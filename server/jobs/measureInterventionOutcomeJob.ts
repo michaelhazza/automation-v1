@@ -211,6 +211,7 @@ async function resolveAccountIdForSubaccount(
 ): Promise<string | null> {
   if (!subaccountId) return null;
   // Targeted single-row SELECT scoped to both organisationId and subaccountId.
-  const account = await canonicalDataService.findAccountBySubaccountId(organisationId, subaccountId);
+  const principal = fromOrgId(organisationId, subaccountId);
+  const account = await canonicalDataService.findAccountBySubaccountId(principal, subaccountId);
   return account?.id ?? null;
 }

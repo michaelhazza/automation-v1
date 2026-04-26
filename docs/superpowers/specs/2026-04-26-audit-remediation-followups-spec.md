@@ -1520,7 +1520,7 @@ When work begins on any item in §1, move it to a build slug under `tasks/builds
 
 | ID | Item | Status | Build slug / PR | Notes |
 |---|---|---|---|---|
-| A1a | Principal-context propagation: service surface change | ☐ todo | — | precedes A1b; deprecated shim allowed temporarily |
+| A1a | Principal-context propagation: service surface change | ✓ done | tasks/builds/audit-remediation-followups/a1a-principal-context-surface/ | All 31 canonicalDataService methods migrated to (principal: PrincipalContext, …) first-positional; 4 in-scope callers + intelligenceSkillExecutor migrated to fromOrgId(); 7/7 principal-context tests pass; build:server clean; gate violations=0. withPrincipalContext wrapping deferred to A1b (non-route callers run outside withOrgTx) |
 | A1b | Principal-context propagation: gate hardening + caller enforcement | ☐ todo | — | depends on A1a; removes shims, flips gate to call-site granularity |
 | A2 | RLS write-boundary guard | ☐ todo | — | new architectural primitive — ships in three phases (schema-diff gate, migration hook, runtime guard) |
 | A3 | briefVisibilityService + onboardingStateService → getOrgScopedDb | ✓ done | tasks/builds/audit-remediation-followups/a3-services-org-scoped-db/ | 8/8 + 12/12 pure tests pass; both services migrated to getOrgScopedDb; build clean |

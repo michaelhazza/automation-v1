@@ -12,47 +12,76 @@ import {
   canonicalMetricHistory,
 } from '../db/schema/index.js';
 import type { NewCanonicalMetric, NewCanonicalMetricHistoryEntry } from '../db/schema/canonicalMetrics.js';
+import type { PrincipalContext } from './principal/types.js';
 
 // ---------------------------------------------------------------------------
 // Canonical Data Service — unified read interface for normalised entities
 // Agents and skills call this service, never the connector directly.
+//
+// A1a (2026-04-26): Every method accepts `principal: PrincipalContext` as the
+// first positional parameter. The `organisationId` (and `subaccountId` where
+// relevant) is derived from `principal` instead of being passed separately.
+// In A1a the method bodies still use the module-top `db` directly — the
+// `withPrincipalContext` wrap and gate hardening land in A1b together so the
+// gate flips from file-level to call-site granularity at the same moment
+// every caller is verified to run inside an active `withOrgTx` block.
 // ---------------------------------------------------------------------------
+
+/**
+ * Validates the principal argument before any DB work. Throws a clear error
+ * when callers pass null/undefined — the gate-hardening contract for A1b
+ * relies on this guard firing BEFORE any SQL is issued.
+ */
+function requirePrincipal(principal: PrincipalContext, methodName: string): void {
+  if (!principal || typeof principal !== 'object' || !principal.organisationId) {
+    throw new Error(`canonicalDataService.${methodName}: principal is required`);
+  }
+}
 
 export const canonicalDataService = {
   // ── Account queries ──────────────────────────────────────────────────────
 
-  async getAccountsByOrg(organisationId: string) {
+  async getAccountsByOrg(principal: PrincipalContext) {
+    requirePrincipal(principal, 'getAccountsByOrg');
     return db
       .select()
       .from(canonicalAccounts)
-      .where(eq(canonicalAccounts.organisationId, organisationId));
+      .where(eq(canonicalAccounts.organisationId, principal.organisationId));
   },
 
-  async findAccountBySubaccountId(orgId: string, subaccountId: string) {
+  async findAccountBySubaccountId(principal: PrincipalContext, subaccountId: string) {
+    requirePrincipal(principal, 'findAccountBySubaccountId');
     const result = await db
       .select()
       .from(canonicalAccounts)
       .where(and(
-        eq(canonicalAccounts.organisationId, orgId),
+        eq(canonicalAccounts.organisationId, principal.organisationId),
         eq(canonicalAccounts.subaccountId, subaccountId),
       ))
       .limit(1);
     return result[0] ?? null;
   },
 
-  async getAccountById(accountId: string, organisationId: string) {
+  async getAccountById(principal: PrincipalContext, accountId: string) {
+    requirePrincipal(principal, 'getAccountById');
     const [account] = await db
       .select()
       .from(canonicalAccounts)
-      .where(and(eq(canonicalAccounts.id, accountId), eq(canonicalAccounts.organisationId, organisationId)));
+      .where(and(
+        eq(canonicalAccounts.id, accountId),
+        eq(canonicalAccounts.organisationId, principal.organisationId),
+      ));
     return account ?? null;
   },
 
   // ── Contact metrics ──────────────────────────────────────────────────────
 
-  async getContactMetrics(accountId: string, dateRange?: { since: Date }, organisationId?: string) {
-    const conditions = [eq(canonicalContacts.accountId, accountId)];
-    if (organisationId) conditions.push(eq(canonicalContacts.organisationId, organisationId));
+  async getContactMetrics(principal: PrincipalContext, accountId: string, dateRange?: { since: Date }) {
+    requirePrincipal(principal, 'getContactMetrics');
+    const conditions = [
+      eq(canonicalContacts.accountId, accountId),
+      eq(canonicalContacts.organisationId, principal.organisationId),
+    ];
     if (dateRange?.since) conditions.push(gte(canonicalContacts.createdAt, dateRange.since));
 
     const [totalResult] = await db
@@ -67,16 +96,16 @@ export const canonicalDataService = {
 
     const recentConditions = [
       eq(canonicalContacts.accountId, accountId),
+      eq(canonicalContacts.organisationId, principal.organisationId),
       gte(canonicalContacts.externalCreatedAt, thirtyDaysAgo),
     ];
-    if (organisationId) recentConditions.push(eq(canonicalContacts.organisationId, organisationId));
 
     const previousConditions = [
       eq(canonicalContacts.accountId, accountId),
+      eq(canonicalContacts.organisationId, principal.organisationId),
       gte(canonicalContacts.externalCreatedAt, sixtyDaysAgo),
       sql`${canonicalContacts.externalCreatedAt} < ${thirtyDaysAgo}`,
     ];
-    if (organisationId) previousConditions.push(eq(canonicalContacts.organisationId, organisationId));
 
     const [recentResult] = await db
       .select({ count: count() })
@@ -103,9 +132,12 @@ export const canonicalDataService = {
 
   // ── Opportunity metrics ──────────────────────────────────────────────────
 
-  async getOpportunityMetrics(accountId: string, organisationId?: string) {
-    const conditions = [eq(canonicalOpportunities.accountId, accountId)];
-    if (organisationId) conditions.push(eq(canonicalOpportunities.organisationId, organisationId));
+  async getOpportunityMetrics(principal: PrincipalContext, accountId: string) {
+    requirePrincipal(principal, 'getOpportunityMetrics');
+    const conditions = [
+      eq(canonicalOpportunities.accountId, accountId),
+      eq(canonicalOpportunities.organisationId, principal.organisationId),
+    ];
 
     const opps = await db
       .select()
@@ -137,9 +169,12 @@ export const canonicalDataService = {
 
   // ── Conversation metrics ─────────────────────────────────────────────────
 
-  async getConversationMetrics(accountId: string, organisationId?: string) {
-    const conditions = [eq(canonicalConversations.accountId, accountId)];
-    if (organisationId) conditions.push(eq(canonicalConversations.organisationId, organisationId));
+  async getConversationMetrics(principal: PrincipalContext, accountId: string) {
+    requirePrincipal(principal, 'getConversationMetrics');
+    const conditions = [
+      eq(canonicalConversations.accountId, accountId),
+      eq(canonicalConversations.organisationId, principal.organisationId),
+    ];
 
     const convos = await db
       .select()
@@ -161,9 +196,12 @@ export const canonicalDataService = {
 
   // ── Revenue metrics ──────────────────────────────────────────────────────
 
-  async getRevenueMetrics(accountId: string, dateRange?: { since: Date }, organisationId?: string) {
-    const conditions = [eq(canonicalRevenue.accountId, accountId)];
-    if (organisationId) conditions.push(eq(canonicalRevenue.organisationId, organisationId));
+  async getRevenueMetrics(principal: PrincipalContext, accountId: string, dateRange?: { since: Date }) {
+    requirePrincipal(principal, 'getRevenueMetrics');
+    const conditions = [
+      eq(canonicalRevenue.accountId, accountId),
+      eq(canonicalRevenue.organisationId, principal.organisationId),
+    ];
     if (dateRange?.since) conditions.push(gte(canonicalRevenue.transactionDate, dateRange.since));
 
     const records = await db
@@ -186,9 +224,12 @@ export const canonicalDataService = {
 
   // ── Health snapshots ─────────────────────────────────────────────────────
 
-  async getLatestHealthSnapshot(accountId: string, organisationId?: string) {
-    const conditions = [eq(healthSnapshots.accountId, accountId)];
-    if (organisationId) conditions.push(eq(healthSnapshots.organisationId, organisationId));
+  async getLatestHealthSnapshot(principal: PrincipalContext, accountId: string) {
+    requirePrincipal(principal, 'getLatestHealthSnapshot');
+    const conditions = [
+      eq(healthSnapshots.accountId, accountId),
+      eq(healthSnapshots.organisationId, principal.organisationId),
+    ];
 
     const [snapshot] = await db
       .select()
@@ -199,9 +240,12 @@ export const canonicalDataService = {
     return snapshot ?? null;
   },
 
-  async getHealthHistory(accountId: string, limit = 30, organisationId?: string) {
-    const conditions = [eq(healthSnapshots.accountId, accountId)];
-    if (organisationId) conditions.push(eq(healthSnapshots.organisationId, organisationId));
+  async getHealthHistory(principal: PrincipalContext, accountId: string, limit = 30) {
+    requirePrincipal(principal, 'getHealthHistory');
+    const conditions = [
+      eq(healthSnapshots.accountId, accountId),
+      eq(healthSnapshots.organisationId, principal.organisationId),
+    ];
 
     return db
       .select()
@@ -211,8 +255,7 @@ export const canonicalDataService = {
       .limit(limit);
   },
 
-  async writeHealthSnapshot(data: {
-    organisationId: string;
+  async writeHealthSnapshot(principal: PrincipalContext, data: {
     accountId: string;
     score: number;
     factorBreakdown: Array<{ factor: string; score: number; weight: number }>;
@@ -221,26 +264,27 @@ export const canonicalDataService = {
     configVersion?: string;
     algorithmVersion?: string;
   }) {
+    requirePrincipal(principal, 'writeHealthSnapshot');
     const [snapshot] = await db
       .insert(healthSnapshots)
-      .values(data)
+      .values({ organisationId: principal.organisationId, ...data })
       .returning();
     return snapshot;
   },
 
   // ── Anomaly events ───────────────────────────────────────────────────────
 
-  async getRecentAnomalies(organisationId: string, limit = 50) {
+  async getRecentAnomalies(principal: PrincipalContext, limit = 50) {
+    requirePrincipal(principal, 'getRecentAnomalies');
     return db
       .select()
       .from(anomalyEvents)
-      .where(eq(anomalyEvents.organisationId, organisationId))
+      .where(eq(anomalyEvents.organisationId, principal.organisationId))
       .orderBy(desc(anomalyEvents.createdAt))
       .limit(limit);
   },
 
-  async writeAnomalyEvent(data: {
-    organisationId: string;
+  async writeAnomalyEvent(principal: PrincipalContext, data: {
     accountId: string;
     metricName: string;
     currentValue: number;
@@ -250,9 +294,11 @@ export const canonicalDataService = {
     severity: 'low' | 'medium' | 'high' | 'critical';
     description: string;
   }) {
+    requirePrincipal(principal, 'writeAnomalyEvent');
     const [event] = await db
       .insert(anomalyEvents)
       .values({
+        organisationId: principal.organisationId,
         ...data,
         currentValue: String(data.currentValue),
         baselineValue: String(data.baselineValue),
@@ -261,26 +307,31 @@ export const canonicalDataService = {
     return event;
   },
 
-  async acknowledgeAnomaly(anomalyId: string, organisationId: string) {
+  async acknowledgeAnomaly(principal: PrincipalContext, anomalyId: string) {
+    requirePrincipal(principal, 'acknowledgeAnomaly');
     await db
       .update(anomalyEvents)
       .set({ acknowledged: true })
-      .where(and(eq(anomalyEvents.id, anomalyId), eq(anomalyEvents.organisationId, organisationId)));
+      .where(and(
+        eq(anomalyEvents.id, anomalyId),
+        eq(anomalyEvents.organisationId, principal.organisationId),
+      ));
   },
 
   // ── Upsert helpers (used by polling/webhook ingestion) ───────────────────
 
-  async upsertAccount(organisationId: string, connectorConfigId: string, data: {
+  async upsertAccount(principal: PrincipalContext, connectorConfigId: string, data: {
     externalId: string;
     displayName?: string;
     status?: string;
     externalMetadata?: Record<string, unknown>;
     subaccountId?: string;
   }) {
+    requirePrincipal(principal, 'upsertAccount');
     const [result] = await db
       .insert(canonicalAccounts)
       .values({
-        organisationId,
+        organisationId: principal.organisationId,
         connectorConfigId,
         externalId: data.externalId,
         displayName: data.displayName,
@@ -303,7 +354,7 @@ export const canonicalDataService = {
     return result;
   },
 
-  async upsertContact(organisationId: string, accountId: string, data: {
+  async upsertContact(principal: PrincipalContext, accountId: string, data: {
     externalId: string;
     firstName?: string;
     lastName?: string;
@@ -313,16 +364,17 @@ export const canonicalDataService = {
     source?: string;
     externalCreatedAt?: Date;
   }) {
+    requirePrincipal(principal, 'upsertContact');
     await db
       .insert(canonicalContacts)
-      .values({ organisationId, accountId, ...data } as typeof canonicalContacts.$inferInsert)
+      .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalContacts.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalContacts.accountId, canonicalContacts.externalId],
         set: { ...data, updatedAt: new Date() } as typeof canonicalContacts.$inferInsert,
       });
   },
 
-  async upsertOpportunity(organisationId: string, accountId: string, data: {
+  async upsertOpportunity(principal: PrincipalContext, accountId: string, data: {
     externalId: string;
     name?: string;
     stage?: string;
@@ -333,16 +385,17 @@ export const canonicalDataService = {
     stageHistory?: Array<{ stage: string; enteredAt: string; exitedAt?: string }>;
     externalCreatedAt?: Date;
   }) {
+    requirePrincipal(principal, 'upsertOpportunity');
     await db
       .insert(canonicalOpportunities)
-      .values({ organisationId, accountId, ...data } as typeof canonicalOpportunities.$inferInsert)
+      .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalOpportunities.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalOpportunities.accountId, canonicalOpportunities.externalId],
         set: { ...data, updatedAt: new Date() } as typeof canonicalOpportunities.$inferInsert,
       });
   },
 
-  async upsertConversation(organisationId: string, accountId: string, data: {
+  async upsertConversation(principal: PrincipalContext, accountId: string, data: {
     externalId: string;
     channel?: string;
     status?: string;
@@ -351,16 +404,17 @@ export const canonicalDataService = {
     lastResponseTimeSeconds?: number;
     externalCreatedAt?: Date;
   }) {
+    requirePrincipal(principal, 'upsertConversation');
     await db
       .insert(canonicalConversations)
-      .values({ organisationId, accountId, ...data } as typeof canonicalConversations.$inferInsert)
+      .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalConversations.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalConversations.accountId, canonicalConversations.externalId],
         set: { ...data, updatedAt: new Date() } as typeof canonicalConversations.$inferInsert,
       });
   },
 
-  async upsertRevenue(organisationId: string, accountId: string, data: {
+  async upsertRevenue(principal: PrincipalContext, accountId: string, data: {
     externalId: string;
     amount: string;
     currency?: string;
@@ -368,9 +422,10 @@ export const canonicalDataService = {
     status?: string;
     transactionDate?: Date;
   }) {
+    requirePrincipal(principal, 'upsertRevenue');
     await db
       .insert(canonicalRevenue)
-      .values({ organisationId, accountId, ...data } as typeof canonicalRevenue.$inferInsert)
+      .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalRevenue.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalRevenue.accountId, canonicalRevenue.externalId],
         set: { ...data, updatedAt: new Date() } as typeof canonicalRevenue.$inferInsert,
@@ -384,10 +439,12 @@ export const canonicalDataService = {
   // they shift as the rolling window moves. Full history with fixed
   // windows is in canonical_metric_history (append-only).
 
-  async upsertMetric(data: NewCanonicalMetric) {
+  async upsertMetric(principal: PrincipalContext, data: Omit<NewCanonicalMetric, 'organisationId'>) {
+    requirePrincipal(principal, 'upsertMetric');
+    const insertValues = { organisationId: principal.organisationId, ...data } as NewCanonicalMetric;
     const [result] = await db
       .insert(canonicalMetrics)
-      .values(data)
+      .values(insertValues)
       .onConflictDoUpdate({
         target: [
           canonicalMetrics.accountId,
@@ -410,28 +467,37 @@ export const canonicalDataService = {
     return result;
   },
 
-  async appendMetricHistory(data: NewCanonicalMetricHistoryEntry) {
+  async appendMetricHistory(
+    principal: PrincipalContext,
+    data: Omit<NewCanonicalMetricHistoryEntry, 'organisationId'>,
+  ) {
+    requirePrincipal(principal, 'appendMetricHistory');
     // Idempotent: skip duplicate entries (same account+metric+period window)
+    const insertValues = {
+      organisationId: principal.organisationId,
+      ...data,
+    } as NewCanonicalMetricHistoryEntry;
     const [result] = await db
       .insert(canonicalMetricHistory)
-      .values(data)
+      .values(insertValues)
       .onConflictDoNothing()
       .returning();
     return result ?? null;
   },
 
   async getMetricValue(
+    principal: PrincipalContext,
     accountId: string,
     metricSlug: string,
     periodType: string,
-    organisationId?: string
   ) {
+    requirePrincipal(principal, 'getMetricValue');
     const conditions = [
       eq(canonicalMetrics.accountId, accountId),
       eq(canonicalMetrics.metricSlug, metricSlug),
       eq(canonicalMetrics.periodType, periodType),
+      eq(canonicalMetrics.organisationId, principal.organisationId),
     ];
-    if (organisationId) conditions.push(eq(canonicalMetrics.organisationId, organisationId));
 
     const [result] = await db
       .select()
@@ -441,9 +507,12 @@ export const canonicalDataService = {
     return result ?? null;
   },
 
-  async getMetricsByAccount(accountId: string, organisationId?: string) {
-    const conditions = [eq(canonicalMetrics.accountId, accountId)];
-    if (organisationId) conditions.push(eq(canonicalMetrics.organisationId, organisationId));
+  async getMetricsByAccount(principal: PrincipalContext, accountId: string) {
+    requirePrincipal(principal, 'getMetricsByAccount');
+    const conditions = [
+      eq(canonicalMetrics.accountId, accountId),
+      eq(canonicalMetrics.organisationId, principal.organisationId),
+    ];
 
     return db
       .select()
@@ -452,16 +521,19 @@ export const canonicalDataService = {
   },
 
   async getMetricHistoryBySlug(
+    principal: PrincipalContext,
     accountId: string,
     metricSlug: string,
     periodType: string,
     limit = 30,
-    excludeBackfill = true
+    excludeBackfill = true,
   ) {
+    requirePrincipal(principal, 'getMetricHistoryBySlug');
     const conditions = [
       eq(canonicalMetricHistory.accountId, accountId),
       eq(canonicalMetricHistory.metricSlug, metricSlug),
       eq(canonicalMetricHistory.periodType, periodType),
+      eq(canonicalMetricHistory.organisationId, principal.organisationId),
     ];
     if (excludeBackfill) {
       conditions.push(eq(canonicalMetricHistory.isBackfill, false));
@@ -476,15 +548,18 @@ export const canonicalDataService = {
   },
 
   async getMetricHistoryCount(
+    principal: PrincipalContext,
     accountId: string,
     metricSlug: string,
     periodType: string,
-    excludeBackfill = true
+    excludeBackfill = true,
   ): Promise<number> {
+    requirePrincipal(principal, 'getMetricHistoryCount');
     const conditions = [
       eq(canonicalMetricHistory.accountId, accountId),
       eq(canonicalMetricHistory.metricSlug, metricSlug),
       eq(canonicalMetricHistory.periodType, periodType),
+      eq(canonicalMetricHistory.organisationId, principal.organisationId),
     ];
     if (excludeBackfill) {
       conditions.push(eq(canonicalMetricHistory.isBackfill, false));
@@ -502,12 +577,14 @@ export const canonicalDataService = {
   // Contacts with no recorded update since N days ago, scoped to a subaccount.
   // Uses `updatedAt` as the activity proxy — TODO(spec-open-1): confirm column
   // once a dedicated lastActivityAt is added to the schema.
-  async listInactiveContacts(args: {
-    orgId: string;
-    subaccountId: string;
+  async listInactiveContacts(principal: PrincipalContext, args: {
     sinceDaysAgo: number;
     limit: number;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'listInactiveContacts');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.listInactiveContacts: principal.subaccountId is required');
+    }
     const cutoff = new Date(Date.now() - args.sinceDaysAgo * 24 * 60 * 60 * 1000);
     const rows = await db
       .select({
@@ -523,8 +600,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(canonicalContacts.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(canonicalContacts.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalContacts.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
           lt(canonicalContacts.updatedAt, cutoff),
         ),
       )
@@ -539,16 +616,18 @@ export const canonicalDataService = {
     };
   },
 
-  async listStaleOpportunities(args: {
-    orgId: string;
-    subaccountId: string;
+  async listStaleOpportunities(principal: PrincipalContext, args: {
     stageKey?: string;
     staleSince: Date;
     limit: number;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'listStaleOpportunities');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.listStaleOpportunities: principal.subaccountId is required');
+    }
     const conditions = [
-      eq(canonicalOpportunities.organisationId, args.orgId),
-      eq(canonicalAccounts.subaccountId, args.subaccountId),
+      eq(canonicalOpportunities.organisationId, principal.organisationId),
+      eq(canonicalAccounts.subaccountId, principal.subaccountId),
       lt(canonicalOpportunities.updatedAt, args.staleSince),
     ];
     if (args.stageKey) conditions.push(eq(canonicalOpportunities.stage, args.stageKey));
@@ -577,22 +656,23 @@ export const canonicalDataService = {
     };
   },
 
-  async listUpcomingAppointments(args: {
-    orgId: string;
-    subaccountId: string;
+  async listUpcomingAppointments(principal: PrincipalContext, args: {
     from: Date;
     to: Date;
     limit: number;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'listUpcomingAppointments');
     // Appointments are sourced from GHL live in v1; canonical table may not exist.
     // This stub ensures the handler compiles. The live executor handles real data.
+    void args;
     return { rows: [], rowCount: 0, truncated: false };
   },
 
-  async countContactsByTag(args: {
-    orgId: string;
-    subaccountId: string;
-  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+  async countContactsByTag(principal: PrincipalContext): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'countContactsByTag');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.countContactsByTag: principal.subaccountId is required');
+    }
     // Tag-partitioned counts — needs unnest(tags). Simplified v1 implementation.
     const rows = await db
       .select({
@@ -603,8 +683,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(canonicalContacts.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(canonicalContacts.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalContacts.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
         ),
       )
       .limit(1000);
@@ -623,10 +703,11 @@ export const canonicalDataService = {
     return { rows: tagRows, rowCount: tagRows.length, truncated: false };
   },
 
-  async countOpportunitiesByStage(args: {
-    orgId: string;
-    subaccountId: string;
-  }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+  async countOpportunitiesByStage(principal: PrincipalContext): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'countOpportunitiesByStage');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.countOpportunitiesByStage: principal.subaccountId is required');
+    }
     const rows = await db
       .select({
         stage: canonicalOpportunities.stage,
@@ -636,8 +717,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(canonicalOpportunities.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(canonicalOpportunities.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalOpportunities.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
           eq(canonicalOpportunities.status, 'open'),
         ),
       )
@@ -651,13 +732,15 @@ export const canonicalDataService = {
     };
   },
 
-  async getRevenueTrend(args: {
-    orgId: string;
-    subaccountId: string;
+  async getRevenueTrend(principal: PrincipalContext, args: {
     from: Date;
     to: Date;
     limit: number;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'getRevenueTrend');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.getRevenueTrend: principal.subaccountId is required');
+    }
     const rows = await db
       .select({
         transactionDate: canonicalRevenue.transactionDate,
@@ -669,8 +752,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(canonicalRevenue.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(canonicalRevenue.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalRevenue.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
           eq(canonicalRevenue.status, 'completed'),
           gte(canonicalRevenue.transactionDate, args.from),
           lte(canonicalRevenue.transactionDate, args.to),
@@ -687,12 +770,14 @@ export const canonicalDataService = {
     };
   },
 
-  async getAccountsAtRiskBand(args: {
-    orgId: string;
-    subaccountId: string;
+  async getAccountsAtRiskBand(principal: PrincipalContext, args: {
     band: 'red' | 'yellow' | 'green';
     limit: number;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'getAccountsAtRiskBand');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.getAccountsAtRiskBand: principal.subaccountId is required');
+    }
     const bandRanges: Record<string, [number, number]> = {
       red:    [0, 40],
       yellow: [41, 70],
@@ -710,8 +795,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(healthSnapshots.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(healthSnapshots.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(healthSnapshots.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
           gte(healthSnapshots.score, minScore),
           lte(healthSnapshots.score, maxScore),
         ),
@@ -727,12 +812,14 @@ export const canonicalDataService = {
     };
   },
 
-  async getPipelineVelocity(args: {
-    orgId: string;
-    subaccountId: string;
+  async getPipelineVelocity(principal: PrincipalContext, args: {
     from: Date;
     to: Date;
   }): Promise<{ rows: Record<string, unknown>[]; rowCount: number; truncated: boolean }> {
+    requirePrincipal(principal, 'getPipelineVelocity');
+    if (!principal.subaccountId) {
+      throw new Error('canonicalDataService.getPipelineVelocity: principal.subaccountId is required');
+    }
     // Stage velocity: count opportunities that entered each stage in the window
     const rows = await db
       .select({
@@ -743,8 +830,8 @@ export const canonicalDataService = {
       .innerJoin(canonicalAccounts, eq(canonicalOpportunities.accountId, canonicalAccounts.id))
       .where(
         and(
-          eq(canonicalOpportunities.organisationId, args.orgId),
-          eq(canonicalAccounts.subaccountId, args.subaccountId),
+          eq(canonicalOpportunities.organisationId, principal.organisationId),
+          eq(canonicalAccounts.subaccountId, principal.subaccountId),
           gte(canonicalOpportunities.stageEnteredAt, args.from),
           lte(canonicalOpportunities.stageEnteredAt, args.to),
         ),
@@ -759,3 +846,11 @@ export const canonicalDataService = {
     };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Unused-import suppression — `avg` and `sum` from drizzle-orm are imported
+// against future aggregation use-cases. Keeping the imports preserves
+// surface continuity and avoids churn in A1b.
+// ---------------------------------------------------------------------------
+void avg;
+void sum;
