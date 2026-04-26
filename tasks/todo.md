@@ -972,3 +972,29 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] C3 follow-up: upgrade canonicalRegistryDrift test from 2-set to 3-set comparison
   - Source: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §C3
 
+---
+
+## Deferred from spec-conformance review — audit-remediation-followups (2026-04-26)
+
+**Captured:** 2026-04-26T05:34:10Z
+**Source log:** `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md`
+
+- [ ] **SC-2026-04-26-1** — A2 schema-vs-registry gate fails on current main (`exit 1`, 64 violations: 60 unregistered tenant tables + 4 stale registry entries).
+  - Spec section: §A2 Acceptance criteria — *"`bash scripts/verify-rls-protected-tables.sh` exits 0 on the current main"*.
+  - Gap: `server/config/rlsProtectedTables.ts` covers 74 tables but `migrations/*.sql` declares ~134 tables with `organisation_id`. The 60-table delta is mostly real tenant-scoped tables that should either be registered (with a matching `CREATE POLICY` in their migration) or added to `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. The 4 stale entries (`document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`) scope via parent FK and have no direct `organisation_id` column — registry should drop these or the diff logic should be taught to recognise FK-scoping.
+  - Suggested approach: the cheapest path is a triage pass — for each of the 60 unregistered tables, `grep -l "<table>" migrations/*.sql` to find the migration, check whether it carries a `CREATE POLICY` block. If yes → add to `rlsProtectedTables.ts`. If no but the table is genuinely tenant-private → write the policy migration AND add the entry. If no and the table is a system/audit/cross-tenant ledger → add to `rls-not-applicable-allowlist.txt` with rationale. The 4 stale entries can be removed mechanically once you confirm their FK-scoping vs `organisation_id` from their schema files.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #15.
+
+- [ ] **SC-2026-04-26-2** — H1 helper `server/lib/derivedDataMissingLog.ts` has no unit tests.
+  - Spec section: §H1 Approach step 3 ("Add unit tests asserting the 'upstream not populated yet' path returns null without throwing") + Approach step 5 ("Tests in step 3 cover both the first-occurrence emit AND the rate-limited-skip / debug-downgrade behaviour, so the contract is exercised").
+  - Gap: H1's chosen Pattern B (first-occurrence WARN, subsequent DEBUG via in-memory `Set<string>`) is implemented but uncovered. Progress.md notes 0 refactors were needed at consumer sites, so no per-service `derivedDataNullSafety.test.ts` files were authored — but the helper itself still needs a test. The `_resetWarnedKeysForTesting()` export at line 60 was added FOR tests, yet no test file uses it.
+  - Suggested approach: add `server/lib/__tests__/derivedDataMissingLog.test.ts` with three `node:test` cases — (1) first call for `(svc, field, orgId)` triple emits at WARN (mock `logger.warn`), (2) repeat call for the same triple emits at DEBUG (mock `logger.debug`), (3) `_resetWarnedKeysForTesting()` clears the set and the next call WARNs again. Use the existing `node:test` + `node:assert` harness; pattern matches `server/services/__tests__/skillStudioServicePure.test.ts`.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #59g.
+
+- [ ] **SC-2026-04-26-3** — H1 gate self-test fixture cannot fail.
+  - Spec section: §H1 Acceptance criteria — *"Gate self-test: deliberate-violation fixture must fail"*.
+  - Gap: fixture at `scripts/__tests__/derived-data-null-safety/fixture-with-violation.ts` is structured to demonstrate a violation (`utilizationByModelFamily!` non-null assertion) but is unreachable: (a) the gate scans only `server/` (`find "$ROOT_DIR/server" -name "*.ts" ! -path "*/__tests__/*"` at gate line 27), and (b) the fixture line carries `// @null-safety-exempt: test fixture` AND `// guard-ignore-next-line` so even if the gate did scan it, both suppression mechanisms would silence the violation. The spec wants the fixture to PROVE the gate fires; today nothing wires it up.
+  - Suggested approach: write `scripts/__tests__/derived-data-null-safety/run-fixture-check.sh` (mirror the shape of `scripts/__tests__/principal-context-propagation/run-fixture-check.sh`) that copies the fixture into a temp `server/` path, runs the gate, asserts at least one violation lands for the temp path, then cleans up. Alternatively: add a `--fixture-path <dir>` argument to the gate itself so a self-test runner can point it at the fixture directory without copying. Either approach takes <30 min.
+  - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #59h.
+
