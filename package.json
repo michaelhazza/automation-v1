@@ -22,6 +22,7 @@
     "playbooks:validate": "tsx scripts/validate-playbooks.ts",
     "playbooks:test": "tsx server/lib/workflow/__tests__/workflow.test.ts",
     "test": "npm run test:gates && npm run test:qa && npm run test:unit",
+    "verify:rls": "bash scripts/verify-rls-coverage.sh && bash scripts/verify-rls-contract-compliance.sh && bash scripts/verify-rls-session-var-canon.sh",
     "test:gates": "bash scripts/run-all-gates.sh",
     "test:qa": "bash scripts/run-all-qa-tests.sh",
     "test:unit": "bash scripts/run-all-unit-tests.sh",
