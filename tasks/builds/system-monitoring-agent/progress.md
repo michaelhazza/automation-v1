@@ -1,13 +1,13 @@
 # System Monitoring Agent — Build Progress
 
 **Branch:** `claude/add-system-monitoring-BgLlY`
-**Last commit:** `8d83136` (spec sections 0-8)
-**Last session ended:** 2026-04-26
-**Next phase:** spec sections 9-19, then user-led spec review (NOT automated `spec-reviewer`).
+**Last commit:** `993b1211` (spec section 14 — testing strategy)
+**Last session ended:** 2026-04-26 (paused mid-session for OAuth maintenance after §14)
+**Next phase:** spec sections 15-19, then progress.md finalisation, then user-led spec review (NOT automated `spec-reviewer`).
 
 ## Current state
 
-Drafting `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`. Skeleton + sections 0-8 written. Sections 9-19 outstanding.
+Drafting `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`. Skeleton + sections 0-14 written. Sections 15-19 outstanding plus the final progress.md update.
 
 ## What this build delivers (settled)
 
@@ -40,44 +40,14 @@ Drafting `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`. Skeleton + 
 - §6 Heuristic Registry (module layout, full TypeScript interface, severity/confidence/FP-rate/suppression model, registration + invocation paths, PR-driven tuning workflow)
 - §7 Baselining primitive (entity kinds + metrics, persistent table choice rationale, refresh job, N≥10 bootstrap requirement, BaselineReader read API)
 - §8 Phase 1 Synthetic checks (job shape, day-one check set: pg-boss-queue-stalled, no-agent-runs-in-window, connector-poll-stale, dlq-not-drained, heartbeat-self, connector-error-rate-elevated, agent-run-success-rate-low; incident shape with fingerprintOverride; full env var table)
+- §9 Phase 2 Monitor agent (agent definition, triggers, sweep job, diagnosis-only skills, day-one + 2.5 heuristic sets, prompt template, output contract, rate limiting, kill switches)
+- §10 UI surface (triage drawer additions, copy button, diagnosis annotation, feedback widget, filter pill)
+- §11 Feedback loop (schema cross-reference, `investigate_prompt_outcome` event, Phase 3 input data)
+- §12 Observability + kill switches (event-type table, env-var inventory, kill-switch hierarchy, logging conventions)
+- §13 File inventory (new files, modified files, NOT-touched cross-check)
+- §14 Testing strategy (unit invariants per target, integration tests with DB, manual smoke checklist)
 
 ## Spec sections outstanding
-
-- §9 Phase 2 — Monitor agent (day-one + 2.5). LARGEST remaining. Subsections:
-  - 9.1 Agent definition (`system_monitor`, isSystemManaged=true, scope='system')
-  - 9.2 Triggers — incident-driven (severity>=medium, exclude self-check) + sweep
-  - 9.3 Sweep job (`system-monitor-sweep`, 5-min tick, 15-min window, max 50 runs / 200KB)
-  - 9.4 Diagnosis-only skills (read recent logs, job queue health, failed agent runs, DLQ jobs, connector status — NO destructiveHint:true)
-  - 9.5 Day-one heuristic set (Phase 2.0) — list: empty-output-baseline-aware, max-turns-hit, tool-success-but-failure-language, runtime-anomaly, token-anomaly, repeated-skill-invocation, identical-output-different-inputs, output-truncation, final-message-not-assistant, tool-output-schema-mismatch, skill-latency-anomaly, tool-failed-but-agent-claimed-success, job-completed-no-side-effect (CRITICAL), connector-empty-response-repeated
-  - 9.6 Phase 2.5 expansion — cross-run/systemic: cache-hit-rate-degradation, latency-creep, retry-rate-increase, auth-refresh-spike, llm-fallback-unexpected, success-rate-degradation-trend, output-entropy-collapse, tool-selection-drift, cost-per-outcome-increasing
-  - 9.7 Agent prompt template (Investigate-Fix Protocol consumer; references docs/investigate-fix-protocol.md verbatim; humility/confidence rules; 400-800 token target / 1500 hard cap)
-  - 9.8 `investigate_prompt` output contract (per §5.2 structure; required vs optional sections; forbidden content)
-  - 9.9 Rate limiting — max 2 invocations per fingerprint per 24h; persistent recurrence auto-escalates via existing manual-escalate path
-  - 9.10 Kill switch (`SYSTEM_MONITOR_ENABLED`) + env var table
-
-- §10 UI surface (extends existing SystemIncidentsPage — NO new page):
-  - 10.1 Triage drawer additions
-  - 10.2 `investigate_prompt` copy button
-  - 10.3 Diagnosis annotation rendering (hypothesis, evidence links, confidence)
-  - 10.4 Feedback widget — was-this-useful (captures wasSuccessful + freeText)
-  - 10.5 Filter pill — Diagnosed by agent / Awaiting diagnosis / All
-
-- §11 Feedback loop:
-  - 11.1 Schema additions for prompt-was-useful (already in §4.5 table — cross-reference)
-  - 11.2 New event type `investigate_prompt_outcome`
-  - 11.3 What this trains for Phase 3 (auto-fix gate evidence)
-
-- §12 Observability + kill switches:
-  - 12.1 New event types: `agent_diagnosis_added`, `investigate_prompt_outcome`, `heuristic_fired`, `heuristic_suppressed`, `sweep_completed`, `triage_rate_limited`
-  - 12.2 New env vars consolidated table (idempotency TTL, throttle ms, baseline interval/window, synthetic interval, monitor enabled, sweep interval/window/cap, min confidence, etc.)
-  - 12.3 Logging conventions (kebab-case event names, structured logger.info with context)
-
-- §13 File inventory — full list of new + modified files with brief purpose. Reference existing phase-0-spec.md §11 format. Include: server/services/systemMonitor/ tree, server/services/principal/systemPrincipal.ts, server/services/synthetic/ tree, migration file, agent definition seed, client/src/pages/SystemIncidentsPage.tsx (modified), CLAUDE.md (modified), docs/investigate-fix-protocol.md (new).
-
-- §14 Testing strategy:
-  - 14.1 Unit (heuristics positive/negative, idempotency, throttle, principal, assertions, synthetic checks)
-  - 14.2 Integration (sweep produces incidents end-to-end, agent runs from triage trigger, RLS enforcement, baseline refresh)
-  - 14.3 Smoke (queue stall scenario, soft-fail signal scenario, prompt copy-paste-into-Claude-Code manual test, kill-switch checks)
 
 - §15 Rollout plan:
   - 15.1 Order of operations across sessions (Slice A → B → C → D)
