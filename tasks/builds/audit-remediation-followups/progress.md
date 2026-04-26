@@ -6,11 +6,11 @@
 ## Per-item status
 See spec §5 Tracking — the single source of truth for ☐ / ⧖ / ✓ / ↗ / ✗ flips.
 
-## Wave progress (as of 2026-04-26 session pause)
+## Wave progress (final — all in-scope work done 2026-04-26)
 - Wave 1 (signal foundation + cleanup): 10 / 10 items done ✓
 - Wave 2 (drift guards + small refactors): 5 / 5 items done ✓
-- Wave 3 (heavy migrations): 1 / 5 items done (A1a ✓; A1b, B2, A2, F2 pending)
-- F2 (parked behind Phase-5A): not started
+- Wave 3 (heavy migrations): 4 / 4 items done (A1a ✓ A1b ✓ B2+B2-ext ✓ A2 ✓)
+- F2: PARKED — Phase-5A `rateLimitStoreService.ts` not yet merged on main (case c per plan); resume when it ships
 
 ### Wave 1 completed items
 G2 runbook ✓ | C1 [GATE] lines ✓ | G1 migration script ✓ | D1 baselines ✓ | D2 framing ✓ | D3 skill-read-paths ✓ | E1 test triage ✓ | E2 gate triage ✓ | B1 throw test ✓ | C4 comment fix ✓
