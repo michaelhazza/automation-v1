@@ -340,12 +340,14 @@ A response can be `status: 'success'` AND `executionStatus: 'failed'` (the API c
   - **Static:** grep every response shape contract (e.g. § 4.5.8) for both fields where execution exists.
   - **Test:** pure tests assert both fields independently; no test treats them as synonyms.
 
-**7.7 Terminal event guarantee.** Every cross-flow chain emits exactly one terminal observability event matching `*.completed` OR `*.failed` OR `*.partial`. No chain leaves the trace open ("dangling chain"). Monitoring agents filter on `executionId` (or `runId` / `jobRunId` per 7.3) and assert that every chain has exactly one terminal event.
+**7.7 Terminal event guarantee + post-terminal event prohibition.** Every cross-flow chain emits exactly one terminal observability event matching `*.completed` OR `*.failed` OR `*.partial`. No chain leaves the trace open ("dangling chain"). Monitoring agents filter on `executionId` (or `runId` / `jobRunId` per 7.3) and assert that every chain has exactly one terminal event.
+
+**Post-terminal event prohibition.** Once a terminal event has been emitted for a given correlation key, no further events with that same correlation key may be emitted. Late-arriving signals (delayed audit log, retry callback, etc.) that would carry the same correlation key MUST be either dropped or re-keyed under a separate correlation (e.g. a follow-up "next attempt" run). Downstream consumers may treat a chain as closed once its terminal event is observed; emitting more events under that key would invalidate the closure assumption.
 
   *Enforcement:*
   - **Static:** every observability section (§ 4.5.7 / § 6.5.2 / § 6.5.3) must list a terminal event matching the `.completed` / `.failed` / `.partial` suffix pattern. Missing terminal event in a chain is a directional finding.
-  - **Test:** integration with `agentExecutionEventService` verifies terminal event is emitted (best-effort emission failure is acceptable; intent-to-emit is required).
-  - **Manual** (owner: `pr-reviewer` agent): post-incident traces lacking a terminal event are flagged for spec amendment.
+  - **Test:** integration with `agentExecutionEventService` verifies terminal event is emitted (best-effort emission failure is acceptable; intent-to-emit is required). Pure tests verify that emitter helpers refuse to emit a non-terminal event after a terminal one for the same correlation key (or re-key the late event).
+  - **Manual** (owner: `pr-reviewer` agent): post-incident traces lacking a terminal event OR carrying post-terminal events are flagged for spec amendment.
 
 ---
 
