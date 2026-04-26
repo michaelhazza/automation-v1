@@ -1,7 +1,7 @@
 # Audit Remediation Follow-ups — Post-Merge Backlog Spec
 
 **Created:** 2026-04-25
-**Last revised:** 2026-04-26 (spec-reviewer iteration 1 — mechanical fixes)
+**Last revised:** 2026-04-26 (ChatGPT review Round 4 — edge-case enforcement, drift prevention, follow-up coupling)
 **Status:** draft (post-merge backlog, ready for spec-reviewer)
 **Source PR:** #196 — `feat/codebase-audit-remediation-spec` (merged at `f824a03`)
 **Source spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md`
@@ -86,7 +86,7 @@ No item in §1 may introduce a new abstraction, primitive, helper module, or sys
 
 Concrete consequences:
 - A1a / A1b introduce no new primitive — `withPrincipalContext` and `fromOrgId` already exist.
-- A2 names exactly three new files (`server/lib/rlsBoundaryGuard.ts`, `scripts/verify-rls-protected-tables.sh`, `scripts/rls-not-applicable-allowlist.txt`) plus one hook. No additional helpers may emerge from A2 implementation. The `scripts/verify-rls-protected-tables.sh` gate carries two checks (schema-vs-registry diff per A2 step 1, AND `allowRlsBypass: true`-justification-comment enforcement per A2 flag-drift protection) — a single file with two checks, not two files.
+- A2 names exactly three new files (`server/lib/rlsBoundaryGuard.ts`, `scripts/verify-rls-protected-tables.sh`, `scripts/rls-not-applicable-allowlist.txt`) plus one hook. No additional helpers may emerge from A2 implementation. The `scripts/verify-rls-protected-tables.sh` gate carries three checks (schema-vs-registry diff per A2 step 1, `allowRlsBypass: true`-justification-comment enforcement per A2 flag-drift protection, AND the write-path advisory grep per A2 Phase-3 Proxy-coverage-completeness section per ChatGPT review Round 4) — a single file with three checks, not three files.
 - B2 introduces no new primitive — uses existing `pg_advisory_xact_lock`, claim+verify, and lease patterns.
 - F2 explicitly does NOT introduce a new generic `kvStoreWithTtl` primitive (already documented in §3 Out of scope and the F2 Approach).
 - H1 names exactly two new files (`scripts/verify-derived-data-null-safety.sh` + the allowlist; `server/lib/derivedDataMissingLog.ts`). Anything else proposed during implementation is out-of-scope drift.
@@ -116,6 +116,52 @@ Concrete consequences:
 - A list of every excluded item beats a calibration constant that "subtracts the right number".
 
 If two approaches produce the same observable behaviour but differ on inspectability or determinism, pick the more inspectable / more deterministic one — even if it is more verbose. The goal is a spec that survives contact with implementation by multiple engineers without each engineer needing to re-derive the original intent. This rule is the meta-pattern under §0.1 (gate quality), §0.2 (no new primitives), and §0.3 (no scope expansion); it is stated explicitly so future items default to the same posture.
+
+### §0.5 No silent success on partial execution (cross-cutting, per ChatGPT review Round 4)
+
+Any operation in this spec — job, service method, gate, runtime guard, refactored consumer — that **partially executes** before discovering it cannot complete MUST do exactly one of the following:
+
+1. **Roll back fully.** The partial state is unwound and the operation returns the same observable state it started with. Preferred for items where rollback is cheap (single-tx writes, in-memory caches).
+2. **Return a structured partial-state result.** The operation returns a result shape that names which sub-steps succeeded and which did not (e.g. `{ status: 'partial', completed: [...], failed: [{ step, reason }] }`). Preferred for items where rollback is impossible (idempotent multi-step pipelines).
+3. **Log explicit partial execution.** The operation emits at least one log line naming what was completed and what was not, at WARN level, before returning.
+
+**What this rule rejects:** an operation that catches an error, swallows it, and returns a "success" shape that does not reflect the partial state. This is the failure mode the rule is named for — silent partial success is the worst kind of inconsistency because downstream callers cannot detect it.
+
+**Concrete consequences across this spec:**
+- B2's `{ status: 'noop', reason, jobName }` shape (with the §B2 Approach step 5 zero-side-effects invariant) is the canonical "rolled back fully" pattern for jobs.
+- A2's runtime guard throws `RlsBoundaryUnregistered` / `RlsBoundaryAdminWriteToProtectedTable` on a protected-boundary violation rather than silently dropping the write.
+- H1's null-safety helper (`logDataDependencyMissing`) is the canonical "log explicit partial execution" pattern for derived-data reads — the read returns `null`/empty/sentinel AND emits a WARN line naming the missing dependency.
+- A1a's deprecated-shim path (during A1a only) MUST forward to the new `(principal, ...)` body — it MUST NOT silently no-op the call when `organisationId` is missing; the new body either succeeds or throws.
+
+This rule generalises the per-item discipline already encoded in B2, A2, and H1 — codifying it at §0 ensures any future item added to this spec inherits the same posture without restating it. `architecture.md` § Architecture Rules carries one line stating this rule (landed in the same architecture.md update wave as the B2-ext concurrency-model rule and the H1 null-safety rule, not as a separate write).
+
+### §0.6 Architecture default lock scope (cross-cutting, per ChatGPT review Round 4)
+
+Where any item in §1 introduces or formalises a concurrency control mechanism for a job (B2 / B2-ext explicitly, plus any future job added to the four-job set), the **default lock scope is per-org** unless the job explicitly requires global serialization. "Per-org" means the advisory-lock key (or claim predicate, lease key, etc.) is parameterised on `organisationId` so two distinct orgs can run the job in parallel; a single org can only have one runner active at a time.
+
+**Why this default matters:** without an explicit default, different engineers or agents will pick different lock scopes for similar jobs (org-level, global, per-entity), producing hard-to-debug contention or under-locking in production. The four jobs in B2 already follow this default in spirit — `bundleUtilizationJob` and `measureInterventionOutcomeJob` are per-org, `connectorPollingSync` is per-connection (which is a per-org sub-scope), and `ruleAutoDeprecateJob` is the documented exception (global). Stating the default explicitly forecloses the "I'll just pick one" failure mode for any future job.
+
+**Concrete consequences:**
+- A new job authored under §B2's standard MUST default to per-org lock scope. The header-comment block lists the lock scope explicitly so a reviewer can compare against the default at a glance.
+- `ruleAutoDeprecateJob`'s global lock is OK because the job's per-job documentation block (per the §B2 standard header form) names the exception and explains the rationale ("global advisory lock — single runner; no per-org parallelism needed for nightly cadence").
+- Any future deviation from per-org scope MUST carry the same rationale-in-header treatment. Reviewers MUST reject a global-lock job that does not explain why per-org doesn't fit.
+- `architecture.md` § Architecture Rules carries one line stating this default — added in the same paragraph that B2-ext lands the concurrency-model rule, not as a separate rule.
+
+This rule is the lock-scope analogue of §0.4 (determinism over cleverness): when the choice is between "an explicit default that handles the common case" and "let each engineer decide ad-hoc", pick the default.
+
+### §0.7 Baseline rot prevention (cross-cutting, per ChatGPT review Round 4)
+
+This spec records gate violation counts in the centralised store at `scripts/guard-baselines.json` (per `scripts/lib/guard-utils.sh`'s `check_baseline()` flow). The risk over time: baseline counts slowly creep upward as developers fold one extra exemption per PR, the running total stops triggering CI failure (the baseline is "current state"), and the gate's signal degrades to "things are about as bad as they were". The rule:
+
+**Any PR that increases a baseline count in `scripts/guard-baselines.json` MUST include a PR-description note explaining why the increase is acceptable.** The note shape: `Baseline increase: <guard_id> from <N> to <M>. Reason: <one-sentence justification — what new code added the violation(s) and why it is OK to ship without fixing>.` "Just folding in pre-existing surface area" is acceptable; "didn't have time" is NOT.
+
+**Concrete consequences:**
+- A reviewer MUST reject a PR that increases a baseline without the note. The note is checked by the reviewer; there is no automated CI check (baseline diffs are inherently noisy, and an automated check would generate false positives on legitimate refactors that touch the gated surface). The rule is enforced socially, the same way the no-amend / no-force-push conventions are.
+- Baseline DECREASES never require a note — a downward delta is always acceptable and welcome.
+- A "no-change-but-cleanup" PR (decreases the baseline) is preferred over a "feature + baseline-increase" PR. When in doubt, split the work.
+- Any guard whose baseline has grown more than 20% over the last quarter (rolling) should trigger an explicit reset-and-fix sweep, scoped as a separate spec — the gate's signal has eroded enough that the next baseline-increase PR is hard to evaluate.
+
+This rule applies to every gate this spec touches (existing gates being baselined for the first time, AND new gates that ship with their initial baseline at zero or a documented starting count). E2 in particular must follow this rule when capturing its `verify-pure-helper-convention.sh` and `verify-integration-reference.mjs` baselines — see E2 Acceptance criteria.
 
 ---
 
@@ -198,6 +244,16 @@ If two approaches produce the same observable behaviour but differ on inspectabi
 - Existing callers (verify still compliant after shim removal).
 
 **Approach (in order):**
+
+**Pre-condition — shim-usage detection (per ChatGPT review Round 4).** A1b MUST NOT begin until the implementer has confirmed every caller migrated off the deprecated overload during A1a. The spec-described worry: A1a permitted the shim, callers may silently still depend on it, tests pass anyway, and A1b's shim-removal then breaks production paths that were never migrated. Mandatory pre-flight checks (run BEFORE any code in step 1):
+
+1. `grep -rn "@deprecated — remove in A1b" server/` — assert exit count is N (the count A1a landed) and no caller-side suppression / re-export removed the tag from any shim. Every shim must still carry the tag at A1b kickoff.
+2. `grep -rn "canonicalDataService\.\w+(\s*organisationId" server/ | grep -v __tests__` — assert exit count is **0**. Any non-test caller that still passes a bare `organisationId` first argument to a `canonicalDataService.<method>(` invocation is a missed A1a migration; it MUST be migrated and merged BEFORE A1b proceeds.
+3. `grep -rn "canonicalDataService\.\w+(\s*orgId" server/ | grep -v __tests__` — same check against the alternative variable name. Asserted count: **0**.
+4. Cross-check: list every file from A1a's `tasks/builds/<slug>/canonical-call-sites.md` inventory and confirm each call site now passes `fromOrgId(...)` or a `: PrincipalContext`-typed identifier. Any inventory entry without a verified migration blocks A1b.
+
+If any check returns non-zero, A1b stops and the offending caller migrates first (in A1a's PR or as a follow-up A1a-2 PR). The grep commands above are the pre-condition; no "checked manually" or "looks fine" variant is acceptable. Capture the four greps' exact output (commit hash, file:line list, exit codes) in `tasks/builds/<slug>/progress.md` so a reviewer can confirm A1b started cleanly.
+
 1. **Remove shims.** Grep for `// @deprecated — remove in A1b`; delete each deprecated overload. After deletion, only the `(principal, ...)` signature remains.
 2. **Gate hardening.** Update `scripts/verify-principal-context-propagation.sh` so that the file-level "imports a principal-context utility" check is no longer enough — every `canonicalDataService.<method>(` invocation in the file must pass a `PrincipalContext`-shaped first argument (call-site-level enforcement, not file-level). The right approach is a positive allowlist of accepted first-argument shapes rather than a narrow negative matcher:
    - **Positive allowlist (accepted first-argument shapes):** the gate accepts a `canonicalDataService.<method>(` call only when the first argument matches one of:
@@ -227,6 +283,7 @@ If two approaches produce the same observable behaviour but differ on inspectabi
 **Risk:** low — A1a already migrated every caller; A1b is mostly mechanical (delete shims, flip the gate's matcher, add fixture tests).
 
 **Definition of Done:**
+- Pre-condition shim-usage greps (per Approach pre-flight section above) executed BEFORE any A1b code change; output captured in `tasks/builds/<slug>/progress.md`; counts: greps 2 and 3 == 0, grep 1 == N (the A1a-landed shim count), and the cross-check from inventory passes for every entry.
 - All shims deleted.
 - Gate updated to call-site granularity with the positive-allowlist matcher; baseline entry in `scripts/guard-baselines.json` regenerated; deliberate-regression fixtures pass for each accepted-shape category.
 - `npm run build:server`, `npm run lint`, and `bash scripts/verify-principal-context-propagation.sh` all pass.
@@ -281,6 +338,10 @@ If two approaches produce the same observable behaviour but differ on inspectabi
    - **Proxy must not change method signatures.** The Proxy applied to the org-scoped handle and to the admin `tx` argument intercepts `.insert(table)`, `.update(table)`, and `.delete(table)` for the boundary check, but it MUST forward all arguments unchanged and return whatever the underlying method returns. The guard does NOT add parameters, change return types, alter the chained-builder semantics (`.insert(...).values(...).returning(...)`), or wrap return values. A caller that switches from a raw handle to a guarded handle must observe identical behaviour at the call site — the only visible change is that protected-boundary writes throw in dev/test instead of silently proceeding.
    - Production behaviour: the guard is no-op (the policy itself enforces). Mitigates risk of false positives in prod, while making dev/test loud.
    - This is wrapper-level enforcement, not Drizzle middleware — it composes with existing primitives instead of inventing a new one.
+   - **Proxy coverage completeness — write-path constraint (per ChatGPT review Round 4).** The Proxy intercepts `.insert(table)`, `.update(table)`, and `.delete(table)` calls on the wrapped handle. It does NOT see writes that bypass those builder methods — specifically `.execute(sql\`...\`)` raw queries, `.transaction(...)`-nested writes that re-use a non-wrapped handle, and indirect writes via service-layer helper wrappers that hold their own pre-wrap reference to the underlying client. To prevent false-confidence "the guard is on" while writes route around it, A2 Phase 3 introduces a written contract enforced at code-review time AND at gate level:
+     - **Service-layer write contract.** All service-layer writes to tenant-scoped tables (i.e. tables in `rlsProtectedTables`) MUST go through one of: (a) a Drizzle builder method (`.insert` / `.update` / `.delete`) on a `getOrgScopedDb` handle or a `withAdminConnectionGuarded` `tx`, OR (b) an explicit call to `assertRlsAwareWrite(tableName)` immediately before the write executes. Raw `.execute(sql)` writes against a tenant table are violations unless the call is preceded by `assertRlsAwareWrite(tableName)` on the same logical path.
+     - **Advisory grep gate (added inside the existing `scripts/verify-rls-protected-tables.sh`, no new file).** The Phase 1 gate gains a third check (alongside the schema-vs-registry diff and the `allowRlsBypass: true` justification check): grep `server/` for `\.execute\(\s*sql` calls and report any that reference a tenant-table name from `rlsProtectedTables` without a same-block `assertRlsAwareWrite(` call within ±10 lines. **Advisory mode initially** — emits the violation, exits 0, baseline tracked in `scripts/guard-baselines.json` per C1. Promotion to blocking follows the §0.1 Gate Quality Bar protocol (FP-rate <5% on `main`, ≥2-3 weeks of stable signal, deterministic match). The check lives inside the existing `verify-rls-protected-tables.sh` file (single file with three checks now: schema diff + flag justification + write-path advisory) — preserves §0.2's A2 file budget.
+     - **Why this is named explicitly.** The §B2 / §H1 work depends on raw `.execute(sql)` for advisory-lock acquisition, claim queries, and migration-shaped writes. Those are NOT writes to tenant tables themselves (they hit lock-keyspace, claim-token columns on rows the org owns, etc.) — but the guard's *coverage shape* is fuzzy without an explicit written contract. The contract above closes the fuzziness without expanding A2's runtime scope (no Proxy coverage of `.execute`; the guard stays at builder-method level; the constraint lives at code-review and gate level).
 **[Phase 2 — migration hook]**
 3. **Migration-time hook (`.claude/hooks/rls-migration-guard.js`).** Ships AFTER Phase 1 (schema-diff gate) and BEFORE Phase 3 (runtime guard). PostToolUse hook that runs on Write/Edit to `migrations/*.sql` (top-level path — confirmed by `ls migrations/` showing migrations 0001..0227+):
    - Parse the SQL diff. If a new `CREATE TABLE` includes `organisation_id`, look for a matching `CREATE POLICY` in the same file or any sibling file in the same migration set.
@@ -323,7 +384,8 @@ If two approaches produce the same observable behaviour but differ on inspectabi
 - `server/lib/rlsBoundaryGuard.ts` shipped; `withAdminConnectionGuarded` shim available.
 - Tests pass for all five cases listed in Tests required below.
 - `scripts/verify-rls-protected-tables.sh` extended with the `allowRlsBypass: true` justification-comment check (per the flag-drift protection in A2 Approach step 2). Every existing call site that passes `allowRlsBypass: true` carries an inline justification comment; gate fails on any unjustified call site; deliberate-removal fixture proves the check fires. The check is blocking — no advisory-mode interim.
-- `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnectionGuarded({ allowRlsBypass: true }, fn)` and must `SET LOCAL ROLE admin_role` inside the callback per the existing `withAdminConnection` contract. Bypass intent is declared via the `allowRlsBypass` flag, not inferred from SQL inspection. Every `allowRlsBypass: true` call site MUST carry an inline justification comment naming the cross-org operation; CI enforces this. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
+- `scripts/verify-rls-protected-tables.sh` extended with the write-path advisory check (per the Proxy coverage completeness section in A2 Approach step 2): grep for `\.execute\(\s*sql` calls referencing tenant-table names without a same-block `assertRlsAwareWrite(` within ±10 lines. **Ships advisory** — emits violations, exits 0; baseline recorded in `scripts/guard-baselines.json`. Promotion to blocking follows §0.1 protocol; promotion date logged in `tasks/builds/<slug>/progress.md` if/when the criteria hold.
+- `architecture.md` § Architecture Rules updated with one line: "Request- and job-scoped writes to tenant-scoped tables must go through `getOrgScopedDb`. All service-layer writes to tenant-scoped tables MUST go through Drizzle builder methods (`.insert` / `.update` / `.delete`) on a `getOrgScopedDb` handle or a `withAdminConnectionGuarded` `tx`, OR explicitly call `assertRlsAwareWrite(tableName)` immediately before the write. Raw `.execute(sql)` writes against tenant tables without a preceding `assertRlsAwareWrite` call are violations. Deliberate cross-org writes (migrations, retention pruners, audit-replay tooling) go through `withAdminConnectionGuarded({ allowRlsBypass: true }, fn)` and must `SET LOCAL ROLE admin_role` inside the callback per the existing `withAdminConnection` contract. Bypass intent is declared via the `allowRlsBypass` flag, not inferred from SQL inspection. Every `allowRlsBypass: true` call site MUST carry an inline justification comment naming the cross-org operation; CI enforces this. Tables that legitimately have `organisation_id` but no RLS appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale."
 - No false-positive issues filed against Phases 1+2 in the preceding 2-3 weeks (confidence gate per §0.1).
 - Spec status field for A2 in `§5 Tracking` is checked when all three phases complete. Partial completion is reflected in Tracking via "phase X done" annotations rather than a single binary check.
 
@@ -502,6 +564,12 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
    - `pg_sleep(0.1)` is acceptable as an *additional* widening tool, NOT as the primary mechanism — flaky tests that depend on timing alone fail intermittently in CI and create false confidence in the underlying concurrency model.
    - The test hook is a named primitive per §0.2 — it lives on the existing job module's exports as a `__testHooks` object (one per job), not as a new shared helper.
    - The hook MUST be a no-op in production (`if (process.env.NODE_ENV === 'production') return;` at the call site, OR the hook defaults to `async () => {}` and is overridden only inside tests). Production behaviour is unchanged.
+   - **Production-safety invariant (per ChatGPT review Round 4).** `__testHooks` MUST satisfy ALL three conditions below in every job that exposes one. A developer who forgets to reset the hook between tests, or who accidentally imports the hook module from production code, MUST NOT be able to alter production execution:
+     1. **Tree-shaken or no-op in production builds.** Either (a) the `__testHooks` export is removed from the bundle when `NODE_ENV === 'production'` (e.g. via a `if (process.env.NODE_ENV !== 'production')` block around the export, with the call-site dead-code-eliminated by the bundler), OR (b) the hook's default value is `async () => {}` and the call site short-circuits on production via the `if (process.env.NODE_ENV === 'production') return;` pattern above. Either approach is acceptable; the choice MUST be documented in the job's header comment.
+     2. **No execution change when unset.** If `__testHooks.<hookName>` has not been overridden (i.e. holds its default `async () => {}` value), the call site MUST behave identically to a job with no hook at all — same timing within scheduling jitter, same observable side effects, same return shape. Centralise this via the canonical pattern `if (!__testHooks.<hookName>) return; await __testHooks.<hookName>();` at every call site so the unset path is a single conditional skip, not an awaited no-op that adds microtask scheduling overhead.
+     3. **Reset-on-import enforcement at test boundaries.** Each job's test file MUST reset `__testHooks` to its default values in a `beforeEach` (or equivalent `node:test` hook) so a forgotten override in one test does not leak into the next. The reset is a one-line assignment per hook key. Document the reset pattern in the first idempotency test that lands so subsequent tests follow it.
+
+   The optional gate (step 4 below) gains a complementary advisory check: grep `server/jobs/` for any unconditional `await __testHooks.` call (i.e. one not guarded by the canonical `if (!__testHooks.<hookName>) return;` pattern) and report any hits. Advisory only — fix-time is "wrap in the conditional"; FP-rate is zero by construction.
 4. **Optional gate (`scripts/verify-job-concurrency-headers.sh`).** Lints every `server/jobs/*.ts` for the presence of `Concurrency model:` and `Idempotency model:` lines in the header. Fail otherwise. Cheap to write, prevents future drift.
 
 5. **No-op return semantics (per ChatGPT review Round 2).** When a job invocation does not perform work (because a sibling invocation already holds the lock / already claimed the row / the predicate filtered out everything), the job MUST return a structured result, not throw and not silently exit. The contract:
@@ -537,7 +605,7 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
 - All four jobs carry the **Concurrency model:** section of the header with named lock primitive per job (advisory lock / lease / claim+verify).
 - Each job has a passing **parallel double-invocation regression test** — `Promise.all([job(), job()])` produces exactly one work-performed outcome.
 - (Optional) the gate (either a new `verify-job-concurrency-headers.sh` or an extension of `verify-job-idempotency-keys.sh`) exits 0 with the standard header present in every `server/jobs/*.ts`.
-- `architecture.md` § Architecture Rules carries one paragraph: "Cron and long-running jobs MUST declare a Concurrency model and an Idempotency model in a header comment using the standard form. See `server/jobs/connectorPollingSync.ts` for the canonical example."
+- `architecture.md` § Architecture Rules carries one paragraph: "Cron and long-running jobs MUST declare a Concurrency model and an Idempotency model in a header comment using the standard form. See `server/jobs/connectorPollingSync.ts` for the canonical example. **Default lock scope is per-org** — the advisory-lock key (or claim predicate, lease key, etc.) is parameterised on `organisationId` so distinct orgs run in parallel while a single org serialises. Any deviation (global serialization, per-entity scope, etc.) MUST be justified inline in the header's `Concurrency model:` section. Operations that partially execute MUST follow §0.5 of the audit-remediation-followups spec (roll back fully, OR return a structured partial-state result, OR log explicit partial execution at WARN level) — silent partial-success returns are rejected." (The H1 derived-data null-safety rule lands as a separate paragraph per H1's own DoD; this paragraph covers concurrency, lock-scope default, and the partial-execution rule for jobs.)
 - B2-ext row in `§5 Tracking` is checked.
 
 **Note on partial completion:** B2 and B2-ext may ship in separate PRs in either order. The split DoD above lets `§5 Tracking` reflect partial progress accurately — B2 can complete before B2-ext does, or vice versa.
@@ -570,6 +638,10 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
    Pulls `$GUARD_ID` from the env var each script already sets (e.g. `GUARD_ID="principal-context-propagation"`). Any script-specific output that follows `emit_summary` (e.g. extra debug context) MUST be moved to before the `Summary:` line so the `[GATE]` line stays terminal at the application level.
 
    **Framework-log exception (per ChatGPT review Round 3).** No application-level logs (script-emitted `echo`, `printf`, `console.log`, or any output the script itself produces) may follow the `[GATE]` line. **Framework-level logs are exempt** — output emitted by the shell, the test runner, the CI runner, or other infrastructure layers (e.g. bash's `+x` trace, `tsx`'s warning output, Node's deprecation warnings, CI-injected timing/cleanup lines) is permitted to follow the `[GATE]` line and does NOT violate this contract. CI parsers handle this by either (a) using `grep -E '^\[GATE\] ' | tail -n 1` instead of `tail -n 1`, OR (b) running the gate with framework noise suppressed (e.g. `2>/dev/null` for stderr framework warnings) when a strict tail is required. The acceptance criterion below uses the grep form to be explicit about the application-vs-framework distinction.
+
+   **Subscript output constraint (per ChatGPT review Round 4).** No subscript or nested-script invocation MAY emit application-level output AFTER its parent's `emit_summary` call. Specifically: if a gate script calls `emit_summary` and then invokes a helper script (e.g. `bash scripts/lib/<helper>.sh` or `node scripts/lib/<helper>.mjs`), that helper script's stdout/stderr counts as application-level output and violates the terminality contract. Two enforcement mechanisms:
+   - **Author-time discipline (mandatory).** Any helper script invocation in a gate MUST run BEFORE the parent's `emit_summary` call — no post-summary subscripts, no pipeline that re-emits the gate's output through a transformer, no trailing cleanup script that prints anything. If a helper genuinely must run last (e.g. a temp-file cleanup), it MUST redirect its output to `/dev/null` so no application-level line lands after the `[GATE]` line.
+   - **Gate-self-test fixture.** The `[GATE]` terminality test (per the existing acceptance criterion) is extended with one fixture that wires up a deliberately-misconfigured subscript that prints AFTER `emit_summary`; the test asserts the canonical `grep -E '^\[GATE\] ' | tail -n 1` parser still returns the correct violation count, AND a separate detection pass (`tail -n 1 | grep -qE '^\[GATE\] '` — strict-tail form) reports the violation as expected. This second test confirms the framework-vs-application distinction is genuinely working and that subscript noise gets caught at author time, not silently passed through.
 2. **Audit non-sharing scripts.** Run `grep -L "guard-utils.sh" scripts/verify-*.sh scripts/verify-*.mjs` to identify scripts that don't use the shared helper. For each, append a dedicated `echo "[GATE] <id>: violations=<count>"` line as the **last** line. The `.mjs` scripts (`verify-help-hint-length.mjs`, `verify-integration-reference.mjs`) need an analogous `console.log` line emitted last (after any other output).
 3. **CI capture (optional, ship in same PR if cheap).** `.github/workflows/<gates>.yml` (or wherever gates run) — pipe gate output to a file and parse out `[GATE]` lines into a JSON artefact. This is nice-to-have; the line itself is the deliverable.
 4. **Documentation.** Add one paragraph to `architecture.md` § Architecture Rules: "Every gate script emits `[GATE] <id>: violations=<n>` as the LAST application-level line of its output. CI parsers extract the count via `grep -E '^\[GATE\] ' | tail -n 1` (the grep form is robust against framework-level output — bash trace, `tsx` warnings, Node deprecation warnings — that may appear after the `[GATE]` line and is exempt from the terminality contract). A gate that emits any application-level line (script-owned `echo`, `printf`, `console.log`) after the `[GATE]` line is in violation. Adding new gates: emit `[GATE]` last from the script's own output; framework noise is allowed."
@@ -672,6 +744,13 @@ Treat each job's PR as a mini-spec — one job, one header migration, one regres
        - Back-link: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md § C3.
      ```
      A follow-up without an owner or without a trigger condition fails C3's Definition of Done — silent backlog rot is the failure mode this rule prevents.
+   - **Phase-5A spec coupling (per ChatGPT review Round 4).** A backlog entry alone — even with owner + trigger condition — depends on someone reading `tasks/todo.md` at Phase-5A kickoff. To force the coupling at the spec level (the failure mode this rule prevents: Phase 5A happens but no one links it back to C3), the C3 follow-up DoD adds one more requirement: the Phase-5A spec, when it is authored, MUST include a checklist item in its own §1 (or equivalent backlog/scope section) reading exactly:
+     ```
+     - [ ] C3 follow-up: upgrade canonicalRegistryDrift test from 2-set to 3-set comparison
+       - Source: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md § C3
+       - Action: add `canonicalTable` metadata field to canonicalQueryRegistry entries; extend canonicalRegistryDriftPure.test.ts with `queryPlannerTables ⊆ dictionaryTables` assertion.
+     ```
+     This couples the upgrade to a spec the Phase-5A implementer is guaranteed to read (their own scope spec), not just a backlog file. The coupling is enforced at C3-implementation time by adding the same line to `tasks/todo.md` AND noting in the C3 PR description that "the Phase-5A spec, when authored, must carry the C3 upgrade as a checklist item per §C3 of the audit-remediation-followups spec". The C3 implementer MUST also verify (at C3 ship time, NOT at Phase-5A ship time) that no Phase-5A spec already exists; if one does, they add the checklist item directly to it in the same PR.
    - Do NOT regex over the planner-action strings — `contacts.inactive_over_days` is not a reliable signal of "table = `canonical_contacts`".
 
    The point of forcing this decision: the original branch ("if no metadata, narrow scope") provided no commitment to ever closing the gap. The Phase-5A deadline ties the upgrade to a real milestone in this codebase rather than letting it sit as an open optional.
@@ -870,19 +949,26 @@ The current gate (`scripts/verify-skill-read-paths.sh`) is a coarse line-counter
    ```
    List both grep outputs side-by-side. The 5 `readPath:` lines that are NOT immediately preceded by an `actionType:` line in the same object literal are the surplus. Common explanations: a recently-added "default options" template, a forward-declared interface, a `readPath` parameter on a generator function, or duplicate `readPath` fields inside one entry.
 2. **Step 2 — patch shape depends on what Step 1 found:**
-   - If the surplus are non-entry uses (templates / generator params / type defs): update the gate's subtraction constant from 2 to 7. **Calibration-constant change discipline (per ChatGPT review Round 2):** changing the subtraction constant is dangerous because a wrong constant masks real mismatches silently. Therefore: any change to the constant MUST list **every excluded occurrence explicitly in a comment with line references** (file path + line number) immediately above the constant declaration in `scripts/verify-skill-read-paths.sh`. Shape:
+   - If the surplus are non-entry uses (templates / generator params / type defs): update the gate's subtraction constant from 2 to 7. **Calibration-constant change discipline (per ChatGPT review Round 2, refined per Round 4):** changing the subtraction constant is dangerous because a wrong constant masks real mismatches silently. Therefore: any change to the constant MUST list **every excluded occurrence explicitly in a comment with a stable identifier — a grep pattern + short description, NOT an absolute line number**. Line numbers drift as the file evolves; the listing becomes stale and someone "fixes" the listing by re-numbering rather than re-checking what each entry actually covers. Use a grep pattern that uniquely identifies each excluded occurrence regardless of where it sits in the file. Shape:
      ```bash
-     # readPath: occurrences excluded from the count (subtraction = 7):
-     #   server/config/actionRegistry.ts:14 — interface ActionDefinition definition
-     #   server/config/actionRegistry.ts:21 — methodology template default
-     #   server/config/actionRegistry.ts:NN — <one-line reason>
+     # readPath: occurrences excluded from the count (subtraction = 7).
+     # Each entry uses a grep pattern that uniquely identifies the excluded
+     # occurrence in the source file (line numbers drift; grep patterns survive).
+     #   pattern: 'interface ActionDefinition'        — type declaration of ActionDefinition
+     #   pattern: 'methodologyTemplate default'       — methodology template default block
+     #   pattern: '<unique grep pattern N>'           — <one-line reason>
+     #   pattern: '<unique grep pattern N+1>'         — <one-line reason>
      #   ...
-     # If you change this constant, update the list above. A constant without an
-     # explicit listing of every excluded occurrence is a regression — silent drift
-     # masks real mismatches.
+     # When you change this constant, update the list above. Each pattern MUST be
+     # specific enough that `grep -n "<pattern>" server/config/actionRegistry.ts`
+     # returns exactly the occurrence the entry describes — verify by running the
+     # grep at the time you author the entry. A pattern that returns 0 hits or >1
+     # hits is invalid (the file evolved, or the pattern is ambiguous; rewrite it).
+     # A constant without a grep-pattern listing of every excluded occurrence is a
+     # regression — silent drift masks real mismatches.
      READPATH_NON_ENTRY_OCCURRENCES=7
      ```
-     This is non-optional. A constant change without the line-by-line listing fails review.
+     This is non-optional. A constant change without the grep-pattern listing fails review. Reviewers MUST run each pattern against the file in the PR's diff to confirm exactly-one-hit before approving.
    - If the surplus are duplicate `readPath:` fields inside an entry: remove the duplicates (only one `readPath` per entry).
    - If the surplus are entries with `readPath` but missing `actionType`: add the missing `actionType` fields, OR remove the orphan entries if they're dead code.
 3. **Step 3 — fallback if a per-entry parser is needed:** rewrite the gate to parse each ActionDefinition entry individually (TypeScript object-literal parsing — non-trivial in pure shell; would justify converting the gate to `.mjs`). Treat this as a separate, bigger task — do not bundle into D3.
@@ -994,6 +1080,7 @@ The final-review log notes all four fail identically on `main` HEAD `ee428901` a
 - `bash scripts/verify-pure-helper-convention.sh` exits 0 (or all `<N>` (currently 7) violators carry annotations the gate recognises). The captured violator count must be confirmed against current main as part of the work — do not rely on the historical "7" count.
 - `node scripts/verify-integration-reference.mjs` no longer reports the actual current blocking error (per Step 0's fresh capture).
 - `<N>` advisory warnings (per Step 0's fresh capture): recorded in `scripts/guard-baselines.json` under the gate's `GUARD_ID`; gate emits parseable count line per C1.
+- E2's PR description follows §0.7 — if E2 commits a baseline above zero (i.e. carries forward existing warnings rather than driving them to zero), the PR description includes the §0.7 baseline note explaining why the residual count is acceptable for ship.
 
 **Tests required:** none in code; the gates are the verification.
 
@@ -1106,7 +1193,16 @@ The route's own comment names Phase 4 as the migration point. Same defect class 
 - TTL expiry: a value past its expiry is not returned.
 
 **Acceptance criteria (when Phase-5A surface does not fit — case (b)):**
-- `tasks/todo.md` carries an entry "F2 deferred: rateLimitStoreService surface doesn't generalise; revisit when a second KV-TTL consumer surfaces".
+- `tasks/todo.md` carries an entry "F2 deferred: rateLimitStoreService surface doesn't generalise; revisit when a second KV-TTL consumer surfaces". The entry MUST include explicit, measurable re-evaluation triggers (per ChatGPT review Round 4 — a deferral with no trigger becomes permanent silently). Required shape:
+  ```
+  - [ ] F2 deferred: rateLimitStoreService surface doesn't generalise; revisit when a second KV-TTL consumer surfaces.
+    - Owner: <name or role of the F2 evaluator at deferral time, OR the next configDocuments-domain build-slug lead>
+    - Re-evaluation triggers (whichever fires first):
+      1. A SECOND in-codebase use case for "key + value + TTL" surfaces (e.g. another route adds a similar Map-with-setTimeout pattern) — at that point the two-consumer count justifies a generic `kvStoreWithTtl` primitive per `docs/spec-authoring-checklist.md` §1, OR
+      2. The `configDocuments` route's median end-to-end latency exceeds 500ms over a rolling 24-hour window (the cache miss → re-parse path becomes a user-visible regression at that threshold) — measured via existing route-timing logs once the live-users phase begins per `docs/spec-context.md`, OR
+      3. A `configDocuments`-domain build slug is opened for any reason (the implementer revisits F2 as part of that build's pre-implementation audit).
+    - Back-link: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md § F2.
+  ```
 - `parsedCache` `Map` left in place; no code change.
 - F2 row in §5 Tracking marked `↗ migrated to deferred` with the todo link.
 
@@ -1240,7 +1336,7 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 **Approach:**
 
 1. **Codify the rule in `architecture.md` § Architecture Rules.** Exact wording:
-   > **Derived-data null-safety.** No service may assume the existence of data produced by a job, rollup, or async pipeline unless that existence is enforced by a DB constraint OR is synchronously produced inside the same transaction. For derived reads (rollups, bundle outputs, intervention-outcome state, pulse-derived metrics, async canonical enrichment): treat the value as nullable. On null, return `null` / empty list / sentinel — never throw. Emit one WARN log line `data_dependency_missing: <service>.<field> for <orgId>` so operators can detect ramp-up gaps without a hard failure.
+   > **Derived-data null-safety.** No service may assume the existence of data produced by a job, rollup, or async pipeline unless that existence is enforced by a DB constraint OR is synchronously produced inside the same transaction. For derived reads (rollups, bundle outputs, intervention-outcome state, pulse-derived metrics, async canonical enrichment): treat the value as nullable. On null, return `null` / empty list / sentinel — never throw. Emit one WARN log line `data_dependency_missing: <service>.<field> for <orgId>` (rate-limited to once per key per interval, OR first-occurrence WARN with subsequent occurrences downgraded to DEBUG — see `server/lib/derivedDataMissingLog.ts`) so operators can detect ramp-up gaps without log spam masking the signal.
 
    The architecture.md rule is the durable policy and applies to all derived reads named above. **H1 Phase 1's enforcement sweep is narrower** — it touches only the four job-output domains named in step 2 below. Broader enforcement (pulse-derived metrics, agent-run-snapshot enrichment, etc.) requires a separate follow-up backlog item; the rule itself stays broad.
 
@@ -1275,6 +1371,14 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
    - Emit `[GATE] derived-data-null-safety: violations=<count>` per C1.
 
 5. **Operator log signal.** Define a single shared helper `logDataDependencyMissing(service, field, orgId)` in `server/lib/derivedDataMissingLog.ts` (sibling of `server/lib/logger.ts`) so every WARN line is shaped identically and parseable for dashboards. Internally the helper delegates to the existing `server/lib/logger.ts` so no new logger framework is introduced.
+
+   **Rate-limiting contract (per ChatGPT review Round 4).** A high-frequency read path that hits the same null condition repeatedly (e.g. a request loop reading `bundleUtilization.utilizationRatio` for an org whose nightly job hasn't run yet) WILL emit `data_dependency_missing` on every read. Without rate-limiting that becomes log spam — operators learn to filter the line, signal degrades, the rule loses its operational value. The helper MUST implement one of the two patterns below, picked at implementation time based on the call-site distribution found in step 2's `null-safety-call-sites.md`:
+   - **Pattern A — once-per-key-per-interval rate limit (preferred for hot paths).** The helper holds an in-memory `Map<string, number>` keyed on `<service>.<field>:<orgId>` storing the last emit timestamp. On each call: if the previous emit for that key was within the rate-limit window (default: 60 seconds), skip the WARN emission entirely; otherwise emit and update the timestamp. Counter aggregation is deliberately NOT added — a counter that aggregates skipped emissions is more complexity than the operational signal needs. The first WARN per key per window is the signal; subsequent identical WARNs in the window are noise. Window value MAY be tuned via `process.env.DATA_DEPENDENCY_MISSING_RATE_LIMIT_MS` for ops emergencies; default lives in the helper.
+   - **Pattern B — first-occurrence WARN, subsequent occurrences DEBUG (preferred for low-volume paths).** The helper emits the first occurrence of each `<service>.<field>:<orgId>` key as WARN; every subsequent occurrence drops to DEBUG (which is filtered out by default in production log aggregation). Reset key tracking on process restart — the in-memory `Set<string>` is good enough; a long-running pod that accumulates many keys is a separate scaling problem and out of scope for H1.
+
+   The helper's interface is identical in both patterns (`logDataDependencyMissing(service, field, orgId)`); the choice is internal. Document the chosen pattern in the helper's JSDoc and in `architecture.md`'s H1 rule line so operators know which pattern is in force. Tests in step 3 cover both the first-occurrence emit AND the rate-limited-skip / debug-downgrade behaviour, so the contract is exercised.
+
+   **Why this is mandatory, not advisory.** Round 1 already flagged H1 over-logging risk; Round 4 made it concrete. Without rate-limiting, the WARN line becomes a noise category operators tune out; the rule then exists in name only. The rate-limit / DEBUG-downgrade pattern preserves the first-instance signal (which is what operators actually need to detect ramp-up gaps) while suppressing the noise of repeat hits.
 
 **Acceptance criteria (Phase 1 — first ship, gate is advisory):**
 - Rule codified in `architecture.md` § Architecture Rules.
@@ -1313,19 +1417,21 @@ G1's reusable script is scoped to **current-order replay only** — it does NOT 
 
 ## §2 Sequencing
 
-PR #196 is merged. Re-sequenced relative to the original draft (which assumed pre-merge work for G1) and again per ChatGPT review Round 1 (front-load signal cleanup before heavy migrations).
+PR #196 is merged. Re-sequenced relative to the original draft (which assumed pre-merge work for G1), again per ChatGPT review Round 1 (front-load signal cleanup before heavy migrations), and again per ChatGPT review Round 4 (front-load **C1** so every subsequent item ships against the standard `[GATE]` output format from day 1).
 
-**Sequencing principle (per ChatGPT review Round 1):** clean signal first (tests + gates), fix small leaks, codify system rules, then do heavy migrations. Reduces cognitive load during the high-blast-radius items (A1a/A1b/A2/B2).
+**Sequencing principle (per ChatGPT review Round 1, refined per Round 4):** clean signal first (tests + gates), establish the gate output standard (C1) before any other gate work, then fix small leaks, codify system rules, then do heavy migrations. Reduces cognitive load during the high-blast-radius items (A1a/A1b/A2/B2) and ensures every gate this spec touches emits the `[GATE]` line from day 1 instead of needing a retrofit pass.
+
+**Why C1 moves to position 2 (per ChatGPT review Round 4):** the original Round-1 sequencing put C1 at position 4 (inside the drift-guards group). The Round-4 observation: C1 is purely additive (changes the gate output format only — does not change behaviour) and is foundational for every subsequent gate's investigation, baseline capture, and CI parsing. Shipping C1 second means every gate cleanup in positions 3+ can rely on the standard format from the moment it lands, instead of catching up later. The cost of moving C1 earlier is half a day's effort (already estimated at half-day in the chunk-size column); the benefit is cleaner signal across the entire remaining spec.
 
 | Order | Item | Why | Suggested chunk size |
 |---|---|---|---|
 | 1 | **G2** — post-merge smoke test | First; observational validation of merged state. Lowest cost, highest signal. | half-day |
-| 2 | **G1** — migration sequencing verification (re-runnable script) | Convert the never-executed pre-merge gate into a re-runnable script so future migration-heavy PRs benefit. | 1 day |
-| 3 | **D1, D2, D3** — pre-merge gate cleanups | Closes the audit-trail items left by Phase 2. D2 is decision-only (no code). D3 depends on C1 (sequence after). | 1 day total |
-| 4 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1 — sequence first within the drift-guards / signal-cleanup group. | half-day |
-| 5 | **E1, E2** — pre-existing test/gate failures | Cleanup pass; unblocks signal in future audit-runner runs. E2 depends on C1. | 1–2 days |
+| 2 | **C1** — parseable gate count line | Foundational for C2, D3, E2, H1, A1b, A2 — every subsequent gate ships against the C1 standard from day 1, no retrofit pass. **Moved earlier per ChatGPT review Round 4** (was position 4). | half-day |
+| 3 | **G1** — migration sequencing verification (re-runnable script) | Convert the never-executed pre-merge gate into a re-runnable script so future migration-heavy PRs benefit. | 1 day |
+| 4 | **D1, D2, D3** — pre-merge gate cleanups | Closes the audit-trail items left by Phase 2. D2 is decision-only (no code). D3 depends on C1 (now shipped at position 2). | 1 day total |
+| 5 | **E1, E2** — pre-existing test/gate failures | Cleanup pass; unblocks signal in future audit-runner runs. E2 depends on C1 (now shipped at position 2). | 1–2 days |
 | 6 | **B1, C4** — zero-risk additive | Trivial; ship anytime, possibly bundled into other PRs of opportunity. | < 1 hour each |
-| 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle with C1 in a single "drift-guards" PR. C2 depends on C1. | 1 day |
+| 7 | **C2, C3** — drift / architect / canonical-registry guards | Bundle as a single "drift-guards" PR. C2 depends on C1 (now shipped at position 2). | 1 day |
 | 8 | **A3, F1** — internal refactors | Independent small PRs. | 1 day each |
 | 8b | **F2** — configDocuments cache durability | Blocked behind Phase-5A `rateLimitStoreService` (per source spec §8.1) — F2 cannot start until that primitive ships. Not part of the parallel-shippable batch. | 1 day after Phase-5A |
 | 9 | **H1** — cross-service null-safety contract | High-leverage system rule. Codify before further service expansion. Gate ships ADVISORY on first release per §0.1; promote to blocking after 2-3 weeks of stable signal. | 2-3 days |
@@ -1335,8 +1441,8 @@ PR #196 is merged. Re-sequenced relative to the original draft (which assumed pr
 | 13 | **A2** — RLS write-boundary guard | Phased rollout per §A2 Phasing block: Phase 1 (schema-diff gate) -> Phase 2 (migration hook) -> Phase 3 (runtime guard). New architectural primitive — ship LAST in this spec to maximise observation time on the rest of the changes. **Independent of A1** — A2's mechanism is table-name + Proxy-based, not principal-flag-based. | 3-4 days, spread across phases |
 
 **Critical-path summary:**
-- **Wave 1 — signal cleanup (parallel-friendly):** G2, G1, D1/D2/D3, C1, E1/E2, B1/C4 — ~1-1.5 weeks if pipelined. C1 must precede E2 and D3.
-- **Wave 2 — drift guards + small refactors (parallel-friendly):** C2/C3, A3, F1, H1 — ~1 week. C2/H1 depend on C1.
+- **Wave 1 — signal foundation + cleanup (parallel-friendly except C1 first):** G2, **C1** (must land before any other gate work this spec touches), G1, D1/D2/D3, E1/E2, B1/C4 — ~1-1.5 weeks if pipelined. C1 (now at position 2) precedes everything else in the wave.
+- **Wave 2 — drift guards + small refactors (parallel-friendly):** C2/C3, A3, F1, H1 — ~1 week. C2/H1 depend on C1 (already shipped in Wave 1).
 - **Wave 3 — heavy migrations (sequential):** A1a -> A1b -> B2 (per-job sequence) -> A2 (phased) — ~2-2.5 weeks. F2 floats whenever Phase-5A's primitive becomes available.
 
 **Total estimate:** 4-5 weeks of focused effort (one engineer), 3-3.5 weeks if multiple chunks ship in parallel within Waves 1+2. Wave 3 is intentionally serial. Treat this estimate as planning input only — re-estimate per chunk during build slug planning.

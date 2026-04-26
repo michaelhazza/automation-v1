@@ -446,3 +446,177 @@ Cross-references touched in Round 3 (§0.4 referencing §0.1/§0.2/§0.3 + A1b/A
 Post-integrity sanity (4c): the one mechanical fix above (A2 flag-drift moved inside existing gate, §0.2's A2 line clarified) was a single coupled edit-pair, not a chain of cascading changes. Verified the A2 Phase-3 DoD line that mentions the new check now matches the updated §0.2 budget — both consistent. No broken links, no left-empty sections.
 
 ---
+
+## Round 4 — 2026-04-26T03-30-00Z
+
+### ChatGPT Feedback (raw)
+
+Short answer: this is already very tight. There's no obvious structural gap left. What remains are a handful of edge-case failure modes and execution risks that aren't explicitly locked down yet.
+
+Below is only delta feedback — things worth tightening before you call this final.
+
+1. Biggest remaining risk: A1a/A1b migration correctness drift
+You've nailed the structure, but there's still one subtle failure mode:
+Issue: A1a allows a temporary shim + partial migration. That creates a window where:
+- Some callers use PrincipalContext
+- Some still rely on the deprecated overload
+- Tests pass, but coverage is incomplete
+Risk: You can "think" you've migrated everything, but a few call sites silently use the shim and never get caught until A1b.
+Tightening (worth adding):
+Add a mandatory detection step before A1b:
+"Before A1b begins, run a grep for all usages of deprecated overloads and assert count = 0."
+Concretely:
+- `grep -rn "@deprecated — remove in A1b" server/`
+- `grep -rn "canonicalDataService\.\w+(organisationId" server/`
+And make it an explicit A1b precondition.
+
+2. A2 runtime guard: Proxy coverage completeness
+You're intercepting: `.insert`, `.update`, `.delete`
+Gap: There are other write paths that can bypass this:
+- `.execute(sql)` raw queries
+- `.transaction(...)` nested writes
+- indirect writes via helper wrappers
+Risk: Guard gives false confidence while some writes bypass it.
+Tightening:
+Add a constraint: "All service-layer writes MUST go through Drizzle builder methods (insert/update/delete) OR explicitly call `assertRlsAwareWrite`."
+And optionally: Add detection in A2 gate — flag `.execute(` usage on tenant tables (advisory).
+
+3. B2 concurrency: lock scope consistency
+You define per-job strategies, which is good.
+Subtle risk: Different engineers may choose: org-level lock, global lock, per-entity lock — inconsistently for similar jobs.
+Outcome: Hard-to-debug production contention or under-locking.
+Tightening:
+Add one line to architecture rule: "Default lock scope is per-org unless the job explicitly requires global serialization."
+This prevents arbitrary decisions.
+
+4. B2 test hooks: leak into production
+You handled this well, but one failure mode remains:
+Risk: A developer forgets to reset or guard the test hook.
+Tightening:
+Require: "__testHooks must be tree-shaken or no-op in production builds AND must not alter execution if unset."
+Even better: enforce `if (!__testHooks.pause) return;` pattern centrally.
+
+5. C1 gate standard: multi-line output edge case
+You enforce: `[GATE]` must be last application-level line.
+Edge case: Some scripts may pipe output, call subscripts that emit after summary.
+Tightening:
+Add: "Subscripts MUST NOT emit output after parent emit_summary is called."
+This prevents accidental violations from nested scripts.
+
+6. C3 follow-up risk: never implemented
+You added owner + trigger (good), but one more failure mode exists:
+Risk: Phase 5A happens but no one links it back to C3.
+Tightening:
+Add: "Phase 5A spec MUST include a checklist item: 'C3 canonicalRegistryDrift test upgraded to 3-set comparison'"
+This forces coupling.
+
+7. D3 calibration constant: future fragility
+You correctly require listing all exclusions.
+Remaining risk: File line numbers drift over time → comment becomes stale.
+Tightening:
+Instead of line numbers, require: grep pattern + short description, not absolute line numbers.
+Example:
+- `interface ActionDefinition` (type declaration)
+- `methodologyTemplate default block`
+Line numbers are brittle.
+
+8. E2 baseline handling: baseline rot
+You standardised on `guard-baselines.json` which is good.
+Risk: Baselines slowly increase and no one questions it.
+Tightening:
+Add rule: "Any increase in baseline count requires a PR note explaining why."
+This keeps signal meaningful.
+
+9. F2 deferral path: permanent deferral risk
+You correctly defer if API doesn't fit.
+Risk: It never gets revisited.
+Tightening:
+Add trigger: "Re-evaluate F2 when: second KV-with-TTL use case appears OR configDocuments route exceeds X latency threshold"
+Now it's measurable.
+
+10. H1 null-safety: over-logging risk
+You standardised logging, which is great.
+Risk: High-frequency paths spam logs (`data_dependency_missing`).
+Tightening:
+Add: "WARN logs MUST be rate-limited (once per key per interval) OR downgraded to DEBUG after first occurrence."
+Otherwise logs become noise.
+
+11. Sequencing: one optimisation
+Your sequencing is solid, but one improvement:
+Move: C1 even earlier (before G1/D1)
+Reason: everything benefits from standard output format; makes early investigation cleaner.
+
+12. One thing that's missing entirely (minor but valuable)
+Global invariant: "No silent success on partial execution"
+You enforce this in B2 (jobs), but not globally.
+Suggest adding (small, high value) — In architecture.md:
+"Any operation that partially executes MUST: either roll back fully, OR return structured partial-state result, OR log explicit partial execution."
+This prevents hidden inconsistencies outside jobs.
+
+Final assessment — What you've done well: Scope control is extremely strong; Phasing is disciplined; Gates are practical, not theoretical; You avoided over-engineering. What's left: Mostly edge-case enforcement; preventing drift over time; ensuring follow-ups actually happen.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Mandatory shim-usage grep precondition before A1b begins (greps must return 0 for any deprecated-overload caller) | technical | apply | auto (apply) | high | Internal migration discipline; closes a known A1a/A1b correctness drift window. Deterministic checks (greps), explicit thresholds. No user-facing impact. |
+| 2 | A2 Proxy coverage: add written contract that all service-layer writes to tenant tables go through builder methods OR call `assertRlsAwareWrite` explicitly; add advisory grep gate inside existing `verify-rls-protected-tables.sh` for `.execute(sql)` calls referencing tenant tables without `assertRlsAwareWrite` nearby | technical | apply | auto (apply) | high | Internal contract reinforcement. Closes the false-confidence gap where Proxy is on but `.execute(sql)` bypasses it. Advisory mode follows §0.1; check lives inside existing gate file (no new file, preserves §0.2 A2 budget — gate now carries 3 checks). No user-facing impact. |
+| 3 | Add §0.6 architectural-default lock scope rule (per-org by default; deviation must be justified inline) + extend B2-ext architecture.md rule line | technical | apply | auto (apply) | medium | Internal architectural discipline; prevents inconsistent lock-scope choices across the four jobs. Strengthens existing posture; no contract change to other specs. No user-facing impact. |
+| 4 | B2 `__testHooks` production-safety invariant (tree-shaken or no-op in prod; no execution change when unset; reset-on-import in test boundaries) + advisory grep check on unguarded `await __testHooks.` calls | technical | apply | auto (apply) | medium | Internal test discipline; prevents test-hook leakage into production execution. Three concrete mechanical conditions; canonical call-site pattern named. No user-facing impact. |
+| 5 | C1 subscript-output constraint: no subscript may emit application-level output AFTER parent's `emit_summary`; gate self-test extended with deliberately-misconfigured-subscript fixture | technical | apply | auto (apply) | medium | Internal CI parser convention; closes accidental-violation path. Author-time discipline + fixture test exercises both grep-form and strict-tail-form parsers. No user-facing impact. |
+| 6 | C3 Phase-5A spec coupling: the future Phase-5A spec MUST include the C3 3-set upgrade as a checklist item in its own §1; C3 implementer adds the line directly if a Phase-5A spec already exists at C3 ship time | technical | apply | auto (apply) | medium | Internal backlog-coupling discipline; closes the "follow-up exists but never gets linked" failure mode. Rule shape is concrete and verifiable. No user-facing impact. |
+| 7 | D3 calibration-constant change discipline refined: use grep pattern + short description for each excluded occurrence, NOT absolute line numbers (line numbers drift) | technical | apply | auto (apply) | medium | Internal gate-stability refinement; replaces brittle line-number references with stable grep patterns. Reviewers verify exactly-one-hit per pattern at PR review time. No user-facing impact. |
+| 8 | Add §0.7 baseline-rot prevention rule: any PR that increases a `scripts/guard-baselines.json` count MUST include a PR-description note explaining why; reviewers reject without the note | technical | apply | auto (apply) | medium | Internal CI quality discipline; prevents silent baseline creep across the spec's gates. Social enforcement (no automated CI check — false-positive prone). E2 acceptance criteria updated to reference §0.7. No user-facing impact. |
+| 9 | F2 case (b) deferral entry MUST include explicit measurable re-evaluation triggers (second KV-with-TTL use case, OR latency >500ms median rolling 24h, OR configDocuments-domain build slug opens) — owner + trigger shape mirrors C3's | technical | apply | auto (apply) | medium | Internal backlog hygiene; prevents permanent-deferral-by-omission. Triggers are measurable. No user-facing impact (latency threshold is internal observability, not a customer-visible SLA). |
+| 10 | H1 `logDataDependencyMissing` helper MUST implement rate-limiting (Pattern A: once per key per 60s interval, configurable via env var) OR DEBUG-downgrade after first occurrence (Pattern B); choice documented in helper JSDoc and architecture.md rule line | technical | apply | auto (apply) | medium | Internal observability / log-volume discipline; prevents WARN-line spam from masking signal. The WARN line itself is operator-facing internal observability, not a customer-visible communication. Both patterns specified mechanically. No user-facing impact. |
+| 11 | Move C1 from sequencing position 4 to position 2 — every gate touch in this spec ships against the C1 standard from day 1, no retrofit pass | technical | apply | auto (apply) | low | Internal sequencing tweak; rationale documented in §2 sequencing block (cost: half-day already estimated; benefit: cleaner signal across remaining items). No user-facing impact. |
+| 12 | Add §0.5 cross-cutting "no silent success on partial execution" rule (roll back fully, OR return structured partial-state result, OR log explicit partial execution at WARN); architecture.md rule line carries the partial-execution clause inside the B2-ext concurrency rule paragraph | technical | apply | auto (apply) | medium | Internal architectural discipline; generalises the per-item rule from B2 to a global posture. Three concrete approved patterns; rejects silent-success returns. Aligns with §4.1 per-item integrity check ("no silent fallbacks"). No user-facing impact. |
+
+### Triage notes
+
+All 12 findings classified as `technical`. ChatGPT's Round 4 feedback explicitly framed itself as "edge-case failure modes and execution risks that aren't explicitly locked down yet" — every finding tightens an internal-quality call (migration correctness gates, runtime guard coverage shape, lock-scope defaults, test-hook isolation, CI parser conventions, backlog coupling, calibration discipline, baseline rot, deferral triggers, observability log volume, sequencing, partial-execution rule). None describe user-facing copy, visible workflows, customer permissions, pricing, public API contracts, defaults end-users build muscle memory around, or visible feature surfaces.
+
+Closer-look items resolved:
+- **Finding 10 (H1 over-logging)** — operator log lines are internal observability, not customer-visible communication. The `data_dependency_missing` WARN line is consumed by ops dashboards, not by an end-user. Engineering quality call.
+- **Finding 9 (F2 latency trigger 500ms)** — the threshold is an internal observability heuristic for triggering re-evaluation of an internal cache primitive choice, not a customer SLA or contract. Engineering quality call.
+- **Findings 3 + 12 (architecture.md rule additions)** — these extend `architecture.md` § Architecture Rules with internal-engineering policy (lock-scope default, partial-execution rule). The rules govern internal service authoring, not user-facing surfaces. Already inside this spec's already-named architecture.md write surface (introduced for B2-ext + H1 in earlier rounds); no new cross-spec contract emerges.
+
+No escalations triggered:
+- No `defer` recommendations (all confident applies).
+- No contract changes with `architecture.md` or `docs/spec-context.md` that propagate cross-spec — the architecture.md rule extensions are internal-engineering policy refinements inside the same paragraph wave already in flight.
+- No `[missing-doc]` rejects — all findings align with existing posture (`prefer_existing_primitives_over_new_ones`, `static_gates_primary`, `runtime_tests: pure_function_only` carve-out).
+- High confidence on every fix.
+
+Top themes (Round 4): drift prevention over time (baseline-rot rule, calibration-constant grep patterns, follow-up coupling), measurable triggers (F2 re-evaluation thresholds, A1b shim-usage greps, sequencing C1-first), coverage shape (A2 write-path contract, B2 test-hook production safety, C1 subscript output), observability discipline (H1 log rate-limiting), and cross-cutting partial-execution rule (§0.5).
+
+### Applied (auto-applied technical)
+
+- [auto] Added §0.5 "No silent success on partial execution" cross-cutting meta rule (3 approved patterns: roll back fully / structured partial-state / log explicit partial execution).
+- [auto] Added §0.6 "Architecture default lock scope" cross-cutting rule (per-org by default; deviation must be justified inline).
+- [auto] Added §0.7 "Baseline rot prevention" cross-cutting rule (any baseline-count increase requires PR-description note; social enforcement, no automated check).
+- [auto] A1b pre-condition added — mandatory shim-usage greps (`@deprecated — remove in A1b` count == N; bare-`organisationId` and bare-`orgId` callers == 0; cross-check from inventory) before A1b begins. DoD updated to require capturing the grep output in build-slug progress log.
+- [auto] A2 Phase 3 — Proxy coverage completeness section added: written contract that service-layer writes to tenant tables go through builder methods OR call `assertRlsAwareWrite`; advisory grep gate added inside existing `verify-rls-protected-tables.sh` (no new file — preserves §0.2 A2 file budget; gate now carries 3 checks). §0.2 A2 line updated. A2 Phase-3 DoD updated; architecture.md rule line extended.
+- [auto] B2 `__testHooks` production-safety invariant added (tree-shaken or no-op in prod; no execution change when unset; reset-on-import in test boundaries; canonical call-site pattern). Optional gate now also includes advisory check on unguarded `await __testHooks.` calls.
+- [auto] B2-ext architecture.md rule line extended — adds explicit "default lock scope is per-org" + partial-execution-rule reference per §0.5.
+- [auto] C1 subscript-output constraint added (no application-level output after parent's `emit_summary`; gate self-test extended with deliberately-misconfigured-subscript fixture exercising both grep-form and strict-tail-form parsers).
+- [auto] C3 Phase-5A spec coupling added — Phase-5A spec MUST include C3 3-set upgrade as checklist item in its own §1; C3 implementer adds the line directly if a Phase-5A spec already exists at C3 ship time.
+- [auto] D3 calibration-constant change discipline refined — grep pattern + short description per excluded occurrence (NOT absolute line numbers); reviewers verify exactly-one-hit per pattern at PR review time; updated comment shape in spec.
+- [auto] E2 acceptance criteria updated to reference §0.7 — if E2 commits a baseline above zero, PR description includes the §0.7 baseline note.
+- [auto] F2 case (b) deferral entry shape updated — explicit measurable re-evaluation triggers (second KV-with-TTL use case OR latency >500ms median rolling 24h OR configDocuments-domain build slug opens) + owner + back-link.
+- [auto] H1 `logDataDependencyMissing` helper rate-limiting contract added — Pattern A (once per key per 60s, env-tunable) OR Pattern B (first occurrence WARN, subsequent DEBUG); choice documented in JSDoc + architecture.md rule line; tests cover both first-occurrence emit and rate-limited-skip / debug-downgrade behaviour.
+- [auto] §2 sequencing — C1 moved from position 4 to position 2 (was 4 → now 2; every subsequent position re-numbered: G1=3, D1/D2/D3=4, E1/E2=5, B1/C4=6, C2/C3=7, A3/F1=8, F2=8b, H1=9, A1a=10, A1b=11, B2=12, A2=13). Critical-path summary updated. Wave 1 description updated to note C1 must precede every other gate item.
+- [auto] Spec header "Last revised" date stamp updated to reflect Round 4.
+
+### Integrity check
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0).
+
+1. The §0.5 / §0.6 / §0.7 sub-headings were initially appended in the wrong order (§0.5 inserted before §0.4 by accident). **Mechanical fix applied:** moved §0.5 and §0.6 to follow §0.4 numerically; §0.7 appended at end of §0; §0.4's referenced predecessors (§0.1 / §0.2 / §0.3) remain stable; §0.5's reference to "§0.4 (determinism over cleverness)" now resolves correctly because §0.4 precedes §0.5. Verified by reading lines 71–155 to confirm sequential numbering.
+
+Cross-references touched in Round 4 (§0.5 referenced from B2/A2/H1/A1a contexts; §0.6 referenced from B2-ext architecture.md DoD line; §0.7 referenced from E2 acceptance criteria; §0.5 referenced inside the B2-ext architecture.md rule paragraph; A1b approach + DoD references the new pre-condition section; A2 §0.2 file-budget line updated to "single file with three checks"; A2 Phase-3 DoD references the new write-path advisory check; sequencing position numbers re-numbered — all 13 rows present and contiguous). All resolve correctly. No empty sections, no broken anchors. The TOC does not enumerate §0 sub-headings, so no TOC update is required.
+
+Post-integrity sanity (4c): the one mechanical fix above (reorder §0.5/§0.6 after §0.4) was a simple structural reordering — no chained references, no cascading edits. Verified §0.5's "§0.4 analogue" sentence resolves correctly. No left-empty sections, no broken anchors. The §2 sequencing position re-numbering touched 11 row labels (positions 2-13); spot-checked that the critical-path summary's Wave 1 / Wave 2 / Wave 3 references match the new positions and that C1's "now shipped at position 2" annotations on D3, E2, C2 row "Why" columns are consistent. Confirmed the architecture.md DoD lines that mention "the H1 derived-data null-safety rule and the B2 concurrency-model rule" in §4 Exit criteria still match the rule additions across rounds.
+
+Top themes (Round 4): drift prevention over time, measurable triggers, coverage-shape clarification, observability discipline, cross-cutting partial-execution rule.
+
+---
