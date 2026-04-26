@@ -247,6 +247,43 @@ Today the schema enforces single-webhook implicitly via the `webhookPath` text c
 
 ---
 
+## 6.5 Pre-implementation hardening (execution-safety contracts)
+
+Folded in 2026-04-26 from external review feedback.
+
+### 6.5.1 No-silent-partial-success per execution flow
+
+- **C4b-INVAL-RACE (`withInvalidationGuard`):** late writer that finds `status === 'invalidated'` returns `{ discarded: true, reason: 'invalidated' }` — explicit signal, NOT silent. The caller logs the discard via `step.dispatch.invalidation_discarded` (see § 6.5.2) and the run's outcome reflects the invalidation per `runStatus.ts`.
+- **W1-43 (`assertSingleWebhook`):** multi-webhook input emits `automation_composition_invalid` with the count in the message. Step transitions to `error` — never silent.
+- **HERMES-S1 (errorMessage threading):** failed-without-throw runs receive the threaded `errorMessage` from `preFinalizeMetadata`; memory extraction sees a non-null value. The "silent" path the bug created (extraction skipped because errorMessage was null) is explicitly closed.
+- **H3-PARTIAL-COUPLING:** `runResultStatus` reflects the per-step aggregation rule from invariant 6.3 ONLY. Summary absence is surfaced via the orthogonal `summaryMissing` side-channel field, never via `runResultStatus = 'partial'`. Both signals visible to the consumer; user-facing surface chooses which to display.
+- **C4a-6-RETSHAPE (Branch A):** every skill handler error matches the legacy flat-string shape `{ success: false, error: '<code-string>', context }`. No partial envelopes. Branch B (if user picks at review) requires every handler to match the nested shape `{ success: false, error: { code, message, context } }` — fixture test asserts.
+
+### 6.5.2 Observability hooks
+
+The `agentExecutionEventService` is the canonical primitive (per invariant 6.5 / `accepted_primitives`). Required emissions for the 5 closed items:
+
+- **C4b-INVAL-RACE:**
+  - `step.dispatch.started` (stepRunId, runId, stepType)
+  - `step.dispatch.completed` (stepRunId, durationMs, outputBytes)
+  - `step.dispatch.invalidation_discarded` (stepRunId — when guard fires after I/O)
+- **W1-43:**
+  - `step.dispatch.composition_invalid` (stepRunId, automationId, webhookCount — when `assertSingleWebhook` returns error)
+- **HERMES-S1:**
+  - `run.terminal.extracted_with_errorMessage` (runId, errorMessageLength) — emitted ONLY when threading occurs (failed run + non-null errorMessage)
+- **H3:**
+  - `run.terminal.summary_missing` (runId, runResultStatus) — emitted ONLY when `summaryMissing=true` so consumers can correlate
+- **C4a-6-RETSHAPE:**
+  - No new emission; the existing skill-execution event already carries error envelope. Branch B implementation adds shape-validation in the emission helper if migrating.
+
+Best-effort emission via `agentExecutionEventService` (graded-failure tier).
+
+### 6.5.3 Webhook timeout posture (cross-reference)
+
+Chunk 3 § 4.5.5 pins the 30-second webhook timeout + retry posture for `invokeAutomationStep`. That contract is binding for Chunk 5's W1-43 / W1-44 dispatcher boundary too — the dispatcher emits `automation_webhook_timeout` (or `automation_missing_connection` for W1-44) with the same failure-classification rules. Cross-spec consistency: the timeout is implemented once in `invokeAutomationStep`, both Chunks 3 + 5 cite it.
+
+---
+
 ## 7. Test plan
 
 ### Pure unit tests (4 files per § 5)

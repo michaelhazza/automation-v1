@@ -147,4 +147,14 @@ If any spec needs amendment post-freeze, the protocol in `tasks/builds/pre-launc
 
 ## 7. Closing
 
-Spec authoring complete. 6 PRs await user review. Preliminary freeze stamped. Consistency sweep clean (1 finding resolved). Implementation cleared to begin AFTER PR merges + final freeze re-stamp + Open Decisions resolution.
+Spec authoring complete. PR #210 open (consolidated; the 6 per-chunk PRs were closed). Preliminary freeze stamped. Consistency sweep clean (1 finding resolved at v1; 8 execution-safety gaps resolved at v2 amendment). Implementation cleared to begin AFTER PR #210 merges + final freeze re-stamp + Open Decisions resolution.
+
+### Pre-implementation hardening pass (2026-04-26 amendment)
+
+External review surfaced 8 execution-safety gaps post-consistency-sweep. All resolved inline in the affected specs:
+
+- Chunk 3 § 4.5 — DR3 idempotency, C4a optimistic guard (CRITICAL), DR2 loop cap, DR1 GIN index, webhook timeout/retry, no-silent-partial-success per flow, observability hooks, response shapes.
+- Chunk 4 § 6.5 — Per-org error isolation (REQUIRED), no-silent-partial-success per job, observability hooks.
+- Chunk 5 § 6.5 — No-silent-partial-success per execution flow, observability hooks, webhook-timeout cross-reference to Chunk 3.
+
+See `tasks/builds/pre-launch-hardening-specs/consistency-sweep.md § Amendment` for the full audit.

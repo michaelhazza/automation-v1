@@ -87,4 +87,22 @@ The 1 directional finding (C4a-6-RETSHAPE unowned) was resolved by amending Chun
 
 ## Forward-looking notes
 
-Per the workflow deviation in `tasks/builds/pre-launch-hardening-specs/progress.md § Workflow deviations`, the sweep ran on the integration-branch preview of all 6 specs (each spec was authored on its own chunk branch and pulled together for the sweep). The final freeze stamp (Task 6.5) requires all 6 PRs (#204–#209) to merge. After merge, this log should be re-validated against the merged state and the sweep stamp re-confirmed if any merge-time edits land.
+Per the workflow deviation in `tasks/builds/pre-launch-hardening-specs/progress.md § Workflow deviations`, the sweep ran on the integration-branch preview of all 6 specs. The 6 chunk PRs (#204–#209) were closed and consolidated into PR #210. After PR #210 merges, this log should be re-validated against the merged state.
+
+---
+
+## Amendment 2026-04-26 (post-sweep) — pre-implementation hardening pass
+
+External review feedback after the consistency sweep surfaced 8 execution-safety gaps that were valid pre-implementation, not architectural. Folded into the affected specs as new § 4.5 / § 6.5 sections (no architectural change; tightening of execution contracts only):
+
+- **Chunk 3 § 4.5** (added): DR3 idempotency contract (4.5.1); C4a-REVIEWED-DISP optimistic transition guard (4.5.2 — CRITICAL); DR2 loop protection at 5/10min cap (4.5.3); DR1 GIN-index requirement (4.5.4); webhook 30s timeout + retry posture (4.5.5); no-silent-partial-success rules per flow (4.5.6); observability hooks per flow (4.5.7); DR3 explicit response shape (4.5.8).
+- **Chunk 4 § 6.5** (added): Per-org error isolation REQUIRED (6.5.1); no-silent-partial-success per job (6.5.2); observability hooks (6.5.3).
+- **Chunk 5 § 6.5** (added): No-silent-partial-success per execution flow (6.5.1); observability hooks (6.5.2); webhook timeout cross-reference (6.5.3).
+
+These amendments do NOT trigger the post-freeze amendment protocol because the sweep + freeze were preliminary stamps (PR #210 is still open; not yet merged). The amendments are absorbed into the same PR's diff. Final post-merge sweep + freeze re-stamp will validate the merged state.
+
+### Sweep stamp v2
+
+**Re-stamped at:** 2026-04-26 (same day as initial sweep)
+**Findings since v1 stamp:** 8 execution-safety gaps from external feedback, all resolved in spec form. 0 mechanical resolved · 8 directional resolved inline · 0 false alarms.
+**Cross-spec coherence verified:** Chunk 5 webhook-timeout contract cross-references Chunk 3's authoritative pin (one implementation in `invokeAutomationStep`); both chunks cite the same 30s value, no-retry posture, and failure-classification rules. No new cross-domain conflicts introduced.

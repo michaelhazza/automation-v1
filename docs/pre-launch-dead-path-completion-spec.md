@@ -120,6 +120,147 @@ Satisfies invariants 3.1, 6.1, 6.2, 6.4.
 
 ---
 
+## 4.5 Pre-implementation hardening (execution-safety contracts)
+
+This section pins execution-safety contracts that the architect output left implicit. Folded in 2026-04-26 from external review feedback. Each item is a hard requirement for the implementation PR; missing any of them is a directional finding for the post-merge review.
+
+### 4.5.1 DR3 idempotency contract
+
+**Problem.** Architect § 1 doesn't pin idempotency behaviour. Failure modes: double-click approve → duplicate `proposeAction` calls; network retry → duplicate dispatch; concurrent approvals → race.
+
+**Contract.**
+
+- **Idempotency key:** `(artefactId, decision)`. The first decision recorded for an `artefactId` is canonical; subsequent decisions for the same `artefactId` return the existing superseding artefact unchanged (HTTP 200, same response body).
+- **Enforcement mechanism:** pre-check in `briefApprovalService.decideBriefApproval()` reads the `conversation_messages` JSONB chain for any artefact whose `parentArtefactId === artefactId AND kind === 'approval_decision'`. If found, return that artefact directly; do NOT call `actionService.proposeAction`. If not found, transactional INSERT of the decision artefact with a unique partial index on `(parent_artefact_id) WHERE kind = 'approval_decision'` to catch race conditions.
+- **HTTP semantics:** second-and-subsequent identical requests return HTTP 200 with `idempotent: true` field on the response. Different decisions for the same `artefactId` (approve then reject) return HTTP 409 `{ error: 'approval_already_decided' }` with the prior decision attached.
+- **Test:** spec-named pure test `briefApprovalServicePure.test.ts` extension — three cases: first decision succeeds; identical retry returns existing artefact + `idempotent: true`; conflicting second decision returns 409.
+
+### 4.5.2 C4a-REVIEWED-DISP execution guard (CRITICAL)
+
+**Problem.** Architect § 4 describes the resume path but doesn't pin a transition guard. Failure modes: concurrent approvals processed in parallel; approval-request retry; tick-loop overlap → duplicate webhook dispatch.
+
+**Contract.**
+
+- **Optimistic transition predicate.** `resumeInvokeAutomationStep` performs the `review_required → running` transition with a guarded UPDATE: `UPDATE workflow_step_runs SET status = 'running' WHERE id = $1 AND status = 'review_required' RETURNING *`. If the UPDATE returns zero rows, the resume call exits without invoking the webhook (another concurrent approval already won the race; the late caller returns success with `alreadyResumed: true`).
+- **No advisory locks needed.** The optimistic predicate IS the lock — Postgres serialises the UPDATE within the row. Advisory locks add complexity for no additional safety.
+- **Idempotency on retry.** If `decideApproval` HTTP request retries (network failure mid-call), the second call sees `status === 'running'` (set by the first call's UPDATE) and short-circuits before re-invoking the webhook. The decision row is the source of truth; the webhook is invoked exactly once per decision artefact.
+- **Test:** pure test `resumeInvokeAutomationStepPure.test.ts` extension — concurrent-resume case: two threads call resume on the same `stepRunId`; UPDATE returns zero rows for the loser; loser exits without invoking; one webhook dispatch total.
+
+### 4.5.3 DR2 loop protection (lightweight)
+
+**Problem.** Architect § 2 flagged "Conversation-level rate limiting" as an Open Decision but didn't pin a default. Failure mode: classifier misfire on a sequence of passive-ack-shaped messages → repeated orchestrator runs.
+
+**Contract.**
+
+- **Per-conversation orchestration cap.** Maximum **5 orchestrator invocations per conversation per 10-minute sliding window.** Tracked by counting `agent_runs` rows with `triggerType = 'brief_followup'` and `conversationId = $1` and `createdAt > now() - interval '10 minutes'`.
+- **When cap reached.** The `handleBriefMessage` helper short-circuits to `simple_reply` path (sentinel artefact: "You're sending follow-ups faster than I can run analyses; the most recent run is still active."). No orchestrator job enqueued.
+- **Cap is informational, not enforced via DB constraint.** Pure-function check at request time. If cap is hit, log `brief.followup.cap_hit` with `{ conversationId, count, windowStart, windowEnd }`.
+- **Test:** pure test `briefMessageHandlerPure.test.ts` extension — 6th orchestration in the same window short-circuits; window-resets after 10 minutes; cap is per-conversation (different conversations in same org reset independently).
+
+### 4.5.4 DR1 JSONB index assumption
+
+**Problem.** Architect § 3 names the JSONB containment scan but doesn't require the supporting index. Failure mode: scan degrades to seq-scan as `conversation_messages` grows.
+
+**Contract.**
+
+- **Required index.** `conversation_messages.artefacts` has a GIN index. Verified at implementation time by `\d conversation_messages` and confirmed in the Drizzle schema.
+- **If absent.** Implementation PR includes a corrective migration adding `CREATE INDEX CONCURRENTLY conversation_messages_artefacts_gin_idx ON conversation_messages USING GIN (artefacts)`. Verified by `EXPLAIN ANALYZE` showing index scan, not seq-scan.
+- **Performance budget.** The artefact lookup query must complete in <100ms p95 on the testing-round dataset (≤10000 conversation_messages rows).
+- **Test:** sanity grep at implementation time: `grep -nE "GIN.*artefacts" server/db/schema/conversationMessages.ts migrations/*conversation*.sql` → must return at least one match. If zero, the corrective migration ships in this PR.
+
+### 4.5.5 Webhook timeout + retry posture (C4a-REVIEWED-DISP)
+
+**Problem.** Architect § 4 says "webhooks typically <30s" but doesn't pin timeout, retry, or failure classification.
+
+**Contract.**
+
+- **Timeout:** the webhook fetch in `invokeAutomationStep` has a hard timeout of **30 seconds**. After 30s, the fetch is aborted; the resume path emits `automation_execution_error` with `code: 'automation_webhook_timeout'` (added to §5.7 vocabulary if not already present).
+- **Retry posture:** **NO automatic retry on timeout in v1.** The decision artefact is marked failed; the user can manually retry via re-approving (which now hits the C4a-REVIEWED-DISP idempotency guard in 4.5.2 — the prior decision returns 200 with the failure marker, blocking a duplicate dispatch). Manual retry path is a deferred item if the user explicitly wants it.
+- **Failure classification:** webhook 4xx → user-error; webhook 5xx → system-error; timeout → system-error; network failure → system-error. Distinction surfaces in the artefact's `executionStatus` and the audit log.
+- **Test:** pure test on the timeout path — assert `automation_webhook_timeout` is emitted; failure is classified as system-error; no retry attempted.
+
+### 4.5.6 No-silent-partial-success per flow
+
+**Problem.** Each flow can partially complete; without explicit success/partial/failure definitions, partial results can be misread as success.
+
+**DR3 — BriefApprovalCard decision.**
+
+- **Success:** decision artefact written + `proposeAction` returned ok + execution record linked.
+- **Partial:** N/A — DR3 is atomic; if `proposeAction` fails, the decision artefact still writes, but with `executionStatus: 'failed'` so the client sees the user input was captured but the action wasn't dispatched.
+- **Failure:** decision artefact write fails → HTTP 500; user re-tries via the idempotency guard.
+
+**DR2 — Conversation follow-up.**
+
+- **Success:** classifier returns + (Orchestrator job enqueued OR simple_reply artefact emitted).
+- **Partial:** classifier returns but enqueue fails → HTTP 500 with `{ error: 'orchestrator_enqueue_failed' }`; the user message is already persisted in `conversation_messages` (independent transaction), so retry replays the classifier.
+- **Failure:** classifier itself fails → log `chat_intent_classifier_failed`; default to `simple_reply` path with a sentinel artefact rather than block the user message.
+
+**DR1 — POST /api/rules/draft-candidates.**
+
+- **Success:** scan finds artefact + `kind === 'approval'` + `briefContext` loaded + `draftCandidates` returns ≥1 candidate → HTTP 200 with full payload.
+- **Partial:** scan finds artefact + briefContext loaded + `draftCandidates` returns 0 candidates → HTTP 200 with `{ candidates: [] }` (empty is success, not partial).
+- **Failure:** scan finds nothing → HTTP 404; wrong kind → HTTP 422; `draftCandidates` throws → HTTP 500.
+
+**C4a-REVIEWED-DISP — Resume path.**
+
+- **Success:** transition + webhook dispatch + `completeStepRunInternal` with real output.
+- **Partial:** transition succeeds, webhook fails → step transitions to `error` with the right code; `executionStatus` on the brief approval artefact updates to reflect the dispatch failure; user sees the failure in-place. NOT silent.
+- **Failure:** transition guard returns zero rows (concurrent winner) → exit with `alreadyResumed: true`; this is success of the SECOND caller, not a partial outcome.
+
+### 4.5.7 Observability hooks per flow
+
+**Problem.** Each flow needs operational signals so production incidents can be debugged without log archaeology.
+
+**Required emissions** (use existing `agentExecutionEventService` where applicable; otherwise structured `logger.info` with the named event):
+
+- **DR3:**
+  - `brief.approval.received` (artefactId, decision, userId, orgId, conversationId)
+  - `brief.approval.dispatched` (artefactId, executionId, latencyMs)
+  - `brief.approval.idempotent_hit` (artefactId — when 4.5.1 idempotency short-circuit fires)
+  - `brief.approval.conflict` (artefactId, priorDecision, attemptedDecision — when 409 fires)
+- **DR2:**
+  - `brief.followup.classified` (conversationId, intentKind, latencyMs)
+  - `brief.followup.orchestrator_enqueued` (conversationId, jobId, runId)
+  - `brief.followup.simple_reply_emitted` (conversationId, artefactId)
+  - `brief.followup.cap_hit` (conversationId, count, windowStart) — from 4.5.3
+- **DR1:**
+  - `rule.draft_candidates.requested` (artefactId, orgId)
+  - `rule.draft_candidates.returned` (artefactId, candidateCount, latencyMs)
+- **C4a-REVIEWED-DISP:**
+  - `step.resume.started` (stepRunId, runId, automationId)
+  - `step.resume.guard_blocked` (stepRunId — when optimistic predicate returns zero rows)
+  - `step.resume.completed` (stepRunId, executionStatus, latencyMs)
+  - `step.resume.webhook_timeout` (stepRunId, automationId, timeoutMs) — from 4.5.5
+
+Each event is best-effort (graded-failure tier per `accepted_primitives` / `agentExecutionEventService`); emission failure does not block the user-facing path.
+
+### 4.5.8 DR3 response shape (explicit contract)
+
+```json
+// HTTP 200 (first decision OR idempotent retry)
+{
+  "artefact": { /* superseding decision artefact, full shape */ },
+  "executionId": "exec_01h...",
+  "executionStatus": "queued" | "completed" | "failed",
+  "idempotent": false  // true on retry of identical decision
+}
+
+// HTTP 409 (conflicting decision)
+{
+  "error": "approval_already_decided",
+  "priorDecision": "approve" | "reject",
+  "priorArtefact": { /* the existing decision artefact */ }
+}
+
+// HTTP 404 (artefact not found)
+{ "error": "artefact_not_found" }
+
+// HTTP 422 (artefact exists but wrong kind)
+{ "error": "artefact_not_approval" }
+```
+
+---
+
 ## 5. Files touched
 
 ### Modified

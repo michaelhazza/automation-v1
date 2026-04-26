@@ -148,6 +148,45 @@ From `docs/spec-context.md § accepted_primitives`:
 
 ---
 
+## 6.5 Pre-implementation hardening (execution-safety contracts)
+
+Folded in 2026-04-26 from external review feedback. Each item is a hard requirement for the implementation PR.
+
+### 6.5.1 Per-org error isolation (REQUIRED)
+
+**Problem.** "Mirror `memoryDedupJob`" leaves error-isolation behaviour implicit. Failure mode: one org's per-org callback throws → entire job aborts → other orgs not processed.
+
+**Contract.**
+
+- **Per-org try/catch boundary REQUIRED.** Each `withOrgTx` invocation is wrapped in a try/catch. A throw inside org A's callback is caught, logged, and the loop continues to org B.
+- **Failure logging REQUIRED.** On per-org failure, emit structured log: `{ event: '<job-source>.org_failed', orgId, error, errorClass }` (where `errorClass` is one of `tx_failure | logic_failure | unknown`).
+- **Continue iteration REQUIRED.** Per-org throw never aborts the job. The job's overall completion status is `partial_with_errors` if any org failed; `success` if all orgs succeeded; `failed` only if the admin-connection acquire itself failed (precedes any org iteration).
+- **Outcome counters REQUIRED.** Job emits `{ event: '<job-source>.completed', orgsAttempted, orgsSucceeded, orgsFailed, durationMs }` at end of run regardless of mixed outcomes.
+
+**Reference contract in `memoryDedupJob.ts`** — confirm at implementation time that `memoryDedupJob` follows this pattern; if it does not, this spec's behaviour is the new reference and `memoryDedupJob` should be updated to match in a follow-up.
+
+### 6.5.2 No-silent-partial-success per job
+
+- **Success:** all orgs processed; emitted rows match expected shape.
+- **Partial:** ≥1 org throws, ≥1 org succeeds → job status `partial_with_errors`; per-failed-org log emitted; outcome counters reflect mix.
+- **Failure:** admin-connection acquire fails OR org enumeration query fails → job status `failed`; nothing processed; reset hook does not fire on next tick.
+
+The job's caller (pg-boss worker) reads the outcome shape to decide the run's status field. Partial outcomes are NOT silent — they emit per-org failure logs AND the counter tuple.
+
+### 6.5.3 Observability hooks
+
+For each of the 3 jobs (`<job-source>` is the kebab-case name from § 4):
+
+- `<job-source>.started` (jobRunId, scheduledAt)
+- `<job-source>.org_started` (jobRunId, orgId)
+- `<job-source>.org_completed` (jobRunId, orgId, rowsAffected, durationMs)
+- `<job-source>.org_failed` (jobRunId, orgId, error, errorClass)
+- `<job-source>.completed` (jobRunId, orgsAttempted, orgsSucceeded, orgsFailed, durationMs)
+
+Best-effort emission (graded-failure tier); never blocks the job.
+
+---
+
 ## 7. Test plan
 
 Per `docs/spec-context.md § testing posture` (`runtime_tests: pure_function_only`):
