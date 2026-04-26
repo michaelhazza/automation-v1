@@ -1662,11 +1662,98 @@ This is the lever that turns the system monitor from a "tool that helps operator
 
 ## 12. Observability + kill switches
 
+This section consolidates the operational surface — every new event type, every new env var, every logging convention — so an operator running a deploy or debugging in production can see the full surface in one place. Cross-references live in earlier sections; this is the index.
+
 ### 12.1 New event types
+
+All event types append to `system_incident_events`. The Phase 0/0.5 enum is extended; no existing event types are renamed or repurposed.
+
+| Event type | Source | When written | `metadata` shape |
+|---|---|---|---|
+| `agent_diagnosis_added` | `system_monitor` agent | After `write_diagnosis` succeeds — diagnosis JSON and `investigate_prompt` are now on the row. | `{ agent_run_id, heuristic_fires: string[], confidence }` |
+| `agent_triage_skipped` | `system-monitor-triage` enqueue path or handler short-circuit | When triage was eligible but skipped (rate-limited, kill switch off, self-check, severity floor not met). | `{ reason: 'rate_limited' \| 'disabled' \| 'self_check' \| 'severity_floor', triage_attempt_count }` |
+| `agent_triage_failed` | `system-monitor-triage` handler | When the agent ran but did not produce a valid output (prompt validation failure, agent run errored). | `{ agent_run_id, reason: 'prompt_validation' \| 'agent_run_failed' \| 'timeout', error_message? }` |
+| `agent_auto_escalated` | rate-limit-aware auto-escalation path (§9.9) | When a rate-limited high/critical incident auto-escalates to the system-ops sentinel. | `{ to_subaccount_id, escalation_count, fingerprint }` |
+| `agent_escalation_blocked` | same path | When auto-escalation hit a Phase 0.5 escalation guardrail. | `{ reason: 'guardrail_cap' \| 'cooldown' \| 'subaccount_disabled' }` |
+| `heuristic_fired` | sweep job | Every fire that passed the per-fire confidence threshold. Written to `system_monitor_heuristic_fires` (§4.5), not `system_incident_events` — but the audit hook still emits a `heuristic_fired` row on the incident if a fire produced an incident. | `{ heuristic_id, confidence, evidence_run_id }` |
+| `heuristic_suppressed` | sweep job | When a heuristic predicate matched but a suppression rule blocked it. Written to `system_monitor_heuristic_fires`; not on the incident event log. | `{ heuristic_id, suppression_id, evidence_run_id }` |
+| `sweep_completed` | sweep job | End of every sweep tick. Audit-only on the system level, not per-incident. Stored in a structured log row, not on `system_incident_events`. | `{ candidates_evaluated, fires, triages_enqueued, sweep_capped_count? }` |
+| `sweep_capped` | sweep job | When the sweep input cap was hit (more than 50 candidates or 200 KB payload). | `{ excess_count, cap_kind: 'candidate' \| 'payload' }` |
+| `triage_rate_limited` | triage enqueue path | Aggregated form of `agent_triage_skipped` for sysadmin-visible counters. Same data as `agent_triage_skipped` but emitted to a metrics channel for dashboarding. Not a separate event row — flagged here for completeness. | n/a (metrics) |
+| `prompt_generated` | `system_monitor` agent | After `write_diagnosis` writes the `investigate_prompt`. Companion to `agent_diagnosis_added` so we can distinguish "diagnosis written" from "prompt written" if validation fails on prompt only. | `{ agent_run_id, prompt_length_chars }` |
+| `investigate_prompt_outcome` | sysadmin via `recordPromptFeedback` mutation | When the operator submits feedback after resolving an agent-diagnosed incident (§11.2). | per §11.2 table |
+| `synthetic_check_fired` | synthetic check tick | A synthetic check produced an incident. Companion event on the resulting incident — explains "this incident's source was synthetic check X." | `{ check_id, resource_kind, resource_id, bucket_key }` |
+| `baseline_refreshed` | baseline refresh job | Tick completed. System-level audit, not on `system_incident_events`. Logged structurally. | `{ entities_refreshed, duration_ms }` |
+| `baseline_refresh_failed` | baseline refresh job | A specific entity-metric refresh failed and was skipped. Other entities continue. | `{ entity_kind, entity_id, metric, error_message }` |
+
+**Naming convention.** All event types are kebab-case-with-underscores in DB rows (consistent with Phase 0/0.5 — `incident_opened`, `status_changed`, `escalation`, etc.). Structured logger event names are the same string, lowercased.
+
+**Event consumers.** The triage drawer (§10) renders the subset relevant to operator-facing context: `agent_diagnosis_added`, `agent_triage_skipped`, `agent_triage_failed`, `agent_auto_escalated`, `prompt_generated`, `investigate_prompt_outcome`. The other event types are audit-only — visible via direct SQL or via a future audit log surface.
 
 ### 12.2 New env vars
 
+Consolidated. Defaults are production-safe — running with all defaults yields the intended Phase 2 behaviour.
+
+| Env var | Default | Section | Purpose |
+|---|---|---|---|
+| `SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS` | `60` | §4.1 | Idempotency LRU TTL. |
+| `SYSTEM_INCIDENT_THROTTLE_MS` | `1000` | §4.2 | Per-fingerprint throttle window. |
+| `SYNTHETIC_CHECKS_ENABLED` | `true` | §8.4 | Master kill switch for Phase 1 synthetic checks. |
+| `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` | `60` | §8.4 | Synthetic check tick interval. |
+| `SYSTEM_MONITOR_QUEUE_STALL_THRESHOLD_MINUTES` | `5` | §8.4 | `pg-boss-queue-stalled` threshold. |
+| `SYSTEM_MONITOR_CONNECTOR_STALE_MULTIPLIER` | `3` | §8.4 | `connector-poll-stale` multiplier. |
+| `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | §8.4 | `dlq-not-drained` threshold. |
+| `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | §8.4 | `heartbeat-self` tolerance. |
+| `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | §8.4 | Per-agent inactivity thresholds. |
+| `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` | `15` | §7.3 | Baseline refresh tick. |
+| `SYSTEM_MONITOR_BASELINE_WINDOW_DAYS` | `7` | §7.3 | Rolling baseline window. |
+| `SYSTEM_MONITOR_BASELINE_REFRESH_ENABLED` | `true` | §7.3 | Kill switch for baseline refresh. |
+| `SYSTEM_MONITOR_ENABLED` | `true` | §9.10 | Master kill switch for Phase 2 agent + triggers. |
+| `SYSTEM_MONITOR_INCIDENT_DRIVEN_ENABLED` | `true` | §9.10 | Per-trigger switch — incident-driven. |
+| `SYSTEM_MONITOR_SWEEP_ENABLED` | `true` | §9.10 | Per-trigger switch — sweep. |
+| `SYSTEM_MONITOR_MODEL` | `claude-opus-4-7` | §9.10 | LLM for the agent. |
+| `SYSTEM_MONITOR_MIN_CONFIDENCE` | `0.5` | §9.10 | Minimum per-fire heuristic confidence. |
+| `SYSTEM_MONITOR_HEURISTIC_PHASES` | `'2.0,2.5'` | §9.10 | Phase filter for the heuristic registry. |
+| `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES` | `5` | §9.10 | Sweep tick. |
+| `SYSTEM_MONITOR_SWEEP_WINDOW_MINUTES` | `15` | §9.10 | Sweep window length. |
+| `SYSTEM_MONITOR_SWEEP_CANDIDATE_CAP` | `50` | §9.10 | Hard ceiling on triage candidates per sweep. |
+| `SYSTEM_MONITOR_SWEEP_PAYLOAD_CAP_KB` | `200` | §9.10 | Hard ceiling on deep-read payload per sweep. |
+| `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT` | `2` | §9.9 | Per-fingerprint rate limit. |
+| `SYSTEM_MONITOR_TRIAGE_RATE_LIMIT_WINDOW_HOURS` | `24` | §9.9 | Rolling window for the rate limit. |
+| `SYSTEM_MONITOR_AUTO_ESCALATE_AFTER_RATE_LIMIT` | `true` | §9.9 | Auto-escalate high/critical past rate limit. |
+
+**Inherited from Phase 0/0.5 — unchanged.** `SYSTEM_INCIDENT_INGEST_ENABLED`, `SYSTEM_INCIDENT_INGEST_MODE`, and other Phase 0/0.5 env vars retain their existing defaults and behaviour. Listed here only for completeness; no spec changes apply to them.
+
+**Kill-switch hierarchy** (highest = most aggressive disable):
+
+1. `SYSTEM_INCIDENT_INGEST_ENABLED=false` — disables the entire ingest pipeline. Phase 0/0.5 + Phase 1 + Phase 2 all silent. Most aggressive.
+2. `SYSTEM_MONITOR_ENABLED=false` — disables Phase 2 agent + triggers only. Phase 0/0.5 reactive ingest + Phase 1 synthetic checks continue. Recommended first response if the agent itself misbehaves.
+3. `SYNTHETIC_CHECKS_ENABLED=false` — disables Phase 1 only. Reactive ingest + agent triage continue. Use if synthetic checks are firing false-positives in volume.
+4. Per-trigger: `SYSTEM_MONITOR_INCIDENT_DRIVEN_ENABLED=false` or `SYSTEM_MONITOR_SWEEP_ENABLED=false` — surgical disable of one trigger class. Use for "the sweep is fine but incident-driven is looping" or vice versa.
+5. Per-heuristic suppression — code change via PR per §6.5. Slowest path; use when narrow targeting matters.
+
+A global "stop everything" sequence is `SYSTEM_INCIDENT_INGEST_ENABLED=false`; all downstream switches are no-ops because nothing flows in. The sequence to gracefully bring things back is the reverse: ingest → synthetic → monitor → per-trigger → per-heuristic.
+
 ### 12.3 Logging conventions
+
+All new code paths follow the existing structured-logger convention from `phase-0-spec.md` and `architecture.md §Logging`.
+
+**Conventions:**
+
+- Structured calls: `logger.info('event-name-kebab-case', { ...context })`. Never string-concatenated messages.
+- Event name matches the `event_type` for paths that also write to `system_incident_events`. So `logger.info('agent-diagnosis-added', ...)` mirrors the `agent_diagnosis_added` event row.
+- Required context keys per call: `correlationId` (when available), `incidentId` (when applicable), `entityKind`/`entityId` (when applicable). Optional keys per the event metadata shape (§12.1).
+- Errors logged with `logger.error('event-name-failed', { err, ...context })`. The `err` field passes through the existing logger's error-serialiser.
+- No PII in logs. Customer email addresses, names, message bodies — all redacted or omitted by the calling code. The system-principal context (§4.3) carries no PII; this is intentional.
+- Log levels: `debug` for high-volume paths (every heuristic evaluation), `info` for state transitions (every fire, every triage, every refresh), `warn` for recoverable errors (single-heuristic throw, single-entity baseline failure), `error` for non-recoverable errors (handler throws past its catch).
+
+**Heuristic-fires audit table is the structured log for sweeps.** Per §4.5, `system_monitor_heuristic_fires` is the durable audit row for every heuristic fire (or suppression / insufficient-data). Logger calls are redundant for this signal; logger is used only for the sweep tick start/end and for unexpected errors.
+
+**Log volume estimate.** Per sweep (5-min interval): ~50-200 candidates × ~14 heuristics = ~700-2,800 evaluations. At `debug` log level, this is meaningful volume; in production, `debug` is off — sweep evaluations log at `debug`, only fires log at `info`. Per minute: ~5-30 fires across the platform under healthy conditions, with rare bursts during incidents. Acceptable.
+
+**No log shipping change.** This spec uses the existing logger configuration. If the host runtime forwards logs to an external aggregator (Datadog, Loki, etc.), new event names will appear there without configuration changes. If the host runtime relies on stdout only, the `system-monitor-self-check` (Phase 0/0.5) constraint remains: process-local rolling buffer, multi-instance undercount acceptable. No change to that posture.
+
+**Searchability.** Operators debugging an incident search by `correlationId` (existing convention) or `incidentId`. Both fields are present on every Phase 2 log line that involves an incident. Heuristic debugging searches by `heuristic_id`. Baseline issues search by `entity_kind`/`entity_id`/`metric`.
 
 ## 13. File inventory
 
