@@ -122,6 +122,14 @@ run_gate "$SCRIPT_DIR/verify-visibility-parity.sh"
 # ── CRM Query Planner — read-only executor enforcement (spec §13.3 / §16.6) ──
 run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
 
+# ── H1: Derived-data null-safety — advisory in Phase 1 + self-test ──
+# (spec docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §H1)
+# The gate itself exits 0 unconditionally (advisory). The self-test runner
+# below is the actual assertion that the gate's detection logic still fires
+# on a deliberate violation — exits 1 if the fixture is no longer caught.
+run_gate "$SCRIPT_DIR/verify-derived-data-null-safety.sh"
+run_gate "$SCRIPT_DIR/__tests__/derived-data-null-safety/run-fixture-self-test.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

@@ -462,16 +462,22 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   // canonical 0079/0200 pattern.
   // 0227 — Phase 1 RLS hardening: FORCE RLS on 2 tables that were missing it
   // in their original migrations 0202 and 0203.
+  // 0202 / 0203 — pre-FORCE-RLS migrations. CREATE POLICY exists at the
+  // canonical org-isolation shape; FORCE RLS hardening is intentionally
+  // deferred (per the NOTE in 0227 — versions table has no organisation_id
+  // column and needs a parent-EXISTS policy variant). Both files are
+  // baselined in scripts/verify-rls-coverage.sh — manifest must point at
+  // the migration that actually CREATEs the policy, not at 0227.
   {
     tableName: 'reference_documents',
     schemaFile: 'referenceDocuments.ts',
-    policyMigration: '0227_rls_hardening_corrective.sql',
+    policyMigration: '0202_reference_documents.sql',
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
     tableName: 'reference_document_versions',
     schemaFile: 'referenceDocumentVersions.ts',
-    policyMigration: '0227_rls_hardening_corrective.sql',
+    policyMigration: '0203_reference_document_versions.sql',
     rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states.',
   },
   {

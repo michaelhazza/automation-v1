@@ -45,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { withAdminConnection } from './adminDbConnection.js';
+// guard-ignore-next-line: rls-contract-compliance reason="type-only import — OrgScopedTx is erased at compile time and issues no queries"
 import type { OrgScopedTx } from '../db/index.js';
 import { RLS_PROTECTED_TABLE_NAMES } from '../config/rlsProtectedTables.js';
 

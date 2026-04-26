@@ -23,11 +23,21 @@ if [ ! -f "$FIELDS_FILE" ]; then
   exit 0
 fi
 
-# Collect all .ts files under server/ excluding node_modules and __tests__
-mapfile -t TS_FILES < <(find "$ROOT_DIR/server" -name "*.ts" \
-  ! -path "*/node_modules/*" \
-  ! -path "*/__tests__/*" \
-  2>/dev/null || true)
+# Collect all .ts files under the scan directory.
+# Default: server/ excluding node_modules and __tests__. Fixture-runner mode
+# overrides SCAN_DIR (and drops the __tests__ exclusion) so the H1 gate
+# self-test can run the gate against the deliberate-violation fixture.
+SCAN_DIR="${DERIVED_DATA_NULL_SAFETY_SCAN_DIR:-$ROOT_DIR/server}"
+if [ -n "${DERIVED_DATA_NULL_SAFETY_SCAN_DIR:-}" ]; then
+  mapfile -t TS_FILES < <(find "$SCAN_DIR" -name "*.ts" \
+    ! -path "*/node_modules/*" \
+    2>/dev/null || true)
+else
+  mapfile -t TS_FILES < <(find "$SCAN_DIR" -name "*.ts" \
+    ! -path "*/node_modules/*" \
+    ! -path "*/__tests__/*" \
+    2>/dev/null || true)
+fi
 
 FILES_SCANNED="${#TS_FILES[@]}"
 
