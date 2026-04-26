@@ -53,7 +53,7 @@ This section captures every binding decision made during scoping, in CEO-level p
 | P1 | Is the Phase 0 incident sink live? | Yes — PR #188 merged. `system_incidents`, `system_incident_events`, `system_incident_suppressions` exist. Ingest hooks live in global error handler, asyncHandler, DLQ monitor, agent-run terminal-failed transition, connector polling, skill execution, LLM router. | Phase A builds **on** the existing sink; does not rebuild it. |
 | P2 | Is there a system-managed agent precedent? | Yes — Orchestrator (migration 0157) and Portfolio Health Agent (migration 0068). Both use `isSystemManaged=true` flag. | `system_monitor` follows the same pattern; see §9.1. |
 | P3 | Does pg-boss have a job-handler convention for system-scoped agents? | Yes — Orchestrator triggers agent runs via pg-boss handlers. | `system-monitor-triage` and `system-monitor-sweep` jobs follow the existing handler convention; see §9.2 / §9.3. |
-| P4 | Is there a principal-context primitive that supports `scope='system'`? | **Partial.** Phase 0/0.5 used Option A (request-attached `req.principal` carrying user context). System-scoped agent runs need a synthesised system-principal. `phase-0-spec.md §7.4` flagged this as Option B, deferred. | Phase A §4.3 builds Option B. **Hard prerequisite for Phase 2.** |
+| P4 | Is there a principal-context primitive that supports `type='system'`? | **Partial.** Phase 0/0.5 used Option A (request-attached `req.principal` carrying user context). The existing `PrincipalContext` discriminated union has three variants — `UserPrincipal | ServicePrincipal | DelegatedPrincipal` — discriminated by `type`. System-scoped agent runs need a fourth `SystemPrincipal` variant added to that union. `phase-0-spec.md §7.4` flagged this as Option B, deferred. | Phase A §4.3 builds Option B. **Hard prerequisite for Phase 2.** |
 | P5 | Is there a baselining primitive (rolling p50/p95 per agent / skill / connector)? | **No.** No service computes per-entity rolling stats today. | Phase A §7 builds it. **Hard prerequisite for baseline-relative heuristics.** |
 | P6 | Is Claude Code already integrated with this repo? | Yes — `CLAUDE.md` is the canonical project-instruction file, read by every Claude Code session in this repo. | Investigate-Fix Protocol references go in `CLAUDE.md`; see §5.3. |
 | P7 | Is `docs/` an established home for protocol documents? | Yes — `docs/capabilities.md`, `docs/spec-context.md`, `docs/codebase-audit-framework.md`, `docs/frontend-design-principles.md`. | `docs/investigate-fix-protocol.md` lives alongside; see §5.1. |
@@ -116,7 +116,7 @@ Spec-internal terms with specific meanings. Used throughout the document. Naming
 | **Fingerprint** | A stable, content-derived hash that identifies an incident class. Inherited unchanged from Phase 0/0.5 (§5.2 of `phase-0-spec.md`). Used as the dedup / throttle / rate-limit key. |
 | **Incident** | A row in `system_incidents`. Created by `recordIncident()` either reactively (from error hooks) or by a synthetic check or by a sweep cluster. Has severity, status, source, fingerprint, and (after triage) `agent_diagnosis` + `investigate_prompt`. |
 | **Investigate-Fix Protocol** | The shared markdown contract in `docs/investigate-fix-protocol.md` (§5) that defines (a) how the monitor agent formats `investigate_prompt` text and (b) how Claude Code consumes it. Versioned by git history of the doc. |
-| **System principal** | The synthesised principal context (`scope='system'`, sentinel `userId`, `isSystemPrincipal=true`) used by system-managed agent runs and pg-boss handlers that have no inbound HTTP request. Set via `withSystemPrincipal()` (§4.3). |
+| **System principal** | The synthesised principal context — a new `SystemPrincipal` variant of the existing `PrincipalContext` union (`type='system'`, sentinel `userId`, `isSystemPrincipal=true`) — used by system-managed agent runs and pg-boss handlers that have no inbound HTTP request. Set via `withSystemPrincipal()` (§4.3). |
 | **Kill switch** | An env-var-based on/off flag for one layer of the system. The hierarchy is documented in §12.2. Always defaults to `true` (system on); the operator sets `false` to disable. |
 
 ## 1. Summary
@@ -248,7 +248,7 @@ The long-term goal — articulated since the Phase 0 spec — is a system-manage
 
 - GA.1 `recordIncident()` is idempotent on an optional `idempotencyKey` per fingerprint. Two calls with the same key within a 60-second dedupe window do not double-increment `occurrence_count`.
 - GA.2 Per-fingerprint ingestion throttle. `lastSeen[fp] < 1s ago` causes the second call to be silently dropped (counted in a process-local metric, not raised as an error).
-- GA.3 A system-principal context primitive exists. Calling code can synthesise a principal with `scope: 'system'` for use by system-managed agent runs and authenticated server-to-server calls.
+- GA.3 A system-principal context primitive exists. Calling code can synthesise a principal with `type: 'system'` (a new `SystemPrincipal` variant added to the existing `PrincipalContext` union) for use by system-managed agent runs and authenticated server-to-server calls.
 - GA.4 Service-layer `assertSystemAdminContext(ctx)` is wired into every `system_incidents` mutation entry point as defence-in-depth. Failures throw a typed error before the DB write.
 - GA.5 The `investigate_prompt` text column exists on `system_incidents`. Nullable. No length cap. Surfaced via a new GET endpoint shape and the existing list/detail endpoints.
 - GA.6 Baselining primitive: rolling p50/p95/p99/median for runtime and token-count is computed per `(entity_kind, entity_id)` over the last 7 days, refreshed every 15 minutes, exposed as a read API for heuristics.
@@ -306,7 +306,7 @@ These are deliberate omissions, not deferred work:
 |---|---|---|
 | S1 | Idempotency window functional. | Unit test: two `recordIncident` calls with same `idempotencyKey` within 60s produce one row, one `occurrence_count` increment. |
 | S2 | Per-fp throttle blocks tight loops. | Unit test: 100 calls in 1s with same fingerprint → 1 ingest, 99 throttled (counter incremented). |
-| S3 | System-principal context usable end-to-end. | Integration test: enqueue `system-monitor-triage`, handler runs, `req.principal.scope === 'system'` in agent invocation. |
+| S3 | System-principal context usable end-to-end. | Integration test: enqueue `system-monitor-triage`, handler runs, `req.principal.type === 'system'` in agent invocation. |
 | S4 | `assertSystemAdminContext` blocks unauthorised caller. | Unit test: call any `system_incidents` mutation service method with a non-sysadmin context → typed error before DB write. |
 | S5 | Synthetic checks detect a stalled queue. | Smoke test: pause pg-boss processing for 5 min; verify `system-monitor-synthetic-checks` produces an incident with `source='synthetic'`. |
 | S6 | Synthetic checks tolerate idle baseline. | Smoke test: cold-start staging, run synthetic checks for 1h, no false positives. |
@@ -367,13 +367,14 @@ Phase A is **dead-code-by-design** — none of these primitives are user-visible
 **Option B shape.**
 
 - New module: `server/services/principal/systemPrincipal.ts` (final path resolved by architect).
-- Exports `getSystemPrincipal(): Principal` — returns a singleton with:
-  - `scope: 'system'`
+- Adds a fourth `SystemPrincipal` variant to the existing `PrincipalContext` discriminated union (`UserPrincipal | ServicePrincipal | DelegatedPrincipal`, defined in `server/services/principal/types.ts`). The variant follows the existing convention — discriminated by the `type` field.
+- Exports `getSystemPrincipal(): SystemPrincipal` — returns a singleton with:
+  - `type: 'system'` (the discriminator field used by every variant in the existing union)
   - `userId: SYSTEM_PRINCIPAL_USER_ID` (a sentinel UUID seeded via migration into `users` table with `is_system: true`, email `system@platform.local`, no password, no auth, never logs in)
   - `subaccountId: null` (system principals are not subaccount-scoped)
   - `organisationId: SYSTEM_OPERATIONS_ORG_ID` (the `isSystemOrg=true` org seeded in Phase 0/0.5)
   - `permissions: ['system_monitor.*']` — minimal scope, expanded only by explicit grant
-  - `isSystemPrincipal: true` discriminator
+  - `isSystemPrincipal: true` boolean — narratively useful (cheap truthy check at call sites that don't need to widen `type` first); does not conflict with the `type` discriminator
 
 - The principal is **immutable**, **process-singleton**, and **safe to log** (no PII).
 
@@ -382,7 +383,7 @@ Phase A is **dead-code-by-design** — none of these primitives are user-visible
   ```ts
   bossHandler('system-monitor-sweep', async (job) => {
     return withSystemPrincipal(async (ctx) => {
-      // ctx.principal.scope === 'system'
+      // ctx.principal.type === 'system'
       ...
     });
   });
@@ -392,11 +393,11 @@ Phase A is **dead-code-by-design** — none of these primitives are user-visible
 
 | Layer | For tenant tables | For `system_incidents` etc. |
 |---|---|---|
-| Postgres RLS | enforces tenant scope | denies all rows by default; PERMITs only when `current_setting('app.principal_scope', true) = 'system'` |
+| Postgres RLS | enforces tenant scope | denies all rows by default; PERMITs only when `current_setting('app.current_principal_type', true) = 'system'` |
 | Drizzle app guard | tenant filter | system filter |
 | Service guard | `requireOrgScoped(ctx)` | `assertSystemAdminContext(ctx)` (§4.4) |
 
-The session-variable approach (`SET LOCAL app.principal_scope = 'system'` inside `withSystemPrincipal`) is the standard Drizzle + RLS pattern (`architecture.md §Row-Level Security`).
+The session-variable approach (`SET LOCAL app.current_principal_type = 'system'` inside `withSystemPrincipal`, reusing the existing session variable already set for user/service/delegated principals) is the standard Drizzle + RLS pattern (`architecture.md §Row-Level Security`).
 
 **Why singleton, not per-call.** Avoids accidental duplication / divergence. The principal carries no per-call state — it's a stable identity object.
 
@@ -412,7 +413,7 @@ The session-variable approach (`SET LOCAL app.principal_scope = 'system'` inside
 
 - New helper: `assertSystemAdminContext(ctx: PrincipalContext): asserts ctx is SystemAdminContext`.
 - Throws `UnauthorizedSystemAccessError` (typed) if:
-  - `ctx.principal.scope !== 'system'` AND
+  - `ctx.principal.type !== 'system'` AND
   - `ctx.principal.permissions` does not include `system_admin.write`
 - System principals (from §4.3) pass automatically. Sysadmin users with `system_admin.write` permission pass.
 - All other principals (regular users, even with `org_admin` or `subaccount_admin`) fail.
@@ -2243,8 +2244,8 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 |---|---|
 | `server/services/principal/systemPrincipal.ts` | `getSystemPrincipal`, `withSystemPrincipal` (§4.3). |
 | `server/services/principal/assertSystemAdminContext.ts` | Service-layer guard (§4.4). |
-| `server/services/incidentIngest/idempotency.ts` | LRU + TTL helpers (§4.1). |
-| `server/services/incidentIngest/throttle.ts` | Per-fingerprint throttle map (§4.2). |
+| `server/services/incidentIngestorIdempotency.ts` | LRU + TTL helpers (§4.1). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
+| `server/services/incidentIngestorThrottle.ts` | Per-fingerprint throttle map (§4.2). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
 | `migrations/<NNNN>_phase_a_foundations.sql` | Schema additions per §4.5 + system principal seed + agent row seed for `system_monitor`. |
 | `migrations/<NNNN>_phase_a_foundations.down.sql` | Local-revert mate. |
 
@@ -2335,7 +2336,7 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 
 | Path | Change |
 |---|---|
-| `server/services/incidentIngest/recordIncident.ts` (or post-merge equivalent) | Wrap with idempotency (§4.1) + throttle (§4.2). Accept new `idempotencyKey?` field. No fingerprint algorithm changes. |
+| `server/services/incidentIngestor.ts` (`recordIncident` function) | Wrap with idempotency (§4.1) + throttle (§4.2). Accept new `idempotencyKey?` field. No fingerprint algorithm changes. |
 | `server/services/systemIncidentService.ts` | Add `assertSystemAdminContext` as the first line of every mutation method (§4.4). Add new mutation: `recordPromptFeedback`. Existing methods otherwise unchanged. |
 | `server/db/schema.ts` (Drizzle) | Add columns to `system_incidents` per §4.5; add new tables `system_monitor_baselines` and `system_monitor_heuristic_fires`. Extend the `system_incident_events.event_type` enum per §12.1. |
 | `server/jobs/index.ts` (or job registration entry) | Register `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh`, `system-monitor-triage`, `system-monitor-sweep` queues. Idempotency strategy declared per architecture.md `verify-idempotency-strategy-declared.sh` requirement. |
@@ -2372,7 +2373,7 @@ Pure-function tests. Fast, deterministic, no DB, no network. CI-gating per archi
 |---|---|
 | `idempotency.ts` (§4.1) | 100 calls in 1s with same key → 1 ingest, 99 LRU hits. 2 calls 61s apart → 2 ingests (TTL respected). LRU eviction at 10,001st key drops oldest. Different fingerprints with same key → independent (key is `${fp}:${key}`). |
 | `throttle.ts` (§4.2) | 100 calls in 1s with same fp → 1 ingest, 99 throttled. 2 calls 1.1s apart with same fp → 2 ingests. Map eviction at 50,001st unique fp → oldest drops, metric increments. Fingerprint isolation: cross-fp calls do not interfere. |
-| `systemPrincipal.ts` (§4.3) | `getSystemPrincipal()` returns reference-equal singleton across calls. Principal carries `scope='system'`, `isSystemPrincipal=true`, no PII. |
+| `systemPrincipal.ts` (§4.3) | `getSystemPrincipal()` returns reference-equal singleton across calls. Principal carries `type='system'`, `isSystemPrincipal=true`, no PII. |
 | `assertSystemAdminContext.ts` (§4.4) | Throws `UnauthorizedSystemAccessError` for: unauthenticated context, regular user context, org-admin context, subaccount-admin context. Passes for: system-principal context, sysadmin context with `system_admin.write` permission. |
 
 **Investigate-Fix Protocol (§5):**

@@ -5,6 +5,10 @@
 **Last commit at spec-complete:** `daad199a` (spec section 19 — future phases summary)
 **Spec file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
 
+## Spec corrections
+
+- Aligned Phase A spec narrative with actual codebase shapes pre-architect: PrincipalContext discriminator is `type` (not `scope`), `SystemPrincipal` is a new variant on the existing union, RLS session variable is `app.current_principal_type`, and `recordIncident` lives in `server/services/incidentIngestor.ts` (no `incidentIngest/` subdirectory).
+
 ## Current state
 
 `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md` is **complete** — sections 0 through 19 written, formatted, and committed. The branch is clean and pushed to `origin/claude/add-system-monitoring-BgLlY`.
