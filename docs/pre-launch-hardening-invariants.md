@@ -69,7 +69,7 @@ Amendments
 
   *Enforcement:*
   - **Static:** Chunk 2 CACHED-CTX-DOC adds this posture to `docs/cached-context-infrastructure-spec.md` § RLS as a first-class architectural decision; future drift detected by grepping new cached-context migrations for matching header comments
-  - **Manual:** spec-conformance review when any new cached-context table lands
+  - **Manual** (owner: `spec-conformance` agent): review when any new cached-context table lands
 
 **1.7 Reference-documents parent-EXISTS RLS.** `reference_documents` and `reference_document_versions` are protected via parent-EXISTS WITH CHECK (the GATES-2026-04-26-1 follow-up named in `tasks/todo.md:935`'s resolved B-1/B-2/B-3 entry), not direct org-id columns. The migration carrying this lives in Chunk 1.
 
@@ -82,7 +82,7 @@ Amendments
   *Enforcement:*
   - **Gate:** `verify-rls-contract-compliance.sh` — checks the admin entry-point pattern is the only path that sets `admin_role`
   - **Static:** grep for `BYPASSRLS` / `admin_role` outside of `server/lib/adminDbConnection.ts` and named callers → must return zero
-  - **Manual:** spec-conformance review for any new feature that proposes a cross-org code path
+  - **Manual** (owner: `spec-conformance` agent): review any new feature that proposes a cross-org code path
 
 ---
 
@@ -119,14 +119,14 @@ Amendments
 
   *Enforcement:*
   - **Static:** grep new analytics consumers — must read from `delegation_outcomes`; reads from `agent_runs` telemetry columns require an explicit comment naming the join purpose
-  - **Manual:** spec-conformance review per new analytics surface as it ships
+  - **Manual** (owner: `spec-conformance` agent + analytics-feature spec author): review per new analytics surface as it ships
   *Source:* `tasks/todo.md:332`.
 
 **2.6 Schema decisions land before any code touching their columns.** No code branch may modify `agent_runs`, the W1-6 columns, the W1-29 file extensions, the skill error envelope, or the new `subaccount_agents.portal_default_safety_mode` column (per F10 architect resolution) until the Chunk 2 spec is merged.
 
   *Enforcement:*
-  - **Manual:** implementation-order rule recorded in `tasks/builds/pre-launch-hardening-specs/progress.md § Implementation Order`
-  - **Manual:** freeze gate in Task 6.5 + consistency sweep in Task 6.6 — both block code branches that violate the order
+  - **Manual** (owner: main session at Task 6.5 freeze gate): implementation-order rule recorded in `tasks/builds/pre-launch-hardening-specs/progress.md § Implementation Order`
+  - **Manual** (owner: main session at Task 6.6 consistency sweep + `pr-reviewer` for code branches): freeze gate in Task 6.5 + consistency sweep in Task 6.6 — both block code branches that violate the order
 
 ---
 
@@ -176,7 +176,7 @@ Amendments
 **4.1 RLS gate posture is explicit.** `verify-rls-coverage.sh` and `verify-rls-contract-compliance.sh` posture (hard-blocking vs warn) is decided by Chunk 1 § Open Decisions and recorded in the spec body. The default during the testing round is documented; the alternative is documented; the user picks.
 
   *Enforcement:*
-  - **Manual:** the chosen posture is recorded in the Chunk 1 spec PR body
+  - **Manual** (owner: Chunk 1 spec author + user at first review checkpoint): the chosen posture is recorded in the Chunk 1 spec PR body
   - **Static:** the gate script itself encodes the chosen posture (exit-code semantics) so CI behaviour matches the spec
 
 **4.2 All Chunk 6 gates green.** `verify-action-call-allowlist.sh`, `verify-skill-read-paths.sh`, `verify-input-validation.sh`, `verify-permission-scope.sh`, `scripts/verify-integration-reference.mjs`, `verify-rls-session-var-canon.sh` all pass after Chunk 6 lands.
@@ -194,13 +194,13 @@ Amendments
 **4.4 Pre-Phase-2 coverage baseline captured (SC-COVERAGE-BASELINE).** Before any testing-round commit, the warning-level counts from `verify-input-validation.sh` (44 today) and `verify-permission-scope.sh` (13 today) are recorded in `tasks/builds/pre-launch-hardening-specs/progress.md`. Subsequent diffs against this baseline determine whether Phase 2 introduced regressions per `REQ #35` (`tasks/todo.md:916`).
 
   *Enforcement:*
-  - **Manual:** baseline numbers recorded in `progress.md` before Chunk 6 PR opens
+  - **Manual** (owner: main session before Chunk 6 PR opens): baseline numbers recorded in `progress.md` before Chunk 6 PR opens
   - **Static:** future PR descriptions cite the baseline + delta when they touch input-validation or permission-scope
 
 **4.5 No new test categories introduced.** Per `docs/spec-context.md § convention_rejections`, no spec adds vitest / jest / playwright / supertest / frontend unit tests / API contract tests. Test plans default to `pure_function_only` (`docs/spec-context.md:28`).
 
   *Enforcement:*
-  - **Manual:** `spec-reviewer` rejects findings that propose any of these via the `convention_rejections` mapping
+  - **Manual** (owner: `spec-reviewer` agent): rejects findings that propose any of these via the `convention_rejections` mapping
   - **Static:** grep `package.json` and `*.test.ts` patterns for vitest/jest/playwright/supertest imports → must remain absent
 
 ---
@@ -210,13 +210,13 @@ Amendments
 **5.1 Prefer existing primitives.** Per `docs/spec-context.md § accepted_primitives` (line 42), every spec defaults to existing primitives. Any new primitive requires a "why not reuse" paragraph per `docs/spec-authoring-checklist.md § Section 1`.
 
   *Enforcement:*
-  - **Manual:** `spec-reviewer` raises `directional-new-primitive-without-justification` for any unjustified new primitive
+  - **Manual** (owner: `spec-reviewer` agent): raises `directional-new-primitive-without-justification` for any unjustified new primitive
   - **Static:** every per-chunk spec's `## Implementation Guardrails § MUST reuse:` lists the primitives it depends on; new primitives require a paragraph in the same section
 
 **5.2 No feature flags.** Rollout model is `commit_and_revert` (`docs/spec-context.md:36`). No `feature_flags` introduced for any chunk. `feature_flags: only_for_behaviour_modes` (line 37) means flags are reserved for shadow-vs-active or dev-vs-prod modes — not pre-launch hardening.
 
   *Enforcement:*
-  - **Manual:** `spec-reviewer` rejects per `convention_rejections` (`spec-context.md:73`)
+  - **Manual** (owner: `spec-reviewer` agent): rejects per `convention_rejections` (`spec-context.md:73`)
   - **Static:** grep `growthbook` / `featureFlag` / `gb.isOn` introductions in any chunk PR diff → must return zero
 
 **5.3 No new test categories.** See § 4.5 above.
@@ -224,20 +224,20 @@ Amendments
 **5.4 No introduce-then-defer patterns.** A spec MUST NOT propose a primitive and then defer it to a later phase. Either the spec ships the primitive in scope, or it doesn't propose it. Mid-spec deferrals are a documented anti-pattern per `docs/spec-authoring-checklist.md § Section 7`.
 
   *Enforcement:*
-  - **Manual:** `spec-reviewer` raises a directional finding when a primitive is mentioned but not built in the same phase
+  - **Manual** (owner: `spec-reviewer` agent): raises a directional finding when a primitive is mentioned but not built in the same phase
   - **Static:** every spec's `## Deferred Items` is the single source of truth for deferred work; prose mentions of "deferred" / "later" / "Phase N+1" / "future" without a corresponding entry fail review
 
 **5.5 Architect outputs are immutable post-pin.** Once a per-chunk spec pins the architect output's commit SHA in its front-matter, the architect output may not be edited without re-pinning every consuming spec. The conflict-resolution rule in `tasks/builds/pre-launch-hardening-specs/plan.md` § Architect-output conflict check permits **in-place updates** to the losing architect output to point at the winning decision; that update is the only sanctioned post-pin edit and counts as a re-pin event.
 
   *Enforcement:*
-  - **Manual:** post-freeze amendment protocol (Task 6.5) catches violations
+  - **Manual** (owner: main session at Task 6.5 freeze gate): post-freeze amendment protocol (Task 6.5) catches violations
   - **Static:** every spec front-matter declares `Architect input: <path> (commit SHA: <sha>)`; SHA mismatch with the actual file SHA at HEAD fails the consistency sweep (Task 6.6)
 
 **5.6 Implementation order is binding.** Implementation order is `1 → {2, 4, 6} → 5 → 3` (`tasks/builds/pre-launch-hardening-specs/progress.md § Implementation Order`). PR merge order does not imply dependency order. No code branch starts until Tasks 6.5 (spec freeze) and 6.6 (consistency sweep) both stamp clear.
 
   *Enforcement:*
-  - **Manual:** freeze stamp + consistency sweep stamp in `progress.md` are required prerequisites for any code branch
-  - **Static:** any code-touching PR opened against `main` before both stamps appear in `progress.md` is out of protocol; pr-reviewer flags it on review
+  - **Manual** (owner: main session at Task 6.5 freeze gate + Task 6.6 sweep): freeze stamp + consistency sweep stamp in `progress.md` are required prerequisites for any code branch
+  - **Static:** any code-touching PR opened against `main` before both stamps appear in `progress.md` is out of protocol; `pr-reviewer` agent flags it on review (owner: `pr-reviewer` agent for code branches)
 
 ---
 
@@ -257,11 +257,18 @@ These invariants pin behaviour around state machines (workflow steps, agent runs
   - **Test:** spec-named pure test asserting only `decideApproval` (or the resume-path entry the architect names) writes the post-`review_required` status
   - **Static:** grep `WorkflowStepReviewService` and `decideApproval` callers for direct status updates — must route through the decision boundary
 
-**6.3 Run cannot end `success` if any step is `error` (or `failed`) unless explicitly `partial`.** `agent_runs.runResultStatus` follows the discriminated rule: `success` requires every constituent step in a non-error terminal state (`completed`, `skipped`, `cancelled`); `error` step → `failed` run; mixed-success-and-error → `partial`. The H3 invariant (3.5) is the orthogonal rule about summary presence; this is the rule about per-step outcome aggregation.
+**6.3 Run cannot end `success` if any step is `error` (or `failed`) unless explicitly `partial`. Cancelled and skipped have their own terminal semantics.** `agent_runs.runResultStatus` follows the discriminated aggregation rule:
+
+- **All steps `completed`** (none cancelled, skipped, errored, failed) → run is `success`.
+- **Any step `error` / `failed`** → run is `failed` if the run terminated abnormally, OR `partial` if the run otherwise completed (mixed-success-and-error). Never `success`.
+- **Steps `cancelled`** → counted as cancelled, NOT as success-by-default. A run with all-cancelled steps takes its own terminal state per the cancellation source (run-level cancel → `cancelled`; per-step cancel within an otherwise-successful run → `partial` to surface the partial-completion semantics, never `success`).
+- **Steps `skipped`** → counted as skipped, NOT as success-by-default. A run where every dispatched step skipped (typically because their preconditions evaluated false) is `success` only if at least one step actually `completed`; an all-skipped run takes the run's own terminal state per `runStatus.ts` rather than masquerading as success.
+
+The H3 invariant (3.5) is the orthogonal rule about summary presence; this is the rule about per-step outcome aggregation. Together they fix the H3-PARTIAL-COUPLING bug: `partial` should ONLY be reachable via per-step aggregation here, not via summary absence in 3.5.
 
   *Enforcement:*
-  - **Test:** spec-named pure test on `computeRunResultStatus` covering: all-success, any-error → failed, mixed → partial. Must coexist with H3's summary-decoupling rule from invariant 3.5
-  - **Static:** grep set membership against `shared/runStatus.ts` (`TERMINAL_RUN_STATUSES` / `IN_FLIGHT_RUN_STATUSES`) — every status referenced in execution code must be in the canonical sets
+  - **Test:** spec-named pure test on `computeRunResultStatus` covering each of the four cases above (all-completed → success; any-error → failed/partial; cancelled aggregation; skipped aggregation). Must coexist with H3's summary-decoupling rule from invariant 3.5 (i.e. summary absence does NOT trigger `partial`)
+  - **Static:** grep set membership against `shared/runStatus.ts` (`TERMINAL_RUN_STATUSES` / `IN_FLIGHT_RUN_STATUSES` / `AWAITING_RUN_STATUSES`) — every status referenced in execution code must be in the canonical sets
 
 **6.4 Resume paths re-enter through the same state machine boundary.** Any post-approval / post-pause resume path enters via `completeStepRun`, `completeStepRunFromReview`, or the named architect-resolved entry (Chunk 3 C4a-REVIEWED-DISP names which one). Resume paths MUST NOT bypass the invalidation re-check from invariant 3.1 — they get the same protection.
 
@@ -273,7 +280,7 @@ These invariants pin behaviour around state machines (workflow steps, agent runs
 
   *Enforcement:*
   - **Static:** CI grep for new string literals matching the status-shape pattern in `server/services/`, `server/jobs/`, `server/routes/` → must intersect the canonical sets in `shared/runStatus.ts`
-  - **Manual:** spec-reviewer raises a directional finding when a new status appears without the corresponding `runStatus.ts` update
+  - **Manual** (owner: `spec-reviewer` agent): raises a directional finding when a new status appears without the corresponding `runStatus.ts` update
 
 ---
 
@@ -315,4 +322,30 @@ Every violation resolution leaves a record:
 
 ## Amendments
 
-_(Empty at authoring. Each amendment entry records: amendment date, prior freeze SHA, the change made, the user who approved, and the consuming specs that need their pinned SHAs refreshed. The post-freeze amendment protocol in `tasks/builds/pre-launch-hardening-specs/plan.md` § Task 6.5 is binding.)_
+Every amendment to this document MUST update the pinned SHA in every consuming per-chunk spec's front-matter. An amendment that lands without re-pinning the consumers leaves the consumers asserting an old, superseded contract — the invariants doc says one thing while the specs claim alignment with a different version.
+
+### Required steps for any amendment
+
+1. **Open the amendment PR** against the integration branch, modifying only `docs/pre-launch-hardening-invariants.md`. The PR title prefix is `docs(pre-launch-hardening-invariants):`.
+2. **Add an entry to the `## Amendments` section below** with: amendment date, prior pinned SHA, the change made, the user who approved, and the list of consuming specs.
+3. **Identify every consuming spec** by grepping `docs/pre-launch-*-spec.md` for the prior SHA. Each match is a consumer that needs re-pinning.
+4. **Open follow-up PRs (one per consuming spec, OR one bundled PR)** that update each consumer's front-matter `Invariants:` line to the new SHA. Do not leave a consumer at the old SHA.
+5. **Re-run Task 6.6 (cross-spec consistency sweep)** with the amended invariants in force.
+6. **Re-stamp Task 6.5 (spec freeze)** at the post-amendment HEAD per the protocol in `tasks/builds/pre-launch-hardening-specs/plan.md`.
+
+### Audit trail format
+
+```markdown
+### YYYY-MM-DD — <one-line summary>
+
+- **Prior SHA:** `<short-sha>` (`<full-sha>`)
+- **New SHA:** `<short-sha>` (`<full-sha>`)
+- **Change:** <what changed; cite invariant numbers>
+- **Approved by:** <user>
+- **Consuming specs re-pinned:** `pre-launch-rls-hardening-spec`, `pre-launch-schema-decisions-spec`, …
+- **Re-stamp:** Task 6.5 freeze re-stamped at `<post-amendment-sha>`; Task 6.6 sweep clean.
+```
+
+### Entries
+
+_(Empty at authoring. The post-freeze amendment protocol in `tasks/builds/pre-launch-hardening-specs/plan.md` § Task 6.5 is binding.)_
