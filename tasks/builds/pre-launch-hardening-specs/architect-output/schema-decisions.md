@@ -309,6 +309,322 @@ The trace-session ID logic at `agentExecutionService.ts:1226-1232` continues to 
 - **`isSubAgent` flag on handoff runs.** Spawn runs set `isSubAgent: true`. What about handoff runs? Architect recommends `isSubAgent: false` for handoff (the new run is a peer assignment, not a sub-agent). Spec author confirms or amends per existing semantics; no change to schema either way.
 - **`hierarchyDepth` for handoff runs.** Spawn runs increment depth by 1 from parent. Handoff runs: same depth as the calling run (peer assignment, not nesting). Spec author confirms in the spec body.
 
+---
+
+## 8. DELEG-CANONICAL (todo.md:332) — Canonical truth between `agent_runs` telemetry and `delegation_outcomes`
+
+### Decision
+
+**`delegation_outcomes` is canonical** for "what was attempted and what was the outcome." `agent_runs` telemetry columns (`delegationScope`, `delegationDirection`, `hierarchyDepth`, `handoffSourceRunId`) are per-run snapshots for joins, not authoritative history.
+
+The recommended direction in todo.md:332 is adopted verbatim and locked in invariant 2.5.
+
+The runtime contract:
+
+- **Every delegation attempt** (spawn or handoff) writes a row to `delegation_outcomes` carrying `runId` (the calling run), `targetAgentId`, `delegationKind`, `outcome` (success / rate_limited / scope_violation / etc.), `errorContext`. This is the source-of-truth event log.
+- **Every successfully-created child `agent_runs` row** carries the per-run snapshot columns. These reflect the state at the moment the child was created; they do not carry the outcome of subsequent attempts (failed attempts don't create child rows but do create `delegation_outcomes` rows).
+
+**Drift detection.** Under failure scenarios these can diverge — outcome write fails → run row exists with telemetry but no outcome event; outcome write succeeds and child run create fails → outcome event exists with no child run. The canonical table is whichever you trust as audit truth: `delegation_outcomes`.
+
+**Analytics consumer rule.** Any analytics surface (admin dashboard, cost-attribution report, audit export) reads from `delegation_outcomes` for the source-of-truth value. Reads from `agent_runs` telemetry columns are permitted only for joins where the snapshot is the explicit interest (e.g. "show me the depth at which this run was created"). Such joins require a code comment naming the join purpose — invariant 2.5 enforces this with a manual reviewer check.
+
+### Rejected options
+
+- **`agent_runs` telemetry columns are canonical** — rejected because they cannot represent failed-attempts (no child row created → no telemetry). The audit trail loses every attempt that didn't result in a child run, which is precisely the data you need to debug delegation failures.
+- **Both are canonical, with a synchronisation contract** — invites drift. Two writes per delegation attempt, with no transactional binding, will diverge under partial-failure scenarios. The reviewer-flagged ChatGPT round 3 finding (todo.md:332 source log) explicitly called out the drift risk.
+- **Document the contract that keeps them aligned** — same drift problem; documenting alignment doesn't enforce it. Picking one as canonical and naming the other as snapshot is enforceable by code review and grep-able in analytics consumers.
+
+### Files affected
+
+- `docs/pre-launch-hardening-invariants.md` — invariant 2.5 already names this; no edit needed in this Chunk 2 spec pass. The Chunk 2 spec body cites the invariant.
+- No code change in Chunk 2. The decision is a contract pin, consumed by future analytics specs (admin dashboard, cost-attribution report).
+- `tasks/todo.md:332` — Chunk 2 spec marks this resolved with the chunk slug per spec authoring notes.
+
+### Downstream ripple
+
+- Invariant 2.5 enforcement is `Manual` (owner: `spec-conformance` agent + analytics-feature spec author per-new-surface). Future analytics specs cite invariant 2.5 in their RLS / contracts checklist.
+- The post-launch `agent_runs` split (todo.md:331) — when that lands, the `agent_runs_delegation` sub-table inherits the snapshot columns. The canonical-vs-snapshot distinction transfers cleanly.
+- No new primitives. Per `prefer_existing_primitives_over_new_ones`, both tables already exist; the decision is which one downstream code reads from.
+
+### Open sub-questions for the spec author
+
+- **Migration of any pre-existing analytics consumers.** Grep for `agent_runs` reads of the telemetry columns from analytics surfaces (admin dashboards). If any exist today and aren't routed through `delegation_outcomes`, flag in the spec body — fix path is per-call-site review, not in scope for Chunk 2 unless the spec author finds violations during file inventory.
+- **Failure-mode telemetry coverage.** `delegation_outcomes` covers success and explicit-failure outcomes. What about silent failures (e.g. `reassign_task` returns `success: true` but the worker job never enqueues)? Architect recommendation: such cases are bugs, not telemetry gaps. Spec body confirms the silent-failure path is closed by Chunk 5 invariant 3.4 (closed error vocabulary) — every dispatch path emits one of the §5.7 codes. If the spec author finds a silent-failure case during file inventory, route to Chunk 5 deferred items.
+
+---
+
+## 9. W1-6 (todo.md:646) — Automations column rename — VERIFIED CLOSED
+
+### Status
+
+**`verified-closed` as of 2026-04-26.**
+
+Direct verification on disk:
+
+- `migrations/0222_rename_automations_columns.sql` exists and contains the three `RENAME COLUMN` statements:
+  - `workflow_engine_id → automation_engine_id`
+  - `parent_process_id → parent_automation_id`
+  - `system_process_id → system_automation_id`
+  - Plus: drops the legacy unique partial index, recreates it on the renamed column; drops the legacy FK constraint, re-adds it with the new column name.
+- `migrations/_down/0222_rename_automations_columns.sql` exists (reversal).
+- `server/db/schema/automations.ts` declares `automationEngineId` (line 15), `parentAutomationId` (line 38), `systemAutomationId` (line 40). Indexes match (`automations_engine_idx`, `automations_parent_automation_idx`, `automations_system_automation_idx`).
+- A grep for the legacy identifiers (`workflowEngineId`, `parentProcessId`, `systemProcessId`) in `server/db/schema/automations.ts` returns zero matches.
+
+### Decision
+
+No further architectural decision required. The Chunk 2 spec annotates W1-6 as `verified-closed` and:
+
+1. Cites the migration filename (`0222_rename_automations_columns.sql`) in the spec body's "Items closed" section.
+2. Cross-references invariant 2.1 — already enforced by the static grep for legacy column identifiers (returns zero matches today; gate confirms).
+3. Marks `tasks/todo.md:646` as resolved by the Chunk 2 spec slug per the spec authoring notes (`docs/pre-launch-hardening-mini-spec.md` line 231).
+
+The 59-call-site rewrite the spec-conformance log named is implicitly verified closed by the absence of grep hits in `server/`. Spec author runs the grep once during the spec authoring pass and records the result in the spec body's verification section as evidence (single-line "grep clean as of <date>") — not a new gate, just a one-shot check.
+
+### Rejected options
+
+- **Re-author the migration with different column names** — no — the rename already landed and matches the spec.
+- **Add a CHECK constraint or enum tightening** — out of scope for Chunk 2; the columns are still `uuid` references with no semantic constraint change required.
+- **Treat as still-open and re-do the work** — the work is done. Re-doing it would create migration churn and break the verified state.
+
+### Files affected (annotation only)
+
+- The Chunk 2 spec body cites:
+  - `migrations/0222_rename_automations_columns.sql` (existing)
+  - `migrations/_down/0222_rename_automations_columns.sql` (existing)
+  - `server/db/schema/automations.ts` (already updated)
+
+No file changes in Chunk 2. The annotation is the contribution.
+
+### Downstream ripple
+
+- Invariant 2.1 — already enforced. Static grep currently returns zero matches.
+- The W1-6 entry in `tasks/todo.md` is removed (or marked closed with a Chunk-2 spec-slug reference) when the Chunk 2 spec lands.
+- Future spec-conformance audits of the Riley Wave-1 spec re-confirm by grep — no new infrastructure needed.
+
+### Open sub-questions for the spec author
+
+- **Phrase the annotation precisely.** Architect-recommended wording for the spec body's "Items closed" entry:
+
+  > **W1-6 — Automations column renames (verified closed).** Migration `0222_rename_automations_columns.sql` performs the three renames (`workflow_engine_id → automation_engine_id`, `parent_process_id → parent_automation_id`, `system_process_id → system_automation_id`) plus the FK + unique-index recreation. `server/db/schema/automations.ts` declares the new identifiers. Grep for legacy identifiers in `server/` returns zero matches as of `<commit-sha-of-spec-authoring-pass>`. Closed by spec slug `pre-launch-schema-decisions-spec`.
+
+- **Cross-link to Riley Wave 1.** The Riley Wave 1 spec-conformance log (todo.md:646) was the original source of W1-6. The Chunk 2 spec author confirms the close-out in the Riley spec's deferred items section, removing the entry per `docs/pre-launch-hardening-mini-spec.md` line 231.
+
+---
+
+## 10. W1-29 (todo.md:647) — `*.playbook.ts → *.workflow.ts` — VERIFIED CLOSED
+
+### Status
+
+**`verified-closed` as of 2026-04-26.**
+
+Direct verification on disk:
+
+- `server/workflows/` directory exists and contains the three expected files:
+  - `event-creation.workflow.ts`
+  - `intelligence-briefing.workflow.ts`
+  - `weekly-digest.workflow.ts`
+- `server/playbooks/` directory does NOT exist on disk (glob `server/playbooks/**/*` returns zero matches).
+- A glob for `**/*.playbook.ts` returns zero matches.
+
+The rename is complete. The directory is renamed; the files are renamed; no legacy files remain.
+
+### Decision
+
+No further architectural decision required. The Chunk 2 spec annotates W1-29 as `verified-closed` and:
+
+1. Cites the new directory + file names in the spec body's "Items closed" section.
+2. Cross-references invariant 2.2 — already enforced by the static glob check for `**/*.playbook.ts` (returns zero matches today).
+3. Marks `tasks/todo.md:647` as resolved by the Chunk 2 spec slug.
+
+### Rejected options
+
+- **Re-do the rename to a different convention** — no, the rename matches the Riley §4.8 file-extension convention.
+- **Promote the static glob check to a CI gate in Chunk 2** — already covered by invariant 2.2 (`Static`). The existing static-check posture is sufficient; no new gate script needed.
+
+### Files affected (annotation only)
+
+- The Chunk 2 spec body cites:
+  - `server/workflows/event-creation.workflow.ts` (existing)
+  - `server/workflows/intelligence-briefing.workflow.ts` (existing)
+  - `server/workflows/weekly-digest.workflow.ts` (existing)
+
+No file changes in Chunk 2.
+
+### Downstream ripple
+
+- Invariant 2.2 — already satisfied. Static glob currently returns zero matches.
+- The W1-29 entry in `tasks/todo.md` is removed (or marked closed) when the Chunk 2 spec lands.
+
+### Open sub-questions for the spec author
+
+- **Importer + seeder verification.** Confirm by grep that no consumer still imports from `server/playbooks/` (the directory shouldn't exist, but a stale import path would surface as a TS error). If any imports reference the old path, route as a one-line cleanup in the Chunk 2 spec — likely already done by whoever moved the files.
+- **Phrase the annotation precisely.** Architect-recommended wording:
+
+  > **W1-29 — File-extension convention rename (verified closed).** Directory `server/playbooks/` removed. Three files moved to `server/workflows/event-creation.workflow.ts` / `intelligence-briefing.workflow.ts` / `weekly-digest.workflow.ts`. Glob for `**/*.playbook.ts` returns zero matches as of `<commit-sha>`. Closed by spec slug `pre-launch-schema-decisions-spec`.
+
+---
+
+## 11. BUNDLE-DISMISS-RLS (todo.md:480) — `bundle_suggestion_dismissals` unique-key vs RLS
+
+### Decision
+
+**Option (a) — extend the unique index to `(organisation_id, user_id, doc_set_hash)` and update the matching `onConflictDoUpdate` target.** The mini-spec list (todo.md:480) names two options; option (a) preserves the org-scoping that aligns with `organisation_id NOT NULL` and the existing org-scoped RLS, AND interprets dismissals as a per-org preference (consistent with §5.12 line 1261's "table is org-scoped"). Per-org dismissals are the correct semantic for a multi-org system_admin user — the same user dismissing a doc set in Org A and re-encountering it in Org B should NOT have the dismissal carry across; the doc set may have different members or different relevance per org.
+
+The decision combines two changes that ship together:
+
+1. **Migration:** new migration in the cached-context sequence — drop the existing `(user_id, doc_set_hash)` unique index, recreate as `(organisation_id, user_id, doc_set_hash)`. Includes `_down` reversal that recreates the original unique index.
+2. **Service-layer fix:** `server/services/documentBundleService.ts:378` — change the `onConflictDoUpdate` target from `[bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash]` to `[bundleSuggestionDismissals.organisationId, bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash]`. This is the bug the original audit flagged — without this change, even after the index is fixed, the service still asserts the old conflict target and the upsert misbehaves under multi-org.
+
+Both changes ship in the same commit. Either alone is incomplete.
+
+The §5.12 spec self-contradiction (line 1258 "personal preference of the user" vs line 1261 "table is org-scoped") resolves to: **per-org preference, not cross-org**. Spec author updates §5.12 of the cached-context spec in the same Chunk 2 PR to clarify.
+
+### Rejected options
+
+- **Option (b) — drop `organisation_id` from the table and RLS, make dismissals truly cross-org per user.** Two reasons to reject:
+  1. Doc sets are org-scoped (a doc set's contents reflect org-specific document availability). Dismissing a doc set in Org A should not blanket-dismiss the same hash in Org B if the underlying doc availability differs.
+  2. The cached-context spec's "Option B-lite" RLS posture (todo.md:491, the next decision below) explicitly keeps subaccount isolation at the service layer; dropping `organisation_id` would also break the org-layer DB RLS, which IS authoritative on these tables. Going from "DB-layer org RLS + service-layer subaccount filter" → "no DB layer at all" is a backwards step.
+- **Add `subaccount_id` to the unique key as well** — over-scopes. Dismissals are agency-admin / system_admin actions; subaccount-context is not the dismissal authority. Adding subaccount to the key would create dismissals that don't carry across the same agency-admin's subaccount switches, which is the opposite of the user-experience intent. Org-level scoping is the correct granularity.
+- **Service-layer fix only, no migration** — leaves the DB without the matching unique constraint. The `onConflictDoUpdate` target must match a real unique constraint or Postgres throws at execution time. Both changes are required.
+- **Migration only, no service-layer fix** — `documentBundleService.ts:378` would still target the old key and the upsert would fail to find a matching unique constraint. Same Postgres-throw outcome.
+
+### Files affected
+
+- New migration in the cached-context sequence (spec author picks the next free number — likely 0223+ depending on Riley sequencing). Drops `bundle_suggestion_dismissals_user_id_doc_set_hash_unique` (or whatever the existing constraint name is — the spec author confirms during file inventory; the original migration `0212_*_dismissals.sql` is the reference). Recreates as `bundle_suggestion_dismissals_org_user_hash_unique` on `(organisation_id, user_id, doc_set_hash)`.
+- `migrations/_down/<n>_<name>.sql` — reversal recreates the original key.
+- `server/services/documentBundleService.ts:378` — `onConflictDoUpdate.target` includes `organisationId` as the leading column.
+- `docs/cached-context-infrastructure-spec.md` §5.12 — update prose to clarify per-org dismissal semantics. Spec author makes this edit in the same Chunk 2 PR (or routes to a follow-up cached-context spec amendment if scope-control prefers).
+- Pure test in the documentBundleService pure helpers (if one exists) — assert that a dismissal in Org A followed by a dismissal in Org B for the same user/hash creates two rows, not one. If no pure helper covers this, the spec author flags as a follow-up test in the spec body's `## Open Decisions`.
+
+### Downstream ripple
+
+- The `bundle_suggestion_dismissals` table grows by zero columns (the unique key changes; the table shape doesn't). No data migration needed pre-launch.
+- `suggestBundle` consumers — the function that reads dismissals to filter suggestions — already filters by `organisationId` per existing RLS; no consumer-side change.
+- Invariant 1.6 (cached-context Option B-lite) interacts: the org-layer RLS continues to be authoritative on this table. This decision aligns with that posture.
+
+### Open sub-questions for the spec author
+
+- **Existing data behaviour.** Pre-launch, the table likely has zero rows. If any rows exist (test data), the migration recreates the index without backfill — every existing row keeps its `organisation_id` value, and the new index includes them. Spec author confirms by `SELECT count(*) FROM bundle_suggestion_dismissals` during the migration authoring; if non-zero, decide whether to truncate (pre-launch test data) or backfill-skip (rows already have `organisation_id`).
+- **Constraint name.** Architect recommends `bundle_suggestion_dismissals_org_user_hash_unique` (drops the long noun chain for readability). Spec author confirms the existing convention in the cached-context migrations and matches.
+
+---
+
+## 12. CACHED-CTX-DOC (todo.md:491) — Cached-context "Option B-lite" RLS posture documentation
+
+### Decision
+
+**The Chunk 2 spec adds a §RLS section to `docs/cached-context-infrastructure-spec.md` documenting the Option B-lite posture as a first-class architectural decision.** The decision content the documentation must capture:
+
+1. **Which tables.** `reference_documents`, `document_bundles`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `bundle_suggestion_dismissals`. (Five tables — the same set named in invariant 1.6.)
+2. **What "Option B-lite" means.** Subaccount isolation is enforced at the service layer (filter by `subaccount_id` in every query that reads or writes these tables), not at the DB layer (no `subaccount_id`-bearing RLS policy). Org-layer RLS remains authoritative. Migration `0213_fix_cached_context_rls.sql` is the source-of-truth migration; the documentation cites it.
+3. **Why DB-layer subaccount RLS is currently not enforced.** Two reasons, both from migration 0213's header comment:
+   - **Bundle resolution at the org layer.** Bundles can be associated with multiple subaccounts (some scoped, some org-wide); a single subaccount filter at the DB layer would force every bundle read into a single-subaccount frame and break cross-subaccount bundle resolution.
+   - **Service-layer enforcement is sufficient for the threat model.** Cached-context tables are read through `documentBundleService` exclusively; every read/write site uses `getOrgScopedDb` and applies the subaccount filter explicitly. The threat model is "wrong-org leak" (covered by org-RLS) plus "wrong-subaccount leak" (covered by service filter).
+4. **Which code path is the authority.** `server/services/documentBundleService.ts` — every read function that takes a `subaccountId` parameter applies the filter; every write asserts the `subaccount_id` value at insert time. The Chunk 2 spec body lists the specific function names (the spec author greps and enumerates).
+5. **What would trigger reinstating the DB-layer subaccount policies.** Two triggers:
+   - The first cached-context table that is read by code paths OUTSIDE `documentBundleService` (i.e. a new consumer that doesn't go through the service layer's filter).
+   - A confirmed wrong-subaccount leak incident — runtime evidence that the service-layer filter was missed somewhere.
+6. **How future cached-context tables should be registered.** New cached-context tables MUST follow the Option B-lite posture (header comment in their migration explicitly noting it) OR carry an opt-in to DB-layer subaccount RLS with a documented rationale. Invariant 1.6 enforces this with a manual reviewer check.
+
+The documentation is a §RLS subsection of the cached-context spec, not a new doc — keep scope narrow per the original mini-spec recommendation.
+
+### Rejected options
+
+- **Document in the cached-context spec's appendix only, not as a first-class §RLS section** — buries the decision. Future readers (spec authors for new cached-context tables) need to find this without a treasure hunt. First-class section is the right granularity.
+- **Document in `docs/architecture.md`'s RLS section instead** — wrong scope. `architecture.md` documents the three-layer RLS contract universally; Option B-lite is a per-subsystem exception. Keep the exception local to the cached-context spec.
+- **Skip documentation; rely on invariant 1.6 alone** — invariant 1.6 NAMES the posture but doesn't explain it. Future authors need the rationale (why this exception was made), not just the rule.
+
+### Files affected
+
+- `docs/cached-context-infrastructure-spec.md` — new `## RLS posture (Option B-lite)` section (or extension of existing §8 RLS section at line 2177). Approximately 30–60 lines of prose covering the six points above. Spec author may move existing §8.1 content under the new heading if the structure flows better.
+- The Chunk 2 spec body includes a one-paragraph summary that points at the cached-context spec's new section, NOT the full text — the cached-context spec is the source of truth.
+- `migrations/0213_fix_cached_context_rls.sql` — the source-of-truth migration that established Option B-lite. No edit; just cited.
+
+### Downstream ripple
+
+- Invariant 1.6 — fully satisfied once the documentation lands.
+- New cached-context tables (post-launch) — author follows the documented posture or carries an explicit opt-in. Invariant 1.6's manual reviewer check enforces.
+- Future audit-runner runs of the RLS hotspot — auditor finds the documentation, knows the posture, classifies any violation correctly (NON_CONFORMANT only if the table opted into Option B-lite without the header comment, OR if a code path bypasses the service-layer filter).
+
+### Open sub-questions for the spec author
+
+- **Document length.** Architect-recommended cap: ~60 lines of prose. If the spec author finds more is needed (e.g. a per-table table mapping subaccount filter sites), expand — but flag the expansion in the Chunk 2 spec's `## Open Decisions` so it gets reviewer attention.
+- **Subaccount-scoped reference document tables.** If any cached-context table is genuinely subaccount-only (one subaccount per row, no cross-subaccount semantics), the service-layer filter degenerates to "always filter by subaccount." Spec author confirms during file inventory whether any of the five tables fits this case — if so, the documentation calls it out as a sub-class of Option B-lite (no behavioural difference; just clearer for readers).
+- **Cross-link to invariant 1.6.** The cached-context spec's new RLS section cites invariant 1.6 by SHA-pinned link, the same way every other consuming spec pins. Confirm in the Chunk 2 spec body.
+
+---
+
+## 13. Cross-decision coherence check + cross-chunk dependencies
+
+### Within Chunk 2 — cross-decision coherence
+
+| Decision | Depends on | Bound to |
+|---|---|---|
+| F6 (`safety_mode` split) | none | F10, F11, F22 (all reference safety-mode resolution) |
+| F10 (`portal_default_safety_mode`) | F6 (column existence) | none downstream in Chunk 2 |
+| F11 (`system_skills.side_effects` boolean) | none | F22 (gate resolution reads `sideEffects`) |
+| F15 (ajv + JSON Schema draft-07) | none | none in Chunk 2; Chunk 5 W1-38 reads emitted error codes |
+| F21 (drop Rule 3) | none | F22 (Rule 3 was the only "Check now" reset path; removing it doesn't affect F22) |
+| F22 ("meaningful" definition) | F11 (gate sees `sideEffects`), F21 (rules without "Check now") | none in Chunk 2 |
+| WB-1 (`handoffSourceRunId`) | none | DELEG-CANONICAL (snapshot column read posture) |
+| DELEG-CANONICAL (`delegation_outcomes` canonical) | WB-1 (telemetry columns continue to exist) | future analytics specs |
+| W1-6 (verified closed) | none | invariant 2.1 |
+| W1-29 (verified closed) | none | invariant 2.2 |
+| BUNDLE-DISMISS-RLS (composite key + service fix) | CACHED-CTX-DOC (org-RLS posture) | none in Chunk 2 |
+| CACHED-CTX-DOC (Option B-lite) | none | invariant 1.6, BUNDLE-DISMISS-RLS |
+
+The dependency graph is acyclic. Decisions can be specified in the Chunk 2 spec in the order F6 → F10 → F11 → F22 → F15 → F21 → WB-1 → DELEG-CANONICAL → W1-6 → W1-29 → BUNDLE-DISMISS-RLS → CACHED-CTX-DOC, which is the order chosen for this document and preserves the dependency-respecting traversal.
+
+### Cross-chunk dependencies
+
+**To Chunk 1 (RLS Hardening):** BUNDLE-DISMISS-RLS migration ships in Chunk 2 but is RLS-relevant. Chunk 1's spec author cross-references this migration in the manifest reconciliation pass (SC-1 60-table delta). The `bundle_suggestion_dismissals` table is already in `RLS_PROTECTED_TABLES`; the new unique index does not change the manifest entry. CACHED-CTX-DOC is documentation-only; no Chunk 1 interaction.
+
+**To Chunk 3 (Dead-Path Completion):** No direct dependency. Chunk 3's `briefApprovalService` introduces new artefact-write paths but does not touch any of the columns Chunk 2 modifies.
+
+**To Chunk 4 (Maintenance Job RLS Contract):** No direct dependency. Maintenance jobs do not read/write the columns Chunk 2 modifies.
+
+**To Chunk 5 (Execution-Path Correctness):** Two interactions:
+- **F6 / F10 → safety_mode resolution.** Chunk 5's W1-43 / W1-44 dispatcher work reads `safetyMode` from the run context; the column must exist in `workflow_runs` (Chunk 2) before Chunk 5 can write tests against it. Per invariant 5.6 (implementation order is binding), Chunk 2 lands before Chunk 5.
+- **F15 → §5.7 error vocabulary.** Chunk 5's W1-38 decision picks one of three options for the `automation_execution_error` code. Chunk 2's F15 emits `automation_input_validation_failed` and `automation_output_validation_failed` (already in §5.7). The two decisions don't conflict — F15 names existing codes; W1-38 picks among new/existing codes for a different scenario.
+
+**To Chunk 6 (Gate Hygiene Cleanup):** No direct dependency. Chunk 6 is gate hygiene only.
+
+### Invariants pinned by this document
+
+This architect output is consistent with every invariant in `docs/pre-launch-hardening-invariants.md` at SHA `cf2ecbd0`. Specifically:
+
+- Invariant 1.6 (cached-context Option B-lite) — directly addressed by CACHED-CTX-DOC (decision 12).
+- Invariant 2.1 (renamed automations columns) — verified-closed by W1-6 (decision 9).
+- Invariant 2.2 (file-extension convention) — verified-closed by W1-29 (decision 10).
+- Invariant 2.3 (handoff-source-run-id canonical column) — write-path resolved by WB-1 (decision 7).
+- Invariant 2.5 (delegation analytics canonical truth) — locked by DELEG-CANONICAL (decision 8).
+- Invariant 2.6 (schema decisions land before code) — Chunk 2 spec freeze gate (Task 6.5 in `tasks/builds/pre-launch-hardening-specs/plan.md`) enforces.
+- Invariant 5.1 (prefer existing primitives) — every "rejected options" section above cites this rule.
+- Invariant 5.4 (no introduce-then-defer) — F21 explicitly applies (no "Check now" placeholder primitive).
+
+### Implementation-order summary for the Chunk 2 spec body
+
+The spec author orders Chunk 2 implementation as:
+
+1. **Schema migrations first** (F6, F10, F11, BUNDLE-DISMISS-RLS) — single migration is acceptable if scope-preserved, or two migrations split safety/portal columns from `system_skills.side_effects` from the unique-index recreation. Architect prefers two migrations for clarity (one Riley-sequence migration for F6/F10/F11; one cached-context-sequence migration for BUNDLE-DISMISS-RLS).
+2. **Drizzle schema updates** in the same commit as the matching migration.
+3. **Service-layer fix for BUNDLE-DISMISS-RLS** (`documentBundleService.ts:378`) ships in the same commit as the migration that recreates the unique index.
+4. **WB-1 wiring** (`AgentRunRequest` + `agentExecutionService` INSERT + `agentScheduleService` worker) — no migration; pure code change.
+5. **F15 validator helper** — pure helper add + tests.
+6. **Documentation** — CACHED-CTX-DOC §RLS section in the cached-context spec; F22 prose update in Riley §7.6 (cross-spec coordination); F21 prose update in Riley §7.4.
+7. **Annotations** — W1-6 and W1-29 verified-closed entries in the Chunk 2 spec body.
+
+DELEG-CANONICAL is contract-only; no commit. Cited from the Chunk 2 spec body and the future analytics specs.
+
+---
+
+**End of architect output for Chunk 2.**
+
+Spec author: consume the decisions above into `docs/pre-launch-schema-decisions-spec.md`. Pin this file's commit SHA in the Chunk 2 spec front-matter. Open sub-questions in each decision section are intentional handoffs — resolve them in the spec body, do not re-route them back to the architect.
+
+
+
+
 
 
 
