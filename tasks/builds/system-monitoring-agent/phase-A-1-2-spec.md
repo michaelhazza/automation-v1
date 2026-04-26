@@ -1757,6 +1757,131 @@ All new code paths follow the existing structured-logger convention from `phase-
 
 ## 13. File inventory
 
+Indicative inventory. Final paths and naming variants are an architect deliverable per §0.5. The table below is the authoritative list of net-new code surfaces and the existing files that need to change; the architect plan refines paths to match the repo's conventions at implementation time.
+
+### 13.1 New files
+
+**Server — Phase A:**
+
+| Path (illustrative) | Purpose |
+|---|---|
+| `server/services/principal/systemPrincipal.ts` | `getSystemPrincipal`, `withSystemPrincipal` (§4.3). |
+| `server/services/principal/assertSystemAdminContext.ts` | Service-layer guard (§4.4). |
+| `server/services/incidentIngest/idempotency.ts` | LRU + TTL helpers (§4.1). |
+| `server/services/incidentIngest/throttle.ts` | Per-fingerprint throttle map (§4.2). |
+| `migrations/<NNNN>_phase_a_foundations.sql` | Schema additions per §4.5 + system principal seed + agent row seed for `system_monitor`. |
+| `migrations/<NNNN>_phase_a_foundations.down.sql` | Local-revert mate. |
+
+**Server — Phase 1 + Investigate-Fix Protocol + heuristic registry + baselining:**
+
+| Path (illustrative) | Purpose |
+|---|---|
+| `server/services/systemMonitor/synthetic/index.ts` | Registry array + handler entry. |
+| `server/services/systemMonitor/synthetic/types.ts` | `SyntheticCheck`, `SyntheticResult`. |
+| `server/services/systemMonitor/synthetic/pgBossQueueStalled.ts` | (§8.2 row 1) |
+| `server/services/systemMonitor/synthetic/noAgentRunsInWindow.ts` | (§8.2 row 2) |
+| `server/services/systemMonitor/synthetic/connectorPollStale.ts` | (§8.2 row 3) |
+| `server/services/systemMonitor/synthetic/dlqNotDrained.ts` | (§8.2 row 4) |
+| `server/services/systemMonitor/synthetic/heartbeatSelf.ts` | (§8.2 row 5) |
+| `server/services/systemMonitor/synthetic/connectorErrorRateElevated.ts` | (§8.2 row 6) |
+| `server/services/systemMonitor/synthetic/agentRunSuccessRateLow.ts` | (§8.2 row 7) |
+| `server/jobs/systemMonitorSyntheticChecksJob.ts` | pg-boss handler (§8.1). |
+| `server/services/systemMonitor/heuristics/types.ts` | `Heuristic`, `HeuristicResult`, `HeuristicContext` (§6.2). |
+| `server/services/systemMonitor/heuristics/index.ts` | Registry array. |
+| `server/services/systemMonitor/heuristics/agentQuality/*.ts` | Day-one + 2.5 agent-quality heuristics (§9.5, §9.6). |
+| `server/services/systemMonitor/heuristics/skillExecution/*.ts` | Day-one skill-execution heuristics (§9.5). |
+| `server/services/systemMonitor/heuristics/infrastructure/*.ts` | Day-one + 2.5 infrastructure heuristics (§9.5, §9.6). |
+| `server/services/systemMonitor/heuristics/systemic/*.ts` | Phase 2.5 systemic heuristics (§9.6). |
+| `server/services/systemMonitor/baselines/refreshJob.ts` | Baseline refresh tick (§7.3). |
+| `server/services/systemMonitor/baselines/baselineReader.ts` | Read API (§7.5). |
+| `server/jobs/systemMonitorBaselineRefreshJob.ts` | pg-boss handler entry. |
+| `docs/investigate-fix-protocol.md` | The protocol contract doc (§5.1). |
+
+**Server — Phase 2:**
+
+| Path (illustrative) | Purpose |
+|---|---|
+| `server/services/systemMonitor/triage/triageJob.ts` | Incident-driven trigger handler (§9.2). |
+| `server/services/systemMonitor/triage/sweepJob.ts` | Sweep-driven trigger handler (§9.3). |
+| `server/services/systemMonitor/triage/clusterFires.ts` | Sweep clustering helper. |
+| `server/services/systemMonitor/triage/rateLimit.ts` | Per-fingerprint rate-limit + auto-escalation logic (§9.9). |
+| `server/services/systemMonitor/triage/promptValidation.ts` | Validates `investigate_prompt` against §5.2 contract before write. |
+| `server/services/systemMonitor/skills/readIncident.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readAgentRun.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readSkillExecution.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readRecentRunsForAgent.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readBaseline.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readHeuristicFires.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readConnectorState.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readDlqRecent.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/readLogsForCorrelationId.ts` | Read skill (§9.4). |
+| `server/services/systemMonitor/skills/writeDiagnosis.ts` | Write skill — diagnosis JSON + investigate_prompt (§9.4, §9.8). |
+| `server/services/systemMonitor/skills/writeEvent.ts` | Write skill — append `system_incident_events` (§9.4). |
+| `server/jobs/systemMonitorTriageJob.ts` | pg-boss handler entry — incident-driven. |
+| `server/jobs/systemMonitorSweepJob.ts` | pg-boss handler entry — sweep. |
+| `server/routes/systemIncidentFeedback.ts` | New mutation route for `recordPromptFeedback` (§10.4 + §11.2). |
+
+**Server — tests (illustrative; see §14):**
+
+- `server/services/__tests__/systemPrincipal.test.ts`
+- `server/services/__tests__/idempotency.test.ts`
+- `server/services/__tests__/throttle.test.ts`
+- `server/services/__tests__/assertSystemAdminContext.test.ts`
+- `server/services/__tests__/syntheticChecks.*.test.ts` (one per check)
+- `server/services/__tests__/heuristics.*.test.ts` (positive + negative per heuristic)
+- `server/services/__tests__/baselineReader.test.ts`
+- `server/services/__tests__/triageJob.integration.test.ts`
+- `server/services/__tests__/sweepJob.integration.test.ts`
+- `server/services/__tests__/promptValidation.test.ts`
+- `server/services/__tests__/rateLimit.test.ts`
+- `server/services/__tests__/incidentFeedback.test.ts`
+
+**Client:**
+
+| Path (illustrative) | Purpose |
+|---|---|
+| `client/src/components/systemIncidents/DiagnosisAnnotation.tsx` | Renders the diagnosis JSON block (§10.3). |
+| `client/src/components/systemIncidents/InvestigatePromptBlock.tsx` | Renders the prompt + copy button (§10.2). |
+| `client/src/components/systemIncidents/FeedbackWidget.tsx` | The was-this-useful card (§10.4). |
+| `client/src/components/systemIncidents/DiagnosisFilterPill.tsx` | Filter pill in the existing filter bar (§10.5). |
+| `client/src/components/systemIncidents/__tests__/*.test.tsx` | Unit tests for each new component. |
+
+**Docs:**
+
+| Path | Purpose |
+|---|---|
+| `docs/investigate-fix-protocol.md` | The shared protocol contract (§5.1). |
+| `architecture.md` | Update — add a System Monitor Active Layer section (sweep, agent, prompt protocol, baselining). |
+| `docs/capabilities.md` | Update — add active monitoring capability under support-facing section. |
+| `CLAUDE.md` | Update — add the §5.3 Investigate-Fix Protocol hook section. |
+
+### 13.2 Modified files
+
+| Path | Change |
+|---|---|
+| `server/services/incidentIngest/recordIncident.ts` (or post-merge equivalent) | Wrap with idempotency (§4.1) + throttle (§4.2). Accept new `idempotencyKey?` field. No fingerprint algorithm changes. |
+| `server/services/systemIncidentService.ts` | Add `assertSystemAdminContext` as the first line of every mutation method (§4.4). Add new mutation: `recordPromptFeedback`. Existing methods otherwise unchanged. |
+| `server/db/schema.ts` (Drizzle) | Add columns to `system_incidents` per §4.5; add new tables `system_monitor_baselines` and `system_monitor_heuristic_fires`. Extend the `system_incident_events.event_type` enum per §12.1. |
+| `server/jobs/index.ts` (or job registration entry) | Register `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh`, `system-monitor-triage`, `system-monitor-sweep` queues. Idempotency strategy declared per architecture.md `verify-idempotency-strategy-declared.sh` requirement. |
+| `server/routes/systemIncidents.ts` | Add `?diagnosis=...` query param to the list endpoint (§10.5). |
+| `server/services/agentRunner.ts` (or post-merge equivalent system-managed agent dispatch) | Wire the system-principal context (§4.3) at the entry point of system-managed agent runs. |
+| `client/src/pages/SystemIncidentsPage.tsx` | Wire new components into the drawer (§10.1). Add diagnosis filter pill to filter bar (§10.5). |
+| `CLAUDE.md` | Add §5.3 Investigate-Fix Protocol section. |
+| `architecture.md` | New section — System Monitor Active Layer. |
+| `docs/capabilities.md` | Updated capability entry. |
+
+### 13.3 Files NOT touched (cross-check)
+
+- Phase 0/0.5 ingest hooks — global error handler, asyncHandler, DLQ monitor, agent-run terminal-failed, connector polling, skill executor, LLM router. Behaviour preserved byte-for-byte. Only the `recordIncident` callable wrapper changes.
+- Existing system-managed agents — Orchestrator (`migrations/0157`) and Portfolio Health Agent (`migrations/0068`). Not modified.
+- AlertFatigueGuard / SystemIncidentFatigueGuard. Not modified — agent invocation rate-limit is its own logic per §9.9.
+- WebSocket emitter / room model. Not modified — diagnosis updates fan out via the existing `system_incident:updated` event channel.
+- Pulse `system_incident` kind. Not modified.
+- Manual escalate-to-agent (Phase 0.5 §10.2). Reused by the auto-escalation path; no schema or behaviour change.
+- Tenant-scoped tables (`agent_runs`, `skill_executions`, `connector_polls`, `llm_router_calls`, `pgboss.*`). Read-only access from the new system-principal context; no schema or write changes.
+
+**Totals (indicative).** ~50-60 net-new server files, ~15-20 net-new client files (including tests), ~3-4 modified docs, ~6-8 modified server files, ~2 modified client files. Total file count is high because of one-module-per-heuristic, one-module-per-synthetic-check; total LoC remains bounded because each module is small and pure-function-shaped.
+
 ## 14. Testing strategy
 
 ### 14.1 Unit
