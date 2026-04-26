@@ -319,6 +319,34 @@ These invariants govern how flows behave under stress — retry, conflict, concu
   - **Test:** pure tests in Chunks 3, 4, 5 cover the success / partial / failed cases for each flow; no test asserts "succeeded if no error thrown" — every assertion checks the `status` field directly.
   - **Manual** (owner: spec author): every flow's response shape contract (e.g. § 4.5.8) must declare the `status` field.
 
+**7.5 Retry classification declared per operation.** Every operation that can be retried (HTTP request, pg-boss job, internal helper, webhook handler) MUST declare exactly one of three retry classes in its spec section:
+
+- **`safe`** — idempotent; retry produces identical outcome and same observable side effects (e.g. pure read; idempotent write keyed by deterministic key).
+- **`guarded`** — state-based; retry is a no-op via state-machine predicate (e.g. `WHERE status = 'pending'` UPDATE).
+- **`unsafe`** — non-idempotent; retry MAY produce duplicate side effects. Operations classified `unsafe` MUST be wrapped by an upstream `safe` or `guarded` boundary OR explicitly accept duplication (with documented rationale).
+
+  *Enforcement:*
+  - **Static:** every per-flow contract in any spec must carry an explicit `**Retry classification:**` line with one of the three values.
+  - **Manual** (owner: `pr-reviewer` agent): operations marked `unsafe` without a guarding boundary fail review.
+
+**7.6 `status` and `executionStatus` are distinct fields with non-overlapping semantics.** Where both apply, every response and every event MUST emit both at top level.
+
+- **`status`:** transport / API outcome. Three values: `'success' | 'partial' | 'failed'`. Set by 7.4.
+- **`executionStatus`:** domain outcome of the underlying action. Values match the action's state machine (e.g. `'queued' | 'completed' | 'failed' | 'cancelled' | 'review_required'` for an `actionService.proposeAction` outcome).
+
+A response can be `status: 'success'` AND `executionStatus: 'failed'` (the API call succeeded; the underlying action failed). The two fields are NEVER conflated.
+
+  *Enforcement:*
+  - **Static:** grep every response shape contract (e.g. § 4.5.8) for both fields where execution exists.
+  - **Test:** pure tests assert both fields independently; no test treats them as synonyms.
+
+**7.7 Terminal event guarantee.** Every cross-flow chain emits exactly one terminal observability event matching `*.completed` OR `*.failed` OR `*.partial`. No chain leaves the trace open ("dangling chain"). Monitoring agents filter on `executionId` (or `runId` / `jobRunId` per 7.3) and assert that every chain has exactly one terminal event.
+
+  *Enforcement:*
+  - **Static:** every observability section (§ 4.5.7 / § 6.5.2 / § 6.5.3) must list a terminal event matching the `.completed` / `.failed` / `.partial` suffix pattern. Missing terminal event in a chain is a directional finding.
+  - **Test:** integration with `agentExecutionEventService` verifies terminal event is emitted (best-effort emission failure is acceptable; intent-to-emit is required).
+  - **Manual** (owner: `pr-reviewer` agent): post-incident traces lacking a terminal event are flagged for spec amendment.
+
 ---
 
 ## Invariant Violation Protocol
