@@ -1440,6 +1440,23 @@ export const agentExecutionService = {
           attemptedStatus: derivedRunResultStatus,
           writeSite: 'finishLoop_normal',
         });
+      } else {
+        // F22 — meaningful-run tracking hook for the non-IEE finalization path.
+        // The IEE path calls this from `agentRunFinalizationService.finaliseAgentRunFromIeeRun`;
+        // without this call, ordinary API/triggered runs never advance
+        // `subaccount_agents.last_meaningful_tick_at` /
+        // `ticks_since_last_meaningful_run`, which leaves the heartbeat
+        // streak detector blind to the primary execution path. Best-effort —
+        // a tracking-update failure must not flip a successful run to failed.
+        try {
+          const { updateMeaningfulRunTracking } = await import('./agentRunFinalizationService.js');
+          await updateMeaningfulRunTracking(run.id, finalStatus);
+        } catch (err) {
+          logger.warn('agentExecutionService.meaningful_hook_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Live Agent Execution Log — critical terminal bookend (spec §5.3).

@@ -2,7 +2,7 @@
 // selectDispatchRoute lives in briefDispatchRoutePure.ts (side-effect-free, unit-testable).
 // The full handleBriefMessage function requires DB for cap checks.
 
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/index.js';
 import { and, eq, gte, count, inArray } from 'drizzle-orm';
 import type { BriefUiContext, FastPathDecision, BriefScope } from '../../shared/types/briefFastPath.js';
@@ -50,6 +50,13 @@ export interface HandleBriefMessageInput {
   scope?: BriefScope;
   /** When true, frequency + concurrency caps are enforced. False for initial Brief creation. */
   isFollowUp?: boolean;
+  /**
+   * Precomputed classification result. When supplied, the internal
+   * `classifyChatIntent` call is skipped — used by `briefCreationService` to
+   * classify before persisting the brief, so a classifier failure does not
+   * leave an orphaned task/conversation in the DB.
+   */
+  prefetchedDecision?: FastPathDecision;
 }
 
 export async function handleBriefMessage(
@@ -61,15 +68,20 @@ export async function handleBriefMessage(
     config: DEFAULT_CHAT_TRIAGE_CONFIG,
   };
 
-  const fastPathDecision = await classifyChatIntent(triageInput);
+  const fastPathDecision = input.prefetchedDecision ?? await classifyChatIntent(triageInput);
 
   let frequencyCapHit = false;
   let concurrencyCapHit = false;
 
   if (input.isFollowUp) {
+    // agent_runs is FORCE-RLS — must run inside the request-scoped org tx
+    // so the cap checks see the brief's actual run history. Bare `db`
+    // would read on a fresh connection without app.organisation_id and
+    // fail-closed to zero rows, silently disabling the caps.
+    const tx = getOrgScopedDb('briefMessageHandler');
     const windowStart = new Date(Date.now() - FOLLOWUP_WINDOW_MS);
 
-    const [freqRow] = await db
+    const [freqRow] = await tx
       .select({ c: count() })
       .from(agentRuns)
       .where(and(
@@ -80,7 +92,7 @@ export async function handleBriefMessage(
     frequencyCapHit = (freqRow?.c ?? 0) >= FOLLOWUP_FREQUENCY_CAP;
 
     if (!frequencyCapHit) {
-      const [concRow] = await db
+      const [concRow] = await tx
         .select({ c: count() })
         .from(agentRuns)
         .where(and(

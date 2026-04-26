@@ -83,8 +83,15 @@ async function aggregateTokensForIeeRun(tx: TxLike, ieeRunId: string): Promise<T
  * F22 — count actions proposed and memory blocks written for an agent run,
  * then update subaccount_agents meaningful-run tracking columns if the run
  * produced meaningful output. Best-effort: errors are caught by the caller.
+ *
+ * Exported so the non-IEE finalization path in `agentExecutionService.ts`
+ * can call it directly. The IEE path (this file's
+ * `finaliseAgentRunFromIeeRun`) and the non-IEE path (the agentic loop's
+ * terminal write) are the two completion sites; both must update the
+ * heartbeat columns or the F22 streak counter cannot detect inactivity
+ * from the primary execution path.
  */
-async function updateMeaningfulRunTracking(
+export async function updateMeaningfulRunTracking(
   agentRunId: string,
   status: string,
 ): Promise<void> {
@@ -109,8 +116,6 @@ async function updateMeaningfulRunTracking(
     memoryBlockWrittenCount,
   });
 
-  if (!isMeaningful) return;
-
   // Look up the subaccount_agent row for this run so we can update its tracking.
   const [run] = await db
     .select({ subaccountAgentId: agentRuns.subaccountAgentId })
@@ -121,14 +126,29 @@ async function updateMeaningfulRunTracking(
   const subaccountAgentId = run?.subaccountAgentId;
   if (!subaccountAgentId) return;
 
-  await db
-    .update(subaccountAgents)
-    .set({
-      lastMeaningfulTickAt: new Date(),
-      ticksSinceLastMeaningfulRun: 0,
-      updatedAt: new Date(),
-    })
-    .where(eq(subaccountAgents.id, subaccountAgentId));
+  if (isMeaningful) {
+    // Reset the streak.
+    await db
+      .update(subaccountAgents)
+      .set({
+        lastMeaningfulTickAt: new Date(),
+        ticksSinceLastMeaningfulRun: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  } else {
+    // Non-meaningful completion advances the streak counter so monitoring
+    // built on `ticksSinceLastMeaningfulRun` can detect prolonged
+    // empty-completion runs. Without this branch the counter is stuck at 0
+    // and no consumer can observe the streak the F22 spec was added for.
+    await db
+      .update(subaccountAgents)
+      .set({
+        ticksSinceLastMeaningfulRun: sql`${subaccountAgents.ticksSinceLastMeaningfulRun} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  }
 }
 
 /**

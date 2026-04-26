@@ -32,7 +32,14 @@
  *   - withAdminConnection + SET LOCAL ROLE admin_role to bypass RLS for the
  *     cross-org decay sweep (no app.organisation_id → fail-closed otherwise).
  *   - Sequential per-org processing; no parallel fan-out in v1.
- *   - Per-org try/catch: one org failure is logged; iteration continues.
+ *   - Per-org SAVEPOINT (nested tx). The outer admin tx holds the global
+ *     advisory lock for the duration of the sweep; each per-org block runs
+ *     inside a SAVEPOINT (drizzle nested tx) so a Postgres statement error
+ *     in one org rolls back its savepoint only — the parent tx stays alive,
+ *     the lock stays held, and subsequent orgs can still run. Without this
+ *     split, "partial" status is unachievable: after one tx.execute throws,
+ *     every later statement in the same tx fails with "current transaction
+ *     is aborted".
  *   - Terminal event emitted with outcome counters regardless of mixed results.
  *
  * Per-org decay logic is run inline using the admin tx (mirrors the
@@ -189,7 +196,11 @@ export async function runRuleAutoDeprecate(): Promise<RuleAutoDeprecateResult> {
           logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
           const orgStart = Date.now();
           try {
-            const { decayed, autoDeprecated } = await applyDecayForOrg(tx, org.id);
+            // SAVEPOINT per org — isolates per-org statement errors so the
+            // outer tx (and its advisory lock + admin_role) survive failures.
+            const { decayed, autoDeprecated } = await tx.transaction(async (subTx) => {
+              return applyDecayForOrg(subTx, org.id);
+            });
             totalDecayed += decayed;
             totalAutoDeprecated += autoDeprecated;
             orgsSucceeded++;

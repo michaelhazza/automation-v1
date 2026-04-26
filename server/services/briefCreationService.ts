@@ -6,6 +6,7 @@ import type { BriefChatArtefact } from '../../shared/types/briefResultContract.j
 import { findOrCreateBriefConversation } from './briefConversationService.js';
 import { logFastPathDecision } from './fastPathDecisionLogger.js';
 import { handleBriefMessage } from './briefMessageHandlerPure.js';
+import { classifyChatIntent, DEFAULT_CHAT_TRIAGE_CONFIG } from './chatTriageClassifier.js';
 
 export async function createBrief(input: {
   organisationId: string;
@@ -15,6 +16,17 @@ export async function createBrief(input: {
   source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
   uiContext: BriefUiContext;
 }): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }> {
+  // Classify BEFORE persisting the brief. classifyChatIntent can throw (LLM
+  // outage, classifier internal error); running it first means a failure
+  // never leaves an orphaned task / conversation in the DB. Phase 6 of the
+  // pre-launch hardening sprint moved this call inside handleBriefMessage,
+  // which inverted the ordering — restore the pre-Phase-6 invariant here.
+  const fastPathDecision = await classifyChatIntent({
+    text: input.text,
+    uiContext: input.uiContext,
+    config: DEFAULT_CHAT_TRIAGE_CONFIG,
+  });
+
   const title = input.text.length > 100 ? input.text.slice(0, 97) + '…' : input.text;
 
   const [task] = await db
@@ -40,7 +52,10 @@ export async function createBrief(input: {
     createdByUserId: input.submittedByUserId,
   });
 
-  const { fastPathDecision } = await handleBriefMessage({
+  // Pass the precomputed decision so handleBriefMessage skips its own
+  // classify call — keeps the dispatch logic in one place without
+  // double-charging the classifier.
+  await handleBriefMessage({
     conversationId: conversation.id,
     briefId,
     organisationId: input.organisationId,
@@ -48,6 +63,7 @@ export async function createBrief(input: {
     text: input.text,
     uiContext: input.uiContext,
     isFollowUp: false,
+    prefetchedDecision: fastPathDecision,
   });
 
   // Shadow-eval logging — best-effort, never blocks

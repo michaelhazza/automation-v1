@@ -1768,6 +1768,9 @@ export const WorkflowEngineService = {
         stepRunId: sr.id,
         run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
         templateCtx: ctx as unknown as Record<string, unknown>,
+        // Approved upstream — bypass the gate so the resume path dispatches
+        // instead of re-emitting review_required and falling through to error.
+        bypassGate: true,
       }),
     );
 
@@ -1796,6 +1799,23 @@ export const WorkflowEngineService = {
         status: 'success',
       });
       return { alreadyResumed: false, stepOutcome: 'completed' };
+    }
+
+    // Defensive: review_required must never reach the resume path —
+    // resumeInvokeAutomationStep passes bypassGate: true to invokeAutomationStep
+    // exactly so this branch never fires. If it does, fail loudly so the bug
+    // is observable rather than silently dispatching nothing.
+    if (result.status === 'review_required') {
+      const reason = 'resume_review_required_after_bypass: gate returned review despite bypass';
+      logger.error('step.resume.review_required_unexpected', {
+        event: 'step.resume.review_required_unexpected',
+        stepRunId,
+        runId: run.id,
+        latencyMs,
+        status: 'failed',
+      });
+      await this.failStepRunInternal(sr, reason);
+      return { alreadyResumed: false, stepOutcome: 'failed' };
     }
 
     // error — respect failurePolicy: 'continue' as in the primary dispatch path

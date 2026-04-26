@@ -5,6 +5,7 @@ import type { Conversation, ConversationMessage } from '../db/schema/conversatio
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import { handleBriefMessage, type DispatchRoute } from './briefMessageHandlerPure.js';
 import { writeConversationMessage } from './briefConversationWriter.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export interface ConversationWithMessages {
   conversation: Conversation;
@@ -114,6 +115,29 @@ export async function handleConversationFollowUp(input: {
   uiContext: BriefUiContext;
   senderUserId?: string;
 }): Promise<{ route: DispatchRoute; fastPathDecision: FastPathDecision }> {
+  // Verify the conversation actually belongs to this brief. Without this
+  // check, a stale tab or malformed payload that posts {conversationId: B}
+  // to a route bound to {briefId: A} would write the user message to
+  // conversation B while orchestration runs against brief A — splitting
+  // intent across two threads. The cross-check is org-scoped via the request
+  // tx so it fails closed for cross-tenant attempts as well.
+  const tx = getOrgScopedDb('briefConversationService.handleConversationFollowUp');
+  const [conv] = await tx
+    .select({ scopeType: conversations.scopeType, scopeId: conversations.scopeId })
+    .from(conversations)
+    .where(and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.organisationId, input.organisationId),
+    ))
+    .limit(1);
+
+  if (!conv || conv.scopeType !== 'brief' || conv.scopeId !== input.briefId) {
+    throw Object.assign(
+      new Error('conversation does not belong to this brief'),
+      { statusCode: 404 },
+    );
+  }
+
   await writeConversationMessage({
     conversationId: input.conversationId,
     briefId: input.briefId,

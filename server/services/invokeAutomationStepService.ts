@@ -70,6 +70,14 @@ export interface InvokeAutomationParams {
   stepRunId: string;
   run: RunScope;
   templateCtx: TemplateCtx;
+  /**
+   * When true, the gate check is skipped. Set by `resumeInvokeAutomationStep`
+   * after an `awaiting_approval` step has been explicitly approved — the
+   * approval is the gate clearance, so re-running `resolveGateLevel` here
+   * would incorrectly hold the step at `review_required` again. Default
+   * false; the primary dispatch path keeps gate enforcement intact.
+   */
+  bypassGate?: boolean;
 }
 
 // W1-43: pure assertion — automation must have exactly one outbound webhook.
@@ -90,7 +98,7 @@ function assertSingleWebhook(automation: { id: string; webhookPath: string | nul
 export async function invokeAutomationStep(
   params: InvokeAutomationParams,
 ): Promise<InvokeAutomationResult> {
-  const { step, runId, stepRunId, run, templateCtx } = params;
+  const { step, runId, stepRunId, run, templateCtx, bypassGate } = params;
 
   const baseEventPayload = {
     runId,
@@ -234,8 +242,10 @@ export async function invokeAutomationStep(
 
   const gateLevel = resolveGateLevel(step, automation);
 
-  // Gate check — if review required, return without dispatching
-  if (gateLevel === 'review') {
+  // Gate check — if review required, return without dispatching. Skipped when
+  // bypassGate is set: the resume path enters here after explicit approval,
+  // and re-running the gate would loop back to review_required forever.
+  if (gateLevel === 'review' && !bypassGate) {
     return { status: 'review_required', gateLevel, retryAttempt: 1 };
   }
 

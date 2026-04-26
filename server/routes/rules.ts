@@ -5,7 +5,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { saveRule } from '../services/ruleCaptureService.js';
 import { listRules, patchRule, deprecateRule } from '../services/ruleLibraryService.js';
 import { draftCandidates } from '../services/ruleCandidateDrafter.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { logger } from '../lib/logger.js';
@@ -127,8 +127,12 @@ router.post(
 
     logger.info('rule.draft_candidates.requested', { event: 'rule.draft_candidates.requested', artefactId, orgId: req.orgId! });
 
+    // conversation_messages, conversations, and tasks are FORCE-RLS — must run
+    // inside the request's org-scoped tx so the JSONB scan sees the org's data.
+    const tx = getOrgScopedDb('rules.draft-candidates');
+
     // Org-scoped JSONB scan for the approval card — GIN index (migration 0232) covers this
-    const rows = await db
+    const rows = await tx
       .select({ artefacts: conversationMessages.artefacts, briefId: conversations.scopeId })
       .from(conversationMessages)
       .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
@@ -172,7 +176,7 @@ router.post(
     }
 
     // Load brief context from task description
-    const [task] = await db
+    const [task] = await tx
       .select({ description: tasks.description })
       .from(tasks)
       .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, req.orgId!)))

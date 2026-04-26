@@ -5,6 +5,9 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { createBrief, getBriefArtefacts, getBriefMeta } from '../services/briefCreationService.js';
 import { handleConversationFollowUp } from '../services/briefConversationService.js';
 import { decideBriefApproval } from '../services/briefApprovalService.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { tasks } from '../db/schema/index.js';
+import { eq, and } from 'drizzle-orm';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
@@ -104,10 +107,29 @@ router.post(
       return;
     }
 
+    // Derive the canonical subaccountId from the brief row itself rather than
+    // trusting the client payload. The client only sends `uiContext.surface`,
+    // so a missing currentSubaccountId would otherwise default the
+    // classifier to 'org' scope and broaden the run for a subaccount-bound
+    // brief. Server-side lookup is the source of truth.
+    const tx = getOrgScopedDb('briefs.followup');
+    const [briefTask] = await tx
+      .select({ subaccountId: tasks.subaccountId })
+      .from(tasks)
+      .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, req.orgId!)))
+      .limit(1);
+
+    if (!briefTask) {
+      res.status(404).json({ message: 'Brief not found' });
+      return;
+    }
+
+    const canonicalSubaccountId = briefTask.subaccountId ?? subaccountId ?? uiContext?.currentSubaccountId;
+
     const context: BriefUiContext = {
       surface: uiContext?.surface ?? 'brief_chat',
       currentOrgId: req.orgId!,
-      currentSubaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      currentSubaccountId: canonicalSubaccountId ?? undefined,
       userPermissions: new Set<string>(),
     };
 
@@ -115,7 +137,7 @@ router.post(
       conversationId,
       briefId,
       organisationId: req.orgId!,
-      subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      subaccountId: canonicalSubaccountId ?? undefined,
       text: content.trim(),
       uiContext: context,
       senderUserId: req.user!.id,
