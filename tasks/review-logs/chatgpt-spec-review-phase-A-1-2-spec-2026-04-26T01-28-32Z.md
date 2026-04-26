@@ -231,3 +231,95 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0).
 
 Post-integrity sanity (4c): re-scanned cross-references — §4.7.2 / §4.7.4 / §4.7.5 / §4.7.6 (referenced in §12.3 fallback enforcement points) all present. §4.9.1 / §4.9.2 / §4.9.5 (referenced in §4.10) all present. §4.10.1 (referenced from §4.10.5) present. §9.11 / §10.3 / §19.2 (referenced from §9.11 severity-ladder edit) all present. No empty sections produced. Headings well-formed. Pass.
 
+---
+
+## Round 3 — 2026-04-26T (resumed session, round 3)
+
+### ChatGPT Feedback (raw)
+
+```
+Executive Summary
+
+Round 2 is strong. You've now closed the system interaction layer, which is where most real-world failures actually occur. At this point, the spec is no longer just well-defined, it is operationally resilient under concurrency, retries, and scale.
+
+Round 3 is not about adding more systems. It's about eliminating ambiguity in execution boundaries and enforceability.
+
+Round 3 — Final Precision Pass
+
+1. Idempotency Key Scope Enforcement (High Priority)
+You defined formats and lifecycle well. One remaining ambiguity: What guarantees that different operations don't accidentally share a key?
+Add a strict invariant: Idempotency keys MUST include: operation_type, scope, unique input fingerprint.
+Explicit rule: Same key across different operation types = INVALID. Collision behaviour: Same key + different payload → MUST throw (not reuse).
+
+2. Input Fingerprinting Definition (High Priority)
+You reference idempotency + retries, but not: How is "same request" actually determined?
+Add: Canonical fingerprint rule (deterministic serialization, sorted keys, no null noise). Hash function: implementation-agnostic, but must be stable. Explicit exclusions: timestamps, request_ids, transient metadata.
+
+3. Retry Budget + Termination Rules (High Priority)
+You define retry behaviour, but not limits. Add: Max retry count OR time-based budget. Backoff strategy: exponential or fixed, but explicitly stated. Terminal state: status: 'failed_permanent'. Rule: After terminal state, system MUST NOT retry automatically.
+
+4. Partial Success Data Contract Tightening (High Priority)
+You added partial success. Now enforce structure. Required fields: status, succeeded, failed, retryable, non_retryable.
+Rule: Every failure MUST be classified as retryable or non-retryable.
+
+5. "Single Source of Truth" Clarification (Medium Priority)
+Multiple layers storing state: idempotency, work-product, logs. Add one rule — which one is authoritative?
+Work-product rows = source of truth for outcome. Logs = diagnostic only. Idempotency store = execution control only.
+
+6. Time Semantics Standardisation (Medium Priority)
+All timestamps MUST be UTC, ISO 8601. Ordering rule: server-generated timestamps only; never trust client time.
+
+7. "At-Least-Once vs Exactly-Once" Explicit Model (Medium Priority)
+Execution model = at-least-once delivery. Outcome guarantee = effectively exactly-once via idempotency.
+
+8. Backpressure / Load Shedding Rule (Medium Priority)
+If system exceeds queue depth OR latency threshold, then MUST: reject new work OR defer with explicit status: 'rejected_over_capacity'.
+
+9. Versioned Contract for Monitor Outputs (Low-Medium Priority)
+Monitor output MUST include schema_version: 'v1'. Rule: Consumers MUST branch on version if changed.
+
+10. CI Enforceability Hook (Low Priority, High Leverage)
+Add one line per major invariant category: "This invariant MUST have a corresponding CI test or gate."
+
+What to Watch For (Subtle Risk)
+You are now approaching over-specification risk. Signs to avoid: duplicating the same rule in multiple sections, introducing alternative wording for the same invariant, adding "just in case" clauses. If something is already defined once, reference it, don't restate it.
+
+Final Verdict
+After Round 3, you'll have a spec that is extremely difficult to break in practice. Recommended Next Step: Run Round 3. After that, do a consistency + deduplication pass only, then lock the spec and move to implementation.
+```
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Idempotency key scope enforcement (operation_type + scope + identity component; cross-operation collision INVALID; same-key-different-payload MUST throw) | technical | partial-apply (structural rule) + reject (per-action restatement) | auto (mixed) | high | Per-action key formats already in §4.8 table embed operation_type + scope (`system`) + identity (e.g. `synthetic:<check_id>:<resourceId>:<bucketKey>`). Collision behaviour already spelled out in §4.8 storage table. The structural invariant — that this composition is the rule, not a coincidence — is implicit and worth naming once. Apply as one paragraph; do not duplicate the table. |
+| 2. Input fingerprinting via canonical JSON serialisation + stable hash (exclude timestamps / request_ids) | technical | reject | auto (reject) | medium | Already covered, structurally. §4.8 keys are constructed from named structured inputs (`incidentId`, `candidateId`, `bucketKey`); there is no "serialize the payload + hash" step because the components themselves are canonical. Adding JSON-canonicalisation would be a new failure surface (sort-order bugs, transient-field exclusion bugs) for zero benefit on the surface area this spec defines. The §4.8 structural-rule paragraph (finding 1) makes this explicit by stating "no payload-hash step." |
+| 3. Retry budget + termination rules (max retry count, backoff strategy, terminal state, no-auto-retry-after-terminal) | technical | reject | auto (reject) | medium | Already covered in §12.4 (pg-boss retry count = 3, exponential backoff inherited, "no retry past the documented count" rule, DLQ as terminal) + §9.8 (max 2 retries for prompt validation) + §9.9 (rate-limit cap = 2/fingerprint/24h as terminal for triage) + §4.7.5 (`agent_triage_failed` event written at terminal). Adding a `failed_permanent` status would duplicate `agent_triage_failed` (which already encodes terminal-failure with a `reason` field). Per ChatGPT's own over-specification warning, this is a restatement. |
+| 4. Partial-success contract — explicit `succeeded` / `failed` / `retryable` / `non_retryable` fields | technical | partial-apply (clarifying note) + reject (per-pair retryable field) | auto (mixed) | medium | §9.3's `SweepResult` already has `fired` (succeeded), `errored` (failed), `suppressed`, `insufficient_data`, `capped`. Adding per-pair `retryable`/`non_retryable` would be misleading because every errored pair is structurally retryable on the next 5-min tick (overlapping window). Apply: a clarifying paragraph in §9.3 stating the structural retryability rule + naming the upstream guardrails (rate limit, throttle, audit-row dedup) that bound retries. Reject: introducing the per-pair classification field. |
+| 5. Single source of truth clarification (work-product / logs / idempotency rank) | technical | apply | auto (apply) | medium | Genuine gap — the spec has all three layers but doesn't name the authoritative ranking. Adding §4.10.7 with the four-layer hierarchy (work-product / events / idempotency / logs) closes the "where do I read X from?" decision per-caller. Internal contract. |
+| 6. Time semantics — UTC, ISO 8601, server-generated only | technical | apply | auto (apply) | medium | The codebase already follows the convention (Postgres `NOW()`, server-issued sequence numbers per §4.9.9), but it's not stated in this spec. Restating once + applying to new paths in this spec prevents drift (e.g. a client-supplied `resolved_at` accidentally passing through). Adding §4.10.8. Internal convention. |
+| 7. At-least-once vs exactly-once delivery/outcome model | technical | apply | auto (apply) | medium | Spec mentions "at-least-once" once (§4.9.7 webhooks) but doesn't name the overall model. Naming both halves explicitly — at-least-once delivery, effectively-exactly-once outcome via idempotency — anchors the operational model. Adding §4.10.9. Internal contract. |
+| 8. Backpressure / load shedding rule (`rejected_over_capacity` status under overload) | technical | partial-apply (cap-signal table) + reject (`rejected_over_capacity` status) | auto (mixed) | medium | Spec already has caps + signals: sweep_capped (§9.3), triage_rate_limited (§9.9), throttle/idempotency-LRU evictions (§4.7.2), pg-boss-queue-stalled / dlq-not-drained (§8.2). The cap-signal events ARE the load-shedding mechanism. Apply: §4.10.10 names the existing caps + signals + the cross-cutting rule "no silent drop under load." Reject: introducing a `rejected_over_capacity` status — would create a third source of truth (per §4.10.7) that duplicates the existing cap-signal events. |
+| 9. Versioned contract for monitor outputs — schema_version + version-branching | technical | reject | auto (reject) | low | Already covered in §9.8 (`schema_version: 'v1'` on all agent-emitted JSON), §12.1 metadata column (every event row carries `schema_version: 'v1'`), §4.8 schema-evolution rules added in Round 2 (readers tolerate unknown / dispatch on version / old rows readable indefinitely). Restating would be the over-specification ChatGPT warned about. |
+| 10. CI enforceability hook — "this invariant MUST have a CI test or gate" tag per major invariant | technical | reject | auto (reject) | low | Contradicts §12.3 explicit posture: "No CI gate enforces dimension presence (the static-gates posture per spec-context.md does not extend to log-format linting). The convention is documented + reviewed in PRs." Per spec-context.md `runtime_tests: pure_function_only` + `testing_posture: static_gates_primary`, the spec already names CI gates where they apply (§4.7.1 RLS gate, §4.8 idempotency-key gate, §14 static gates). A blanket "every invariant must have a gate" tag would either be ignored (most invariants are documented conventions) or force test-infrastructure work that contradicts spec-context's deferral posture. |
+
+(Round 3: 10 findings — 4 auto-apply [1 partial, 1 partial, 1 full, 1 full + 2 partials = 4 distinct application actions], 4 auto-reject, 0 deferred, 0 user-facing, 0 escalations. Per ChatGPT's own over-specification warning, the reject ratio is high by design — most findings restated already-covered rules.)
+
+### Applied (auto-applied technical findings)
+
+- [auto] Added structural-rule paragraph + cross-operation-collision rule + same-key-different-payload rule + "why no payload fingerprinting" rationale to §4.8 — finding 1 (apply portion). Findings 2 (reject) is referenced inline in the new "no payload-hash step" rationale.
+- [auto] Added §4.10.7 Source-of-truth hierarchy (4-layer ranking: work-product / events / idempotency / logs) + cross-cutting rule "when two layers disagree, work-product wins" — finding 5.
+- [auto] Added §4.10.8 Time semantics (UTC, ISO 8601, server-generated, never trust client time, applied to DB / logs / events / API responses) — finding 6.
+- [auto] Added §4.10.9 Delivery vs outcome model (at-least-once delivery + effectively-exactly-once outcome via idempotency, with the "no exactly-once delivery attempts" callout) — finding 7.
+- [auto] Added §4.10.10 Backpressure / load-shedding (table of existing caps + their signal events + cross-cutting "no silent drop under load" rule + "why no rejected_over_capacity status" rationale referencing §4.10.7 source-of-truth hierarchy) — finding 8 (apply portion).
+- [auto] Added per-pair-retryability clarification paragraph to §9.3 partial-success contract (errored pairs retry implicitly via next tick; no per-pair `retryable`/`non_retryable` field; upstream guardrails are the actual retry bounds) — finding 4 (apply portion).
+- [auto] Updated §4.10 opener (subsection-roadmap line "ten subsections cover...") + closing rule line ("ten interaction rules" replacing prior "six") — count update consequent to the four new subsections.
+
+### Integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Cross-references introduced this round: §4.10.7 (referenced from §4.10.10 "rejected_over_capacity" rationale) — present. §4.7.2 / §9.3 / §9.9 / §8.2 / §4.1 / §4.2 / §12.1 (referenced in §4.10.10 cap table) — all pre-existing, all present. §4.6 / §4.8 inherited fingerprint reference (in §4.8 structural-rule paragraph) — present. §11.2 `metadata.resolved_at` reference (in §4.10.8) — present. §4.9.7 (in §4.10.9) — present. §12.3 no-silent-fallback rule (in §4.10.10) — present. §12.4 retry counts (in finding 3 rationale, not in spec body) — present. §9.8 schema-version (in finding 9 rationale) — present. §12.1 schema_version metadata (in finding 9 rationale) — present.
+
+Post-integrity sanity (4c): re-scanned section structure — §4.10 now has ten subsections (§4.10.1-§4.10.10), opener and closing rule both reference "ten" consistently, no empty subsections, no broken cross-references. §4.8 structural rule paragraph is additive (no removal of prior content), key-format table preserved. §9.3 retryability paragraph is additive (no removal of prior partial-success contract). Pass.
+

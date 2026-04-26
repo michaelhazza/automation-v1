@@ -571,6 +571,18 @@ This subsection makes the per-component failure surface explicit. Constraints de
 
 **Why a deterministic key.** Random keys defeat the purpose — two retries of the same logical action with different random keys are treated as two distinct actions, double-executing the side effect. A deterministic key is the same on retry as on the original; idempotency layer collapses them.
 
+**Structural rule for keys.** Every key in the table below is constructed from three components — there is no payload-hash step, because the components themselves are canonical:
+
+1. **Operation type** — the action class (`triage`, `sweep`, `synthetic`, `baseline-refresh`, `sweep-tick`, `synthetic-checks`). Always the leading namespace component.
+2. **Scope** — the tenant/system boundary the action runs against. For this spec, every scope is `system` (the monitor is system-scoped). Phase 5+ tenant-scoped monitoring will introduce per-`org_id` / per-`subaccount_id` namespacing; the structural slot is reserved by convention even though every current key implicitly fills it with `system`.
+3. **Identity component** — the input fingerprint that uniquely identifies this logical action: `incidentId`, `(candidateKind, candidateId, bucketKey)`, `(checkId, resourceId, bucketKey)`, etc. Always derived from named action inputs; never from JSON-serialised payload + hash. Per §4.6 and the inherited Phase 0/0.5 fingerprint, the identity component is canonical by construction.
+
+**Cross-operation collision is invalid.** Two actions with different operation types MUST NOT share the same key. The leading-namespace convention (`triage:`, `sweep:`, `synthetic:`, etc.) enforces this structurally — a `triage:<incidentId>` key cannot collide with a `sweep:<candidateKind>:<candidateId>:<bucketKey>` key because the namespaces differ. Same key + different operation types is therefore a code bug (caller forgot the namespace prefix), not a runtime case the system must tolerate.
+
+**Same key + different payload behaviour.** Per the storage table below, every layer's collision posture is named explicitly. The cross-cutting rule: the system MUST NOT silently merge differing payloads under the same key. Either the second write is rejected (work-product layer — `write_diagnosis`, `recordPromptFeedback`), or the mismatch is logged at `warn` and treated as a fresh row (LRU layer — see §4.7.2 + storage table below), or the second enqueue's payload is discarded and the singleton-collision return is logged (pg-boss layer). No silent merge anywhere.
+
+**Why no payload fingerprinting.** Payload-hash idempotency is the right pattern when the caller cannot pre-derive a stable key (e.g. arbitrary HTTP webhook bodies). Every key in this spec's surface is derivable from named structured inputs (`incidentId`, `candidateId`, `bucketKey`) — adding a JSON-canonicalisation + hash step would be an extra failure surface (sort-order bugs, transient field exclusion bugs) for zero benefit. Phase 5+ may introduce payload-hash keys if a caller surface emerges that needs them; not built now.
+
 **Key-format conventions.**
 
 | Action class | Key format | Storage | Expiry |
@@ -699,6 +711,8 @@ Ordering matters for some paths and is irrelevant for others. Every path introdu
 
 §4.7 (failure modes), §4.8 (idempotency), §4.9 (concurrency), and §9.3 (partial-success) each define one axis of system behaviour. They interact under real load — a retry that hits an idempotency layer, a partial-success that retries only failed components, a failure that must still persist its idempotency record. Without naming the interactions explicitly, the executor will pick a local rule per-axis and the system will drift.
 
+The ten subsections below cover: (1-4) the four primary axis interactions, (5-6) liveness and in-flight-duplicate semantics, (7) source-of-truth hierarchy across layers, (8) time semantics, (9) the at-least-once-delivery / exactly-once-outcome split, and (10) backpressure / load-shedding posture.
+
 **4.10.1 Idempotency × Retry.** Retries MUST reuse the same idempotency key as the original attempt. A new key would mean "this is a new logical operation," which is what idempotency is designed to prevent. Concretely:
 
 - pg-boss retries inherit the original job's payload; `idempotencyKey` is part of the payload, so re-execution sees the same key.
@@ -737,7 +751,52 @@ Ordering matters for some paths and is irrelevant for others. Every path introdu
 - Read-style requests (e.g. operator polling the incident drawer while the agent is mid-run) read the current state of `system_incidents` — `triage_attempt_count > 0 AND agent_diagnosis IS NULL AND last_triage_attempt_at > NOW() - 5 min` is the in-flight indicator (§10.1 loading state). The drawer renders a skeleton; no re-trigger.
 - **No new DB column for in-flight state.** The combination of `triage_attempt_count`, `agent_diagnosis`, `last_triage_attempt_at` already encodes the four observable states (idle, in-flight, succeeded, failed-but-retryable). Adding a status column would duplicate state and create the "two sources of truth" failure mode that NG-class rules explicitly prevent.
 
-**Rule (cross-cutting):** When a new path is introduced (in this spec or downstream), the executor confirms its behaviour against the six interaction rules above before merging. The conformance check is part of the spec-conformance pass — not a runtime gate.
+**4.10.7 Source-of-truth hierarchy.** Multiple layers store state about the same logical action — work-product rows, audit events, idempotency caches, structured logs. Without a hierarchy, the executor will check whichever is convenient and the layers will silently disagree. The authoritative ranking:
+
+| Layer | Role | Authoritative for |
+|---|---|---|
+| **Work-product rows** (`system_incidents`, `agent_runs`, `system_monitor_baselines`, `system_monitor_heuristic_fires`) | Source of truth for outcome. The "what happened" answer. | Final state of the operation: did the agent diagnose? what was the runtime? what's the current baseline? Reading any other layer to answer this is wrong. |
+| **`system_incident_events`** (audit log) | Fidelity record of state transitions. The "how did we get here" answer. | History — every state change appends a row; rows are never mutated or deleted. Used for audit, drill-down, debugging, downstream training data. NOT used as the current-state read path. |
+| **Idempotency layers** (LRU §4.1, throttle map §4.2, pg-boss singletons, work-product unique keys §4.8) | Execution-control only. | Whether to *execute* this attempt — never read for outcome. A "hit" in the LRU means "skip the write," not "the write succeeded." |
+| **Structured logs** (logger.info / logger.warn / logger.error per §12.3) | Diagnostic-only. | Operator debugging, structured-log-as-metric (per §12.3 queryable-dimensions invariant). NEVER the source of truth for outcome — logs may be sampled, dropped on shipping failure, or rotated. |
+
+**Cross-cutting rule:** When two layers disagree, the work-product row wins. If the LRU says "hit" but the work-product row is missing, the action did not complete (the LRU is execution-control only, see above). If the audit log says "agent_diagnosis_added" but `system_incidents.agent_diagnosis IS NULL`, the row write failed mid-flight — investigate, but trust the row. If a log line says one thing and the work-product row says another, the row is correct and the log is stale or misleading.
+
+**Why this matters.** Pre-production code naturally accumulates layers; without a hierarchy, "where do I read X from?" becomes a per-caller decision and the layers drift. Naming the rank once + applying it across §4 / §9 / §10 / §11 / §12 is the lever that prevents per-caller drift.
+
+**4.10.8 Time semantics.** All timestamps generated by code introduced in this spec MUST be UTC, server-generated, ISO 8601 in their text representation. Concretely:
+
+- DB columns of `timestamp` type are written via `NOW()` or equivalent — never via a client-supplied value. The Postgres default (UTC) is the storage convention.
+- Structured log timestamps are server-generated by the logger middleware (existing pattern) — call sites do not pass a `timestamp` field.
+- Event-row `created_at` is `NOW()` at append time; `metadata.resolved_at` (per §11.2) is server-derived from the resolve mutation, not from the client.
+- Cross-process / cross-tier ordering relies on server-issued sequence numbers + server `created_at` (per §4.9.9 ordering rules), never on client clocks.
+- API responses serialise timestamps as ISO 8601 with `Z` suffix (UTC). The client renders in the operator's local zone for display only — never round-trips back to the server as authoritative.
+
+**Why the server-only rule.** Client clocks drift; phones lie about timezone; multi-process deployments under load see different OS clocks. Treating the server (with NTP-synced clocks) as the single time source is the cheapest correctness guarantee. This is consistent with the inherited Phase 0/0.5 convention; restating here so new paths in this spec do not accidentally accept client-supplied timestamps.
+
+**4.10.9 Delivery vs outcome model.** The execution model in this spec is **at-least-once delivery, effectively-exactly-once outcome via idempotency**. Naming both halves separately because conflating them is the failure pattern this rule prevents.
+
+- **At-least-once delivery.** pg-boss retries failed jobs (§12.4 — default 3 retries), `recordIncident` is called by multiple sources for the same logical event (sync mode + async worker + sweep cluster), webhooks fan out at-least-once (§4.9.7). The system never assumes "this will run exactly once" at the delivery layer.
+- **Effectively exactly-once outcome.** Idempotency (§4.8) is the layer that turns at-least-once delivery into effectively-once observable side effects. Two retries of the same triage produce one `agent_diagnosis_added` event row and one `agent_diagnosis` JSON. Two `recordIncident` calls with the same key produce one row. The DB row is the proof of "exactly once" at the outcome layer.
+- **The two halves combine.** Code at the delivery layer (handlers, routes, ingest paths) MUST tolerate retries silently — a second invocation observes the first's side effects via the idempotency layer and returns success without re-doing the work. Code at the outcome layer (work-product writes) MUST produce one observable result regardless of how many delivery attempts arrived.
+- **No "exactly-once delivery" attempts.** True exactly-once delivery is a distributed-systems hard problem and is not what this spec implements. The combination above is the operational reality — and the only reality that scales.
+
+**4.10.10 Backpressure / load-shedding.** Under sustained overload, the system MUST reject new work loudly rather than buffer indefinitely or silently drop. The mechanism uses existing primitives — there is no new "rejected_over_capacity" status because the existing cap-signal events already encode this:
+
+| Cap | Signal when hit | Behaviour |
+|---|---|---|
+| Sweep candidate cap (50) / payload cap (200 KB) per §9.3 | `sweep_capped` event with `excess_count`, `cap_kind` (§12.1) | Top-N proceed to triage; excess re-evaluated next tick. Operator sees the signal. |
+| Idempotency LRU full (10,000 entries) per §4.1 | `system_incident_ingest_idempotent_evictions` counter (§4.7.2) | Eviction is the soft fail; the metric increments. Acceptable degradation per §4.7.2. |
+| Throttle map full (50,000 fingerprints) per §4.2 | `system_incident_ingest_throttle_map_evictions` counter (§4.7.2) | Oldest fingerprints lose throttle; metric increments. Acceptable per §4.7.2. |
+| Triage rate limit (2/fingerprint/24h) per §9.9 | `agent_triage_skipped` event with `reason='rate_limited'` (§12.1) | Triage skipped; auto-escalation path may fire (§9.9). Operator sees the signal. |
+| pg-boss queue stall (job not draining) | `pg-boss-queue-stalled` synthetic check fires (§8.2) | High-severity incident produced; the synthetic-check pipeline is the load-shedding signal for queue overload. |
+| pg-boss DLQ accumulation | `dlq-not-drained` synthetic check fires (§8.2) | Same — DLQ growth is detected via the synthetic-check tick, not via a direct overload-status field. |
+
+**Cross-cutting rule:** No new code path introduced by this spec or downstream may silently drop work under load. Either it (a) collapses via an idempotency layer (no-op is fine — duplicate detection is not a drop), or (b) emits a cap-signal event when a cap is hit (sweep_capped / triage_rate_limited / synthetic-check fired), or (c) fails loudly via a structured-log line at `error` (§12.3 no-silent-fallback rule). The **third bucket — silent drop without signal — is forbidden**. This is the same rule as §12.3's no-silent-fallback invariant, applied to the load-shedding axis.
+
+**Why no `rejected_over_capacity` status.** A new status field would duplicate signal already encoded by the cap-signal events above — the operator-visible answer to "is the system shedding load?" is "is the `sweep_capped` event firing?" / "is `triage_rate_limited` firing?" Adding a separate `rejected_over_capacity` payload would be a third source of truth (see §4.10.7) that the operator must reconcile against the existing two.
+
+**Rule (cross-cutting):** When a new path is introduced (in this spec or downstream), the executor confirms its behaviour against the ten interaction rules above before merging. The conformance check is part of the spec-conformance pass — not a runtime gate.
 
 ## 5. Investigate-Fix Protocol
 
@@ -1457,6 +1516,8 @@ Returned from the handler, written to the structured log as the `sweep_completed
 - `failure` — the handler itself threw (e.g. `loadCandidates` failed). No fires propagate. pg-boss retries.
 
 **Retry eligibility:** `success` and `partial_success` are NOT retried — they completed (with the partial caveat for the latter). `failure` is retried by pg-boss up to its retry limit; after exhaustion the job lands in DLQ and the synthetic-check `dlq-not-drained` (§8.2) catches the persistence.
+
+**Per-pair retryability is structural, not a payload field.** The `errored` array does not classify each failed `(heuristic, candidate)` pair as `retryable` vs `non_retryable`. The classification is structural: errored pairs retry implicitly via the next 5-min tick's overlapping window. Adding a per-pair `retryable` boolean would be misleading because every errored pair is structurally retryable on the next tick by construction. The only way a pair becomes "non-retryable" is via the upstream guardrails — the rate limit (§9.9) caps how often a fingerprint can re-trigger triage, the heuristic-fires audit row (§4.5) deduplicates same-tick fires, and the throttle (§4.2) bounds tight-loop ingest. There is no per-pair terminal-failure state at the sweep-result layer because the next tick is the natural retry surface.
 
 **Downstream consumption.** The triage handler consumes the `fired` array — only fires propagate to triage. `errored`, `suppressed`, `insufficient_data` are audit-only; they land in `system_monitor_heuristic_fires` (§4.5) for tuning data but do not become incidents. `capped` is surfaced as a `sweep_capped` event for operator visibility.
 
