@@ -1045,25 +1045,408 @@ Per-check enable/disable is via heuristic-style suppression, not env vars — ke
 
 ## 9. Phase 2 — Monitor agent (day-one + 2.5)
 
+Phase 2 is the actual deliverable. Phase A built the substrate; Phase 1 generates volume; Phase 2 reads everything and produces the diagnosis + paste-ready prompt the operator works from.
+
 ### 9.1 Agent definition (`system_monitor`)
+
+**Pattern.** Follows the existing system-managed agent precedent — Orchestrator (migration 0157) and Portfolio Health Agent (migration 0068). Same `agents` row shape, same `isSystemManaged=true` flag, same lifecycle.
+
+**Seed migration.** A single `INSERT INTO agents (...)` row, idempotent via `ON CONFLICT (slug) DO NOTHING`. Lives in the same migration as the §4.6 schema additions (one migration for the whole Phase A surface, including this row).
+
+**Row shape (verbatim values that ship in the seed):**
+
+| Column | Value | Why |
+|---|---|---|
+| `slug` | `system_monitor` | Stable identifier; matches env-var prefix and queue-name prefix. |
+| `name` | `System Monitor` | Display name in the few admin surfaces that render it (agent list, run logs). |
+| `description` | `Watches every agent run, job-completed transition, and skill execution. Flags errors and soft-fail signals. Emits a paste-ready Investigate-Fix prompt per incident. Diagnosis-only — no remediation actions.` | Set once; not iterated weekly. |
+| `is_system_managed` | `true` | Excludes from non-sysadmin agent listings; routes through system-principal context. |
+| `scope` | `system` | New scope value introduced in §4.3. Distinct from `org` (Portfolio Health) and `subaccount` (user-created agents). |
+| `organisation_id` | `SYSTEM_OPERATIONS_ORG_ID` | The system org seeded by Phase 0/0.5. Mirrors Orchestrator. |
+| `subaccount_id` | The sentinel subaccount under System Operations | Mirrors Orchestrator. |
+| `model` | `claude-opus-4-7` (default) | Diagnosis quality matters more than per-run cost; cost lever is the rate limit (§9.9), not the model tier. Configurable via `SYSTEM_MONITOR_MODEL` env var. |
+| `system_prompt` | The Investigate-Fix Protocol authoring instructions (§9.7) | Stored on the row, not in code. Tunable without redeploy. |
+| `tools` (or equivalent skill-binding column) | The diagnosis-only skill set (§9.4) | No `destructiveHint: true` skills. Hard contract. |
+| `enabled` | `true` | Default on after migration. Kill switch is `SYSTEM_MONITOR_ENABLED` (§9.10), not the row flag. |
+| `created_at` | `NOW()` | Standard. |
+
+**Why not a config file.** The agent definition lives in the database because (a) the existing system-managed agent infrastructure expects it there, (b) the system prompt is long and benefits from editor tooling not available in migration files, and (c) tuning the system prompt without a redeploy becomes possible later if we ship a sysadmin "edit system-managed agent prompt" surface. The seed migration is the source of truth for v1; subsequent edits land via separate migrations or an admin route — not by re-running the seed.
+
+**Permissions.** The agent inherits the system-principal scope (§4.3). It can read every table the system principal has been granted; for Phase 2 that is: `system_incidents`, `system_incident_events`, `system_monitor_baselines`, `system_monitor_heuristic_fires`, `agent_runs` (read-only), `pgboss.job` (read-only), `pgboss.archive` (read-only), `connector_polls` (read-only), `skill_executions` (read-only), `llm_router_calls` (read-only). It can write to `system_incidents` (only the diagnosis columns from §4.5) and `system_incident_events` (only event types it owns — §12.1). It cannot write to anything else; the service-layer guard (§4.4) plus RLS enforce this.
+
+**No subaccount, no org-level visibility.** Operators see this agent in the system-admin agent list (if such a list exists or is added) but never in the per-subaccount or per-org agent views.
 
 ### 9.2 Triggers — incident-driven + sweep
 
+Two triggers, by design. Each catches a class of failure the other misses.
+
+**Trigger 1 — incident-driven.**
+
+When an incident is opened (`system_incident_events` row of type `incident_opened`), the ingestor fires-and-forgets a `system-monitor-triage(incidentId)` pg-boss job. The job is enqueued **synchronously inside the same transaction** that wrote the event row, using the outbox pattern (`phase-0-spec.md §5.8.1` async-mode discussion) — same connection pool, transactional `pgboss.send` inside the Drizzle tx. If the tx rolls back, the enqueue rolls back with it; no phantom triage jobs.
+
+Conditions for enqueueing:
+
+- `incident.severity >= medium` (low-severity incidents do not auto-triage; operator can manually escalate per Phase 0/0.5).
+- `incident.source != 'self_check'` AND `incident.metadata.isSelfCheck != true` (avoid triaging the monitor's own dead-heartbeat — recursion loop).
+- `incident.triage_attempt_count < SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT` (rate limit, §9.9).
+- `SYSTEM_MONITOR_ENABLED == true` (kill switch).
+
+If any condition fails, no job is enqueued; the failure reason is logged with `incident.id` for audit. No `incident_events` row is written for the no-enqueue case — that would generate noise; the audit log is sufficient.
+
+**Trigger 2 — sweep.**
+
+A `system-monitor-sweep` pg-boss job runs every 5 minutes. Its purpose: catch **soft-fail** signals — runs that completed successfully but produced anomalous output, jobs that finished without their expected side effect, skill executions that returned the wrong shape. The reactive ingest hooks miss all of these because no error fires.
+
+The sweep job is described in detail in §9.3.
+
+**Why both, not one.**
+
+- Incident-driven covers known errors. The error already happened; the question is what to do about it. Triaging immediately keeps the operator's working memory aligned with the incident's freshness.
+- Sweep covers degraded-correctness signals on runs that did not error. These never produce an incident from the reactive path — only the sweep can see them. Phase 1 synthetic checks cover absence-of-events; Phase 2 sweep covers presence-of-degraded-events.
+
+A single trigger covering both classes would either run too often (every state transition) or too rarely (catch errors but miss soft fails). Two triggers, each scoped to its class, is cleaner.
+
+**Idempotency.** Both jobs use pg-boss `singletonKey`:
+
+- `system-monitor-triage`: singleton per `incidentId`. Two enqueues for the same incident collapse to one.
+- `system-monitor-sweep`: singleton per `bucketKey` (15-min window). Two enqueues for the same window collapse to one.
+
+This means a transient pg-boss queue glitch that re-enqueues a triage cannot produce duplicate triage runs.
+
 ### 9.3 Sweep job (`system-monitor-sweep`)
+
+**Job name:** `system-monitor-sweep` (kebab-case per `phase-0-spec.md §0.6`).
+
+**Tick:** every 5 minutes via pg-boss schedule. Configurable via `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES`.
+
+**Window:** rolling 15 minutes. The window overlaps adjacent ticks by 10 minutes intentionally — a degraded run completing right at a tick boundary should not be missed. Heuristic fires are deduplicated via the `system_monitor_heuristic_fires` audit table (§4.5) and the per-fingerprint throttle (§4.2), so window overlap does not produce duplicate incidents.
+
+**Two-pass design.** This is the load-bearing performance decision (Q8 §0.2). Without it, every sweep would deep-read every run in the window — token cost and runtime would blow up on busy days.
+
+- **Pass 1 — cheap pre-pass.** Iterate the heuristic registry (§6) over each candidate (agent runs, jobs, skill executions, llm calls in the window). Each heuristic's `evaluate` reads only summary fields — `runtime_ms`, `output_length_chars`, `success`, `final_message_role`, etc. — plus the baseline reader (§7.5). No full payloads loaded; no LLM calls. Aim: ≤200 ms per candidate, ≤30 s total per tick.
+- **Pass 2 — deep-read on fire.** Candidates with ≥1 high-confidence fire (per-fire confidence ≥ `SYSTEM_MONITOR_MIN_CONFIDENCE`, default 0.5) are escalated to deep-read: full agent-run payload, full skill-execution input/output, full message history. This is the expensive pass; the pre-pass is the gate that keeps it bounded.
+
+**Input cap (Q8 §0.2).** Hard ceiling per sweep:
+
+- Max 50 candidates accepted into Pass 2, OR
+- Max 200 KB of total log payload across deep-reads, whichever hits first.
+
+If the pre-pass identifies more than 50 candidates as triage-worthy, the sweep takes the top-50 by per-fire confidence and emits a `sweep_capped` event for the rest. The capped candidates are not lost — they will be re-evaluated on the next sweep, and the `sweep_capped` event itself is a signal worth surfacing on a sysadmin dashboard (Phase 3).
+
+**Sweep handler shape:**
+
+```ts
+bossHandler('system-monitor-sweep', async (job) => {
+  return withSystemPrincipal(async (ctx) => {
+    if (!isEnabled('SYSTEM_MONITOR_ENABLED')) return;
+    const window = computeSweepWindow(ctx.now);
+    const candidates = await loadCandidates(ctx, window);  // summary fields only
+    const fires: HeuristicFire[] = [];
+    for (const candidate of candidates) {
+      for (const heuristic of HEURISTICS) {
+        if (!matchesPhase(heuristic)) continue;
+        const result = await heuristic.evaluate(ctx, candidate);
+        if (result.fired && result.confidence >= MIN_CONFIDENCE) {
+          await writeHeuristicFireRow(ctx, heuristic, candidate, result);
+          fires.push({ heuristic, candidate, result });
+        } else if (result.fired === false && 'reason' in result) {
+          await writeHeuristicFireRow(ctx, heuristic, candidate, result);  // audit suppressed/insufficient
+        }
+      }
+    }
+    const triagable = selectTopForTriage(fires, INPUT_CAP);
+    for (const cluster of triagable) {
+      await enqueueTriage(ctx, cluster);
+    }
+    if (fires.length > triagable.length) {
+      await writeSweepCappedEvent(ctx, fires.length - triagable.length);
+    }
+  });
+});
+```
+
+**Clustering.** Multiple heuristics firing on the same candidate produce a single triage invocation, not one per heuristic. The agent receives the cluster — list of fires plus the candidate — as one piece of evidence. This is what makes "five symptoms of one underlying cause" appear as one diagnosis, not five.
+
+**Idempotency.** Each triage enqueue carries an `idempotencyKey` of `sweep:<candidateKind>:<candidateId>:<bucketKey>`. Two sweeps that converge on the same candidate within the same bucket collapse to one triage run.
+
+**Failure isolation.** A heuristic throwing in `evaluate` is logged and skipped. The sweep does not abort. A bad heuristic in the registry cannot break the sweep for all heuristics.
 
 ### 9.4 Diagnosis-only skills
 
+The agent's tool set is **read-only**. This is the architectural hard line that separates Phase 2 from Phase 3. No skill in this set takes a side effect outside the diagnosis columns of the incident row the agent is currently triaging.
+
+**Day-one skill set:**
+
+| Skill ID | Reads | Returns | Why |
+|---|---|---|---|
+| `read_incident` | `system_incidents` row by id | full row + recent events | Anchor — the agent always starts here. |
+| `read_agent_run` | `agent_runs` row by id | run row + message history (capped at 50 messages or 100 KB) | Required for any agent-run-source incident or sweep cluster. |
+| `read_skill_execution` | `skill_executions` row by id | execution row + input + output (capped) | Required for skill-source incidents. |
+| `read_recent_runs_for_agent` | `agent_runs` filtered by `agent_id` and time window | recent runs (summary, capped at 20) | For "is this a repeated pattern" questions. |
+| `read_baseline` | `system_monitor_baselines` row by `(entity_kind, entity_id, metric_name)` | the current baseline row | For "is this anomalous against history" questions. |
+| `read_heuristic_fires` | `system_monitor_heuristic_fires` filtered by entity / window | recent fires (capped at 20) | For "what other heuristics flagged this entity recently" questions. |
+| `read_connector_state` | `connector_configs` + `connector_polls` recent rows | config + last 10 polls | For connector-source incidents. |
+| `read_dlq_recent` | `pgboss.archive` filtered to `state='failed'` and recent | last 20 failed jobs (summary) | For job-source / DLQ-source incidents. |
+| `read_logs_for_correlation_id` | structured-log query by `correlationId` | matched log lines (capped at 200 lines or 100 KB) | For tracing a single failed request end-to-end. (Implementation note: depends on the log source — see `phase-0-spec.md §2.8` for the process-local rolling buffer; can be upgraded to a durable log store later.) |
+| `write_diagnosis` | n/a | writes `agent_diagnosis` JSON, `agent_diagnosis_run_id`, and `investigate_prompt` text on the **incident currently being triaged** | The sole write skill. Locked to the `incidentId` passed at triage start. |
+| `write_event` | n/a | appends `system_incident_events` row of an allowed type (`agent_diagnosis_added`, `agent_triage_skipped`, `prompt_generated`) | Audit trail of what the agent did. |
+
+**What's deliberately missing:**
+
+- No `update_incident_status`. Status changes belong to the operator. The agent annotates; it does not move the incident through the lifecycle.
+- No `escalate_to_dev_agent`. Phase 4. The agent emits a prompt; the operator pastes it.
+- No `retry_job`, `restart_connector`, `disable_flag`, `revoke_subaccount`. Phase 3 actions.
+- No `create_pull_request`. Phase 4.
+- No `read_user_data` or any tenant-scoped reads. The agent operates on system-scoped tables only.
+
+**Skill registration.** Skills are registered in the existing skill catalogue with `destructiveHint: false` on every read skill, `destructiveHint: false` on `write_diagnosis` (it writes only to incident rows the agent owns and only to the four diagnosis columns), and `destructiveHint: false` on `write_event` (append-only). No skill in this set has `destructiveHint: true`. A pre-merge linter — added in Slice C — verifies the agent's bound skill set has no destructive skills; mismatch fails CI.
+
+**Tool result size cap.** Every read skill enforces a per-call response cap (rows × max bytes). The cap is set per skill in §9.4 above; the agent's system prompt also tells it to summarise rather than re-fetch when a result is truncated.
+
 ### 9.5 Day-one heuristic set (Phase 2.0)
+
+These heuristics ship in Slice C, before Phase 2.5. They are deliberately **categorical or single-baseline** — each one looks at one signal and answers one question. Cross-run / systemic heuristics are Phase 2.5 (§9.6).
+
+Each heuristic's full metadata (severity, confidence, expectedFpRate, suppressions, requiresBaseline) lives in its module file; the table below summarises the firing condition and the reason it earns a slot in v1.
+
+**Agent quality (read on every agent run, sweep + incident-driven):**
+
+| ID | Fires when | Severity | Why it earns a v1 slot |
+|---|---|---|---|
+| `empty-output-baseline-aware` | Agent run completed successfully but `output_length_chars == 0` AND baseline `p50 > 200`. | medium | Empty output on an agent that normally produces text is the cleanest soft-fail signal we have. |
+| `max-turns-hit` | `agent_runs.terminated_reason == 'max_turns'` (or equivalent). | medium | The agent ran out of budget mid-task; output is almost certainly incomplete. |
+| `tool-success-but-failure-language` | Final assistant message contains a regex match for "I couldn't" / "I'm unable" / "failed to" / "I don't have access" AND the run is marked successful. | medium | Most-cited soft-fail in the agent-quality literature; cheap to detect. |
+| `runtime-anomaly` | `runtime_ms > baseline.p95 * 5` AND `runtime_ms > absolute floor (1000 ms)`. | low | Catches slow runs without firing on tiny medians. The absolute floor avoids "5× a 50 ms baseline." |
+| `token-anomaly` | `token_count_input + token_count_output > baseline.p95 * 3` AND token total > 5,000. | low | Flags runs that consumed wildly more context than usual — often indicates a prompt loop or stuck-on-retry. |
+| `repeated-skill-invocation` | Same skill called > 5× in one run AND that skill's typical invocation count is ≤ 2. | low | Stuck loops where the agent calls the same tool repeatedly. |
+| `final-message-not-assistant` | Last message in run is `tool` or `system`, not `assistant`. | medium | The agent terminated mid-tool-call — operator never received a coherent response. |
+| `output-truncation` | Final message ends abruptly (no terminating punctuation, output length within 10% of model's max output) | low | Probable truncation; flags need-to-extend-max-tokens. |
+| `identical-output-different-inputs` | Two runs of the same agent in the last hour produced identical output bytes despite different inputs. | medium | The agent is ignoring its input — either a prompt bug or a stuck cache. |
+
+**Skill execution (read on every skill execution):**
+
+| ID | Fires when | Severity | Why |
+|---|---|---|---|
+| `tool-output-schema-mismatch` | Skill returned a payload that fails its declared output schema. | medium | Catches schema drift at the connector or third-party API level before the agent consumes garbage. |
+| `skill-latency-anomaly` | Skill `runtime_ms > baseline.p95 * 5` AND > 500 ms. | low | Skill-side analogue of runtime-anomaly; absolute floor prevents flapping on tiny medians. |
+| `tool-failed-but-agent-claimed-success` | Skill returned an error but the assistant message after it claims the action succeeded. | high | The agent is confabulating success. Quality issue, possibly user-facing. |
+
+**Infrastructure (read on every job / connector poll / llm call):**
+
+| ID | Fires when | Severity | Why |
+|---|---|---|---|
+| `job-completed-no-side-effect` | A pg-boss job marked `completed` but its expected side effect (per a per-job manifest) is absent. | critical | The job system thinks it succeeded; reality says no. Highest-cost class of silent failure. |
+| `connector-empty-response-repeated` | A connector returned an empty result set ≥ 3 times in 1 hour where its baseline median sample size is ≥ 1. | medium | Either upstream went silent or our query went wrong; both are worth investigating. |
+
+**Total day-one count: 14 heuristics.** Calibrated to "high signal, low FP rate, cheap to evaluate." Each ships with a positive test (the heuristic fires on a synthetic example) and a negative test (it does not fire on a baseline-normal example).
+
+**Per-heuristic suppression rules — examples:**
+
+- `empty-output-baseline-aware` suppresses if the agent's `expected_outputs` schema declares an optional output (some agents legitimately produce empty output for "no-op" inputs).
+- `max-turns-hit` suppresses if the run's input includes the metadata flag `max_turns_acceptable: true` (operator-marked acceptable cap).
+- `runtime-anomaly` suppresses if the run is the first run for a newly-deployed agent version (cold-start).
+
+Suppressions are calibrated against the audit data (§6.3) over the first month of production traffic, then iterated.
 
 ### 9.6 Phase 2.5 heuristic expansion (cross-run / systemic)
 
+Phase 2.5 lands in the **same session as Phase 2.0** (Slice C → continuing into Slice D), once baseline data is sufficient. The expansion is layered onto the same registry — no breaking interface changes, no new code paths, just more `Heuristic` modules and more entries in the registry array.
+
+**What Phase 2.5 adds:**
+
+| ID | Fires when | Severity | Why this is 2.5 not 2.0 |
+|---|---|---|---|
+| `cache-hit-rate-degradation` | LLM router cache hit rate over the last 1h is below `baseline.p50 - 0.20` (absolute drop of 20 percentage points). | low | Requires baseline. Catches "we accidentally introduced unique tokens into a previously-cached prompt." |
+| `latency-creep` | Agent or skill runtime p95 over the last 1h is > baseline p95 * 1.5 AND > baseline p95 + 500ms. | low | Slow drift is hard to see from a single run; needs windowed comparison. |
+| `retry-rate-increase` | Job queue retry rate over the last 1h is > baseline p50 * 2 AND > 10 retries/h absolute. | medium | Often a precursor to a saturating queue; catches degradation before stall. |
+| `auth-refresh-spike` | Connector auth-refresh rate over the last 1h is > baseline p95 * 3. | medium | Indicates token expiry storms or upstream auth instability. |
+| `llm-fallback-unexpected` | LLM router fell back from primary to secondary model > 10× in 1h despite primary's baseline 5xx rate < 0.5%. | medium | Catches "primary is degraded but the router thinks it's fine" — usually a config or threshold misalignment. |
+| `success-rate-degradation-trend` | Agent or skill success rate over the last 4h is trending down: linear-regression slope < -0.05/hour AND last-hour rate < baseline.p50 - 0.10. | high | The trend is the signal; a single dip is not enough. |
+| `output-entropy-collapse` | Output text entropy (token-level Shannon entropy) over the last 1h is < baseline.p50 * 0.5. | medium | The agent is producing more repetitive output than usual — often a sign of prompt corruption or model degradation. (Computation cost: cheap if we sample; full computation only on fire.) |
+| `tool-selection-drift` | An agent's tool-selection distribution over the last 1h diverges from its baseline distribution by KL divergence > threshold. | medium | The agent has changed how it decomposes problems. Often benign (new task mix), sometimes a regression. |
+| `cost-per-outcome-increasing` | Tokens-per-successful-run for an agent over the last 4h is > baseline p95 * 1.5. | low | Flags "the agent is grinding more without producing better outputs" — useful for budget hygiene. |
+
+**Total Phase 2.5 additions: 9 heuristics.** Combined day-one + 2.5: 23 heuristics.
+
+**Why these are 2.5, not 2.0:**
+
+- Each requires either a richer baseline (windowed trends) or cross-run aggregation that doesn't exist in 2.0's per-candidate evaluator.
+- The pre-pass cost per candidate is higher — windowed reads vs single-row reads — so they only make sense after the 2.0 set has proved its FP profile and the budget has room.
+- They benefit from real production data for FP-rate calibration. Shipping them on day one with author's-best-guess metadata produces noise; shipping them after 2.0 has accumulated `system_monitor_heuristic_fires` data lets us calibrate against reality.
+
+**Shipping order inside the spec.** Slice C ships day-one (14 heuristics) end-to-end. Slice D ships Phase 2.5 (9 heuristics) plus the additional baseline metrics they require. Slice D is smaller because the registry, agent, sweep job, prompt template, and feedback loop all already exist.
+
 ### 9.7 Agent prompt template (Investigate-Fix Protocol consumer)
+
+The agent's `system_prompt` (stored on the `agents` row) carries authoring instructions that produce prompts conforming to the Investigate-Fix Protocol (§5.2).
+
+**Prompt structure (stored on the `agents.system_prompt` column):**
+
+```
+You are the System Monitor — a system-managed diagnostic agent. Your job is to
+read evidence about a single incident or sweep cluster, form a diagnosis, and
+emit a paste-ready Investigate-Fix prompt that a human operator will hand to a
+local Claude Code session.
+
+## Operating principles
+
+1. You diagnose; you do not remediate. The skills available to you are read-
+   only with two exceptions: `write_diagnosis` (writes to the incident row
+   you are triaging) and `write_event` (appends an audit event). You have
+   no other write access. If you find yourself wanting to take an action,
+   describe it in the prompt for the human operator instead.
+
+2. Be honest about uncertainty. If you cannot confidently identify a root
+   cause, say so. State your confidence (low / medium / high) and your top
+   alternative hypothesis.
+
+3. Cite evidence. Every claim in your diagnosis must be backed by a specific
+   read — a row id, a file:line reference, a baseline reading, a heuristic
+   fire id. Never fabricate a file path or a line number. If you do not know
+   a precise location, say "see <table_name>.<column_name>" or refer to the
+   stable resource identifier.
+
+4. Surface what you cannot see. If your evidence is thin (e.g. you read 5
+   recent runs but the baseline window is 7 days), say so. Recommend the
+   operator run additional queries.
+
+## Output contract
+
+Every triage produces exactly two artefacts via tools:
+
+1. `write_diagnosis(incidentId, { hypothesis, evidence, confidence, generatedAt })`
+   — your structured diagnosis. Hypothesis is one paragraph plain English.
+   Evidence is an array of { type, ref, summary } objects. Confidence is
+   "low" | "medium" | "high".
+
+2. `write_diagnosis(incidentId, { investigatePrompt: <text> })` — the paste-
+   ready prompt, conforming to the Investigate-Fix Protocol below. Note: in
+   v1 these are stored in two columns on the same row but written via the
+   same skill — one call, two fields.
+
+You also write one `write_event` row of type `agent_diagnosis_added` with
+`metadata.agent_run_id` set to your run id.
+
+## Investigate-Fix Protocol
+
+[Full §5.2 template inlined here — verbatim.]
+
+## Required sections
+
+- Protocol, Incident, Problem statement, Evidence, Hypothesis, Investigation
+  steps, Scope, Expected output, Approval gate.
+
+## Optional section
+
+- Do not change without confirmation.
+
+## Forbidden
+
+- Any instruction that tells Claude Code to commit, push, deploy, or merge
+  without explicit operator approval.
+- Any "auto-fix" instruction. The operator approves; the operator commits.
+- Any reference to skills, tools, or system-monitor agent internals — the
+  prompt is for an investigator who knows the codebase but does not know
+  this agent's internals.
+
+## Length
+
+- Target 400–800 tokens per prompt.
+- Hard cap 1,500 tokens.
+- If you exceed the hard cap, trim Evidence or Investigation steps and add
+  a note that you trimmed.
+
+## Worked example
+
+[One short anonymised worked example included verbatim.]
+
+## When in doubt
+
+If your evidence is too thin to form a hypothesis, say so explicitly. Output
+a prompt that says "Hypothesis: insufficient evidence" and asks Claude Code
+to investigate fresh. This is acceptable; do not fabricate a hypothesis to
+avoid an empty section.
+```
+
+**Why on the row, not in code.** The system prompt is iterated based on the feedback loop (§11). Storing it on the row enables tuning without redeploy once an admin "edit system-managed agent prompt" surface exists. For v1 the row value is set by migration; future updates land via additional migrations or a sysadmin-only mutation.
+
+**Versioning.** The prompt itself is not versioned at runtime. Git history of the migration files is the version log. The Investigate-Fix Protocol doc (`docs/investigate-fix-protocol.md`) is also git-versioned. When the protocol changes meaningfully, both the doc and the agent's stored prompt update in the same commit.
 
 ### 9.8 `investigate_prompt` output contract
 
+The agent calls `write_diagnosis(incidentId, { investigatePrompt: <text> })` once per triage. This populates `system_incidents.investigate_prompt` (§4.5).
+
+**Validation at write time:**
+
+- Required sections (§5.2) must all be present. Validation regex: header strings present in order. Missing → write rejected with a typed error; the agent retries (max 2 retries built into the agent's run loop); after 2 failures, the triage emits `agent_triage_failed` event with `reason='prompt_validation'` and the operator sees a triage-failed badge in the UI.
+- Length: 200–6,000 chars (lower bound rejects truncated empty prompts; upper bound is ~1,500 tokens with margin).
+- No instruction text matching the "forbidden" patterns (no "git push", no "merge to main", no "auto-deploy"). Pattern list in code.
+
+**Idempotency.** `write_diagnosis` is idempotent on `(incidentId, agentRunId)`. The agent's own run loop will not call it twice; if the agent's process crashes mid-call and pg-boss retries, the second attempt is a no-op (the existing row already has the diagnosis). The audit event `agent_diagnosis_added` is also idempotent on `(incidentId, agentRunId)`.
+
+**One prompt per incident.** Subsequent triages of the same incident (rate-limit allowing — §9.9) overwrite the prior diagnosis and prompt. The prior values are not preserved on the incident row; the audit trail is the `system_incident_events` log, which has the full history of `agent_diagnosis_added` rows.
+
+**Display.** The triage drawer (§10) renders the `investigate_prompt` text inside a copy-formatted block with a one-click copy button. No syntax highlighting beyond markdown; the prompt is markdown-formatted and the existing markdown renderer is reused.
+
 ### 9.9 Rate limiting
 
+Rate limiting is the bound on **agent invocation cost**. Every triage call costs LLM tokens; an unbounded agent that re-triages the same incident on every recurrence becomes a cost lever pointed at noise.
+
+**Per-fingerprint rate limit.**
+
+- Max **2 triage attempts per fingerprint per 24-hour rolling window**.
+- Counter: `system_incidents.triage_attempt_count` (§4.5).
+- Last attempt: `system_incidents.last_triage_attempt_at` (§4.5).
+- 3rd attempt within window: triage is **skipped**; an `agent_triage_skipped` event is written with `reason='rate_limited'`. The incident remains in the operator's queue, ready for manual escalate-to-agent (Phase 0.5) if the operator wants to override.
+
+**Why per-fingerprint, not per-incident.** A new incident on an existing fingerprint (recurrence after resolution) inherits the fingerprint's recent triage history. Two clean diagnoses in 24 hours are usually enough to learn anything; a third triage is unlikely to find something the first two missed.
+
+**Auto-escalation past the rate limit.**
+
+- If a fingerprint hits its rate limit AND the incident's `severity == high|critical` AND the incident is still open after the rate-limit window expires, an `agent_auto_escalated` event is written and the existing manual-escalate path (Phase 0.5 §10.2) is invoked **automatically** — pointing the incident at the system-ops sentinel subaccount, where a sysadmin can pick it up.
+- Auto-escalation respects the existing escalation guardrails (`phase-0-spec.md §10.2.5`) — `escalation_count <= 3`, the existing 5-min cooldown — so it cannot loop.
+- If the guardrails block the auto-escalation, the incident sits in the open queue with a `agent_escalation_blocked` event; sysadmin sees it on their next visit to the page.
+
+**Sweep clustering interacts with rate limiting.** A sweep cluster groups multiple heuristic fires on one candidate into one triage. The triage counts as one against the rate limit. So a noisy candidate that hits 5 heuristics produces one triage, not five.
+
+**Rate-limit env vars** (defaults; configurable):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT` | `2` | Per-fingerprint cap. |
+| `SYSTEM_MONITOR_TRIAGE_RATE_LIMIT_WINDOW_HOURS` | `24` | Rolling window. |
+| `SYSTEM_MONITOR_AUTO_ESCALATE_AFTER_RATE_LIMIT` | `true` | Whether to auto-escalate high/critical incidents past the rate limit. |
+
 ### 9.10 Kill switch + env vars
+
+**Master kill switch:** `SYSTEM_MONITOR_ENABLED` (default `true`). When `false`:
+
+- The incident-driven trigger (§9.2) does not enqueue `system-monitor-triage` jobs.
+- The sweep job (§9.3) returns early with no work.
+- Already-enqueued jobs are not aborted — pg-boss runs them; the handler short-circuits and emits an `agent_triage_skipped` event with `reason='disabled'`. This avoids a mid-flight surprise where a flag flip leaves orphan jobs in the queue.
+- Synthetic checks (§8) are not affected — they run under their own switch (`SYNTHETIC_CHECKS_ENABLED`).
+- Phase 0/0.5 incident sink is not affected — the kill switch is scoped to Phase 2 triage, not to the underlying error pipeline.
+
+**Per-trigger switches** for finer control:
+
+| Env var | Default | Effect when `false` |
+|---|---|---|
+| `SYSTEM_MONITOR_INCIDENT_DRIVEN_ENABLED` | `true` | Disables only the incident-driven trigger. Sweep continues. |
+| `SYSTEM_MONITOR_SWEEP_ENABLED` | `true` | Disables only the sweep job. Incident-driven continues. |
+
+**Other env vars introduced by this section:**
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SYSTEM_MONITOR_MODEL` | `claude-opus-4-7` | LLM model for the agent. Tunable for cost/quality balance. |
+| `SYSTEM_MONITOR_MIN_CONFIDENCE` | `0.5` | Minimum per-fire heuristic confidence to count as fired. |
+| `SYSTEM_MONITOR_HEURISTIC_PHASES` | `'2.0,2.5'` | Comma-separated phase filter. Setting `'2.0'` disables Phase 2.5 heuristics without removing them. |
+| `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES` | `5` | Sweep tick. |
+| `SYSTEM_MONITOR_SWEEP_WINDOW_MINUTES` | `15` | Sweep window length. |
+| `SYSTEM_MONITOR_SWEEP_CANDIDATE_CAP` | `50` | Hard ceiling on triage candidates per sweep. |
+| `SYSTEM_MONITOR_SWEEP_PAYLOAD_CAP_KB` | `200` | Hard ceiling on deep-read payload per sweep. |
+
+The full env-var inventory across this spec lives in §12.2 (consolidated for ops).
 
 ## 10. UI surface
 
