@@ -7,6 +7,7 @@
 **Scope:** all 21 in-scope items (Waves 1+2+3 per progress.md); F2 explicitly parked per user instruction
 **Changed-code set:** 117 files in audit-remediation-followups footprint (filtered from 792 total branch-vs-main diff)
 **Run at:** 2026-04-26T05:34:10Z
+**Commit at finish:** `3c8faf9190bfcf103b88a5ef61b5edf0ee0566c4`
 
 ---
 
