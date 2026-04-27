@@ -65,6 +65,19 @@ export const subaccountAgents = pgTable(
     maxCostPerRunCents: integer('max_cost_per_run_cents'),
     maxLlmCallsPerRun: integer('max_llm_calls_per_run'),
 
+    // ── Safety mode default (F10) ───────────────────────────────────────────
+    // Agency-configured default safety posture for portal-initiated runs on
+    // this (agent, subaccount) pair. Resolution order: parentRun → request →
+    // this column → agents.default_safety_mode → 'explore' literal.
+    portalDefaultSafetyMode: text('portal_default_safety_mode').notNull().default('explore').$type<'explore' | 'execute'>(),
+
+    // ── Meaningful-run tracking (F22) ───────────────────────────────────────
+    // Updated by the run-completion hook when a run produces meaningful output
+    // (status='completed' AND (action proposed OR memory block written)).
+    // Used by heartbeat gate Rules 2 + 4.
+    lastMeaningfulTickAt: timestamp('last_meaningful_tick_at', { withTimezone: true }),
+    ticksSinceLastMeaningfulRun: integer('ticks_since_last_meaningful_run').notNull().default(0),
+
     // ── Run tracking ────────────────────────────────────────────────────
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
     nextRunAt: timestamp('next_run_at', { withTimezone: true }),

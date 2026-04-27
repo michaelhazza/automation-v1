@@ -2,6 +2,10 @@ import { db } from '../db/index.js';
 import { conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and, asc } from 'drizzle-orm';
 import type { Conversation, ConversationMessage } from '../db/schema/conversations.js';
+import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
+import { handleBriefMessage, type DispatchRoute } from './briefMessageHandlerPure.js';
+import { writeConversationMessage } from './briefConversationWriter.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export interface ConversationWithMessages {
   conversation: Conversation;
@@ -100,4 +104,57 @@ export async function listConversationMessages(
     .from(conversationMessages)
     .where(eq(conversationMessages.conversationId, conversationId))
     .orderBy(asc(conversationMessages.createdAt));
+}
+
+export async function handleConversationFollowUp(input: {
+  conversationId: string;
+  briefId: string;
+  organisationId: string;
+  subaccountId?: string;
+  text: string;
+  uiContext: BriefUiContext;
+  senderUserId?: string;
+}): Promise<{ route: DispatchRoute; fastPathDecision: FastPathDecision }> {
+  // Verify the conversation actually belongs to this brief. Without this
+  // check, a stale tab or malformed payload that posts {conversationId: B}
+  // to a route bound to {briefId: A} would write the user message to
+  // conversation B while orchestration runs against brief A — splitting
+  // intent across two threads. The cross-check is org-scoped via the request
+  // tx so it fails closed for cross-tenant attempts as well.
+  const tx = getOrgScopedDb('briefConversationService.handleConversationFollowUp');
+  const [conv] = await tx
+    .select({ scopeType: conversations.scopeType, scopeId: conversations.scopeId })
+    .from(conversations)
+    .where(and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.organisationId, input.organisationId),
+    ))
+    .limit(1);
+
+  if (!conv || conv.scopeType !== 'brief' || conv.scopeId !== input.briefId) {
+    throw Object.assign(
+      new Error('conversation does not belong to this brief'),
+      { statusCode: 404 },
+    );
+  }
+
+  await writeConversationMessage({
+    conversationId: input.conversationId,
+    briefId: input.briefId,
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    role: 'user',
+    content: input.text,
+    senderUserId: input.senderUserId,
+  });
+
+  return handleBriefMessage({
+    conversationId: input.conversationId,
+    briefId: input.briefId,
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    text: input.text,
+    uiContext: input.uiContext,
+    isFollowUp: true,
+  });
 }

@@ -2301,6 +2301,30 @@ No service, route, or orchestrator path uses `withAdminConnection` or any RLS-by
 
 **Compliance allow-list mechanism.** `scripts/gates/verify-rls-contract-compliance.sh` today scans service files (`server/services/**`) and blocks direct-DB-access bypasses. For jobs (`server/jobs/**`), the same gate reads `scripts/gates/rls-bypass-allowlist.txt` — an explicit file of permitted cross-org-maintenance entry points. `server/jobs/bundleUtilizationJob.ts` MUST be added to that allow-list in the same PR that adds the job file, and the PR MUST include the same inline justification comment the other allow-listed jobs use. The allow-list file is listed in the file inventory (§13.10) as a modified config file. No other cached-context code path is permitted this carve-out.
 
+### 8.7 RLS Posture (Option B-lite)
+
+*(Added in pre-launch-hardening Phase 2 — CACHED-CTX-DOC decision. Architect resolution: schema-decisions.md § 12.)*
+
+**Why DB-layer subaccount RLS is intentionally not enforced on cached-context tables.**
+
+Migration `0213_fix_cached_context_rls.sql` deliberately dropped DB-layer *subaccount* RLS policies from `reference_documents`, `document_bundles`, `document_bundle_attachments`, `bundle_resolution_snapshots`, and `bundle_suggestion_dismissals`. Org-isolation policies remain in place and are enforced via FORCE ROW LEVEL SECURITY. The subaccount-level policies were removed because:
+
+1. **Cached context is by design cross-subaccount.** A bundle assembled from org-level documents should be reusable across all subaccounts in that org. DB-layer subaccount RLS would require every read to carry a subaccount context, but many read paths (org-level orchestration, cross-subaccount analytics, maintenance jobs) have no natural subaccount principal.
+
+2. **Service-layer filters are the chosen authority.** Every application read path that surfaces cached-context data to a specific subaccount filters by `subaccountId` at the service layer (`documentBundleService`, `bundleResolutionService`, `referenceDocumentService`). These filters enforce the intended isolation without the performance penalty of subaccount-scoped RLS on high-frequency read paths.
+
+3. **Option B-lite is documented as a first-class decision.** Calling this "deferred" would imply it will be revisited — it will only be revisited if a concrete cross-subaccount data-leak signal is observed post-launch.
+
+**What triggers reinstating DB-layer subaccount RLS:** A confirmed, reproducible case where service-layer filters failed to prevent a cross-subaccount read. Absent that signal, the Option B-lite posture is permanent for v1.
+
+**How future cached-context tables register.** A new table that stores data with subaccount semantics MUST either:
+- (a) Add a header comment in its creation migration explicitly naming "Option B-lite" and citing this section, OR
+- (b) Opt into DB-layer subaccount RLS in its migration, following the §8.1 template and adding a manifest entry in `rlsProtectedTables.ts`.
+
+Option (a) is the default. Option (b) is appropriate only when the table's read paths all carry a natural subaccount principal and the cross-subaccount reuse argument does not apply.
+
+**§5.12 BUNDLE-DISMISS-RLS amendment.** The `bundle_suggestion_dismissals` unique key was extended from 2 columns `(user_id, doc_set_hash)` to 3 columns `(organisation_id, user_id, doc_set_hash)` in migration `0231_bundle_dismiss_rls_unique.sql`. This closes the multi-org dismissal collision scenario: a user who belongs to multiple organisations dismissing the same doc-set hash in org A must not silently conflict with a dismissal record in org B. The service-layer upsert (`documentBundleService.ts`) was updated to match the 3-column conflict target.
+
 ---
 
 ## 9. Execution model

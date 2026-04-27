@@ -2,14 +2,9 @@
  * agentExecutionServicePure — runResultStatus derivation tests.
  *
  * Spec: tasks/hermes-audit-tier-1-spec.md §6.3, §6.3.1, §9.2 (Phase B).
- *
- * Pins the full truth table plus two edge cases that were surfaced
- * during spec review:
- *   - completed + empty summary → partial
- *   - completed + hadUncertainty → partial
- *
- * The helper returns `null` for non-terminal statuses — callers must
- * NOT write the column while the run is still in flight.
+ * H3 amendment: hasSummary removed from computeRunResultStatus; partial is
+ * reachable ONLY from per-step aggregation per invariant 6.3. Summary absence
+ * is surfaced via the summaryMissing side-channel, NOT via 'partial' status.
  *
  * Runnable via:
  *   npx tsx server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts
@@ -39,54 +34,55 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 }
 
 console.log('');
-console.log('Phase B §6.3 — computeRunResultStatus truth table:');
+console.log('Phase B §6.3 — computeRunResultStatus truth table (H3: hasSummary removed):');
 
-// ── completed + no error + no uncertainty + non-empty summary → success
+// ── completed + no error + no uncertainty → success (summary absence no longer demotes)
 test('completed + clean signals → success', () => {
-  assertEqual(computeRunResultStatus('completed', false, false, true), 'success', 'status');
+  assertEqual(computeRunResultStatus('completed', false, false), 'success', 'status');
 });
 
-// ── completed + any demotion signal → partial
+// ── completed + error → partial
 test('completed + error → partial', () => {
-  assertEqual(computeRunResultStatus('completed', true, false, true), 'partial', 'status');
+  assertEqual(computeRunResultStatus('completed', true, false), 'partial', 'status');
 });
-test('completed + hadUncertainty → partial (edge case)', () => {
-  assertEqual(computeRunResultStatus('completed', false, true, true), 'partial', 'status');
+test('completed + hadUncertainty → partial', () => {
+  assertEqual(computeRunResultStatus('completed', false, true), 'partial', 'status');
 });
-test('completed + empty summary → partial (edge case)', () => {
-  assertEqual(computeRunResultStatus('completed', false, false, false), 'partial', 'status');
+// H3: summary absence no longer demotes to partial — it's a side-channel signal
+test('completed + clean signals (no summary) → success (H3: summary absence does NOT demote)', () => {
+  assertEqual(computeRunResultStatus('completed', false, false), 'success', 'status');
 });
-test('completed + all demotion signals → partial', () => {
-  assertEqual(computeRunResultStatus('completed', true, true, false), 'partial', 'status');
+test('completed + error + hadUncertainty → partial', () => {
+  assertEqual(computeRunResultStatus('completed', true, true), 'partial', 'status');
 });
 
 // ── completed_with_uncertainty → partial (always)
 test('completed_with_uncertainty (clean signals) → partial', () => {
-  assertEqual(computeRunResultStatus('completed_with_uncertainty', false, false, true), 'partial', 'status');
+  assertEqual(computeRunResultStatus('completed_with_uncertainty', false, false), 'partial', 'status');
 });
 test('completed_with_uncertainty (demotion signals) → partial', () => {
-  assertEqual(computeRunResultStatus('completed_with_uncertainty', true, true, false), 'partial', 'status');
+  assertEqual(computeRunResultStatus('completed_with_uncertainty', true, true), 'partial', 'status');
 });
 
 // ── failure statuses → failed
 for (const s of ['failed', 'timeout', 'loop_detected', 'budget_exceeded', 'cancelled']) {
   test(`${s} → failed (regardless of other signals)`, () => {
-    assertEqual(computeRunResultStatus(s, false, false, true), 'failed', 'status');
-    assertEqual(computeRunResultStatus(s, true,  true,  false), 'failed', 'status-inverted');
+    assertEqual(computeRunResultStatus(s, false, false), 'failed', 'status');
+    assertEqual(computeRunResultStatus(s, true, true), 'failed', 'status-inverted');
   });
 }
 
 // ── non-terminal statuses → null
 for (const s of ['pending', 'running', 'delegated', 'awaiting_clarification', 'waiting_on_clarification']) {
   test(`${s} → null (non-terminal, caller must not write)`, () => {
-    assertEqual(computeRunResultStatus(s, false, false, true), null, 'status');
-    assertEqual(computeRunResultStatus(s, true,  true,  false), null, 'status-inverted');
+    assertEqual(computeRunResultStatus(s, false, false), null, 'status');
+    assertEqual(computeRunResultStatus(s, true, true), null, 'status-inverted');
   });
 }
 
 // ── unknown status → null (defensive)
 test('unknown status → null', () => {
-  assertEqual(computeRunResultStatus('future_status', false, false, true), null, 'status');
+  assertEqual(computeRunResultStatus('future_status', false, false), null, 'status');
 });
 
 console.log('');

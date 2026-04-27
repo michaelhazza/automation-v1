@@ -2,7 +2,7 @@
 name: Import n8n workflow
 description: Parses an n8n workflow JSON export and produces a draft Synthetos workflow definition with a mapping report. The admin reviews, edits, and saves via the existing Workflow Studio save-and-PR flow.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

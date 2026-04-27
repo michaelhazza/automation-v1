@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api.js';
 import { useSocketRoom } from '../hooks/useSocket.js';
 import { resolveLifecyclePure } from '../lib/briefArtefactLifecycle.js';
-import type { BriefChatArtefact, BriefStructuredResult, BriefApprovalCard, BriefErrorResult } from '../../../shared/types/briefResultContract.js';
+import type { BriefChatArtefact, BriefStructuredResult, BriefApprovalCard, BriefApprovalDecision, BriefErrorResult } from '../../../shared/types/briefResultContract.js';
 import type { ArtefactChainState } from '../lib/briefArtefactLifecyclePure.js';
 import { StructuredResultCard } from '../components/brief-artefacts/StructuredResultCard.js';
 import { ApprovalCard } from '../components/brief-artefacts/ApprovalCard.js';
@@ -34,16 +34,73 @@ interface BriefDetailPageProps {
   user: User;
 }
 
-function ArtefactItem({ artefact, isSuperseded, onSuggestionClick }: {
+/**
+ * Merge a single artefact into a list, deduplicating by `artefactId`.
+ *
+ * Rationale: artefacts can arrive from up to two sources for the same logical
+ * event — the optimistic POST-success path in `handleApprovalDecision`, and
+ * the `brief-artefact:new` / `brief-artefact:updated` websocket events. Without
+ * dedup the same `artefactId` can render twice (one optimistic, one WS-confirmed).
+ *
+ * Replace-or-append semantics: if the incoming artefact's id already exists in
+ * the list, replace the entry in place; otherwise append. Replace-in-place is
+ * the right policy because the WS-confirmed copy is authoritative — it carries
+ * server-side fields (timestamps, derived state) that the optimistic copy
+ * may not.
+ *
+ * Ordering: when the incoming artefact carries a server-stamped
+ * `serverCreatedAt`, the merged list is re-sorted by that field so the
+ * timeline reflects logical write order rather than WS arrival order. This
+ * matters when distinct-artefactId events arrive out of order (delayed WS
+ * delivery, multi-emitter race). Optimistic inserts that lack a server
+ * timestamp skip the re-sort to avoid visible reflow before the
+ * WS-confirmed copy lands. ISO-8601 lexicographic compare is correct
+ * chronological order.
+ */
+function mergeArtefactById(
+  prev: BriefChatArtefact[],
+  incoming: BriefChatArtefact,
+): BriefChatArtefact[] {
+  const idx = prev.findIndex((a) => a.artefactId === incoming.artefactId);
+  const merged = idx === -1
+    ? [...prev, incoming]
+    : (() => {
+        const next = prev.slice();
+        next[idx] = incoming;
+        return next;
+      })();
+
+  if (!incoming.serverCreatedAt) return merged;
+
+  return [...merged].sort((a, b) => {
+    const ta = a.serverCreatedAt;
+    const tb = b.serverCreatedAt;
+    // Primary: server timestamp (chronological). When both present.
+    if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
+    // Tiebreak: artefactId lex order. Required to keep order STABLE across
+    // multiple WS update rounds — without a deterministic secondary key,
+    // entries with equal (or both-missing) timestamps can oscillate as
+    // successive WS events trigger re-sort, producing visible flicker.
+    // artefactId is unique per artefact and never changes after creation,
+    // so it's the correct stable tiebreaker.
+    if (ta && !tb) return -1;  // a stamped, b not → a first
+    if (!ta && tb) return 1;   // b stamped, a not → b first
+    return a.artefactId < b.artefactId ? -1 : a.artefactId > b.artefactId ? 1 : 0;
+  });
+}
+
+function ArtefactItem({ artefact, isSuperseded, onSuggestionClick, onApprove, onReject }: {
   artefact: BriefChatArtefact;
   isSuperseded: boolean;
   onSuggestionClick: (intent: string) => void;
+  onApprove?: (artefactId: string) => void;
+  onReject?: (artefactId: string) => void;
 }) {
   if (artefact.kind === 'structured') {
     return <StructuredResultCard artefact={artefact as BriefStructuredResult} isSuperseded={isSuperseded} onSuggestionClick={onSuggestionClick} />;
   }
   if (artefact.kind === 'approval') {
-    return <ApprovalCard artefact={artefact as BriefApprovalCard} isSuperseded={isSuperseded} />;
+    return <ApprovalCard artefact={artefact as BriefApprovalCard} isSuperseded={isSuperseded} onApprove={onApprove} onReject={onReject} />;
   }
   if (artefact.kind === 'error') {
     return <ErrorArtefactCard artefact={artefact as BriefErrorResult} />;
@@ -98,7 +155,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         if (payload.artefact) {
           const art = payload.artefact;
           setArtefacts((prev: BriefChatArtefact[]) => {
-            const next = [...prev, art];
+            const next = mergeArtefactById(prev, art);
             setChainState({ artefacts: next });
             return next;
           });
@@ -109,7 +166,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         if (payload.artefact) {
           const art = payload.artefact;
           setArtefacts((prev: BriefChatArtefact[]) => {
-            const next = [...prev, art];
+            const next = mergeArtefactById(prev, art);
             setChainState({ artefacts: next });
             return next;
           });
@@ -136,9 +193,10 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
     if (!reply.trim() || isSending || !brief?.conversationId) return;
     setIsSending(true);
     try {
-      await api.post(`/api/conversations/${brief.conversationId}/messages`, {
+      await api.post(`/api/briefs/${briefId}/messages`, {
         content: reply.trim(),
-        briefId,
+        conversationId: brief.conversationId,
+        uiContext: { surface: 'brief_chat' },
       });
       setReply('');
       await load();
@@ -146,6 +204,29 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
       setIsSending(false);
     }
   };
+
+  const handleApprovalDecision = async (artefactId: string, decision: 'approve' | 'reject'): Promise<void> => {
+    if (!brief?.conversationId) return;
+    try {
+      const res = await api.post<{ status: string; artefact?: BriefApprovalDecision }>(
+        `/api/briefs/${briefId}/approvals/${artefactId}/decision`,
+        { decision, conversationId: brief.conversationId },
+      );
+      const decisionArtefact = res.data?.artefact;
+      if (decisionArtefact) {
+        setArtefacts((prev) => {
+          const next = mergeArtefactById(prev, decisionArtefact);
+          setChainState({ artefacts: next });
+          return next;
+        });
+      }
+    } catch {
+      // Non-200 responses (409, 410, etc.) surface via WS brief-artefact:updated events
+    }
+  };
+
+  const handleApprove = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'approve'); };
+  const handleReject = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'reject'); };
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading…</div>;
@@ -183,6 +264,8 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
                 artefact={a}
                 isSuperseded={supersededIds.has(a.artefactId)}
                 onSuggestionClick={handleSuggestionClick}
+                onApprove={handleApprove}
+                onReject={handleReject}
               />
             ))}
           </div>

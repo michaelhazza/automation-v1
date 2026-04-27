@@ -76,7 +76,9 @@ export type AgentExecutionEventType =
   | 'clarification.requested'
   | 'run.event_limit_reached'
   | 'run.completed'
-  | 'tool.error';
+  | 'tool.error'
+  | 'run.terminal.summary_missing'
+  | 'run.terminal.extracted_with_errorMessage';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -232,6 +234,18 @@ export type AgentExecutionEventPayload =
         message: string;
         context: Record<string, unknown>;
       };
+    }
+  | {
+      /** H3: emitted when a run completes without a summary (side-channel; does not demote runResultStatus). */
+      eventType: 'run.terminal.summary_missing';
+      critical: false;
+      runResultStatus: string;
+    }
+  | {
+      /** HERMES-S1: emitted when errorMessage is threaded into extractRunInsights for a failed run. */
+      eventType: 'run.terminal.extracted_with_errorMessage';
+      critical: false;
+      errorMessageLength: number;
     };
 
 // ---------------------------------------------------------------------------
@@ -260,6 +274,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'run.event_limit_reached': true,
   'run.completed': true,
   'tool.error': false,
+  'run.terminal.summary_missing': false,
+  'run.terminal.extracted_with_errorMessage': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

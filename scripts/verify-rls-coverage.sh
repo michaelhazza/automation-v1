@@ -44,18 +44,16 @@ VIOLATIONS=0
 # migration 0213 repairs the policies on 0204–0208 / 0212 at runtime and
 # migration 0227 applies FORCE RLS to those.
 #
-# 0202 (reference_documents) and 0203 (reference_document_versions) were
-# excluded from 0227's hardening — see the NOTE in 0227_rls_hardening_corrective.sql:
-# the versions table has no organisation_id column so the canonical policy shape
-# does not apply verbatim, and the parent-EXISTS variant is routed to a separate
-# follow-on migration. The CREATE POLICY in 0202/0203 still provides org isolation;
-# only FORCE RLS is missing. The deferred hardening is tracked in tasks/todo.md.
+# 0202 (reference_documents) and 0203 (reference_document_versions) are no
+# longer baselined here. Migration 0229 is now the authoritative migration for
+# both tables — it adds FORCE RLS and proper CREATE POLICY (direct org-isolation
+# shape for reference_documents; parent-EXISTS shape for reference_document_versions),
+# and the manifest now points to 0229 for both entries. 0229 passes all gate
+# checks without baseline exemption.
 #
 # Files in this list are exempt from the FORCE RLS and CREATE POLICY
 # checks when they carry a @rls-baseline: annotation comment.
 HISTORICAL_BASELINE_FILES=(
-  "0202_reference_documents.sql"
-  "0203_reference_document_versions.sql"
   "0204_document_bundles.sql"
   "0205_document_bundle_members.sql"
   "0206_document_bundle_attachments.sql"

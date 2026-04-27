@@ -2,7 +2,7 @@
 name: Config Set Link Limits
 description: Set execution limits on a subaccount agent link.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

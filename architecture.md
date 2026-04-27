@@ -103,7 +103,19 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 - Services contain all business logic. Routes are thin wrappers.
 - Services throw errors as `{ statusCode: number, message: string, errorCode?: string }` — `asyncHandler` catches these.
 - One service per domain. Target max ~500 lines; `skillExecutor.ts` (65KB) is the exception.
-- Never access `db` directly in a route — call a service.
+- Never access `db` directly in a route — call a service. `server/lib/**` files are pure helpers and must not import `db` either.
+
+### When to create a new service file
+
+A new service file is justified only when (a) the route has more than one DB interaction, OR (b) the logic is reused by more than one caller. If neither holds, the single DB call goes inline in the route wrapped in `withOrgTx` and no new service is created. Two service files covering the same domain in one PR is a signal the split is wrong — merge them.
+
+### Five patterns for service-tier DB access
+
+1. **Org-scoped service** — wrap in `withOrgTx(organisationId, async (tx) => { … })` from `server/instrumentation.ts`. Every query inside runs with `app.organisation_id` set.
+2. **Admin/system service** — use `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Bypasses RLS by design. For routes with `requireSystemAdmin` middleware or system-scoped tables.
+3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
+4. **Background / maintenance jobs that write tenant data** — acquire an admin connection for top-level iteration, then call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts`. A job that skips this pattern silently no-ops on every write because RLS sees no session var.
+5. **Log-and-swallow services** (bookkeeping, audit inserts, best-effort mirrors — anything whose contract says "must not block execution") — `getOrgScopedDb()` must be the first line **inside** the `try` block, never above it. Placing it above the catch turns a missing-org-context throw into a hard failure that escapes the error boundary.
 
 ---
 
@@ -1352,6 +1364,54 @@ Session variables are set via `server/db/withPrincipalContext.ts` which wraps `w
 **Legacy compat (migration 0169):** Fallback policies allow access when `app.current_principal_type` is NULL/empty, covering callers not yet migrated to `withPrincipalContext`. These will be removed in P3C when all callers are migrated.
 
 The canonical manifest lives in `server/config/rlsProtectedTables.ts`. Every new tenant-owned table must be added to this manifest in the same commit as its `CREATE POLICY` migration. CI gate `verify-rls-coverage.sh` fails if the manifest references a table without a corresponding policy in any migration.
+
+#### Canonical org-isolation policy template
+
+Every new tenant table ships with this exact policy in the same migration that creates the table. Both `USING` (read) and `WITH CHECK` (write) are required; without `WITH CHECK`, an INSERT/UPDATE with no session var succeeds silently. `FORCE ROW LEVEL SECURITY` prevents the table owner (the migration role) from bypassing RLS. The `IS NOT NULL` + non-empty guards exist because `current_setting(..., true)` returns NULL when unset and `organisation_id = NULL` evaluates to NULL (not false).
+
+```sql
+ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS <table>_org_isolation ON <table>;
+
+CREATE POLICY <table>_org_isolation ON <table>
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+```
+
+Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR. `policyMigration` in that manifest must point at the migration that physically runs `CREATE POLICY ... ON <table>` — when a corrective migration's header NOTE explicitly excludes a table, the manifest still references the original. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm.
+
+#### Corrective migrations (when RLS is broken or missing)
+
+Migrations are append-only. To repair: write a new migration with the next number, `DROP POLICY IF EXISTS` for **every** historical policy name on the table (enumerate `*_tenant_isolation`, `*_org_isolation`, `*_subaccount_isolation`, etc.), then `CREATE POLICY <table>_org_isolation` with the canonical shape. Reference: `migrations/0213_fix_cached_context_rls.sql` (precedent), `migrations/0200_fix_universal_brief_rls.sql` (canonical policy shape source).
+
+#### Application-level defence-in-depth
+
+Never rely on RLS alone. Every read and write that takes a row by ID must also filter by `organisationId` explicitly in the query:
+
+```ts
+// Bad — relies on RLS alone
+const row = await tx.select().from(items).where(eq(items.id, id));
+
+// Good — defence-in-depth
+const row = await tx.select().from(items)
+  .where(and(eq(items.id, id), eq(items.organisationId, organisationId)));
+```
+
+If RLS is silently disabled by a migration regression, the application-level filter still protects the caller. Detection gate: `scripts/verify-org-scoped-writes.sh`.
+
+#### Subaccount resolution (mandatory before consuming `:subaccountId`)
+
+Any route with a `:subaccountId` URL parameter calls `resolveSubaccount(req.params.subaccountId, req.orgId!)` before using the ID. The function verifies the subaccount belongs to the requesting org. Skipping it allows horizontal privilege escalation even with RLS in place — a request scoped to org A can reference subaccount IDs belonging to org B. Pass `subaccount.id` downstream — never `req.params.subaccountId` directly. Detection gate: `scripts/verify-subaccount-resolution.sh`.
 
 ### Layer A / 1B — Service-layer org-scoped DB
 

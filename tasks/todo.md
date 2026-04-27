@@ -1035,3 +1035,35 @@ ChatGPT review of the audit-remediation-followups PR surfaced two architectural 
   - **Rationale for defer:** valid system-thinking improvement that would unify how jobs report outcome and how monitoring acts on partial-success. Not a bug; ChatGPT explicitly tagged it "optional but powerful." Tacking it onto this PR would balloon scope across all jobs without a clear contract sketch. Better as a dedicated spec that defines the union, the queueService logging shape, the monitoring consumer's expectations, and a migration plan that converts jobs incrementally rather than in one commit.
   - **Suggested next-spec framing:** define `JobResult = { kind: 'ok', detail?: ... } | { kind: 'noop', reason: string } | { kind: 'partial', completed: N, failed: M, errors: ... } | { kind: 'error', cause: ... }`. Specify how `queueService` logs each kind (current `logger.info('job_noop', ...)` already covers `noop`). Specify which monitoring signals each kind raises. Migrate jobs file-by-file behind the new return shape; old plain-`Promise<void>` jobs continue to work as `kind: 'ok'` until migrated.
 
+---
+
+## Deferred from chatgpt-pr-review — PR #211 pre-launch-hardening (round 1)
+
+**Captured:** 2026-04-26T23:59:09Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-impl-pre-launch-hardening-2026-04-26T23-59-09Z.md`
+**PR:** #211 — https://github.com/michaelhazza/automation-v1/pull/211
+**Branch:** `impl/pre-launch-hardening`
+
+User reply: `all as recommended` — both items deferred per agent recommendation. Items below are real architectural concerns flagged by ChatGPT but out of scope for the pre-launch hardening PR; each warrants its own scoped spec.
+
+- [ ] **CHATGPT-PR211-F2a** — Mechanical enforcement for **read-side** Option B-lite cached-context isolation: introduce a shared `assertSubaccountScopedRead(query, subaccountId)` helper used by every cached-context read site, plus a `scripts/verify-*.sh` CI gate that fails when a cached-context table is queried without the helper.
+  - **Severity:** medium (security posture / engineering ergonomics).
+  - **Scope:** architectural (new shared primitive + new CI gate + every cached-context call site).
+  - **Files affected:** `referenceDocumentService`, `documentBundleService`, `bundleResolutionService` (~6–10 read paths), plus a new helper module and a new verify script.
+  - **Rationale for defer:** spec § 8.7 (`docs/cached-context-infrastructure-spec.md`) explicitly names service-layer filtering as the **chosen authority** and Option B-lite as a first-class permanent decision. Adding the helper + CI gate is meaningful new architecture (`DEVELOPMENT_GUIDELINES.md § 8.4` requires a "why not reuse" paragraph for new primitives) and the scope_signal is architectural per the chatgpt-pr-review agent's escalation rules. Spec § 8.7 already documents the trigger for revisiting this: a concrete observed cross-subaccount data leak. Until that trigger fires, the existing service-layer-filter discipline is the locked design.
+  - **Suggested next-spec framing:** define the helper signature (read-vs-write variants, return type, failure mode — throw vs filter), enumerate every cached-context table the gate must cover, decide whether the CI gate is grep-based (cheap, false-positive-prone) or AST-based (expensive, accurate), and specify the migration plan that introduces the helper one service at a time without forcing every site to convert in one commit.
+
+- [ ] **CHATGPT-PR211-F2b** — Mechanical enforcement for **write-side** cached-context isolation: assert that every cached-context write either includes a non-null `subaccountId` OR explicitly declares `orgScoped: true`. Promote `server/lib/cachedContextWriteScope.ts` from observability-only logger to assertion that fails closed.
+  - **Severity:** medium-high (write leakage = data corruption, larger blast radius than read leakage).
+  - **Scope:** architectural (introduce explicit `{ orgScoped: true }` discriminator in input shapes; thread through every cached-context write helper).
+  - **Files affected:** `referenceDocumentService` (create / update / archive / restore / deprecate), `documentBundleService` (create / update / archive), `bundleSuggestionDismissalService`, plus the input types in each.
+  - **Rationale for split from F2a:** read leakage is exposure (one tenant sees another's data); write leakage is corruption (data lands on the wrong tenant — much larger blast radius). Splitting the two lets the spec author handle each with the right urgency. F2b's runtime log already exists as of PR #211 round 2 (`server/lib/cachedContextWriteScope.ts`); the deferred work is promoting log → assert and threading the explicit discriminator.
+  - **Suggested next-spec framing:** define the `{ subaccountId: string } | { orgScoped: true; subaccountId: null }` discriminated input type, list every cached-context write entry point that must adopt it, pick the assertion failure mode (throw vs structured log), and specify the migration plan that converts call sites incrementally without leaving a half-typed surface.
+
+- [ ] **CHATGPT-PR211-F6 (FOLLOW-UP — partial coverage shipped in round 2)** — Extend the centralised `assertValidTransition(from, to)` guard to all remaining run / step status-write sites and add transition tables for non-terminal-to-non-terminal moves.
+  - **Status:** Round-2 minimal coverage SHIPPED in PR #211. `shared/stateMachineGuards.ts` carries the helper + tests; wired at `workflowEngineService.completeStepRunInternal`, `failStepRun`, dispatch-error path, the run-level context-overflow path, and `agentRunFinalizationService.finaliseAgentRunFromIeeRun`. Coverage scope: terminal-write boundaries (post-terminal mutation, terminal→terminal, unknown-status target). NOT covered: intermediate non-terminal transitions, `decideApproval`, `completeStepRunFromReview`, `workflowRunService` run-level terminal writes, agent-run aggregation paths.
+  - **Severity:** low-medium (highest-blast-radius cases now covered; remaining gaps are defence-in-depth completion).
+  - **Scope:** finishing work — extend existing helper to remaining sites, add per-kind transition tables for intermediate moves.
+  - **Files affected:** `workflowEngineService` (~5 remaining status-write sites), `agentExecutionService` (terminal write in agentic loop), `briefApprovalService.decideApproval`, `workflowRunService` (run-level terminal aggregation), plus `shared/stateMachineGuards.ts` (extend with intermediate transition tables).
+  - **Suggested next-spec framing:** enumerate every status-write site by kind, define the canonical transition tables (allowed `from → to` per status family), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and decide whether to promote intermediate-transition violations from warn-log to throw once telemetry confirms zero false-positives.
+

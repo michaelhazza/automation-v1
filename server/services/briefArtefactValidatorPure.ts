@@ -37,7 +37,8 @@ export type ValidateChainResult = {
 // the contract file; these are local validation mirrors)
 // ---------------------------------------------------------------------------
 
-const VALID_KINDS = new Set(['structured', 'approval', 'error']);
+const VALID_KINDS = new Set(['structured', 'approval', 'approval_decision', 'error']);
+const VALID_DECISION_VALUES = new Set(['approve', 'reject']);
 const VALID_STATUSES = new Set<BriefArtefactStatus>(['final', 'pending', 'updated', 'invalidated']);
 const VALID_ENTITY_TYPES = new Set<BriefResultEntityType>([
   'contacts', 'opportunities', 'appointments', 'conversations',
@@ -202,6 +203,15 @@ function validateError(errors: ValidationError[], obj: Record<string, unknown>):
   }
 }
 
+function validateApprovalDecision(errors: ValidationError[], obj: Record<string, unknown>): void {
+  requireString(errors, 'parentArtefactId', obj['parentArtefactId']);
+  requireString(errors, 'decision', obj['decision']);
+  checkEnum(errors, 'decision', obj['decision'], VALID_DECISION_VALUES);
+  if (obj['executionStatus'] !== undefined) {
+    checkEnum(errors, 'executionStatus', obj['executionStatus'], VALID_EXECUTION_STATUSES as Set<string>);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public: validateArtefactPure
 // ---------------------------------------------------------------------------
@@ -231,6 +241,7 @@ export function validateArtefactPure(artefact: unknown): ValidateArtefactResult 
     const kind = obj['kind'] as string;
     if (kind === 'structured') validateStructured(errors, obj);
     else if (kind === 'approval') validateApproval(errors, obj);
+    else if (kind === 'approval_decision') validateApprovalDecision(errors, obj);
     else if (kind === 'error') validateError(errors, obj);
   }
 

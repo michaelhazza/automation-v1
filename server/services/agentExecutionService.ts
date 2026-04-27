@@ -3,6 +3,7 @@ import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { describeTransition } from '../../shared/stateMachineGuards.js';
 import {
   agents,
   subaccounts,
@@ -177,6 +178,9 @@ export interface AgentRunRequest {
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
   parentRunId?: string;
+  /** WB-1: for handoff runs, the canonical handoff-edge pointer. Set alongside
+   *  parentRunId (both equal the source run's id for a handoff run). */
+  handoffSourceRunId?: string;
   isSubAgent?: boolean;
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
@@ -400,6 +404,7 @@ export const agentExecutionService = {
         taskId: request.taskId ?? null,
         handoffDepth: request.handoffDepth ?? 0,
         parentRunId: request.parentRunId ?? null,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         workflowStepRunId: request.workflowStepRunId ?? null,
@@ -1361,7 +1366,7 @@ export const agentExecutionService = {
       // `hadUncertainty` from runMetadata, where the clarification-timeout
       // job writes it).
       const [preFinalizeRow] = await db
-        .select({ runMetadata: agentRuns.runMetadata })
+        .select({ runMetadata: agentRuns.runMetadata, errorMessage: agentRuns.errorMessage })
         .from(agentRuns)
         .where(eq(agentRuns.id, run.id))
         .limit(1);
@@ -1403,14 +1408,28 @@ export const agentExecutionService = {
         /* hasError — only affects the 'completed' branch of computeRunResultStatus;
            ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
         hadUncertainty,
-        hasSummary,
       );
+      // H3: hasSummary is no longer passed to computeRunResultStatus. Summary absence
+      // is surfaced via the summaryMissing side-channel below, not via 'partial' status.
 
       // Write-once guard (§6.3.1): add `AND run_result_status IS NULL` so
       // a second attempt at the same terminal write becomes a zero-row
       // UPDATE rather than an overwrite. `.returning()` lets us detect
       // that and log rather than silently drift from the first writer's
       // value.
+      //
+      // Round-3 review note: this terminal write does not yet flow through
+      // `assertValidTransition`. The `runResultStatus IS NULL` predicate
+      // already guards against overwriting a terminal row, but we log the
+      // transition with `guarded: false` so operators can quantify the
+      // unguarded-by-assert surface area against the F6 follow-up spec.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: finalStatus,
+        site: 'agentExecutionService.finishLoop_normal',
+        guarded: false,
+      }));
       const terminalUpdate = await db.update(agentRuns).set({
         status: finalStatus,
         runResultStatus: derivedRunResultStatus,
@@ -1435,6 +1454,23 @@ export const agentExecutionService = {
           attemptedStatus: derivedRunResultStatus,
           writeSite: 'finishLoop_normal',
         });
+      } else {
+        // F22 — meaningful-run tracking hook for the non-IEE finalization path.
+        // The IEE path calls this from `agentRunFinalizationService.finaliseAgentRunFromIeeRun`;
+        // without this call, ordinary API/triggered runs never advance
+        // `subaccount_agents.last_meaningful_tick_at` /
+        // `ticks_since_last_meaningful_run`, which leaves the heartbeat
+        // streak detector blind to the primary execution path. Best-effort —
+        // a tracking-update failure must not flip a successful run to failed.
+        try {
+          const { updateMeaningfulRunTracking } = await import('./agentRunFinalizationService.js');
+          await updateMeaningfulRunTracking(run.id, finalStatus);
+        } catch (err) {
+          logger.warn('agentExecutionService.meaningful_hook_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Live Agent Execution Log — critical terminal bookend (spec §5.3).
@@ -1471,6 +1507,22 @@ export const agentExecutionService = {
           eventCount,
         },
       });
+
+      // H3: summaryMissing side-channel — emit only when hasSummary is false so
+      // consumers can correlate without demoting runResultStatus to 'partial'.
+      if (!hasSummary) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'run.terminal.summary_missing',
+            critical: false,
+            runResultStatus: derivedRunResultStatus ?? 'partial',
+          },
+        });
+      }
 
       // Surface terminal failures as system incidents for operator visibility.
       if (finalStatus === 'failed' || finalStatus === 'timeout' || finalStatus === 'loop_detected') {
@@ -1646,17 +1698,28 @@ export const agentExecutionService = {
           // primary agent-run completion path always passes a non-null
           // `runResultStatus` here (when derivedRunResultStatus is null
           // the run is not terminal and this branch is unreachable).
+          // HERMES-S1: thread errorMessage from the pre-finalize DB read so
+          // failed-without-throw runs surface the error to extractRunInsights.
+          const threadedErrorMessage = derivedRunResultStatus === 'failed'
+            ? (preFinalizeRow?.errorMessage ?? null)
+            : null;
+          if (threadedErrorMessage !== null) {
+            tryEmitAgentEvent({
+              runId: run.id,
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              sourceService: 'agentExecutionService',
+              payload: {
+                eventType: 'run.terminal.extracted_with_errorMessage',
+                critical: false,
+                errorMessageLength: threadedErrorMessage.length,
+              },
+            });
+          }
           const extractionOutcome = {
             runResultStatus: (derivedRunResultStatus ?? 'partial') as 'success' | 'partial' | 'failed',
-            // trajectoryPassed is always null in Phase B — no per-run
-            // verdict is persisted today. Reserved forward-compat slot.
             trajectoryPassed: null as boolean | null,
-            // Best-effort errorMessage for the short-summary guard.
-            // The normal terminal path does not set errorMessage on the
-            // run row here (only the catch path does); pass null. A
-            // future refactor could surface loopResult.errorMessage if
-            // the loop ever captures one without throwing.
-            errorMessage: null as string | null,
+            errorMessage: threadedErrorMessage,
           };
           await workspaceMemoryService.extractRunInsights(
             run.id,
@@ -1761,8 +1824,16 @@ export const agentExecutionService = {
         'failed',
         /* hasError */ true,
         /* hadUncertainty */ false,
-        /* hasSummary */ false,
       );
+      // Round-3 review note: catch-block terminal write logged with
+      // `guarded: false` for the same reason as `finishLoop_normal` above.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: 'failed',
+        site: 'agentExecutionService.finishLoop_catch',
+        guarded: false,
+      }));
       const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',
         runResultStatus: catchRunResultStatus,

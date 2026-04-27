@@ -2,7 +2,7 @@
 name: Config List Links
 description: List all agent links for a given subaccount, showing active skills and schedule.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

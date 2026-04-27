@@ -19,23 +19,28 @@
  * See docs/iee-delegation-lifecycle-spec.md §3–5 for the full design.
  */
 
-import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
+import { eq, sql, and, isNull, inArray, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
+import { actions } from '../db/schema/actions.js';
+import { memoryBlocks } from '../db/schema/memoryBlocks.js';
+import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
 import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
+  computeMeaningfulOutputPure,
 } from './agentRunFinalizationServicePure.js';
 import { computeRunResultStatus } from './agentExecutionServicePure.js';
+import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths. The DB-touching entry points below are the only
 // additions here.
-export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun };
+export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun, computeMeaningfulOutputPure };
 
 type IeeRun = typeof ieeRuns.$inferSelect;
 
@@ -73,6 +78,78 @@ async function aggregateTokensForIeeRun(tx: TxLike, ieeRunId: string): Promise<T
     totalTokens: Number(row?.totalTokens ?? 0),
     llmCallCount: Number(row?.llmCallCount ?? 0),
   };
+}
+
+/**
+ * F22 — count actions proposed and memory blocks written for an agent run,
+ * then update subaccount_agents meaningful-run tracking columns if the run
+ * produced meaningful output. Best-effort: errors are caught by the caller.
+ *
+ * Exported so the non-IEE finalization path in `agentExecutionService.ts`
+ * can call it directly. The IEE path (this file's
+ * `finaliseAgentRunFromIeeRun`) and the non-IEE path (the agentic loop's
+ * terminal write) are the two completion sites; both must update the
+ * heartbeat columns or the F22 streak counter cannot detect inactivity
+ * from the primary execution path.
+ */
+export async function updateMeaningfulRunTracking(
+  agentRunId: string,
+  status: string,
+): Promise<void> {
+  // Count actions proposed for this run (agentRunId is the FK from actions).
+  const [actionsRow] = await db
+    .select({ c: count() })
+    .from(actions)
+    .where(eq(actions.agentRunId, agentRunId));
+  const actionProposedCount = Number(actionsRow?.c ?? 0);
+
+  // Count memory blocks written during this run (sourceRunId is the closest
+  // FK — it tracks the workflow/agent run that last wrote the block).
+  const [memoryRow] = await db
+    .select({ c: count() })
+    .from(memoryBlocks)
+    .where(and(eq(memoryBlocks.sourceRunId, agentRunId), isNull(memoryBlocks.deletedAt)));
+  const memoryBlockWrittenCount = Number(memoryRow?.c ?? 0);
+
+  const isMeaningful = computeMeaningfulOutputPure({
+    status,
+    actionProposedCount,
+    memoryBlockWrittenCount,
+  });
+
+  // Look up the subaccount_agent row for this run so we can update its tracking.
+  const [run] = await db
+    .select({ subaccountAgentId: agentRuns.subaccountAgentId })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, agentRunId))
+    .limit(1);
+
+  const subaccountAgentId = run?.subaccountAgentId;
+  if (!subaccountAgentId) return;
+
+  if (isMeaningful) {
+    // Reset the streak.
+    await db
+      .update(subaccountAgents)
+      .set({
+        lastMeaningfulTickAt: new Date(),
+        ticksSinceLastMeaningfulRun: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  } else {
+    // Non-meaningful completion advances the streak counter so monitoring
+    // built on `ticksSinceLastMeaningfulRun` can detect prolonged
+    // empty-completion runs. Without this branch the counter is stuck at 0
+    // and no consumer can observe the streak the F22 spec was added for.
+    await db
+      .update(subaccountAgents)
+      .set({
+        ticksSinceLastMeaningfulRun: sql`${subaccountAgents.ticksSinceLastMeaningfulRun} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  }
 }
 
 /**
@@ -207,6 +284,18 @@ export async function finaliseAgentRunFromIeeRun(
       : null;
 
     if (!parentAlreadyTerminal) {
+      // Defence-in-depth: explicit transition assertion before the terminal
+      // write. The WHERE clause below already gates on a non-terminal status
+      // set, but assertValidTransition surfaces the contract violation as a
+      // typed error rather than a silent no-op UPDATE. See
+      // shared/stateMachineGuards.ts.
+      assertValidTransition({
+        kind: 'agent_run',
+        recordId: parent.id,
+        from: parent.status,
+        to: terminalStatus,
+      });
+
       // Roll up token + call counts inside the transaction so late
       // llm_requests inserts (up to the FOR UPDATE lock) are included.
       // See aggregateTokensForIeeRun JSDoc for the race this avoids.
@@ -220,7 +309,6 @@ export async function finaliseAgentRunFromIeeRun(
         terminalStatus,
         /* hasError */ isFailureStatus,
         /* hadUncertainty */ false,
-        /* hasSummary */ !!(summary && summary.trim().length > 0),
       );
 
       // Defence-in-depth: gate the terminal transition on the parent's
@@ -316,6 +404,17 @@ export async function finaliseAgentRunFromIeeRun(
       toStatus: resolvedStatus,
       failureReason: ieeRun.failureReason ?? null,
     });
+
+    // F22 — meaningful-output hook: update subaccount_agents tracking columns
+    // when the completed run produced at least one action or memory write.
+    if (resolvedStatus === 'completed') {
+      await updateMeaningfulRunTracking(ieeRun.agentRunId, resolvedStatus).catch((err) => {
+        logger.warn('agentRunFinalization.meaningful_hook_failed', {
+          agentRunId: ieeRun.agentRunId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   }
 
   return performedTransition;

@@ -565,11 +565,10 @@ export function computeRunResultStatus(
   finalStatus: string,
   hasError: boolean,
   hadUncertainty: boolean,
-  hasSummary: boolean,
 ): RunResultStatus | null {
   switch (finalStatus) {
     case 'completed':
-      if (hasError || hadUncertainty || !hasSummary) return 'partial';
+      if (hasError || hadUncertainty) return 'partial';
       return 'success';
     case 'completed_with_uncertainty':
       return 'partial';

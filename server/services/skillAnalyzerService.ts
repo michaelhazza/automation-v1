@@ -372,6 +372,7 @@ export async function getJob(
         visibility,
         definition: row.definition as SystemSkill['definition'],
         instructions: row.instructions ?? null,
+        sideEffects: row.sideEffects,
       });
     }
   }
