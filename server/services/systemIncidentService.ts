@@ -17,6 +17,8 @@ import {
   computeEscalationVerdict,
   resolutionEventPayload,
 } from './systemIncidentServicePure.js';
+import { assertSystemAdminContext } from './principal/assertSystemAdminContext.js';
+import { getCurrentPrincipal } from './principal/systemPrincipal.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,7 +120,8 @@ export const systemIncidentService = {
     return { incident, events };
   },
 
-  async acknowledgeIncident(id: string, userId: string): Promise<SystemIncident> {
+  async acknowledgeIncident(id: string, userId: string, actorRole?: string): Promise<SystemIncident> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -143,7 +146,8 @@ export const systemIncidentService = {
     });
   },
 
-  async resolveIncident(id: string, userId: string, note?: string, linkedPrUrl?: string): Promise<SystemIncident> {
+  async resolveIncident(id: string, userId: string, note?: string, linkedPrUrl?: string, actorRole?: string): Promise<SystemIncident> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -199,7 +203,8 @@ export const systemIncidentService = {
     });
   },
 
-  async suppressIncident(id: string, userId: string, reason: string, duration: SuppressionDuration): Promise<SystemIncident> {
+  async suppressIncident(id: string, userId: string, reason: string, duration: SuppressionDuration, actorRole?: string): Promise<SystemIncident> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -245,7 +250,8 @@ export const systemIncidentService = {
     });
   },
 
-  async escalateIncidentToAgent(id: string, userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
+  async escalateIncidentToAgent(id: string, userId: string, actorRole?: string): Promise<{ incident: SystemIncident; taskId: string }> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     const { incident } = await this.getIncident(id);
 
     const now = new Date();
@@ -339,7 +345,8 @@ export const systemIncidentService = {
       .orderBy(desc(systemIncidentSuppressions.createdAt));
   },
 
-  async removeSuppression(id: string, userId: string): Promise<void> {
+  async removeSuppression(id: string, userId: string, actorRole?: string): Promise<void> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     const [suppression] = await db
       .select()
       .from(systemIncidentSuppressions)
@@ -382,7 +389,8 @@ export const systemIncidentService = {
   },
 
   // Test incident trigger (admin page test button, §8.9)
-  async createTestIncident(userId: string, triggerNotifications = false): Promise<SystemIncident> {
+  async createTestIncident(userId: string, triggerNotifications = false, actorRole?: string): Promise<SystemIncident> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
     const { recordIncident } = await import('./incidentIngestor.js');
     const { hashFingerprint } = await import('./incidentIngestorPure.js');
     const timestamp = Date.now();
