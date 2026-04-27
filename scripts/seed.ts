@@ -494,7 +494,7 @@ async function phase3_playbookAuthor(): Promise<void> {
       } as never)
       .returning();
     log(`  [ok]   Created Playbook Author system agent: ${created.id}`);
-    return;
+    // NOTE: no return here — fall through to orphan cleanup + hierarchy assertions
   }
 
   await db
@@ -585,13 +585,15 @@ async function phase3_playbookAuthor(): Promise<void> {
     );
   }
 
-  // Assertion 2: no cycles, depth ≤ 3
+  // Assertion 2: no cycles, depth ≤ 3 (max 2 hops from any leaf to root:
+  //   Worker→Head→Orchestrator). Guard fires when hops ≥ 2 before making the
+  //   hop — i.e. before taking a 3rd hop that would reach T4.
   for (const row of all) {
     if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
     let cur = row;
     let hops = 0;
     while (cur.parentId !== null) {
-      if (hops >= 3) {
+      if (hops >= 2) {
         throw new Error(`[hierarchy] depth > 3 from leaf '${row.slug}' — chain exceeds Orchestrator → Head → Worker`);
       }
       const parent = byId.get(cur.parentId);
