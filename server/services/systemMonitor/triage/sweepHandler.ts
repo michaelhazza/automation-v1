@@ -200,9 +200,10 @@ export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
     });
   }
 
-  const overallStatus = errored.length > 0 && firedRecords.length === 0
-    ? 'partial_success'
-    : 'success';
+  // Per spec §9.3: status is `partial_success` when at least one heuristic errored
+  // OR the input cap was hit (capped != null). Successful fires still propagate.
+  const overallStatus: 'success' | 'partial_success' =
+    errored.length > 0 || capped !== null ? 'partial_success' : 'success';
 
   const result: SweepResult = {
     status: overallStatus,
