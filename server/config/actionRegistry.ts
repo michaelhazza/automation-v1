@@ -913,14 +913,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'write',
+    sideEffectClass: 'none',
     directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['file_path'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   search_codebase: {

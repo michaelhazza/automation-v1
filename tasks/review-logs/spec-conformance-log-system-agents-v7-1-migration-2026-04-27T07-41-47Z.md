@@ -8,6 +8,7 @@
 **Scope:** All 9 chunks (Phases 1–9) — caller confirmed all-of-spec coverage; progress.md marks every chunk COMPLETE
 **Changed-code set:** 106 v7.1-specific files (filtered from 818 total branch diff)
 **Run at:** 2026-04-27T07:41:47Z
+**Commit at finish:** `0f0cd5d6`
 
 ---
 

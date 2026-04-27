@@ -485,7 +485,9 @@ async function executeListMySubordinates(
 
   const callerSystemAgentId = agentRow.systemAgentId;
 
-  // Fetch all system_agents in one read — the full table is small (dozens of rows).
+  // Fetch all active system_agents in one read — the full table is small (dozens of rows).
+  // Soft-deleted rows are filtered at the SQL layer so a deleted parent or
+  // child cannot reappear in the hierarchy resolver's output.
   const allAgents = await db.select({
     id: systemAgents.id,
     slug: systemAgents.slug,
@@ -496,7 +498,8 @@ async function executeListMySubordinates(
     deletedAt: systemAgents.deletedAt,
     status: systemAgents.status,
   })
-  .from(systemAgents);
+  .from(systemAgents)
+  .where(isNull(systemAgents.deletedAt));
 
   const subordinates = resolveSubordinates({ callerSystemAgentId, scope, allAgents });
   return { success: true, scope, agents: subordinates };
@@ -2109,19 +2112,73 @@ async function executeWithActionAudit(
 
     // ── Cross-run idempotency wrapper (§9.3.1) ─────────────────────────────
     const def = getActionDefinition(actionType);
+
+    // M5 — run parameterSchema.parse first so Zod defaults are materialised
+    // before canonicalisation (§8.1.1). Falls through to raw input only when
+    // no schema is declared (legacy entries — every new skill in v7.1 has one).
+    let parsedInput: Record<string, unknown> = input;
+    if (def?.parameterSchema) {
+      try {
+        parsedInput = def.parameterSchema.parse(input) as Record<string, unknown>;
+      } catch (zerr) {
+        createEvent('skill.error', {
+          skillName: actionType, reason: 'validation_failed', error: String(zerr).slice(0, 200),
+        }, { level: 'ERROR' });
+        pipelineSpan.end({ output: { status: 'blocked', reason: 'validation_failed' } });
+        return { status: 'blocked', reason: 'validation_failed', error: String(zerr) };
+      }
+    }
+
+    // M4 — preconditions are internal-only checks; run BEFORE the idempotency
+    // INSERT so a precondition-blocked write does not leave an in_flight row
+    // that locks the key forever. Per spec §16A.1 the no-side-effect-before-claim
+    // invariant only governs external side effects; precondition inspection is
+    // pure config reads.
+    if (def?.sideEffectClass === 'write') {
+      const preconditions = await checkSkillPreconditions(actionType, parsedInput, context);
+      if (preconditions.status === 'blocked') {
+        createEvent('skill.blocked', {
+          skillName: actionType, reason: preconditions.reason,
+          provider: (preconditions as Record<string, unknown>)['provider'],
+          requires: (preconditions as Record<string, unknown>)['requires'],
+        });
+        pipelineSpan.end({ output: preconditions });
+        return preconditions;
+      }
+    }
+
     let keyHash: string | undefined;
     let isFirstWriter = false;
 
     if (def?.idempotency) {
-      const requestHash = hashActionArgs(input);
-      keyHash = hashKeyShape(def.idempotency.keyShape, input);
+      // M7 — explicit subaccount-context guard. The schema requires NOT NULL;
+      // silently coercing null to '' produced un-matchable rows and hid the
+      // root cause when context wasn't propagated correctly.
+      if (!context.subaccountId) {
+        throw new Error(`Skill '${actionType}' requires subaccount context for cross-run idempotency.`);
+      }
+      const subaccountId = context.subaccountId;
+
+      const requestHash = hashActionArgs(parsedInput);
+      keyHash = hashKeyShape(def.idempotency.keyShape, parsedInput);
 
       assertRlsAwareWrite('skill_idempotency_keys');
+
+      // S7 — confirm the org session var is set before the INSERT. Without it
+      // the RLS policy silently rejects the write, producing zero rows and
+      // making the wrapper believe a prior writer already claimed the key —
+      // the cross-run guarantee would then be silently void.
+      const sessionCheck = await db.execute(sql`SELECT current_setting('app.organisation_id', true) AS org`);
+      const sessionRow = (sessionCheck as unknown as { rows: Array<{ org?: string | null }> }).rows[0];
+      if (!sessionRow?.org) {
+        throw new Error(`Skill '${actionType}' invoked outside withOrgTx — RLS session var not set; cross-run idempotency cannot be enforced.`);
+      }
+
       const insertResult = await db.execute(sql`
         INSERT INTO skill_idempotency_keys
           (subaccount_id, organisation_id, skill_slug, key_hash, request_hash, status, expires_at)
         VALUES (
-          ${context.subaccountId},
+          ${subaccountId},
           ${context.organisationId},
           ${actionType},
           ${keyHash},
@@ -2139,7 +2196,7 @@ async function executeWithActionAudit(
         const [existing] = await db.select()
           .from(skillIdempotencyKeys)
           .where(and(
-            eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+            eq(skillIdempotencyKeys.subaccountId, subaccountId),
             eq(skillIdempotencyKeys.skillSlug, actionType),
             eq(skillIdempotencyKeys.keyHash, keyHash),
           ))
@@ -2177,7 +2234,7 @@ async function executeWithActionAudit(
               const reclaim = await db.update(skillIdempotencyKeys)
                 .set({ createdAt: new Date(), requestHash, responsePayload: {} })
                 .where(and(
-                  eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+                  eq(skillIdempotencyKeys.subaccountId, subaccountId),
                   eq(skillIdempotencyKeys.skillSlug, actionType),
                   eq(skillIdempotencyKeys.keyHash, keyHash),
                   eq(skillIdempotencyKeys.status, 'in_flight'),
@@ -2208,17 +2265,6 @@ async function executeWithActionAudit(
 
       assertHandlerInvokedWithClaim(isFirstWriter);
     }
-    // ── Side-effect-class wrapper (§9.3.2) ──────────────────────────────────
-    if (def?.sideEffectClass === 'write') {
-      const preconditions = await checkSkillPreconditions(actionType, input, context);
-      if (preconditions.status === 'blocked') {
-        createEvent('skill.blocked', {
-          skillName: actionType, reason: preconditions.reason, provider: (preconditions as Record<string, unknown>)['provider'], requires: (preconditions as Record<string, unknown>)['requires'],
-        });
-        pipelineSpan.end({ output: preconditions });
-        return preconditions;
-      }
-    }
 
     // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
@@ -2227,15 +2273,37 @@ async function executeWithActionAudit(
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
+    // S8 — handler exception path must mark the in_flight row terminal so the
+    // key is not stuck for the rest of the TTL. Without this, a thrown error
+    // leaves an orphan row that blocks all retries until the cleanup job runs.
+    let result: unknown;
     const executeSpan = createSpan('skill.phase.execute', { skillName: actionType }, { parentSpan: pipelineSpan });
-    const result = await runWithProcessors(
-      actionType,
-      input,
-      context,
-      (_processedInput) => executor(),
-      proposed.actionId,
-    );
-    executeSpan.end({ output: result });
+    try {
+      result = await runWithProcessors(
+        actionType,
+        parsedInput,
+        context,
+        (_processedInput) => executor(),
+        proposed.actionId,
+      );
+      executeSpan.end({ output: result });
+    } catch (handlerErr) {
+      executeSpan.end({ output: { error: String(handlerErr) } });
+      if (def?.idempotency && isFirstWriter && keyHash && context.subaccountId) {
+        await db.update(skillIdempotencyKeys)
+          .set({
+            responsePayload: { error: String(handlerErr).slice(0, 1000) },
+            status: 'failed',
+          })
+          .where(and(
+            eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+            eq(skillIdempotencyKeys.skillSlug, actionType),
+            eq(skillIdempotencyKeys.keyHash, keyHash),
+            eq(skillIdempotencyKeys.status, 'in_flight'),
+          ));
+      }
+      throw handlerErr;
+    }
 
     // Read fail-soft logging (§9.3.2 + §9.3.3)
     if (def?.sideEffectClass === 'read') {
@@ -2250,41 +2318,61 @@ async function executeWithActionAudit(
       }
     }
 
-    // Terminal idempotency update (§9.3.1 — state machine closure)
-    if (def?.idempotency && isFirstWriter && keyHash) {
-      const updateResult = await db.update(skillIdempotencyKeys)
-        .set({
-          responsePayload: result as Record<string, unknown>,
-          status: (result as Record<string, unknown>)?.success ? 'completed' : 'failed',
-        })
-        .where(and(
-          eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
-          eq(skillIdempotencyKeys.skillSlug, actionType),
-          eq(skillIdempotencyKeys.keyHash, keyHash),
-          eq(skillIdempotencyKeys.status, 'in_flight'),
-        ))
-        .returning({ status: skillIdempotencyKeys.status });
+    // M6 — distinguish terminal completion ('completed' / 'failed') from
+    // recoverable handler responses ('blocked' / 'not_configured' / 'transient_error').
+    // Only success or hard error closes the state machine; recoverable
+    // statuses delete the in_flight row so a later replay (with provider
+    // configured / transient cleared) can claim fresh per spec §16A.7.
+    const resultObj = (result ?? {}) as Record<string, unknown>;
+    const handlerStatus = typeof resultObj['status'] === 'string' ? String(resultObj['status']) : undefined;
+    const isSuccess = resultObj['success'] === true;
+    const isRecoverable = handlerStatus === 'blocked' || handlerStatus === 'not_configured' || handlerStatus === 'transient_error';
 
-      if (updateResult.length === 0) {
-        // Terminal race lost — read and return the winning row's payload
-        createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARNING' });
-        const [winner] = await db.select()
-          .from(skillIdempotencyKeys)
+    if (def?.idempotency && isFirstWriter && keyHash && context.subaccountId) {
+      const subaccountId = context.subaccountId;
+      if (isRecoverable) {
+        // Drop the claim entirely — the next call should re-attempt.
+        await db.delete(skillIdempotencyKeys)
           .where(and(
-            eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+            eq(skillIdempotencyKeys.subaccountId, subaccountId),
             eq(skillIdempotencyKeys.skillSlug, actionType),
             eq(skillIdempotencyKeys.keyHash, keyHash),
+            eq(skillIdempotencyKeys.status, 'in_flight'),
+          ));
+      } else {
+        const updateResult = await db.update(skillIdempotencyKeys)
+          .set({
+            responsePayload: resultObj,
+            status: isSuccess ? 'completed' : 'failed',
+          })
+          .where(and(
+            eq(skillIdempotencyKeys.subaccountId, subaccountId),
+            eq(skillIdempotencyKeys.skillSlug, actionType),
+            eq(skillIdempotencyKeys.keyHash, keyHash),
+            eq(skillIdempotencyKeys.status, 'in_flight'),
           ))
-          .limit(1);
-        if (winner) return winner.responsePayload as unknown;
+          .returning({ status: skillIdempotencyKeys.status });
+
+        if (updateResult.length === 0) {
+          // Terminal race lost — read and return the winning row's payload
+          createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARNING' });
+          const [winner] = await db.select()
+            .from(skillIdempotencyKeys)
+            .where(and(
+              eq(skillIdempotencyKeys.subaccountId, subaccountId),
+              eq(skillIdempotencyKeys.skillSlug, actionType),
+              eq(skillIdempotencyKeys.keyHash, keyHash),
+            ))
+            .limit(1);
+          if (winner) return winner.responsePayload as unknown;
+        }
       }
     }
 
-    const resultObj = result as Record<string, unknown>;
-    if (resultObj?.success) {
+    if (isSuccess) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
-    } else {
-      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
+    } else if (!isRecoverable) {
+      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj['error'] ?? 'Unknown error'));
     }
 
     pipelineSpan.end({ output: result });
@@ -2297,11 +2385,21 @@ async function executeWithActionAudit(
       pipelineSpan.end({ output: { success: false, error: err.reason } });
       return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
     }
+    // M3 — for write/idempotent skills the catch path MUST NOT bypass the
+    // claim by re-running the executor directly. Doing so re-fires external
+    // side effects with no audit row, no manager guard re-check, and no
+    // idempotency row — defeating the spec §16A.0 ordering invariant.
+    // Surface a structured error instead.
+    const def = getActionDefinition(actionType);
+    const guarded = def?.idempotency !== undefined || def?.sideEffectClass === 'write';
     createEvent('skill.action.failed', {
-      skillName: actionType, error: String(err).slice(0, 200),
+      skillName: actionType, error: String(err).slice(0, 200), guarded,
     }, { parentSpan: pipelineSpan, level: 'ERROR' });
-    console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
+    console.error(`[ActionAudit] Failed to track ${actionType} (guarded=${guarded}):`, err);
     pipelineSpan.end({ output: { error: String(err) } });
+    if (guarded) {
+      return { success: false, error: `Wrapper failure for guarded skill '${actionType}': ${String(err).slice(0, 200)}` };
+    }
     return executor();
   }
 }

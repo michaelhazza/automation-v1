@@ -1121,3 +1121,57 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - Gap: spec mandates appending the 7 new agents (head-of-product-engineering, head-of-growth, head-of-client-services, head-of-commercial, admin-ops-agent, retention-success-agent, sdr-agent) to the customer-facing roster in vendor-neutral, marketing-ready terms.
   - Suggested approach: write each agent's customer-facing one-liner per the editorial rules in `docs/capabilities.md § Editorial Rules` (no LLM provider names, vendor-neutral, marketing-ready). Anchor on the existing roster section in `docs/capabilities.md` and add seven entries in alphabetical order.
 
+## Deferred from pr-reviewer review — system-agents-v7-1-migration (2026-04-27)
+
+The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NICE-TO-HAVE findings. M1–M7 + S2/S7/S8/S9 were resolved in commit batch immediately following the review (M8 verified as already correct: `system_agents_slug_idx` was the actual original index name, dropped correctly by 0233). The items below are the remaining SHOULD-FIX/NICE-TO-HAVE plus one directional spec contradiction.
+
+- [ ] DIRECTIONAL — `head-of-growth` declares `read_campaigns` and `read_analytics` but both have `directExternalSideEffect: true`
+  - Source: spec §10.1.2 vs §9.4 + §8.2 line 797
+  - Gap: spec §10.1.2 puts these on head-of-growth's per-manager declared bundle, but the manager guard's second check (`directExternalSideEffect: true`) blocks them, and §8.2 line 797 explicitly says external-API reads should not run from a manager. The implementation is consistent with §9.4/§8.2 (rejects them) but contradicts §10.1.2.
+  - Suggested approach: pick one — (a) remove `read_campaigns`/`read_analytics` from `head-of-growth/AGENTS.md` so the manager delegates via `spawn_sub_agents` to `ads-management-agent`/`social-media-agent` (consistent with the spec's "managers orchestrate" stance); or (b) carve out a per-manager-declared exemption in the second guard check too. Option (a) is more consistent with the broader §6 architecture.
+- [ ] S1 — Manager-guard performs 2 DB roundtrips per tool call with no caching
+  - Source: pr-reviewer
+  - Gap: every tool invocation by every agent runs `agents` → `systemAgents` SELECTs in `proposeAction.ts:286-305`. Spec §9.4 referenced `resolveAgentRole(...)` cache; not implemented.
+  - Suggested approach: cache `(agentRole, defaultSystemSkillSlugs)` keyed on `agentId` for the duration of the run on the middleware context or a per-runId LRU.
+- [ ] S3 — `request_hash` uses 64-bit truncated digest (`hashActionArgs.slice(0,16)`); idempotency key uses full 256-bit
+  - Source: pr-reviewer
+  - Gap: 64-bit truncation has ~2^32 collision probability. Mixed precision is implicit; collisions could mask "different request, same key" cases.
+  - Suggested approach: introduce a separate `computeRequestHashForIdempotency` that returns the full SHA-256 digest, and use it in `executeWithActionAudit`. Leave the legacy `hashActionArgs` for actions-table use. Document the divergence.
+- [ ] S4 — `googlePlacesProvider` and `hunterProvider` caches are unbounded and process-wide
+  - Source: pr-reviewer
+  - Gap: `Map<string, ...>` grows monotonically; `JSON.stringify(input)` is order-dependent so semantically identical inputs miss the cache; tenants share cache pressure.
+  - Suggested approach: use the project's LRU primitive keyed on `canonicaliseForHash(input)` with a 500-entry cap.
+- [ ] S5 — Domain handlers (`adminOpsService`, `sdrService`, `retentionSuccessService`) accept `_context: unknown`
+  - Source: pr-reviewer
+  - Gap: handlers cannot type-safely reach `context.organisationId`/`context.subaccountId` if a future change needs them; TS can't enforce correct usage at the call sites.
+  - Suggested approach: import `SkillExecutionContext` (or extract to a shared types file) and type the second parameter accordingly.
+- [ ] S6 — `verify-agent-skill-contracts.ts` skill list parser is regex-based and brittle
+  - Source: pr-reviewer
+  - Gap: regex `/^skills:\s*\n((?:[ \t]+-[ \t]+\S+\n?)*)/m` stops on any irregularity; a typo silently truncates the list and hides skill references from the gate.
+  - Suggested approach: use the same YAML parser the seed uses (`gray-matter` / `yaml.parse`).
+- [ ] S10 — `skillIdempotencyKeysCleanupJob` can exceed `MAX_ROWS_PER_RUN` ceiling on a batch boundary
+  - Source: pr-reviewer
+  - Gap: loop terminates when `totalDeleted >= MAX_ROWS_PER_RUN` is checked, but a batch-of-1000 can push past the cap because the check runs *before* the increment. Cap is 10,000 but actual could hit 10,999.
+  - Suggested approach: add `if (totalDeleted >= MAX_ROWS_PER_RUN) break;` after the increment.
+- [ ] N1 — `send_invoice.md` skill description says "Returns not_configured" but runtime returns `{ status: 'blocked', reason: 'provider_not_configured' }`
+  - Source: pr-reviewer
+  - Gap: write skills return `'blocked'`, not `'not_configured'` (which is for `'read'` skills). Audit all 14 new skill `.md` files for this drift.
+  - Suggested approach: sweep `server/skills/*.md` for the 14 new skills; correct the documented contract.
+- [ ] N2 — Hierarchy depth-guard error wording confuses hops and depth
+  - Source: pr-reviewer; `scripts/seed.ts:599-600`
+  - Gap: cosmetic — message says "depth > 3" but the guard fires at hops ≥ 2 (4 nodes). Clarify the wording.
+- [ ] N3 — `proposeAction.ts` middleware error handling uses `console.error` instead of structured logger
+  - Source: pr-reviewer; `proposeAction.ts:92, 400`
+  - Gap: drift from other middleware files; bypasses log levels and structured tagging.
+  - Suggested approach: import `server/lib/logger.ts` and use it consistently.
+- [ ] N4 — `googlePlacesProvider.searchPlaces` types `data.results` items inline
+  - Source: pr-reviewer
+  - Gap: 30-line inline type would read better as a named interface alongside `PlaceSummary`.
+- [ ] N5 — `_down/0233_system_agents_v7_1.sql` rollback comment lacks a Spec: reference
+  - Source: pr-reviewer
+- [ ] N6 — `proposeAction.ts` top-of-file docstring lists 5 responsibilities but the v7.1 manager-role guard adds a sixth
+  - Source: pr-reviewer
+- [ ] N7 — `skillIdempotencyKeysPure.test.ts:61-68` `same key values in different input key order → same hash` is a tautology
+  - Source: pr-reviewer
+  - Gap: `hashKeyShape` builds a NEW object from `keyShape` order before canonicalising, so the test passes regardless of canonicaliseForHash's behaviour. The actual canonicalisation property is tested separately at line 115.
+  - Suggested approach: either remove the redundant test or strengthen it by computing the SHA against a hand-canonicalised string.

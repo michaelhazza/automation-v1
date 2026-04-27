@@ -61,14 +61,14 @@ test('manager + allowlisted + directExternalSideEffect: true → manager_direct_
   assert.deepEqual(result, { allowed: false, reason: 'manager_direct_external_side_effect' });
 });
 
-// Test 5: manager + allowlisted + sideEffectClass: 'read' + directExternalSideEffect: false → manager_indirect_side_effect_class
-test('manager + allowlisted + sideEffectClass: read → manager_indirect_side_effect_class', () => {
+// Test 5: manager + allowlisted + sideEffectClass: 'write' + directExternalSideEffect: false → manager_indirect_side_effect_class
+test('manager + allowlisted + sideEffectClass: write → manager_indirect_side_effect_class', () => {
   const def = makeDef({
     managerAllowlistMember: true,
-    sideEffectClass: 'read',
+    sideEffectClass: 'write',
     directExternalSideEffect: false,
   });
-  const result = isManagerAllowlisted(def, 'manager', [], 'read_crm');
+  const result = isManagerAllowlisted(def, 'manager', [], 'mutate_canonical');
   assert.deepEqual(result, { allowed: false, reason: 'manager_indirect_side_effect_class' });
 });
 
@@ -87,4 +87,46 @@ test('manager + in perManagerDeclaredSlugs (not global) + sideEffectClass: none 
 test('undefined def + manager → manager_role_violation', () => {
   const result = isManagerAllowlisted(undefined, 'manager', [], 'unknown_tool');
   assert.deepEqual(result, { allowed: false, reason: 'manager_role_violation' });
+});
+
+// Test 8 (S9): manager + per-manager declared READ skill (e.g. read_revenue, read_crm)
+// + sideEffectClass: 'read' + directExternalSideEffect: false → allowed.
+// Spec §10.1.4 explicitly puts read_revenue / read_crm on head-of-commercial's
+// per-manager declared bundle. They are canonical DB reads (no external blast)
+// so the third deny check (now scoped to 'write' only) must let them through.
+test('manager + per-manager declared READ skill + directExternalSideEffect: false → allowed', () => {
+  const def = makeDef({
+    managerAllowlistMember: false,
+    sideEffectClass: 'read',
+    directExternalSideEffect: false,
+  });
+  const result = isManagerAllowlisted(def, 'manager', ['read_revenue'], 'read_revenue');
+  assert.deepEqual(result, { allowed: true });
+});
+
+// Test 9 (S9): per-manager declared READ that hits an external API
+// (read_campaigns / read_analytics — directExternalSideEffect: true) is still
+// blocked by the second check, even though the third check no longer rejects
+// 'read'. This preserves spec §8.2 line 797's stance that reads against
+// quota'd external APIs should not run from a manager.
+test('manager + per-manager declared external-API read → manager_direct_external_side_effect', () => {
+  const def = makeDef({
+    managerAllowlistMember: false,
+    sideEffectClass: 'read',
+    directExternalSideEffect: true,
+  });
+  const result = isManagerAllowlisted(def, 'manager', ['read_campaigns'], 'read_campaigns');
+  assert.deepEqual(result, { allowed: false, reason: 'manager_direct_external_side_effect' });
+});
+
+// Test 10 (S9): manager + globally allowlisted + sideEffectClass: 'read'
+// → allowed (the third check no longer rejects 'read'; only 'write').
+test('manager + globally allowlisted + sideEffectClass: read → allowed', () => {
+  const def = makeDef({
+    managerAllowlistMember: true,
+    sideEffectClass: 'read',
+    directExternalSideEffect: false,
+  });
+  const result = isManagerAllowlisted(def, 'manager', [], 'allowlisted_read');
+  assert.deepEqual(result, { allowed: true });
 });
