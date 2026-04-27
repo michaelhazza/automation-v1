@@ -5,6 +5,18 @@
 **Predecessor (shipped, do not re-build):** `tasks/builds/system-monitoring-agent/phase-0-spec.md` + `tasks/builds/system-monitoring-agent/implementation-plan.md` (Phase 0 + 0.5, PR #188 — used here as a structural template only).
 **Sessions:** 4 (one per slice A → B → C → D), each writes back to `tasks/builds/system-monitoring-agent/progress.md` before ending.
 
+> **Post-implementation refactor note (2026-04-27).** During the Slice A
+> migration the prompt template was deferred to a follow-on migration
+> (originally 0234, then renumbered 0235 after a skill-seed file took
+> 0234). After the build completed, all `system_monitor` seed data
+> (system_agent row, system principal user, org-side agents row, 11
+> system_skills, master_prompt, write_event enum widening) was relocated
+> from migrations 0233/0234/0235/0236 into `scripts/seed.ts` Phase 4 +
+> `scripts/lib/systemMonitorSeed.ts`. Migration 0233 retains the schema
+> work only; 0234/0235/0236 no longer exist. References below to
+> "Slice A migration includes seed rows" / "0234_system_monitor_*" /
+> §10.3 read as the original plan; current state is seed.ts.
+
 This plan is a build contract, not a re-review. Where the spec is concrete (schema columns, idempotency keys, heuristic firing conditions, env-var defaults, event-type registry), this plan references the spec section rather than restating. Where the spec hands off to architect (paths, sequencing, sub-decisions), this plan resolves the call.
 
 The spec organises delivery as **four slices A → B → C → D** (§17). This plan preserves that cadence and refines commit-level sequencing within each slice. Slice boundaries are session boundaries; commit ordering inside a slice is graph-of-dependencies.

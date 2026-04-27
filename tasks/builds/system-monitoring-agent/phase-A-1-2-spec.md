@@ -6,6 +6,16 @@
 **Predecessor:** `tasks/builds/system-monitoring-agent/phase-0-spec.md` (Phase 0 + 0.5 — shipped via PR #188)
 **Successor:** None planned. Phase 0.75 / Phase 3 / Phase 4 remain deferred (§19).
 
+> **Post-implementation refactor note (2026-04-27).** Seed data for the
+> `system_monitor` agent (system_agent row, system principal user, org-side
+> agents row, 11 system_skills, master_prompt) was relocated from migrations
+> 0233/0234/0235/0236 into `scripts/seed.ts` Phase 4 + `scripts/lib/systemMonitorSeed.ts`
+> after this spec was finalised. Migration 0233 retains the **schema** parts
+> only (columns, baselines + heuristic_fires tables, `execution_scope='system'`
+> CHECK widening). Sections describing seed-in-migration (§4.6 step 6, §6
+> deliverables, §11 file paths) read as the original plan; current state is
+> seed.ts. Migrations 0234/0235/0236 no longer exist.
+
 This spec moves the System Monitor from **passive incident sink** (Phase 0/0.5) to **active monitoring** by:
 
 1. Adding the foundations needed to safely run a system-scoped agent (Phase A).
@@ -2399,7 +2409,7 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 | `server/services/principal/assertSystemAdminContext.ts` | Service-layer guard (§4.4). |
 | `server/services/incidentIngestorIdempotency.ts` | LRU + TTL helpers (§4.1). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
 | `server/services/incidentIngestorThrottle.ts` | Per-fingerprint throttle map (§4.2). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
-| `migrations/<NNNN>_phase_a_foundations.sql` | Schema additions per §4.5 + system principal seed + agent row seed for `system_monitor`. |
+| `migrations/<NNNN>_phase_a_foundations.sql` | Schema additions per §4.5. *Seed rows (system principal user, system_monitor agent row) relocated post-implementation to `scripts/seed.ts` Phase 4 — see top-of-file note.* |
 | `migrations/<NNNN>_phase_a_foundations.down.sql` | Local-revert mate. |
 
 **Server — Phase 1 + Investigate-Fix Protocol + heuristic registry + baselining:**
@@ -2811,7 +2821,7 @@ This section is the **content** of each slice — what concretely lands in each 
 
 **Deliverables in landing order:**
 
-1. **Schema migration.** One file (`migrations/<NNNN>_phase_a_foundations.sql`) covering all of §4.5: new columns on `system_incidents`, the two new tables (`system_monitor_baselines`, `system_monitor_heuristic_fires`) with **no** RLS policies (per §4.6 step 7 — they follow the existing `system_*` bypass posture), the system-principal user seed (`role='system_admin'` in the `is_system_org=true` org per §4.6 step 6), the `system_monitor` agent row seed, the new event-type enum values per §12.1, registration of the two new tables in `scripts/rls-not-applicable-allowlist.txt`. Forward-only with a `.down.sql` mate per `phase-0-spec.md §6.3`.
+1. **Schema migration.** One file (`migrations/<NNNN>_phase_a_foundations.sql`) covering all of §4.5: new columns on `system_incidents`, the two new tables (`system_monitor_baselines`, `system_monitor_heuristic_fires`) with **no** RLS policies (per §4.6 step 7 — they follow the existing `system_*` bypass posture), the new event-type enum values per §12.1, registration of the two new tables in `scripts/rls-not-applicable-allowlist.txt`. Forward-only with a `.down.sql` mate per `phase-0-spec.md §6.3`. *Original spec also folded the system-principal user seed and `system_monitor` agent row seed into this migration; relocated post-implementation to `scripts/seed.ts` Phase 4 — see top-of-file note.*
 2. **System principal module.** `getSystemPrincipal`, `withSystemPrincipal`, the AsyncLocalStorage wiring, the cross-tenant-read posture using `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason })` per §4.3. Plus the integration test that confirms cross-tenant reads succeed only via the admin-bypass guard and that `system_*` mutations require Condition A or B from §4.4.
 3. **`assertSystemAdminContext` guard.** Helper module + the typed error. Wired into every `system_incidents` mutation method as the first line — including the new `recordPromptFeedback` mutation (will be added in Slice C; placeholder only here).
 4. **Idempotency layer.** LRU + TTL helper, with `IncidentInput.idempotencyKey?` field added to the existing `recordIncident` callable. Wraps the existing ingest path; no fingerprint algorithm change.

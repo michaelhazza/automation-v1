@@ -3060,7 +3060,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a new permission key | `server/lib/permissions.ts` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
 | Add/modify a System Monitor heuristic (Phase 2+) | `server/services/systemMonitor/heuristics/` (pure module per category folder) + `index.ts` (HEURISTICS array) + co-located test. Heuristics MUST be pure (no DB writes — `verify-heuristic-purity.sh` gate). New event types go to `shared/types/systemIncidentEvent.ts` + `server/db/schema/systemIncidentEvents.ts` (`verify-event-type-registry.sh` gate). Baselining: `server/services/systemMonitor/baselines/sourceTableQueries.ts`. Triage orchestration: `server/services/systemMonitor/triage/sweepHandler.ts` (sweep) + `triageHandler.ts` (incident-driven). |
-| Modify the system_monitor agent prompt | `server/services/systemMonitor/triage/agentSystemPrompt.ts` (constant) + migration in `migrations/` (UPDATE system_agents SET master_prompt). Validate changes via `validateInvestigatePrompt` in `promptValidation.ts`. |
+| Modify the system_monitor agent prompt | `server/services/systemMonitor/triage/agentSystemPrompt.ts` (`SYSTEM_MONITOR_PROMPT` constant) — single source of truth, imported at runtime by `triageHandler.ts` and seeded into `system_agents.master_prompt` by `scripts/seed.ts` Phase 4. Re-run `npm run seed` to propagate to the DB. Validate changes via `validateInvestigatePrompt` in `promptValidation.ts`. |
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
@@ -3344,7 +3344,7 @@ pg-boss queue: `system-monitor-triage`, `teamSize: 4` (concurrent per incident, 
 
 **Prompt validation.** `validateInvestigatePrompt(text)` in `promptValidation.ts`: 200–6,000 chars, 9 required headings in order, 3 forbidden patterns (`git push`, `merge to main`, `auto-deploy`). Returned from `write_diagnosis` as `{ success: false, error: 'PROMPT_VALIDATION_FAILED', retryable: true }` → agent retries up to 2×.
 
-**Investigate-Fix Protocol.** `/docs/investigate-fix-protocol.md` cross-reference. The triage agent generates a prompt per §9.7 template stored in `agentSystemPrompt.ts` and seeded into `system_agents.master_prompt` via migration `0235_system_monitor_prompt_template.sql`.
+**Investigate-Fix Protocol.** `/docs/investigate-fix-protocol.md` cross-reference. The triage agent generates a prompt per §9.7 template stored in `agentSystemPrompt.ts` and seeded into `system_agents.master_prompt` by `scripts/seed.ts` Phase 4 (single source of truth — also imported at runtime by `triageHandler.ts`).
 
 ### pg-boss Queue Inventory (System Monitor)
 

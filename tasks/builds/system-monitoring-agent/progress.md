@@ -1,12 +1,17 @@
 # System Monitoring Agent — Build Progress
 
 **Branch:** `claude/add-system-monitoring-BgLlY`
-**Status:** Implementation complete. Awaiting user review and PR open.
-**Last implementation commit:** `2bff1b33` (fix: type errors in Phase 2.5 heuristics + sweep handler)
+**Status:** Implementation complete + ChatGPT review (3 rounds) finalised + post-merge seed-from-migration refactor. Awaiting merge to main.
+**PR:** [#215](https://github.com/michaelhazza/automation-v1/pull/215)
+**Last implementation commit:** `44411d60` (refactor: move agent + skills + prompt seed from migrations to seed.ts)
 **Spec file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
 **Plan file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-implementation-plan.md`
 **Staging smoke checklist:** `tasks/builds/system-monitoring-agent/staging-smoke-checklist.md`
-**Spec file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
+**Post-merge follow-ups:** `tasks/post-merge-system-monitor.md`
+
+## Post-build refactor (2026-04-27)
+
+Seed data for `system_monitor` (system_agent row, system principal user, org-side agents row, 11 system_skills, master_prompt, write_event enum widening) relocated from migrations 0233/0234/0235/0236 into `scripts/seed.ts` Phase 4 + `scripts/lib/systemMonitorSeed.ts`. Migration 0233 retains the schema work only; 0234/0235/0236 deleted. Single source of truth. To activate the agent in a fresh DB: `npm run migrate && npm run seed`.
 
 ## Spec corrections
 
