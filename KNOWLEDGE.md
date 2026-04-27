@@ -930,3 +930,110 @@ Round 1 of this session's review added §5.5 protocol-version stamping rule: "ev
 ### [2026-04-27] Pattern — Default-to-user-facing triage holds across resumed reviews when the spec deliberately hides user surface
 
 Confirmed for a second time on the same spec: across Rounds 5 + 6 + finalisation cleanup (19 total decisions), every single finding triaged `technical` and was auto-applied / auto-rejected without a user gate. Zero user-facing escalations across both the original 4-round loop AND the resumed 2-round loop. **Stronger form of the 2026-04-26 pattern:** a spec that intentionally defers UI to a separate architect spec (per the system-monitoring-agent §10 "UI surface" reference back to existing `SystemIncidentsPage` extension only — no new pages, no new copy strings, no new workflow steps) survives ChatGPT's review pressure across multiple sessions without producing any user-visible findings. The triage discipline produces zero false escalations because the user-visible surface is structurally empty. **Implication:** when authoring an internal-contract spec for a system that has a user-visible surface, the cheapest path to autonomous review is to extract the user surface into a separate spec (or defer to architect) so the contract spec can be reviewed under pure technical-triage. Bundling internal contract + user copy + workflow ordering into one spec forces every round to wait on user decisions for the UI-string findings.
+
+### [2026-04-27] Pattern — Three-layer defence-in-depth for status writes (WHERE-guard / log-bridge / hard-assert)
+
+When migrating status-write boundaries from a single guard layer (state-based `WHERE inArray(status, [...non-terminal])`) to a stronger guarantee (runtime `assertValidTransition`), do not flip every site at once. Use three layers concurrently and migrate sites between them over time:
+
+1. **Pre-existing WHERE-clause guard** — already in place at every site; gives 0-row no-op on contract violation but is silent.
+2. **Observability bridge** — `describeTransition({ ..., guarded: false })` log line emitted immediately before the UPDATE. Lets log queries quantify the unguarded-by-assert surface area while keeping migration incremental.
+3. **Hard assert** — `assertValidTransition(...)` throws `InvalidTransitionError` on terminal→non-terminal, terminal→terminal, or unknown-status target. Adopted at high-blast-radius sites first.
+
+The bridge layer is the load-bearing piece. Without it, a partial migration looks identical (in logs) to a fully-migrated codebase, so operators cannot tell when the migration is complete or surface unconverted sites for review. Adopt the log line at the same time you start adopting the assert.
+
+**Applied to:** PR #211 R3-2 — `shared/stateMachineGuards.ts` exports both `assertValidTransition` (hard) and `describeTransition` (log). 5 sites adopted the assert (`workflowEngineService.ts`, `agentRunFinalizationService.ts`); 2 high-volume terminal-write sites in `agentExecutionService.ts` adopted the log with `guarded: false` and stayed on the WHERE guard pending the F6 follow-up spec. Operators query `event=state_transition guarded=false` to see remaining migration surface.
+
+**When NOT to use this pattern.** If the new assert can be adopted everywhere in one PR (small surface, clear sites), skip the bridge layer — three-layer transition only earns its complexity when migration is incremental.
+
+### [2026-04-27] Decision — Risk-class split for cached-context isolation rollout (read-leak vs write-leak)
+
+Read leakage (one tenant queries data scoped to another) is **exposure** — bounded blast radius, contained per query. Write leakage (insert/update lands on the wrong tenant) is **corruption** — durable damage that compounds across reads. Cached-context isolation has both surfaces; rolling them out together obscures the urgency gap.
+
+**Pattern.** Split the rollout by risk class:
+- **Write side first, log-only:** ship `logCachedContextWrite({ table, operation, organisationId, subaccountId, hasSubaccountId })` at every write boundary. Cheap, surfaces the higher-blast-radius surface in observability before it becomes an incident. Promote log → hard assert under a follow-up spec when the explicit `{ orgScoped: true }` discriminator is defined.
+- **Read side later, mechanical:** the F2a follow-up — shared `assertSubaccountScopedRead(query, subaccountId)` helper + grep/CI gate. Lower urgency because exposure is bounded per query.
+
+Splitting also makes the spec-author's job tractable — each half can carry its own decision (failure mode, discriminator design, gate type) without entangling the other.
+
+**Applied to:** PR #211 R2-2 — original F2 finding split into F2a (read, deferred) and F2b (write, partial-shipped). `server/lib/cachedContextWriteScope.ts` is the F2b log helper; full assert promotion routed to `tasks/todo.md § CHATGPT-PR211-F2b`.
+
+**Reusable test.** When a reviewer flags a single mechanical-enforcement gap that has both a read side and a write side, ask: would each side need a different failure mode (log vs throw) or a different discriminator? If yes, split the rollout. If no, ship them together.
+
+### [2026-04-27] Pattern — Bypass annotations bind to function name, not file
+
+When introducing a doc-rule that requires an annotation at every caller of an allow-listed primitive (RLS-bypass functions, admin-DB scopes, raw-SQL escape hatches), the annotation MUST cite the immediately-following function name verbatim, not just the file or table. Form:
+
+```
+// @rls-allowlist-bypass: <table_name> <function_name> [ref: <invariant-or-spec-§>]
+async function fooJob() { ... }
+```
+
+**Why.** Files accumulate functions over time. Without name binding, an allow-listed file silently grows new bypass call sites because the file itself is "covered" by the annotation. Binding the annotation to a specific function name closes that gap — if a developer renames the function, moves it, or copy-pastes the bypass into a sibling function, reviewers can grep for `@rls-allowlist-bypass` and spot orphaned annotations whose third token no longer matches the next declaration.
+
+**Why no CI gate.** A new gate is a new primitive (`DEVELOPMENT_GUIDELINES § 8.4` — prefer existing primitives). At current call volume, grep is sufficient: `grep -nE "@rls-allowlist-bypass" server/` lists every annotated caller, and reviewers spot-check whether the line below each annotation declares a function whose name matches the third token. The gate becomes worth its cost only when allow-list size × code churn makes the manual grep error-prone.
+
+**Applied to:** PR #211 R3-5 — `scripts/rls-not-applicable-allowlist.txt` format-rules header. The allow-list itself is currently empty by design (every tenant table is registered); the rule fires when the first real entry is added.
+
+**Anti-pattern.** Annotating the file (`// rls-bypass file: foo.ts`) without naming the function — silent drift as the file grows.
+
+### [2026-04-27] Pattern — Stable-tiebreaker sort for distributed event reconciliation
+
+When a client merges optimistic local writes with WebSocket-streamed events into a single ordered list, sort by `(serverTimestamp, immutableId)` — never by `serverTimestamp` alone. ISO timestamps with second precision can collide across multi-server fan-out; without a tiebreaker, the merged list oscillates as new events arrive, causing list re-rendering, scroll jumps, and visible flicker.
+
+**Comparator shape:**
+
+```ts
+items.sort((a, b) => {
+  if (a.serverCreatedAt !== b.serverCreatedAt) {
+    return a.serverCreatedAt < b.serverCreatedAt ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : 1;  // tiebreak by immutable, unique ID
+});
+```
+
+The tiebreaker must be immutable (artefact ID, message ID, decision ID — not a derived field that can change between renders) and unique (collision-free by construction).
+
+**Applied to:** PR #211 R3-1 — `client/src/pages/BriefDetailPage.tsx` `mergeArtefactById` sorts by `serverCreatedAt` primary + `artefactId` secondary. Server stamps `serverCreatedAt` at write time; client re-sorts only on stamped incomings (legacy optimistic inserts without timestamps fall through to replace-or-append).
+
+**When this matters.** Any UI surface that merges live data from multiple sources where ordering visibly affects UX — chat threads, run timelines, audit logs, notification streams. Less critical for tables sorted by paginated cursor (cursor stability is a different problem).
+
+### [2026-04-27] Pattern — Pre-merge sanity check pass: 4 read-only confirmations after a multi-round review iteration
+
+After a multi-round ChatGPT/Codex review iteration concludes with "you're done" verdict, run 4 read-only confirmation checks targeted at the riskiest invariants the iteration introduced. Cost: ~30 seconds × 4. Value: catches any regression introduced during the review rounds themselves at zero implementation cost.
+
+**Check shapes:**
+
+1. **No silent bypass** — the new infra adds a guard or assertion. Confirm no path skips both the new infra AND the pre-existing fallback (e.g. WHERE-clause guard). Grep for the assert call sites; verify each is wired or replaced by a logged-and-WHERE-protected variant.
+2. **No dead instrumentation** — new logging / observability hooks are imported and called from at least one real, callable production path. Grep the import; trace the call chain to a route handler / job entry / scheduled tick.
+3. **No wrong-position assumption** — if the iteration introduced new sorting or ordering, confirm no existing code assumes "last item in array = latest" (or first = oldest). Grep for `[length - 1]`, `.at(-1)`, `.pop()` on the affected types.
+4. **No theoretical-only enforcement** — if the iteration introduced an annotation rule, doc-rule, or convention, confirm it has at least one real call site. If not, document explicitly that it's empty-by-design (see "Empty-allowlist-by-design is correct" below).
+
+**When to skip.** Trivial PRs (single-file fix, no new infra). When the reviewer's "you're done" comes after only one round of substantive feedback (no iteration to regress against).
+
+**Applied to:** PR #211 Round 4 — all 4 checks run; 3 pass; check 4 N/A by design (empty allowlist). Recorded in `tasks/review-logs/chatgpt-pr-review-impl-pre-launch-hardening-2026-04-26T23-59-09Z.md § Round 4 § Sanity check results`.
+
+### [2026-04-27] Convention — Empty-by-design allow-lists / registries are correct, not a flaw
+
+When a doc-rule introduces a registry (allow-list, exception-list, opt-out catalog) and the registry is empty at the time the rule lands, that is the **expected** state — not a flaw to fix by adding placeholder entries. The rule fires when the first real entry is added; until then, the rule is intentionally theoretical.
+
+**Why.** The rule's value is preventing future "just add it to the list" reflexes by codifying the entry format upfront. Adding a fake entry to "validate the rule" mechanically would dilute the registry (placeholder vs real entries get confused over time) and contradict the rule's purpose.
+
+**Detection.** When a reviewer flags "rule is theoretical / not exercised", confirm the registry is empty by design (file header should say so) before treating the finding as a gap. If the file header doesn't document the empty-by-design state, that's the actual fix — annotate the file, not the rule.
+
+**Applied to:** PR #211 Round 4 sanity-check 4 — `scripts/rls-not-applicable-allowlist.txt` is empty; file header explicitly states "Currently empty — every tenant table on `main` is registered in `rlsProtectedTables.ts`. Add new entries below as needed." Reviewer's "rule is theoretical" finding correctly closed as N/A-by-design.
+
+### [2026-04-27] Pattern — Reviewer follow-up may overturn round-1 defer when cost-curve evidence emerges
+
+When a reviewer iteration produces a Round 1 finding that is reasonable to defer, do NOT treat the defer as locked. If the reviewer's Round 2 follow-up cites cost-curve reasoning ("cheap now, very expensive later") on the same finding, that is the strongest signal to overturn the round-1 defer in the same session.
+
+**Why this works.** Round 1 defers are usually decided on scope/architectural grounds ("new primitive, multiple call sites, escalate"). Round 2 follow-ups have access to the round-1 decision and can refute it specifically — when the refutation is cost-curve evidence (not a re-litigation of scope), it carries more weight than the original scope concern. Acting in the same session preserves the iteration's coherence; deferring further would create an open thread the next session has to re-discover.
+
+**How to apply.**
+1. When a round-1 finding is deferred on scope grounds, leave a marker (`tasks/todo.md` entry with rationale).
+2. If the reviewer's next round cites the deferred finding with cost-curve reasoning, escalate to user with the round-2 quote.
+3. User-directed implement overturns the round-1 defer; capture the overturn in the log so future review sessions can read the trail.
+4. Apply the minimum coverage scope per the reviewer's round-2 advice — not the full original scope — to keep the overturn cheap.
+
+**Applied to:** PR #211 R2-6 (`assertValidTransition`) — Round 1 deferred F6 on architectural-scope grounds (multiple call sites, new primitive). Round 2 ChatGPT marked it "the most important decision in this round" / "cheap now, very expensive later". User explicitly directed implement — minimal coverage shipped (terminal-write boundaries only, 5 sites), remaining coverage routed to `CHATGPT-PR211-F6 (FOLLOW-UP)`.
+
+**Anti-pattern.** Honouring the round-1 defer mechanically when round-2 cost-curve evidence has emerged. The defer was a routing decision, not a contract.
