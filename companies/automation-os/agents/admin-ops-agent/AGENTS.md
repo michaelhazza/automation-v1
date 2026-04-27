@@ -11,6 +11,7 @@ schedule: on-demand
 gate: review
 tokenBudget: 25000
 maxToolCalls: 20
+phase: v7.1
 skills:
   - read_workspace
   - write_workspace

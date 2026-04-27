@@ -11,6 +11,7 @@ schedule: on-demand
 gate: auto
 tokenBudget: 9000
 maxToolCalls: 12
+phase: v7.1
 skills:
   - read_workspace
   - write_workspace
