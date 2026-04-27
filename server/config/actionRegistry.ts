@@ -3440,6 +3440,29 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     managerAllowlistMember: true,
   },
 
+  spawn_sub_agents: {
+    actionType: 'spawn_sub_agents',
+    description: 'Spawn one or more sub-agents to execute work in parallel under the calling agent\'s delegation authority. Foundation delegation primitive — available to all agents.',
+    actionCategory: 'worker',
+    topics: ['universal'],
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['agent_slugs', 'task_description', 'context'],
+    parameterSchema: z.object({
+      agent_slugs: z.array(z.string()).describe('Slugs of the sub-agents to spawn'),
+      task_description: z.string().describe('Description of the task to delegate'),
+      context: z.record(z.unknown()).optional().describe('Context to pass to the sub-agents'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    sideEffectClass: 'none',
+    directExternalSideEffect: false,
+    managerAllowlistMember: true,
+  },
+
   generate_invoice: {
     actionType: 'generate_invoice',
     description: 'Generate a draft invoice for an engagement billing period and record it internally.',

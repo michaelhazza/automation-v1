@@ -191,13 +191,18 @@ test('assertHandlerInvokedWithClaim(true) — no-op in test env (NODE_ENV=test)'
 });
 
 test('assertHandlerInvokedWithClaim(false) in test env — throws', () => {
-  // NODE_ENV is already 'test' when running via node:test
-  assert.throws(
-    () => assertHandlerInvokedWithClaim(false),
-    (err: unknown) => {
-      assert.ok(err instanceof Error);
-      assert.ok((err as Error).message.includes('isFirstWriter=false'));
-      return true;
-    },
-  );
+  const original = process.env['NODE_ENV'];
+  process.env['NODE_ENV'] = 'test';
+  try {
+    assert.throws(
+      () => assertHandlerInvokedWithClaim(false),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.ok((err as Error).message.includes('isFirstWriter=false'));
+        return true;
+      },
+    );
+  } finally {
+    process.env['NODE_ENV'] = original;
+  }
 });
