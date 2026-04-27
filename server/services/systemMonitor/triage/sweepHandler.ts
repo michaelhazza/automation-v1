@@ -17,6 +17,7 @@ import { bucket15min, loadCandidates } from './loadCandidates.js';
 import { clusterFires, type HeuristicFireRecord } from './clusterFires.js';
 import { selectTopForTriage } from './selectTopForTriage.js';
 import { writeHeuristicFire } from './writeHeuristicFire.js';
+import { recordSweepTick } from '../synthetic/sweepTickHistory.js';
 import type { Evidence } from '../heuristics/types.js';
 
 export interface SweepResult {
@@ -61,6 +62,17 @@ export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
     logger.error('sweep_load_candidates_failed', {
       bucketKey,
       error: err instanceof Error ? err.message : String(err),
+    });
+    // Surface the failure to sweep-coverage-degraded — repeated load failures
+    // are exactly what §12.5 considers degraded coverage, but the check stays
+    // in cold-start unless every completed sweep path feeds the buffer
+    // (DEVELOPMENT_GUIDELINES §8.15 — lifecycle hooks fire from every path).
+    recordSweepTick({
+      bucketKey,
+      candidatesEvaluated: 0,
+      limitReached: false,
+      loadFailed: true,
+      completedAt: new Date(),
     });
     return {
       status: 'failure',
@@ -230,6 +242,15 @@ export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
     capped: result.capped ?? null,
     durationMs: result.durationMs,
     candidateLimitReached: limitReached,
+  });
+
+  // Feed the sweep-coverage-degraded synthetic check (spec §8.2 / §12.5).
+  recordSweepTick({
+    bucketKey,
+    candidatesEvaluated: result.candidatesEvaluated,
+    limitReached,
+    loadFailed: false,
+    completedAt: new Date(),
   });
 
   if (capped) {

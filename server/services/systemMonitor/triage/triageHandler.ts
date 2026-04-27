@@ -29,11 +29,21 @@ import { WRITE_DIAGNOSIS_DEFINITION } from '../skills/writeDiagnosis.js';
 import { WRITE_EVENT_DEFINITION } from '../skills/writeEvent.js';
 import type { ProviderTool, ProviderMessage } from '../../providers/types.js';
 import { checkAdmit } from './triageAdmitPure.js';
+import { checkRateLimit, maybeAutoEscalate } from './rateLimit.js';
 export { checkAdmit, type AdmitVerdict } from './triageAdmitPure.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TRIAGE_MAX_ITERATIONS = 10;
+// Tunable via SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS (spec §9.10 / §12.2). Resolved
+// once at module load — env changes need a redeploy, matching the cron-interval
+// envs in queueService.ts.
+function resolveMaxIterations(): number {
+  const raw = process.env.SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS;
+  const parsed = raw === undefined ? NaN : parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) return 10;
+  return parsed;
+}
+const TRIAGE_MAX_ITERATIONS = resolveMaxIterations();
 const TRIAGE_MAX_TOKENS = 8_096;
 
 const SYSTEM_MONITOR_TOOL_DEFINITIONS: ProviderTool[] = [
@@ -203,6 +213,33 @@ export async function runTriage(incidentId: string): Promise<TriageResult> {
     });
     logger.info('triage_skipped', { incidentId, reason: verdict.reason });
     return { status: 'skipped', reason: verdict.reason };
+  }
+
+  // 2b. Rate-limit gate (spec §9.9). Soft cap defaults to 2 / fingerprint / 24h
+  // (configurable via SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT). The hard ceiling
+  // in checkAdmit (cap=5) is defense-in-depth and normally never trips in this flow.
+  const rateLimit = await checkRateLimit(incidentId);
+  if (!rateLimit.allowed) {
+    await db.insert(systemIncidentEvents).values({
+      incidentId,
+      eventType: 'agent_triage_skipped',
+      actorKind: 'agent',
+      payload: { reason: 'rate_limited', triageAttemptCount: incident.triageAttemptCount },
+      occurredAt: new Date(),
+    });
+    logger.info('triage_skipped', { incidentId, reason: 'rate_limited' });
+    return { status: 'skipped', reason: 'rate_limited' };
+  }
+
+  // Window has expired on a previously rate-limited incident. For high/critical
+  // open incidents this triggers auto-escalation instead of re-triaging — the
+  // operator hasn't resolved it after 24h, so defer to a human via the system-ops
+  // sentinel subaccount (spec §9.9). maybeAutoEscalate handles the Phase 0.5
+  // escalation guardrails internally; if blocked, an agent_escalation_blocked
+  // event is written by the underlying path.
+  if (rateLimit.windowExpired && (incident.severity === 'high' || incident.severity === 'critical')) {
+    await maybeAutoEscalate(incidentId);
+    return { status: 'skipped', reason: 'auto_escalated' };
   }
 
   // 3. Resolve system ops context + system_monitor agent

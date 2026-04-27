@@ -8,6 +8,7 @@ import {
   systemIncidents,
   systemIncidentEvents,
   systemIncidentSuppressions,
+  systemMonitorHeuristicFires,
 } from '../db/schema/index.js';
 import type { SystemIncident, SystemIncidentStatus, SystemIncidentSeverity, SystemIncidentSource, SystemIncidentClassification } from '../db/schema/systemIncidents.js';
 import type { SystemIncidentEvent } from '../db/schema/systemIncidentEvents.js';
@@ -156,6 +157,9 @@ export const systemIncidentService = {
       id: systemIncidents.id,
       agentDiagnosis: systemIncidents.agentDiagnosis,
       promptWasUseful: systemIncidents.promptWasUseful,
+      resolvedAt: systemIncidents.resolvedAt,
+      linkedPrUrl: systemIncidents.linkedPrUrl,
+      agentDiagnosisRunId: systemIncidents.agentDiagnosisRunId,
     }).from(systemIncidents).where(eq(systemIncidents.id, id)).limit(1);
 
     if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -166,6 +170,15 @@ export const systemIncidentService = {
     const promptWasUseful = input.wasSuccessful !== 'no';
 
     await db.transaction(async (tx) => {
+      // Spec §11.2: heuristic_fires joins this feedback to the heuristics that
+      // fired on this incident. Read inside the tx so the snapshot lands at the
+      // same logical timestamp as the event row (small payload — negligible cost).
+      const heuristicRows = await tx
+        .select({ heuristicId: systemMonitorHeuristicFires.heuristicId })
+        .from(systemMonitorHeuristicFires)
+        .where(eq(systemMonitorHeuristicFires.producedIncidentId, id));
+      const heuristicFires = heuristicRows.map((r) => r.heuristicId);
+
       await tx.update(systemIncidents).set({
         promptWasUseful,
         promptFeedbackText: input.text ?? null,
@@ -182,6 +195,10 @@ export const systemIncidentService = {
           promptWasUseful,
           partial: input.wasSuccessful === 'partial',
           text: input.text ?? null,
+          linkedPrUrl: incident.linkedPrUrl ?? null,
+          resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
+          diagnosisRunId: incident.agentDiagnosisRunId ?? null,
+          heuristicFires,
         },
         occurredAt: now,
       });

@@ -52,6 +52,19 @@ let queueWorkerReady = false;
 const EXECUTION_QUEUE_NAME = 'execution-run';
 const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
 
+// Parses an env-var integer for a cron `*/N` minute step. Falls back to the default
+// when the value is missing, non-numeric, or outside the [1, 59] step range cron supports.
+// Logs a warning when the env was provided but rejected, so misconfiguration is loud.
+function clampMinutesEnv(raw: string | undefined, defaultMinutes: number, envName: string): number {
+  if (raw === undefined) return defaultMinutes;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 59) {
+    logger.warn('queue_invalid_interval_env', { envName, raw, defaultMinutes });
+    return defaultMinutes;
+  }
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Advisory lock helpers — prevent duplicate maintenance runs across
 // horizontally-scaled instances when using the in-memory queue backend.
@@ -1105,7 +1118,7 @@ export const queueService = {
         }
       });
 
-      // System Monitor — synthetic checks (every minute)
+      // System Monitor — synthetic checks (every minute; spec §8.4)
       await boss.schedule('system-monitor-synthetic-checks', '* * * * *', {});
       await (boss as any).work('system-monitor-synthetic-checks', { teamSize: 1, teamConcurrency: 1 }, async () => {
         try {
@@ -1116,8 +1129,14 @@ export const queueService = {
         }
       });
 
-      // System Monitor — baseline refresh (every 15 minutes)
-      await boss.schedule('system-monitor-baseline-refresh', '*/15 * * * *', {});
+      // System Monitor — baseline refresh.
+      // Default 15 min, configurable via SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES (spec §7.3).
+      const baselineRefreshMinutes = clampMinutesEnv(
+        process.env.SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES,
+        15,
+        'SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES',
+      );
+      await boss.schedule('system-monitor-baseline-refresh', `*/${baselineRefreshMinutes} * * * *`, {});
       await (boss as any).work('system-monitor-baseline-refresh', { teamSize: 1, teamConcurrency: 1 }, async () => {
         try {
           const { handleBaselineRefresh } = await import('../jobs/systemMonitorBaselineRefreshJob.js');
@@ -1127,8 +1146,15 @@ export const queueService = {
         }
       });
 
-      // System Monitor — sweep (every 15 minutes; two-pass heuristic evaluation)
-      await boss.schedule('system-monitor-sweep', '*/15 * * * *', {});
+      // System Monitor — sweep (two-pass heuristic evaluation).
+      // Default 5 min, configurable via SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES (spec §9.3 / §9.10).
+      // The 15-min sweep window (§9.10) intentionally overlaps adjacent ticks by 10 min at the default cadence.
+      const sweepIntervalMinutes = clampMinutesEnv(
+        process.env.SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES,
+        5,
+        'SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES',
+      );
+      await boss.schedule('system-monitor-sweep', `*/${sweepIntervalMinutes} * * * *`, {});
       await (boss as any).work('system-monitor-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: { data?: Record<string, unknown> }) => {
         try {
           const { handleSystemMonitorSweep } = await import('../jobs/systemMonitorSweepJob.js');
