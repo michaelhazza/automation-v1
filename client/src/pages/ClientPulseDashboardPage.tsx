@@ -62,7 +62,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
       api.get('/api/my-subscription').catch((e) => { console.warn('my-subscription failed', e); return null; }),
       api.get('/api/onboarding/status').catch((e) => { console.warn('onboarding/status failed', e); return null; }),
     ]).then(([healthRes, riskRes, reportRes, subRes, onboardingRes]) => {
-      if (healthRes?.data) setHealth(healthRes.data);
+      if (healthRes?.data?.data) setHealth(healthRes.data.data);
       if (riskRes?.data?.clients) setHighRisk(riskRes.data.clients);
       if (reportRes?.data) setLatestReport(reportRes.data);
       if (subRes?.data) setSubscription(subRes.data);

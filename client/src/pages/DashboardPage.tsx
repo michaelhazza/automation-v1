@@ -35,14 +35,14 @@ export default function DashboardPage({ user }: { user: User }) {
   useEffect(() => {
     Promise.all([
       api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
-      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: null }; }),
-      api.get('/api/pulse/attention').catch((err) => { console.error('[Dashboard] Failed to fetch pulse attention:', err); return { data: null }; }),
-      api.get('/api/clientpulse/health-summary').catch(() => { return { data: null }; }),
+      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: { data: null, serverTimestamp: '' } }; }),
+      api.get('/api/pulse/attention').catch((err) => { console.error('[Dashboard] Failed to fetch pulse attention:', err); return { data: { data: null, serverTimestamp: '' } }; }),
+      api.get('/api/clientpulse/health-summary').catch(() => { return { data: { data: null, serverTimestamp: '' } }; }),
     ]).then(([a, s, p, h]) => {
       setAgents(a.data);
-      setStats(s.data);
-      setAttention(p.data);
-      setHealthSummary(h.data);
+      setStats(s.data.data);
+      setAttention(p.data.data);
+      setHealthSummary(h.data.data);
     }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
   }, []);
 

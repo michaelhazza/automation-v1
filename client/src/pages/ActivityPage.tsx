@@ -260,7 +260,10 @@ export default function ActivityPage({ user }: { user: User }) {
       if (from) params.from = from;
       if (to) params.to = to;
 
-      const { data } = await api.get(getEndpoint(), { params });
+      const res = await api.get(getEndpoint(), { params });
+      const data = scope === 'org'
+        ? res.data.data
+        : res.data;
       setItems(data.items);
       setTotal(data.total);
     } catch {
