@@ -7,6 +7,7 @@
 **Scope:** All-of-spec verification — implementation is complete (Tasks 1–20 committed across `035ccafb` → `7ed08512`); every section of the spec is in scope.
 **Changed-code set:** 23 files attributable to home-dashboard-reactivity commits.
 **Run at:** 2026-04-27T21:02:16Z
+**Commit at finish:** `d0bacc9f`
 
 ---
 
