@@ -182,16 +182,19 @@ export default function DashboardPage({ user }: { user: User }) {
 
   // ── Socket subscriptions (org room — auto-joined on connect) ─────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Spec §4.2 drift guardrail: every entry in the §4.2 wire-event-to-block
+  // table maps to a refetch function here, and each useSocket call below
+  // reads from this constant by literal key — TypeScript blocks renames or
+  // removals because the keyed access becomes a compile error.
   const EVENT_TO_GROUP = {
     'dashboard.approval.changed':      refetchApprovals,
     'dashboard.activity.updated':      refetchActivity,
     'dashboard.client.health.changed': refetchClientHealth,
   } as const;
 
-  useSocket('dashboard.approval.changed',      useCallback(() => { void refetchApprovals(); }, []));
-  useSocket('dashboard.activity.updated',      useCallback(() => { void refetchActivity(); }, []));
-  useSocket('dashboard.client.health.changed', useCallback(() => { void refetchClientHealth(); }, []));
+  useSocket('dashboard.approval.changed',      useCallback(() => { void EVENT_TO_GROUP['dashboard.approval.changed'](); }, []));
+  useSocket('dashboard.activity.updated',      useCallback(() => { void EVENT_TO_GROUP['dashboard.activity.updated'](); }, []));
+  useSocket('dashboard.client.health.changed', useCallback(() => { void EVENT_TO_GROUP['dashboard.client.health.changed'](); }, []));
 
   useSocketRoom(
     'sysadmin',
@@ -215,6 +218,13 @@ export default function DashboardPage({ user }: { user: User }) {
         refetchAll();
       }, RECONNECT_DEBOUNCE_MS);
     }
+
+    return () => {
+      if (reconnectDebounce.current) {
+        clearTimeout(reconnectDebounce.current);
+        reconnectDebounce.current = null;
+      }
+    };
   }, [connected]);
 
   useEffect(() => {
@@ -225,9 +235,20 @@ export default function DashboardPage({ user }: { user: User }) {
       api.get('/api/clientpulse/health-summary').catch(() => { return { data: { data: null, serverTimestamp: '' } }; }),
     ]).then(([a, s, p, h]) => {
       setAgents(a.data);
-      setStats(s.data.data);
-      setAttention(p.data.data);
-      setHealthSummary(h.data.data);
+      // Route initial-load setters through applyIfNewer so a socket-driven
+      // refetch that resolved during the load window cannot be silently
+      // overwritten by an older initial-load response (latest-data-wins,
+      // spec §6.2). Empty-string timestamps from the catch-fallbacks are
+      // treated as not-newer and discarded by applyIfNewer's strict `>`.
+      applyIfNewer(activityTs, s.data.serverTimestamp ?? '', () => {
+        setStats(s.data.data);
+      });
+      applyIfNewer(approvalsTs, p.data.serverTimestamp ?? '', () => {
+        setAttention(p.data.data);
+      });
+      applyIfNewer(clientHealthTs, h.data.serverTimestamp ?? '', () => {
+        setHealthSummary(h.data.data);
+      });
       markFresh(new Date());
     }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
   }, []);

@@ -22,6 +22,7 @@ export function FreshnessIndicator({ lastUpdatedAt }: FreshnessIndicatorProps): 
   const [displayText, setDisplayText] = useState(() => formatAge(lastUpdatedAt));
   const [pulsing, setPulsing] = useState(false);
   const pulseDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pulseEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refresh the displayed text every 5 seconds.
   useEffect(() => {
@@ -35,12 +36,14 @@ export function FreshnessIndicator({ lastUpdatedAt }: FreshnessIndicatorProps): 
   // Debounced pulse animation: fires 1500ms after the last prop change.
   useEffect(() => {
     if (pulseDebounce.current) clearTimeout(pulseDebounce.current);
+    if (pulseEnd.current) clearTimeout(pulseEnd.current);
     pulseDebounce.current = setTimeout(() => {
       setPulsing(true);
-      setTimeout(() => setPulsing(false), PULSE_DURATION_MS);
+      pulseEnd.current = setTimeout(() => setPulsing(false), PULSE_DURATION_MS);
     }, PULSE_DEBOUNCE_MS);
     return () => {
       if (pulseDebounce.current) clearTimeout(pulseDebounce.current);
+      if (pulseEnd.current) clearTimeout(pulseEnd.current);
     };
   }, [lastUpdatedAt]);
 
