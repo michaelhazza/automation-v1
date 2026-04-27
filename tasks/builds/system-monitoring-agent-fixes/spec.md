@@ -485,14 +485,18 @@ WITH params AS (
 SELECT
   (SELECT COUNT(*) FROM system_incidents si, params
    WHERE si.created_at >= params.silence_cutoff
-     AND si.is_test_incident = false)                  AS incidents_in_window,
+     AND si.is_test_incident = false
+     AND NOT (si.source = 'synthetic'
+              AND si.metadata->>'checkId' = 'incident-silence'))  AS incidents_in_window,
   (SELECT COUNT(*) FROM system_incidents si, params
    WHERE si.source = 'synthetic'
-     AND si.created_at >= params.proof_cutoff)         AS synthetic_fires_in_proof_window
+     AND si.created_at >= params.proof_cutoff)                    AS synthetic_fires_in_proof_window
 ```
 
 `$silenceCutoff = ctx.now - SYSTEM_MONITOR_INCIDENT_SILENCE_HOURS hours` (default 12h).
 `$proofCutoff = ctx.now - SYSTEM_MONITOR_INCIDENT_SILENCE_PROOF_OF_LIFE_HOURS hours` (default 24h).
+
+The `incidents_in_window` count **excludes** rows written by this check itself (`source='synthetic' AND metadata.checkId='incident-silence'`). Rationale and the sustained-signal contract that depends on this exclusion: see [§9.6](#96-sustained-silence-signal-contract).
 
 ### 9.2 Pure helper
 
@@ -519,9 +523,18 @@ A literally idle staging environment will have zero incidents and zero synthetic
 
 Single global resource (`resourceKind='system'`, `resourceId='monitoring'`). Fingerprint `synthetic:incident-silence:system:monitoring`. The existing `system_incidents_active_fingerprint_idx` partial unique index ensures at most one *active* incident exists for this fingerprint — repeated silence detection within the same active incident bumps `occurrence_count` rather than creating duplicates. Operator-resolved → next tick after silence-still-active creates a new incident, which is the right behaviour.
 
-### 9.6 Self-feedback loop note
+### 9.6 Sustained-silence signal contract
 
-A subtle interaction: when the silence check itself fires, it writes a `system_incidents` row, which means the *next* tick of `incident-silence` will see `incidents_in_window >= 1` and stay quiet. That's correct — the monitoring system is no longer silent because the silence detector fired. If the operator resolves and the underlying silence persists past `silenceCutoff` again, the next tick fires once more. No infinite-loop risk; the dedup index limits it to one active incident at a time.
+Silence-check incidents do **not** count as monitoring activity. The §9.1 query explicitly excludes rows where `source='synthetic' AND metadata.checkId='incident-silence'` from `incidents_in_window`, so a system whose only signal is the silence detector itself is **still considered silent** — the underlying substrate is still dark, and that's what we want to surface.
+
+Two independent mechanisms cooperate:
+
+1. **Sustained-signal counting (§9.1 predicate):** the silence detector ignores its own prior fires when computing `incidents_in_window`. As long as the underlying silence persists past `silenceCutoff` and proof-of-life still holds, the check *would* re-fire every tick. This is what keeps the signal alive instead of self-healing after one row.
+2. **Active-incident dedup (§9.5):** the partial unique index `system_incidents_active_fingerprint_idx` on fingerprint `synthetic:incident-silence:system:monitoring` ensures at most one *active* row exists at any moment. Per-tick re-fires bump `occurrence_count` on the existing active incident rather than creating duplicates. Operators see one open incident with a rising occurrence count, not a flood of new incidents.
+
+Together: the check fires every tick while underlying silence persists (sustained signal), but the operator sees a single active incident with an incrementing `occurrence_count` (clean inbox). When the operator resolves the incident *and* the underlying silence is still present, the next tick creates a new active incident — by design, because resolution is operator intent, and intent should be respected. When real activity returns (any non-silence-check incident written within the silence window, or proof-of-life still holding with at least one real incident), `incidents_in_window` becomes ≥ 1 and the check stops firing naturally.
+
+No infinite-loop risk: the dedup index caps active-row count at 1, and `occurrence_count` is the only thing that grows while silence persists.
 
 ## 10. Phase 4 — Failed-triage filter pill (G5)
 

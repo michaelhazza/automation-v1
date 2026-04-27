@@ -96,30 +96,37 @@ Ready to implement. No further rounds required.
 | 2. Staleness sweep: add `last_triage_job_id IS NOT NULL` predicate + document explicit SLA | technical | apply | auto (apply) | medium | Internal SQL predicate hardening + internal SLA doc; current predicate already includes status+timestamp checks, this adds a "first attempt registered" guard |
 | 3. Duplicate-job skip observability: tighten log to structured counter `triage.idempotent_skip` with `(incidentId, jobId)` | technical | apply | auto (apply) | low | Internal observability tightening of an existing log line (§7.1 already logs `triage_attempt_skipped_idempotent`); just pins the contract |
 | 4. First-fire-wins multi-agent detection latency: document explicitly | technical | apply | auto (apply) | low | Doc-only addition to §8.3 making latency scaling explicit; chose the doc option over the multi-offender option (smaller blast radius, matches existing pattern across other synthetic checks) |
-| 5. Incident-silence self-heals too aggressively: exclude silence-check incidents from `incidentsInWindow` | technical-escalated (high severity + reverses explicit author decision in §9.6) | apply | (pending user) | high | ChatGPT recommends reversing §9.6's deliberate "self-heal is correct" stance; behaviour change in synthetic-check firing cadence — better to surface |
+| 5. Incident-silence self-heals too aggressively: exclude silence-check incidents from `incidentsInWindow` | technical-escalated (high severity + reverses explicit author decision in §9.6) | apply | apply (user-approved, reply: `1: apply`) | high | ChatGPT recommends reversing §9.6's deliberate "self-heal is correct" stance; behaviour change in synthetic-check firing cadence — better to surface |
 | 6. Doc-level invariant: terminal events MUST only emit when row transitions from `running` | technical | apply | auto (apply) | medium | Internal correctness invariant; aligns with existing §11.3 closure but adds explicit emitter-side guard text |
 | 7. Env var parsing NaN guard | technical | apply | auto (apply) | low | Internal robustness fix on the env-var parse pattern; one-line tighten on `staleTriageSweep.ts` snippet |
 | 8. SQL style consistency (CTE vs inline) | technical | reject | auto (reject) | low | Stylistic preference with no functional impact (recommendation-criteria reject) |
 | 9. Naming asymmetry (`incidentSilence` vs `silentAgentSuccess`) | technical | reject | auto (reject) | low | Stylistic; ChatGPT itself flagged it "not critical" |
 
-### Auto-applied (technical)
+### Applied (auto-applied technical + user-approved)
 - [auto] Silent-success agent-write contract added to §4.4 and §8.5
 - [auto] Staleness sweep predicate + SLA tightened in §4.2 / §7.2 / §11.2
 - [auto] Idempotent-skip log contract pinned in §7.1 (event name `triage.idempotent_skip`) and §13.2
 - [auto] First-fire-wins detection-latency doc added to §8.3
 - [auto] Terminal-event emitter-side guard invariant added to §11.3 (every emitter MUST verify `triage_status='running'` row-count return before writing the terminal event; race-loser suppresses)
 - [auto] Env-var NaN guard added to §7.2 snippet via new pure helper `parseStaleAfterMinutesEnv` (handles `undefined` / `''` / `'abc'` / `'0'` / `'-5'`); test description extended in §3 + §13.4
+- [user] Incident-silence self-heal reversal: §9.1 query excludes own prior fires from `incidents_in_window` (`AND NOT (si.source = 'synthetic' AND si.metadata->>'checkId' = 'incident-silence')`); §9.6 rewritten from "Self-feedback loop note" to "Sustained-silence signal contract" — silence-check rows do not count as monitoring activity, sustained signal carried by per-tick re-fire while underlying silence persists, dedup index caps active rows at 1, `occurrence_count` is the only thing that grows; §9.1 cross-links §9.6 for rationale
 
 ### Integrity check (round 1)
 1 issue found, 1 auto-applied, 0 escalated.
 - Mechanical: `parseStaleAfterMinutesEnv` is a new pure export in `staleTriageSweep.ts`; the §3 file table and the §13.4 test-table description both need to mention it covers the new helper. Auto-applied.
 
-### Escalated (user decision pending)
-- Finding 5: Incident-silence self-heal reversal (§9.6 / §9.1 query) — surfaced to user; awaiting decision.
+### Escalated (user decision)
+- Finding 5: Incident-silence self-heal reversal (§9.6 / §9.1 query) — user replied `1: apply` (treated as "apply all", and finding 5 was the only escalated item). Applied.
+
+### Round 1 finalised — 2026-04-27T10-15-00Z
+- Auto-accepted (technical): 6 applied, 2 rejected, 0 deferred
+- User-decided: 1 applied, 0 rejected, 0 deferred
+- Total: 7 applied, 2 rejected, 0 deferred
+- Integrity-check post-finding-5: 0 new issues (forward reference to renamed §9.6 anchor verified, §9.5 still consistent)
 
 ### Top themes
 - Future-proofing through explicit contracts (findings 1, 4, 6)
 - Predicate / SLA hardening (findings 2, 7)
 - Observability tightening (finding 3)
-- Self-heal cadence reversal (finding 5 — escalated)
+- Self-heal cadence reversal (finding 5 — user-approved)
 - Style cleanups (findings 8, 9 — rejected)
