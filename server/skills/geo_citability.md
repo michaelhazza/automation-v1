@@ -3,6 +3,7 @@ name: GEO Citability Analysis
 description: Analyses content extraction quality for AI citation — evaluates passage structure, claim density, and quotability for AI search engines.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

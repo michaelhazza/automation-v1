@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, real, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // System Agents — platform-level agent definitions (our IP)
@@ -62,7 +63,9 @@ export const systemAgents = pgTable('system_agents', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
-  slugIdx: uniqueIndex('system_agents_slug_idx').on(table.slug),
+  slugActiveIdx: uniqueIndex('system_agents_slug_active_idx')
+    .on(table.slug)
+    .where(sql`${table.deletedAt} IS NULL`),
   statusIdx: index('system_agents_status_idx').on(table.status),
   publishedIdx: index('system_agents_published_idx').on(table.isPublished),
 }));

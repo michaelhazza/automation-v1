@@ -2,7 +2,7 @@
 name: Ads Management Agent
 title: Ads Management Agent
 slug: ads-management-agent
-reportsTo: orchestrator
+reportsTo: head-of-growth
 model: claude-sonnet-4-6
 temperature: 0.2
 maxTokens: 4096

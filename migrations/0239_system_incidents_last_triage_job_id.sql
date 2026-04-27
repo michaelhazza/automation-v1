@@ -1,4 +1,4 @@
--- 0238_system_incidents_last_triage_job_id
+-- 0239_system_incidents_last_triage_job_id
 --
 -- Adds last_triage_job_id text column to system_incidents to support
 -- key-based idempotency on triage_attempt_count increments. The handler

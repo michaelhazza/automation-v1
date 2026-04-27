@@ -55,7 +55,6 @@ Run these after every non-trivial change. No task is complete until all relevant
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
 | Any TypeScript change | `npm run typecheck` | 3 |
-| Logic change in server/ | `npm test` (or relevant suite) | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
 | Client change | `npm run build` | 2 |
 
@@ -68,14 +67,18 @@ Run these after every non-trivial change. No task is complete until all relevant
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
 
-### Gate-cadence rule (overrides default per-change verification for `npm run test:gates`)
+### Gate-cadence rule (overrides default per-change verification for `npm run test:gates` and `bash scripts/run-all-unit-tests.sh`)
 
-`npm run test:gates` (and the umbrella `npm test`, which runs gates first) is **expensive** — it spans every contract / RLS / schema gate in the repo and routinely takes minutes. It is NOT part of the per-change verification loop. Only run it when the user signals **"we're done, prepare for merge"** (or equivalent — typically after `final-review` finishes and we're staging the PR for merge). For routine mid-iteration verification:
-- Use `npx tsc --noEmit` for typecheck.
-- Use `bash scripts/run-all-unit-tests.sh` (or a single targeted `npx tsx <file>`) for unit tests.
-- Use `npm run build:client` / `npm run build:server` only when the change touches the build surface.
+Both the unit test suite and gate scripts are **expensive** and run exactly ONCE each at programme-end, in this order:
 
-This rule applies to all sessions, including review-loop iterations. Skipping the gates suite mid-iteration is the correct default; running it pre-merge is the correct exception.
+1. `bash scripts/run-all-unit-tests.sh` — after all chunks + spec-conformance complete, before `pr-reviewer`.
+2. Full gate set (`npm run test:gates` / `scripts/verify-*.sh`) — immediately after the unit tests, still before `pr-reviewer`.
+
+Neither runs at any other point during development. For routine mid-iteration verification use only:
+- `npx tsc --noEmit` for typecheck.
+- `npm run build:client` / `npm run build:server` only when the change touches the build surface.
+
+This rule applies to all sessions, including review-loop iterations. Running unit tests or gates mid-iteration is always wrong.
 
 ---
 

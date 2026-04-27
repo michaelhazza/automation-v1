@@ -3,6 +3,7 @@ name: GEO Brand Authority
 description: Brand mention tracking, entity signals (Wikipedia, Wikidata, Knowledge Panel), and citation density analysis for AI search engine brand visibility.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

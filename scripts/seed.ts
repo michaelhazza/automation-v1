@@ -79,7 +79,7 @@ import { resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, not, sql } from 'drizzle-orm';
 import { glob } from 'glob';
 import bcrypt from 'bcryptjs';
 
@@ -92,8 +92,8 @@ import { integrationConnections } from '../server/db/schema/integrationConnectio
 import {
   systemAgents,
   systemSkills,
-  systemPlaybookTemplates,
-  systemPlaybookTemplateVersions,
+  systemWorkflowTemplates,
+  systemWorkflowTemplateVersions,
 } from '../server/db/schema/index.js';
 import { modules } from '../server/db/schema/modules.js';
 import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
@@ -148,11 +148,14 @@ async function preflightVerifySkillVisibility(): Promise<void> {
   for (const file of files) {
     if (!file.endsWith('.md')) continue;
     const slug = file.slice(0, -3);
+    if (slug === 'README') continue; // documentation file, not a skill
     const raw = (await readFile(join(skillsDir, file), 'utf-8')).replace(/\r\n/g, '\n');
 
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) {
-      violations.push(`${slug}: no YAML frontmatter`);
+      // No frontmatter — legacy/documentation file, not a classified skill.
+      // Warn but do not block the seed. Run verify-skill-visibility for details.
+      log(`  [warn] skills/${slug}.md has no YAML frontmatter — skipping visibility check`);
       continue;
     }
     const visMatch = fmMatch[1].match(/^visibility:\s*(\S+)\s*$/m);
@@ -512,19 +515,150 @@ async function phase3_playbookAuthor(): Promise<void> {
       } as never)
       .returning();
     log(`  [ok]   Created Playbook Author system agent: ${created.id}`);
-    return;
+  } else {
+    await db
+      .update(systemAgents)
+      .set({
+        name: 'Playbook Author',
+        masterPrompt,
+        defaultSystemSkillSlugs: TOOL_SKILLS,
+        updatedAt: new Date(),
+      } as never)
+      .where(eq(systemAgents.id, existing.id));
+    log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
   }
 
-  await db
-    .update(systemAgents)
-    .set({
-      name: 'Playbook Author',
-      masterPrompt,
-      defaultSystemSkillSlugs: TOOL_SKILLS,
-      updatedAt: new Date(),
-    } as never)
-    .where(eq(systemAgents.id, existing.id));
-  log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
+  // v7.1 — Orphan cleanup: soft-delete any system_agents row whose slug is
+  // no longer in (parsed.agents.slug ∪ 'workflow-author'). Cascade soft-delete
+  // to the matching `agents` rows and deactivate `subaccount_agents`.
+  const companyDir = resolve(process.cwd(), 'companies/automation-os');
+  const orphanParsed = await parseCompanyFolder(companyDir);
+  const expectedSlugs = new Set([
+    ...orphanParsed.agents.map((a) => a.slug),
+    'workflow-author',
+  ]);
+
+  const orphanRows = await db
+    .select({ slug: systemAgents.slug, id: systemAgents.id })
+    .from(systemAgents)
+    .where(and(
+      isNull(systemAgents.deletedAt),
+      not(inArray(systemAgents.slug, [...expectedSlugs])),
+    ));
+
+  if (orphanRows.length > 0) {
+    log(`  [cleanup] soft-deleting ${orphanRows.length} orphan system_agents row(s): ${orphanRows.map((o) => o.slug).join(', ')}`);
+
+    await db
+      .update(systemAgents)
+      .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+      .where(and(
+        isNull(systemAgents.deletedAt),
+        not(inArray(systemAgents.slug, [...expectedSlugs])),
+      ));
+
+    const orphanIds = orphanRows.map((o) => o.id);
+    await db
+      .update(agents)
+      .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+      .where(and(
+        isNull(agents.deletedAt),
+        eq(agents.isSystemManaged, true),
+        inArray(agents.systemAgentId, orphanIds),
+      ));
+
+    const orphanAgentRows = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(and(eq(agents.isSystemManaged, true), inArray(agents.systemAgentId, orphanIds)));
+
+    if (orphanAgentRows.length > 0) {
+      await db
+        .update(subaccountAgents)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(inArray(subaccountAgents.agentId, orphanAgentRows.map((a) => a.id)));
+    }
+  }
+
+  // v7.1 — Hierarchy assertions (spec §13.4)
+  const all = await db
+    .select({
+      id: systemAgents.id,
+      slug: systemAgents.slug,
+      parentId: systemAgents.parentSystemAgentId,
+    })
+    .from(systemAgents)
+    .where(isNull(systemAgents.deletedAt));
+
+  const byId = new Map(all.map((r) => [r.id, r]));
+
+  // Assertion 1: exactly one business-team root (orchestrator)
+  const businessRoots = all.filter(
+    (r) =>
+      r.parentId === null &&
+      r.slug !== 'portfolio-health-agent' &&
+      r.slug !== 'workflow-author',
+  );
+  if (businessRoots.length !== 1 || businessRoots[0].slug !== 'orchestrator') {
+    throw new Error(
+      `[hierarchy] expected exactly one business-team root 'orchestrator'; found ${businessRoots.length}: ${businessRoots.map((r) => r.slug).join(', ')}`,
+    );
+  }
+
+  // Assertion 2: no cycles, depth ≤ 3 (max 2 hops from any leaf to root:
+  //   Worker→Head→Orchestrator). Guard fires when hops ≥ 2 before making the
+  //   hop — i.e. before taking a 3rd hop that would reach T4.
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    let cur = row;
+    let hops = 0;
+    while (cur.parentId !== null) {
+      if (hops >= 2) {
+        throw new Error(`[hierarchy] depth > 3 from leaf '${row.slug}' — chain exceeds Orchestrator → Head → Worker`);
+      }
+      const parent = byId.get(cur.parentId);
+      if (!parent) {
+        throw new Error(`[hierarchy] '${cur.slug}' references non-existent or soft-deleted parent ${cur.parentId}`);
+      }
+      cur = parent;
+      hops += 1;
+    }
+  }
+
+  // Assertion 3: every non-root non-special agent has a non-null parent
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    if (row.parentId === null) {
+      throw new Error(`[hierarchy] '${row.slug}' has parent_system_agent_id = NULL but is not a designated root`);
+    }
+  }
+
+  // Assertion 4: every T3 worker's parent is in the allowed T1/T2 parent set.
+  // admin-ops-agent is `role: 'staff'` (per §10.1.5) but sits at T2 as a direct
+  // report of Orchestrator — included as a future-proofing allowance for the
+  // case where admin-ops grows worker subordinates without a spec amendment.
+  const ALLOWED_T1_T2_PARENTS = new Set([
+    'orchestrator',                  // T1 (sole)
+    'head-of-product-engineering',   // T2 manager
+    'head-of-growth',                // T2 manager
+    'head-of-client-services',       // T2 manager
+    'head-of-commercial',            // T2 manager
+    'admin-ops-agent',               // T2 staff direct report (see comment above)
+    'strategic-intelligence-agent',  // T2 direct report of Orchestrator
+  ]);
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    const parent = byId.get(row.parentId!);
+    if (!parent) continue; // already reported by Assertion 2
+    if (!ALLOWED_T1_T2_PARENTS.has(parent.slug)) {
+      throw new Error(
+        `[hierarchy] worker '${row.slug}' is parented to '${parent.slug}', which is not in the allowed T1/T2 parent set. ` +
+        `A worker (T3) must report directly to the Orchestrator or a T2 agent listed in ALLOWED_T1_T2_PARENTS.`,
+      );
+    }
+  }
+
+  log('  [ok]   hierarchy assertions: 1 root, no cycles, depth ≤ 3, all parents present, every worker has exactly one parent in ALLOWED_T1_T2_PARENTS');
 }
 
 // ---------------------------------------------------------------------------
@@ -725,7 +859,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   const PLAYBOOK_SLUG = 'intelligence-briefing';
 
   const [mod] = await db
-    .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
+    .select({ id: modules.id, onboardingWorkflowSlugs: modules.onboardingWorkflowSlugs })
     .from(modules)
     .where(and(eq(modules.slug, REPORTING_MODULE_SLUG), isNull(modules.deletedAt)))
     .limit(1);
@@ -735,7 +869,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
     return;
   }
 
-  const already = (mod.onboardingPlaybookSlugs ?? []).includes(PLAYBOOK_SLUG);
+  const already = (mod.onboardingWorkflowSlugs ?? []).includes(PLAYBOOK_SLUG);
   if (already) {
     log(`  [skip] '${PLAYBOOK_SLUG}' already in '${REPORTING_MODULE_SLUG}'`);
     return;
@@ -744,7 +878,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   await db
     .update(modules)
     .set({
-      onboardingPlaybookSlugs: sql`array_append(${modules.onboardingPlaybookSlugs}, ${PLAYBOOK_SLUG})`,
+      onboardingWorkflowSlugs: sql`array_append(${modules.onboardingWorkflowSlugs}, ${PLAYBOOK_SLUG})`,
       updatedAt: new Date(),
     })
     .where(eq(modules.id, mod.id));
@@ -858,24 +992,24 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // Upsert template row
   const [existing] = await db
     .select()
-    .from(systemPlaybookTemplates)
-    .where(eq(systemPlaybookTemplates.slug, TEMPLATE_SLUG));
+    .from(systemWorkflowTemplates)
+    .where(eq(systemWorkflowTemplates.slug, TEMPLATE_SLUG));
 
   let templateId: string;
   if (existing) {
     templateId = existing.id;
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({
         name: TEMPLATE_NAME,
         description: definition.description,
         updatedAt: new Date(),
       })
-      .where(eq(systemPlaybookTemplates.id, existing.id));
+      .where(eq(systemWorkflowTemplates.id, existing.id));
     log(`  [update] portfolio-health-sweep template: ${templateId}`);
   } else {
     const [row] = await db
-      .insert(systemPlaybookTemplates)
+      .insert(systemWorkflowTemplates)
       .values({
         slug: TEMPLATE_SLUG,
         name: TEMPLATE_NAME,
@@ -890,28 +1024,28 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // (not templateId) and has no updatedAt / status columns on the version row.
   const [existingVersion] = await db
     .select()
-    .from(systemPlaybookTemplateVersions)
-    .where(eq(systemPlaybookTemplateVersions.systemTemplateId, templateId));
+    .from(systemWorkflowTemplateVersions)
+    .where(eq(systemWorkflowTemplateVersions.systemTemplateId, templateId));
 
   if (existingVersion) {
     await db
-      .update(systemPlaybookTemplateVersions)
+      .update(systemWorkflowTemplateVersions)
       .set({
         definitionJson: definition as unknown as Record<string, unknown>,
       })
-      .where(eq(systemPlaybookTemplateVersions.id, existingVersion.id));
+      .where(eq(systemWorkflowTemplateVersions.id, existingVersion.id));
     log(`  [update] portfolio-health-sweep v${existingVersion.version}`);
   } else {
-    await db.insert(systemPlaybookTemplateVersions).values({
+    await db.insert(systemWorkflowTemplateVersions).values({
       systemTemplateId: templateId,
       version: 1,
       definitionJson: definition as unknown as Record<string, unknown>,
     });
     // Bump latestVersion on parent template to match.
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({ latestVersion: 1, updatedAt: new Date() })
-      .where(eq(systemPlaybookTemplates.id, templateId));
+      .where(eq(systemWorkflowTemplates.id, templateId));
     log(`  [create] portfolio-health-sweep v1`);
   }
 }
@@ -1266,9 +1400,15 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
  * organisation (linked via systemAgentId) and, for subaccount-scoped agents,
  * link it into the given subaccount via `subaccount_agents`.
  *
- * Org-scoped system agents (executionScope: 'org' — e.g. portfolio-health-agent)
- * are activated at org level but NOT linked to the subaccount, matching how
- * they run in production.
+ * Org-scoped system agents (executionScope: 'org') are activated at org level
+ * (via ensureOrgSubaccount) but NOT linked to the regular subaccount.
+ *
+ * Two-pass design for fresh databases:
+ *   Pass 1 — upsert all `agents` rows; build sysAgentId → orgAgentId map.
+ *   Pass 2 — upsert `subaccount_agents` rows in topological order (root first),
+ *            wiring parentSubaccountAgentId from the already-inserted parent row.
+ *   This avoids the subaccount_agents_one_root_per_subaccount constraint violation
+ *   that would occur if all rows were inserted with parentSubaccountAgentId = null.
  */
 async function activateBaselineSystemAgents(
   organisationId: string,
@@ -1286,18 +1426,7 @@ async function activateBaselineSystemAgents(
     return;
   }
 
-  let orgAgentsCreated = 0;
-  let orgAgentsUpdated = 0;
-  let subaccountLinksCreated = 0;
-  let subaccountLinksUpdated = 0;
-  let orgScopedSkipped = 0;
-
-  // Pre-fetch every existing non-system-managed agent in this org. Any slug
-  // that already belongs to a custom (non-system-managed) agent is off-limits
-  // to the baseline activation loop — overwriting it would destroy user
-  // customisation. This generalises the Reporting Agent slug-collision case
-  // (the Reporting Agent is created in Phase 6d as a non-system-managed
-  // custom agent with slug 'reporting-agent') without hardcoding the slug.
+  // Pre-fetch every existing non-system-managed agent in this org.
   const existingCustomAgents = await db
     .select({ slug: agents.slug })
     .from(agents)
@@ -1310,14 +1439,22 @@ async function activateBaselineSystemAgents(
     );
   const customSlugs = new Set(existingCustomAgents.map((a) => a.slug));
 
+  let orgAgentsCreated = 0;
+  let orgAgentsUpdated = 0;
+  let subaccountLinksCreated = 0;
+  let subaccountLinksUpdated = 0;
+  let orgScopedSkipped = 0;
+
+  // ── Pass 1: upsert all `agents` rows ──────────────────────────────────────
+  // Skip system-scoped agents (e.g. system_monitor) — those run exclusively
+  // under the system-ops org and are seeded in Phase 4, not here.
+  // sysAgentId → orgAgentId
+  const sysToOrgId = new Map<string, string>();
+
   for (const sysAgent of allSystemAgents) {
-    // Skip any slug that collides with a custom (non-system-managed) agent
-    // already in this org. Covers the Reporting Agent case and any future
-    // situation where a custom agent happens to share a slug with a system
-    // agent — the custom agent wins, the system agent is left alone.
+    if (sysAgent.executionScope === 'system') continue;
     if (customSlugs.has(sysAgent.slug)) continue;
 
-    // Upsert the org-level agent row (agents table)
     const [existingOrgAgent] = await db
       .select()
       .from(agents)
@@ -1367,7 +1504,7 @@ async function activateBaselineSystemAgents(
           icon: sysAgent.icon ?? null,
           agentRole: sysAgent.agentRole ?? null,
           agentTitle: sysAgent.agentTitle ?? null,
-          masterPrompt: '', // system-managed agents inherit masterPrompt at runtime
+          masterPrompt: '',
           additionalPrompt: '',
           modelProvider: sysAgent.modelProvider,
           modelId: sysAgent.modelId,
@@ -1381,119 +1518,161 @@ async function activateBaselineSystemAgents(
       orgAgentsCreated += 1;
     }
 
-    // Org-scoped agents (e.g. portfolio-health-agent) are linked to the org
-    // subaccount, not the regular subaccount. They should NOT be linked to
-    // client subaccounts. Post-migration 0106: all agents are subaccount-scoped.
-    if (sysAgent.executionScope === 'org') {
-      // Deactivate any existing link to the regular subaccount
-      await db
-        .update(subaccountAgents)
-        .set({ isActive: false, updatedAt: new Date() })
-        .where(
-          and(
-            eq(subaccountAgents.subaccountId, subaccountId),
-            eq(subaccountAgents.agentId, orgAgentId),
-            eq(subaccountAgents.isActive, true),
-          ),
-        );
+    sysToOrgId.set(sysAgent.id, orgAgentId);
+  }
 
-      // Link to the org subaccount instead
-      const { ensureOrgSubaccount } = await import('../server/services/orgSubaccountService.js');
-      const orgSa = await ensureOrgSubaccount(organisationId, '');
-      if (orgSa) {
-        const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
-        const [existingOrgLink] = await db
-          .select()
-          .from(subaccountAgents)
-          .where(
-            and(
-              eq(subaccountAgents.subaccountId, orgSa.id),
-              eq(subaccountAgents.agentId, orgAgentId),
-            ),
-          )
-          .limit(1);
+  // ── Pass 2a: org-scoped agents (link to org subaccount) ───────────────────
+  const { ensureOrgSubaccount } = await import('../server/services/orgSubaccountService.js');
+  const orgSa = await ensureOrgSubaccount(organisationId, '');
 
-        if (existingOrgLink) {
-          await db
-            .update(subaccountAgents)
-            .set({
-              isActive: true,
-              skillSlugs,
-              tokenBudgetPerRun: sysAgent.defaultTokenBudget,
-              maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-              updatedAt: new Date(),
-            })
-            .where(eq(subaccountAgents.id, existingOrgLink.id));
-          subaccountLinksUpdated += 1;
-        } else {
-          await db.insert(subaccountAgents).values({
-            organisationId,
-            subaccountId: orgSa.id,
-            agentId: orgAgentId,
-            isActive: true,
-            skillSlugs,
-            tokenBudgetPerRun: sysAgent.defaultTokenBudget,
-            maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-            timeoutSeconds: 300,
-          });
-          subaccountLinksCreated += 1;
-        }
-      }
-      orgScopedSkipped += 1;
-      continue;
-    }
+  for (const sysAgent of allSystemAgents) {
+    if (sysAgent.executionScope !== 'org') continue;
+    if (customSlugs.has(sysAgent.slug)) continue;
+    const orgAgentId = sysToOrgId.get(sysAgent.id);
+    if (!orgAgentId) continue;
 
-    // Upsert the subaccount_agents link row
-    const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
-    const [existingLink] = await db
-      .select()
-      .from(subaccountAgents)
+    // Deactivate any existing link to the regular subaccount
+    await db
+      .update(subaccountAgents)
+      .set({ isActive: false, updatedAt: new Date() })
       .where(
         and(
           eq(subaccountAgents.subaccountId, subaccountId),
           eq(subaccountAgents.agentId, orgAgentId),
+          eq(subaccountAgents.isActive, true),
         ),
-      )
-      .limit(1);
+      );
 
-    if (existingLink) {
-      // Refresh all mutable fields so upstream changes to the system agent's
-      // default budgets propagate to every org. Without this, existing
-      // subaccount links drift permanently from the current defaults.
-      await db
-        .update(subaccountAgents)
-        .set({
+    if (orgSa) {
+      const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
+      const [existingOrgLink] = await db
+        .select()
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, orgSa.id),
+            eq(subaccountAgents.agentId, orgAgentId),
+          ),
+        )
+        .limit(1);
+
+      if (existingOrgLink) {
+        await db
+          .update(subaccountAgents)
+          .set({
+            isActive: true,
+            skillSlugs,
+            tokenBudgetPerRun: sysAgent.defaultTokenBudget,
+            maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
+            updatedAt: new Date(),
+          })
+          .where(eq(subaccountAgents.id, existingOrgLink.id));
+        subaccountLinksUpdated += 1;
+      } else {
+        await db.insert(subaccountAgents).values({
+          organisationId,
+          subaccountId: orgSa.id,
+          agentId: orgAgentId,
           isActive: true,
           skillSlugs,
           tokenBudgetPerRun: sysAgent.defaultTokenBudget,
           maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-          updatedAt: new Date(),
-        })
-        .where(eq(subaccountAgents.id, existingLink.id));
-      subaccountLinksUpdated += 1;
-    } else {
-      await db.insert(subaccountAgents).values({
+          timeoutSeconds: 300,
+        });
+        subaccountLinksCreated += 1;
+      }
+    }
+    orgScopedSkipped += 1;
+  }
+
+  // ── Pass 2b: subaccount-scoped agents — topological order ─────────────────
+  // Sort by depth so each parent SA row exists before its children are inserted.
+  // This ensures parentSubaccountAgentId is always set correctly on first insert,
+  // avoiding the subaccount_agents_one_root_per_subaccount unique-index violation.
+  const sysAgentById = new Map(allSystemAgents.map((a) => [a.id, a]));
+  function sysDepth(id: string): number {
+    const a = sysAgentById.get(id);
+    if (!a || !a.parentSystemAgentId) return 0;
+    return 1 + sysDepth(a.parentSystemAgentId);
+  }
+  const subaccountScopedAgents = allSystemAgents
+    .filter((a) => a.executionScope !== 'org' && a.executionScope !== 'system' && !customSlugs.has(a.slug))
+    .sort((a, b) => sysDepth(a.id) - sysDepth(b.id));
+
+  // Clear existing system-managed SA rows for this subaccount before re-seeding.
+  // This handles corrupted partial state from previously failed seed runs (e.g.
+  // a non-root agent ended up as the lone root, blocking the real root insert).
+  // Safe for dev: the seed owns these rows. Custom (non-system-managed) SA rows
+  // are untouched because we filter by the sysToOrgId agent set.
+  const systemOrgAgentIds = [...sysToOrgId.values()];
+  if (systemOrgAgentIds.length > 0) {
+    await db
+      .delete(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, subaccountId),
+          inArray(subaccountAgents.agentId, systemOrgAgentIds),
+        ),
+      );
+  }
+
+  // orgAgentId → subaccountAgentId (starts empty; populated as rows are inserted)
+  const orgToSaId = new Map<string, string>();
+
+  for (const sysAgent of subaccountScopedAgents) {
+    const orgAgentId = sysToOrgId.get(sysAgent.id);
+    if (!orgAgentId) continue;
+
+    const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
+
+    // Resolve parent SA ID (topological order guarantees the parent's SA row
+    // is already in orgToSaId when this child is processed).
+    let parentSaId: string | null = null;
+    if (sysAgent.parentSystemAgentId) {
+      const parentOrgId = sysToOrgId.get(sysAgent.parentSystemAgentId);
+      if (parentOrgId) parentSaId = orgToSaId.get(parentOrgId) ?? null;
+    }
+
+    const [inserted] = await db
+      .insert(subaccountAgents)
+      .values({
         organisationId,
         subaccountId,
         agentId: orgAgentId,
+        parentSubaccountAgentId: parentSaId,
         isActive: true,
         skillSlugs,
         tokenBudgetPerRun: sysAgent.defaultTokenBudget,
         maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
         timeoutSeconds: 300,
-      });
-      subaccountLinksCreated += 1;
-    }
+      })
+      .returning({ id: subaccountAgents.id });
+    orgToSaId.set(orgAgentId, inserted.id);
+    subaccountLinksCreated += 1;
   }
 
-  log(
-    `  [ok]   org agents:         ${orgAgentsCreated} created, ${orgAgentsUpdated} updated`,
-  );
-  log(
-    `  [ok]   subaccount links:   ${subaccountLinksCreated} created, ${subaccountLinksUpdated} updated`,
-  );
+  log(`  [ok]   org agents:         ${orgAgentsCreated} created, ${orgAgentsUpdated} updated`);
+  log(`  [ok]   subaccount links:   ${subaccountLinksCreated} created, ${subaccountLinksUpdated} updated`);
   if (orgScopedSkipped > 0) {
     log(`  [ok]   org-scoped skipped: ${orgScopedSkipped} (activated at org only)`);
+  }
+}
+
+async function preflightVerifyAgentSkillContracts(): Promise<void> {
+  const { execSync } = await import('child_process');
+  try {
+    execSync('npx tsx scripts/verify-agent-skill-contracts.ts', { stdio: 'inherit' });
+  } catch {
+    throw new Error('preflight: agent-skill contract violations found — aborting seed');
+  }
+}
+
+async function preflightVerifyManifestDrift(): Promise<void> {
+  const { execSync } = await import('child_process');
+  try {
+    execSync('npx tsx scripts/regenerate-company-manifest.ts --check', { stdio: 'inherit' });
+  } catch {
+    throw new Error('preflight: manifest drift detected — run `npx tsx scripts/regenerate-company-manifest.ts` to fix — aborting seed');
   }
 }
 
@@ -1509,6 +1688,8 @@ async function main(): Promise<void> {
   // Pre-flight: fail fast if skill visibility has drifted from the
   // classification rule. Catches dev mistakes before any DB writes happen.
   await preflightVerifySkillVisibility();
+  await preflightVerifyAgentSkillContracts();
+  await preflightVerifyManifestDrift();
 
   await phase1_systemBootstrap();
   await phase2_systemAgents();
@@ -1545,6 +1726,7 @@ async function main(): Promise<void> {
 main()
   .catch((err) => {
     console.error('\n✗ Seed failed:', err instanceof Error ? err.message : err);
+    if (err?.cause) console.error('Caused by:', err.cause);
     process.exitCode = 1;
   })
   .finally(() => pool.end());

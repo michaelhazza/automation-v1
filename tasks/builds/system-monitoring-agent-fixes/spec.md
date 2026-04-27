@@ -79,7 +79,7 @@ This table is the single source of truth for what the spec touches. Any prose re
 
 | File | Phase | Purpose |
 |---|---|---|
-| `migrations/0238_system_incidents_last_triage_job_id.sql` | 1 | Adds `last_triage_job_id text` column to `system_incidents`. Down migration: `migrations/0238_system_incidents_last_triage_job_id.down.sql`. |
+| `migrations/0239_system_incidents_last_triage_job_id.sql` | 1 | Adds `last_triage_job_id text` column to `system_incidents`. Down migration: `migrations/0239_system_incidents_last_triage_job_id.down.sql`. |
 | `server/services/systemMonitor/triage/staleTriageSweep.ts` | 1 | Pure + IO split. Exports `findStaleTriageRowsSql(now, staleAfterMs)` (pure SQL builder) and `runStaleTriageSweep()` (executes UPDATE...RETURNING + writes events). |
 | `server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts` | 1 | Pure-helper test of the staleness predicate boundary AND `parseStaleAfterMinutesEnv` (NaN / empty / non-positive / valid env values). Runnable via `npx tsx`. |
 | `server/services/systemMonitor/triage/triageIdempotencyPure.ts` | 1 | Pure helper: `shouldIncrementAttemptCount(currentJobId, candidateJobId): boolean`. |
@@ -93,7 +93,7 @@ This table is the single source of truth for what the spec touches. Any prose re
 
 | File | Phase | Change |
 |---|---|---|
-| [`server/db/schema/systemIncidents.ts`](../../../server/db/schema/systemIncidents.ts) | 1 | Add `lastTriageJobId: text('last_triage_job_id')` column matching migration 0238. No type alias change. |
+| [`server/db/schema/systemIncidents.ts`](../../../server/db/schema/systemIncidents.ts) | 1 | Add `lastTriageJobId: text('last_triage_job_id')` column matching migration 0239. No type alias change. |
 | [`server/services/systemMonitor/triage/triageHandler.ts`](../../../server/services/systemMonitor/triage/triageHandler.ts) | 1 | (a) Add `jobId: string` parameter to `runTriage`. (b) Replace the unconditional increment at line 269-277 with an idempotent UPDATE predicated on `last_triage_job_id IS DISTINCT FROM $jobId`. (c) Step 5 sets `triageStatus='running'` *only if* the increment fires. (d) Pass `jobId` from caller. |
 | [`server/jobs/systemMonitorTriageJob.ts`](../../../server/jobs/systemMonitorTriageJob.ts) | 1 | Pass `job.id` (pg-boss job UUID) into `runTriage`. Update job-shape type to include `id: string`. |
 | [`server/services/systemMonitor/synthetic/index.ts`](../../../server/services/systemMonitor/synthetic/index.ts) | 2, 3 | Append `silentAgentSuccess` and `incidentSilence` to the `SYNTHETIC_CHECKS` array. |
@@ -247,10 +247,10 @@ Fingerprint override: `synthetic:incident-silence:system:monitoring`.
 
 Exactly one migration. Up + down. Drizzle schema synced in the same chunk.
 
-### 5.1 `0238_system_incidents_last_triage_job_id.sql`
+### 5.1 `0239_system_incidents_last_triage_job_id.sql`
 
 ```sql
--- 0238_system_incidents_last_triage_job_id
+-- 0239_system_incidents_last_triage_job_id
 --
 -- Adds last_triage_job_id text column to system_incidents to support
 -- key-based idempotency on triage_attempt_count increments. The handler
@@ -270,7 +270,7 @@ ALTER TABLE system_incidents
 -- when the column is NULL and the candidate jobId is not.
 ```
 
-Down migration (`0238_system_incidents_last_triage_job_id.down.sql`):
+Down migration (`0239_system_incidents_last_triage_job_id.down.sql`):
 
 ```sql
 ALTER TABLE system_incidents
@@ -318,7 +318,7 @@ This spec follows `docs/spec-context.md` framing without deviation. Pre-producti
 
 **Order of edits:**
 
-1. Migration `0238_*.sql` + down. Run `npm run db:generate`; verify the generated diff matches §5.1.
+1. Migration `0239_*.sql` + down. Run `npm run db:generate`; verify the generated diff matches §5.1.
 2. Add `lastTriageJobId` to [`server/db/schema/systemIncidents.ts`](../../../server/db/schema/systemIncidents.ts).
 3. Create `server/services/systemMonitor/triage/triageIdempotencyPure.ts`:
    ```ts
@@ -756,7 +756,7 @@ A reviewer can confirm this spec is satisfied by running each check below and ob
 
 | # | Check | Expected outcome |
 |---|---|---|
-| A1.1 | Apply migration `0238_*.sql`. | `system_incidents.last_triage_job_id` column exists, type `text NULL`, no default. |
+| A1.1 | Apply migration `0239_*.sql`. | `system_incidents.last_triage_job_id` column exists, type `text NULL`, no default. |
 | A1.2 | Run `triageIdempotencyPure.test.ts`. | Pass. |
 | A1.3 | Run `staleTriageSweepPure.test.ts`. | Pass. |
 | A1.4 | Run `triageDurability.integration.test.ts`. | Pass — exercises the full G1+G2 flow per §7.3. |

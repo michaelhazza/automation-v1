@@ -3,6 +3,7 @@ name: GEO llms.txt Analysis
 description: Analyses or generates llms.txt — the emerging standard for AI-readable site summaries that help LLMs understand site purpose, structure, and key content.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

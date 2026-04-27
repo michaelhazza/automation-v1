@@ -29,7 +29,7 @@
 
 - **Spec is normative.** Inventory in spec §3 is locked — do NOT add files / columns / migrations beyond it without a spec amendment. Two known inventory-drift items are called out in [Inventory drift](#3-inventory-drift) below; add only those, not others.
 - **No feature flags. No staged rollout. No backwards-compat shims.** Per spec §6 ("Implementation philosophy"), this is pre-production hardening — direct cut-over.
-- **Phase ordering is hard-locked.** Chunk 1 bundles G1+G2 per spec §1 / §7 ("they MUST land together"). Chunks 2/3/4 are independent of each other but all depend on chunk 1 having committed migration 0238 to the branch (so the branch's migration numbering stays monotonic and chunks 2/3/4 never bring up the schema without `last_triage_job_id`).
+- **Phase ordering is hard-locked.** Chunk 1 bundles G1+G2 per spec §1 / §7 ("they MUST land together"). Chunks 2/3/4 are independent of each other but all depend on chunk 1 having committed migration 0239 to the branch (so the branch's migration numbering stays monotonic and chunks 2/3/4 never bring up the schema without `last_triage_job_id`).
 - **§11.0 single-writer terminal-event invariant is load-bearing.** Chunk 1 must retrofit BOTH the triage-attempt increment site (step 5) AND the tool-loop success/failure terminal sites (step 8) of [`triageHandler.ts`](../../../server/services/systemMonitor/triage/triageHandler.ts) with `WHERE triage_status = 'running'` + row-count gate. The integration test in spec §7.3 exercises the race resolution.
 - **Gate scripts run TWICE TOTAL per this plan: once during Phase 0 baseline (and any pre-existing-violation fixes) and once during Programme-end verification after all chunks AND spec-conformance. Running them between chunks, after individual fixes, or as 'regression sanity checks' is forbidden — it adds wall-clock cost without adding signal.**
 - After all four chunks land, run `spec-conformance` BEFORE the final gate pass per CLAUDE.md review pipeline.
@@ -90,8 +90,8 @@ Add both in chunk 1 alongside the spec §3.2-listed changes. No spec amendment n
 
 | File | Purpose | Spec ref |
 |---|---|---|
-| `migrations/0238_system_incidents_last_triage_job_id.sql` | UP migration | §5.1 |
-| `migrations/0238_system_incidents_last_triage_job_id.down.sql` | DOWN migration | §5.1 |
+| `migrations/0239_system_incidents_last_triage_job_id.sql` | UP migration | §5.1 |
+| `migrations/0239_system_incidents_last_triage_job_id.down.sql` | DOWN migration | §5.1 |
 | `server/services/systemMonitor/triage/triageIdempotencyPure.ts` | `shouldIncrementAttemptCount` pure helper | §3.1, §7.1 step 3 |
 | `server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts` | Pure-helper test of `(currentJobId, candidateJobId)` boundary | §12.1, §14 A1.2 |
 | `server/services/systemMonitor/triage/staleTriageSweep.ts` | Pure SQL builder (`findStaleTriageRowsSql`) + IO entrypoint (`runStaleTriageSweep`) + env parser (`parseStaleAfterMinutesEnv`) | §3.1, §7.2 step 1 |
@@ -111,7 +111,7 @@ Add both in chunk 1 alongside the spec §3.2-listed changes. No spec amendment n
 
 ### 4.3 Order of edits (translate verbatim from spec §7.1 + §7.2)
 
-1. **Migration + drizzle sync.** Author `0238_*.sql` + `0238_*.down.sql` per spec §5.1 (verbatim — do not paraphrase the SQL). Add `lastTriageJobId` to `server/db/schema/systemIncidents.ts` per spec §5.2. Run `npm run db:generate` and verify the diff matches §5.1 with no other drift.
+1. **Migration + drizzle sync.** Author `0239_*.sql` + `0239_*.down.sql` per spec §5.1 (verbatim — do not paraphrase the SQL). Add `lastTriageJobId` to `server/db/schema/systemIncidents.ts` per spec §5.2. Run `npm run db:generate` and verify the diff matches §5.1 with no other drift.
 2. **Event-type registry extensions.** Append `'agent_triage_timed_out'` to BOTH `shared/types/systemIncidentEvent.ts` and `server/db/schema/systemIncidentEvents.ts` (see [Inventory drift](#3-inventory-drift)).
 3. **Pure helper.** Create `triageIdempotencyPure.ts` per spec §7.1 step 3 (verbatim function body).
 4. **Pure helper test.** Create `__tests__/triageIdempotencyPure.test.ts` covering: same `jobId` → false; different `jobId` → true; null current + non-null candidate → true.
@@ -131,7 +131,7 @@ bash scripts/run-all-unit-tests.sh                                              
 npx tsx server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts
 npx tsx server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts
 npx tsx server/services/systemMonitor/triage/__tests__/triageDurability.integration.test.ts   # real DB; needs DATABASE_URL
-npm run db:generate                                                             # confirm no drift beyond migration 0238
+npm run db:generate                                                             # confirm no drift beyond migration 0239
 ```
 
 Do NOT run any `scripts/verify-*.sh` here. Gate scripts run only at Phase 0 baseline and at Programme-end verification.
@@ -163,7 +163,7 @@ If a future change introduces a fourth writer that can transition `triage_status
 
 **Scope:** Phase 2 of the spec — one new `SyntheticCheck` registered in `SYNTHETIC_CHECKS`, plus its pure-helper test. Independent of chunks 3 and 4.
 
-**Dependencies:** Chunk 1 has committed to the branch (so migration 0238 is the only outstanding migration; no data dep on `last_triage_job_id`).
+**Dependencies:** Chunk 1 has committed to the branch (so migration 0239 is the only outstanding migration; no data dep on `last_triage_job_id`).
 
 **Acceptance IDs satisfied:** A2.1 – A2.5 (spec §14.2).
 
@@ -326,7 +326,7 @@ Chunks 2/3/4 are independent of each other in code and data terms. The "chunk-1 
 | §11.0 invariant misimplementation — current `triageHandler.ts` step 8 success/failure paths issue UNCONDITIONAL terminal-state UPDATEs. If chunk 1 only retrofits step 5 (the increment) and forgets step 8 (the terminal flips), the `late tool-loop completion races sweep` corruption from §11.0 ships uncovered. | High | Chunk 1 order-of-edits step 7 makes the retrofit explicit. Integration test §7.3 step 3 verifies the sweep-wins-race. Add a code-review note: search `triageHandler.ts` for `triageStatus: 'completed'` and `triageStatus: 'failed'` after edit; both UPDATEs MUST include `WHERE triageStatus='running'`. |
 | `agent_triage_timed_out` event-type registry drift — if added to only one of `shared/types/systemIncidentEvent.ts` and `server/db/schema/systemIncidentEvents.ts`, either the gate or the typecheck fails. | Medium | Inventory drift section above lists both files. Step 2 of chunk-1 order-of-edits handles both in the same edit. |
 | `runTriage` signature ripple — adding `jobId` parameter breaks any caller. | Low | `triageHandler.runTriage` is called from one file (`server/jobs/systemMonitorTriageJob.ts`) per spec §3.2. Confirmed in primitives-reuse pass. `npx tsc --noEmit` after chunk 1 will catch any missed call site. |
-| Migration 0238 numbering conflict — main lands a new migration before this branch merges. | Low | Standard rebase + renumber. Branch is currently up-to-date with main HEAD `58cf0316`; no fix needed unless main moves. |
+| Migration 0238 numbering conflict — main lands a new migration before this branch merges. | Resolved | PR #216 landed migration `0238_system_agents_v7_1.sql` on main; this branch's migration was renumbered to `0239_system_incidents_last_triage_job_id.sql` during the merge from main on 2026-04-27. |
 | Incident-silence self-validation regression — implementer omits one of the two `metadata.checkId='incident-silence'` exclusions in spec §9.1 SQL, causing the check to validate its own proof-of-life. | High (silent) | Chunk 3 order-of-edits step 1 calls the dual exclusion out as not-optional. A3.6 acceptance check directly verifies the proof-of-life exclusion (three silence rows with no other synthetic fires → no incident). |
 | Sweep + `agent_runs` row — sweep flips `system_incidents.triageStatus` to `failed` but does NOT update the dead worker's `agent_runs` row (it stays at `status='running'`). | Low | Intentional per spec §4.3 (`actorAgentRunId: null` because we cannot reliably attribute to a specific run UUID). Surfaced as a known observability gap; not addressed in this spec. The existing `noAgentRunsInWindow` and `agentRunSuccessRateLow` checks will not produce false fires because they read `created_at` / lookback windows on completed runs, not stuck-running runs. |
 | First-fire-wins detection latency — `silent-agent-success` takes N ticks to surface N degraded agents. | Accepted | Spec §8.3 explicitly accepts this for the current fleet size. Top-K-offenders promotion is a future spec amendment; not in scope here. |
@@ -344,7 +344,7 @@ bash scripts/run-all-unit-tests.sh
 
 # Full gate set (only run here, not between chunks)
 npm run lint
-npm run db:generate                                  # confirm clean diff (only migration 0238)
+npm run db:generate                                  # confirm clean diff (only migration 0239)
 bash scripts/verify-event-type-registry.sh           # picks up agent_triage_timed_out
 bash scripts/verify-job-idempotency-keys.sh
 bash scripts/verify-rls-coverage.sh

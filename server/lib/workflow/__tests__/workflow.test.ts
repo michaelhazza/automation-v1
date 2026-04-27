@@ -223,7 +223,7 @@ test('blocked: run.something_unexpected', () => {
 test('blocked: run.subaccount field outside whitelist', () => {
   const ctx = makeContext();
   assertThrows(
-    () => resolve('run.subaccount.organisationId', ctx),
+    () => resolve('run.subaccount.passwordHash', ctx),
     /not in whitelist/,
     'subaccount whitelist enforced'
   );
