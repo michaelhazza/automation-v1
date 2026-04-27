@@ -342,6 +342,7 @@ Single-screen operational command centre that replaces the legacy inbox, dashboa
 
 - **Three-lane classifier** — Actions are deterministically sorted into Client-facing, Major, and Internal lanes based on impact: irreversibility, cross-subaccount scope, per-action cost, and per-run cost
 - **Major-lane safeguards** — High-cost or irreversible actions require explicit acknowledgment before approval, with configurable cost thresholds per organisation
+- **Live home dashboard** — Approvals, activity, client-health, and queue tiles refresh in place as events occur, with a "last updated" freshness indicator on every group. Operators see new state without manual refresh, and ordering is preserved under bursts so the dashboard never drifts behind reality.
 - **Attention tab** — Live feed of pending review items, failed runs, health findings, and tasks needing decisions, with optimistic UI updates and real-time WebSocket push
 - **History tab** — Full activity timeline with column-header sort, type/status/severity filters, search, and date-range filtering — delegates to the unified activity service
 - **Bulk approve** — Select and approve multiple items at once; Major-lane items are automatically held back with a split response showing what was approved vs. blocked

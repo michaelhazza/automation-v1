@@ -1497,6 +1497,25 @@ Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one
 
 **Backstop polling:** Components that use WebSocket rooms also run a `setInterval` backstop — 15s when connected, 5s when disconnected — to cover reconnect windows. The backstop is a safety net, not the primary update path.
 
+### Home dashboard live reactivity (PR #218 / spec: `docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md`)
+
+Live updates to the home dashboard use a coalescing + last-write-wins pattern instead of trusting socket payloads for UI state. Events are notifications only; the REST endpoint is the source of truth.
+
+**Topic family.** `dashboard.approval.changed`, `dashboard.activity.updated`, `dashboard.client.health.changed`, `dashboard.queue.changed`. Emitted from `server/services/reportService.ts`, `server/routes/reviewItems.ts`, `server/services/reviewService.ts`, plus agent-run and workflow-run terminal-state hooks. The legacy `dashboard:update` topic is retained for `ClientPulseDashboardPage` parity but is not used by the home dashboard.
+
+**Client primitives** (`client/src/pages/DashboardPage.tsx`):
+- **`applyIfNewer(currentTs, incomingTs, apply)`** — strict-greater-than guard on per-group `serverTimestamp`. Out-of-order responses drop silently.
+- **Per-group inflight + pending coalescing** — if a refetch is in flight when an event arrives, set `pending = true` instead of firing a second request. The in-flight finalizer re-fires once if `pending` was set. Replaces the earlier drop-on-inflight pattern (which left stale UI state when the inflight response was older than the suppressed event).
+- **`markFresh(ts)`** — single freshness clock fed by every successful `applyIfNewer` apply; consumed by `FreshnessIndicator` for the "last updated · Ns ago" line.
+- **`EVENT_TO_GROUP`** — `as const` keyed map from socket event name to refetch function. The keyed-access call sites (`useSocket('dashboard.approval.changed', () => EVENT_TO_GROUP['dashboard.approval.changed']())`) make rename/removal a TypeScript error — drift guardrail per spec §4.2.
+
+**Server invariants:**
+- **Server-side timestamp generation** — `serverTimestamp` on the REST response is set inside the same handler that produces the payload; clients never generate timestamps. This anchors the "latest data wins" comparison to a monotonic source.
+- **`expectedTimestamp` atomicity** — for the activity group, the two REST calls (`/api/activity` and `/api/agent-activity/stats`) return independent timestamps; the client combines them with `min(...)` (not `max`) so the group only advances when BOTH halves are at least that fresh. Splitting these or switching to `max` re-opens the atomicity gap.
+- **Suppression is success** — single-writer event emitters that lose a coordination race must return `success: true, suppressed: true` rather than `success: false`. Returning failure here triggers retries, false incident signals, and broken metrics. Pattern enforced in `writeDiagnosis` (system-monitoring agent) and should be applied consistently to any new single-writer emitter.
+
+**Reconnect handling:** `RECONNECT_DEBOUNCE_MS = 500` debounce on the `false → true` socket-connection transition (NOT `null → true` initial mount), then a single `refetchAll()`. Initial mount uses the standard fetch path; only true reconnects trigger the bulk refetch.
+
 ---
 
 ## Regression Capture & Trajectory Testing

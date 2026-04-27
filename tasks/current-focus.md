@@ -8,10 +8,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md
-**Active plan:** docs/superpowers/plans/2026-04-26-audit-remediation-followups.md
-**Active build slug:** audit-remediation-followups (Wave 1)
-**Last updated:** 2026-04-26
+**Active spec:** docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md
+**Active plan:** docs/superpowers/plans/2026-04-27-home-dashboard-reactivity.md
+**Active build slug:** home-dashboard-reactivity (PR #218 — branch `create-views`, awaiting merge after ChatGPT PR review APPROVED)
+**Last updated:** 2026-04-27
 
 ---
 
