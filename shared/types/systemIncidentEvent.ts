@@ -37,4 +37,5 @@ export type SystemIncidentEventType =
   | 'investigate_prompt_outcome'// operator marked prompt useful/not (spec §11)
   | 'synthetic_check_fired'     // a synthetic check fired (spec §8)
   | 'baseline_refreshed'        // baseline window refreshed successfully
-  | 'baseline_refresh_failed';  // baseline refresh job failed
+  | 'baseline_refresh_failed'   // baseline refresh job failed
+  | 'agent_triage_timed_out';   // worker died; staleness sweep flipped row to failed (spec §4.3)

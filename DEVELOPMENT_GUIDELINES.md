@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
+**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3; §§8.23–8.25 from system-monitoring-agent-fixes pr-reviewer)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -194,6 +194,18 @@ Any pure resolver / reducer / ranker whose source array can be reordered between
 ### 8.22 Allow-list annotations name the function they cover
 
 Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
+
+### 8.23 Status-flip + event INSERT must be atomic
+
+A Drizzle `db.update(...)` that flips a row to a terminal state and the `db.insert(systemIncidentEvents, ...)` that records the outcome must run inside a single `db.transaction()` block; a connection error between two separate statements leaves the row terminal with no event and no recovery path.
+
+### 8.24 Raw SQL must be cross-checked against schema and migrations before landing
+
+Before writing a raw `sql\`...\`` template in any service file (synthetic checks, complex queries), verify every column reference against the Drizzle schema file and every table reference against the migration history — column-name mismatches and references to non-existent tables are swallowed by `catch`/log error handlers and silently disable the entire check at runtime.
+
+### 8.25 Test hooks that skip critical production writes require a NODE_ENV guard
+
+`__testHooks` seams that bypass DB inserts or business-logic paths (not merely pausing execution) must guard the active branch on `process.env.NODE_ENV === 'test'`; seams that only pause or inject a delay do not require the guard.
 
 ---
 

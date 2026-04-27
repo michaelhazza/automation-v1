@@ -29,7 +29,7 @@ export const listIncidentsQuery = z.object({
   sort: z.enum(['last_seen_desc', 'first_seen_desc', 'occurrence_count_desc', 'severity_desc']).optional(),
   limit: z.string().optional(),
   offset: z.string().optional(),
-  diagnosis: z.enum(['all', 'diagnosed', 'awaiting', 'not-triaged']).optional(),
+  diagnosis: z.enum(['all', 'diagnosed', 'awaiting', 'not-triaged', 'failed-triage']).optional(),
 });
 
 // POST /api/system/incidents/:id/feedback

@@ -11,7 +11,7 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
 
 ## Correctness fixes
 
-- [ ] **Rate-limit retry idempotency on triage attempts** (item 7b) — `[auto]` —
+- [x] **Rate-limit retry idempotency on triage attempts** (item 7b) — `[auto]` — *Implemented in `system-monitoring-agent-fixes` (G1); see `tasks/builds/system-monitoring-agent-fixes/spec.md` §7.1.*
       `server/services/systemMonitor/triage/triageHandler.ts:268-274` increments
       `triage_attempt_count + 1` before the LLM tool loop runs. If pg-boss retries
       the message after that point (transient network failure, OOM, redeploy mid-job),
@@ -19,7 +19,7 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
       Fix: idempotency-key the increment on `(incidentId, jobId)` — only increment
       once per pg-boss job id, not once per handler invocation.
 
-- [ ] **List filter semantics for `triageStatus=failed AND diagnosisStatus=none`**
+- [x] **List filter semantics for `triageStatus=failed AND diagnosisStatus=none`** *Implemented in `system-monitoring-agent-fixes` (G5); see spec §10.*
       (round 2, item 3) — `[user]` — The diagnosis filter pill on the incidents
       list (`SystemIncidentsPage.tsx`) currently maps the status enum directly,
       which means a worker-died incident (`triageStatus='running'` left stale,
@@ -32,7 +32,7 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
       alongside `none / valid / partial / invalid`. UI string + filter contract
       need spec design — defer until the post-launch operator workflow review.
 
-- [ ] **Backend staleness guard for worker-death recovery** (round 2, item 4) —
+- [x] **Backend staleness guard for worker-death recovery** (round 2, item 4) — *Implemented in `system-monitoring-agent-fixes` (G2); see spec §7.2.*
       `[user]` — `triageHandler.ts` writes `triageStatus='running'` at the start
       of an attempt. If the worker dies mid-run (OOM, segfault, host shutdown),
       the row stays at `'running'` indefinitely and the UI shows an eternal
@@ -61,14 +61,14 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
 
 ## Observability
 
-- [ ] **Synthetic check: write success vs declared success mismatch** (item 6a) —
+- [x] **Synthetic check: write success vs declared success mismatch** (item 6a) — *Implemented in `system-monitoring-agent-fixes` (G3); see spec §8.*
       `[user]` — System-wide invariant: % of agent runs marked `success` where no
       side effects (no events written, no skill executions, no incident updates)
       were observed. Surfaces silent agent failures where the LLM returned cleanly
       but did nothing. Spec (§9 Phase 2.5 heuristics) lists the day-one synthetic
       set — this is genuinely missing.
 
-- [ ] **Synthetic check: incident silence detection** (item 6b) — `[user]` —
+- [x] **Synthetic check: incident silence detection** (item 6b) — `[user]` — *Implemented in `system-monitoring-agent-fixes` (G4); see spec §9.*
       System-wide invariant: no incidents created in the last X hours despite
       ingest activity (heuristic fires, sweep runs, agent runs). Catches the
       "monitoring system is broken" case where the absence of incidents itself

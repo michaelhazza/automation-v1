@@ -203,13 +203,14 @@ Conforms to the existing `SyntheticResult` interface in [`server/services/system
 Fingerprint override: `synthetic:silent-agent-success:agent:<slug>` (matches the pattern in `syntheticChecksTickHandler.ts:35`).
 
 **"Side effect" definition.** A `completed` `agent_runs` row is *not silent* if any of:
-1. At least one `agent_execution_events` row exists with `agent_run_id = run.id`.
+1. At least one `agent_execution_events` row exists with `run_id = run.id`.
 2. At least one `system_incident_events` row exists with `actor_agent_run_id = run.id`.
-3. At least one `skill_executions` row exists with `agent_run_id = run.id`.
 
-Silent = none of the above. Verifiable with a single LEFT JOIN query (one row per run, three boolean side-effect probes ANDed).
+Silent = none of the above. Verifiable with a single LEFT JOIN query (one row per run, two boolean side-effect probes ANDed).
 
-**Observability contract for system-managed agents.** All system-managed agents (rows in `agents` with `is_system_managed = true`) MUST write at least one of `agent_execution_events`, `system_incident_events`, or `skill_executions` per completed run to remain observable to this check. New write surfaces introduced by future system-managed agents MUST also emit at least one `agent_execution_events` row per run — even if the primary write is to a new table — so this side-effect probe stays stable as the fleet grows. This is an internal contract on system-managed agents; it does not apply to tenant-scoped agents and is not surfaced to operators.
+Note: `skill_executions` is not yet present in the codebase (see `sourceTableQueries.ts` stub comment). The `agent_execution_events` contract (every system-managed agent MUST emit at least one row per run per §4.4 observability contract) makes the third probe redundant — if the contract is held, `agent_execution_events` is sufficient for detection. When `skill_executions` ships, it may be added as a third probe in its own spec amendment.
+
+**Observability contract for system-managed agents.** All system-managed agents (rows in `agents` with `is_system_managed = true`) MUST write at least one of `agent_execution_events` or `system_incident_events` per completed run to remain observable to this check. New write surfaces introduced by future system-managed agents MUST also emit at least one `agent_execution_events` row per run — even if the primary write is to a new table — so this side-effect probe stays stable as the fleet grows. This is an internal contract on system-managed agents; it does not apply to tenant-scoped agents and is not surfaced to operators.
 
 **Timing clause — synchronous emission required.** The required `agent_execution_events` (or other side-effect) row MUST be written synchronously *during the run lifecycle* — i.e. before the `agent_runs` row transitions to `status='completed'`. A system-managed agent that defers side effects asynchronously (e.g. enqueues a follow-up job that writes downstream rows after the run completes, or batches writes via a downstream queue) MUST still emit at least one `agent_execution_events` row inside the run lifecycle to remain observable to this check. This prevents the check from drifting into false positives as the fleet evolves toward async patterns: a run that "looks completed but its side effects are still in flight" would otherwise be indistinguishable from a genuinely silent run at the moment the check executes. The synchronous-emission rule is the load-bearing invariant — `agent_runs.status='completed'` MUST mean "this run produced at least one observable marker by the time it claimed success."
 
@@ -412,9 +413,8 @@ SELECT
   a.slug,
   COUNT(ar.id)::int AS total_completed,
   COUNT(*) FILTER (
-    WHERE NOT EXISTS (SELECT 1 FROM agent_execution_events ae WHERE ae.agent_run_id = ar.id)
+    WHERE NOT EXISTS (SELECT 1 FROM agent_execution_events ae WHERE ae.run_id = ar.id)
       AND NOT EXISTS (SELECT 1 FROM system_incident_events sie WHERE sie.actor_agent_run_id = ar.id)
-      AND NOT EXISTS (SELECT 1 FROM skill_executions se WHERE se.agent_run_id = ar.id)
   )::int AS silent_count
 FROM agents a
 JOIN agent_runs ar ON ar.agent_id = a.id
@@ -458,15 +458,16 @@ Following the pattern in [`agentRunSuccessRateLow.ts`](../../../server/services/
 
 A `failed` agent run with no side effects is not silent — it failed. We're chasing the case where the agent *claims* success (status='completed') but produced nothing. Failed runs are a different observability concern handled by `agentRunSuccessRateLow`. The two checks together cover the success-rate cliff (failures spiking) and the silent-success cliff (successes that aren't really successes).
 
-### 8.5 Why side effects are defined as 3 specific tables
+### 8.5 Why side effects are defined as 2 specific tables
 
-These three tables are the universe of write surfaces a system_monitor-class agent can touch:
+These two tables are the universe of currently-instrumented write surfaces for system_monitor-class agents:
 
-- `agent_execution_events` — every meaningful step in the tool loop emits one of these (per the live-execution-log spec).
-- `system_incident_events` — the diagnosis-skill output is recorded here when the agent writes a diagnosis.
-- `skill_executions` — every tool call records a row here.
+- `agent_execution_events` — every meaningful step in the tool loop emits one of these (per the live-execution-log spec). Column used: `run_id`.
+- `system_incident_events` — the diagnosis-skill output is recorded here when the agent writes a diagnosis. Column used: `actor_agent_run_id`.
 
-If none of the three has a row pointing to the run, the agent literally did nothing observable. Logging at `info` when the check fires includes the specific run UUIDs so operators can spot-check the "silent" claim.
+`skill_executions` is not yet present in the codebase (stubbed in `sourceTableQueries.ts`). Once it ships, it may be added as a third probe via its own spec amendment. The `agent_execution_events` contract makes the third probe redundant for detection purposes in the current fleet.
+
+If none of the two has a row pointing to the run, the agent literally did nothing observable. Logging at `info` when the check fires includes the specific run UUIDs so operators can spot-check the "silent" claim.
 
 The list is held stable by the §4.4 observability contract: every system-managed agent MUST emit at least one `agent_execution_events` row per run regardless of any new write surface it touches. This means a future "execute remediation" skill writing to a new table does not require this list to be extended — the agent's `agent_execution_events` row is still produced, the check still treats it as non-silent. The list expands only if the contract is deliberately revised (e.g. a future class of system-managed agent that writes to a new primary surface and is exempted from emitting `agent_execution_events`); that revision lands in its own spec amendment.
 
@@ -489,11 +490,11 @@ SELECT
    WHERE si.created_at >= params.silence_cutoff
      AND si.is_test_incident = false
      AND NOT (si.source = 'synthetic'
-              AND si.metadata->>'checkId' = 'incident-silence'))  AS incidents_in_window,
+              AND si.latest_error_detail->>'checkId' = 'incident-silence'))  AS incidents_in_window,
   (SELECT COUNT(*) FROM system_incidents si, params
    WHERE si.source = 'synthetic'
      AND si.created_at >= params.proof_cutoff
-     AND NOT (si.metadata->>'checkId' = 'incident-silence'))      AS synthetic_fires_in_proof_window
+     AND NOT (si.latest_error_detail->>'checkId' = 'incident-silence'))      AS synthetic_fires_in_proof_window
 ```
 
 `$silenceCutoff = ctx.now - SYSTEM_MONITOR_INCIDENT_SILENCE_HOURS hours` (default 12h).
