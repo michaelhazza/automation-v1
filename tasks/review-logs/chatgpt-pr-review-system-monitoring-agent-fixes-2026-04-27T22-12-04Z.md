@@ -93,3 +93,33 @@ Plus a "what's solid" recap (idempotent increment, race-claim ordering, single-w
 - Top themes: error_handling (suppression contract symmetry), other (hallucinated duplicate-field claim).
 
 ---
+
+## Final Summary
+
+- **Rounds:** 3
+- **Finalised:** 2026-04-28
+- **Final HEAD at session close:** `b8ae2c0a` (`chore(review): PR #217 round 3 — explicit suppressed:false on writeDiagnosis success path`)
+- **Auto-accepted (technical):** 1 implemented | 1 rejected | 0 deferred
+  - Round 3 finding 2 (writeDiagnosis explicit `suppressed: false` symmetry) → auto-implement
+  - Round 3 finding 1 (duplicate-field claim, re-asserted hallucination) → auto-reject
+- **User-decided:** 2 implemented | 4 rejected | 1 deferred
+  - Implements: round 1 finding 1 (silentAgentSuccess description narrowing); round 2 finding 3 (suppression-as-success contract — `writeDiagnosis.ts` + mirrored in `triageHandler.ts` `TriageResult`)
+  - Rejects: round 1 findings 3 + 4 + 5 (capabilities entry / pre-emptive KNOWLEDGE.md / terminal-event guard return uniformity); round 2 findings 1 + 4 (double-write hallucination / duplicate-assignment hallucination)
+  - Defers: round 3 finding 3 (counter metric for `triage.terminal_event_suppressed` — routed to `tasks/todo.md § PR Review deferred items / PR #217`)
+- **Index write failures:** 0
+- **Consistency warnings:** none.
+  - Round 2 finding 4 (duplicate-field claim) was rejected as a false positive. Round 3 finding 1 re-asserted the same claim under a "retraction of earlier admission" framing — also rejected. The decisions are aligned; the round-3 framing was itself a hallucination.
+  - Round 2 finding 3 (suppression-as-success) was implemented. Round 3 finding 2 (explicit `suppressed: false` symmetry on the success branch) was an additive refinement, not a contradiction — both ship.
+- **Deferred items routed to `tasks/todo.md` § PR Review deferred items / PR #217:**
+  - [user] Counter metric / aggregation for `triage.terminal_event_suppressed` transitions — observability follow-up. Reconsider when (a) a counter/metric primitive is adopted in-repo, or (b) suppression rates become non-zero in production and we need quantitative monitoring rather than log-grep.
+- **Architectural items surfaced to user:** none. All findings were `technical` triage. Two technical-escalations occurred via the `defer` carveout (round 1 finding 4 was rejected after escalation; round 3 finding 3 was deferred as the user pre-decided it in the round prompt). No `user-facing` findings in this session.
+- **KNOWLEDGE.md updated:** yes (3 entries — 1 update + 2 new).
+  - Updated 2026-04-24 hallucination entry with PR #217 round-3 recurrence ("retracted false-positive" framing variant) — now 5 occurrences across 3 PRs.
+  - New 2026-04-28 entry: "Suppression is a first-class success outcome, not an error, under single-writer invariants" — captures the round-2 / round-3 contract evolution on `writeDiagnosis.ts` and the `triageHandler.ts` `TriageResult` mirror.
+  - New 2026-04-28 entry: "Integration tests as concurrency-coordination proof" — captures the round-3 sign-off observation that pure-helper tests prove the predicate, integration tests prove the writers respect the predicate in coordination, and both are required for multi-writer correctness rules.
+- **architecture.md updated:** no — no structural changes.
+- **docs/capabilities.md updated:** no — no operator-visible capability changes.
+- **Spec doc updated:** yes — `tasks/builds/system-monitoring-agent-fixes/spec.md` §3.2 row for `writeDiagnosis.ts` was updated in round 2 (CLAUDE.md §11 doc-sync requirement). Round-3 `suppressed: false` symmetry refinement is implementation-level and does not invalidate the §3.2 prose. No further spec edits required at finalisation.
+- **PR:** #217 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/217
+
+---

@@ -11,7 +11,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** none
 **Active plan:** none
 **Active build slug:** none
-**Last updated:** 2026-04-27
+**Last updated:** 2026-04-28
+
+**Also merge-ready:** PR #217 (branch `system-monitoring-agent-fixes`) — System Monitor Tier-1 hardening (G1 retry idempotency + G2 staleness recovery + G3 silent-agent-success synthetic check + G4 incident-silence synthetic check + G5 failed-triage filter pill). Full review pipeline complete: spec-conformance CONFORMANT (1 directional item routed to backlog) → pr-reviewer blocking findings B1–B4 fixed in-branch (`2dcafa88`) → ChatGPT PR review 3 rounds (3 implements: silentAgentSuccess description narrowing, suppression-as-success contract on `writeDiagnosis.ts` + mirrored on `triageHandler.ts` `TriageResult`, explicit `suppressed: false` symmetry on success path; 5 rejects: 4 hallucinations + 1 spec-violating uniformity suggestion; 1 defer: counter metric for `triage.terminal_event_suppressed` transitions, routed to `tasks/todo.md § PR Review deferred items / PR #217`). 3 durable KNOWLEDGE.md patterns captured (suppression as first-class success outcome under single-writer invariants; integration tests as concurrency-coordination proof; "retracted false-positive" hallucination variant — 5th occurrence across 3 PRs). Session log: `tasks/review-logs/chatgpt-pr-review-system-monitoring-agent-fixes-2026-04-27T22-12-04Z.md`. Final HEAD at session close: `b8ae2c0a`. Awaiting merge into `main`.
 
 ---
 

@@ -395,3 +395,20 @@ tasks/review-logs/spec-conformance-log-system-monitoring-agent-fixes-<timestamp>
 - `tasks/post-merge-system-monitor.md` updated per A5.1
 - `spec-conformance` returns `CONFORMANT` (or `CONFORMANT_AFTER_FIXES`)
 - `pr-reviewer` returns clean
+
+---
+
+## 13. Completion status (PR #217)
+
+All four chunks landed and the full review pipeline closed. Ready to merge.
+
+| Stage | Outcome | Reference |
+|---|---|---|
+| Chunks 1–4 implementation | shipped | commit `e0c8000f` (Tier-1 hardening — G1–G5) |
+| `spec-conformance` | CONFORMANT (1 directional item routed to `tasks/todo.md`) | `tasks/review-logs/spec-conformance-log-system-monitoring-agent-fixes-2026-04-27T11-41-03Z.md` |
+| `pr-reviewer` | blocking findings B1–B4 fixed in-branch | commit `2dcafa88` |
+| ChatGPT PR review | 3 rounds — 3 implement / 5 reject / 1 defer | `tasks/review-logs/chatgpt-pr-review-system-monitoring-agent-fixes-2026-04-27T22-12-04Z.md` |
+| Final HEAD | `b8ae2c0a` | — |
+| PR | https://github.com/michaelhazza/automation-v1/pull/217 | OPEN, ready to merge |
+
+Deferred follow-up: counter metric / aggregation for `triage.terminal_event_suppressed` transitions. See `tasks/todo.md § PR Review deferred items / PR #217`.
