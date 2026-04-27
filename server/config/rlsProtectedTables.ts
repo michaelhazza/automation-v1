@@ -523,11 +523,11 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0217_delegation_outcomes.sql',
     rationale: 'Per-run delegation decision log — caller/target agent ids and scope reveal agent hierarchy topology; cross-tenant leak would expose one org\'s agent structure to another.',
   },
-  // 0233 — system agents v7.1
+  // 0238 — system agents v7.1
   {
     tableName: 'skill_idempotency_keys',
     schemaFile: 'skillIdempotencyKeys.ts',
-    policyMigration: '0233_system_agents_v7_1.sql',
+    policyMigration: '0238_system_agents_v7_1.sql',
     rationale: 'Cross-run idempotency keys for write skills — request payload hashes can encode customer PII (email recipient hashes, invoice amounts, contact updates).',
   },
 ];

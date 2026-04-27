@@ -130,6 +130,14 @@ run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
 run_gate "$SCRIPT_DIR/verify-derived-data-null-safety.sh"
 run_gate "$SCRIPT_DIR/__tests__/derived-data-null-safety/run-fixture-self-test.sh"
 
+# ── System Monitor — heuristic purity (no DB writes in heuristic modules) ──
+run_gate "$SCRIPT_DIR/verify-heuristic-purity.sh"
+run_gate "$SCRIPT_DIR/__tests__/heuristic-purity/run-fixture-self-test.sh"
+
+# ── System Monitor — event type registry (all event types in canonical file) ──
+run_gate "$SCRIPT_DIR/verify-event-type-registry.sh"
+run_gate "$SCRIPT_DIR/__tests__/event-type-registry/run-fixture-self-test.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

@@ -1,4 +1,4 @@
--- migrations/0233_system_agents_v7_1.sql
+-- migrations/0238_system_agents_v7_1.sql
 -- v7.1 system-agents migration: active-row uniqueness + cross-run idempotency table.
 
 BEGIN;

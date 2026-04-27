@@ -1175,3 +1175,57 @@ The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NIC
   - Source: pr-reviewer
   - Gap: `hashKeyShape` builds a NEW object from `keyShape` order before canonicalising, so the test passes regardless of canonicaliseForHash's behaviour. The actual canonicalisation property is tested separately at line 115.
   - Suggested approach: either remove the redundant test or strengthen it by computing the SHA against a hand-canonicalised string.
+
+---
+
+## Deferred from spec-conformance review — system-monitoring-agent (2026-04-27)
+
+**Captured:** 2026-04-27T06:52:33Z
+**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-2026-04-27T06-52-33Z.md`
+**Spec:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
+**Resolved:** 2026-04-27 — all six directional gaps addressed in the same session as the spec-conformance fixes; see triageHandler.ts, sweepHandler.ts, sweepCoverageDegraded.ts, sweepTickHistory.ts, queueService.ts, systemIncidentService.ts, and migration 0236.
+
+- [x] REQ 2.4 — Sweep cron interval is hard-coded `*/15 * * * *` (every 15 min), spec §9.3 mandates default 5 minutes
+  - Spec section: §9.3 Sweep job — "**Tick:** every 5 minutes via pg-boss schedule. Configurable via `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES`."
+  - Gap: `server/services/queueService.ts:1131` schedules `system-monitor-sweep` with cron `*/15 * * * *`. Spec default is 5; window is 15. The spec relies on the 5-min interval / 15-min window combination for "rolling 15 minutes... overlaps adjacent ticks by 10 minutes intentionally" (§9.3). At the current 15-min interval, no window overlap occurs and a degraded run completing at a tick boundary could be missed.
+  - Suggested approach: make the sweep schedule honour `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES` (env var defaults to 5) — either by using pg-boss's dynamic-schedule API or by having the registration code build the cron string from the env var. Confirm cost impact (3× more sweep ticks at default) and decide whether the runtime cap on `loadCandidates` (200 candidate hard ceiling) is sufficient backstop. Consider the same treatment for `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` and `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` if they suffer the same hardcoded-cron pattern.
+
+- [x] REQ 2.15 + 2.16 — `rateLimit.ts` module is defined but never wired into the triage flow
+  - Spec section: §9.9 Rate limiting — "Max **2 triage attempts per fingerprint per 24-hour rolling window**. ... Configurable via `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT`."
+  - Gap: `server/services/systemMonitor/triage/rateLimit.ts` exports `checkRateLimit` (env-driven, default 2) and `maybeAutoEscalate` (calls existing manual-escalate path on window expiry for high/critical). Neither is imported or invoked anywhere in the codebase. The active triage path uses `triageAdmitPure.ts:7` which hard-codes `TRIAGE_ATTEMPT_CAP = 5` and does not honor the spec's env var. Effect: rate limit is 5, not 2; auto-escalation past the window is dead code; smoke step 8 in `staging-smoke-checklist.md` (which expects 3rd attempt blocked) will not pass against staging defaults.
+  - Suggested approach: wire `checkRateLimit` into `triageHandler.runTriage` immediately after `checkAdmit` returns admitted (or fold the rate-limit check into the admit verdict). On rate-limited verdict, write `agent_triage_skipped` event with `reason='rate_limited'` and call `maybeAutoEscalate` for high/critical incidents. Remove the `TRIAGE_ATTEMPT_CAP = 5` constant from `triageAdmitPure.ts` (or keep as a hard ceiling separate from the rate limit). Add an integration test that asserts: third attempt within window → blocked + `agent_triage_skipped` event + `triage_attempt_count` = 2.
+
+- [x] REQ F.2 — `investigate_prompt_outcome` event metadata is missing four required fields
+  - Spec section: §11.2 Event type `investigate_prompt_outcome`
+  - Gap: `server/services/systemIncidentService.ts:175-187` writes the event with metadata `{ wasSuccessful, promptWasUseful, partial, text }`. Spec §11.2 requires additional metadata: `linked_pr_url` (from incident's `linkedPrUrl` column), `resolved_at` (timestamp of the resolve), `diagnosis_run_id` (from `agent_diagnosis_run_id`), `heuristic_fires` (array of heuristic IDs that fired on this incident — joinable from `system_monitor_heuristic_fires` via `produced_incident_id`).
+  - Suggested approach: in `recordPromptFeedback`, after loading the incident, also fetch `resolvedAt`, `linkedPrUrl`, `agentDiagnosisRunId`, and the list of `heuristic_id` values from `system_monitor_heuristic_fires` where `produced_incident_id = id`. Add them to the event payload. Decide whether the heuristic-fires lookup should happen in the same transaction (consistency vs latency trade-off) — likely yes since the data is small.
+
+- [x] REQ 1.2 — `sweep-coverage-degraded` synthetic check is a stub
+  - Spec section: §8.2 row 8 — "fires when ... rolling-window sweep coverage rate drops below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95)"
+  - Gap: `server/services/systemMonitor/synthetic/sweepCoverageDegraded.ts` returns `{ fired: false }` unconditionally. Per progress.md "stub returning fired:false (activates Slice C)", but Slice C did not activate it. Spec §12.5 names this signal as load-bearing for the "monitor-the-monitor" health invariant.
+  - Suggested approach: implement per spec §8.2 + §12.5. Read the `sweep_completed` log/event series for the last `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` ticks (default 6 = 30 min). Compute coverage rate per tick (`metadata.candidates_evaluated / source-table active-entity count for the window`). If rolling average < `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95), fire with offending tick stats in metadata. Note: requires a queryable source for sweep ticks — either persist `sweep_completed` events (currently logger-only — see writeDiagnosis path), persist `system_monitor_sweep_ticks` rows, or query pg-boss completed-job history.
+
+- [x] REQ E.1 (subset) — Hardcoded skill-execution iteration cap and other constants in triage handler
+  - Spec section: §9.10 env-var inventory; §9.7 length cap mention
+  - Gap: `triageHandler.ts` hardcodes `TRIAGE_MAX_ITERATIONS = 10` and `TRIAGE_MAX_TOKENS = 8_096` without env-var fallbacks. `selectTopForTriage.ts` has been fixed to honor env vars (mechanical fix in this run), but the iteration / token caps remain hardcoded. Spec §12.4 names "5-minute soft timeout" but no env var; likely fine as documented constants. Lower priority than other items.
+  - Suggested approach: lift `TRIAGE_MAX_ITERATIONS` to an env var (`SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS`) so noisy production scenarios can be tuned without redeploy. Document the choice in §12.2 inventory.
+
+- [x] REQ E.2 — `write_event` skill DB-stored definition narrower than runtime ALLOWED_TYPES
+  - Spec section: §9.4 + §12.1 (event registry)
+  - Gap: `migrations/0234_system_monitor_skills.sql:57` registers `write_event` with `enum: ["diagnosis", "note", "escalation_blocked"]` in the JSON definition. The runtime handler at `server/services/systemMonitor/skills/writeEvent.ts:10-22` accepts a much wider set including `agent_diagnosis_added`, `prompt_generated`, `agent_triage_skipped`, etc. The agent reads its tool definitions from the DB (via the system-managed agent infrastructure), so the LLM will only know about the narrow enum and may fail to call `write_event` with `agent_diagnosis_added` (which §9.7 system prompt instructs it to do).
+  - Suggested approach: ship a corrective migration (`migrations/<NNNN>_system_monitor_write_event_enum_widen.sql`) that updates the `system_skills.definition` JSON for `write_event` with the full ALLOWED_TYPES list. Migrations are append-only — do not edit 0234. Verify the agent's tool registration path actually reads from `system_skills.definition` (not from the TypeScript module).
+
+## Follow-ups surfaced during pr-reviewer pass — system-monitoring-agent (2026-04-27)
+
+- [ ] Rate-limit scope is per-incident, not per-fingerprint as spec §9.9 requires
+  - Spec §9.9: "A new incident on an existing fingerprint (recurrence after resolution) inherits the fingerprint's recent triage history."
+  - Gap: `system_incidents.triage_attempt_count` is a per-row column. A fingerprint that recurs (new incident row after resolve) starts at `triage_attempt_count = 0`, so the rate limit does not actually carry across recurrences. Pre-existing — not introduced by the spec-conformance directional fixes. The new `checkRateLimit` wiring in `triageHandler.ts` reads this per-row counter.
+  - Suggested approach: aggregate triage attempts via a fingerprint-keyed query at admit time (`SELECT SUM(triage_attempt_count) WHERE fingerprint = ? AND last_triage_attempt_at >= NOW() - WINDOW`), or denormalise onto a small `system_monitor_fingerprint_state` table indexed by fingerprint. Decide whether `lastTriageAttemptAt` aggregation needs the same treatment.
+
+- [ ] Persist sweep tick history to DB (multi-instance correctness for `sweep-coverage-degraded`)
+  - Captured by pr-reviewer (S2) on the directional fixes. The current ring buffer in `server/services/systemMonitor/synthetic/sweepTickHistory.ts` is process-local. Acceptable for staging (single instance) and explicitly listed as one of three valid options in the original spec-conformance log. For production multi-instance deploys, promote to a `system_monitor_sweep_ticks` table keyed by `bucket_key UNIQUE` with `(candidates_evaluated, limit_reached, load_failed, completed_at)` and a 7-day retention sweep.
+  - Roughly 12 inserts/hour at default cadence — negligible cost. Update `sweepCoverageDegraded` to read from the table instead of the in-memory buffer.
+
+- [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
+  - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
+  - Pre-existing. Process-local cache that captures the first-seen org's agent row id and reuses it for the lifetime of the process. Production has a fixed system-ops org so this is fine today; future dual-org / test-env scenarios could collide. Cheap fix: switch to `Map<organisationId, agentId>`.

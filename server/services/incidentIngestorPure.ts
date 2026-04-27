@@ -31,6 +31,10 @@ export interface IncidentInput {
   // Integrations with a domain-stable identifier pass it here to bypass
   // stack-derived fingerprinting. Must match FINGERPRINT_OVERRIDE_RE.
   fingerprintOverride?: string;
+
+  // Caller-supplied deduplication key. Combined with fingerprint to form the
+  // idempotency LRU key. Prevents double-write when callers retry on transient errors.
+  idempotencyKey?: string;
 }
 
 // ---------------------------------------------------------------------------
