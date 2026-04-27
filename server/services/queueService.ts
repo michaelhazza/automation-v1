@@ -1127,6 +1127,29 @@ export const queueService = {
         }
       });
 
+      // System Monitor — sweep (every 15 minutes; two-pass heuristic evaluation)
+      await boss.schedule('system-monitor-sweep', '*/15 * * * *', {});
+      await (boss as any).work('system-monitor-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: { data?: Record<string, unknown> }) => {
+        try {
+          const { handleSystemMonitorSweep } = await import('../jobs/systemMonitorSweepJob.js');
+          await handleSystemMonitorSweep(job);
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-sweep', error: String(err) });
+          throw err; // re-throw so pg-boss marks the job failed and retries
+        }
+      });
+
+      // System Monitor — triage (no schedule; enqueued by incidentIngestor + sweep handler)
+      await (boss as any).work('system-monitor-triage', { teamSize: 4, teamConcurrency: 4 }, async (job: { data: { incidentId: string } }) => {
+        try {
+          const { handleSystemMonitorTriage } = await import('../jobs/systemMonitorTriageJob.js');
+          await handleSystemMonitorTriage(job);
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-triage', error: String(err) });
+          throw err; // re-throw so pg-boss marks the job failed and retries
+        }
+      });
+
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
       await (boss as any).work('subscription-trial-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
