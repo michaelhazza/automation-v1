@@ -655,39 +655,39 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Auto-gated skills (action record for audit, executes synchronously) ──
   create_task: async (input, context) => {
     requireSubaccountContext(context, 'create_task');
-    return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
+    return executeWithActionAudit('create_task', input, context, (processedInput) => executeCreateTask(processedInput, context));
   },
   triage_intake: async (input, context) => {
     requireSubaccountContext(context, 'triage_intake');
-    return executeWithActionAudit('triage_intake', input, context, () => executeTriageIntake(input, context));
+    return executeWithActionAudit('triage_intake', input, context, (processedInput) => executeTriageIntake(processedInput, context));
   },
   move_task: async (input, context) => {
-    return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
+    return executeWithActionAudit('move_task', input, context, (processedInput) => executeMoveTask(processedInput, context));
   },
   add_deliverable: async (input, context) => {
-    return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
+    return executeWithActionAudit('add_deliverable', input, context, (processedInput) => executeAddDeliverable(processedInput, context));
   },
   reassign_task: async (input, context) => {
     requireSubaccountContext(context, 'reassign_task');
-    return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+    return executeWithActionAudit('reassign_task', input, context, (processedInput) => executeReassignTask(processedInput, context));
   },
   update_task: async (input, context) => {
-    return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
+    return executeWithActionAudit('update_task', input, context, (processedInput) => executeUpdateTask(processedInput, context));
   },
   read_inbox: async (input, context) => {
-    return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
+    return executeWithActionAudit('read_inbox', input, context, (processedInput) => executeReadInbox(processedInput, context));
   },
   fetch_url: async (input, context) => {
-    return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
+    return executeWithActionAudit('fetch_url', input, context, (processedInput) => executeFetchUrl(processedInput, context));
   },
   scrape_url: async (input, context) => {
-    return executeWithActionAudit('scrape_url', input, context, () => executeScrapeUrl(input, context));
+    return executeWithActionAudit('scrape_url', input, context, (processedInput) => executeScrapeUrl(processedInput, context));
   },
   scrape_structured: async (input, context) => {
-    return executeWithActionAudit('scrape_structured', input, context, () => executeScrapeStructured(input, context));
+    return executeWithActionAudit('scrape_structured', input, context, (processedInput) => executeScrapeStructured(processedInput, context));
   },
   monitor_webpage: async (input, context) => {
-    return executeWithActionAudit('monitor_webpage', input, context, () => executeMonitorWebpage(input, context));
+    return executeWithActionAudit('monitor_webpage', input, context, (processedInput) => executeMonitorWebpage(processedInput, context));
   },
 
   // ── Workflow Studio tools (system-admin only; agent: Workflow-author) ──
@@ -724,31 +724,31 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
   read_codebase: async (input, context) => {
     requireSubaccountContext(context, 'read_codebase');
-    return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
+    return executeWithActionAudit('read_codebase', input, context, (processedInput) => executeReadCodebase(processedInput, context));
   },
   search_codebase: async (input, context) => {
     requireSubaccountContext(context, 'search_codebase');
-    return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
+    return executeWithActionAudit('search_codebase', input, context, (processedInput) => executeSearchCodebase(processedInput, context));
   },
   run_tests: async (input, context) => {
     requireSubaccountContext(context, 'run_tests');
-    return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
+    return executeWithActionAudit('run_tests', input, context, (processedInput) => executeRunTests(processedInput, context));
   },
   analyze_endpoint: async (input, context) => {
     requireSubaccountContext(context, 'analyze_endpoint');
-    return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
+    return executeWithActionAudit('analyze_endpoint', input, context, (processedInput) => executeAnalyzeEndpoint(processedInput, context));
   },
   report_bug: async (input, context) => {
     requireSubaccountContext(context, 'report_bug');
-    return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
+    return executeWithActionAudit('report_bug', input, context, (processedInput) => executeReportBug(processedInput, context));
   },
   capture_screenshot: async (input, context) => {
     requireSubaccountContext(context, 'capture_screenshot');
-    return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
+    return executeWithActionAudit('capture_screenshot', input, context, (processedInput) => executeCaptureScreenshot(processedInput, context));
   },
   run_playwright_test: async (input, context) => {
     requireSubaccountContext(context, 'run_playwright_test');
-    return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
+    return executeWithActionAudit('run_playwright_test', input, context, (processedInput) => executeRunPlaywrightTest(processedInput, context));
   },
 
   // ── Dev review-gated skills (safeMode-checked, require subaccount) ───
@@ -912,16 +912,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   search_knowledge_base: async (input, context) => {
     // Auto-gated stub — integration not yet wired
-    const searchQuery = typeof input.query === 'string' ? input.query : '';
-    const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
-    return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      query: searchQuery,
-      intent_category: searchCategory ?? null,
-      results: [],
-      message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
-    }));
+    return executeWithActionAudit('search_knowledge_base', input, context, async (processedInput) => {
+      const searchQuery = typeof processedInput.query === 'string' ? processedInput.query : '';
+      const searchCategory = typeof processedInput.intent_category === 'string' ? processedInput.intent_category : undefined;
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        query: searchQuery,
+        intent_category: searchCategory ?? null,
+        results: [],
+        message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
+      };
+    });
   },
 
   // ── Social Media Agent skills ────────────────────────────────────────
@@ -942,43 +944,54 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('publish_post', input, context);
   },
   read_analytics: async (input, context) => {
-    // Auto-gated stub — platform integrations not yet wired
-    const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
+    // Auto-gated stub — platform integrations not yet wired.
+    // Pre-call date-range guard runs against raw input so we fail fast before
+    // the action row is even proposed; the lambda re-reads the same fields
+    // from processedInput so any Zod defaults materialise consistently.
     const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-    // Validate date range
     if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_analytics', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      platforms: analyticsplatforms,
-      date_from: dateFrom,
-      date_to: dateTo,
-      results: [],
-      message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
-    }));
+    return executeWithActionAudit('read_analytics', input, context, async (processedInput) => {
+      const analyticsplatforms = Array.isArray(processedInput.platforms) ? processedInput.platforms : [];
+      const dateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
+      const dateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        platforms: analyticsplatforms,
+        date_from: dateFromInner,
+        date_to: dateToInner,
+        results: [],
+        message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
+      };
+    });
   },
 
   // ── Ads Management Agent skills ──────────────────────────────────────
   read_campaigns: async (input, context) => {
-    // Auto-gated stub — ads platform integrations not yet wired
-    const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
+    // Auto-gated stub — ads platform integrations not yet wired.
+    // Pre-call guard runs against raw input; lambda re-reads from processedInput.
     const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_campaigns', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      platform: adsPlatform,
-      date_from: adsDateFrom,
-      date_to: adsDateTo,
-      campaigns: [],
-      message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
-    }));
+    return executeWithActionAudit('read_campaigns', input, context, async (processedInput) => {
+      const adsPlatform = typeof processedInput.platform === 'string' ? processedInput.platform : '';
+      const adsDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
+      const adsDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        platform: adsPlatform,
+        date_from: adsDateFromInner,
+        date_to: adsDateToInner,
+        campaigns: [],
+        message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
+      };
+    });
   },
   analyse_performance: async (input) => {
     return executeMethodologySkill('analyse_performance', input, {
@@ -1023,15 +1036,17 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Email Outreach Agent skills ──────────────────────────────────────
   enrich_contact: async (input, context) => {
     // Auto-gated stub — enrichment integration not yet wired
-    const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
-    return executeWithActionAudit('enrich_contact', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      contact: enrichEmail,
-      matched: false,
-      fields: {},
-      message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
-    }));
+    return executeWithActionAudit('enrich_contact', input, context, async (processedInput) => {
+      const enrichEmail = typeof processedInput.contact_email === 'string' ? processedInput.contact_email : '';
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        contact: enrichEmail,
+        matched: false,
+        fields: {},
+        message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
+      };
+    });
   },
   draft_sequence: async (input) => {
     return executeMethodologySkill('draft_sequence', input, {
@@ -1066,34 +1081,44 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
 
   // ── Finance Agent skills ─────────────────────────────────────────────
   read_revenue: async (input, context) => {
+    // Pre-call date-range guard runs against raw input; lambda re-reads from processedInput.
     const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_revenue', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      date_from: revDateFrom,
-      date_to: revDateTo,
-      total_revenue: null,
-      message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
-    }));
+    return executeWithActionAudit('read_revenue', input, context, async (processedInput) => {
+      const revDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
+      const revDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        date_from: revDateFromInner,
+        date_to: revDateToInner,
+        total_revenue: null,
+        message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
+      };
+    });
   },
   read_expenses: async (input, context) => {
+    // Pre-call date-range guard runs against raw input; lambda re-reads from processedInput.
     const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_expenses', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      date_from: expDateFrom,
-      date_to: expDateTo,
-      total_expenses: null,
-      message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
-    }));
+    return executeWithActionAudit('read_expenses', input, context, async (processedInput) => {
+      const expDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
+      const expDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        date_from: expDateFromInner,
+        date_to: expDateToInner,
+        total_expenses: null,
+        message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
+      };
+    });
   },
   analyse_financials: async (input) => {
     return executeMethodologySkill('analyse_financials', input, {
@@ -1349,14 +1374,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── CRM/Pipeline Agent skills ────────────────────────────────────────
   read_crm: async (input, context) => {
     // Auto-gated stub — CRM integration not yet wired
-    const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
-    return executeWithActionAudit('read_crm', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      query_type: crmQueryType,
-      records: [],
-      message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
-    }));
+    return executeWithActionAudit('read_crm', input, context, async (processedInput) => {
+      const crmQueryType = typeof processedInput.query_type === 'string' ? processedInput.query_type : '';
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        query_type: crmQueryType,
+        records: [],
+        message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
+      };
+    });
   },
   analyse_pipeline: async (input) => {
     return executeMethodologySkill('analyse_pipeline', input, {
@@ -1402,16 +1429,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Knowledge Management Agent skills ────────────────────────────────
   read_docs: async (input, context) => {
     // Auto-gated stub — documentation integration not yet wired
-    const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
-    const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
-    return executeWithActionAudit('read_docs', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      page_id: docPageId,
-      page_title: docPageTitle,
-      content: null,
-      message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
-    }));
+    return executeWithActionAudit('read_docs', input, context, async (processedInput) => {
+      const docPageId = typeof processedInput.page_id === 'string' ? processedInput.page_id : '';
+      const docPageTitle = typeof processedInput.page_title === 'string' ? processedInput.page_title : '';
+      return {
+        status: 'stub',
+        dataAvailability: 'stub' as const,
+        page_id: docPageId,
+        page_title: docPageTitle,
+        content: null,
+        message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
+      };
+    });
   },
   propose_doc_update: async (input, context) => {
     return proposeReviewGatedAction('propose_doc_update', input, context);
@@ -1423,70 +1452,70 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Phase 2: Workflow orchestration ──────────────────────────────────
   assign_task: async (input, context) => {
     const { executeAssignTask } = await import('../tools/internal/assignTask.js');
-    return executeWithActionAudit('assign_task', input, context, () =>
-      executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
+    return executeWithActionAudit('assign_task', input, context, (processedInput) =>
+      executeAssignTask(processedInput, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
     );
   },
 
   // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
   query_subaccount_cohort: async (input, context) => {
     const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
-      executeQuerySubaccountCohort(input, context));
+    return executeWithActionAudit('query_subaccount_cohort', input, context, (processedInput) =>
+      executeQuerySubaccountCohort(processedInput, context));
   },
   read_org_insights: async (input, context) => {
     const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('read_org_insights', input, context, () =>
-      executeReadOrgInsights(input, context));
+    return executeWithActionAudit('read_org_insights', input, context, (processedInput) =>
+      executeReadOrgInsights(processedInput, context));
   },
   write_org_insight: async (input, context) => {
     const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('write_org_insight', input, context, () =>
-      executeWriteOrgInsight(input, context));
+    return executeWithActionAudit('write_org_insight', input, context, (processedInput) =>
+      executeWriteOrgInsight(processedInput, context));
   },
   compute_health_score: async (input, context) => {
     const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('compute_health_score', input, context, () =>
-      executeComputeHealthScore(input, context));
+    return executeWithActionAudit('compute_health_score', input, context, (processedInput) =>
+      executeComputeHealthScore(processedInput, context));
   },
   detect_anomaly: async (input, context) => {
     const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('detect_anomaly', input, context, () =>
-      executeDetectAnomaly(input, context));
+    return executeWithActionAudit('detect_anomaly', input, context, (processedInput) =>
+      executeDetectAnomaly(processedInput, context));
   },
   compute_churn_risk: async (input, context) => {
     const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('compute_churn_risk', input, context, () =>
-      executeComputeChurnRisk(input, context));
+    return executeWithActionAudit('compute_churn_risk', input, context, (processedInput) =>
+      executeComputeChurnRisk(processedInput, context));
   },
   compute_staff_activity_pulse: async (input, context) => {
     const { executeComputeStaffActivityPulse } = await import('./computeStaffActivityPulseService.js');
-    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async () => {
-      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async (processedInput) => {
+      const subaccountId = (processedInput.subaccount_id as string | undefined) ?? context.subaccountId;
       if (!subaccountId) throw new Error('subaccount_id is required');
       return executeComputeStaffActivityPulse({
         organisationId: context.organisationId,
         subaccountId,
-        sourceRunId: input.source_run_id as string | undefined,
+        sourceRunId: processedInput.source_run_id as string | undefined,
       });
     });
   },
   scan_integration_fingerprints: async (input, context) => {
     const { executeScanIntegrationFingerprints } = await import('./scanIntegrationFingerprintsService.js');
-    return executeWithActionAudit('scan_integration_fingerprints', input, context, async () => {
-      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
+    return executeWithActionAudit('scan_integration_fingerprints', input, context, async (processedInput) => {
+      const subaccountId = (processedInput.subaccount_id as string | undefined) ?? context.subaccountId;
       if (!subaccountId) throw new Error('subaccount_id is required');
       return executeScanIntegrationFingerprints({
         organisationId: context.organisationId,
         subaccountId,
-        sourceRunId: input.source_run_id as string | undefined,
+        sourceRunId: processedInput.source_run_id as string | undefined,
       });
     });
   },
   generate_portfolio_report: async (input, context) => {
     const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('generate_portfolio_report', input, context, () =>
-      executeGeneratePortfolioReport(input, context));
+    return executeWithActionAudit('generate_portfolio_report', input, context, (processedInput) =>
+      executeGeneratePortfolioReport(processedInput, context));
   },
   trigger_account_intervention: async (input, context) => {
     return proposeReviewGatedAction('trigger_account_intervention', input, context);
@@ -1766,67 +1795,67 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // Mutation tools (review-gated via action registry)
   config_create_agent: async (input, context) => {
     const { executeConfigCreateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_agent', input, context, () => executeConfigCreateAgent(input, context));
+    return executeWithActionAudit('config_create_agent', input, context, (processedInput) => executeConfigCreateAgent(processedInput, context));
   },
   config_update_agent: async (input, context) => {
     const { executeConfigUpdateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_agent', input, context, () => executeConfigUpdateAgent(input, context));
+    return executeWithActionAudit('config_update_agent', input, context, (processedInput) => executeConfigUpdateAgent(processedInput, context));
   },
   config_activate_agent: async (input, context) => {
     const { executeConfigActivateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_activate_agent', input, context, () => executeConfigActivateAgent(input, context));
+    return executeWithActionAudit('config_activate_agent', input, context, (processedInput) => executeConfigActivateAgent(processedInput, context));
   },
   config_link_agent: async (input, context) => {
     const { executeConfigLinkAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_link_agent', input, context, () => executeConfigLinkAgent(input, context));
+    return executeWithActionAudit('config_link_agent', input, context, (processedInput) => executeConfigLinkAgent(processedInput, context));
   },
   config_update_link: async (input, context) => {
     const { executeConfigUpdateLink } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_link', input, context, () => executeConfigUpdateLink(input, context));
+    return executeWithActionAudit('config_update_link', input, context, (processedInput) => executeConfigUpdateLink(processedInput, context));
   },
   config_set_link_skills: async (input, context) => {
     const { executeConfigSetLinkSkills } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_skills', input, context, () => executeConfigSetLinkSkills(input, context));
+    return executeWithActionAudit('config_set_link_skills', input, context, (processedInput) => executeConfigSetLinkSkills(processedInput, context));
   },
   config_set_link_instructions: async (input, context) => {
     const { executeConfigSetLinkInstructions } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_instructions', input, context, () => executeConfigSetLinkInstructions(input, context));
+    return executeWithActionAudit('config_set_link_instructions', input, context, (processedInput) => executeConfigSetLinkInstructions(processedInput, context));
   },
   config_set_link_schedule: async (input, context) => {
     const { executeConfigSetLinkSchedule } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_schedule', input, context, () => executeConfigSetLinkSchedule(input, context));
+    return executeWithActionAudit('config_set_link_schedule', input, context, (processedInput) => executeConfigSetLinkSchedule(processedInput, context));
   },
   config_set_link_limits: async (input, context) => {
     const { executeConfigSetLinkLimits } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_limits', input, context, () => executeConfigSetLinkLimits(input, context));
+    return executeWithActionAudit('config_set_link_limits', input, context, (processedInput) => executeConfigSetLinkLimits(processedInput, context));
   },
   config_create_subaccount: async (input, context) => {
     const { executeConfigCreateSubaccount } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_subaccount', input, context, () => executeConfigCreateSubaccount(input, context));
+    return executeWithActionAudit('config_create_subaccount', input, context, (processedInput) => executeConfigCreateSubaccount(processedInput, context));
   },
   config_create_scheduled_task: async (input, context) => {
     const { executeConfigCreateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_scheduled_task', input, context, () => executeConfigCreateScheduledTask(input, context));
+    return executeWithActionAudit('config_create_scheduled_task', input, context, (processedInput) => executeConfigCreateScheduledTask(processedInput, context));
   },
   config_update_scheduled_task: async (input, context) => {
     const { executeConfigUpdateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_scheduled_task', input, context, () => executeConfigUpdateScheduledTask(input, context));
+    return executeWithActionAudit('config_update_scheduled_task', input, context, (processedInput) => executeConfigUpdateScheduledTask(processedInput, context));
   },
   config_attach_data_source: async (input, context) => {
     const { executeConfigAttachDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_attach_data_source', input, context, () => executeConfigAttachDataSource(input, context));
+    return executeWithActionAudit('config_attach_data_source', input, context, (processedInput) => executeConfigAttachDataSource(processedInput, context));
   },
   config_update_data_source: async (input, context) => {
     const { executeConfigUpdateDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_data_source', input, context, () => executeConfigUpdateDataSource(input, context));
+    return executeWithActionAudit('config_update_data_source', input, context, (processedInput) => executeConfigUpdateDataSource(processedInput, context));
   },
   config_remove_data_source: async (input, context) => {
     const { executeConfigRemoveDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_remove_data_source', input, context, () => executeConfigRemoveDataSource(input, context));
+    return executeWithActionAudit('config_remove_data_source', input, context, (processedInput) => executeConfigRemoveDataSource(processedInput, context));
   },
   config_restore_version: async (input, context) => {
     const { executeConfigRestoreVersion } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
+    return executeWithActionAudit('config_restore_version', input, context, (processedInput) => executeConfigRestoreVersion(processedInput, context));
   },
 
   // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
@@ -1902,11 +1931,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // Phase G — portal / email skills (spec §11.6) — action_call only.
   config_publish_workflow_output_to_portal: async (input, context) => {
     const { executeConfigPublishWorkflowOutputToPortal } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, () => executeConfigPublishWorkflowOutputToPortal(input, context));
+    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, (processedInput) => executeConfigPublishWorkflowOutputToPortal(processedInput, context));
   },
   config_send_workflow_email_digest: async (input, context) => {
     const { executeConfigSendWorkflowEmailDigest } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_send_workflow_email_digest', input, context, () => executeConfigSendWorkflowEmailDigest(input, context));
+    return executeWithActionAudit('config_send_workflow_email_digest', input, context, (processedInput) => executeConfigSendWorkflowEmailDigest(processedInput, context));
   },
 
   // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
@@ -1930,59 +1959,59 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
 
   // ── System Agents v7.1 — Hierarchy ───────────────────────────────────────
   list_my_subordinates: async (input, context) =>
-    executeWithActionAudit('list_my_subordinates', input, context, () => executeListMySubordinates(input, context)),
+    executeWithActionAudit('list_my_subordinates', input, context, (processedInput) => executeListMySubordinates(processedInput, context)),
 
   // ── System Agents v7.1 — Admin Ops (finance) ─────────────────────────────
   generate_invoice: async (input, context) => {
     requireSubaccountContext(context, 'generate_invoice');
-    return executeWithActionAudit('generate_invoice', input, context, () => executeGenerateInvoice(input, context));
+    return executeWithActionAudit('generate_invoice', input, context, (processedInput) => executeGenerateInvoice(processedInput, context));
   },
   send_invoice: async (input, context) => {
     requireSubaccountContext(context, 'send_invoice');
-    return executeWithActionAudit('send_invoice', input, context, () => executeSendInvoice(input, context));
+    return executeWithActionAudit('send_invoice', input, context, (processedInput) => executeSendInvoice(processedInput, context));
   },
   reconcile_transactions: async (input, context) => {
     requireSubaccountContext(context, 'reconcile_transactions');
-    return executeWithActionAudit('reconcile_transactions', input, context, () => executeReconcileTransactions(input, context));
+    return executeWithActionAudit('reconcile_transactions', input, context, (processedInput) => executeReconcileTransactions(processedInput, context));
   },
   chase_overdue: async (input, context) => {
     requireSubaccountContext(context, 'chase_overdue');
-    return executeWithActionAudit('chase_overdue', input, context, () => executeChaseOverdue(input, context));
+    return executeWithActionAudit('chase_overdue', input, context, (processedInput) => executeChaseOverdue(processedInput, context));
   },
   process_bill: async (input, context) => {
     requireSubaccountContext(context, 'process_bill');
-    return executeWithActionAudit('process_bill', input, context, () => executeProcessBill(input, context));
+    return executeWithActionAudit('process_bill', input, context, (processedInput) => executeProcessBill(processedInput, context));
   },
   track_subscriptions: async (input, context) => {
     requireSubaccountContext(context, 'track_subscriptions');
-    return executeWithActionAudit('track_subscriptions', input, context, () => executeTrackSubscriptions(input, context));
+    return executeWithActionAudit('track_subscriptions', input, context, (processedInput) => executeTrackSubscriptions(processedInput, context));
   },
   prepare_month_end: async (input, context) => {
     requireSubaccountContext(context, 'prepare_month_end');
-    return executeWithActionAudit('prepare_month_end', input, context, () => executePrepareMonthEnd(input, context));
+    return executeWithActionAudit('prepare_month_end', input, context, (processedInput) => executePrepareMonthEnd(processedInput, context));
   },
 
   // ── System Agents v7.1 — SDR ──────────────────────────────────────────────
   discover_prospects: async (input, context) => {
     requireSubaccountContext(context, 'discover_prospects');
-    return executeWithActionAudit('discover_prospects', input, context, () => executeDiscoverProspects(input, context));
+    return executeWithActionAudit('discover_prospects', input, context, (processedInput) => executeDiscoverProspects(processedInput, context));
   },
   draft_outbound: async (input, context) => {
     requireSubaccountContext(context, 'draft_outbound');
-    return executeWithActionAudit('draft_outbound', input, context, () => executeDraftOutbound(input, context));
+    return executeWithActionAudit('draft_outbound', input, context, (processedInput) => executeDraftOutbound(processedInput, context));
   },
   score_lead: async (input, context) =>
-    executeWithActionAudit('score_lead', input, context, () => executeScoreLead(input, context)),
+    executeWithActionAudit('score_lead', input, context, (processedInput) => executeScoreLead(processedInput, context)),
   book_meeting: async (input, context) => {
     requireSubaccountContext(context, 'book_meeting');
-    return executeWithActionAudit('book_meeting', input, context, () => executeBookMeeting(input, context));
+    return executeWithActionAudit('book_meeting', input, context, (processedInput) => executeBookMeeting(processedInput, context));
   },
 
   // ── System Agents v7.1 — Retention/Success ────────────────────────────────
   score_nps_csat: async (input, context) =>
-    executeWithActionAudit('score_nps_csat', input, context, () => executeScoreNpsCsat(input, context)),
+    executeWithActionAudit('score_nps_csat', input, context, (processedInput) => executeScoreNpsCsat(processedInput, context)),
   prepare_renewal_brief: async (input, context) =>
-    executeWithActionAudit('prepare_renewal_brief', input, context, () => executePrepareRenewalBrief(input, context)),
+    executeWithActionAudit('prepare_renewal_brief', input, context, (processedInput) => executePrepareRenewalBrief(processedInput, context)),
 };
 
 export const skillExecutor = {
@@ -2041,7 +2070,12 @@ async function executeWithActionAudit(
   actionType: string,
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-  executor: () => Promise<unknown>
+  // ChatGPT R1 #3 — executor must receive parsedInput (Zod defaults
+  // materialised + canonicalised) so the value used to compute the
+  // idempotency hash matches the value the handler executes against.
+  // Capturing raw `input` in the closure caused defaults/transforms
+  // to drift between key and execution.
+  executor: (processedInput: Record<string, unknown>) => Promise<unknown>
 ): Promise<unknown> {
   // Sprint 2 P1.1 Layer 3: when a toolCallId is on the context, build a
   // deterministic key that matches the one proposeActionMiddleware already
@@ -2335,7 +2369,7 @@ async function executeWithActionAudit(
         actionType,
         parsedInput,
         context,
-        (_processedInput) => executor(),
+        (processedInput) => executor(processedInput),
         proposed.actionId,
       );
       executeSpan.end({ output: result });
@@ -2452,7 +2486,12 @@ async function executeWithActionAudit(
     if (guarded) {
       return { success: false, error: `Wrapper failure for guarded skill '${actionType}': ${String(err).slice(0, 200)}` };
     }
-    return executor();
+    // ChatGPT R1 #3 — unguarded fallback: the wrapper failed before
+    // parameterSchema.parse could materialise defaults. Pass the raw input
+    // so the executor sees the same value it would have under the prior
+    // closure-capture behaviour (no behavioural regression for legacy
+    // skills without a Zod schema).
+    return executor(input);
   }
 }
 
