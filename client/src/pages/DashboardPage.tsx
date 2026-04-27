@@ -90,6 +90,96 @@ export default function DashboardPage({ user }: { user: User }) {
     }
   }, []);
 
+  // ── Refetch functions ─────────────────────────────────────────────────────
+
+  async function refetchApprovals() {
+    if (approvalsInflight.current) {
+      approvalsPending.current = true;
+      return;
+    }
+    approvalsInflight.current = true;
+    try {
+      const res = await api.get<TimestampedResponse<PulseAttentionResponse>>('/api/pulse/attention');
+      applyIfNewer(approvalsTs, res.data.serverTimestamp, () => {
+        setAttention(res.data.data);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchApprovals failed:', err);
+    } finally {
+      approvalsInflight.current = false;
+      if (approvalsPending.current) {
+        approvalsPending.current = false;
+        void refetchApprovals();
+      }
+    }
+  }
+
+  async function refetchActivity() {
+    if (activityInflight.current) {
+      activityPending.current = true;
+      return;
+    }
+    activityInflight.current = true;
+    try {
+      const [feedRes, statsRes] = await Promise.all([
+        api.get<TimestampedResponse<{ items: unknown[]; total: number }>>('/api/activity', { params: { limit: 20, sort: 'newest' } }),
+        api.get<TimestampedResponse<ActivityStats>>('/api/agent-activity/stats', { params: { sinceDays: 7 } }),
+      ]);
+      // Use min of two timestamps — both must be at least this fresh.
+      const groupTs = feedRes.data.serverTimestamp < statsRes.data.serverTimestamp
+        ? feedRes.data.serverTimestamp
+        : statsRes.data.serverTimestamp;
+      applyIfNewer(activityTs, groupTs, () => {
+        setStats(statsRes.data.data);
+        setActivityRefreshToken(t => t + 1);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchActivity failed:', err);
+    } finally {
+      activityInflight.current = false;
+      if (activityPending.current) {
+        activityPending.current = false;
+        void refetchActivity();
+      }
+    }
+  }
+
+  async function refetchClientHealth() {
+    if (clientHealthInflight.current) {
+      clientHealthPending.current = true;
+      return;
+    }
+    clientHealthInflight.current = true;
+    try {
+      const res = await api.get<TimestampedResponse<HealthSummary | null>>('/api/clientpulse/health-summary');
+      applyIfNewer(clientHealthTs, res.data.serverTimestamp, () => {
+        setHealthSummary(res.data.data);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchClientHealth failed:', err);
+    } finally {
+      clientHealthInflight.current = false;
+      if (clientHealthPending.current) {
+        clientHealthPending.current = false;
+        void refetchClientHealth();
+      }
+    }
+  }
+
+  function refetchQueue() {
+    setQueueRefreshToken(t => t + 1);
+  }
+
+  function refetchAll() {
+    void refetchApprovals();
+    void refetchActivity();
+    void refetchClientHealth();
+    if (user.role === 'system_admin') refetchQueue();
+  }
+
   useEffect(() => {
     Promise.all([
       api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
