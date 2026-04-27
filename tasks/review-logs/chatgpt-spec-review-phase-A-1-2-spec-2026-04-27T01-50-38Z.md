@@ -106,7 +106,7 @@ Post-integrity sanity (4c): re-scanned heading list — §7.6 and §12.5 are pro
 
 ---
 
-## Round 2 — 2026-04-27T<round-2>
+## Round 2 — 2026-04-27T02-21-04Z (commit 9858a6af)
 
 ### ChatGPT Feedback (raw)
 
