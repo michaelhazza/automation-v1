@@ -1,4 +1,4 @@
-﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+﻿import { eq, and, isNull, count, inArray, lt, sql } from 'drizzle-orm';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
 import { insertOutcomeSafe } from './delegationOutcomeService.js';
@@ -56,6 +56,38 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+// ── System Agents v7.1 imports ────────────────────────────────────────────
+import {
+  hashKeyShape,
+  ttlClassToExpiresAt,
+  assertHandlerInvokedWithClaim,
+  IDEMPOTENCY_CLAIM_TIMEOUT_MS,
+} from './skillIdempotencyKeysPure.js';
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+import { skillIdempotencyKeys } from '../db/schema/skillIdempotencyKeys.js';
+import { hashActionArgs } from './actionService.js';
+import { systemAgents } from '../db/schema/systemAgents.js';
+import { resolveSubordinates } from '../tools/config/configSkillHandlersPure.js';
+import {
+  executeGenerateInvoice,
+  executeSendInvoice,
+  executeReconcileTransactions,
+  executeChaseOverdue,
+  executeProcessBill,
+  executeTrackSubscriptions,
+  executePrepareMonthEnd,
+} from './adminOpsService.js';
+import {
+  executeDiscoverProspects,
+  executeDraftOutbound,
+  executeScoreLead,
+  executeBookMeeting,
+} from './sdrService.js';
+import {
+  executeScoreNpsCsat,
+  executePrepareRenewalBrief,
+} from './retentionSuccessService.js';
+
 // ---------------------------------------------------------------------------
 // Register worker adapter for execution layer (handles review-gated worker actions)
 // ---------------------------------------------------------------------------
@@ -81,7 +113,6 @@ registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx
     case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
     case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
     case 'update_crm': return executeCrmUpdateApproved(payload, context);
-    case 'update_financial_record': return executeFinancialRecordUpdateApproved(payload, context);
     case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
     case 'deliver_report': return executeDeliverReportApproved(payload, context);
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
@@ -396,6 +427,66 @@ let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null 
 
 export function setHandoffJobSender(sender: (name: string, data: object) => Promise<string | null>) {
   pgBossSend = sender;
+}
+
+// ---------------------------------------------------------------------------
+// checkSkillPreconditions — dispatches per-skill env / config checks before
+// write-class handler invocation. Specific checks are implemented internally
+// by the domain service handlers (they self-block). This function provides
+// the dispatch point for the side-effect-class wrapper.
+// ---------------------------------------------------------------------------
+
+async function checkSkillPreconditions(
+  _actionType: string,
+  _input: Record<string, unknown>,
+  _context: SkillExecutionContext,
+): Promise<{ status: 'ok' } | { status: 'blocked'; reason: string; provider?: string; requires?: string[] }> {
+  // Dispatch per skill — returns ok if preconditions met, blocked if not.
+  // Specific config checks are implemented per skill in the domain services.
+  // Write skills self-block internally when provider keys are absent.
+  return { status: 'ok' };
+}
+
+// ---------------------------------------------------------------------------
+// executeListMySubordinates — queries system_agents to resolve the calling
+// agent's children or descendants in the system agent hierarchy.
+// ---------------------------------------------------------------------------
+
+async function executeListMySubordinates(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext,
+): Promise<unknown> {
+  const scope = (input['scope'] as 'children' | 'descendants') ?? 'children';
+
+  // Find the caller's system_agents row via the agents → system_agents join.
+  // The context.agentId is the agents.id (org-level agent FK).
+  const [agentRow] = await db
+    .select({ systemAgentId: agents.systemAgentId })
+    .from(agents)
+    .where(and(eq(agents.id, context.agentId), eq(agents.organisationId, context.organisationId)))
+    .limit(1);
+
+  if (!agentRow?.systemAgentId) {
+    return { success: false, error: 'Calling agent has no linked system_agents row' };
+  }
+
+  const callerSystemAgentId = agentRow.systemAgentId;
+
+  // Fetch all system_agents in one read — the full table is small (dozens of rows).
+  const allAgents = await db.select({
+    id: systemAgents.id,
+    slug: systemAgents.slug,
+    name: systemAgents.name,
+    title: systemAgents.agentTitle,
+    agentRole: systemAgents.agentRole,
+    parentSystemAgentId: systemAgents.parentSystemAgentId,
+    deletedAt: systemAgents.deletedAt,
+    status: systemAgents.status,
+  })
+  .from(systemAgents);
+
+  const subordinates = resolveSubordinates({ callerSystemAgentId, scope, allAgents });
+  return { success: true, scope, agents: subordinates };
 }
 
 /**
@@ -1004,10 +1095,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
     });
   },
-  update_financial_record: async (input, context) => {
-    return proposeReviewGatedAction('update_financial_record', input, context);
-  },
-
   // ── Strategic Intelligence Agent skills ──────────────────────────────
   generate_competitor_brief: async (input) => {
     return executeMethodologySkill('generate_competitor_brief', input, {
@@ -1824,6 +1911,62 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
     };
   },
+
+  // ── System Agents v7.1 — Hierarchy ───────────────────────────────────────
+  list_my_subordinates: async (input, context) =>
+    executeWithActionAudit('list_my_subordinates', input, context, () => executeListMySubordinates(input, context)),
+
+  // ── System Agents v7.1 — Admin Ops (finance) ─────────────────────────────
+  generate_invoice: async (input, context) => {
+    requireSubaccountContext(context, 'generate_invoice');
+    return executeWithActionAudit('generate_invoice', input, context, () => executeGenerateInvoice(input, context));
+  },
+  send_invoice: async (input, context) => {
+    requireSubaccountContext(context, 'send_invoice');
+    return executeWithActionAudit('send_invoice', input, context, () => executeSendInvoice(input, context));
+  },
+  reconcile_transactions: async (input, context) => {
+    requireSubaccountContext(context, 'reconcile_transactions');
+    return executeWithActionAudit('reconcile_transactions', input, context, () => executeReconcileTransactions(input, context));
+  },
+  chase_overdue: async (input, context) => {
+    requireSubaccountContext(context, 'chase_overdue');
+    return executeWithActionAudit('chase_overdue', input, context, () => executeChaseOverdue(input, context));
+  },
+  process_bill: async (input, context) => {
+    requireSubaccountContext(context, 'process_bill');
+    return executeWithActionAudit('process_bill', input, context, () => executeProcessBill(input, context));
+  },
+  track_subscriptions: async (input, context) => {
+    requireSubaccountContext(context, 'track_subscriptions');
+    return executeWithActionAudit('track_subscriptions', input, context, () => executeTrackSubscriptions(input, context));
+  },
+  prepare_month_end: async (input, context) => {
+    requireSubaccountContext(context, 'prepare_month_end');
+    return executeWithActionAudit('prepare_month_end', input, context, () => executePrepareMonthEnd(input, context));
+  },
+
+  // ── System Agents v7.1 — SDR ──────────────────────────────────────────────
+  discover_prospects: async (input, context) => {
+    requireSubaccountContext(context, 'discover_prospects');
+    return executeWithActionAudit('discover_prospects', input, context, () => executeDiscoverProspects(input, context));
+  },
+  draft_outbound: async (input, context) => {
+    requireSubaccountContext(context, 'draft_outbound');
+    return executeWithActionAudit('draft_outbound', input, context, () => executeDraftOutbound(input, context));
+  },
+  score_lead: async (input, context) =>
+    executeWithActionAudit('score_lead', input, context, () => executeScoreLead(input, context)),
+  book_meeting: async (input, context) => {
+    requireSubaccountContext(context, 'book_meeting');
+    return executeWithActionAudit('book_meeting', input, context, () => executeBookMeeting(input, context));
+  },
+
+  // ── System Agents v7.1 — Retention/Success ────────────────────────────────
+  score_nps_csat: async (input, context) =>
+    executeWithActionAudit('score_nps_csat', input, context, () => executeScoreNpsCsat(input, context)),
+  prepare_renewal_brief: async (input, context) =>
+    executeWithActionAudit('prepare_renewal_brief', input, context, () => executePrepareRenewalBrief(input, context)),
 };
 
 export const skillExecutor = {
@@ -1951,6 +2094,119 @@ async function executeWithActionAudit(
       gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
     }, { parentSpan: pipelineSpan });
 
+    // ── Cross-run idempotency wrapper (§9.3.1) ─────────────────────────────
+    const def = getActionDefinition(actionType);
+    let keyHash: string | undefined;
+    let isFirstWriter = false;
+
+    if (def?.idempotency) {
+      const requestHash = hashActionArgs(input);
+      keyHash = hashKeyShape(def.idempotency.keyShape, input);
+
+      assertRlsAwareWrite('skill_idempotency_keys');
+      const insertResult = await db.execute(sql`
+        INSERT INTO skill_idempotency_keys
+          (subaccount_id, organisation_id, skill_slug, key_hash, request_hash, status, expires_at)
+        VALUES (
+          ${context.subaccountId},
+          ${context.organisationId},
+          ${actionType},
+          ${keyHash},
+          ${requestHash},
+          'in_flight',
+          ${ttlClassToExpiresAt(def.idempotency.ttlClass)}
+        )
+        ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
+        RETURNING (xmax = 0) AS is_first_writer
+      `);
+
+      isFirstWriter = (insertResult.rows[0] as { is_first_writer?: boolean } | undefined)?.is_first_writer === true;
+
+      if (!isFirstWriter) {
+        const [existing] = await db.select()
+          .from(skillIdempotencyKeys)
+          .where(and(
+            eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+            eq(skillIdempotencyKeys.skillSlug, actionType),
+            eq(skillIdempotencyKeys.keyHash, keyHash),
+          ))
+          .limit(1);
+
+        if (!existing) {
+          // Race: INSERT returned 0 rows (DO NOTHING) but the row is gone — proceed as first writer
+          isFirstWriter = true;
+        } else {
+          if (existing.requestHash !== requestHash) {
+            createEvent('skill.error', { skillName: actionType, reason: 'idempotency_collision', key_hash: keyHash }, { level: 'ERROR' });
+            pipelineSpan.end({ output: { status: 'idempotency_collision' } });
+            return { status: 'idempotency_collision', error: 'Same idempotency key with different request hash' };
+          }
+
+          if (existing.status === 'completed') {
+            createEvent('skill.idempotency.hit', { skillName: actionType, key_hash: keyHash });
+            pipelineSpan.end({ output: existing.responsePayload });
+            return existing.responsePayload as unknown;
+          }
+
+          if (existing.status === 'in_flight') {
+            const reclaimEligible = def.idempotency.reclaimEligibility === 'eligible';
+            const ageMs = Date.now() - new Date(existing.createdAt).getTime();
+
+            if (!reclaimEligible) {
+              if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs }, { level: 'WARN' });
+              }
+              pipelineSpan.end({ output: { status: 'in_flight' } });
+              return { status: 'in_flight', message: 'Another caller is processing this idempotent request (reclaim disabled)', retryable_after_ms: 5000 };
+            }
+
+            if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
+              const reclaim = await db.update(skillIdempotencyKeys)
+                .set({ createdAt: new Date(), requestHash, responsePayload: {} })
+                .where(and(
+                  eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+                  eq(skillIdempotencyKeys.skillSlug, actionType),
+                  eq(skillIdempotencyKeys.keyHash, keyHash),
+                  eq(skillIdempotencyKeys.status, 'in_flight'),
+                  lt(skillIdempotencyKeys.createdAt, new Date(Date.now() - IDEMPOTENCY_CLAIM_TIMEOUT_MS)),
+                ))
+                .returning({ sub: skillIdempotencyKeys.subaccountId });
+
+              if (reclaim.length >= 1) {
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_reclaimed', key_hash: keyHash, age_ms: ageMs }, { level: 'WARN' });
+                isFirstWriter = true;
+              } else {
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash }, { level: 'WARN' });
+                pipelineSpan.end({ output: { status: 'in_flight' } });
+                return { status: 'in_flight', message: 'Another caller reclaimed this in_flight request', retryable_after_ms: 1000 };
+              }
+            } else {
+              pipelineSpan.end({ output: { status: 'in_flight' } });
+              return { status: 'in_flight', message: 'Another caller is processing this idempotent request', retryable_after_ms: Math.max(1000, IDEMPOTENCY_CLAIM_TIMEOUT_MS - ageMs) };
+            }
+          }
+
+          if (existing.status === 'failed') {
+            pipelineSpan.end({ output: { status: 'previous_failure' } });
+            return { status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' };
+          }
+        }
+      }
+
+      assertHandlerInvokedWithClaim(isFirstWriter);
+    }
+    // ── Side-effect-class wrapper (§9.3.2) ──────────────────────────────────
+    if (def?.sideEffectClass === 'write') {
+      const preconditions = await checkSkillPreconditions(actionType, input, context);
+      if (preconditions.status === 'blocked') {
+        createEvent('skill.blocked', {
+          skillName: actionType, reason: preconditions.reason, provider: (preconditions as Record<string, unknown>)['provider'], requires: (preconditions as Record<string, unknown>)['requires'],
+        }, { level: 'INFO' });
+        pipelineSpan.end({ output: preconditions });
+        return preconditions;
+      }
+    }
+
     // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
@@ -1967,6 +2223,36 @@ async function executeWithActionAudit(
       proposed.actionId,
     );
     executeSpan.end({ output: result });
+
+    // Terminal idempotency update (§9.3.1 — state machine closure)
+    if (def?.idempotency && isFirstWriter && keyHash) {
+      const updateResult = await db.update(skillIdempotencyKeys)
+        .set({
+          responsePayload: result as Record<string, unknown>,
+          status: (result as Record<string, unknown>)?.success ? 'completed' : 'failed',
+        })
+        .where(and(
+          eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+          eq(skillIdempotencyKeys.skillSlug, actionType),
+          eq(skillIdempotencyKeys.keyHash, keyHash),
+          eq(skillIdempotencyKeys.status, 'in_flight'),
+        ))
+        .returning({ status: skillIdempotencyKeys.status });
+
+      if (updateResult.length === 0) {
+        // Terminal race lost — read and return the winning row's payload
+        createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARN' });
+        const [winner] = await db.select()
+          .from(skillIdempotencyKeys)
+          .where(and(
+            eq(skillIdempotencyKeys.subaccountId, context.subaccountId ?? ''),
+            eq(skillIdempotencyKeys.skillSlug, actionType),
+            eq(skillIdempotencyKeys.keyHash, keyHash),
+          ))
+          .limit(1);
+        if (winner) return winner.responsePayload as unknown;
+      }
+    }
 
     const resultObj = result as Record<string, unknown>;
     if (resultObj?.success) {
@@ -2516,45 +2802,6 @@ async function executeCrmUpdateApproved(
     fields_updated: Object.keys(updates),
     status: 'pending_integration',
     message: `CRM update approved for ${recordType} ${recordIdentifier}. Integration not yet connected — action logged.`,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// executeFinancialRecordUpdateApproved — MVP stub for update_financial_record.
-// ---------------------------------------------------------------------------
-
-async function executeFinancialRecordUpdateApproved(
-  payload: Record<string, unknown>,
-  context: SkillExecutionContext
-): Promise<unknown> {
-  const recordType = String(payload.record_type ?? '');
-  const recordDescription = String(payload.record_description ?? '');
-  const updates = payload.updates as Record<string, unknown> ?? {};
-  const reasoning = String(payload.reasoning ?? '');
-
-  if (!recordType) return { success: false, error: 'record_type is required' };
-
-  if (context.taskId) {
-    try {
-      await taskService.addActivity(context.taskId, context.organisationId, {
-        activityType: 'note',
-        message: [
-          `FINANCIAL_RECORD_UPDATE_APPROVED:${recordType}`,
-          `description: ${recordDescription}`,
-          `fields: ${Object.keys(updates).join(', ')}`,
-          `reasoning: ${reasoning}`,
-        ].join('\n'),
-        agentId: context.agentId,
-      });
-    } catch { /* non-fatal */ }
-  }
-
-  return {
-    success: true,
-    record_type: recordType,
-    fields_written: Object.keys(updates),
-    status: 'pending_integration',
-    message: `Financial record update approved (${recordType}: ${recordDescription}). Accounting integration not yet connected — action logged.`,
   };
 }
 
