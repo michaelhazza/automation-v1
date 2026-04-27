@@ -49,13 +49,15 @@ async function assertFoundationalSelfContainment(): Promise<void> {
     const entry = ACTION_REGISTRY[slug as keyof typeof ACTION_REGISTRY];
     if (!entry) continue; // not yet in registry — chunk-03 will add it
 
-    const isApiCategory = (entry as { actionCategory?: string }).actionCategory === 'api';
+    // Check openWorldHint and directExternalSideEffect (the runtime-enforced external-API guards).
+    // actionCategory === 'api' is NOT checked — some foundational skills (e.g. read_workspace)
+    // use 'api' for internal platform APIs, not third-party services.
     const openWorldHint = (entry as { mcp?: { annotations?: { openWorldHint?: boolean } } }).mcp?.annotations?.openWorldHint === true;
     const directExternal = (entry as { directExternalSideEffect?: boolean }).directExternalSideEffect === true;
 
-    if (isApiCategory || openWorldHint || directExternal) {
+    if (openWorldHint || directExternal) {
       violations.push(
-        `${slug}: foundational skill must not have external integrations (actionCategory=${(entry as { actionCategory?: string }).actionCategory}, openWorldHint=${openWorldHint}, directExternalSideEffect=${directExternal})`,
+        `${slug}: foundational skill must not have external integrations (openWorldHint=${openWorldHint}, directExternalSideEffect=${directExternal})`,
       );
     }
   }

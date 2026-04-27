@@ -3,6 +3,7 @@ name: List Platform Capabilities
 description: Return the catalogue of integrations the Synthetos platform supports, with per-integration capabilities, scopes, status, and confidence.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

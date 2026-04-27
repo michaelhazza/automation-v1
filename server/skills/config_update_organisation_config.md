@@ -17,6 +17,8 @@ intent: |
   (spec §3 / contract (i) — platform primitives are module-agnostic). The
   legacy slug continues to resolve via `ACTION_SLUG_ALIASES` for in-flight
   callers; new code uses the canonical slug.
+reusable: true
+---
 
 inputs:
   path: dot-path into operational_config (e.g. `alertLimits.notificationThreshold`)
