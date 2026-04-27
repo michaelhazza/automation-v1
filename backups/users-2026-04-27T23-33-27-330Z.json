@@ -1,0 +1,42 @@
+[
+  {
+    "id": "8e59134b-2a31-4ff4-bc46-2304ac3e9df4",
+    "organisation_id": "443c675f-0f9f-4954-98d9-85bc3c3560af",
+    "email": "michael@breakoutsolutions.com",
+    "password_hash": "$2a$12$3j5a84lNvBuuj6BgsMB52u4UER0fXnmjzxHVjn5I2d8PGs6GVIBk.",
+    "first_name": "Michael",
+    "last_name": "Admin",
+    "role": "org_admin",
+    "status": "active",
+    "invite_token": null,
+    "invite_expires_at": null,
+    "invited_by_user_id": null,
+    "password_reset_token": null,
+    "password_reset_expires_at": null,
+    "last_login_at": null,
+    "created_at": "2026-04-02T00:08:14.333Z",
+    "updated_at": "2026-04-02T00:08:14.333Z",
+    "deleted_at": null,
+    "slack_user_id": null
+  },
+  {
+    "id": "131dda68-d37a-4809-94e9-640aa5b9ab46",
+    "organisation_id": "22efa0e3-8270-4eb9-b4a8-bd8741341ce1",
+    "email": "admin@automation.os",
+    "password_hash": "$2a$12$KeadLfk59tH1dbIXcuuA2.ZiROcUKe2kWDw.K9f3FHfZSXz2bNkCG",
+    "first_name": "System",
+    "last_name": "Admin",
+    "role": "system_admin",
+    "status": "active",
+    "invite_token": null,
+    "invite_expires_at": null,
+    "invited_by_user_id": null,
+    "password_reset_token": null,
+    "password_reset_expires_at": null,
+    "last_login_at": "2026-04-24T02:16:05.615Z",
+    "created_at": "2026-04-02T00:08:14.076Z",
+    "updated_at": "2026-04-24T02:16:05.617Z",
+    "deleted_at": null,
+    "slack_user_id": null
+  }
+]
