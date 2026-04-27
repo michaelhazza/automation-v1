@@ -1105,6 +1105,28 @@ export const queueService = {
         }
       });
 
+      // System Monitor — synthetic checks (every minute)
+      await boss.schedule('system-monitor-synthetic-checks', '* * * * *', {});
+      await (boss as any).work('system-monitor-synthetic-checks', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { handleSyntheticChecksTick } = await import('../jobs/systemMonitorSyntheticChecksJob.js');
+          await handleSyntheticChecksTick();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-synthetic-checks', error: String(err) });
+        }
+      });
+
+      // System Monitor — baseline refresh (every 15 minutes)
+      await boss.schedule('system-monitor-baseline-refresh', '*/15 * * * *', {});
+      await (boss as any).work('system-monitor-baseline-refresh', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { handleBaselineRefresh } = await import('../jobs/systemMonitorBaselineRefreshJob.js');
+          await handleBaselineRefresh();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-baseline-refresh', error: String(err) });
+        }
+      });
+
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
       await (boss as any).work('subscription-trial-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
