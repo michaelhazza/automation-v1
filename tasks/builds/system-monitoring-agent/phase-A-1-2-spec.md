@@ -298,7 +298,7 @@ These are deliberate omissions, not deferred work:
 - **NG7 No real-time WebSocket push of agent diagnoses.** The existing Phase 0.5 WebSocket fans out incident-open / status-change events. Diagnosis annotations land via the same channel piggybacked on the existing event types — no new WS event type, no new client-side handler.
 - **NG8 No new admin UI page.** All UI changes extend the existing `SystemIncidentsPage`. No new route, no new navigation entry.
 - **NG9 No baseline storage in a new persistent table for tenants.** Baseline storage is global / system-scoped — not partitioned by tenant. Per-tenant baselines are Phase 3.
-- **NG10 No prompt versioning.** The Investigate-Fix Protocol doc is versioned by git history. Generated `investigate_prompt` text does not carry a protocol-version stamp — protocol drift is observable from the git log of the doc, sufficient for the iteration loop.
+- **NG10 No structured protocol-version column on `system_incidents`.** The generated `investigate_prompt` body carries an in-text `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line per §5.2 / §5.5, and the protocol doc itself is versioned by git history. What is deliberately omitted is a separate `system_incidents.investigate_protocol_version` column or any other structured per-row stamp — the prompt body is the work product (per §4.10.7) and is the single source of truth for the version that produced an incident's prompt. Adding a column would create a duplicate source of truth and require a backfill story for pre-bump rows. If Phase 3 needs a structured stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
 
 ### 3.3 Success criteria — observable, measurable
 
@@ -1872,7 +1872,7 @@ The agent calls `write_diagnosis(incidentId, { investigatePrompt: <text> })` onc
 
 Why on every payload, not on the table: the JSON shape is the contract; tables outlive single shapes. A future Phase 3 enhancement (e.g. richer evidence types) bumps to `schema_version: 'v2'` while old rows stay readable. Consumers (UI render, downstream analytics) check `schema_version` at read time.
 
-**No prompt-text version stamp.** The `investigate_prompt` text itself is markdown, not JSON. Its versioning is the `## Protocol` line at the top (`v1 (per docs/investigate-fix-protocol.md)` — §5.2). The protocol-doc version + the agent's stored prompt are the version pair; the text body does not need an explicit field. (Consistent with NG10 — no protocol-version stamp at runtime; per-payload `schema_version` is for the structured JSON only.)
+**No structured version field on the prompt payload.** The `investigate_prompt` text itself is markdown, not JSON. Its version is carried in-band by the `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line at the top of the body (§5.2 / §5.5). The protocol-doc revision + the agent's stored prompt body are the version pair; no separate JSON field, no `system_incidents.investigate_protocol_version` column. (Consistent with NG10 — the in-body `## Protocol` line is the runtime stamp; what is omitted is a structured per-row column. Per-payload `schema_version` applies to the structured JSON payloads only — `agent_diagnosis`, event `metadata` — not to the markdown prompt body.)
 
 **Display.** The triage drawer (§10) renders the `investigate_prompt` text inside a copy-formatted block with a one-click copy button. No syntax highlighting beyond markdown; the prompt is markdown-formatted and the existing markdown renderer is reused.
 
@@ -2969,7 +2969,7 @@ These items are deliberate omissions, not deferred work. Naming them here preven
 
 **No baseline storage in a tenant-partitioned table.** Baselines are global / system-scoped. Per-tenant baselines are Phase 3.
 
-**No prompt versioning at runtime.** The Investigate-Fix Protocol doc is git-versioned. Generated `investigate_prompt` text does not carry a protocol-version stamp — drift is observable from `git log docs/investigate-fix-protocol.md`. If Phase 3 needs a stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
+**No structured protocol-version column on `system_incidents`.** The Investigate-Fix Protocol doc is git-versioned, and the generated `investigate_prompt` body carries an in-text `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line at the top per §5.2 / §5.5 — that line IS the runtime stamp. What is deliberately omitted is a separate `system_incidents.investigate_protocol_version` column or any other structured per-row field; the prompt body is the work product (§4.10.7) and is the single source of truth for an incident's protocol version. If Phase 3 needs a structured stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
 
 **No analytics view in this spec.** A sysadmin dashboard that visualises feedback rollups (per-heuristic FP rate over time, prompt effectiveness trend, week-over-week incident volume) is not built. The data is captured per §11; the visualisation is a Phase 3 deliverable, designed alongside the auto-fix gate.
 
@@ -3041,10 +3041,11 @@ A small list, mainly to close the loop on architectural conversations the team h
 
 ## Spec Status
 
-**Status:** Finalised — v1.2 (Execution Ready, post-merge audit alignment + ChatGPT round 5/6 tightening)
-**Last review:** ChatGPT spec review — 4 rounds (2026-04-26 v1.0) + 1 round (2026-04-27 v1.1, principal usage matrix + enqueue idempotency invariant + baseline drift reset + heuristic boundary contract + protocol version stamping rule + monitor-the-monitor health signals + event registry invariant) + 1 round (2026-04-27 v1.2, heuristic firing-constraint contract + per-entity fire-rate cap + sweep-coverage-degraded synthetic check + sweep coverage invariant + event-time vs write-time clarification).
-**Total findings processed:** 30 (v1.0) + 8 (v1.1) + 9 (v1.2) = 47 (31 applied, 14 rejected, 0 deferred, 5 partial-applies).
+**Status:** Finalised — v1.3 (Execution Ready, post-merge audit alignment + ChatGPT round 5/6 tightening + NG10 reconciliation)
+**Last review:** ChatGPT spec review — 4 rounds (2026-04-26 v1.0) + 1 round (2026-04-27 v1.1, principal usage matrix + enqueue idempotency invariant + baseline drift reset + heuristic boundary contract + protocol version stamping rule + monitor-the-monitor health signals + event registry invariant) + 1 round (2026-04-27 v1.2, heuristic firing-constraint contract + per-entity fire-rate cap + sweep-coverage-degraded synthetic check + sweep coverage invariant + event-time vs write-time clarification) + finalisation cleanup (2026-04-27 v1.3, NG10 reconciliation — restated as "no structured protocol-version column" to align with the in-body `## Protocol\nvN` stamp added in §5.5).
+**Total findings processed:** 30 (v1.0) + 8 (v1.1) + 9 (v1.2) + 1 finalisation cleanup = 48 (32 applied, 14 rejected, 0 deferred, 5 partial-applies).
 **Latest round (v1.2) outcome:** Tightened false-positive containment + sweep observability invariants without changing observable behaviour. Six findings rejected as already-covered (incident lifecycle states / fingerprint-based dedup race / baseline smoothing / prompt determinism / retry classification / naming drift); three partial-applies (heuristic firing constraint, sweep coverage invariant + new synthetic check, event-time vs write-time clarification). All findings auto-triaged technical; zero user-facing decisions required.
+**Finalisation cleanup (v1.3):** NG10 / §5.7 "no prompt-text version stamp" / §3.2-echo non-goal text restated to match the §5.5 protocol-version stamping rule introduced in v1.1. The prompt body now carries a `## Protocol\nv<n>` line; what NG10 omits is a structured `system_incidents.investigate_protocol_version` column. All three sites reconciled in one pass; no behaviour change, no schema change.
 **Next step:** implementation per §15 rollout plan (Slice A → B → C → D).
 
 ---

@@ -231,3 +231,57 @@ Cross-references introduced this round:
 
 Post-integrity sanity (4c): no integrity-check applied any mechanical fix this round (no broken refs found by the pass), so 4c is a no-op. Re-scanned heading list — no new top-level or sub-headings added; existing structure preserved. ToC unchanged. Spec Status block correctly version-bumped from v1.1 to v1.2 with the Round 6 (2026-04-27) line and the 47-finding total. No empty sections produced. Pass.
 
+---
+
+## Finalisation — 2026-04-27T (session-close)
+
+### NG10 reconciliation (pre-finalisation cleanup)
+
+ChatGPT's Round 2 final verdict flagged: "Make sure NG10 is updated or removed if it still says 'No prompt versioning', because §5.5 now has protocol version stamping in the prompt body."
+
+Verification: `grep -in "prompt versioning"` against the spec found three stale sites — all from v1.0, none updated by Rounds 1 or 2:
+
+1. **§3.2 NG10** (line 301) — "**NG10 No prompt versioning.**"
+2. **§5.7-area paragraph** (line 1875) — "**No prompt-text version stamp.**"
+3. **§3.2 echo / longer-form non-goals discussion** (line 2972) — "**No prompt versioning at runtime.**"
+
+All three said "no protocol-version stamp" but Round 1 §5.5 added a `## Protocol\nv<n>` line in the prompt body itself — so the stamp DOES exist in-band, what's omitted is a structured column.
+
+**Applied (single mechanical reconciliation pass — auto-applied as technical):**
+
+- [auto] Restated NG10 (§3.2) as "**NG10 No structured protocol-version column on `system_incidents`.**" — preserves the deliberate-omission framing while accurately naming what's omitted (the column, not the stamp itself). References §5.2 / §5.5 as the in-body stamp authority and §4.10.7 as the work-product source-of-truth rule.
+- [auto] Restated §5.7-area paragraph as "**No structured version field on the prompt payload.**" — clarifies that the in-body `## Protocol\nv<n>` line IS the version stamp; what's absent is a separate JSON field or column. Per-payload `schema_version` continues to apply to structured JSON only (`agent_diagnosis`, event `metadata`).
+- [auto] Restated longer-form non-goals echo as "**No structured protocol-version column on `system_incidents`.**" — same reframe as NG10 with the §4.10.7 work-product rationale.
+- [auto] Spec Status block bumped to v1.3 with finalisation-cleanup line; total findings 47 → 48 (32 applied / 14 rejected / 0 deferred / 5 partial-applies).
+
+**Triage classification:** technical — internal correctness clarification, no observable behaviour change, no schema change. Auto-applied per the standard contract (no escalation carveouts triggered).
+
+**Integrity check (post-cleanup):** `grep -in "prompt versioning|No prompt-text version"` returned zero matches across the spec. No broken cross-references introduced. ToC unchanged. Pass.
+
+### Session-close summary
+
+- **Rounds processed:** 2 (Round 1 — v1.0 → v1.1, commit 761bc9ea; Round 2 — v1.1 → v1.2, commit 9858a6af) + finalisation NG10 cleanup (v1.2 → v1.3).
+- **Total findings (this session):** 18 distinct ChatGPT findings + 1 finalisation cleanup = 19 decisions.
+  - Round 1: 9 findings — 4 full apply, 2 reject, 3 partial-apply (apply portion + reject portion documented inline).
+  - Round 2: 9 findings — 0 full apply, 6 reject, 3 partial-apply.
+  - Finalisation: 1 cleanup — 1 apply (mechanical reconciliation, three sites in one pass).
+- **Auto-accepted (technical):** 19 of 19 decisions auto-applied. Zero user-facing escalations across both rounds.
+- **Defers:** 0 across both rounds. Confirmed against `tasks/todo.md` — no spec-review items routed.
+- **Final spec version:** v1.3 (Finalised — Execution Ready).
+- **PR:** #213 — https://github.com/michaelhazza/automation-v1/pull/213
+- **Final commits on branch:** 3e9143d0 (post-merge audit alignment) → 761bc9ea (Round 1) → 9858a6af (Round 2) → finalisation commit (NG10 reconciliation + session-close).
+- **Index write failures:** 0 (clean — no JSONL append attempted; index format is per-finding records and the prior session already represented the same spec slug, so finalisation appends a single session-summary entry below).
+- **KNOWLEDGE.md:** 3 entries appended — patterns extracted from this session's review dynamics (see KNOWLEDGE.md section dated 2026-04-27).
+- **CLAUDE.md / architecture.md:** no `[missing-doc]` triggers across both rounds; no updates required.
+- **Hand-off:** spec is implementation-ready. `npm run build` / `npm run typecheck` not applicable to spec-only changes. Next step is `architect` invocation against §15 rollout plan (Slice A → B → C → D).
+
+### Implementation readiness checklist
+
+- [x] All inputs defined — heuristic interface (§6.2 + §6.3), baseline reader (§7.5), principal-usage matrix (§4.3), event registry (§12.1).
+- [x] All outputs defined — `SweepResult` (§9.3), `agent_triage_failed.reason` enum (§9.8), `investigate_prompt` markdown body with `## Protocol\nv<n>` stamp (§5.2 / §5.5), event registry rows (§12.1), incident state machine (Phase 0 §5.6 — referenced).
+- [x] Failure modes covered — §4.7 per-component failure-mode tables + §4.10.3 partial-success × retry + §4.10.4 failure-mode × idempotency + DLQ catch-all (§8.2).
+- [x] Ordering guarantees explicit — §4.9.9 (created_at + uuid v7 surrogate) + §4.10.8 event-time vs write-time clarification (Round 2 v1.2) + §12.1 optional `metadata.occurred_at` carve-out.
+- [x] No unresolved forward references — integrity check across both rounds returned zero issues; finalisation grep confirmed.
+
+No checklist failures. Spec is implementation-ready.
+
