@@ -3,6 +3,7 @@ name: Ask Clarifying Questions
 description: Draft up to 5 ranked questions to resolve brief ambiguity when orchestrator confidence is below threshold.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

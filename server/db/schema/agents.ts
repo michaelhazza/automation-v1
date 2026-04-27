@@ -72,7 +72,7 @@ export const agents = pgTable(
   (table) => ({
     orgIdx: index('agents_org_idx').on(table.organisationId),
     orgStatusIdx: index('agents_org_status_idx').on(table.organisationId, table.status),
-    orgSlugUniq: uniqueIndex('agents_org_slug_uniq')
+    orgSlugActiveUniq: uniqueIndex('agents_org_slug_active_uniq')
       .on(table.organisationId, table.slug)
       .where(sql`${table.deletedAt} IS NULL`),
   })
