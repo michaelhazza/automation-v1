@@ -81,7 +81,7 @@ This table is the single source of truth for what the spec touches. Any prose re
 |---|---|---|
 | `migrations/0238_system_incidents_last_triage_job_id.sql` | 1 | Adds `last_triage_job_id text` column to `system_incidents`. Down migration: `migrations/0238_system_incidents_last_triage_job_id.down.sql`. |
 | `server/services/systemMonitor/triage/staleTriageSweep.ts` | 1 | Pure + IO split. Exports `findStaleTriageRowsSql(now, staleAfterMs)` (pure SQL builder) and `runStaleTriageSweep()` (executes UPDATE...RETURNING + writes events). |
-| `server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts` | 1 | Pure-helper test of the staleness predicate boundary. Runnable via `npx tsx`. |
+| `server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts` | 1 | Pure-helper test of the staleness predicate boundary AND `parseStaleAfterMinutesEnv` (NaN / empty / non-positive / valid env values). Runnable via `npx tsx`. |
 | `server/services/systemMonitor/triage/triageIdempotencyPure.ts` | 1 | Pure helper: `shouldIncrementAttemptCount(currentJobId, candidateJobId): boolean`. |
 | `server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts` | 1 | Pure-helper test for the idempotency predicate. |
 | `server/services/systemMonitor/synthetic/silentAgentSuccess.ts` | 2 | New `SyntheticCheck` registered in `SYNTHETIC_CHECKS` array. |
@@ -209,6 +209,8 @@ Fingerprint override: `synthetic:silent-agent-success:agent:<slug>` (matches the
 
 Silent = none of the above. Verifiable with a single LEFT JOIN query (one row per run, three boolean side-effect probes ANDed).
 
+**Observability contract for system-managed agents.** All system-managed agents (rows in `agents` with `is_system_managed = true`) MUST write at least one of `agent_execution_events`, `system_incident_events`, or `skill_executions` per completed run to remain observable to this check. New write surfaces introduced by future system-managed agents MUST also emit at least one `agent_execution_events` row per run — even if the primary write is to a new table — so this side-effect probe stays stable as the fleet grows. This is an internal contract on system-managed agents; it does not apply to tenant-scoped agents and is not surfaced to operators.
+
 ### 4.5 `incident-silence` synthetic-check result contract
 
 | Field | Value |
@@ -331,7 +333,7 @@ This spec follows `docs/spec-context.md` framing without deviation. Pre-producti
 5. Modify [`server/services/systemMonitor/triage/triageHandler.ts`](../../../server/services/systemMonitor/triage/triageHandler.ts):
    - Update `runTriage` signature: `runTriage(incidentId: string, jobId: string): Promise<TriageResult>`.
    - Replace the unconditional UPDATE at lines 269-277 with the predicated UPDATE from §4.2. Capture the returned row count.
-   - If 0 rows returned: log `triage_attempt_skipped_idempotent` with `{ incidentId, jobId }`, then early-return `{ status: 'skipped', reason: 'duplicate_job' }`. Do NOT proceed to step 6 (the LLM tool loop) — the previous invocation already owns this attempt.
+   - If 0 rows returned: emit a structured log with event name `triage.idempotent_skip` at `info`, payload `{ incidentId, jobId, reason: 'duplicate_job' }`. The event name is the contract — log aggregators count occurrences by event name to surface retry-storm volume without a database write or incident. Then early-return `{ status: 'skipped', reason: 'duplicate_job' }`. Do NOT proceed to step 6 (the LLM tool loop) — the previous invocation already owns this attempt.
    - If 1 row returned: proceed exactly as today.
 
 **Why early-return on 0 rows.** Running the LLM tool loop twice for the same `(incidentId, jobId)` would charge tokens twice and write a duplicate `agent_runs` row. The predicate's job is to ensure exactly-once tool-loop execution per `(incidentId, jobId)` pair, not just exactly-once counter increment.
@@ -351,14 +353,28 @@ This spec follows `docs/spec-context.md` framing without deviation. Pre-producti
        SET triage_status = 'failed', updated_at = ${now}
        WHERE triage_status = 'running'
          AND last_triage_attempt_at < ${cutoff}
+         AND last_triage_job_id IS NOT NULL
        RETURNING id, last_triage_attempt_at, triage_attempt_count`;
    }
 
    // IO: executes UPDATE...RETURNING, batches one event INSERT per row.
    export async function runStaleTriageSweep(now: Date = new Date()): Promise<{ flipped: number }> {
      if (process.env.SYSTEM_MONITOR_TRIAGE_STALE_SWEEP_ENABLED === 'false') return { flipped: 0 };
-     const staleAfterMs = parseInt(process.env.SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES ?? '10', 10) * 60 * 1000;
+     const staleAfterMs = parseStaleAfterMinutesEnv() * 60 * 1000;
      // ... runs UPDATE...RETURNING in a transaction with the events INSERT.
+   }
+
+   // Pure helper: parse SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES with explicit
+   // NaN / non-positive guards. `parseInt('', 10)` returns NaN, and `??` only
+   // catches null/undefined — so a malformed env value (e.g. `''`, `'abc'`,
+   // `'0'`, `'-5'`) would silently produce NaN minutes and disable the sweep.
+   // Always fall back to the default in that case.
+   export function parseStaleAfterMinutesEnv(raw: string | undefined = process.env.SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES): number {
+     const DEFAULT_MINUTES = 10;
+     if (raw === undefined || raw === '') return DEFAULT_MINUTES;
+     const parsed = Number.parseInt(raw, 10);
+     if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MINUTES;
+     return parsed;
    }
    ```
 2. Wire `runStaleTriageSweep()` into `syntheticChecksTickHandler.ts`: call it before the `for (const check of SYNTHETIC_CHECKS)` loop, wrapped in its own try/catch so a sweep error never short-circuits the synthetic checks.
@@ -366,6 +382,8 @@ This spec follows `docs/spec-context.md` framing without deviation. Pre-producti
 4. Event emission: one `agent_triage_timed_out` event per row flipped, payload per §4.3. The events INSERT runs in the same transaction as the UPDATE so the (status flip, event write) pair is atomic — operators never see a `failed` row without an event, or an event without a `failed` row.
 
 **Why the sweep, not a heartbeat.** Per [`tasks/post-merge-system-monitor.md`](../../post-merge-system-monitor.md) round-3 note: option (a) is simpler. Heartbeat (option b) generalises better but introduces a write-on-every-iteration tax on a long-running loop, plus a heartbeat column that other long-running ops would also want — that pushes into "general-purpose long-job heartbeat primitive" territory, which is correctly out of scope here. The sweep is one UPDATE per tick, costs nothing, recovers stuck rows within `STALE_AFTER_MINUTES + tick interval`.
+
+**Triage SLA contract.** A triage attempt that does not reach a terminal state within `SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES` (default 10) is considered failed by contract. This is an explicit SLA on the triage tool loop — not an implicit "should be fast enough" assumption. If a future triage variant legitimately needs longer than `STALE_AFTER_MINUTES`, the variant MUST raise the env-var ceiling explicitly (and document why) rather than silently relying on the worker outliving the sweep. The `last_triage_job_id IS NOT NULL` clause is the matching guard: a row that never registered a `jobId` (i.e. never made it past the idempotent UPDATE in §4.2) is excluded from the sweep — it represents a row that is `running` only by an inconsistent prior state, not by a worker actually processing it. Such rows are surfaced separately by gate / state-consistency checks rather than swept.
 
 ### 7.3 Coordination tests (G1 + G2 together)
 
@@ -432,6 +450,8 @@ Pure-helper test asserts boundary cases: `0/5 → false`, `2/5 (40%) → true at
 
 Following the pattern in [`agentRunSuccessRateLow.ts`](../../../server/services/systemMonitor/synthetic/agentRunSuccessRateLow.ts), the check returns `fired: true` on the *first* offending agent encountered, not all of them. The next tick will catch the next worst agent. Operators get one incident at a time per agent (deduped by fingerprint), which matches the existing synthetic-check operational rhythm.
 
+**Detection-latency characteristic.** Detection latency for `silent-agent-success` (and every other first-fire-wins synthetic check in `SYNTHETIC_CHECKS`) scales linearly with the number of simultaneously-degraded agents: `N` degraded agents take `N` ticks to all surface (default tick interval applies). At a 60s tick this is `N` minutes worst-case. This is acceptable for the current fleet size — system-managed agents are added one at a time and degradations rarely arrive in synchronised bursts. If the fleet grows past ~10 system-managed agents *or* simultaneous degradations become a routine pattern, this latency profile becomes the bottleneck and a top-K-offenders variant of the check (configurable cap, default 3) becomes the right promotion path. That promotion lands in its own spec amendment — first-fire-wins remains the convention across `SYNTHETIC_CHECKS` until then.
+
 ### 8.4 Why "completed" specifically and not "all runs"
 
 A `failed` agent run with no side effects is not silent — it failed. We're chasing the case where the agent *claims* success (status='completed') but produced nothing. Failed runs are a different observability concern handled by `agentRunSuccessRateLow`. The two checks together cover the success-rate cliff (failures spiking) and the silent-success cliff (successes that aren't really successes).
@@ -444,7 +464,9 @@ These three tables are the universe of write surfaces a system_monitor-class age
 - `system_incident_events` — the diagnosis-skill output is recorded here when the agent writes a diagnosis.
 - `skill_executions` — every tool call records a row here.
 
-If none of the three has a row pointing to the run, the agent literally did nothing observable. Future agents that introduce a new write surface (e.g. a future "execute remediation" skill writing to a new table) will need this list extended; the spec acknowledges this as a known maintenance point. Logging at `info` when the check fires includes the specific run UUIDs so operators can spot-check the "silent" claim.
+If none of the three has a row pointing to the run, the agent literally did nothing observable. Logging at `info` when the check fires includes the specific run UUIDs so operators can spot-check the "silent" claim.
+
+The list is held stable by the §4.4 observability contract: every system-managed agent MUST emit at least one `agent_execution_events` row per run regardless of any new write surface it touches. This means a future "execute remediation" skill writing to a new table does not require this list to be extended — the agent's `agent_execution_events` row is still produced, the check still treats it as non-silent. The list expands only if the contract is deliberately revised (e.g. a future class of system-managed agent that writes to a new primary surface and is exempted from emitting `agent_execution_events`); that revision lands in its own spec amendment.
 
 ## 9. Phase 3 — Synthetic check: monitoring silence (G4)
 
@@ -560,11 +582,13 @@ Section 10 of the spec-authoring checklist. Each new write path has its idempote
 
 | Concern | Posture |
 |---|---|
-| Idempotency | **State-based** on the optimistic predicate `triage_status = 'running' AND last_triage_attempt_at < cutoff`. A second sweep run for the same row finds `triage_status = 'failed'` and matches no rows. |
+| Idempotency | **State-based** on the optimistic predicate `triage_status = 'running' AND last_triage_attempt_at < cutoff AND last_triage_job_id IS NOT NULL`. A second sweep run for the same row finds `triage_status = 'failed'` and matches no rows. |
 | Retry classification | **Safe** — the sweep can run any number of times per tick; only rows still in the stuck-running state at the moment of the UPDATE flip. |
 | Concurrency guard | Optimistic predicate is the guard. If two sweep ticks race (e.g. multi-instance deploy), Postgres serialises; exactly one tick flips each stuck row, the other sees `triage_status='failed'` and matches nothing for that row. |
 | Counter update | Sweep does NOT touch `triage_attempt_count`. |
 | Atomicity with event | UPDATE...RETURNING + event INSERT(s) run in the same transaction. Operators never see (status flip, no event) or (event, no status flip). |
+| SLA contract | Triages that do not reach a terminal state within `SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES` are failed by contract (see §7.2). Long-running triage variants MUST raise the ceiling explicitly. |
+| `last_triage_job_id IS NOT NULL` guard | Excludes rows in `running` that never registered a jobId (impossible under §4.2 but defensive against historical / inconsistent state). |
 
 ### 11.3 Terminal-event guarantee for triage
 
@@ -578,6 +602,13 @@ The triage flow has exactly one terminal event per logical attempt. The closure 
 | Idempotent skip on duplicate job | (no event — the original attempt's terminal event is authoritative) | n/a |
 
 Post-terminal prohibition: once a row has `triage_status IN ('completed', 'failed')`, the sweep predicate excludes it (`WHERE triage_status = 'running'`), so no spurious `agent_triage_timed_out` can fire after a real terminal event landed. The three terminal events are mutually exclusive per logical attempt.
+
+**Invariant — no double terminal events per attempt.** A terminal event (`agent_diagnosis_added`, `agent_triage_failed`, `agent_triage_timed_out`) MUST only be emitted by a writer that itself flipped `triage_status` from `'running'` to a terminal value (`'completed'` or `'failed'`) in the same transaction. All emitters MUST verify the row was in `triage_status = 'running'` at the moment of their UPDATE (via the predicate's row-count return) before writing the event. Concretely:
+- The tool-loop success path: the `write_diagnosis` skill's UPDATE includes `WHERE triage_status = 'running'`; the `agent_diagnosis_added` event INSERT runs in the same transaction and only if the UPDATE returned 1 row.
+- The tool-loop failure path: the failure handler's UPDATE includes `WHERE triage_status = 'running'`; `agent_triage_failed` only fires on a 1-row return.
+- The sweep path: per §7.2 / §11.2, the predicate (`triage_status = 'running' AND last_triage_attempt_at < cutoff AND last_triage_job_id IS NOT NULL`) is the guard; `agent_triage_timed_out` is emitted once per row in the UPDATE...RETURNING set, in the same transaction.
+
+This makes the closure self-enforcing at every emitter rather than relying on absence-of-race-condition between three independent writers. A late-arriving tool-loop completion that races a sweep tick will find its UPDATE matches 0 rows (the sweep already flipped the row to `'failed'`) and MUST suppress its terminal event accordingly. Symmetrically, a sweep tick racing a late tool-loop completion finds its UPDATE matches 0 rows and emits no event. Exactly one writer wins the row transition per attempt; only that writer emits the terminal event.
 
 ### 11.4 Synthetic check writes
 
@@ -628,7 +659,7 @@ e2e_tests_of_own_app: none_for_now
 | Test file | Type | Tooling | What it asserts |
 |---|---|---|---|
 | `triageIdempotencyPure.test.ts` | Pure unit | `npx tsx` | Predicate correctness on `(currentJobId, candidateJobId)` boundary cases. |
-| `staleTriageSweepPure.test.ts` | Pure unit | `npx tsx` | The cutoff calculation is correct on boundary timestamps. |
+| `staleTriageSweepPure.test.ts` | Pure unit | `npx tsx` | The cutoff calculation is correct on boundary timestamps; `parseStaleAfterMinutesEnv` falls back to `10` for `undefined`, `''`, `'abc'`, `'0'`, `'-5'`, and parses valid positive integers. |
 | `silentAgentSuccessPure.test.ts` | Pure unit | `npx tsx` | Ratio threshold + minSamples gate. |
 | `incidentSilencePure.test.ts` | Pure unit | `npx tsx` | Silence + proof-of-life predicate. |
 | `triageDurability.integration.test.ts` | Integration (real DB) | `npx tsx` against test DB | The G1+G2 coordination contract — see §7.3. |
@@ -682,7 +713,7 @@ Items that this spec deliberately does not implement. Each remains tracked in [`
 
 - **Cross-instance staleness sweep coordination.** Multi-instance deploys will run the sweep tick in parallel. The optimistic predicate (§11.2) makes this safe but inefficient (each instance does the same UPDATE, only one wins per row). Not optimised here — sweep cost is low, and the synthetic-checks tick is already idempotent at this granularity. If load grows, an `advisory_lock_idle` style guard can be added later.
 
-- **Telemetry on idempotent skips.** When the predicated UPDATE returns 0 rows (`reason: 'duplicate_job'`), we log at info but do not increment a counter or emit an incident. This is intentional — duplicate-job skips are expected behaviour under pg-boss internal retries, not a problem signal. If the rate of duplicate-job skips becomes pathologically high (e.g. signals a worker stuck in a retry loop), the existing pg-boss DLQ + `pg-boss-queue-stalled` synthetic check are the right detection points.
+- **Telemetry on idempotent skips.** When the predicated UPDATE returns 0 rows (`reason: 'duplicate_job'`), we emit a structured log at info under the event name `triage.idempotent_skip` with `{ incidentId, jobId, reason: 'duplicate_job' }` (per §7.1). We do NOT increment a database counter or emit an incident. The event-name contract gives log-aggregator visibility into retry-storm volume without a DB write surface. This is intentional — duplicate-job skips are expected behaviour under pg-boss internal retries, not a problem signal. If the rate of duplicate-job skips becomes pathologically high (e.g. signals a worker stuck in a retry loop), the existing pg-boss DLQ + `pg-boss-queue-stalled` synthetic check are the right detection points.
 
 ## 14. Acceptance criteria
 
