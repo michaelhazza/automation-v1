@@ -437,13 +437,26 @@ export function setHandoffJobSender(sender: (name: string, data: object) => Prom
 // ---------------------------------------------------------------------------
 
 async function checkSkillPreconditions(
-  _actionType: string,
+  actionType: string,
   _input: Record<string, unknown>,
   _context: SkillExecutionContext,
 ): Promise<{ status: 'ok' } | { status: 'blocked'; reason: string; provider?: string; requires?: string[] }> {
-  // Dispatch per skill — returns ok if preconditions met, blocked if not.
-  // Specific config checks are implemented per skill in the domain services.
-  // Write skills self-block internally when provider keys are absent.
+  switch (actionType) {
+    case 'send_invoice':
+    case 'chase_overdue':
+      if (!process.env['STRIPE_API_KEY']) {
+        return { status: 'blocked', reason: 'provider_not_configured', provider: 'stripe', requires: ['STRIPE_API_KEY'] };
+      }
+      break;
+    case 'book_meeting':
+      if (!process.env['GOOGLE_CALENDAR_CLIENT_ID']) {
+        return { status: 'blocked', reason: 'provider_not_configured', provider: 'google_calendar', requires: ['GOOGLE_CALENDAR_CLIENT_ID'] };
+      }
+      break;
+    // generate_invoice, process_bill, prepare_month_end: no external provider — always ok
+    default:
+      break;
+  }
   return { status: 'ok' };
 }
 
@@ -2223,6 +2236,19 @@ async function executeWithActionAudit(
       proposed.actionId,
     );
     executeSpan.end({ output: result });
+
+    // Read fail-soft logging (§9.3.2 + §9.3.3)
+    if (def?.sideEffectClass === 'read') {
+      const r = result as Record<string, unknown> | null;
+      if (r?.status === 'not_configured' || r?.status === 'transient_error') {
+        createEvent('skill.warn', {
+          skillName: actionType,
+          reason: String(r.status),
+          warning: r['warning'],
+          retryable: r.status === 'transient_error',
+        }, { level: 'WARN' });
+      }
+    }
 
     // Terminal idempotency update (§9.3.1 — state machine closure)
     if (def?.idempotency && isFirstWriter && keyHash) {
