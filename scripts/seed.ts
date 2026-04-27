@@ -68,7 +68,7 @@ import { resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, not, sql } from 'drizzle-orm';
 import { glob } from 'glob';
 import bcrypt from 'bcryptjs';
 
@@ -507,6 +507,136 @@ async function phase3_playbookAuthor(): Promise<void> {
     } as never)
     .where(eq(systemAgents.id, existing.id));
   log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
+
+  // v7.1 — Orphan cleanup: soft-delete any system_agents row whose slug is
+  // no longer in (parsed.agents.slug ∪ 'workflow-author'). Cascade soft-delete
+  // to the matching `agents` rows and deactivate `subaccount_agents`.
+  const companyDir = resolve(process.cwd(), 'companies/automation-os');
+  const orphanParsed = await parseCompanyFolder(companyDir);
+  const expectedSlugs = new Set([
+    ...orphanParsed.agents.map((a) => a.slug),
+    'workflow-author',
+  ]);
+
+  const orphanRows = await db
+    .select({ slug: systemAgents.slug, id: systemAgents.id })
+    .from(systemAgents)
+    .where(and(
+      isNull(systemAgents.deletedAt),
+      not(inArray(systemAgents.slug, [...expectedSlugs])),
+    ));
+
+  if (orphanRows.length > 0) {
+    log(`  [cleanup] soft-deleting ${orphanRows.length} orphan system_agents row(s): ${orphanRows.map((o) => o.slug).join(', ')}`);
+
+    await db
+      .update(systemAgents)
+      .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+      .where(and(
+        isNull(systemAgents.deletedAt),
+        not(inArray(systemAgents.slug, [...expectedSlugs])),
+      ));
+
+    const orphanIds = orphanRows.map((o) => o.id);
+    await db
+      .update(agents)
+      .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+      .where(and(
+        isNull(agents.deletedAt),
+        eq(agents.isSystemManaged, true),
+        inArray(agents.systemAgentId, orphanIds),
+      ));
+
+    const orphanAgentRows = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(and(eq(agents.isSystemManaged, true), inArray(agents.systemAgentId, orphanIds)));
+
+    if (orphanAgentRows.length > 0) {
+      await db
+        .update(subaccountAgents)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(inArray(subaccountAgents.agentId, orphanAgentRows.map((a) => a.id)));
+    }
+  }
+
+  // v7.1 — Hierarchy assertions (spec §13.4)
+  const all = await db
+    .select({
+      id: systemAgents.id,
+      slug: systemAgents.slug,
+      parentId: systemAgents.parentSystemAgentId,
+    })
+    .from(systemAgents)
+    .where(isNull(systemAgents.deletedAt));
+
+  const byId = new Map(all.map((r) => [r.id, r]));
+
+  // Assertion 1: exactly one business-team root (orchestrator)
+  const businessRoots = all.filter(
+    (r) =>
+      r.parentId === null &&
+      r.slug !== 'portfolio-health-agent' &&
+      r.slug !== 'workflow-author',
+  );
+  if (businessRoots.length !== 1 || businessRoots[0].slug !== 'orchestrator') {
+    throw new Error(
+      `[hierarchy] expected exactly one business-team root 'orchestrator'; found ${businessRoots.length}: ${businessRoots.map((r) => r.slug).join(', ')}`,
+    );
+  }
+
+  // Assertion 2: no cycles, depth ≤ 3
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    let cur = row;
+    let hops = 0;
+    while (cur.parentId !== null) {
+      if (hops >= 3) {
+        throw new Error(`[hierarchy] depth > 3 from leaf '${row.slug}' — chain exceeds Orchestrator → Head → Worker`);
+      }
+      const parent = byId.get(cur.parentId);
+      if (!parent) {
+        throw new Error(`[hierarchy] '${cur.slug}' references non-existent or soft-deleted parent ${cur.parentId}`);
+      }
+      cur = parent;
+      hops += 1;
+    }
+  }
+
+  // Assertion 3: every non-root non-special agent has a non-null parent
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    if (row.parentId === null) {
+      throw new Error(`[hierarchy] '${row.slug}' has parent_system_agent_id = NULL but is not a designated root`);
+    }
+  }
+
+  // Assertion 4: every T3 worker's parent is in the allowed T1/T2 parent set.
+  // admin-ops-agent is `role: 'staff'` (per §10.1.5) but sits at T2 as a direct
+  // report of Orchestrator — included as a future-proofing allowance for the
+  // case where admin-ops grows worker subordinates without a spec amendment.
+  const ALLOWED_T1_T2_PARENTS = new Set([
+    'orchestrator',                  // T1 (sole)
+    'head-of-product-engineering',   // T2 manager
+    'head-of-growth',                // T2 manager
+    'head-of-client-services',       // T2 manager
+    'head-of-commercial',            // T2 manager
+    'admin-ops-agent',               // T2 staff direct report (see comment above)
+    'strategic-intelligence-agent',  // T2 direct report of Orchestrator
+  ]);
+  for (const row of all) {
+    if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+    const parent = byId.get(row.parentId!);
+    if (!parent) continue; // already reported by Assertion 2
+    if (!ALLOWED_T1_T2_PARENTS.has(parent.slug)) {
+      throw new Error(
+        `[hierarchy] worker '${row.slug}' is parented to '${parent.slug}', which is not in the allowed T1/T2 parent set. ` +
+        `A worker (T3) must report directly to the Orchestrator or a T2 agent listed in ALLOWED_T1_T2_PARENTS.`,
+      );
+    }
+  }
+
+  log('  [ok]   hierarchy assertions: 1 root, no cycles, depth ≤ 3, all parents present, every worker has exactly one parent in ALLOWED_T1_T2_PARENTS');
 }
 
 // ---------------------------------------------------------------------------
@@ -1302,6 +1432,24 @@ async function activateBaselineSystemAgents(
   }
 }
 
+async function preflightVerifyAgentSkillContracts(): Promise<void> {
+  const { execSync } = await import('child_process');
+  try {
+    execSync('npx tsx scripts/verify-agent-skill-contracts.ts', { stdio: 'inherit' });
+  } catch {
+    throw new Error('preflight: agent-skill contract violations found — aborting seed');
+  }
+}
+
+async function preflightVerifyManifestDrift(): Promise<void> {
+  const { execSync } = await import('child_process');
+  try {
+    execSync('npx tsx scripts/regenerate-company-manifest.ts --check', { stdio: 'inherit' });
+  } catch {
+    throw new Error('preflight: manifest drift detected — run `npx tsx scripts/regenerate-company-manifest.ts` to fix — aborting seed');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -1314,6 +1462,8 @@ async function main(): Promise<void> {
   // Pre-flight: fail fast if skill visibility has drifted from the
   // classification rule. Catches dev mistakes before any DB writes happen.
   await preflightVerifySkillVisibility();
+  await preflightVerifyAgentSkillContracts();
+  await preflightVerifyManifestDrift();
 
   await phase1_systemBootstrap();
   await phase2_systemAgents();
