@@ -7,6 +7,7 @@
 **Scope:** all-of-spec — branch tip is `ce7ed103` ("programme-end verification complete + progress.md close-out") confirming Slices A→D shipped per `progress.md`. Verification narrowed to system-monitor files; the merge-from-main brought in unrelated audit-remediation-followups + pre-launch-hardening churn that is OUT_OF_SCOPE for this spec.
 **Changed-code set:** ~100+ files across the branch (committed only); ~80 in scope after filtering to system-monitor surface
 **Run at:** 2026-04-27T06:52:33Z
+**Commit at finish:** `77277716`
 
 ---
 
