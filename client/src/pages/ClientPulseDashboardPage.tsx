@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { User } from '../lib/auth';
 import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
@@ -75,7 +74,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
     if (!data || typeof data !== 'object') return;
     const update = data as Partial<HealthSummary>;
     setHealth((prev) => prev ? { ...prev, ...update } : prev);
-    toast.success('Dashboard updated with latest data');
   }, []));
 
   if (loading) return <DashboardSkeleton />;
