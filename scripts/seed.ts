@@ -80,8 +80,8 @@ import { subaccountAgents } from '../server/db/schema/subaccountAgents.js';
 import { integrationConnections } from '../server/db/schema/integrationConnections.js';
 import {
   systemAgents,
-  systemPlaybookTemplates,
-  systemPlaybookTemplateVersions,
+  systemWorkflowTemplates,
+  systemWorkflowTemplateVersions,
 } from '../server/db/schema/index.js';
 import { modules } from '../server/db/schema/modules.js';
 import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
@@ -795,24 +795,24 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // Upsert template row
   const [existing] = await db
     .select()
-    .from(systemPlaybookTemplates)
-    .where(eq(systemPlaybookTemplates.slug, TEMPLATE_SLUG));
+    .from(systemWorkflowTemplates)
+    .where(eq(systemWorkflowTemplates.slug, TEMPLATE_SLUG));
 
   let templateId: string;
   if (existing) {
     templateId = existing.id;
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({
         name: TEMPLATE_NAME,
         description: definition.description,
         updatedAt: new Date(),
       })
-      .where(eq(systemPlaybookTemplates.id, existing.id));
+      .where(eq(systemWorkflowTemplates.id, existing.id));
     log(`  [update] portfolio-health-sweep template: ${templateId}`);
   } else {
     const [row] = await db
-      .insert(systemPlaybookTemplates)
+      .insert(systemWorkflowTemplates)
       .values({
         slug: TEMPLATE_SLUG,
         name: TEMPLATE_NAME,
@@ -827,28 +827,28 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // (not templateId) and has no updatedAt / status columns on the version row.
   const [existingVersion] = await db
     .select()
-    .from(systemPlaybookTemplateVersions)
-    .where(eq(systemPlaybookTemplateVersions.systemTemplateId, templateId));
+    .from(systemWorkflowTemplateVersions)
+    .where(eq(systemWorkflowTemplateVersions.systemTemplateId, templateId));
 
   if (existingVersion) {
     await db
-      .update(systemPlaybookTemplateVersions)
+      .update(systemWorkflowTemplateVersions)
       .set({
         definitionJson: definition as unknown as Record<string, unknown>,
       })
-      .where(eq(systemPlaybookTemplateVersions.id, existingVersion.id));
+      .where(eq(systemWorkflowTemplateVersions.id, existingVersion.id));
     log(`  [update] portfolio-health-sweep v${existingVersion.version}`);
   } else {
-    await db.insert(systemPlaybookTemplateVersions).values({
+    await db.insert(systemWorkflowTemplateVersions).values({
       systemTemplateId: templateId,
       version: 1,
       definitionJson: definition as unknown as Record<string, unknown>,
     });
     // Bump latestVersion on parent template to match.
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({ latestVersion: 1, updatedAt: new Date() })
-      .where(eq(systemPlaybookTemplates.id, templateId));
+      .where(eq(systemWorkflowTemplates.id, templateId));
     log(`  [create] portfolio-health-sweep v1`);
   }
 }
