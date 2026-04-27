@@ -7,6 +7,7 @@
 **Scope:** Re-verification after follow-up fix commit `c849c534`. The two NON_CONFORMANT directional gaps from the prior run (`spec-conformance-log-home-dashboard-reactivity-2026-04-27T20-57-33Z.md`) are re-checked, plus a regression sweep (single-item approve/reject paths and the §4.2 pre-merge coverage check). All 32 previously-PASS items outside the touched files remain in force — re-extracting them is unnecessary because the fix commit only modified `server/routes/reviewItems.ts` and `server/services/reviewService.ts`.
 **Changed-code set (this commit only):** 2 files (`server/routes/reviewItems.ts`, `server/services/reviewService.ts`). Two non-code files (`tasks/todo.md`, prior log) excluded per playbook.
 **Run at:** 2026-04-27T21:13:34Z
+**Commit at finish:** `f9941f9f`
 **Prior log:** `tasks/review-logs/spec-conformance-log-home-dashboard-reactivity-2026-04-27T20-57-33Z.md`
 
 ---
