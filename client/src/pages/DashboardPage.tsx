@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSocket, useSocketRoom, useSocketConnected } from '../hooks/useSocket';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import MetricCard from '../components/MetricCard';
 import { PendingApprovalCard } from '../components/dashboard/PendingApprovalCard';
 import WorkspaceFeatureCard from '../components/dashboard/WorkspaceFeatureCard';
 import { QueueHealthSummary } from '../components/dashboard/QueueHealthSummary';
+import { FreshnessIndicator } from '../components/dashboard/FreshnessIndicator';
+import { OperationalMetricsPlaceholder } from '../components/dashboard/OperationalMetricsPlaceholder';
 import UnifiedActivityFeed from '../components/UnifiedActivityFeed';
 import { resolvePulseDetailUrl } from '../lib/resolvePulseDetailUrl';
 import {
@@ -24,6 +27,13 @@ interface ActivityStats {
 }
 interface HealthSummary { totalClients: number; healthy: number; attention: number; atRisk: number; }
 
+interface TimestampedResponse<T> {
+  data: T;
+  serverTimestamp: string;
+}
+
+const RECONNECT_DEBOUNCE_MS = 500;
+
 export default function DashboardPage({ user }: { user: User }) {
   const [agents, setAgents]               = useState<Agent[]>([]);
   const [stats, setStats]                 = useState<ActivityStats | null>(null);
@@ -31,6 +41,54 @@ export default function DashboardPage({ user }: { user: User }) {
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [loading, setLoading]             = useState(true);
   const navigate = useNavigate();
+
+  // ── Per-group timestamp refs (latest-data-wins) ──────────────────────────
+  const approvalsTs     = useRef<string>('');
+  const activityTs      = useRef<string>('');
+  const clientHealthTs  = useRef<string>('');
+  const queueTs         = useRef<string>('');
+
+  // ── Per-group inflight + pending (coalescing) ─────────────────────────────
+  const approvalsInflight    = useRef(false);
+  const approvalsPending     = useRef(false);
+  const activityInflight     = useRef(false);
+  const activityPending      = useRef(false);
+  const clientHealthInflight = useRef(false);
+  const clientHealthPending  = useRef(false);
+  const queueInflight        = useRef(false);
+  const queuePending         = useRef(false);
+
+  // ── FreshnessIndicator ────────────────────────────────────────────────────
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>(() => new Date());
+  const lastUpdatedAtRef = useRef<Date>(new Date());
+
+  // ── Refresh tokens (signal child components to re-fetch) ─────────────────
+  const [activityRefreshToken, setActivityRefreshToken] = useState(0);
+  const [queueRefreshToken, setQueueRefreshToken]       = useState(0);
+
+  // ── Reconnect state ───────────────────────────────────────────────────────
+  const prevConnected      = useRef<boolean | null>(null);
+  const reconnectDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function applyIfNewer(
+    currentTs: { current: string },
+    incomingTs: string,
+    apply: () => void,
+  ): void {
+    if (incomingTs > currentTs.current) {
+      currentTs.current = incomingTs;
+      apply();
+    }
+  }
+
+  const markFresh = useCallback((ts: Date) => {
+    if (ts > lastUpdatedAtRef.current) {
+      lastUpdatedAtRef.current = ts;
+      setLastUpdatedAt(ts);
+    }
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -43,6 +101,7 @@ export default function DashboardPage({ user }: { user: User }) {
       setStats(s.data.data);
       setAttention(p.data.data);
       setHealthSummary(h.data.data);
+      markFresh(new Date());
     }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
   }, []);
 
