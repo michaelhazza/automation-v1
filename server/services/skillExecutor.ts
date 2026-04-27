@@ -2208,12 +2208,31 @@ async function executeWithActionAudit(
         } else {
           if (existing.requestHash !== requestHash) {
             createEvent('skill.error', { skillName: actionType, reason: 'idempotency_collision', key_hash: keyHash }, { level: 'ERROR' });
+            // ChatGPT R1 #2 — terminalise the freshly-proposed action row before
+            // returning. Without this, every idempotency-hit reply leaves an
+            // unresolved 'approved' row that never closes the audit loop.
+            await actionService.markFailed(
+              proposed.actionId,
+              context.organisationId,
+              'idempotency_collision: same idempotency key with different request hash',
+              'IDEMPOTENCY_COLLISION',
+            );
             pipelineSpan.end({ output: { status: 'idempotency_collision' } });
             return { status: 'idempotency_collision', error: 'Same idempotency key with different request hash' };
           }
 
           if (existing.status === 'completed') {
             createEvent('skill.idempotency.hit', { skillName: actionType, key_hash: keyHash });
+            // ChatGPT R1 #2 — close out the freshly-proposed action row by
+            // mirroring the cached response. The action's effective outcome is
+            // the cached one; recording it here keeps the audit trail complete
+            // and prevents dangling 'approved' rows on every replay.
+            await actionService.markCompleted(
+              proposed.actionId,
+              context.organisationId,
+              existing.responsePayload,
+              'success',
+            );
             pipelineSpan.end({ output: existing.responsePayload });
             return existing.responsePayload as unknown;
           }
@@ -2226,6 +2245,15 @@ async function executeWithActionAudit(
               if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
                 createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs }, { level: 'WARNING' });
               }
+              // ChatGPT R1 #2 — block the freshly-proposed action row with a
+              // machine-readable concurrent_execute reason. The handler did not
+              // run, but the row would otherwise sit in 'approved' forever.
+              await actionService.markBlocked(
+                proposed.actionId,
+                context.organisationId,
+                'concurrent_execute',
+                'Another caller is processing this idempotent request (reclaim disabled)',
+              );
               pipelineSpan.end({ output: { status: 'in_flight' } });
               return { status: 'in_flight', message: 'Another caller is processing this idempotent request (reclaim disabled)', retryable_after_ms: 5000 };
             }
@@ -2247,16 +2275,40 @@ async function executeWithActionAudit(
                 isFirstWriter = true;
               } else {
                 createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash }, { level: 'WARNING' });
+                // ChatGPT R1 #2 — same reasoning as the reclaim-disabled
+                // branch: the row never executes here, so block it.
+                await actionService.markBlocked(
+                  proposed.actionId,
+                  context.organisationId,
+                  'concurrent_execute',
+                  'Another caller reclaimed this in_flight request',
+                );
                 pipelineSpan.end({ output: { status: 'in_flight' } });
                 return { status: 'in_flight', message: 'Another caller reclaimed this in_flight request', retryable_after_ms: 1000 };
               }
             } else {
+              // ChatGPT R1 #2 — block the freshly-proposed action row while
+              // another caller is still within the claim window.
+              await actionService.markBlocked(
+                proposed.actionId,
+                context.organisationId,
+                'concurrent_execute',
+                'Another caller is processing this idempotent request',
+              );
               pipelineSpan.end({ output: { status: 'in_flight' } });
               return { status: 'in_flight', message: 'Another caller is processing this idempotent request', retryable_after_ms: Math.max(1000, IDEMPOTENCY_CLAIM_TIMEOUT_MS - ageMs) };
             }
           }
 
           if (existing.status === 'failed') {
+            // ChatGPT R1 #2 — terminalise as failed; caller must submit a new
+            // idempotency key to retry, so this action row is unrecoverable.
+            await actionService.markFailed(
+              proposed.actionId,
+              context.organisationId,
+              'previous_failure: prior attempt failed; submit a new idempotency key to retry',
+              'PREVIOUS_FAILURE',
+            );
             pipelineSpan.end({ output: { status: 'previous_failure' } });
             return { status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' };
           }
