@@ -103,7 +103,7 @@ The following are explicitly excluded from this build. Proposing any of these du
 | File | What changes |
 |---|---|
 | `client/src/pages/DashboardPage.tsx` | Add socket subscriptions; block-level refetch logic; per-block version tracking; `<FreshnessIndicator>` integration; layout slot for Piece 3; `refreshToken` prop wiring to `<UnifiedActivityFeed>` |
-| `client/src/components/UnifiedActivityFeed.tsx` | Add `refreshToken?: number` prop — when the value changes, the feed re-fetches. No other changes to the component. |
+| `client/src/components/UnifiedActivityFeed.tsx` | Add `refreshToken?: number` prop — when the value changes, the feed re-fetches. Also add `expectedTimestamp?: string` prop (§6.5) — when the feed's internal fetch returns a `serverTimestamp` older than `expectedTimestamp`, the response is discarded so the feed and the stats card stay version-aligned within the Activity group. |
 
 ### 3.3 Modified files — server
 
@@ -125,7 +125,8 @@ The following are explicitly excluded from this build. Proposing any of these du
 
 | Primitive | Used for |
 |---|---|
-| `client/src/hooks/useSocket.ts` — `useSocket(event, callback)` | Subscribing to org-level dashboard events |
+| `client/src/hooks/useSocket.ts` — `useSocket(event, callback)` | Subscribing to org-level dashboard events (org room is auto-joined on connect) |
+| `client/src/hooks/useSocket.ts` — `useSocketRoom(roomType, roomId, events, onReconnectSync?)` | Joining the `system:sysadmin` room for `dashboard.queue.changed` (§10.2) — null `roomId` is the non-sysadmin gate |
 | `client/src/hooks/useSocket.ts` — `useSocketConnected()` | Detecting WebSocket reconnect |
 | `server/websocket/emitters.ts` — `emitOrgUpdate(orgId, event, data)` | Emitting dashboard events to `org:${orgId}` room |
 | `server/websocket/emitters.ts` — `emitToSysadmin(event, entityId, data)` | Emitting queue events to `system:sysadmin` room |
@@ -150,6 +151,21 @@ The brief flagged that existing emitters use inconsistent naming conventions. Th
 | `dashboard.activity.updated` | `org:${orgId}` | `agentRunFinalizationService.ts` (run completed) + `workflowEngineService.ts` (terminal status) | Activity | `UnifiedActivityFeed` + `MetricCard(Runs 7d)` | `GET /api/activity` + `GET /api/agent-activity/stats` |
 | `dashboard.client.health.changed` | `org:${orgId}` | ClientPulse health recalculation path (§5.4) | Client-health | `MetricCard(Clients Needing Attention)` + `WorkspaceFeatureCard(ClientPulse)` | `GET /api/clientpulse/health-summary` |
 | `dashboard.queue.changed` | `system:sysadmin` | Job queue mutation path (§5.5) | Queue-health | `QueueHealthSummary` | `GET /api/system/job-queues` |
+
+> **Pre-merge coverage check:** Before the PR is opened, run `grep -r "emitOrgUpdate.*'dashboard\." server/` and verify every matching call appears in the table above. Any call not in this table is a `file-inventory-drift` finding in review.
+
+> **Event ordering guarantee — none assumed.** No ordering guarantee is assumed across events. Two events emitted close together (e.g. `dashboard.approval.changed` followed immediately by `dashboard.activity.updated`) may arrive at the client in any order. The `serverTimestamp`-based `applyIfNewer` guard (§6.2) handles any ordering correctly — stale arrivals are silently discarded.
+
+> **`EVENT_TO_GROUP` constant in `DashboardPage`:** To prevent drift between this table and the implementation, `DashboardPage.tsx` defines a local `EVENT_TO_GROUP` constant mapping each wire event to its refetch function:
+> ```typescript
+> const EVENT_TO_GROUP = {
+>   'dashboard.approval.changed': refetchApprovals,
+>   'dashboard.activity.updated': refetchActivity,
+>   'dashboard.client.health.changed': refetchClientHealth,
+>   'dashboard.queue.changed': refetchQueue, // system admin only
+> } as const;
+> ```
+> This is not a framework — it is a single-file guardrail so any new entry in the table above forces a corresponding entry in `EVENT_TO_GROUP` (and vice versa). The `useSocket` subscriptions iterate this constant to register handlers.
 
 ### 4.3 Event payload contracts
 
@@ -209,6 +225,8 @@ interface EventEnvelope {
 ```
 
 > The dashboard does not consume the payload for data — it uses the event only as an **invalidation signal** that triggers a refetch. Payload fields above are informational and may be used for future optimistic updates; the source of truth is always the refetch response.
+>
+> **Payload-not-trusted rule (global):** This principle applies to every dashboard block in this spec. No block uses event payload fields to update its displayed state. The payload is informational only and may be used for future optimistic updates. The API response is always the source of truth.
 
 **`dashboard.queue.changed`**
 
@@ -223,8 +241,10 @@ interface EventEnvelope {
 ### 4.4 Idempotency posture (per constraint §1.3-5)
 
 - Each `useSocket` subscription is wrapped by the existing `useSocket` dedup mechanism (LRU set of `eventId`, max 500). Re-delivery of the same `eventId` is silently dropped before the callback fires.
-- The callback itself calls a refetch function. Multiple identical refetch calls for the same block are deduplicated by the per-block in-flight guard (§6.3) — a refetch already in flight drops duplicate triggers until it resolves.
-- These two layers together ensure same-event-twice produces at most one pending refetch.
+- The callback itself calls a refetch function. Multiple refetch triggers for the same group while a refetch is in flight are coalesced by the per-group inflight + pending refs (§6.3): the in-flight fetch resolves, then a single trailing refetch fires if any triggers arrived during the in-flight window.
+- These two layers together ensure same-event-twice produces at most one in-flight refetch plus one trailing refetch — never an unbounded queue, never a silent drop of the freshest server state.
+
+> **`eventId` uniqueness scope:** The `eventId` dedup LRU (max 500) assumes IDs are globally unique across rooms and event types — not per-room or per-event-type. UUID v4 generation by the emitter (`buildEnvelope` calls `crypto.randomUUID()`) satisfies this assumption.
 
 ---
 
@@ -232,7 +252,11 @@ interface EventEnvelope {
 
 All new emits use the existing `emitOrgUpdate` and `emitToSysadmin` helpers from `server/websocket/emitters.ts`. No new helper functions are introduced.
 
-> **Signature note:** Verify the exact `emitOrgUpdate` and `emitToSysadmin` call signatures from `server/websocket/emitters.ts` before implementing. The underlying `emitToRoom(room, event, entityId, data)` takes 4 args; the org-level wrappers may collapse or reorder these. Code examples below use the 4-arg form `(orgId, event, entityId, payload)` — adjust to match the actual signature.
+> **Signature note:** Confirmed against `server/websocket/emitters.ts`:
+> - `emitOrgUpdate(orgId: string, event: string, data: Record<string, unknown>)` — 3 args. The wrapper internally calls `emitToRoom('org:${orgId}', event, orgId, data)`, so `entityId` is always `orgId` for org-scoped emits and is set automatically.
+> - `emitToSysadmin(event: string, entityId: string, data: Record<string, unknown>)` — 3 args. `entityId` is the meaningful resource the event refers to (e.g. `'system'` for queue-wide events).
+>
+> Code examples below use these exact signatures. The `entityId` for `emitOrgUpdate` is implicit (the wrapper supplies `orgId`); the `payload` `data` object carries any per-event identifiers (`subaccountId`, `runId`, etc.).
 
 ### 5.1 `dashboard.approval.changed` — `server/routes/reviewItems.ts`
 
@@ -245,7 +269,7 @@ if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { ac
 
 **Add alongside** (do not replace — the subaccount emit must stay for existing subscribers):
 ```typescript
-emitOrgUpdate(orgId, 'dashboard.approval.changed', orgId, {
+emitOrgUpdate(orgId, 'dashboard.approval.changed', {
   action: 'approved', // or 'rejected'
   subaccountId: subaccountId ?? null,
 });
@@ -271,7 +295,7 @@ emitAgentRunUpdate(ieeRun.agentRunId, 'agent:run:completed', {
 **Add alongside** (only for non-sub-agent runs — guard: `!parentIsSubAgent`):
 ```typescript
 if (!parentIsSubAgent) {
-  emitOrgUpdate(orgId, 'dashboard.activity.updated', orgId, {
+  emitOrgUpdate(orgId, 'dashboard.activity.updated', {
     source: 'agent_run',
     runId: ieeRun.agentRunId,
     finalStatus: resolvedStatus,
@@ -295,7 +319,7 @@ await emitWorkflowEvent(runId, run.subaccountId, 'Workflow:run:status', { status
 **Add after the terminal-status emit** (check `finalStatus` is in `['completed', 'failed', 'cancelled']`):
 ```typescript
 if (['completed', 'failed', 'cancelled'].includes(finalStatus)) {
-  emitOrgUpdate(run.orgId, 'dashboard.activity.updated', run.orgId, {
+  emitOrgUpdate(run.orgId, 'dashboard.activity.updated', {
     source: 'workflow_run',
     runId,
     status: finalStatus,
@@ -315,7 +339,7 @@ if (['completed', 'failed', 'cancelled'].includes(finalStatus)) {
 
 **Emit:**
 ```typescript
-emitOrgUpdate(orgId, 'dashboard.client.health.changed', orgId, {
+emitOrgUpdate(orgId, 'dashboard.client.health.changed', {
   totalClients,
   healthy,
   attention,
@@ -353,6 +377,10 @@ interface TimestampedResponse<T> {
 }
 ```
 
+> **UTC invariant:** All `serverTimestamp` values are UTC ISO-8601 strings. `new Date().toISOString()` always produces UTC (the trailing `Z`). Client-side `Date` comparisons in `applyIfNewer` rely on lexicographic ordering of the UTC string — no timezone conversion is applied, and none is required.
+
+> **Generation invariant:** `serverTimestamp` MUST be generated after all data reads for the response have completed and immediately before response serialization begins. Generating it before the query (e.g. at route entry, or as middleware) is incorrect — it would produce timestamps that precede the data they version, breaking ordering guarantees under load. The correct pattern: complete the data fetch, then construct the response with `serverTimestamp: new Date().toISOString()` as the final step.
+
 **Endpoints to modify** (server route handlers):
 
 | Endpoint | Current response shape | New response shape |
@@ -363,7 +391,22 @@ interface TimestampedResponse<T> {
 | `GET /api/activity` | `ActivityItem[]` | `{ data: ActivityItem[], serverTimestamp: string }` |
 | `GET /api/system/job-queues` | `Array<{ pending, dlqDepth, failed }>` | `{ data: Array<{ pending, dlqDepth, failed }>, serverTimestamp: string }` |
 
-> **Breaking change notice:** All five endpoints change their response envelope. Any other client consumer of these endpoints must be updated in the same PR. Implementation must grep for all usages of each endpoint and update consumers accordingly. This is a mechanical but mandatory step.
+> **Breaking change notice — explicit constraints:** All five endpoints change their response envelope. The following constraints are mandatory:
+>
+> (a) **All consumers updated in the same PR.** Every consumer of each modified endpoint MUST be located via grep and updated in this PR. No follow-up PR is acceptable.
+>
+> (b) **Grep commands** to enumerate consumers — run each and update every match:
+> ```bash
+> grep -rn "/api/activity" client/src server/ --include="*.ts" --include="*.tsx"
+> grep -rn "/api/pulse/attention" client/src server/ --include="*.ts" --include="*.tsx"
+> grep -rn "/api/agent-activity/stats" client/src server/ --include="*.ts" --include="*.tsx"
+> grep -rn "/api/clientpulse/health-summary" client/src server/ --include="*.ts" --include="*.tsx"
+> grep -rn "/api/system/job-queues" client/src server/ --include="*.ts" --include="*.tsx"
+> ```
+>
+> (c) **No dual-format fallback.** The old envelope shape MUST NOT be supported alongside the new one. A consumer that previously read `res.lanes` now reads `res.data.lanes`, and the old path is removed — not branched on.
+>
+> (d) **No partial rollout.** All five endpoints ship in the same PR. Splitting the envelope rollout across multiple PRs creates a window where some consumers see the new shape and others see the old, defeating the ordering guarantee.
 
 ### 6.2 Per-block version tracking in DashboardPage
 
@@ -397,22 +440,31 @@ ISO-8601 string comparison is lexicographically monotonic and correct for this p
 
 **Source-of-truth precedence:** The `serverTimestamp` from the API response is the sole version discriminator. Local state (`useState` values), socket event timestamps, and client-generated timestamps are never used as version comparators.
 
-### 6.3 In-flight guard (idempotency for rapid events)
+### 6.3 In-flight guard (coalescing for rapid events)
 
-Each consistency group tracks whether a refetch is currently in flight:
+Each consistency group tracks whether a refetch is currently in flight, and whether another refetch was requested while in flight:
 
 ```typescript
 const approvalsInflight = useRef(false);
+const approvalsPending = useRef(false);
 const activityInflight = useRef(false);
+const activityPending = useRef(false);
 const clientHealthInflight = useRef(false);
+const clientHealthPending = useRef(false);
 const queueInflight = useRef(false); // system admin only
+const queuePending = useRef(false);
 ```
 
-Refetch function pattern (same shape for all groups):
+Refetch function pattern (same shape for all groups) — coalesce, do not drop:
 
 ```typescript
 async function refetchApprovals() {
-  if (approvalsInflight.current) return; // drop — already fetching
+  if (approvalsInflight.current) {
+    // Another refetch already running — coalesce: mark pending, let the
+    // current fetch resolve, then fire one more refetch in `finally`.
+    approvalsPending.current = true;
+    return;
+  }
   approvalsInflight.current = true;
   try {
     const res = await api.get<TimestampedResponse<AttentionData>>('/api/pulse/attention');
@@ -421,15 +473,57 @@ async function refetchApprovals() {
     });
   } finally {
     approvalsInflight.current = false;
+    if (approvalsPending.current) {
+      approvalsPending.current = false;
+      // Fire one trailing refetch to capture any state change that arrived
+      // while the previous fetch was in flight.
+      refetchApprovals();
+    }
   }
 }
 ```
 
-This ensures that rapid-fire events (multiple approvals in quick succession) result in at most one pending refetch at a time. Events arriving while a fetch is in flight are silently dropped — the in-flight fetch will return current data.
+This ensures that rapid-fire events (multiple approvals in quick succession) result in at most **one in-flight refetch plus one trailing refetch** — never an unbounded queue, never a silent drop. The trailing refetch closes the reconnect-window race where a state change occurs after the in-flight fetch's snapshot but before the next user-driven event.
 
-> **Trade-off acknowledged:** The drop-if-in-flight strategy means that under very rapid event streams, one event's data change may not be individually reflected. This is acceptable because: (a) the in-flight fetch returns the most current server state at response time, (b) the feed's append-only dedup model (§6.4) ensures no rows are lost, and (c) any missed metric update will be corrected on the next event.
+> **Why coalesce instead of drop:** A pure drop-if-in-flight strategy can lose the freshest server state when an event arrives in the narrow window between the in-flight fetch's read and its response. Coalescing guarantees that every event triggers at least one refetch that began *after* the event was emitted, which is the correctness condition the freshness guarantee depends on.
 
-### 6.4 Activity feed dedup rule
+### 6.4 Failure posture (refetch errors)
+
+If a refetch throws (network error, 5xx, parsing failure) or returns a non-2xx response, the group's `applyIfNewer` callback MUST NOT be called. The `lastUpdatedAt` timestamp MUST NOT be updated. This prevents the "stuck but looks fresh" failure mode where the indicator pulses to "updated just now" while the underlying data has not in fact updated.
+
+Pattern (applies to every `refetch*()` function):
+
+```typescript
+async function refetchApprovals() {
+  if (approvalsInflight.current) {
+    approvalsPending.current = true;
+    return;
+  }
+  approvalsInflight.current = true;
+  try {
+    const res = await api.get<TimestampedResponse<AttentionData>>('/api/pulse/attention');
+    // Only on success — applyIfNewer + freshness update happen inside the callback
+    applyIfNewer(approvalsTs, res.data.serverTimestamp, () => {
+      setAttention(res.data.data);
+      markFresh(new Date()); // see §7.4 — only fires on successful refetch
+    });
+  } catch (err) {
+    // Failure: do NOT update applyIfNewer state, do NOT update lastUpdatedAt.
+    // Freshness indicator will continue to age, signalling staleness to the operator.
+    console.error('[DashboardPage] refetchApprovals failed:', err);
+  } finally {
+    approvalsInflight.current = false;
+    if (approvalsPending.current) {
+      approvalsPending.current = false;
+      refetchApprovals();
+    }
+  }
+}
+```
+
+The `console.error` is the minimum failure-visibility floor; no toast, no banner — the aging `<FreshnessIndicator>` is the operator-facing staleness signal.
+
+### 6.5 Activity feed dedup rule
 
 `UnifiedActivityFeed` is append-only. When triggered by `dashboard.activity.updated`, it refetches `/api/activity` and receives the latest N items. The feed must not produce duplicate rows or reorder existing rows.
 
@@ -440,15 +534,20 @@ This ensures that rapid-fire events (multiple approvals in quick succession) res
 
 **`refreshToken` prop:** `DashboardPage` increments a `refreshToken` counter on `dashboard.activity.updated` events. `UnifiedActivityFeed` adds a `refreshToken?: number` prop; a `useEffect` with `refreshToken` as a dependency triggers the internal refetch. This avoids exposing a ref-based imperative `refresh()` handle.
 
+**`expectedTimestamp` prop (Activity group atomicity):** `UnifiedActivityFeed` also accepts an optional `expectedTimestamp?: string` prop. When provided and the feed's internal fetch returns a `serverTimestamp < expectedTimestamp`, the feed discards the response (does not update its rendered rows). This pins the feed and the stats `MetricCard(Runs 7d)` to the same activity-group version: both refresh to a state at least as fresh as the group's `activityTs`, or neither does.
+
 ```typescript
 // In DashboardPage
 const [activityRefreshToken, setActivityRefreshToken] = useState(0);
 
-// On dashboard.activity.updated event:
-setActivityRefreshToken(t => t + 1);
-
-// In JSX:
-<UnifiedActivityFeed orgId={orgId} limit={20} refreshToken={activityRefreshToken} />
+// In refetchActivity (§7.2): pass activityTs.current as expectedTimestamp so the
+// feed's internal fetch is gated on the same version the group just established.
+<UnifiedActivityFeed
+  orgId={orgId}
+  limit={20}
+  refreshToken={activityRefreshToken}
+  expectedTimestamp={activityTs.current}
+/>
 ```
 
 ---
@@ -471,9 +570,12 @@ Blocks that derive from the same underlying data must update together or not at 
 Each group shares a single `refetch*()` function. Both (or all) state setters within a group are called **synchronously within the same `applyIfNewer` callback** before React has a chance to re-render:
 
 ```typescript
-// Approvals group example
+// Approvals group example — see §6.3 for the full coalescing pattern + §6.4 for failure handling
 async function refetchApprovals() {
-  if (approvalsInflight.current) return;
+  if (approvalsInflight.current) {
+    approvalsPending.current = true;
+    return;
+  }
   approvalsInflight.current = true;
   try {
     const res = await api.get<TimestampedResponse<AttentionData>>('/api/pulse/attention');
@@ -482,38 +584,57 @@ async function refetchApprovals() {
       setAttention(res.data.data);
       // MetricCard value is derived from attention.total directly — no separate setter needed
     });
+  } catch (err) {
+    console.error('[DashboardPage] refetchApprovals failed:', err);
   } finally {
     approvalsInflight.current = false;
+    if (approvalsPending.current) {
+      approvalsPending.current = false;
+      refetchApprovals();
+    }
   }
 }
 ```
 
-For the Activity group, two separate endpoints feed two blocks. Both fetches are issued in parallel; the group is applied only when **both** responses arrive, using `Promise.all`:
+For the Activity group, two separate endpoints feed two blocks. Both fetches are issued in parallel; the group is applied only when **both** responses arrive, using `Promise.all`. The coalescing pattern from §6.3 applies — a refetch arriving while one is in flight sets `activityPending.current = true` and is fired from `finally`:
 
 ```typescript
 async function refetchActivity() {
-  if (activityInflight.current) return;
+  if (activityInflight.current) {
+    activityPending.current = true;
+    return;
+  }
   activityInflight.current = true;
   try {
     const [feedRes, statsRes] = await Promise.all([
       api.get<TimestampedResponse<ActivityItem[]>>('/api/activity'),
       api.get<TimestampedResponse<ActivityStats>>('/api/agent-activity/stats'),
     ]);
-    // Use the newer of the two timestamps as the group version
-    const groupTs = feedRes.data.serverTimestamp > statsRes.data.serverTimestamp
+    // Use the OLDER of the two timestamps as the group version. min(), not max():
+    // both datasets must be at least this fresh before applying. Picking max would
+    // let a stale dataset slip in alongside a newer one, breaking group atomicity.
+    const groupTs = feedRes.data.serverTimestamp < statsRes.data.serverTimestamp
       ? feedRes.data.serverTimestamp
       : statsRes.data.serverTimestamp;
     applyIfNewer(activityTs, groupTs, () => {
       setActivityStats(statsRes.data.data);
       setActivityRefreshToken(t => t + 1); // signals UnifiedActivityFeed to re-fetch internally
+      // The feed receives `expectedTimestamp={activityTs.current}` (now updated to
+      // groupTs) and will discard any internal fetch result older than that — see §6.5.
     });
+  } catch (err) {
+    console.error('[DashboardPage] refetchActivity failed:', err);
   } finally {
     activityInflight.current = false;
+    if (activityPending.current) {
+      activityPending.current = false;
+      refetchActivity();
+    }
   }
 }
 ```
 
-> **Note on `UnifiedActivityFeed` and the Activity group:** The feed fetches its own data internally when `refreshToken` increments. This means feed data and stats data are fetched in parallel (correct) but the feed's internal fetch is a separate HTTP call. The `activityTs` guard on `applyIfNewer` covers the stats state; the feed's own internal version check covers the feed rows. Both happen atomically from the user's perspective because both refetches complete before the next render cycle produces a visible delta.
+> **Activity group atomicity:** The stats card and the feed are version-aligned via the `expectedTimestamp` prop (§6.5). When `refetchActivity` updates `activityTs` to `groupTs`, the feed's next internal fetch must return `serverTimestamp ≥ groupTs` or the result is discarded. This guarantees the user never sees the stats card and the feed reflecting different points in time within the Activity group.
 
 ### 7.3 `WorkspaceFeatureCard(ClientPulse)` update
 
@@ -532,14 +653,28 @@ When `refetchClientHealth()` calls `setHealth(newData)`, React re-renders `Dashb
 
 ### 7.4 FreshnessIndicator integration with groups
 
-Every successful group refetch (any consistency group, including reconnect refetch) calls `setLastUpdatedAt(new Date())` to update `<FreshnessIndicator>`. This call is added inside each `applyIfNewer` callback:
+Every successful group refetch (any consistency group, including reconnect refetch) updates the `<FreshnessIndicator>` via a `markFresh(ts: Date)` helper. This call is added inside each `applyIfNewer` callback so freshness updates only fire on successful, non-stale responses (per §6.4):
 
 ```typescript
 applyIfNewer(approvalsTs, res.data.serverTimestamp, () => {
   setAttention(res.data.data);
-  setLastUpdatedAt(new Date()); // freshness indicator update
+  markFresh(new Date()); // freshness indicator update
 });
 ```
+
+> **Batched freshness updates:** When two or more groups update simultaneously (e.g. on reconnect, when `refetchAll()` triggers all four groups in parallel), naive `setLastUpdatedAt(new Date())` calls trigger redundant renders and may flicker the pulse animation. To prevent this, freshness updates flow through a `useCallback`-stable `markFresh(ts)` helper that only calls `setLastUpdatedAt(ts)` if `ts > lastUpdatedAtRef.current`:
+>
+> ```typescript
+> const lastUpdatedAtRef = useRef<Date>(new Date());
+> const markFresh = useCallback((ts: Date) => {
+>   if (ts > lastUpdatedAtRef.current) {
+>     lastUpdatedAtRef.current = ts;
+>     setLastUpdatedAt(ts);
+>   }
+> }, []);
+> ```
+>
+> Within `refetchAll()` and any per-tick batch (multiple `applyIfNewer` callbacks resolving in the same React render cycle), capture `const now = new Date()` once before invoking the group refetches and pass that single `Date` value through to `markFresh(now)` — this guarantees one `setLastUpdatedAt` call per batch, not one per group.
 
 ---
 
@@ -596,7 +731,7 @@ Since each `refetch*` function has its own in-flight guard, calling them all sim
 
 ### 8.4 FreshnessIndicator on reconnect
 
-After `refetchAll()` completes each successful sub-refetch, the group's `applyIfNewer` callback calls `setLastUpdatedAt(new Date())`. The freshness indicator therefore updates to "updated just now" as soon as any group refetch succeeds — no special reconnect code needed in the indicator.
+After `refetchAll()` completes each successful sub-refetch, the group's `applyIfNewer` callback calls `markFresh(new Date())` (see §7.4). The freshness indicator therefore updates to "updated just now" as soon as any group refetch succeeds — no special reconnect code needed in the indicator. The `markFresh` dedup ensures a single `setLastUpdatedAt` call when multiple group refetches resolve in the same render cycle.
 
 ---
 
@@ -687,7 +822,7 @@ const PULSE_DURATION_MS = 600;
 const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>(() => new Date());
 ```
 
-On mount, `DashboardPage` fetches all blocks in parallel (unchanged behaviour). As each group resolves, it calls `setLastUpdatedAt(new Date())`. The indicator therefore shows a near-accurate "updated X ago" immediately after initial load with no special handling.
+On mount, `DashboardPage` fetches all blocks in parallel (unchanged behaviour). As each group resolves successfully, it calls `markFresh(new Date())` (§7.4), which routes through the dedup helper to `setLastUpdatedAt`. The indicator therefore shows a near-accurate "updated X ago" immediately after initial load with no special handling.
 
 ---
 
@@ -717,13 +852,18 @@ On mount, `DashboardPage` fetches all blocks in parallel (unchanged behaviour). 
    }, []));
    ```
 
-4. **`dashboard.queue.changed` is received via `system:sysadmin` room.** The sysadmin room requires an explicit join via `useSocketRoom` (the room gate validates `system_admin` role server-side). Confirm whether `DashboardPage` already joins `system:sysadmin` for system-admin users; if not, add:
+4. **`dashboard.queue.changed` is received via `system:sysadmin` room.** The sysadmin room requires an explicit join via `useSocketRoom` (the room gate validates `system_admin` role server-side). Always call the hook unconditionally and pass `null` as the `roomId` for non-sysadmin users — the hook's `useEffect` early-returns when `roomId` is null (verified in `client/src/hooks/useSocket.ts`):
    ```typescript
-   if (isSystemAdmin) {
-     useSocketRoom('sysadmin', '', ['dashboard.queue.changed'], refetchQueue);
-   }
+   useSocketRoom(
+     'sysadmin',
+     isSystemAdmin ? 'system' : null,
+     {
+       'dashboard.queue.changed': () => setQueueRefreshToken(t => t + 1),
+     },
+     refetchQueue, // onReconnectSync — re-fetch on socket reconnect
+   );
    ```
-   > Note: `useSocketRoom` cannot be called conditionally in standard React. If `isSystemAdmin` is stable (known before first render), the room join can be placed behind a component-level guard. Confirm the exact pattern used by other sysadmin socket subscriptions in the codebase.
+   > **Hook signature note:** The third argument is `Record<string, (data: unknown) => void>` — an event-name-to-handler map, not an array of event names. The fourth argument is the optional `onReconnectSync` callback. The null-roomId early-return is the gate — no conditional hook call is needed, which keeps React's hook ordering rules satisfied for both sysadmin and non-sysadmin renders.
 
 5. **Apply version tracking** using `queueTs` ref — same `applyIfNewer` pattern as other groups.
 
@@ -762,8 +902,8 @@ The server has never emitted this event (confirmed: no grep matches). This is de
 2. **Add `dashboard:update` server emit** in the ClientPulse health recalculation path (same location as `dashboard.client.health.changed` from §5.4):
    ```typescript
    // Emit both events from the same location
-   emitOrgUpdate(orgId, 'dashboard.client.health.changed', orgId, healthSummary);
-   emitOrgUpdate(orgId, 'dashboard:update', orgId, healthSummary);
+   emitOrgUpdate(orgId, 'dashboard.client.health.changed', healthSummary);
+   emitOrgUpdate(orgId, 'dashboard:update', healthSummary);
    ```
    The `dashboard:update` payload must match the `Partial<HealthSummary>` shape that `ClientPulseDashboardPage` merges into state. Use the same health summary object.
 
@@ -956,11 +1096,12 @@ Single-phase build. No backward dependencies. All new server emitters are additi
 
 - **Goals ↔ Implementation match.** §1.2 success criteria each have a corresponding implementation section.
 - **Every constraint in §1.3 has a named mechanism:**
-  - Block-level refetch → §4 event table + §6.3 in-flight guard
-  - Deterministic mapping → §4.2 exhaustive table
-  - Consistency groups → §7.2 `Promise.all` + synchronous state setters
-  - Latest-data-wins → §6.2 `applyIfNewer` + `serverTimestamp`
-  - Idempotency → §4.4 two-layer dedup
+  - Block-level refetch → §4 event table + §6.3 coalescing inflight/pending refs
+  - Deterministic mapping → §4.2 exhaustive table + `EVENT_TO_GROUP` constant
+  - Consistency groups → §7.2 `Promise.all` + synchronous state setters + §6.5 `expectedTimestamp` for activity-group atomicity
+  - Latest-data-wins → §6.2 `applyIfNewer` + `serverTimestamp` (UTC + post-read generation invariant)
+  - Idempotency → §4.4 two-layer dedup (eventId LRU + per-group coalescing)
+  - Failure handling → §6.4 (no `applyIfNewer`, no `markFresh` on failure — indicator ages to signal staleness)
   - No new state library → §3.4 (not introduced)
   - No global socket abstraction → §3.4 (not introduced)
   - Pulse debounced ≥1.5s → §9.3 `PULSE_DEBOUNCE_MS = 1_500`
