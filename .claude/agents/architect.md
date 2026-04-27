@@ -151,25 +151,31 @@ Every plan you produce must follow this exact pattern:
 
 ### Development phases (Chunks 1..N)
 
-- **Per-chunk verification commands MUST be limited to:** `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. Nothing else.
+- **Per-chunk verification commands MUST be limited to:** `npm run build:server` (fast typecheck) only. Nothing else.
 - **Forbidden mid-build, in any form:**
   - `scripts/verify-*.sh` of any kind
+  - Unit test runs of any scope — targeted, partial, or full
   - "Run verify-X to confirm no regression" — never write this in a plan
   - Whole-repo lint or full test-suite passes between chunks
   - Any gate run framed as "sanity check" / "regression check" / "quick re-verify"
-- If a chunk's correctness depends on a gate-level invariant, write a targeted unit test for that invariant inside the chunk. Do not lean on the gate script.
+- If a chunk's correctness depends on a gate-level invariant, write a targeted unit test for that invariant inside the chunk — but do not run it. All unit tests accumulate and run once at programme-end.
 
 ### Final phase — Programme-end verification (after ALL chunks AND spec-conformance complete)
 
-- Run the full gate set once. This is the ONLY post-baseline gate run.
-- Spec-conformance runs BEFORE the final gate pass, not after — if spec-conformance applies fixes, those fixes are part of what the final gate pass validates.
+Run in this exact order:
+
+1. `bash scripts/run-all-unit-tests.sh` — full unit test suite, run ONCE here and nowhere else.
+2. Full gate set (`scripts/verify-*.sh`) — run ONCE here and nowhere else.
+3. Hand off to `pr-reviewer`.
+
+Spec-conformance runs BEFORE this phase — if it applies fixes, those are included in what the unit tests and gates validate here.
 
 ### What this means for the plan document
 
-- Each chunk's "Verification commands" section lists ONLY `npm run build:server` + targeted unit tests. It must not contain any `scripts/verify-*.sh` invocation.
-- The plan ends with a single "Programme-end verification" section listing the full gate set, ordered after spec-conformance.
-- The plan's "Executor notes" must include this line verbatim: **"Gate scripts run TWICE TOTAL per this plan: once during Phase 0 baseline (and any pre-existing-violation fixes) and once during Programme-end verification after all chunks AND spec-conformance. Running them between chunks, after individual fixes, or as 'regression sanity checks' is forbidden — it adds wall-clock cost without adding signal."**
-- Do not introduce hedging language ("optionally", "if helpful", "feel free to") around gate timing. Subagents read hedges as permission.
+- Each chunk's "Verification commands" section lists ONLY `npm run build:server`. No unit tests, no gate scripts.
+- The plan ends with a single "Programme-end verification" section in the order above (unit tests → gates → pr-reviewer).
+- The plan's "Executor notes" must include this line verbatim: **"Unit tests and gate scripts are forbidden mid-build. Unit tests run ONCE at programme-end (step 1 of final phase). Gate scripts run TWICE TOTAL: once during Phase 0 baseline and once at programme-end (step 2 of final phase). Running either between chunks, after individual fixes, or as 'sanity checks' is forbidden — it adds wall-clock cost without adding signal."**
+- Do not introduce hedging language ("optionally", "if helpful", "feel free to") around gate or unit-test timing. Subagents read hedges as permission.
 
 ---
 
