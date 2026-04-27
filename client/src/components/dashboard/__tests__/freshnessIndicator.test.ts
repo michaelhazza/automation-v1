@@ -16,6 +16,7 @@ function check(secsAgo: number, expected: string) {
 
 check(0,    'updated just now');
 check(5,    'updated just now');
+check(9,    'updated just now');
 check(10,   'updated 10s ago');
 check(59,   'updated 59s ago');
 check(60,   'updated 1m ago');

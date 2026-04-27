@@ -38,6 +38,7 @@ function applyIfNewer(
   let called = false;
   applyIfNewer(ts, '2026-04-27T10:00:00.000Z', () => { called = true; });
   assert.ok(!called, 'equal: apply() should not be called');
+  assert.strictEqual(ts.current, '2026-04-27T10:00:00.000Z', 'equal: currentTs should not change');
 }
 
 // Scenario 4: empty initial state — any timestamp beats ''
