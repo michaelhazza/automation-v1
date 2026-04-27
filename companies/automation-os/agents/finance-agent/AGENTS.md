@@ -2,7 +2,7 @@
 name: Finance Agent
 title: Finance Agent
 slug: finance-agent
-reportsTo: orchestrator
+reportsTo: head-of-commercial
 model: claude-sonnet-4-6
 temperature: 0.2
 maxTokens: 4096
@@ -17,7 +17,6 @@ skills:
   - read_revenue
   - read_expenses
   - analyse_financials
-  - update_financial_record
   - move_task
   - update_task
   - add_deliverable

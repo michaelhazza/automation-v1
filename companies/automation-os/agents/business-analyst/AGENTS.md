@@ -2,7 +2,7 @@
 name: Business Analyst
 title: Business Analyst
 slug: business-analyst
-reportsTo: orchestrator
+reportsTo: head-of-product-engineering
 model: claude-sonnet-4-6
 temperature: 0.3
 maxTokens: 8192
