@@ -149,6 +149,9 @@ For each round:
       (Rationale: silent defers accumulate invisible spec debt.)
     - The finding would change the spec's contract with `architecture.md` or
       `docs/spec-context.md` in a way that propagates across other specs.
+    - Severity is `high` or `critical` — even a mechanical spec fix is worth a
+      look when the underlying issue is serious. Low/medium severity technical
+      items still auto-apply.
     - The recommendation contradicts a documented convention in `CLAUDE.md`,
       `architecture.md`, or `docs/spec-context.md` (use `[missing-doc]` prefix
       in rationale as before).
@@ -460,8 +463,9 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   described product behaviour.
 - **Escalation carveouts.** Technical findings escalate to the approval gate
   when the recommendation is `defer`, the finding changes the spec's contract
-  with `architecture.md` or `docs/spec-context.md` in a cross-spec way, the
-  rationale carries `[missing-doc]`, or you are not confident in the fix.
+  with `architecture.md` or `docs/spec-context.md` in a cross-spec way,
+  severity is `high` or `critical`, the rationale carries `[missing-doc]`, or
+  you are not confident in the fix.
 - **User-facing findings.** The user makes the final call — no silent
   auto-apply, auto-reject, or auto-defer for anything triaged `user-facing` or
   escalated from `technical`. Your recommendation is advisory only.
