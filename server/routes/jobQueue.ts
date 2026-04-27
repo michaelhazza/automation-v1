@@ -13,7 +13,7 @@ router.get(
   requireSystemAdmin,
   asyncHandler(async (_req, res) => {
     const summaries = await jobQueueHealthService.getQueueSummaries();
-    res.json(summaries);
+    res.json({ data: summaries, serverTimestamp: new Date().toISOString() });
   })
 );
 

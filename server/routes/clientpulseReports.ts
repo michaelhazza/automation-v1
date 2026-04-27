@@ -63,20 +63,23 @@ router.post('/api/reports/:id/resend', authenticate, asyncHandler(async (req, re
 router.get('/api/clientpulse/health-summary', authenticate, asyncHandler(async (req, res) => {
   const orgId = req.orgId;
   if (!orgId) {
-    res.json(null);
+    res.json({ data: null, serverTimestamp: new Date().toISOString() });
     return;
   }
   // Derive from latest report if available
   const latest = await reportService.getLatestReport(orgId);
   if (!latest) {
-    res.json(null);
+    res.json({ data: null, serverTimestamp: new Date().toISOString() });
     return;
   }
   res.json({
-    totalClients: latest.totalClients,
-    healthy: latest.healthyCount,
-    attention: latest.attentionCount,
-    atRisk: latest.atRiskCount,
+    data: {
+      totalClients: latest.totalClients,
+      healthy: latest.healthyCount,
+      attention: latest.attentionCount,
+      atRisk: latest.atRiskCount,
+    },
+    serverTimestamp: new Date().toISOString(),
   });
 }));
 
