@@ -1129,3 +1129,19 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
 - [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
   - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
   - Pre-existing. Process-local cache that captures the first-seen org's agent row id and reuses it for the lifetime of the process. Production has a fixed system-ops org so this is fine today; future dual-org / test-env scenarios could collide. Cheap fix: switch to `Map<organisationId, agentId>`.
+
+## Deferred from spec-conformance review — system-monitoring-agent-fixes (2026-04-27)
+
+**Captured:** 2026-04-27T11:41:03Z
+**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-fixes-2026-04-27T11-41-03Z.md`
+**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
+
+- [ ] REQ #29 — Tier-1 items in `tasks/post-merge-system-monitor.md` not yet checked off with cross-reference to this spec
+  - Spec section: §14.5 A5.1, §14.6 (Definition of done bullet 5)
+  - Gap: All five Tier-1 items in `tasks/post-merge-system-monitor.md` remain `- [ ]`. Spec A5.1 requires they be marked `- [x]` with a one-line cross-reference to `tasks/builds/system-monitoring-agent-fixes/spec.md` after merge. Tier-2 items correctly remain `- [ ]`. This is a docs cross-link, not runtime behaviour.
+  - Suggested approach: Update `tasks/post-merge-system-monitor.md` in the same merge commit (or immediately after merge) — for each of the five Tier-1 items (rate-limit retry idempotency, list filter `triageStatus=failed AND diagnosisStatus=none`, backend staleness guard, write-vs-declared synthetic check, incident-silence synthetic check), flip `- [ ]` → `- [x]` and append `— closed by tasks/builds/system-monitoring-agent-fixes/spec.md (PR <merge-commit-or-PR-#>).` Defer until merge so the cross-reference can name the actual PR/commit.
+
+- [ ] Spec defect — §9.1 SQL references non-existent `system_incidents.metadata` column
+  - Spec section: §9.1, §4.5, §9.6 (and §14.3 A3.6 acceptance test which depends on the exclusion working)
+  - Gap: The `incidentSilence` SQL in spec §9.1 (and the verbatim implementation at `server/services/systemMonitor/synthetic/incidentSilence.ts`) references `si.metadata->>'checkId'` in two places (the `incidents_in_window` exclusion and the `synthetic_fires_in_proof_window` exclusion). The `system_incidents` table has no `metadata` column — the closest equivalent is `latest_error_detail` (jsonb), populated by `recordIncident` from the `errorDetail` parameter (see `server/services/incidentIngestor.ts:241,251`). When the synthetic-checks tick runs `incidentSilence` against a real database, the query will fail with `ERROR: column si.metadata does not exist`. The implementation faithfully follows the spec — this is a SPEC defect, not an implementation defect.
+  - Suggested approach: open a `spec-reviewer` (or `chatgpt-spec-review`) round on `tasks/builds/system-monitoring-agent-fixes/spec.md` §9.1 to swap `si.metadata->>'checkId'` for `si.latest_error_detail->>'checkId'` in BOTH the `incidents_in_window` and `synthetic_fires_in_proof_window` exclusions, and update §9.6 / §14.3 (A3.6) cross-references. Once the spec is corrected, mirror the rename in `incidentSilence.ts` (and any acceptance-test seeding fixtures that stamp the metadata key). Verify the `synthetic-check fired` row produced by `recordIncident` actually persists `errorDetail.metadata.checkId` into `latest_error_detail` so the proof-of-life exclusion can match — `syntheticChecksTickHandler.ts:46` passes `result.metadata` as `errorDetail`, so `latest_error_detail->>'checkId'` should match the `metadata.checkId: 'incident-silence'` value emitted by `incidentSilence`. Confirm by reading one synthetic-check `system_incidents` row after a tick.
