@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed)
+**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -170,6 +170,30 @@ Cross-cutting lifecycle hooks (heartbeat, audit, cost tracking) fire from every 
 ### 8.16 Allow-list discipline
 
 Every entry in a project allow-list (RLS exceptions, gate suppressions, baseline files) cites a linked invariant ID, spec section anchor, or migration filename — bare rationale text is not enough.
+
+### 8.17 Multi-source UI merges sort by server time with a stable tiebreaker
+
+UI surfaces that consume the same logical event from optimistic and websocket sources (or any two replay paths) merge by stable record ID and sort by server-stamped timestamp with an immutable secondary key — never primary-only.
+
+### 8.18 Terminal state-machine writes flow through `assertValidTransition`
+
+Every code path that writes a terminal status to a state-machine row (run, step, action) calls `shared/stateMachineGuards.ts` immediately before the UPDATE; sites that have not yet adopted it emit a `state_transition` log with `guarded: false` — silent unguarded writes are not allowed.
+
+### 8.19 Error codes are extracted via the single shared helper
+
+`shared/errorCode.ts` (`getErrorCode`) is the only place that branches on error shape (`string` / `{ code }` / `{ error: string }` / `{ error: { code } }`); `Error.message` is free text and is never promoted to the code channel.
+
+### 8.20 Deferred enforcement requires an observability log at the same boundary
+
+When a mechanical isolation or transition assertion is deferred, the matching boundary still ships a structured log NOW with table, operation, and scope-tuple booleans — write-side boundaries get the log even when the read-side spec slips.
+
+### 8.21 Pure functions whose inputs may reorder are tested under input permutation
+
+Any pure resolver / reducer / ranker whose source array can be reordered between renders ships with a determinism test that exercises ≥3 input orderings and asserts by-key identical output.
+
+### 8.22 Allow-list annotations name the function they cover
+
+Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
 
 ---
 

@@ -32,6 +32,7 @@ user can audit after the fact.
 ## Before doing anything else, read:
 1. `CLAUDE.md` — project conventions and the "Before you write a spec" section
 2. `docs/spec-context.md` — framing ground truth for all specs in this project
+3. `DEVELOPMENT_GUIDELINES.md` — locked build-discipline rules (RLS, service-tier, gates, migrations, §8 development discipline) used to evaluate whether a ChatGPT spec suggestion contradicts existing locked policy. Always read; skip only for trivial typo / formatting specs.
 
 ---
 
