@@ -27,7 +27,7 @@ import { llmRequests } from '../db/schema/llmRequests.js';
 import { actions } from '../db/schema/actions.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
 import { subaccountAgents } from '../db/schema/subaccountAgents.js';
-import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitAgentRunUpdate, emitOrgUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
 import {
   mapIeeStatusToAgentRunStatus,
@@ -377,6 +377,14 @@ export async function finaliseAgentRunFromIeeRun(
       finalStatus: resolvedStatus,
       failureReason: ieeRun.failureReason ?? null,
     });
+
+    if (!parentIsSubAgent) {
+      emitOrgUpdate(parent.organisationId, 'dashboard.activity.updated', {
+        source: 'agent_run',
+        runId: ieeRun.agentRunId,
+        finalStatus: resolvedStatus,
+      });
+    }
 
     // Codex dual-review finding #3: the non-IEE path pairs every
     // 'live:agent_started' emission with a matching 'live:agent_completed'
