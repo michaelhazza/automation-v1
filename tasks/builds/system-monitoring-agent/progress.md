@@ -1,8 +1,11 @@
 # System Monitoring Agent — Build Progress
 
 **Branch:** `claude/add-system-monitoring-BgLlY`
-**Status:** Spec complete. Awaiting user-led review.
-**Last commit at spec-complete:** `daad199a` (spec section 19 — future phases summary)
+**Status:** Implementation complete. Awaiting user review and PR open.
+**Last implementation commit:** `2bff1b33` (fix: type errors in Phase 2.5 heuristics + sweep handler)
+**Spec file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
+**Plan file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-implementation-plan.md`
+**Staging smoke checklist:** `tasks/builds/system-monitoring-agent/staging-smoke-checklist.md`
 **Spec file:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
 
 ## Spec corrections
@@ -158,3 +161,44 @@ All 5 commits implemented, spec-reviewed, quality-reviewed, and verified. Build 
 - server/services/incidentIngestor.ts — override validation + throttle + idempotency wired into recordIncident before isAsyncMode() branch
 - server/services/__tests__/incidentIngestorIdempotency.test.ts — 7 tests, all pass
 - server/services/__tests__/incidentIngestorThrottle.test.ts — 6 tests, all pass
+
+## Slice B — COMPLETE
+
+All 5 commits implemented and verified. Build passes (npm run build:server exits 0). No gates run mid-slice (per plan §1.3).
+
+### Commit 1: Investigate-Fix Protocol doc + CLAUDE.md hook (923affa2 — see actual SHA)
+- docs/investigate-fix-protocol.md — full v1 protocol contract (5 sections: purpose, template, rules, authoring, iteration)
+- CLAUDE.md — §Investigate-Fix Protocol hook added before §User Preferences
+
+### Commit 2: Heuristic registry skeleton
+- server/services/systemMonitor/heuristics/types.ts — all heuristic types including EntityKind, BaselineEntityKind (distinct), Baseline, BaselineReader, HeuristicContext, Candidate, HeuristicResult, BaselineRequirement, SuppressionRule, Heuristic interfaces
+- server/services/systemMonitor/heuristics/phaseFilter.ts — parseHeuristicPhases + matchesPhase
+- server/services/systemMonitor/heuristics/index.ts — HEURISTICS empty array + getActiveHeuristics()
+
+### Commit 3: Baselining service
+- server/services/systemMonitor/baselines/refreshJobPure.ts — computeStats() with linear interpolation percentiles
+- server/services/systemMonitor/baselines/sourceTableQueries.ts — aggregateAgentRuns (real PERCENTILE_CONT query, entity_id=agents.slug, entity_change_marker=config_hash); aggregateSkillExecutions/ConnectorPolls/LlmRouterCalls as stubs
+- server/services/systemMonitor/baselines/baselineReader.ts — baselineReader singleton (get + getOrNull)
+- server/services/systemMonitor/baselines/refreshJob.ts — runBaselineRefresh with withAdminConnectionGuarded + SET LOCAL ROLE admin_role + drift detection + UPSERT
+- server/jobs/systemMonitorBaselineRefreshJob.ts — handleBaselineRefresh with B2 comment block + withSystemPrincipal
+
+### Commit 4: Synthetic checks engine (923affa2)
+- server/services/systemMonitor/synthetic/types.ts — SyntheticCheck interface, SyntheticResult union, bucket15min()
+- server/services/systemMonitor/synthetic/syntheticChecksPure.ts — 7 pure decision helpers (isQueueStalled, isAgentInactive, isConnectorPollStale, isDlqStale, isHeartbeatStale, isConnectorErrorRateElevated, isSuccessRateLow)
+- server/services/systemMonitor/synthetic/pgBossQueueStalled.ts — fires on pending queue with no recent completion
+- server/services/systemMonitor/synthetic/noAgentRunsInWindow.ts — fires when system-managed agent inactive beyond threshold
+- server/services/systemMonitor/synthetic/connectorPollStale.ts — fires when active connector last sync > interval × multiplier
+- server/services/systemMonitor/synthetic/dlqNotDrained.ts — fires when pgboss.job DLQ has stale failed rows
+- server/services/systemMonitor/synthetic/heartbeatSelf.ts — two-tick heartbeat via process-local Map; metadata.isSelfCheck=true
+- server/services/systemMonitor/synthetic/connectorErrorRateElevated.ts — fires when connector in error status > 1h
+- server/services/systemMonitor/synthetic/agentRunSuccessRateLow.ts — fires when last-hour success rate < baseline p50 - 30%; degrades gracefully if no baseline
+- server/services/systemMonitor/synthetic/sweepCoverageDegraded.ts — stub returning fired:false (activates Slice C)
+- server/services/systemMonitor/synthetic/syntheticChecksTickHandler.ts — per-check try/catch tick handler, calls recordIncident with source='synthetic' + fingerprintOverride + idempotencyKey
+- server/services/systemMonitor/synthetic/index.ts — SYNTHETIC_CHECKS registry (8 checks)
+- server/jobs/systemMonitorSyntheticChecksJob.ts — B2 comment block + withSystemPrincipal entry point
+- server/services/systemMonitor/synthetic/__tests__/syntheticChecksPure.test.ts — 24 tests, all pass
+
+### Commit 5: Wire pg-boss queues (6f4c17b5)
+- server/services/queueService.ts — system-monitor-synthetic-checks (every minute) + system-monitor-baseline-refresh (every 15 min); both teamSize:1 teamConcurrency:1
+
+**Slice B handoff gate row:** protocol doc + hook landed ✓, registry types compile ✓, baseline refresh structured ✓, synthetic checks (all 8) with 24 pure tests passing ✓, pg-boss wiring verified ✓
