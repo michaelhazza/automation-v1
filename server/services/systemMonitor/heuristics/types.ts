@@ -8,14 +8,21 @@
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 
+// EntityKind describes the kind of candidate being evaluated by a heuristic
+// (the sweep/triage input entity).
 export type EntityKind = 'agent_run' | 'job' | 'skill_execution' | 'connector_poll' | 'llm_call';
+
+// BaselineEntityKind describes what a baseline row aggregates over.
+// Distinct from EntityKind: 'agent' is an aggregate across many 'agent_run' candidates.
+// Per spec §7.1.
+export type BaselineEntityKind = 'agent' | 'skill' | 'connector' | 'job_queue' | 'llm_router';
 
 // ---------------------------------------------------------------------------
 // Baseline types (interface only — implementation lives in baselines/)
 // ---------------------------------------------------------------------------
 
 export interface Baseline {
-  entityKind: EntityKind;
+  entityKind: BaselineEntityKind;
   entityId: string;
   metric: string;
   windowStart: Date;
@@ -32,14 +39,14 @@ export interface Baseline {
 
 export interface BaselineReader {
   get(
-    entityKind: EntityKind,
+    entityKind: BaselineEntityKind,
     entityId: string,
     metric: string,
   ): Promise<Baseline | null>;
 
   // Returns null if sample_count < minSampleCount.
   getOrNull(
-    entityKind: EntityKind,
+    entityKind: BaselineEntityKind,
     entityId: string,
     metric: string,
     minSampleCount: number,
@@ -99,7 +106,7 @@ export type HeuristicResult =
 // ---------------------------------------------------------------------------
 
 export interface BaselineRequirement {
-  entityKind: EntityKind;
+  entityKind: BaselineEntityKind;
   metric: string;
   minSampleCount: number;   // default 10 per spec §7.4
 }

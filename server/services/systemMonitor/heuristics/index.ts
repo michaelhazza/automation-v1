@@ -9,7 +9,7 @@ import type { Heuristic } from './types.js';
 import { parseHeuristicPhases, matchesPhase } from './phaseFilter.js';
 
 export type { Heuristic };
-export type { HeuristicContext, HeuristicResult, Candidate, Evidence, EvidenceItem, Baseline, BaselineReader, Severity, EntityKind, BaselineRequirement, SuppressionRule } from './types.js';
+export type { HeuristicContext, HeuristicResult, Candidate, Evidence, EvidenceItem, Baseline, BaselineReader, Severity, EntityKind, BaselineEntityKind, BaselineRequirement, SuppressionRule } from './types.js';
 
 // Populated in Slice C.
 export const HEURISTICS: Heuristic[] = [];
