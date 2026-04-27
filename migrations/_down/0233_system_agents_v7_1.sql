@@ -1,0 +1,10 @@
+-- _down/0233_system_agents_v7_1.sql
+-- NO-OP DOWN MIGRATION
+--
+-- This migration is purely additive and forward-compatible with v6 row state.
+-- Rolling back to pre-0233 leaves the partial indexes in place (they coexist
+-- with existing rows) and dropping skill_idempotency_keys is unsafe while
+-- in-flight idempotency rows may exist.
+--
+-- Operational rollback: use §14 Path A re-seed (wipe + re-seed from company
+-- roster). See docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md §14.
