@@ -16,7 +16,18 @@
 Code site: `server/services/agentExecutionService.ts:1701-1731`. No further action. `tasks/todo.md` § "Hermes Tier 1 — Deferred Item (S1)" is stale and will be marked resolved.
 
 ### Task 2 — LAEL-P1-1 LLM event emission + payload writer wiring
-**Status:** OUTSTANDING. TODO marker still present at `server/services/llmRouter.ts:845-855`. Architect plan in progress at `tasks/builds/pre-testing-fixes/lael-p1-1-plan.md`.
+**Status:** IMPLEMENTED in `server/services/llmRouter.ts`. Architect agent timed out before producing a plan; plan was written inline at `tasks/builds/pre-testing-fixes/lael-p1-1-plan.md` and executed.
+
+Summary of edits:
+- Imports added: `tryEmitAgentEvent`, `buildPayloadRow`, `agentRunLlmPayloads`.
+- Closure-scoped `llmRequestId`, `llmRequestedEmitted`, `llmCallStartedAt` after the idempotency-tx returns.
+- `llm.requested` (CRITICAL) emitted at the former TODO marker (line 845-855), gated to agent-run callers, fires ONCE per logical call (across all per-provider attempts).
+- Both terminal upserts (failure path lines 1098-1226 and success path lines 1375-1518) wrapped in `db.transaction(async (tx) => { ... })` with `agent_run_llm_payloads` insert inside the same tx.
+- Failure-path payload uses synthetic `response: { error: callStatus, errorMessage: callError }` to satisfy `response NOT NULL`.
+- `llm.completed` (CRITICAL) emitted after each terminal-write tx commits, gated on `llmRequestedEmitted` + agent-run.
+- Pairing invariant preserved: pre-dispatch terminals (budget_blocked, rate_limited, getProviderAdapter throw) never reach the emit site; `llmRequestedEmitted` stays false; both events skipped.
+
+`pr-reviewer` invoked over the cumulative diff after implementation completed.
 
 ### Task 3 — S-2 Principal-context propagation
 **Status:** ALREADY MERGED on `main`. Two commits resolved this:

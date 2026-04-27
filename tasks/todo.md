@@ -89,20 +89,15 @@ Generate with: `npm run db:generate` then `npm run migrate`
 
 ---
 
-## Hermes Tier 1 — Deferred Item (S1 from pr-reviewer)
+## Hermes Tier 1 — Deferred Item (S1 from pr-reviewer) — RESOLVED 2026-04-27
 
-**Captured**: 2026-04-21  
+**Captured**: 2026-04-21
 **Branch**: `claude/hermes-audit-tier-1-qzqlD`
+**Resolved in**: commit `35112d0` ("feat(hardening): Phase 5 — execution-path correctness"), HERMES-S1 block.
 
-### §6.8 errorMessage gap on normal-path failed runs
+### §6.8 errorMessage gap on normal-path failed runs — RESOLVED
 
-**File**: `server/services/agentExecutionService.ts` lines 1350-1368
-
-When `finalStatus` is `'failed'` but the loop produces a non-empty `loopResult.summary` via the normal terminal path (not a thrown exception), `errorMessage: null` is passed to `extractRunInsights`. The §6.8 short-summary guard then falls back entirely to the `hasMeaningfulSummary >= 100` check. A failed run with a 50-char summary but no thrown exception gets its memory extraction skipped — even if `agent_runs.errorMessage` was set before the loop terminated.
-
-**Why it's deferred**: Pre-existing limitation. Documented at lines 1355-1360 as known; acceptable per spec §11.4 deferred items. The §6.8 "either signal is sufficient" contract is only half-enforced for normal-path failures.
-
-**Suggested fix**: Thread `errorMessage` from `preFinalizeMetadata` (already in scope) into the extraction call when `derivedRunResultStatus === 'failed'`. No new DB read required if a future loop result carries an `errorMessage` field.
+`preFinalizeRow` SELECT extended to fetch `agentRuns.errorMessage`; `threadedErrorMessage = derivedRunResultStatus === 'failed' ? (preFinalizeRow?.errorMessage ?? null) : null` is now passed to `extractRunInsights` instead of hardcoded null. Verified at `server/services/agentExecutionService.ts:1701-1731`. Side-channel event `run.terminal.extracted_with_errorMessage` (non-critical) emits when threading occurs.
 
 ---
 
@@ -180,22 +175,20 @@ Monitor for now; revisit before Tier 2 memory promotion work.
 
 This is the single source of truth for everything the Live Agent Execution Log build has deferred. Any future session working on this surface should start here, not by re-reading the review logs or the spec §9.
 
-### LAEL-P1-1 — Finish `llmRouter` `llm.requested`/`llm.completed` emission + `agent_run_llm_payloads` writer integration
+### LAEL-P1-1 — Finish `llmRouter` `llm.requested`/`llm.completed` emission + `agent_run_llm_payloads` writer integration — RESOLVED 2026-04-27
 
-**Scope.** Most operationally valuable remaining item — without this, the Live Log timeline shows no "doing" phase between `prompt.assembled` and `run.completed`.
+**Resolved on branch:** `claude/pre-testing-fixes-OPR8w` (build slug `pre-testing-fixes`).
+**Plan:** `tasks/builds/pre-testing-fixes/lael-p1-1-plan.md`.
 
-**Files.** `server/services/llmRouter.ts` has a scaffold TODO near the `llmInflightRegistry.add()` site. `server/services/agentRunPayloadWriter.ts::buildPayloadRow` + `server/services/agentExecutionEventEmitter.ts::tryEmitAgentEvent` are ready.
+Wiring landed in `server/services/llmRouter.ts`:
+- Provisional `'started'` ledger-row id threaded into `llmRequestId` after the idempotency-check tx returns.
+- `llm.requested` (CRITICAL) emitted before `providerAdapter.call()` — gated on `ctx.sourceType === 'agent_run' && ctx.runId && llmRequestId`. Pairing-invariant flag `llmRequestedEmitted` set on emit.
+- Both terminal-row upserts (success + failure paths) now run inside `db.transaction(async (tx) => { ... })` with `agent_run_llm_payloads` insert in the same tx (spec §4.5: payload row + ledger row commit together). `runId` populated from `ctx.runId` per the denormalised FK from migration 0192.
+- Failure path uses synthetic `response: { error: callStatus, errorMessage: callError }` to satisfy `agent_run_llm_payloads.response NOT NULL`.
+- `llm.completed` (CRITICAL) emitted after both terminal-write transactions — only when `llmRequestedEmitted === true`. Pre-dispatch terminals (`budget_blocked`, `rate_limited`, `getProviderAdapter` throw) never reach the emit site, so neither event fires.
+- `provider_not_configured` thrown by the adapter itself (post-`llm.requested`) emits both events (paired); the brief's "skip provider_not_configured" note is approximate — the binding rule is "never emit completed without requested".
 
-**Work.**
-- Thread the provisional `'started'` ledger-row id from the idempotency-check transaction up to the emit call site.
-- Emit `llm.requested` (critical) before `providerAdapter.call()` — guard on `ctx.sourceType === 'agent_run' && ctx.runId`.
-- Inside the terminal ledger-write transaction (success / failure / budget_blocked / etc.), call `buildPayloadRow({ systemPrompt, messages, toolDefinitions, response, toolPolicies, maxBytes })` and insert into `agent_run_llm_payloads`. Populate `run_id` from `ctx.runId` (denormalised FK added in migration 0192).
-- Emit `llm.completed` (critical) in the same `finally` block that writes the terminal row.
-- Never emit for pre-dispatch terminal states (`budget_blocked`, `rate_limited`, `provider_not_configured`) — the adapter was never called.
-
-**Spec references.** §4.5, §5.3, §5.7.
-
-**Hazard.** The `run_id`-populating path must stay inside the terminal tx so a rollback drops both the ledger row and the payload row together. The route-level double-check on the payload endpoint depends on `payload.runId === run.id`; null values break silently if the migration's denormalised FK is ever dropped.
+**Verification.** Diff inspection confirmed paired emission and tx atomicity. Server-side typecheck not runnable in this env (no node_modules); errors observed are pre-existing `Cannot find module 'drizzle-orm'` etc.
 
 ### LAEL-P1-2 — Remaining P1 emission sites
 
@@ -937,10 +930,7 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [x] **S-3 — `automationConnectionMappingService.listMappings` / `cloneAutomation` defensive `organisationId` filter.** RESOLVED: added `eq(automationConnectionMappings.organisationId, organisationId)` to all three `listMappings`/`replaceMappings` queries (including the post-replace return SELECT and the delete WHERE); changed `cloneAutomation` source SELECT to filter by `(scope = 'system' OR organisationId = caller-orgId)` directly in the WHERE clause; updated route caller to pass `req.orgId!`.
 
 ### Routed to follow-on phases
-- [ ] **S-2 — Principal-context propagation is import-only across 4 of 5 files.** `actionRegistry.ts`, `connectorPollingService.ts`, `canonicalQueryRegistry.ts`, `webhooks/ghlWebhook.ts` import `fromOrgId` to satisfy the gate but never call it. Spec §5.4 prescribes per-call-site `fromOrgId(...)` invocations at every `canonicalDataService` call. The mismatch likely needs the canonicalDataService signatures to accept `PrincipalContext` first (upstream change). `intelligenceSkillExecutor.ts` is import-presence-only per spec line 919 and is correct.
-  - Spec section: §5.4
-  - Gap: implementation does not reach defence-in-depth at the per-call boundary.
-  - Suggested approach: (a) extend Phase 5 with a `canonicalDataService` signature migration to accept `PrincipalContext`, then thread `fromOrgId(...)` calls at all five call sites; OR (b) update spec §5.4 to acknowledge that the propagation work is import-presence-only across all five files in this phase and route the actual propagation to a later phase. Document the choice in the next PR description.
+- [x] **S-2 — Principal-context propagation is import-only across 4 of 5 files.** RESOLVED 2026-04-27 via commits `cc68168` (A1a — `canonicalDataService` signatures migrated to accept `PrincipalContext` as first parameter; caller sites updated) and `58476bc` (A1b — gate hardened to call-site granularity). `bash scripts/verify-principal-context-propagation.sh` exits 0 with 0 violations across 7 files scanned. `actionRegistry.ts` retains `// @principal-context-import-only` exemption header (the file references `canonicalDataService` only in handler-classification documentation; no runtime call). `connectorPollingService.ts`, `crmQueryPlanner/executors/canonicalQueryRegistry.ts`, `webhooks/ghlWebhook.ts`, and `intelligenceSkillExecutor.ts` all call `fromOrgId(...)` at every `canonicalDataService.*(principal, ...)` call site.
 
 - [ ] **S-4 — Server cycle count 43 vs spec DoD ≤ 5.** Same item as the existing REQ #43 above; cross-reference only. Operator decision required on framing (re-scope DoD vs extend Chunk 3 vs accept residual to Phase 5A).
 
