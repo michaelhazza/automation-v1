@@ -110,3 +110,51 @@ Validation pass:
 - [auto] 3: Updated four legacy sites (lines 110 re-use table, 176 file inventory, 1112 §9.4 trailing sentence, §15.2 contract block) to enumerate all three deny reasons; AC #16 + line 1189 deliberately preserved as `manager_role_violation` (non-allowlisted-skill test path).
 - [auto] 4: Added `assertRlsAwareWrite('skill_idempotency_keys')` to the §16.3 cleanup-job loop (per-batch); updated §16.5 to acknowledge cleanup uses raw SQL too; updated §16.4 checklist row; updated §9.6 verification list; updated AC #22 to mention both raw-SQL write paths; corrected stale `(§9.5)` forward reference to `(per §16.3)`.
 - [auto] 5: Renamed `T1_OR_T2` → `ALLOWED_T1_T2_PARENTS` in §13.4; rewrote the inline comment to drop the "Managers in v7.1" claim and explain that the set is T1 + T2-agents-that-own-workers (with explicit note that admin-ops-agent is `role: staff` and is included as future-proofing); updated trailing log line + error message.
+
+---
+
+## Round 3 — 2026-04-27T02-33-34Z (FINAL)
+
+### ChatGPT Feedback (raw)
+
+> What looks clean: reclaimEligibility split is the right fix. KeyShape consistency is now tight. Manager guard is now internally consistent. RLS + raw SQL alignment is properly justified and enforced. Hierarchy naming fix removes conceptual ambiguity. No structural contradictions left.
+>
+> Final 3 things to tighten (worth doing):
+>
+> 1. **Reclaim eligibility needs an explicit default rule.** Right now you've marked the 8 skills as eligible, but the system still relies on discipline for future skills. Add: Default for any new skill = `reclaimEligibility: disabled`; enabling requires explicit justification in the registry (or PR note). Why: prevents a future dev from accidentally inheriting "eligible" and reintroducing the double-fire class of bugs.
+> 2. **"No external side-effect before claim" needs a test hook.** You've defined the invariant, but enforcement is currently conceptual. Add: wrapper asserts claim success BEFORE invoking skill handler; in test mode, inject a hook that throws if handler runs without claim. Why: this is one of your highest-impact invariants. Without a test hook, it can regress silently.
+> 3. **Failed rows = terminal needs one explicit operator path.** That's correct for system integrity, but operationally incomplete. Add: operators may retry by issuing a new key via re-dispatch with regenerated key, or manual override pathway (if exists). Why: prevents ambiguity during incident handling. Otherwise someone will try to "fix" the row in-place and break invariants.
+>
+> Optional but high-leverage: Add a single "Idempotency Guarantees Summary" block consolidating key uniqueness scope, claim semantics, reclaim rules, terminal failure behaviour, side-effect ordering guarantee. Why: spread across multiple sections; this makes future audits and onboarding faster and reduces drift risk.
+>
+> Verdict: production-grade on the spec. No correctness gaps. No conflicting rules. Edge cases covered. Failure modes explicitly handled. If you apply the 3 tightenings above, this becomes reference-quality and resistant to future regression.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Default `reclaimEligibility: 'disabled'` for new skills + require explicit justification to enable | technical | apply | auto (apply) | medium | Real future-proofing gap. Current §8.1 JSDoc said `'eligible' (default)` — exactly the inverse of safe-by-default for a double-fire-class invariant. Inverting the default + strengthening pre-flight to refuse the omission AND require a justification annotation when declaring `'eligible'` closes the regression-by-inheritance class. Low risk: the 8 current write skills are already explicitly declared `'eligible'` with the runtime-budget rationale block (§8.2). User explicitly relaxed escalation for this round. |
+| 2 | Test hook for "no external side-effect before claim" invariant | technical | apply | auto (apply) | medium | Real enforcement gap. The static `verify-no-direct-adapter-calls.sh` gate covers HTTP-bearing adapters but a handler can still issue a side effect inline through a non-adapter code path the gate doesn't see. A pure-function test-mode predicate (`assertHandlerInvokedWithClaim(claimed)`) gives the highest-impact invariant runtime teeth without violating the `runtime_tests: pure_function_only` posture. Defence-in-depth pair: gate + test hook. |
+| 3 | Operator recovery path for failed=terminal | technical | apply | auto (apply) | medium | Real operational gap. Without a sanctioned path, an incident-stressed operator improvises and breaks invariants (in-place UPDATE of `status`, manual flip to `in_flight`, etc.). Two-path explicit clause (re-dispatch with new key = preferred; row DELETE + runbook log = last resort) + explicit list of forbidden actions removes the ambiguity. |
+| 4 | Idempotency Guarantees Summary consolidation block | technical | apply | auto (apply) | low | Optional but high-leverage per ChatGPT. Idempotency rules currently span §§8.1, 8.1.1, 8.2, 9.3.1, 9.4, 13.2, 16.3, 18, 18.1, 21 — scattered enough that an auditor or future contributor can miss a guarantee. Single read-once table at the top of §16A consolidates "what is guaranteed / where it is established / where it is enforced". No risk; reduces drift risk. |
+
+### Post-edit integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Validation pass:
+- All new symbols defined where introduced: `assertHandlerInvokedWithClaim` and `SideEffectBeforeClaimError` defined in §16A.1 runtime test-mode contract block; `registry-default rule` introduced in §8.1 IdempotencyContract JSDoc and re-stated in §8.2 ("Default for new skills") + §13.2 pre-flight (sixth assertion bullet).
+- All cross-references resolve: §16A.0 references AC #22, #25, #27, #29, #31, #32, #35, #36, #37 — all exist; §8.1 → §13.2 → §8.2 → §16A.0/§16A.1/§16A.7/§16A.8 chain consistent; §23 testing posture updated to enumerate the 4 pure helpers (`hashKeyShape`, `ttlClassToExpiresAt`, `canonicaliseForHash`, `assertHandlerInvokedWithClaim`).
+- Wrapper code-snippet consistency: §9.3.1 closing comment now calls `assertHandlerInvokedWithClaim(isFirstWriter)`; §16A.1 example call site corrected from literal `true` to `isFirstWriter` so the example matches the live call site (avoids a documentation lie that would mask a future regression).
+- AC list extended with #37 (test hook) and #38 (operator path) — both phrased as concrete pure-function / manual tests consistent with the §23 testing posture.
+- §16A.0 column 3 ("Where it is enforced") audited: every guarantee row points at a code path or static gate. No documentation-only rows.
+- TOC entry for §16A unchanged (sub-sections don't appear in the TOC by spec convention) — the new §16A.0 is reachable via §16A.
+
+Post-integrity sanity: §16A.0 is a new section but introduces no new symbols (it consolidates existing guarantees). No empty sections. No broken links. The runtime-budget annotation requirement in §8.1 / §13.2 / §8.2 is consistent across all three sites.
+
+### Applied (auto-applied technical, 4 findings)
+
+- [auto] 1: Inverted the §8.1 IdempotencyContract `reclaimEligibility` JSDoc default from `'eligible'` → `'disabled'`; added the registry-default rule (mandatory pre-flight refusal of omission + explicit justification annotation requirement when declaring `'eligible'`); extended §13.2 verify-agent-skill-contracts.ts assertions with two new bullets (write-class skills must declare the field; `'eligible'` declarations must carry a runtime-budget annotation OR a `reclaimEligibility justification:` comment in the source); added "Default for new skills" subsection to §8.2 rationale block; rewrote AC #35 to include both the missing-field hard-fail manual test and the missing-justification hard-fail manual test.
+- [auto] 2: Added §16A.1 "Runtime test-mode contract (mandatory)" subsection with the full `SideEffectBeforeClaimError` class definition, the `assertHandlerInvokedWithClaim` pure helper, three pure-function test cases, and a wrapper call-site code example; added the `assertHandlerInvokedWithClaim(isFirstWriter)` call into the §9.3.1 wrapper code snippet at the closing brace of the side-effect-bearing branch (with a trailing-comment cross-reference back to §16A.1); extended the §4.11c file-inventory description for `skillIdempotencyKeysPure.test.ts`; extended §23 testing-posture line; new AC #37.
+- [auto] 3: Added §16A.7 "Operator recovery path (mandatory)" subsection — two sanctioned paths (re-dispatch with new key = preferred; explicit row DELETE + runbook log = last resort) and three explicit forbidden actions (status UPDATE, request_hash/response_payload mutation, bulk date-clearing); new AC #38.
+- [auto] 4: New §16A.0 "Idempotency guarantees summary (audit-friendly consolidation)" 9-row table with columns Guarantee / What it says / Where it lives / Where it is enforced; closing "How to extend this table" rule binding future amendments to (a) row here + (b) section reference + (c) gate reference.

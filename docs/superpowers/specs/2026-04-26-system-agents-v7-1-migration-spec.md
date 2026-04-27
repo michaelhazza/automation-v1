@@ -223,7 +223,7 @@ Per §17, the daily cleanup of expired `skill_idempotency_keys` rows runs as a q
 |------|---------|
 | `server/services/skillIdempotencyKeysPure.ts` | **NEW** — `hashKeyShape(keyShape, input)`, `ttlClassToExpiresAt(class)` pure helpers consumed by the wrapper extension in §9.3 |
 | `server/services/middleware/managerGuardPure.ts` | **NEW** — `isManagerAllowlisted(skill, agentRole, perAgentReads)` pure helper consumed by §9.4 |
-| `server/services/__tests__/skillIdempotencyKeysPure.test.ts` | **NEW** — tsx pure-function tests for `hashKeyShape` + `ttlClassToExpiresAt` |
+| `server/services/__tests__/skillIdempotencyKeysPure.test.ts` | **NEW** — tsx pure-function tests for `hashKeyShape` + `ttlClassToExpiresAt` + `canonicaliseForHash` (per §8.1.1) + `assertHandlerInvokedWithClaim` test-mode invariant per §16A.1 |
 | `server/services/__tests__/managerGuardPure.test.ts` | **NEW** — tsx pure-function tests for `isManagerAllowlisted` (allowed bundle, denied worker skill, per-manager declared read pass-through, `directExternalSideEffect` reject, `sideEffectClass !== 'none'` indirect-side-effect reject per §9.4) |
 
 ### 4.12 Agent files (7 new, 13 modified, 1 deleted)
@@ -636,19 +636,30 @@ export interface IdempotencyContract {
    * while the reclaimer separately fires its own side effect).
    *
    * Two settings:
-   *  - `'eligible'` (default): worst-case runtime < 50% of
+   *  - `'disabled'` (**safe default — see registry-default rule below**): never
+   *    reclaimed; an `in_flight` row owns the key until cleanup or manual
+   *    intervention. Use for any handler whose worst-case runtime is ≥ 5 min
+   *    OR is unbounded (e.g. waits on a human-in-the-loop callback). Replays
+   *    of the same key while `status = 'in_flight'` always return
+   *    `{ status: 'in_flight' }`.
+   *  - `'eligible'`: worst-case runtime < 50% of
    *    IDEMPOTENCY_CLAIM_TIMEOUT_MS (i.e. < 5 min). Reclaim permitted per
-   *    §16A.8. The 50% margin protects against latency spikes.
-   *  - `'disabled'`: never reclaimed; an `in_flight` row owns the key
-   *    until cleanup or manual intervention. Use for any handler whose
-   *    worst-case runtime is ≥ 5 min OR is unbounded (e.g. waits on a
-   *    human-in-the-loop callback). Replays of the same key while
-   *    `status = 'in_flight'` always return `{ status: 'in_flight' }`.
+   *    §16A.8. The 50% margin protects against latency spikes. Enabling
+   *    requires explicit per-skill justification (see registry-default rule
+   *    below).
    *
-   * MUST be declared explicitly for any write skill whose registry entry
-   * does not also document a worst-case runtime estimate. The seed
-   * pre-flight refuses to load a write-class skill missing both the field
-   * and the runtime annotation.
+   * **Registry-default rule (mandatory).** Any new write-class skill that
+   * does NOT explicitly declare `reclaimEligibility` is treated by the
+   * pre-flight (`scripts/verify-agent-skill-contracts.ts`) as if it had
+   * declared `'disabled'`, AND the omission is a hard load failure — the
+   * pre-flight refuses to start the seed until the field is declared.
+   * Declaring `'eligible'` further requires either (a) a runtime-budget
+   * comment in the registry entry pointing at the worst-case path, or
+   * (b) a `// reclaimEligibility justification:` comment on the same line
+   * recording the rationale (linkable in the implementing PR review). The
+   * point of the friction: a future contributor cannot accidentally inherit
+   * `'eligible'` and silently reintroduce the double-fire class of bugs
+   * (§16A.8).
    */
   reclaimEligibility: 'eligible' | 'disabled';
 }
@@ -777,7 +788,9 @@ Each new entry follows the standard shape. The fields that vary across the 14 ar
 | `score_nps_csat` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
 | `prepare_renewal_brief` | worker | none | auto | read_only | false | (n/a — output is a draft) | (n/a) | (n/a) | false |
 
-**Reclaim-eligibility rationale.** All 8 write skills above stub at first to non-Stripe / non-Xero / non-Gmail providers and have worst-case runtimes well below 5 minutes (the 50% safety margin against `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 min`). When real provider integration lands, the spec amendment that wires Stripe / Xero / Gmail MUST re-evaluate this column per skill — any skill whose worst-case runtime grows past 5 min must move to `'disabled'` or implement a heartbeat (deferred to that amendment).
+**Reclaim-eligibility rationale.** All 8 write skills above stub at first to non-Stripe / non-Xero / non-Gmail providers and have worst-case runtimes well below 5 minutes (the 50% safety margin against `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 min`); each is therefore explicitly declared `'eligible'` with a runtime-budget annotation in the registry source per the §8.1 registry-default rule. When real provider integration lands, the spec amendment that wires Stripe / Xero / Gmail MUST re-evaluate this column per skill — any skill whose worst-case runtime grows past 5 min must move to `'disabled'` or implement a heartbeat (deferred to that amendment).
+
+**Default for new skills.** Per the §8.1 registry-default rule, any future write-class skill added in a follow-up spec MUST declare `reclaimEligibility` explicitly. The pre-flight (`scripts/verify-agent-skill-contracts.ts`, §13.2) refuses to start the seed if the field is omitted; the safe-by-default stance is `'disabled'`, and `'eligible'` requires an explicit per-skill runtime-budget annotation. This protects against a future contributor inheriting `'eligible'` by accident and reintroducing the double-fire class of bugs (§16A.8).
 
 Notes on the table:
 - `defaultGateLevel: review` everywhere a write touches an external system or a financial record. Matches v7.1 §5 gate model.
@@ -1019,7 +1032,14 @@ if (def?.idempotency) {
   }
 
   // First writer wins (or successful reclaimer) — proceed with execution;
-  // write response_payload + status='completed' on success
+  // write response_payload + status='completed' on success.
+  //
+  // §16A.1 test-mode invariant: assert the handler is only invoked under a
+  // held claim. No-op in production; throws SideEffectBeforeClaimError in
+  // test mode if the wrapper somehow reached this branch with isFirstWriter
+  // === false (defence-in-depth against future-regression of the
+  // "no external side-effect before claim" rule).
+  assertHandlerInvokedWithClaim(isFirstWriter);
 }
 ```
 
@@ -1518,6 +1538,9 @@ Any failure aborts the seed with a clear error referencing the gate that fired.
      - It is referenced by at least one agent's `skills:` list, **OR** its frontmatter declares `reusable: true`.
    - For every slug in `APP_FOUNDATIONAL_SKILLS`:
      - Its `ACTION_REGISTRY` entry has `actionCategory !== 'api'`, `mcp.annotations.openWorldHint === false`, `directExternalSideEffect !== true`.
+   - For every slug whose `ACTION_REGISTRY` entry has `sideEffectClass === 'write'`:
+     - The entry declares `idempotency.reclaimEligibility` explicitly (one of `'eligible' | 'disabled'`). A missing field is a hard fail — the pre-flight refuses the seed until it is declared. **There is no implicit default at the wrapper layer; the safe-default `'disabled'` is enforced via the pre-flight refusing the omission, NOT via the wrapper silently treating omission as eligible.** This guarantees a future contributor cannot accidentally inherit `'eligible'` (per §8.1 registry-default rule).
+     - If the entry declares `'eligible'`, the `actionRegistry.ts` source line MUST carry either a runtime-budget annotation comment OR a `reclaimEligibility justification:` comment on the same line. Enforced by a regex check against the source file (the script reads `actionRegistry.ts` as text in addition to importing it).
 
 Exit 0 on no violations.
 
@@ -1996,6 +2019,24 @@ The cleanup job (per §16.3) ALSO uses raw `db.execute(sql\`...\`)` — the inde
 
 Mandatory section for any spec that introduces external-side-effect writes or state-machine rows. Pinned for `skill_idempotency_keys` and the side-effect-class wrapper.
 
+### 16A.0 Idempotency guarantees summary (audit-friendly consolidation)
+
+Single read-once block consolidating the guarantees that the rest of §16A and §§8.1, 8.1.1, 8.2, 9.3.1, 9.4, 13.2, 16.3, 18, 18.1, 21 each establish. Use this section as the entry point for audits, onboarding, and incident-response runbook lookups — every guarantee below is enforced by code or a static gate referenced in the matching paragraph.
+
+| Guarantee | What it says | Where it lives | Where it is enforced |
+|-----------|--------------|----------------|----------------------|
+| **Key uniqueness scope** | An idempotency key is unique per `(subaccount_id, skill_slug, key_hash)` triple. Cross-subaccount, cross-skill, cross-shape callers cannot collide. | §16.1 schema, §16A.1 row 1 | Composite primary key + `ON CONFLICT DO NOTHING` in §9.3.1; RLS policy in §6.1 enforces the subaccount column. |
+| **Hash determinism** | `key_hash` and `request_hash` are derived via `canonicaliseForHash` (sorted keys, undefined-stripped, NFC-normalised primitives) before SHA-256 — never raw `JSON.stringify`. | §8.1.1 | `hashActionArgs` extension in §9.3.1; pure-function unit test in `skillIdempotencyKeysPure.test.ts` (AC #27). |
+| **Claim semantics (first-writer-wins)** | The first INSERT-RETURNING-xmax succeeds; concurrent INSERTs see 0-rows-returned and become losers. The winner runs the side effect; losers either replay the cached payload or wait. | §16A.1 row 1, §16A.3 row 1, §9.3.1 | `ON CONFLICT DO NOTHING RETURNING xmax = 0` in the §9.3.1 wrapper. |
+| **No external side effect before claim** | The wrapper invokes the side-effect-bearing handler ONLY inside the `if (isFirstWriter)` branch (after a successful first-writer claim or §16A.8 reclaim). Handlers must not perform external side effects in any other code path. | §16A.1 mandatory ordering invariant, §8.10 of `DEVELOPMENT_GUIDELINES.md` | `verify-no-direct-adapter-calls.sh` (static gate) + `assertHandlerInvokedWithClaim` (test-mode runtime gate, §16A.1 + AC #37). |
+| **Reclaim rules** | Stale-claim takeover runs only for `reclaimEligibility: 'eligible'` skills, only when `created_at` is older than `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 min), and only via a state-based UPDATE that one and only one reclaimer can win. `'disabled'` skills never reclaim. New skills default to `'disabled'` (registry-default rule, §8.1). | §16A.8 + §8.1 + §8.2 rationale | §13.2 pre-flight refuses missing field; §9.3.1 wrapper gates the takeover UPDATE on `reclaimEligibility === 'eligible'` (AC #29, #35, #36). |
+| **Terminal failure behaviour (failed = terminal)** | `status = 'failed'` rows are immutable for that key. Same-key replay returns `{ status: 'previous_failure' }`. Operators recover via re-dispatch with regenerated key (preferred) OR explicit row deletion + runbook log (last resort). In-place mutation is forbidden. | §16A.7 failed-rows clause + operator recovery path | Wrapper's `WHERE status = 'in_flight'` predicate refuses any other transition (AC #25, #31). |
+| **Side-effect ordering guarantee** | The wrapper persists the state-claim BEFORE invoking the handler, then persists the terminal state AFTER the handler returns — never the inverse. This is the §8.10 race-claim ordering rule applied to this table. | §16A.1 mandatory ordering invariant + §16A.4 terminal event guarantee | §9.3.1 wrapper code path; reinforced by the `assertHandlerInvokedWithClaim` test hook. |
+| **State-machine closure** | `status` is one of `{'in_flight', 'completed', 'failed'}`. Allowed transitions: `(insert) → in_flight`; `in_flight → completed`; `in_flight → failed`. No back-transitions; no cross-terminal transitions. | §16A.7 | DB CHECK constraint (AC #25) + wrapper's `WHERE status = 'in_flight'` predicate on every terminal UPDATE. |
+| **TTL + cleanup** | TTL classes (`'permanent' → NULL`, `'long' → 30d`, `'short' → 14d`) are governed by a single constant map. Cleanup job batches DELETEs at 1k rows per pass with a 10k-batch safety cap; permanent rows never match. | §8.1.1 TTL constant table + §16.3 | `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts`; `assertRlsAwareWrite` per cleanup batch (AC #22, #32). |
+
+**How to extend this table.** Adding a new guarantee — or relaxing one — requires a row here AND a reference to the section that establishes it AND a reference to the gate that enforces it. A guarantee with no enforcement is a documentation lie; the table is the contract that the rest of §16A delivers on.
+
 ### 16A.1 Idempotency posture
 
 | Operation | Posture | Mechanism |
@@ -2009,6 +2050,65 @@ Mandatory section for any spec that introduces external-side-effect writes or st
 **Mandatory ordering invariant (no side effect before claim).** No external side effect — no API call, no email sent, no payment initiated, no calendar booking, nothing observable beyond a DB write — may execute until the wrapper holds a successful first-writer claim (or a successful reclaim per §16A.8). The §9.3.1 wrapper enforces this by routing the side-effect-bearing handler call **after** the INSERT-RETURNING-xmax check and **inside** the `if (isFirstWriter)` branch. Handlers themselves MUST NOT perform external side effects in any other code path (e.g. precondition validation, parameter coercion). The pre-side-effect precondition check (§9.3.2 `checkSkillPreconditions`) is internal-only — it inspects env vars, integration-row presence, and input validity, never the external provider.
 
 A handler that breaks this invariant — e.g. by issuing a Stripe API call inside its precondition check — defeats the cross-run guarantee and silently re-fires side effects on every replay. `verify-no-direct-adapter-calls.sh` (existing gate) enforces this for HTTP-bearing adapters; new providers (Stripe, Hunter, Google Places, Xero) join the gate's adapter list as part of Phase 4.
+
+**Runtime test-mode contract (mandatory).** The static gate above is necessary but not sufficient — a handler can still issue a side effect inline through a non-adapter code path the gate doesn't see. To give the invariant runtime teeth without introducing a new test framework (`testing_posture: static_gates_primary` + `runtime_tests: pure_function_only` per `docs/spec-context.md`), the wrapper exposes a single test-mode predicate consumed by the existing pure-function harness:
+
+```ts
+// server/services/skillExecutor.ts (NEW pure helper + error class, exported for tests)
+
+/**
+ * Thrown by `assertHandlerInvokedWithClaim` in test mode when the wrapper
+ * reached a side-effect-bearing handler invocation without holding a
+ * first-writer claim or successful reclaim. Production callers never see it
+ * — the assertion is a no-op outside `NODE_ENV === 'test'`.
+ */
+export class SideEffectBeforeClaimError extends Error {
+  readonly name = 'SideEffectBeforeClaimError' as const;
+  constructor(message: string) { super(message); }
+}
+
+/**
+ * Test-mode-only assertion. The wrapper calls this at the top of the
+ * side-effect-bearing handler-invocation branch (inside `if (isFirstWriter)`)
+ * with `process.env.NODE_ENV === 'test'` gating the throw.
+ *
+ * In test mode, if `claimed === false` (i.e. the wrapper called the handler
+ * without first holding a successful first-writer claim or successful
+ * reclaim), throws `SideEffectBeforeClaimError`. In production this is a
+ * no-op — the static `if (isFirstWriter)` branch is the live guard.
+ *
+ * This is the test hook that prevents silent regression of the "no external
+ * side-effect before claim" invariant. Pure (no DB / network / FS), so it
+ * fits the existing `runtime_tests: pure_function_only` posture.
+ */
+export function assertHandlerInvokedWithClaim(claimed: boolean): void {
+  if (process.env.NODE_ENV === 'test' && !claimed) {
+    throw new SideEffectBeforeClaimError(
+      'Wrapper invoked side-effect-bearing handler without holding a first-writer claim or successful reclaim',
+    );
+  }
+}
+```
+
+Pure-function test (`skillIdempotencyKeysPure.test.ts`, NOT a new framework — same tsx harness as the rest of §23):
+
+1. Mock the wrapper's claim-acquisition step to return `isFirstWriter = false` and the handler-invocation closure to call `assertHandlerInvokedWithClaim(false)` directly. Assert `SideEffectBeforeClaimError` is thrown.
+2. Mock the same with `isFirstWriter = true`. Assert no throw.
+3. With `process.env.NODE_ENV !== 'test'`, repeat case (1). Assert no throw (production no-op behaviour).
+
+The wrapper's call site (per §9.3.1) becomes:
+
+```ts
+if (isFirstWriter) {
+  assertHandlerInvokedWithClaim(isFirstWriter); // test-mode invariant teeth
+  const result = await handler(input, context);
+  // ... terminal UPDATE ...
+}
+```
+
+Passing `isFirstWriter` rather than the literal `true` keeps the assertion meaningful: if a future refactor re-orders the `if` check or factors the handler call into a branch where `isFirstWriter` is mutable, the assertion catches it. A literal `true` would silently pass through any such regression.
+
+Any code path that reaches a side-effect-bearing handler invocation **without** routing through `if (isFirstWriter)` is a contract violation — the test hook catches the regression in unit tests; the static `verify-no-direct-adapter-calls.sh` gate catches the adapter-direct-call class. Together they form a defence-in-depth pair against the highest-impact invariant in this spec.
 
 ### 16A.2 Retry classification
 
@@ -2076,6 +2176,18 @@ No HTTP routes touch these tables, so no HTTP status codes are issued. The agent
 **Concurrency guard predicate (mandatory):** every terminal UPDATE includes `WHERE status = 'in_flight'`. 0-rows-updated is observable and emits `skill.warn` with `reason: 'terminal_race_lost'`.
 
 **Failed rows are terminal.** A row in `status = 'failed'` MUST NOT be retried under the same `(subaccount_id, skill_slug, key_hash)` tuple. The wrapper's same-key replay returns `{ status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' }`. Callers that legitimately need to retry must mint a NEW key — typically by changing one of the `keyShape`-resolved fields (e.g. `chase_overdue` bumps `dunning_step`, `send_invoice` requires a new `invoice_id`). This rule prevents silent re-attempts of a side effect that the previous run determined was unsafe (validation rejected, recipient bounced, downstream provider rejected).
+
+**Operator recovery path (mandatory).** Operators handling an incident on a failed-row case have exactly two sanctioned paths — no in-place row mutation, no manual UPDATE to flip `status`:
+
+1. **Re-dispatch with a regenerated key.** The first-line path. Re-dispatch the originating skill call from the agent or queue with a `keyShape` field changed such that the resolver mints a fresh `key_hash` (per the per-skill rules above — `dunning_step++` for `chase_overdue`; new `invoice_id` for `send_invoice`; new `(period_start, period_end)` window for `prepare_month_end`; etc.). The wrapper opens a fresh `in_flight` row and the side effect runs cleanly. The original `failed` row is left in place as the audit trail.
+2. **Manual override via row deletion.** Last-resort path. If field-mutation is impossible (e.g. the `keyShape` is a single immutable provider ID and the failure was a transient provider outage now resolved), an operator with DB access may `DELETE FROM skill_idempotency_keys WHERE subaccount_id = $sa AND skill_slug = $slug AND key_hash = $kh AND status = 'failed'` to clear the row. The next replay then opens a fresh `in_flight` row. **This MUST be logged as an incident-response action** (operator runbook entry naming the row, the original failure reason, and the justification for re-dispatch) — silent deletes are a multi-tenant safety violation.
+
+**Forbidden during incident response:**
+- Direct UPDATE flipping `status` from `failed` to `in_flight` or `completed` (the §16A.7 transition matrix forbids it; the wrapper's `WHERE status = 'in_flight'` predicate would refuse the next terminal write anyway, leaving the row in a corrupt state).
+- "Fixing" the row's `request_hash` or `response_payload` in place to bypass the `previous_failure` branch.
+- Bulk-clearing `failed` rows by date — operators delete one row at a time with explicit justification.
+
+The point of this clause: incidents create pressure to "just clear it" — without an explicit sanctioned path the operator improvises and breaks invariants. The two paths above are the only safe options; the rest are explicitly forbidden.
 
 `skill_idempotency_keys` is intentionally **not** wired through `shared/stateMachineGuards.ts` (which is scoped to `agent_run | workflow_run | workflow_step_run` per its current implementation). The optimistic predicate in the wrapper provides equivalent enforcement for this narrower table; integrating with the shared guard module is deferred until a fourth state machine kind is added (which would justify the abstraction).
 
@@ -2242,8 +2354,10 @@ The migration is complete when **all** of the following hold. Numbered for trace
 32. **Cleanup batching.** Manual test: insert 5,000 rows with `expires_at < NOW()`; run cleanup job; verify (a) `skill_idempotency_keys.cleanup.batch` log emits ≥ 5 times (≥ 5 batches at 1k each), (b) `skill_idempotency_keys.cleanup.complete` log includes accurate `total` and `batches` counts, (c) permanent-class rows (`expires_at IS NULL`) untouched.
 33. **`skill.blocked` rate-limiting.** Manual test: invoke a write skill 10 times in a 60-second window with `STRIPE_API_KEY` unset; verify only 1 `skill.blocked` log line emitted, suppression-summary line at minute close indicates 9 suppressed.
 34. **Worker-parent assertion.** Manual test: edit the seed to parent `dev` to `qa` (a T3-to-T3 chain); seed aborts with the `[hierarchy]` error from Assertion 4 in §13.4.
-35. **Reclaim eligibility declared.** Every write-class skill in §8.2 has `idempotency.reclaimEligibility` set to either `'eligible'` or `'disabled'`; the seed pre-flight (extension to `verify-agent-skill-contracts.ts`) refuses to load a write-class skill whose registry entry omits the field.
+35. **Reclaim eligibility declared.** Every write-class skill in §8.2 has `idempotency.reclaimEligibility` set to either `'eligible'` or `'disabled'`; the seed pre-flight (extension to `verify-agent-skill-contracts.ts` per §13.2) refuses to load a write-class skill whose registry entry omits the field. **Manual test:** delete the `reclaimEligibility:` line from one of the 8 write-skill registry entries (e.g. `send_invoice`); `npx tsx scripts/verify-agent-skill-contracts.ts` exits 1 with a hard-fail message naming the skill and the missing field. Restore. **Justification check:** delete the runtime-budget comment alongside an `'eligible'` declaration; the script also exits 1, naming the skill and the missing comment annotation.
 36. **Reclaim-disabled in_flight surfacing.** Manual test: register a test-only write skill with `reclaimEligibility: 'disabled'`, insert an `in_flight` row with `created_at = NOW() - INTERVAL '15 minutes'`, replay the same key — wrapper returns `{ status: 'in_flight', retryable_after_ms: 5000 }` (no reclaim attempted) and emits exactly one `skill.warn` with `reason: 'in_flight_reclaim_disabled'` per minute (rate-limited per §18.1).
+37. **No-side-effect-before-claim test hook.** Pure-function test in `skillIdempotencyKeysPure.test.ts` (per §16A.1 runtime test-mode contract): (a) `assertHandlerInvokedWithClaim(false)` with `NODE_ENV='test'` throws `SideEffectBeforeClaimError`; (b) `assertHandlerInvokedWithClaim(true)` with `NODE_ENV='test'` returns silently; (c) `assertHandlerInvokedWithClaim(false)` with `NODE_ENV='production'` returns silently (production no-op). The wrapper's `if (isFirstWriter)` branch in §9.3.1 calls `assertHandlerInvokedWithClaim(isFirstWriter)` immediately before invoking the handler.
+38. **Failed-row operator recovery path.** Manual test: insert a `failed` row for `chase_overdue` at `(invoice_id=I1, dunning_step=1)`; (a) replay same key → `{ status: 'previous_failure' }` (per AC #31); (b) re-dispatch with `dunning_step=2` → fresh `in_flight` row opens cleanly (operator path 1, sanctioned); (c) `DELETE` the original `failed` row and replay `(I1, 1)` → fresh `in_flight` row opens cleanly (operator path 2, last-resort, requires runbook log per §16A.7); (d) `UPDATE skill_idempotency_keys SET status = 'in_flight' WHERE ...` against the failed row → on subsequent terminal write the wrapper's `WHERE status = 'in_flight'` predicate succeeds but a `skill.warn` with `reason: 'terminal_race_lost'` should NOT be emitted spuriously — verify the row's audit trail is now corrupt and forbidden per §16A.7 (this case demonstrates why direct UPDATE is forbidden, not a recommended path).
 
 ---
 
@@ -2285,7 +2399,7 @@ The migration is complete when **all** of the following hold. Numbered for trace
 Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`):
 
 - **Static gates** (binding): `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` referenced in §6.5 / §7.7 / §8.4 / §9.6 / §13.5.
-- **Pure-function unit tests** (recommended): tsx tests for the new pure helpers introduced in this spec — `hashKeyShape`, `ttlClassToExpiresAt`, the manager-allowlist resolver. Land in `server/services/__tests__/skillIdempotencyKeysPure.test.ts` and `server/services/__tests__/managerGuardPure.test.ts`. Convention: `.test.ts` next to the pure module.
+- **Pure-function unit tests** (recommended): tsx tests for the new pure helpers introduced in this spec — `hashKeyShape`, `ttlClassToExpiresAt`, `canonicaliseForHash` (per §8.1.1), `assertHandlerInvokedWithClaim` (per §16A.1 — test-mode invariant teeth for "no external side-effect before claim"), the manager-allowlist resolver. Land in `server/services/__tests__/skillIdempotencyKeysPure.test.ts` and `server/services/__tests__/managerGuardPure.test.ts`. Convention: `.test.ts` next to the pure module.
 - **Manual end-to-end tests** (one-off, recorded in PR description):
   - Manager-guard happy path + violation path (one of each).
   - Idempotency replay test — `send_invoice` twice; verify cached payload.
