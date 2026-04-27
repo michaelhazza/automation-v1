@@ -2427,7 +2427,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     directExternalSideEffect: false,
     idempotency: {
       keyShape: ['name'],
-      scope: 'org',
+      scope: 'subaccount',
       ttlClass: 'long',
       reclaimEligibility: 'disabled',
     },
@@ -2465,7 +2465,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     directExternalSideEffect: false,
     idempotency: {
       keyShape: ['agentId'],
-      scope: 'org',
+      scope: 'subaccount',
       ttlClass: 'long',
       reclaimEligibility: 'disabled',
     },
@@ -2495,7 +2495,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     directExternalSideEffect: false,
     idempotency: {
       keyShape: ['agentId', 'status'],
-      scope: 'org',
+      scope: 'subaccount',
       ttlClass: 'long',
       reclaimEligibility: 'disabled',
     },
@@ -2732,7 +2732,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     directExternalSideEffect: false,
     idempotency: {
       keyShape: ['name'],
-      scope: 'org',
+      scope: 'subaccount',
       ttlClass: 'long',
       reclaimEligibility: 'disabled',
     },
