@@ -201,6 +201,8 @@ User also accepted ChatGPT's refinements on R2-1 (timestamp nuance) and R2-2 (sp
 
 ## Round 3 — 2026-04-27T (post round 2 commits `da31bfa7` / `f24a7220`)
 
+- Round 3 commit: `2ff566a9` (pushed to `origin/impl/pre-launch-hardening`)
+
 ### ChatGPT Feedback (raw)
 
 ```
