@@ -107,7 +107,7 @@ Per the spec-authoring checklist §1, every new primitive must justify why reuse
 | `skill_idempotency_keys` table for cross-run dedup | `actions.idempotencyKey` (unique on `(subaccount_id, idempotency_key)`) — keyed on `(runId, toolCallId, argsHash)`; scoped to a single tool-call within a run | **Extend with new sibling table** | `actions.idempotencyKey` is a **per-tool-call within-run** key; replays inside the same run hit it. Cross-run replay (the same `send_invoice` for the same `(engagement_id, period)` triggered by two different runs from the queue retry layer) is a different scope and needs a different keyspace. Reusing `actions` would conflate the two — a different `runId` produces a different key today, so the dedup never fires. The new table is small, owns its own keyspace, and the wrapper composes with `proposeAction` rather than replacing it. |
 | `sideEffectClass: 'read' \| 'write'` on registry | `idempotencyStrategy: 'read_only' \| 'keyed_write' \| 'locked'` already on every entry | **Extend registry, don't repurpose** | `idempotencyStrategy` documents the retry-safety contract; the brief's `sideEffectClass` documents the on-failure UX (fail-soft return-warning vs hard-block return-`{status:'blocked'}`). They overlap but are not the same axis: a `read_only` skill could still be `sideEffectClass: 'read'` (Stripe revenue read) or `'none'` (workspace memory read). Two fields keep both contracts explicit. The wrapper reads `sideEffectClass`; the proposeAction layer reads `idempotencyStrategy`. |
 | `directExternalSideEffect: bool` on registry | implicit via `mcp.annotations.openWorldHint` + `actionCategory: 'api'` + `defaultGateLevel: 'review'` | **New explicit flag** | The manager guard's "no direct external side effects from a manager" rule (§4.11.5 of the brief) needs a single boolean to read at allowlist-check time, not a 3-field heuristic. We add it explicitly; existing fields stay as-is. |
-| Manager-role allowlist guard | `proposeActionMiddleware` already runs as the universal pre-tool hook | **Extend the middleware** | The hook already sees every tool call with full context including the agent row. We add a single conditional: when the resolved agent's `agentRole === 'manager'`, the call passes the allowlist check or returns `{ action: 'block', reason: 'manager_role_violation' }`. No new middleware, no new pipeline position. |
+| Manager-role allowlist guard | `proposeActionMiddleware` already runs as the universal pre-tool hook | **Extend the middleware** | The hook already sees every tool call with full context including the agent row. We add a single conditional: when the resolved agent's `agentRole === 'manager'`, the call passes a three-condition deny composition (allowlist + `directExternalSideEffect` + `sideEffectClass !== 'none'`) and returns `{ action: 'block', reason: 'manager_role_violation' \| 'manager_direct_external_side_effect' \| 'manager_indirect_side_effect_class' }` — see §9.4 for the exact deny logic. No new middleware, no new pipeline position. |
 | Cross-run idempotency wrapper | `executeWithActionAudit` in `skillExecutor.ts` already wraps every auto-gated skill | **Extend the wrapper** | The wrapper is the single chokepoint every audited skill call passes through. We add: before `lockForExecution`, if the skill declares `idempotency.keyShape`, attempt a first-writer-wins INSERT on `skill_idempotency_keys`; on conflict, read the prior `response_payload` and return it verbatim. Existing wrapper behaviour for non-declaring skills is unchanged. |
 | `list_my_subordinates` skill | no equivalent exists; `read_workspace` is unrelated; `config_list_agents` is admin-tool-scoped | **New foundational skill** | Required by every manager agent's delegation flow. Foundational because it reads `system_agents` directly, declares no external integration, and is invokable from any agent. Goes in `APP_FOUNDATIONAL_SKILLS`. |
 | `agentRole: 'manager'` on system_agents | `agentRole text` column already exists; `portfolio-health-agent` uses `role: analyst` | **Reuse the column** | No schema change. The four department heads land with `role: manager` in their `AGENTS.md` frontmatter; `companyParser.toSystemAgentRows` already passes `agentRole` through to the seed row. |
@@ -173,7 +173,7 @@ Deleted: `server/skills/update_financial_record.md`.
 
 | Path | Change |
 |------|--------|
-| `server/services/middleware/proposeAction.ts` | Add manager-role allowlist check — returns `{ action: 'block', reason: 'manager_role_violation' }` when `agent.agentRole === 'manager'` and the resolved skill is not in `manager_allowlist` |
+| `server/services/middleware/proposeAction.ts` | Add manager-role guard with three-condition deny composition (allowlist membership + `directExternalSideEffect` + `sideEffectClass !== 'none'`) — returns `{ action: 'block', reason: <one of 'manager_role_violation' \| 'manager_direct_external_side_effect' \| 'manager_indirect_side_effect_class'> }`. See §9.4 for the deny logic and reason ordering. |
 
 ### 4.9 Universal-skill list (review only)
 
@@ -622,6 +622,35 @@ export interface IdempotencyContract {
    *  - 'short' (communications) → 14 days
    */
   ttlClass: 'permanent' | 'long' | 'short';
+
+  /**
+   * v7.1 — Stale-claim takeover eligibility (per §16A.8).
+   *
+   * The wrapper reclaims an `in_flight` row whose `created_at` is older than
+   * `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 min). This is safe ONLY when the
+   * skill's worst-case successful runtime (preconditions + side effect +
+   * terminal write) sits comfortably below that threshold — otherwise a
+   * legitimately slow handler can be reclaimed mid-execution and the side
+   * effect can fire twice (the original handler completes its terminal
+   * UPDATE against a now-reclaimed row → 0 rows updated → silent no-op,
+   * while the reclaimer separately fires its own side effect).
+   *
+   * Two settings:
+   *  - `'eligible'` (default): worst-case runtime < 50% of
+   *    IDEMPOTENCY_CLAIM_TIMEOUT_MS (i.e. < 5 min). Reclaim permitted per
+   *    §16A.8. The 50% margin protects against latency spikes.
+   *  - `'disabled'`: never reclaimed; an `in_flight` row owns the key
+   *    until cleanup or manual intervention. Use for any handler whose
+   *    worst-case runtime is ≥ 5 min OR is unbounded (e.g. waits on a
+   *    human-in-the-loop callback). Replays of the same key while
+   *    `status = 'in_flight'` always return `{ status: 'in_flight' }`.
+   *
+   * MUST be declared explicitly for any write skill whose registry entry
+   * does not also document a worst-case runtime estimate. The seed
+   * pre-flight refuses to load a write-class skill missing both the field
+   * and the runtime annotation.
+   */
+  reclaimEligibility: 'eligible' | 'disabled';
 }
 
 export interface ActionDefinition {
@@ -731,22 +760,24 @@ Adding a new TTL class requires (a) a spec amendment to this table, (b) a consta
 
 Each new entry follows the standard shape. The fields that vary across the 14 are summarised in this table; the full Zod `parameterSchema` and per-skill rationale belong in the implementation PR, not in this spec.
 
-| Slug | actionCategory | sideEffectClass | defaultGateLevel | idempotencyStrategy | directExternalSideEffect | idempotency.keyShape (write only) | idempotency.ttlClass | managerAllowlistMember |
-|------|----------------|-----------------|------------------|---------------------|--------------------------|-----------------------------------|----------------------|------------------------|
-| `list_my_subordinates` | worker | none | auto | read_only | false | (n/a — read) | (n/a) | **true** |
-| `generate_invoice` | worker | write | review | keyed_write | false | `[engagement_id, billing_period_start, billing_period_end]` | permanent | false |
-| `send_invoice` | api | write | review | locked | true | `[invoice_id]` | permanent | false |
-| `reconcile_transactions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | false |
-| `chase_overdue` | api | write | review | locked | true | `[invoice_id, dunning_step]` | long | false |
-| `process_bill` | worker | write | review | keyed_write | false | `[external_bill_id, amount, due_date]` | permanent | false |
-| `track_subscriptions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | false |
-| `prepare_month_end` | worker | write | review | keyed_write | false | `[period_start, period_end]` | permanent | false |
-| `discover_prospects` | api | read | auto | read_only | true | (n/a — read) | (n/a) | false |
-| `draft_outbound` | worker | none | auto | read_only | false | (n/a) | (n/a) | false |
-| `score_lead` | worker | none | auto | read_only | false | (n/a) | (n/a) | false |
-| `book_meeting` | api | write | review | locked | true | `[prospect_email, requested_slot]` | long | false |
-| `score_nps_csat` | worker | none | auto | read_only | false | (n/a) | (n/a) | false |
-| `prepare_renewal_brief` | worker | none | auto | read_only | false | (n/a — output is a draft) | (n/a) | false |
+| Slug | actionCategory | sideEffectClass | defaultGateLevel | idempotencyStrategy | directExternalSideEffect | idempotency.keyShape (write only) | idempotency.ttlClass | idempotency.reclaimEligibility | managerAllowlistMember |
+|------|----------------|-----------------|------------------|---------------------|--------------------------|-----------------------------------|----------------------|--------------------------------|------------------------|
+| `list_my_subordinates` | worker | none | auto | read_only | false | (n/a — read) | (n/a) | (n/a) | **true** |
+| `generate_invoice` | worker | write | review | keyed_write | false | `[engagement_id, billing_period_start, billing_period_end]` | permanent | eligible | false |
+| `send_invoice` | api | write | review | locked | true | `[invoice_id]` | permanent | eligible | false |
+| `reconcile_transactions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `chase_overdue` | api | write | review | locked | true | `[invoice_id, dunning_step]` | long | eligible | false |
+| `process_bill` | worker | write | review | keyed_write | false | `[external_bill_id, amount, due_date]` | permanent | eligible | false |
+| `track_subscriptions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `prepare_month_end` | worker | write | review | keyed_write | false | `[period_start, period_end]` | permanent | eligible | false |
+| `discover_prospects` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `draft_outbound` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `score_lead` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `book_meeting` | api | write | review | locked | true | `[prospect_email, requested_slot]` | long | eligible | false |
+| `score_nps_csat` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `prepare_renewal_brief` | worker | none | auto | read_only | false | (n/a — output is a draft) | (n/a) | (n/a) | false |
+
+**Reclaim-eligibility rationale.** All 8 write skills above stub at first to non-Stripe / non-Xero / non-Gmail providers and have worst-case runtimes well below 5 minutes (the 50% safety margin against `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 min`). When real provider integration lands, the spec amendment that wires Stripe / Xero / Gmail MUST re-evaluate this column per skill — any skill whose worst-case runtime grows past 5 min must move to `'disabled'` or implement a heartbeat (deferred to that amendment).
 
 Notes on the table:
 - `defaultGateLevel: review` everywhere a write touches an external system or a financial record. Matches v7.1 §5 gate model.
@@ -927,7 +958,28 @@ if (def?.idempotency) {
       // `WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL '...'`
       // predicate is the concurrency guard — only one of N racing reclaimers
       // wins (the rest see 0 rows updated and re-poll the row).
+      //
+      // SAFETY GATE: takeover runs ONLY for `reclaimEligibility: 'eligible'`
+      // skills (per §8.1 + §16A.8 budget rule). For `'disabled'` skills, an
+      // `in_flight` row is owned indefinitely until cleanup or manual
+      // intervention — protects against double-firing the side effect when a
+      // legitimately slow handler is reclaimed mid-execution.
+      const reclaimEligible = def.idempotency.reclaimEligibility === 'eligible';
       const ageMs = Date.now() - new Date(existing.createdAt).getTime();
+
+      if (!reclaimEligible) {
+        // Disabled-reclaim path — surface the stuck row to operators (rate-limited per §18.1)
+        // and return in_flight with a generous retry hint.
+        if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
+          createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs });
+        }
+        return {
+          status: 'in_flight',
+          message: 'Another caller is processing this idempotent request (reclaim disabled for this skill)',
+          retryable_after_ms: 5000,
+        };
+      }
+
       if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
         const reclaim = await db.update(skillIdempotencyKeys)
           .set({ createdAt: new Date(), requestHash, responsePayload: {} })
@@ -976,11 +1028,23 @@ if (def?.idempotency) {
 ```ts
 /**
  * After this much time, an `in_flight` claim is presumed crashed and may be
- * reclaimed by the next caller. 10 minutes covers the longest expected
- * legitimate handler runtime (LLM-heavy workflows + external provider
- * round-trips with retries) plus a safety margin. Adjusting this value is a
- * spec amendment — too short causes legitimate handlers to be reclaimed
- * mid-execution; too long worsens the deadlock-on-crash window.
+ * reclaimed by the next caller — BUT ONLY for skills with
+ * `idempotency.reclaimEligibility: 'eligible'` per §8.1.
+ *
+ * Per §16A.8 budget rule: any `'eligible'` skill's worst-case successful
+ * runtime MUST be < 50% of this value (i.e. < 5 minutes for the 10-minute
+ * default). The 50% margin protects against latency spikes — without it, a
+ * legitimately slow handler running close to the timeout could be reclaimed
+ * mid-execution and double-fire its external side effect.
+ *
+ * Skills whose worst-case runtime cannot be bounded under this budget MUST
+ * declare `reclaimEligibility: 'disabled'` (per §16A.8 step 5) — the wrapper
+ * skips the takeover branch and surfaces stuck rows via `skill.warn` with
+ * `reason: 'in_flight_reclaim_disabled'` instead.
+ *
+ * Adjusting this value is a spec amendment — too short causes legitimate
+ * eligible handlers to be reclaimed mid-execution; too long worsens the
+ * deadlock-on-crash window for `'disabled'` skills.
  */
 export const IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
 ```
@@ -1109,7 +1173,7 @@ if (agentRole === 'manager') {
 
 The three-condition deny composition (allowlist + `directExternalSideEffect` + `sideEffectClass !== 'none'`) closes both the **direct** leak (manager calls Stripe directly) and the **indirect** leak (manager calls an internal skill that itself calls Stripe). Adding a new manager-allowlisted skill with `sideEffectClass: 'read'` or `'write'` is a deliberate decision and requires the spec author to justify the carveout in the registry entry.
 
-The guard returns `{ action: 'block', reason: 'manager_role_violation' }` — the existing middleware-block surface. The agent observes the block as a normal denial; no exception is thrown.
+The guard returns `{ action: 'block', reason: <one of the three deny reasons above> }` via the existing middleware-block surface — `'manager_role_violation'` for non-allowlisted skills, `'manager_direct_external_side_effect'` for skills whose handler itself calls an external system, or `'manager_indirect_side_effect_class'` for skills with any external blast radius. The agent observes the block as a normal denial regardless of the specific reason; no exception is thrown.
 
 ### 9.5 Worker-adapter case removal
 
@@ -1121,9 +1185,9 @@ In `registerAdapter('worker', ...)` (top of `skillExecutor.ts`), the `case 'upda
 - `npm run lint` passes.
 - `bash scripts/verify-no-silent-failures.sh` passes (the new wrapper paths emit structured logs, not silent returns).
 - `bash scripts/verify-principal-context-propagation.sh` passes — every `canonicalDataService.<method>(` call site in the new service modules (`adminOpsService.ts`, `sdrService.ts`, `retentionSuccessService.ts`) passes a `fromOrgId(...)` first argument or the file declares `// @principal-context-import-only`.
-- `bash scripts/verify-rls-protected-tables.sh` passes — the `assertRlsAwareWrite('skill_idempotency_keys')` call in §9.3.1 satisfies the write-path advisory check; no other raw-SQL writes to RLS-protected tables are introduced by this phase.
+- `bash scripts/verify-rls-protected-tables.sh` passes — both raw-SQL writes to `skill_idempotency_keys` are guarded: the wrapper INSERT in §9.3.1 and the cleanup-job DELETE in §16.3 each call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the write.
 - Manual test: invoke `draft_post` from a `head-of-growth` test run → wrapper returns `{ action: 'block', reason: 'manager_role_violation' }`.
-- Manual test: invoke `send_invoice` twice with the same `(engagement_id, billing_period_start, billing_period_end)` → second call returns the cached payload with `skill.idempotency.hit` log.
+- Manual test: invoke `send_invoice` twice with the same `invoice_id` (per §8.2 — `send_invoice.keyShape = [invoice_id]`) → second call returns the cached payload with `skill.idempotency.hit` log. (Confirm against the registry table — `generate_invoice` uses `[engagement_id, billing_period_start, billing_period_end]`; do not mix them.)
 - Manual test: race two terminal UPDATEs on the same idempotency row → losing path's `WHERE status = 'in_flight'` returns 0 rows; logger emits `skill.warn` with `reason: 'terminal_race_lost'`; both callers receive the winner's payload (per §16A.3 + §16A.7).
 
 ---
@@ -1581,39 +1645,45 @@ for (const row of all) {
   }
 }
 
-// Assertion 4: every T3 worker has exactly one parent and that parent is a
-// manager (T1 or T2). This catches the misconfiguration class where two
-// `AGENTS.md` files declare ownership of the same worker via overlapping
-// implicit `subordinates:` lists, or where a worker accidentally gets parented
-// to another T3 (creating a 4-tier chain that Assertion 2 would catch but
-// with a less specific error).
+// Assertion 4: every T3 worker has exactly one parent and that parent is in
+// the allowed-parents set (T1 Orchestrator OR a T2 department head OR a T2
+// direct-report-of-Orchestrator that owns workers — see set definition
+// below). This catches the misconfiguration class where two `AGENTS.md` files
+// declare ownership of the same worker via overlapping implicit
+// `subordinates:` lists, or where a worker accidentally gets parented to
+// another T3 (creating a 4-tier chain that Assertion 2 would catch but with
+// a less specific error).
 for (const row of all) {
   if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
   const parent = byId.get(row.parentId!);
   if (!parent) continue; // already reported by Assertion 2
 
-  // The parent must itself be either the Orchestrator (T1) or a manager (T2).
-  // Managers in v7.1: head-of-product-engineering, head-of-growth,
-  // head-of-client-services, head-of-commercial, admin-ops-agent,
-  // strategic-intelligence-agent. Orchestrator is the sole T1.
-  const T1_OR_T2 = new Set([
-    'orchestrator',
-    'head-of-product-engineering',
-    'head-of-growth',
-    'head-of-client-services',
-    'head-of-commercial',
-    'admin-ops-agent',
-    'strategic-intelligence-agent',
+  // The parent must itself be either the Orchestrator (T1) OR a T2 agent
+  // that legitimately owns workers. Note: not all entries below carry
+  // `role: 'manager'` — admin-ops-agent is `role: 'staff'` (per §10.1.5)
+  // because its primary mode is staff-execution, but it sits in T2 as a
+  // direct report of Orchestrator and owns no subordinates of its own
+  // currently. It is included here as a future-proofing allowance for the
+  // case where admin-ops grows worker subordinates without a spec
+  // amendment to this assertion.
+  const ALLOWED_T1_T2_PARENTS = new Set([
+    'orchestrator',                  // T1 (sole)
+    'head-of-product-engineering',   // T2 manager
+    'head-of-growth',                // T2 manager
+    'head-of-client-services',       // T2 manager
+    'head-of-commercial',            // T2 manager
+    'admin-ops-agent',               // T2 staff direct report (see comment above)
+    'strategic-intelligence-agent',  // T2 direct report of Orchestrator
   ]);
-  if (!T1_OR_T2.has(parent.slug)) {
+  if (!ALLOWED_T1_T2_PARENTS.has(parent.slug)) {
     throw new Error(
-      `[hierarchy] worker '${row.slug}' is parented to '${parent.slug}', which is not a manager (T1/T2). ` +
-      `A worker (T3) must report directly to the Orchestrator or a department head.`,
+      `[hierarchy] worker '${row.slug}' is parented to '${parent.slug}', which is not in the allowed T1/T2 parent set. ` +
+      `A worker (T3) must report directly to the Orchestrator or a T2 agent listed in ALLOWED_T1_T2_PARENTS.`,
     );
   }
 }
 
-log('  [ok]   hierarchy assertions: 1 root, no cycles, depth ≤ 3, all parents present, every worker has exactly one T1/T2 parent');
+log('  [ok]   hierarchy assertions: 1 root, no cycles, depth ≤ 3, all parents present, every worker has exactly one parent in ALLOWED_T1_T2_PARENTS');
 ```
 
 Failure aborts the seed with a clear error.
@@ -1765,12 +1835,15 @@ The seed is idempotent against any prior agent state, so reverting the file chan
 
 ### 15.2 Manager-role-violation block response
 
-Returned by `proposeActionMiddleware` as the `PreToolResult.action: 'block'` payload:
+Returned by `proposeActionMiddleware` as the `PreToolResult.action: 'block'` payload. The `reason` field is one of three values, ordered by §9.4's deny composition:
 
 ```ts
 {
   action: 'block',
-  reason: 'manager_role_violation' | 'manager_direct_external_side_effect',
+  reason:
+    | 'manager_role_violation'                // Skill is not on the manager allowlist (and not a per-manager declared read).
+    | 'manager_direct_external_side_effect'   // Skill is allowlisted but `directExternalSideEffect: true` — the handler itself calls an external system.
+    | 'manager_indirect_side_effect_class',   // Skill is allowlisted with `directExternalSideEffect: false` but `sideEffectClass !== 'none'` — closes the indirect leak where a "safe" manager-allowed skill internally invokes a write skill.
   details: {
     skill: 'draft_post',
     agent_role: 'manager',
@@ -1779,7 +1852,7 @@ Returned by `proposeActionMiddleware` as the `PreToolResult.action: 'block'` pay
 }
 ```
 
-The agent observes this as a denied tool call, not an exception. Manager prompts are written to expect this surface and route the work to a worker via `reassign_task` instead.
+The agent observes this as a denied tool call regardless of the specific reason — no exception is thrown. Manager prompts are written to expect this surface and route the work to a worker via `reassign_task` instead. The three reasons exist so audit logs distinguish allowlist drift (`manager_role_violation`) from contract drift (`*_side_effect_*`) when investigating manager-side denials.
 
 ### 15.3 Side-effect-class `blocked` response
 
@@ -1848,16 +1921,21 @@ No new permission keys are introduced.
 
 The cleanup of expired `skill_idempotency_keys` rows runs as a daily pg-boss job (registered in `server/jobs/index.ts`). This is a backend job, not an HTTP route — same posture as every other ledger-cleanup job in the codebase.
 
-**Batched-delete pattern (mandatory).** The cleanup job deletes in batches of 1,000 rows per iteration, looping until the predicate returns 0 rows. This avoids a single massive `DELETE WHERE expires_at < NOW()` that could acquire a long table-level lock when the expires-at backlog accumulates (e.g. after a multi-day outage of the cleanup job, or after a TTL reduction migration that retroactively shortens long-class to short-class):
+**Batched-delete pattern (mandatory).** The cleanup job deletes in batches of 1,000 rows per iteration, looping until the predicate returns 0 rows. This avoids a single massive `DELETE WHERE expires_at < NOW()` that could acquire a long table-level lock when the expires-at backlog accumulates (e.g. after a multi-day outage of the cleanup job, or after a TTL reduction migration that retroactively shortens long-class to short-class).
+
+The job uses `db.execute(sql\`...\`)` for the DELETE rather than Drizzle's typed `.delete()` because the `IN (SELECT ... LIMIT N)` index-aware batching pattern is awkward to express through Drizzle's typed builder without losing the index on `(expires_at)`. Because this is a raw-SQL write to an RLS-protected table, the job MUST call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the DELETE per `server/lib/rlsBoundaryGuard.ts` — otherwise `verify-rls-protected-tables.sh` flags the call site as an advisory violation:
 
 ```ts
 // server/jobs/skillIdempotencyKeysCleanupJob.ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
 const BATCH_SIZE = 1000;
 let totalDeleted = 0;
 let batchCount = 0;
 const start = Date.now();
 
 while (true) {
+  assertRlsAwareWrite('skill_idempotency_keys');
   const deleted = await db.execute(sql`
     DELETE FROM skill_idempotency_keys
     WHERE (subaccount_id, skill_slug, key_hash) IN (
@@ -1888,7 +1966,7 @@ A safety cap of 10,000 batches per job invocation prevents a runaway loop in pat
 | Service-layer mediated | ✅ | All access flows through `server/services/skillExecutor.ts` and (for cleanup) `server/jobs/skillIdempotencyKeysCleanupJob.ts`; no route file imports the table |
 | Subaccount-resolved | ✅ | Inherited from agent execution context — `executeWithActionAudit` runs after `resolveSubaccount` has populated the principal context |
 | Gates green | ✅ | §6.5 verification list (rls-coverage + rls-protected-tables + rls-session-var-canon + migration-sequencing) |
-| Background jobs follow admin/org tx pattern | ✅ | `skillIdempotencyKeysCleanupJob` mirrors `memoryDedupJob.ts` — admin connection for iteration, `withOrgTx` per tenant write (§9.5) |
+| Background jobs follow admin/org tx pattern | ✅ | `skillIdempotencyKeysCleanupJob` mirrors `memoryDedupJob.ts` — admin connection for iteration, raw-SQL DELETE guarded per-batch by `assertRlsAwareWrite('skill_idempotency_keys')` (§16.3) |
 | New table has principal-scoped context | ✅ | Inherits agent execution context (§16.1 item 4) |
 | Down-migration shipped (no-op stub) | ✅ | §6.4 |
 
@@ -1910,7 +1988,7 @@ const result = await tx.execute(sql`
 `);
 ```
 
-The cleanup job (§9.5) uses Drizzle's typed `.delete()` and is therefore auto-guarded by the runtime Proxy in `getOrgScopedDb`; no explicit `assertRlsAwareWrite` call is needed in that path.
+The cleanup job (per §16.3) ALSO uses raw `db.execute(sql\`...\`)` — the index-aware `IN (SELECT ... LIMIT N)` batching pattern is awkward to express through Drizzle's typed `.delete()` without losing the `(expires_at)` index. The cleanup job therefore calls `assertRlsAwareWrite('skill_idempotency_keys')` immediately before each batch DELETE inside the loop. Both raw-SQL write paths (the wrapper INSERT here in §9.3.1 and the cleanup DELETE in §16.3) are explicitly listed as `assertRlsAwareWrite` call sites in the v7.1 advisory log.
 
 ---
 
@@ -1924,7 +2002,7 @@ Mandatory section for any spec that introduces external-side-effect writes or st
 |-----------|---------|-----------|
 | `skill_idempotency_keys` first-writer INSERT | **key-based** | Composite primary key `(subaccount_id, skill_slug, key_hash)`. Unique constraint at the DB level; `ON CONFLICT DO NOTHING RETURNING xmax = 0 AS is_first_writer` decides who runs the side effect. |
 | `skill_idempotency_keys` terminal UPDATE (`in_flight` → `completed`/`failed`) | **state-based** | `UPDATE ... WHERE status = 'in_flight'` — 0 rows updated = another writer terminated us, treat as a no-op. |
-| `skill_idempotency_keys` stale-claim takeover | **time-based + state-based** | Per §16A.8 — `UPDATE ... WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL 'IDEMPOTENCY_CLAIM_TIMEOUT_MS'`. 0 rows updated = another reclaimer beat us; one-and-only-one wins. |
+| `skill_idempotency_keys` stale-claim takeover (eligible skills only) | **time-based + state-based + skill-gated** | Per §16A.8 — `UPDATE ... WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL 'IDEMPOTENCY_CLAIM_TIMEOUT_MS'`, gated on `def.idempotency.reclaimEligibility === 'eligible'`. 0 rows updated = another reclaimer beat us; one-and-only-one wins. Skills declared `'disabled'` skip this branch entirely (per §16A.8 step 5). |
 | Skill side-effect execution (the actual `send_invoice`, `send_email`, etc. call) | **non-idempotent (intentional)** | The external provider may or may not be idempotent — we cannot assume. The guarded boundary is the `skill_idempotency_keys` row above; the wrapper guarantees the side effect runs at most once per `(subaccount_id, skill_slug, key_hash)` tuple across runs. |
 | `system_agents` / `agents` upsert during seed | **state-based** | `WHERE slug = ? AND deleted_at IS NULL` (with the §6.1 partial unique index providing the race-claim ordering). |
 
@@ -1947,7 +2025,8 @@ A handler that breaks this invariant — e.g. by issuing a Stripe API call insid
 | Race scenario | Guard | Losing-caller response |
 |---------------|-------|------------------------|
 | Two queue retries fire `send_invoice` for the same `(engagement_id, period)` simultaneously | First-writer-wins INSERT on `skill_idempotency_keys` (`ON CONFLICT DO NOTHING RETURNING xmax = 0`) | Loser reads the existing row; if `status = 'in_flight'` and the row's age is below `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 minutes) the loser surfaces `{ status: 'in_flight', retryable_after_ms }` and the caller polls; if the row's age is at-or-above the threshold the loser attempts the §16A.8 stale-claim takeover; if `status = 'completed'` returns cached `response_payload` immediately and emits `skill.idempotency.hit`. |
-| First writer crashes mid-execution; second caller arrives 11 minutes later | Stale-claim takeover via state-based UPDATE: `WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL '<TIMEOUT>'` | Reclaimer wins the UPDATE → becomes the new first writer (emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'`). Concurrent reclaimers see 0-rows-updated and re-poll; `skill.warn` with `reason: 'in_flight_claim_lost_reclaim'`. |
+| First writer crashes mid-execution; second caller arrives 11 minutes later (skill `reclaimEligibility: 'eligible'`) | Stale-claim takeover via state-based UPDATE: `WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL '<TIMEOUT>'` | Reclaimer wins the UPDATE → becomes the new first writer (emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'`). Concurrent reclaimers see 0-rows-updated and re-poll; `skill.warn` with `reason: 'in_flight_claim_lost_reclaim'`. |
+| Same scenario, but skill `reclaimEligibility: 'disabled'` (handler runtime is genuinely long / unbounded) | Takeover branch is skipped entirely per §16A.8 step 5 — no reclaim attempted, the original `in_flight` row remains owner | Caller receives `{ status: 'in_flight', retryable_after_ms: 5000 }`; wrapper emits `skill.warn` with `reason: 'in_flight_reclaim_disabled'` (rate-limited 1/min per `(skill, subaccount)` per §18.1). Manual DB cleanup or row TTL expiry is the recovery path — see §21 for the deferred heartbeat-extending takeover variant. |
 | Two callers race the terminal UPDATE (`in_flight` → `completed` vs `failed`) | `UPDATE ... WHERE status = 'in_flight'` returning row count | 0-rows-updated = the other path won; logger emits `skill.warn` with `reason: 'terminal_race_lost'`, return the winner's row contents to the caller. |
 | Two seed runs hit `system_agents.slug` for the same active row | Partial unique index `system_agents_slug_active_idx` | Drizzle upsert handles it via `ON CONFLICT DO UPDATE` — no caller-visible failure. |
 | Same `key_hash` arrives with a **mismatched** `request_hash` (idempotency collision) | `request_hash` stored on the existing row; wrapper compares before returning cached payload | Wrapper returns `{ status: 'idempotency_collision' }`; emits `skill.error` with both hashes; caller surfaces as a structured failure (does not retry). |
@@ -2004,10 +2083,14 @@ No HTTP routes touch these tables, so no HTTP status codes are issued. The agent
 
 A first writer that crashes mid-execution leaves its `in_flight` row owning the idempotency key indefinitely. Without a takeover path, every subsequent same-key replay returns `{ status: 'in_flight' }` forever — the side effect can never be retried and the deadlock can only be cleared by a manual DB DELETE.
 
-**Takeover protocol** (implemented in §9.3.1):
+**Per-skill eligibility gate (mandatory).** The takeover path runs ONLY when the resolved skill's `IdempotencyContract.reclaimEligibility === 'eligible'` (per §8.1). Skills declared `'disabled'` skip the takeover branch entirely and always return `{ status: 'in_flight', retryable_after_ms: <bounded> }` for any same-key replay while the row remains `in_flight`. This is the safety wall against the "slow-but-still-running handler" failure mode: a handler whose worst-case runtime approaches or exceeds `IDEMPOTENCY_CLAIM_TIMEOUT_MS` would otherwise be reclaimed mid-execution and re-fire its external side effect when the original eventually completes.
+
+**Eligibility budget.** A skill MAY declare `reclaimEligibility: 'eligible'` only when its worst-case successful runtime is < 50% of `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (i.e. < 5 minutes). The 50% margin protects against latency spikes (provider slowness, cold starts, temporary network jitter). A skill whose runtime cannot be bounded under this budget MUST declare `'disabled'` until a heartbeat-extending takeover variant is added (deferred — see §21).
+
+**Takeover protocol** (implemented in §9.3.1, runs only for `reclaimEligibility === 'eligible'`):
 
 1. The losing first-writer reads the existing row.
-2. If `existing.status === 'in_flight'` AND `(NOW() - existing.created_at) >= IDEMPOTENCY_CLAIM_TIMEOUT_MS`, the losing writer attempts a state-based UPDATE:
+2. If `existing.status === 'in_flight'` AND `(NOW() - existing.created_at) >= IDEMPOTENCY_CLAIM_TIMEOUT_MS` AND the resolved skill's `idempotency.reclaimEligibility === 'eligible'`, the losing writer attempts a state-based UPDATE:
    ```sql
    UPDATE skill_idempotency_keys
       SET created_at = NOW(),
@@ -2019,9 +2102,10 @@ A first writer that crashes mid-execution leaves its `in_flight` row owning the 
    ```
 3. If 1 row updated → reclaimer becomes the new first writer; emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'` and proceeds with execution.
 4. If 0 rows updated → another reclaimer beat us; we re-poll and surface `{ status: 'in_flight', retryable_after_ms: 1000 }` to the caller.
+5. If `reclaimEligibility === 'disabled'` → skip steps 2–4 entirely; return `{ status: 'in_flight', retryable_after_ms: 5000 }` regardless of `created_at` age. The deadlock-recovery path for these skills is manual DB intervention OR the cleanup job (when the row's `expires_at` is reached). The wrapper logs `skill.warn` with `reason: 'in_flight_reclaim_disabled'` once per (skill, subaccount) per minute (rate-limited per §18.1) so operators can surface chronically stuck rows.
 
 **Constants.**
-- `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 * 60 * 1000` (10 minutes — covers the longest expected legitimate handler runtime). Defined alongside `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts` (§4.11c).
+- `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 * 60 * 1000` (10 minutes — the upper bound for any `reclaimEligibility: 'eligible'` skill's worst-case runtime, per the 50% budget rule above). Defined alongside `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts` (§4.11c).
 
 **Why a state-based UPDATE, not a DELETE-then-INSERT:** the row keeps its primary key + composite uniqueness — concurrent reclaimers cannot both succeed because only one UPDATE matches the `created_at < NOW() - INTERVAL` predicate. A DELETE-then-INSERT would race two callers into a double-INSERT.
 
@@ -2029,13 +2113,14 @@ A first writer that crashes mid-execution leaves its `in_flight` row owning the 
 
 **Why `response_payload` is reset to `{}`:** prevents a stale partial result from a half-completed prior attempt leaking into the reclaimed row's eventual `completed`/`failed` write.
 
-**Operational note.** The 10-minute window is intentionally generous — too aggressive a takeover would interrupt a legitimately long-running handler (LLM-heavy workflows + external provider round-trips with retries). Tightening it requires a spec amendment + a redeploy.
+**Operational note.** The 10-minute window is intentionally generous — too aggressive a takeover would interrupt a legitimately long-running `'eligible'` handler. The 50% budget rule means `'eligible'` skills must comfortably finish within 5 minutes; the extra 5 minutes is the safety margin against latency spikes. For handlers that need genuinely long runtimes, the answer is `reclaimEligibility: 'disabled'`, NOT loosening the timeout. Tightening or extending the constant itself requires a spec amendment + a redeploy.
 
-**Telemetry.** Two new event sub-tags route through `skill.warn` (per §18):
+**Telemetry.** Three new event sub-tags route through `skill.warn` (per §18):
 - `reason: 'in_flight_claim_reclaimed'` — successful takeover; includes `age_ms`.
 - `reason: 'in_flight_claim_lost_reclaim'` — lost a takeover race; non-paged.
+- `reason: 'in_flight_reclaim_disabled'` — caller hit an `in_flight` row for a `reclaimEligibility: 'disabled'` skill past the timeout; surfaces a chronically stuck row for operator review. Rate-limited to 1/min per `(skill, subaccount)` per §18.1.
 
-A sustained rate of either tag indicates upstream worker instability or a chronically misconfigured handler — investigate before paging the on-call.
+A sustained rate of any of these tags indicates upstream worker instability, a chronically misconfigured handler, or (for the third tag) operational debt that needs manual cleanup — investigate before paging the on-call.
 
 ---
 
@@ -2072,6 +2157,7 @@ Every new skill handler must emit structured logs at the standard tag points (th
 | Idempotency collision (same key, different request hash) | `skill.error` | `slug`, `reason: 'idempotency_collision'`, both hashes | **ERROR** (paged) |
 | Stale-claim takeover (per §16A.8 — successful reclaim) | `skill.warn` | `slug`, `reason: 'in_flight_claim_reclaimed'`, `key_hash`, `age_ms` | WARN |
 | Stale-claim takeover lost to a concurrent reclaimer | `skill.warn` | `slug`, `reason: 'in_flight_claim_lost_reclaim'`, `key_hash` | WARN |
+| Reclaim-disabled skill stuck `in_flight` past timeout (per §16A.8 step 5) | `skill.warn` | `slug`, `reason: 'in_flight_reclaim_disabled'`, `key_hash`, `age_ms` | WARN (rate-limited 1/min per `(skill, subaccount)` per §18.1) |
 
 Fail-soft on a **read** skill emits `skill.warn`. An *expected* blocked write (the §15.3 must-block path — config missing, no auth, validation rejected) emits `skill.blocked` at INFO level. Only contract violations and unexpected failures emit `skill.error`. The split prevents the alerting layer from paging on every "Stripe API key not configured" event during local dev.
 
@@ -2086,6 +2172,7 @@ The pre-prod alerting layer is intentionally permissive (no PagerDuty integratio
 | `skill.error` (any single occurrence) | **paged immediately** | The split between `blocked` (expected) and `error` (unexpected) means every `skill.error` is a contract violation. | Emitting `error` is itself the alert signal — there is no rate threshold. |
 | `skill.warn` rate with `reason: 'terminal_race_lost'` | **> 1/min sustained** | Investigate concurrent caller pattern — likely a bug in the agent's queue-retry semantics. | A single occasional terminal-race-loss is benign; sustained means two queue lanes are duplicating work. |
 | `skill.warn` rate with `reason: 'in_flight_claim_reclaimed'` | **> 1/hour sustained per skill** | Investigate worker stability — handlers are crashing mid-execution often enough to leave stale claims for the takeover path to clean up. | Reclaims should be exceptional (worker death, deploy mid-flight). Sustained reclaims indicate an upstream worker or handler bug. |
+| `skill.warn` rate with `reason: 'in_flight_reclaim_disabled'` | **any sustained occurrence > 1/hour per skill** | Manual intervention required — a `reclaimEligibility: 'disabled'` skill has rows stuck `in_flight` past timeout. Either the prior worker died (manual DB DELETE) or the handler is genuinely unbounded and the skill needs heartbeat support (deferred). | The takeover path is intentionally off for these skills, so chronically stuck rows must be operator-visible — sustained signal indicates either crash damage or unmet runtime budgets. |
 
 **`skill.blocked` flood protection (mandatory, not advisory).** The wrapper rate-limits the **logging** of `skill.blocked` per `(skill, subaccount)` to **at most 1 emit per minute**, with subsequent in-window emits suppressed and a single suppression-summary line emitted at minute close. Without this, a tenant with a missing `STRIPE_API_KEY` and a per-second cron loop produces 3,600 INFO lines per hour per skill — drowning structured-log search and inflating storage cost.
 
@@ -2135,14 +2222,14 @@ The migration is complete when **all** of the following hold. Numbered for trace
 12. **Agent ↔ skill contract.** `npx tsx scripts/verify-agent-skill-contracts.ts` exits 0; every skill in every `AGENTS.md` resolves to a `.md` file, an `ACTION_REGISTRY` entry, and a `SKILL_HANDLERS` handler.
 13. **Hierarchy invariants.** Post-seed assertion passes: exactly one business-team root (Orchestrator), no cycles, depth ≤ 3, all parents non-deleted (§13.4 logic).
 14. **Side-effect classification.** Every new write skill has `sideEffectClass: 'write'` in its registry entry; the `executeWithActionAudit` wrapper enforces fail-soft vs must-block by class.
-15. **Idempotency wiring.** Every new write skill declares `idempotency.keyShape` in its registry entry; manual replay test (invoking `send_invoice` twice with the same key tuple) confirms second invocation returns cached result.
+15. **Idempotency wiring.** Every new write skill declares `idempotency.keyShape` AND `idempotency.reclaimEligibility` in its registry entry; manual replay test invoking `send_invoice` twice with the same `invoice_id` (per §8.2 — `send_invoice.keyShape = [invoice_id]`) confirms second invocation returns cached result. (`generate_invoice` is a separate skill with `keyShape = [engagement_id, billing_period_start, billing_period_end]` — do not conflate.)
 16. **Manager guard.** Manual test: invoking `draft_post` from a `head-of-growth` test run returns `{ action: 'block', reason: 'manager_role_violation' }`.
 17. **Manifest JSON.** `companies/automation-os/automation-os-manifest.json` is at `version: "7.1.0"` with all 22 agents listed, `reportsTo` matching frontmatter, and `masterBrief` pointing at `docs/automation-os-system-agents-master-brief-v7.1.md`.
 18. **Foundational-skill self-containment.** Every skill in `APP_FOUNDATIONAL_SKILLS` declares no external integration in its registry entry (verified by extended `verify-skill-visibility.ts`).
 19. **No orphan skills.** Every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list **OR** carries `reusable: true` in its own frontmatter.
 20. **No orphan agents.** Every active `system_agents` row except `orchestrator`, `portfolio-health-agent`, and `workflow-author` has a non-null `parent_system_agent_id` referencing another active row.
 21. **Active-row uniqueness.** `\d+ system_agents` shows `system_agents_slug_active_idx` and `\d+ agents` shows `agents_org_slug_active_uniq` — both as `WHERE (deleted_at IS NULL)` partial uniques.
-22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table; the §9.3.1 `assertRlsAwareWrite` call covers the raw-SQL write-path advisory).
+22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table; both raw-SQL write-path advisory checks pass — the §9.3.1 wrapper INSERT and the §16.3 cleanup-job DELETE each call `assertRlsAwareWrite('skill_idempotency_keys')`).
 23. **Principal-context propagation.** `bash scripts/verify-principal-context-propagation.sh` exits 0 — every `canonicalDataService` call site in the new service modules passes a PrincipalContext-shaped first argument, or the file declares `@principal-context-import-only`.
 24. **Migration sequencing.** `bash scripts/verify-migration-sequencing.sh` exits 0 — migration `0233_system_agents_v7_1.sql` is correctly numbered and the `_down/` reversal stub exists.
 25. **State-machine closure.** `skill_idempotency_keys.status` CHECK constraint is in place (`status IN ('in_flight','completed','failed')`); manual psql probe inserting `'completed'` directly fails with `23514 check_violation`; manual UPDATE attempting `completed → failed` returns 0 rows (the wrapper's `WHERE status = 'in_flight'` predicate refuses the transition per §16A.7).
@@ -2155,6 +2242,8 @@ The migration is complete when **all** of the following hold. Numbered for trace
 32. **Cleanup batching.** Manual test: insert 5,000 rows with `expires_at < NOW()`; run cleanup job; verify (a) `skill_idempotency_keys.cleanup.batch` log emits ≥ 5 times (≥ 5 batches at 1k each), (b) `skill_idempotency_keys.cleanup.complete` log includes accurate `total` and `batches` counts, (c) permanent-class rows (`expires_at IS NULL`) untouched.
 33. **`skill.blocked` rate-limiting.** Manual test: invoke a write skill 10 times in a 60-second window with `STRIPE_API_KEY` unset; verify only 1 `skill.blocked` log line emitted, suppression-summary line at minute close indicates 9 suppressed.
 34. **Worker-parent assertion.** Manual test: edit the seed to parent `dev` to `qa` (a T3-to-T3 chain); seed aborts with the `[hierarchy]` error from Assertion 4 in §13.4.
+35. **Reclaim eligibility declared.** Every write-class skill in §8.2 has `idempotency.reclaimEligibility` set to either `'eligible'` or `'disabled'`; the seed pre-flight (extension to `verify-agent-skill-contracts.ts`) refuses to load a write-class skill whose registry entry omits the field.
+36. **Reclaim-disabled in_flight surfacing.** Manual test: register a test-only write skill with `reclaimEligibility: 'disabled'`, insert an `in_flight` row with `created_at = NOW() - INTERVAL '15 minutes'`, replay the same key — wrapper returns `{ status: 'in_flight', retryable_after_ms: 5000 }` (no reclaim attempted) and emits exactly one `skill.warn` with `reason: 'in_flight_reclaim_disabled'` per minute (rate-limited per §18.1).
 
 ---
 
@@ -2163,7 +2252,8 @@ The migration is complete when **all** of the following hold. Numbered for trace
 ### Deferred-from-this-spec
 
 - **Master prompts for the 4 manager agents and 3 new workers.** Drafted in the implementing PR per master brief §10–§14, §21, §29. Each prompt encodes the manager pattern (vet → decompose → pick subordinate → delegate → aggregate → report) for the heads, and the standard worker pattern for the others. Reason: prompt drafting is implementation work, not architectural decision.
-- **Stripe / Xero real integration for admin-ops handlers.** Handlers stub at first (per §9.1); real provider plumbing is its own piece of work. Reason: provider integration scope spans OAuth flows, webhook handlers, and reconciliation logic far beyond the v7.1 migration's blast radius.
+- **Stripe / Xero real integration for admin-ops handlers.** Handlers stub at first (per §9.1); real provider plumbing is its own piece of work. Reason: provider integration scope spans OAuth flows, webhook handlers, and reconciliation logic far beyond the v7.1 migration's blast radius. **Note:** the spec amendment that wires real providers MUST re-evaluate `idempotency.reclaimEligibility` per skill (per §8.2 rationale block) — any handler whose worst-case runtime grows past 5 minutes (50% of `IDEMPOTENCY_CLAIM_TIMEOUT_MS`) must move to `'disabled'` or implement heartbeat support.
+- **Heartbeat-extending takeover variant for `reclaimEligibility: 'disabled'` skills.** A future enhancement where the wrapper periodically `UPDATE`s `created_at = NOW()` from inside the running handler so the takeover-timeout window slides forward as long as the worker is alive — letting genuinely long-running handlers participate in stale-claim recovery without the double-fire risk of the current binary `'eligible' / 'disabled'` switch. Out of scope for v7.1: no current skill needs runtime > 5 minutes, and the heartbeat needs a separate concurrency contract (cooperative cancellation, deadline propagation) that is its own design problem.
 - **Master brief sections 14–22 + Appendices A–F.** ~~Pending capture.~~ Resolved — user provided full master brief; `docs/automation-os-system-agents-master-brief-v7.1.md` rewritten with all 22 agents + Appendices A–F.
 - **Content/SEO + Social Media merge investigation.** Master brief Appendix F flags this for evaluation based on combined skill count and context-window impact. Out-of-scope here.
 

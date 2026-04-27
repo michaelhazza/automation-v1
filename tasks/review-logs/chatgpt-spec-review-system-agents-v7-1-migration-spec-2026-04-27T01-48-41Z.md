@@ -64,3 +64,49 @@ No other forward references or contradictions detected. New symbols (`IDEMPOTENC
 ### Applied — new acceptance criteria
 
 Added items 27–34 to §20 Acceptance criteria covering: hash canonicalisation determinism (27), keyShape field-resolution semantics (28), stale-claim takeover (29), manager indirect-side-effect block (30), failed-row terminal rule (31), cleanup batching (32), `skill.blocked` rate-limiting (33), worker-parent assertion (34).
+
+---
+
+## Round 2 — 2026-04-27T02-22-29Z
+
+### ChatGPT Feedback (raw)
+
+> Round 2 feedback: mostly done, but I'd tighten 5 items before final.
+>
+> 1. **Stale-claim takeover can double-fire external side effects.** The 10-minute reclaim assumes the original worker died, but it may still be running slowly. Add a rule: only skills whose worst-case runtime is safely below `IDEMPOTENCY_CLAIM_TIMEOUT_MS` may use takeover, otherwise require heartbeat or disable reclaim per skill.
+> 2. **`send_invoice` manual test uses wrong key tuple.** Registry says `send_invoice` keyShape is `[invoice_id]`, but acceptance criteria still says replay with `(engagement_id, billing_period_start, billing_period_end)`. Fix AC #15 to use `invoice_id`.
+> 3. **Manager guard docs contradict return reason.** §9.4 says the guard may return `manager_direct_external_side_effect` or `manager_indirect_side_effect_class`, but the old sentence still says it returns `{ action: 'block', reason: 'manager_role_violation' }`. Remove/update that stale sentence.
+> 4. **Cleanup job RLS posture conflicts with raw SQL.** §16.5 says cleanup uses typed `.delete()` and no explicit RLS guard, but §16.3 shows raw `db.execute(sql DELETE...)`. Either change implementation to typed delete or require `assertRlsAwareWrite('skill_idempotency_keys')` before the raw delete.
+> 5. **Hierarchy assertion labels admin-ops-agent as manager/T2 despite role staff.** That may be intentional as a direct report of Orchestrator, but the spec text says "Managers in v7.1" and includes admin-ops. Rename the set to `ALLOWED_T1_T2_PARENTS` and avoid calling all entries managers.
+>
+> After those, I'd call it final.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Stale-claim takeover can double-fire side effects when handler is slow but still running | technical | apply | auto (apply) | high | Real correctness gap. The current `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 min` rule reclaims on `created_at < NOW() - 10 min` regardless of whether the original worker is still running — a legitimately slow handler running close to the timeout could be reclaimed mid-execution and re-fire its external side effect when the original eventually completes. User explicitly relaxed high-severity escalation for this round. **Fix:** add `IdempotencyContract.reclaimEligibility: 'eligible' \| 'disabled'` per-skill flag with a 50% budget rule (eligible only if worst-case runtime < 5 min). All 8 current write skills are stub-first / non-heavy → safe to declare `'eligible'`. Add a deferred item for the heartbeat-extending takeover variant. |
+| 2 | AC #15 + §9.6 manual test use wrong `send_invoice` key tuple | technical | apply | auto (apply) | high | Real correctness gap that would mislead the implementer / cause a manual-test failure. §8.2 registry says `send_invoice.keyShape = [invoice_id]` but AC #15 implies the legacy `(engagement_id, billing_period_start, billing_period_end)` tuple (which belongs to `generate_invoice`). The §9.6 manual test on line 1126 explicitly uses the wrong tuple. **Fix:** rewrite both to use `invoice_id` and call out the `generate_invoice` separation explicitly so the conflation cannot recur. |
+| 3 | Manager guard return-reason contradiction (stale "returns manager_role_violation" sentence) | technical | apply | auto (apply) | medium | Doc consistency gap. After Round 1's three-condition deny tightening, §9.4 introduced two new reasons (`manager_direct_external_side_effect`, `manager_indirect_side_effect_class`) but several legacy sentences still claimed the guard returns only `manager_role_violation`. Affected sites: line 110 (re-use table), line 176 (file inventory), line 1112 (§9.4 trailing sentence), §15.2 contract block (only listed 2 of 3 reasons). AC #16 + §9.6 manual test for `draft_post` correctly remain `manager_role_violation` (non-allowlisted skills hit that branch first per §9.4 deny ordering). |
+| 4 | Cleanup job RLS posture contradiction (§16.5 says typed `.delete()`, §16.3 shows raw SQL) | technical | apply | auto (apply) | high | Real correctness gap that would fail `verify-rls-protected-tables.sh` at runtime. The §16.3 raw-SQL pattern (`IN (SELECT ... LIMIT N)` for index-aware batching) is the right implementation choice — typed `.delete()` would lose the `(expires_at)` index efficiency. **Fix:** add `assertRlsAwareWrite('skill_idempotency_keys')` to §16.3 (per-batch, inside the loop), update §16.5 to acknowledge cleanup uses raw SQL too, update §16.4 checklist row, update §9.6 verification list, update AC #22. Side benefit: corrects the stale `(§9.5)` forward reference in §16.5 (§9.5 is "Worker-adapter case removal", not cleanup). |
+| 5 | Hierarchy assertion `T1_OR_T2` set name + comment incorrectly call admin-ops-agent a "manager" | technical | apply | auto (apply) | low | Naming clarity. `admin-ops-agent` is `role: staff` (per §10.1.5 line 1189), not `manager` — labelling all entries "Managers in v7.1" in the §13.4 comment is technically incorrect and would confuse a reader cross-checking against the agent definitions. **Fix:** rename const → `ALLOWED_T1_T2_PARENTS`, update inline comment to clarify the set is "T2 agents that legitimately own workers" (with a note that admin-ops is included as future-proofing for the case where it grows worker subordinates), update the trailing log line, update the error message. |
+
+### Post-edit integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Validation pass:
+- All new symbols (`reclaimEligibility`, `in_flight_reclaim_disabled`, `ALLOWED_T1_T2_PARENTS`) defined where introduced (§8.1 / §16A.8 / §13.4).
+- All cross-references resolve: §8.1 → §8.2 table → §9.3.1 wrapper → §16A.8 protocol → AC #15, #35, #36 ✓; new `in_flight_reclaim_disabled` reason → §18 logging table + §18.1 thresholds ✓; `ALLOWED_T1_T2_PARENTS` only used in §13.4 ✓.
+- Manager-guard reason consistency: lines 110, 176, 1112, §15.2 all updated to mention all three reasons. Line 1189 + AC #16 (`draft_post`) deliberately retain `manager_role_violation` because non-allowlisted skills hit that branch first per §9.4 deny ordering — this is the correct test surface for that path.
+- Cleanup-job RLS posture: §16.3, §16.4 row, §16.5, §9.6 verification, AC #22 all aligned to "raw-SQL DELETE guarded per-batch by `assertRlsAwareWrite`".
+- §16A.1 (idempotency posture) and §16A.3 (race-scenarios table) updated to reflect skill-gated takeover.
+- Stale `(§9.5)` reference in §16.5 → corrected to `(per §16.3)`.
+
+### Applied (auto-applied technical, 5 findings + ripple updates)
+
+- [auto] 1: Added `reclaimEligibility: 'eligible' \| 'disabled'` to `IdempotencyContract` (§8.1) + populated column in §8.2 registry table (all 8 write skills marked `eligible` with rationale block); §16A.8 takeover protocol gated on `reclaimEligibility === 'eligible'` with 50% budget rule + step 5 for `'disabled'` skills; new `skill.warn` reason `in_flight_reclaim_disabled` added to §18 + §18.1; §16A.1 + §16A.3 updated to reflect skill-gated takeover; new ACs 35 + 36 for declared-eligibility + disabled-surfacing manual test; new deferred item for heartbeat-extending takeover variant in §21; jsdoc on `IDEMPOTENCY_CLAIM_TIMEOUT_MS` rewritten to explain budget rule + the `'disabled'` opt-out; §16A.8 operational note reframed.
+- [auto] 2: Rewrote AC #15 to specify `invoice_id` for `send_invoice` + call out `generate_invoice` separation; rewrote §9.6 manual test (line 1126) the same way.
+- [auto] 3: Updated four legacy sites (lines 110 re-use table, 176 file inventory, 1112 §9.4 trailing sentence, §15.2 contract block) to enumerate all three deny reasons; AC #16 + line 1189 deliberately preserved as `manager_role_violation` (non-allowlisted-skill test path).
+- [auto] 4: Added `assertRlsAwareWrite('skill_idempotency_keys')` to the §16.3 cleanup-job loop (per-batch); updated §16.5 to acknowledge cleanup uses raw SQL too; updated §16.4 checklist row; updated §9.6 verification list; updated AC #22 to mention both raw-SQL write paths; corrected stale `(§9.5)` forward reference to `(per §16.3)`.
+- [auto] 5: Renamed `T1_OR_T2` → `ALLOWED_T1_T2_PARENTS` in §13.4; rewrote the inline comment to drop the "Managers in v7.1" claim and explain that the set is T1 + T2-agents-that-own-workers (with explicit note that admin-ops-agent is `role: staff` and is included as future-proofing); updated trailing log line + error message.
