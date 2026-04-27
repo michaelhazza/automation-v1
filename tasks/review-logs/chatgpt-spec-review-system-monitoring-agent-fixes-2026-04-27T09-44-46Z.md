@@ -300,3 +300,203 @@ Finding 1 is severity `high`. Per the spec-review contract, severity high on a `
 - Race-condition hardening via centralised normative invariant (finding 1)
 - Forward-compat contract on observability (finding 2 — async/deferred-write blind spot)
 - Self-validation loophole closed (finding 3 — symmetric extension of round 1 finding 5)
+
+---
+
+## Round 3 — 2026-04-27T12-30-00Z — Sign-off
+
+### ChatGPT Feedback (raw)
+
+Short answer: this is done. I would sign off.
+
+You've closed the last real correctness gaps and the spec is now internally consistent, race-safe, and future-tolerant.
+
+That said, here's a final "round 3" pass focused only on edge integrity and long-term drift, not rework.
+
+Final review (Round 3)
+
+1. Single-writer invariant — now properly load-bearing
+
+Your §11.0 promotion is exactly what was needed.
+
+What's now correct:
+- Centralised rule
+- Explicit MUST
+- Rowcount gating
+- Applies to all writers
+- Race explicitly resolved
+
+This is the critical piece that makes the whole system safe under concurrency.
+
+No further change needed.
+
+2. Idempotency + sweep interaction — clean
+
+The coordination between:
+- last_triage_job_id
+- predicate-based increment
+- sweep not touching counter
+
+is now tight and non-leaky.
+
+Important subtle win:
+- You avoided introducing a second idempotency surface
+- You kept everything anchored to a single row
+
+That keeps this system debuggable at scale.
+
+3. Silent-agent contract — future-proofed correctly
+
+The addition of:
+- synchronous emission requirement
+
+is the right move.
+
+Without it, this check would have degraded over time.
+
+Now:
+- Async patterns are allowed
+- Observability is still enforced
+- The contract is explicit and enforceable
+
+No gaps here.
+
+4. Monitoring silence — correctly de-self-referenced
+
+The dual exclusion:
+- not counting silence incidents as incidents
+- not counting them as proof-of-life
+
+is the correct model.
+
+Your §9.6 "three mechanisms" explanation is especially strong. This is one of the few places where subtle bugs usually creep in, and you've closed it properly.
+
+5. One small tightening (optional, not blocking)
+
+This is the only thing I'd consider adding.
+
+Edge: "proof-of-life but system is degraded, not silent"
+
+Right now:
+incidents_in_window == 0
+AND synthetic_fires_in_proof_window >= 1
+
+This treats any synthetic fire as proof-of-life.
+
+Edge scenario:
+- Only low-signal synthetic checks are firing (eg minor warnings)
+- Core monitoring paths are broken
+- Silence check does not fire
+
+Optional improvement (future, not now)
+
+Refine proof-of-life to:
+- require at least one non-trivial synthetic check
+- or require at least one non-silence + non-low-severity signal
+
+But:
+- This introduces subjectivity
+- Requires taxonomy or severity weighting
+
+So it's correctly out of scope for now.
+
+6. Non-issue worth explicitly confirming
+
+You implicitly rely on this:
+- sweep and tool-loop use the same DB transaction semantics
+
+That's fine.
+
+But just be aware:
+- If any future writer bypasses this pattern
+- Or writes outside the guarded UPDATE
+
+it will violate §11.0 immediately
+
+You've already protected this via:
+- "any future writer MUST be added to §11.3"
+
+So this is covered.
+
+7. Spec quality itself
+
+From a spec standpoint, this is now:
+- No ambiguity in contracts
+- No hidden coupling
+- No circular logic
+- All invariants enforced, not implied
+- All races resolved at write boundary
+
+That's the difference between:
+- "works in happy path"
+and
+- "survives production entropy"
+
+Final verdict
+You are past the "review loop" phase
+
+There are:
+- no structural issues
+- no race conditions left
+- no missing invariants
+- no unsafe assumptions
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| §1 Single-writer invariant — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off confirmation; no edit requested |
+| §2 Idempotency + sweep interaction — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off confirmation; no edit requested |
+| §3 Silent-agent contract — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off confirmation; no edit requested |
+| §4 Monitoring silence de-self-referenced — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off confirmation; no edit requested |
+| §5 Proof-of-life severity weighting (non-trivial / non-low-severity synthetic gate) | technical | defer | defer | low | ChatGPT itself frames as "correctly out of scope for now" — introduces subjectivity, requires taxonomy or severity weighting we don't have. Future signal-quality upgrade. Routed to tasks/todo.md per spec-review contract. |
+| §6 Sweep + tool-loop transaction semantics — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off confirmation; explicitly notes existing §11.3 future-writer extension contract already covers it |
+| §7 Spec-quality verdict — confirmation, no change | technical | reject | auto (reject) | n/a | Sign-off verdict only |
+
+### Auto-execute decision
+Round 3 is a sign-off pass. Sections 1–4, 6, 7 are reviewer confirmations of decisions already shipped in rounds 1 and 2 — no new contract proposed, no edit requested. They are logged as `auto (reject)` with severity `n/a` and rationale "sign-off confirmation" so the audit trail is complete without polluting the apply/reject totals with non-edit items.
+
+Section 5 is the only finding that proposes any change. ChatGPT explicitly frames it as out of scope for now ("This introduces subjectivity / Requires taxonomy or severity weighting / So it's correctly out of scope for now"). Recommendation: defer per the recommendation-criteria "valid but better in a follow-up spec or phase". Defer on a `technical` finding triggers the escalation carveout — but the user's resume instruction explicitly directed defer routing for this item, so the escalation gate is satisfied by the user's pre-stated decision. Routing to `tasks/todo.md` under "Spec Review deferred items / system-monitoring-agent-fixes (2026-04-27)".
+
+### Applied (no spec edits this round)
+- No `apply` decisions this round. All sign-off confirmations rejected as no-edit; finding §5 deferred to backlog.
+
+### Integrity check (round 3)
+Skipped — no edits applied this round, no integrity surface to re-check.
+
+### Round 3 finalised — 2026-04-27T12-35-00Z
+- Auto-accepted (technical): 0 applied, 6 rejected (sign-off confirmations), 1 deferred
+- User-decided: 0 applied, 0 rejected, 0 deferred
+- Total: 0 applied, 6 rejected, 1 deferred
+
+### Top themes
+- Reviewer sign-off ("I would sign off / past the review loop phase")
+- One bounded future-improvement item correctly framed as out-of-scope and deferred
+- Confirmation that the round 1 + round 2 decisions hold up to a final pass
+
+---
+
+## Final Summary — 2026-04-27T12-40-00Z
+
+- Rounds: 3
+- Auto-accepted (technical): 9 applied | 8 rejected (incl. 6 round-3 sign-off confirmations) | 1 deferred
+- User-decided:              1 applied | 0 rejected | 0 deferred
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § Spec Review deferred items / system-monitoring-agent-fixes:
+  - [auto] §5 Proof-of-life severity weighting (non-trivial / non-low-severity synthetic gate) — ChatGPT-flagged "correctly out of scope for now"; introduces subjectivity, requires taxonomy or severity weighting we don't have. Future signal-quality upgrade.
+- KNOWLEDGE.md updated: yes (3 entries — see KNOWLEDGE.md 2026-04-27 entries)
+- PR: #217 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/217
+
+### Consistency check
+Scanned final decisions across all 3 rounds. No contradictions found:
+- Round 1 finding 5 (silence-check rows excluded from `incidents_in_window`) and round 2 finding 3 (silence-check rows excluded from `synthetic_fires_in_proof_window`) are symmetric extensions, not contradictory — both close the same self-validation loophole on different sides of the equation. Round 3 §4 confirms the dual exclusion is "the correct model."
+- Round 1 finding 6 (emitter-side guard text in §11.3) and round 2 finding 1 (centralised normative invariant in §11.0) are layered, not duplicative — round 2 lifted the rule to §11.0 and pointed §11.3 back, with deduplication confirmed in the round 2 integrity check.
+- Round 3 §5 deferral does not contradict any prior accept — it proposes a *new* dimension (severity weighting) that was not raised in rounds 1 or 2.
+
+### Implementation readiness checklist
+- All inputs defined: YES (pure-helper signatures, SQL parameter contracts, env-var parse contract all explicit)
+- All outputs defined: YES (terminal-event payloads, synthetic-check fire shapes, idempotency log shape all specified)
+- Failure modes covered: YES (race-loser suppression, idempotent-skip, env-var fallback, silence self-validation guard)
+- Ordering guarantees explicit: YES (§11.0 single-writer invariant + §11.3 enumerated writer paths)
+- No unresolved forward references: YES (round 1 + round 2 integrity checks both clean; round 3 no edits)
+
+Spec is implementation-ready.

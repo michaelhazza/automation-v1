@@ -314,6 +314,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **Nearest-common-ancestor routing for cross-subtree reassignment** — ChatGPT suggested automatic NCA-based routing so two peer subtrees can exchange work without requiring the subaccount root as middleman. Out of scope for v1 where root-only is a deliberate simplification; revisit when a real cross-subtree workflow emerges that root-funnelling demonstrably bottlenecks. Requires algorithmic design + prompt-scaffolding decision about how the NCA is surfaced to the caller.
 - [ ] **Violation sampling / alerting tier above §17.3 rejection-rate metric** — ChatGPT suggested a sampling-based alert ladder (page on sustained rejection-rate anomalies, digest on daily trend breaks). Ops/observability concern rather than a delegation-contract concern; belongs in a post-launch monitoring spec or the ops playbook, not in this spec. Revisit after Phase 4 ships and there is a baseline rejection-rate distribution to calibrate against.
 
+### system-monitoring-agent-fixes (2026-04-27)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-system-monitoring-agent-fixes-2026-04-27T09-44-46Z.md`
+**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
+**PR:** #217 — https://github.com/michaelhazza/automation-v1/pull/217
+
+- [ ] **Proof-of-life severity weighting — `synthetic_fires_in_proof_window` non-trivial / non-low-severity gate.** [auto] ChatGPT round 3 §5: refine §9.1 proof-of-life so it requires at least one *non-trivial* synthetic check (or a non-silence + non-low-severity signal), not just any synthetic fire. **Why deferred:** ChatGPT itself frames as "correctly out of scope for now" — introduces subjectivity, requires a taxonomy or severity-weighting model the system does not currently have. Round 1 finding 5 + round 2 finding 3 already excluded silence-check fires from proof-of-life; this would extend the exclusion to a *severity tier*, not just a *check-id*. **Reconsider per trigger:** when the synthetic-check fleet grows beyond the current two checks (silent-agent-success + incident-silence) AND there is empirical evidence of "low-signal synthetic fires masking real degradation" — at that point the taxonomy investment is worth the subjectivity cost. Until then, the round 2 §9.6 "three independent mechanisms" model is the right fail-quiet posture.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
