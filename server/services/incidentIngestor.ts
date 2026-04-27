@@ -26,6 +26,8 @@ import {
   validateFingerprintOverride,
   shouldNotify,
 } from './incidentIngestorPure.js';
+import { checkThrottle } from './incidentIngestorThrottle.js';
+import { checkAndRecord } from './incidentIngestorIdempotency.js';
 import type { SystemIncidentSeverity } from '../db/schema/systemIncidents.js';
 
 export type { IncidentInput };
@@ -86,6 +88,30 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
   if (!isIngestEnabled()) return;
 
   try {
+    // Validate override here so throttle + idempotency operate on the same fingerprint as the DB write.
+    if (input.fingerprintOverride && !validateFingerprintOverride(input.fingerprintOverride)) {
+      logger.warn('incident_fingerprint_override_rejected', {
+        override: input.fingerprintOverride,
+        source: input.source,
+      });
+      input = { ...input, fingerprintOverride: undefined };
+    }
+
+    const fingerprint = computeFingerprint(input);
+
+    if (checkThrottle(fingerprint)) {
+      logger.debug('incident_throttled', { fingerprint, source: input.source });
+      return;
+    }
+
+    if (input.idempotencyKey) {
+      const idempKey = `${fingerprint}:${input.idempotencyKey}`;
+      if (checkAndRecord(idempKey)) {
+        logger.debug('incident_idempotent_skip', { fingerprint, source: input.source });
+        return;
+      }
+    }
+
     if (isAsyncMode()) {
       await enqueueIngest(input);
     } else {

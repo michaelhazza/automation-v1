@@ -103,3 +103,58 @@ The next step is user-led spec review (NOT the automated `spec-reviewer` agent �
 - DO NOT run `architect` until the user has reviewed the spec.
 - DO NOT write any application code until the architect plan is in place.
 - The auto-commit override during spec authoring was scoped to this build only — implementation reverts to the standard CLAUDE.md no-auto-commit rule (review agents excepted).
+
+---
+
+## Phase 0 Baseline Gate Results
+
+**Run date:** 2026-04-27
+**Gate runner:** npm run test:gates (52 gates)
+
+**Pre-existing violations (not in build scope):**
+- verify-permission-scope.sh: violations=13 — WARNING — pre-existing route middleware issues, not in system-monitor scope. DECISION: ignored.
+- verify-input-validation.sh: violations=44 — WARNING — pre-existing input validation gaps, not in system-monitor scope. DECISION: ignored.
+- verify-pure-helper-convention.sh: violations=9 — BLOCKING FAIL — pre-existing *Pure.test.ts convention violations in existing modules, not in system-monitor scope. DECISION: ignored (our new tests follow the convention).
+- verify-no-silent-failures.sh: violations=7 — WARNING — pre-existing, not in scope. DECISION: ignored.
+- verify-canonical-required-columns.sh: violations=4 — WARNING — pre-existing, not in scope. DECISION: ignored.
+
+**Build-relevant gates (all green):**
+- verify-principal-context-propagation.sh: violations=0 — PASS
+- verify-background-jobs-readiness.sh: violations=0 — PASS
+- verify-idempotency-strategy-declared.sh: violations=0 — PASS
+- All remaining gates: PASS
+
+**No pre-existing violations block Slice A work. No Slice A commit 0 needed.**
+
+## Slice A — COMPLETE
+
+All 5 commits implemented, spec-reviewed, quality-reviewed, and verified. Build passes (npm run build:server exits 0). No gates run mid-slice (per plan §1.3). Slice A handoff: all artefacts below are dead-code-by-design until Slice B/C/D wire them up.
+
+### Commit 1: Schema migration 0233 + Drizzle schema
+- migrations/0233_phase_a_foundations.sql — 8 new system_incidents columns, 2 new tables, enum widen, 3 seed rows
+- migrations/0233_phase_a_foundations.down.sql — rollback (drops tables/columns, leaves seeds)
+- server/db/schema/systemMonitorBaselines.ts — new (BYPASSES RLS)
+- server/db/schema/systemMonitorHeuristicFires.ts — new (BYPASSES RLS)
+- server/db/schema/systemIncidents.ts — 8 new columns + agentRuns FK reference
+- server/db/schema/systemAgents.ts — executionScope widened to include 'system'
+- server/db/schema/index.ts — 2 new exports
+- scripts/rls-not-applicable-allowlist.txt — 2 new entries
+
+### Commit 2: SystemPrincipal + getSystemPrincipal + withSystemPrincipal
+- server/services/principal/types.ts — SystemPrincipal interface + PrincipalContext union extended
+- server/services/principal/systemPrincipal.ts — promise-cache pattern, ALS, getCurrentPrincipal, __resetForTest
+
+### Commit 3: assertSystemAdminContext guard
+- server/services/principal/assertSystemAdminContext.ts — UnauthorizedSystemAccessError + assertSystemAdminContext (Condition A: type==='system', Condition B: actorRole==='system_admin' + principal != null)
+
+### Commit 4: Guard wired into systemIncidentService mutations
+- server/services/systemIncidentService.ts — 2 new imports + actorRole? param + guard on 6 mutation methods
+- server/routes/systemIncidents.ts — req.user!.role passed to all 6 mutation call sites
+
+### Commit 5: Idempotency LRU + per-fingerprint throttle
+- server/services/incidentIngestorIdempotency.ts — new (TTL LRU, MAX_ENTRIES=10k)
+- server/services/incidentIngestorThrottle.ts — new (THROTTLE_MS, MAX_FINGERPRINTS=50k)
+- server/services/incidentIngestorPure.ts — idempotencyKey?: string added to IncidentInput
+- server/services/incidentIngestor.ts — override validation + throttle + idempotency wired into recordIncident before isAsyncMode() branch
+- server/services/__tests__/incidentIngestorIdempotency.test.ts — 7 tests, all pass
+- server/services/__tests__/incidentIngestorThrottle.test.ts — 6 tests, all pass
