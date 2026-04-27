@@ -3,7 +3,6 @@ name: Config Attach Data Source
 description: Attach a knowledge source (URL or uploaded file) to an agent, subaccount link, or scheduled task.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

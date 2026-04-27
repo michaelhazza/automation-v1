@@ -2,6 +2,7 @@ import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { reports } from '../db/schema/index.js';
 import type { Report } from '../db/schema/index.js';
+import { emitOrgUpdate } from '../websocket/emitters.js';
 
 export class ReportService {
   /** List reports for an org, newest first. */
@@ -111,6 +112,20 @@ export class ReportService {
     if (!report) {
       throw { statusCode: 404, message: 'Report not found' };
     }
+
+    const healthSummary = {
+      totalClients: data.totalClients,
+      healthy: data.healthyCount,
+      attention: data.attentionCount,
+      atRisk: data.atRiskCount,
+    };
+
+    // Invalidation signal for DashboardPage's refetchClientHealth
+    emitOrgUpdate(orgId, 'dashboard.client.health.changed', healthSummary);
+
+    // Merge-in-place update for ClientPulseDashboardPage
+    emitOrgUpdate(orgId, 'dashboard:update', healthSummary);
+
     return report;
   }
 

@@ -3,7 +3,6 @@ name: Search Agent History
 description: Search memories and learnings across all agents in the workspace via semantic vector search.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

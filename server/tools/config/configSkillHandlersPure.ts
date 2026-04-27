@@ -80,55 +80,6 @@ export function mapSubaccountAgentIdsToAgentIds(input: {
   return result;
 }
 
-export interface SystemAgentRow {
-  id: string;
-  slug: string;
-  name: string;
-  title: string | null;
-  agentRole: string | null;
-  parentSystemAgentId: string | null;
-  deletedAt: Date | null;
-  status: string | null;
-}
-
-/**
- * Pure helper — resolves children or descendants from a flat list of system_agents rows.
- * Caller fetches the rows; this function does the traversal.
- * Filters by deletedAt IS NULL and status === 'active'.
- */
-export function resolveSubordinates(input: {
-  callerSystemAgentId: string;
-  scope: 'children' | 'descendants';
-  allAgents: SystemAgentRow[];
-  maxDepth?: number; // default 3 for descendants
-}): Array<{ slug: string; name: string; title: string | null; role: string | null; isActive: boolean }> {
-  const { callerSystemAgentId, scope, allAgents, maxDepth = 3 } = input;
-  const active = allAgents.filter(a => a.deletedAt === null && a.status === 'active');
-
-  if (scope === 'children') {
-    return active
-      .filter(a => a.parentSystemAgentId === callerSystemAgentId)
-      .map(a => ({ slug: a.slug, name: a.name, title: a.title, role: a.agentRole, isActive: true }));
-  }
-
-  // BFS descendants up to maxDepth
-  const result: typeof active = [];
-  const visited = new Set<string>([callerSystemAgentId]);
-  const queue: Array<{ id: string; depth: number }> = [{ id: callerSystemAgentId, depth: 0 }];
-
-  while (queue.length > 0) {
-    const { id, depth } = queue.shift()!;
-    if (depth >= maxDepth) continue;
-    const children = active.filter(a => a.parentSystemAgentId === id && !visited.has(a.id));
-    for (const child of children) {
-      visited.add(child.id);
-      result.push(child);
-      queue.push({ id: child.id, depth: depth + 1 });
-    }
-  }
-  return result.map(a => ({ slug: a.slug, name: a.name, title: a.title, role: a.agentRole, isActive: true }));
-}
-
 /**
  * Determines the effective DelegationScope for a list-agents call.
  * Pure — no IO.

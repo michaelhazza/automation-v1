@@ -2,7 +2,7 @@
 name: Dev Agent
 title: Senior Full-Stack Developer
 slug: dev
-reportsTo: head-of-product-engineering
+reportsTo: orchestrator
 model: claude-opus-4-6
 temperature: 0.3
 maxTokens: 8192

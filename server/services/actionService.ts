@@ -9,7 +9,6 @@ import {
 } from '../config/actionRegistry.js';
 import { policyEngineService } from './policyEngineService.js';
 import { IDEMPOTENCY_KEY_VERSION } from '../lib/idempotencyVersion.js';
-import { canonicaliseForHash } from './skillIdempotencyKeysPure.js';
 
 // ---------------------------------------------------------------------------
 // Deterministic idempotency keys — P1.1 Layer 3 contract
@@ -56,7 +55,7 @@ function canonicaliseJson(value: unknown): string {
 }
 
 export function hashActionArgs(args: Record<string, unknown>): string {
-  const canonical = canonicaliseForHash(args);
+  const canonical = canonicaliseJson(args);
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 

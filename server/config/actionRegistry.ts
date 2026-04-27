@@ -52,80 +52,6 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
-/**
- * v7.1 — Side-effect class governs **external blast-radius** only.
- *
- * Internal DB writes (e.g. `create_task`, `update_task`, board edits) are NOT
- * external side effects and are classified `'none'` regardless of how many
- * rows they mutate. Internal-write safety is provided by RLS + transaction
- * boundaries (`withOrgTx`), not by `sideEffectClass`.
- *
- *  - 'read'  : may call external read-only API (Stripe / Xero / Google Places /
- *              Hunter / etc.). No mutation of external state. May still hit a
- *              quota — see `directExternalSideEffect` for the manager guard.
- *  - 'write' : mutates external state (sends email/invoice, books meeting,
- *              files invoice in accounting). Wrapper enforces precondition
- *              check + `{ status: 'blocked' }` before any side effect runs.
- *  - 'none'  : no external blast radius. Internal-only (DB reads, DB writes,
- *              workspace updates, foundational delegation primitives).
- */
-export type SideEffectClass = 'read' | 'write' | 'none';
-
-export interface IdempotencyContract {
-  /**
-   * Field names from `parameterSchema` that combine to form the dedup key.
-   *
-   * **Field-resolution semantics** (consumed by `hashKeyShape` in §4.11c):
-   *  - **Dot-path support.** Nested fields are addressed via dot notation —
-   *    e.g. `'customer.id'` resolves `input.customer.id`. Arrays are
-   *    addressed positionally (`'recipients.0.email'`); for unordered set
-   *    semantics, the handler must canonicalise the array before invoking
-   *    the wrapper.
-   *  - **Missing-field rule.** If any field listed in `keyShape` cannot be
-   *    resolved on the input (`undefined` after dot-path traversal), the
-   *    wrapper throws `IdempotencyKeyShapeError` BEFORE the INSERT — never
-   *    silently includes `undefined` in the hash. The handler is responsible
-   *    for surfacing this as `{ status: 'blocked', reason: 'missing_idempotency_key_field', requires: [<field>] }`.
-   *  - **Optional fields.** A field that is legitimately optional MUST NOT
-   *    appear in `keyShape`. If two requests differ only in an optional
-   *    field, they collide intentionally on the same key.
-   *  - **Canonicalisation.** The hash inputs are extracted and serialised via
-   *    `canonicaliseForHash(value)` (defined in §8.1.1) — NOT raw
-   *    `JSON.stringify(input)`. This guarantees stable hashes across JSON
-   *    key reorderings, default-field omissions, and primitive normalisations.
-   */
-  keyShape: string[];
-  /** Persistence scope. 'subaccount' = the default for tenant-scoped skills. */
-  scope: 'subaccount' | 'org';
-  /**
-   * TTL class — drives `expires_at` in skill_idempotency_keys via the canonical
-   * constant table. The wrapper resolves the TTL via `ttlClassToExpiresAt(class)`
-   * (pure helper in `skillIdempotencyKeysPure.ts`) and the cleanup job consumes
-   * the same helper. Both must read from the same constant — no per-call-site literals.
-   *  - 'permanent' (financial, audit-trail-required) → expires_at = NULL
-   *  - 'long' (CRM / commitments / scheduled-meetings) → 30 days
-   *  - 'short' (communications) → 14 days
-   */
-  ttlClass: 'permanent' | 'long' | 'short';
-
-  /**
-   * v7.1 — Stale-claim takeover eligibility.
-   *
-   * The wrapper reclaims an `in_flight` row whose `created_at` is older than
-   * `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 min). This is safe ONLY when the
-   * skill's worst-case successful runtime sits below that threshold.
-   *
-   *  - `'disabled'` (**safe default**): never reclaimed.
-   *  - `'eligible'`: worst-case runtime < 50% of IDEMPOTENCY_CLAIM_TIMEOUT_MS (< 5 min).
-   *    Requires an explicit runtime-budget annotation comment in the registry entry.
-   *
-   * **Registry-default rule (mandatory).** Any write-class skill that does NOT
-   * explicitly declare `reclaimEligibility` causes the pre-flight to refuse the seed.
-   * Safe default is `'disabled'`; `'eligible'` requires an explicit comment.
-   */
-  reclaimEligibility: 'eligible' | 'disabled';
-}
-
 export interface ActionDefinition {
   actionType: string;
   description: string;
@@ -212,39 +138,6 @@ export interface ActionDefinition {
    * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
    */
   isUniversal?: boolean;
-
-  /**
-   * v7.1 — UX semantics on failure or missing config.
-   *  - 'read'  : on missing config / transient failure, return
-   *              { status: 'not_configured' | 'transient_error', warning, data: null }.
-   *  - 'write' : on missing config / validation failure, return
-   *              { status: 'blocked', reason } BEFORE any side effect.
-   *  - 'none'  : neither — pure internal operation (most foundational skills).
-   * Required on every entry. Enforced by the executeWithActionAudit wrapper.
-   */
-  sideEffectClass: SideEffectClass;
-
-  /**
-   * v7.1 — Cross-run idempotency contract. When present, the wrapper hashes
-   * the inputs per `keyShape` and acquires a row in skill_idempotency_keys
-   * before executing. Replays return the cached `response_payload` verbatim.
-   * Read-only skills MUST omit this field.
-   */
-  idempotency?: IdempotencyContract;
-
-  /**
-   * v7.1 — Manager guard hint. When true, this skill's handler may itself
-   * call an external system. The manager-role guard rejects any skill where
-   * this is true, regardless of allowlist membership.
-   */
-  directExternalSideEffect?: boolean;
-
-  /**
-   * v7.1 — Manager allowlist membership. When true, this skill is permitted
-   * for managers as part of the universal+delegation bundle or the manager's
-   * declared per-domain reads.
-   */
-  managerAllowlistMember?: boolean;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -276,8 +169,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   list_connections: {
     actionType: 'list_connections',
@@ -300,8 +191,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   check_capability_gap: {
     actionType: 'check_capability_gap',
@@ -334,8 +223,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   request_feature: {
     actionType: 'request_feature',
@@ -383,8 +270,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: ['validation_error'] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   send_email: {
     actionType: 'send_email',
@@ -412,14 +297,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['to', 'subject', 'thread_id'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -444,8 +321,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
   create_task: {
     actionType: 'create_task',
@@ -473,9 +348,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
   triage_intake: {
     actionType: 'triage_intake',
@@ -542,8 +414,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   move_task: {
     actionType: 'move_task',
@@ -567,9 +437,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
   read_data_source: {
     actionType: 'read_data_source',
@@ -623,8 +490,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   reassign_task: {
     actionType: 'reassign_task',
@@ -648,9 +513,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
   add_deliverable: {
     actionType: 'add_deliverable',
@@ -676,9 +538,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
   update_record: {
     actionType: 'update_record',
@@ -704,14 +563,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['provider', 'record_type', 'record_id'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   fetch_url: {
     actionType: 'fetch_url',
@@ -737,8 +588,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
   scrape_url: {
     actionType: 'scrape_url',
@@ -765,8 +614,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
     topics: ['research', 'competitive_intelligence', 'data_gathering'],
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
   scrape_structured: {
     actionType: 'scrape_structured',
@@ -793,8 +640,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
     topics: ['research', 'competitive_intelligence', 'data_gathering', 'monitoring'],
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
   monitor_webpage: {
     actionType: 'monitor_webpage',
@@ -821,14 +666,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
     topics: ['monitoring', 'competitive_intelligence'],
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['url', 'frequency'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   request_approval: {
     actionType: 'request_approval',
@@ -853,9 +690,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
 
   // ── BA Spec submission — review-gated, writes approved spec to workspace memory ──
@@ -886,8 +720,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
@@ -913,8 +745,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   search_codebase: {
@@ -942,14 +772,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
     isUniversal: true,
     topics: ['dev'],
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['query', 'search_type'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   run_tests: {
@@ -973,14 +795,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: [],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   analyze_endpoint: {
@@ -1008,8 +822,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
 
   report_bug: {
@@ -1039,8 +851,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Dev/QA devops actions ──────────────────────────────────────────────────
@@ -1071,14 +881,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['file', 'base_commit'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   run_command: {
@@ -1102,14 +904,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['command'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   create_pr: {
@@ -1136,14 +930,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['branch', 'title'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Workflow orchestration (Phase 2) ────────────────────────────────────────
@@ -1170,8 +956,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Page management actions ─────────────────────────────────────────────────
@@ -1202,8 +986,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   update_page: {
@@ -1231,8 +1013,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   publish_page: {
@@ -1256,8 +1036,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Cross-Subaccount Intelligence Skills (Phase 3) ──────────────────────
@@ -1278,8 +1056,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   read_org_insights: {
@@ -1297,8 +1073,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   write_org_insight: {
@@ -1317,8 +1091,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   compute_health_score: {
@@ -1337,8 +1109,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   detect_anomaly: {
@@ -1359,8 +1129,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   compute_churn_risk: {
@@ -1379,8 +1147,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   compute_staff_activity_pulse: {
@@ -1400,8 +1166,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   scan_integration_fingerprints: {
@@ -1421,8 +1185,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   generate_portfolio_report: {
@@ -1442,8 +1204,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   trigger_account_intervention: {
@@ -1465,8 +1225,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'locked',
     topics: ['gh-integration'],
     requiresCritiqueGate: true,
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Sprint 5 P4.1: Universal skills ─────────────────────────────────────
@@ -1492,8 +1250,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isUniversal: true,
     isMethodology: false,
     topics: [],
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Phase 2 S8: Real-time clarification routing (§5.4) ────────────────────
@@ -1523,8 +1279,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isUniversal: true,
     isMethodology: false,
     topics: [],
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   read_workspace: {
@@ -1544,9 +1298,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
     isUniversal: true,
     topics: ['workspace'],
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
   },
 
   // Sprint 5 P4.2: Shared memory block write
@@ -1567,8 +1318,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   web_search: {
@@ -1589,9 +1338,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
     isUniversal: true,
     topics: [],
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
-    managerAllowlistMember: true,
   },
 
   // ── Support Agent — auto-gated stubs ────────────────────────────────────────
@@ -1619,8 +1365,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   // ── Social Media Agent — review-gated publish + auto-gated analytics ────────
@@ -1652,14 +1396,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['platform', 'post_content', 'schedule_at'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   read_analytics: {
@@ -1688,8 +1424,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
 
   // ── Ads Management Agent — auto-gated stubs + block-gated + review-gated ──
@@ -1720,8 +1454,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
 
   update_bid: {
@@ -1753,14 +1485,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['platform', 'campaign_id', 'proposed_bid'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   update_copy: {
@@ -1791,14 +1515,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['platform', 'campaign_id', 'ad_format'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   pause_campaign: {
@@ -1827,14 +1543,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['platform', 'campaign_id', 'pause_reason'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   increase_budget: {
@@ -1865,14 +1573,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['platform', 'campaign_id', 'proposed_daily_budget'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Email Outreach Agent — auto-gated stub + review-gated ───────────────
@@ -1894,7 +1594,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       company_name: z.string().optional().describe('Company name'),
       crm_contact_id: z.string().optional().describe('CRM contact ID to write enriched data back to'),
       fields_requested: z.array(z.enum(['job_title', 'seniority', 'company', 'industry', 'company_size', 'linkedin_url', 'phone', 'location'])).optional().describe('Specific fields to enrich'),
-      provider: z.enum(['hunter', 'apollo', 'clearbit']).optional().describe('Enrichment provider override'),
     }),
     retryPolicy: {
       maxRetries: 1,
@@ -1904,14 +1603,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['contact_email'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   update_crm: {
@@ -1940,14 +1631,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['record_type', 'record_id'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Finance Agent — auto-gated stubs + review-gated ─────────────────────
@@ -1977,8 +1660,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   read_expenses: {
@@ -2007,8 +1688,34 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
+  },
+
+  update_financial_record: {
+    actionType: 'update_financial_record',
+    description: 'Write a financial record update to the connected accounting system. Review-gated — requires human approval before execution.',
+    actionCategory: 'api',
+    topics: ['finance'],
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['record_type', 'record_description', 'updates', 'period', 'reasoning'],
+    parameterSchema: z.object({
+      record_type: z.enum(['budget_entry', 'forecast_adjustment', 'expense_note', 'revenue_note']).describe('Type of financial record to update'),
+      record_id: z.string().optional().describe('ID of the record to update in the accounting system'),
+      record_description: z.string().describe('Human-readable description of what is being updated'),
+      updates: z.record(z.unknown()).describe('Fields to write: amounts, notes, dates, category assignments'),
+      period: z.string().optional().describe('The financial period this update applies to'),
+      reasoning: z.string().describe('Why this record is being updated — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Content/SEO + Client Reporting — review-gated ────────────────────────
@@ -2041,8 +1748,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   deliver_report: {
@@ -2073,14 +1778,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['client_email', 'report_title', 'delivery_channel'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Onboarding Agent — review-gated ─────────────────────────────────────
@@ -2110,8 +1807,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── CRM/Pipeline Agent — auto-gated stub ─────────────────────────────────
@@ -2140,8 +1835,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   // ── Canonical Data Dictionary ──────────────────────────────────────────────
@@ -2168,8 +1861,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Knowledge Management Agent — auto-gated stub + review-gated ──────────
@@ -2198,8 +1889,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   propose_doc_update: {
@@ -2233,8 +1922,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   write_docs: {
@@ -2263,14 +1950,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['page_title', 'change_summary'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Priority Feed (Feature 2) ───────────────────────────────────────────────
@@ -2301,8 +1980,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Cross-Agent Memory Search (Feature 5) ──────────────────────────────────
@@ -2333,8 +2010,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Methodology skills (pure prompt scaffolds, no side effects) ──────────
@@ -2388,8 +2063,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none' as const, retryOn: [] as string[], doNotRetryOn: [] as string[] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only' as const,
-    sideEffectClass: 'none' as const,
-    directExternalSideEffect: false,
   }])),
 
   // ---------------------------------------------------------------------------
@@ -2423,14 +2096,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['name'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_update_agent: {
     actionType: 'config_update_agent',
@@ -2461,14 +2126,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['agentId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_activate_agent: {
     actionType: 'config_activate_agent',
@@ -2491,14 +2148,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['agentId', 'status'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_link_agent: {
     actionType: 'config_link_agent',
@@ -2522,14 +2171,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['agentId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_update_link: {
     actionType: 'config_update_link',
@@ -2565,14 +2206,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['linkId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_set_link_skills: {
     actionType: 'config_set_link_skills',
@@ -2596,14 +2229,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['linkId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_set_link_instructions: {
     actionType: 'config_set_link_instructions',
@@ -2627,14 +2252,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['linkId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_set_link_schedule: {
     actionType: 'config_set_link_schedule',
@@ -2663,14 +2280,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['linkId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_set_link_limits: {
     actionType: 'config_set_link_limits',
@@ -2698,14 +2307,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['linkId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_create_subaccount: {
     actionType: 'config_create_subaccount',
@@ -2728,14 +2329,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['name'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_create_scheduled_task: {
     actionType: 'config_create_scheduled_task',
@@ -2766,14 +2359,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['title', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_update_scheduled_task: {
     actionType: 'config_update_scheduled_task',
@@ -2805,14 +2390,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['taskId', 'subaccountId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_attach_data_source: {
     actionType: 'config_attach_data_source',
@@ -2844,14 +2421,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['name', 'sourcePath'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_update_data_source: {
     actionType: 'config_update_data_source',
@@ -2879,14 +2448,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['dataSourceId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_remove_data_source: {
     actionType: 'config_remove_data_source',
@@ -2908,14 +2469,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['dataSourceId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_restore_version: {
     actionType: 'config_restore_version',
@@ -2939,14 +2492,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['entityId', 'version'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── Phase G — portal + email skills (spec §11.6) — action_call only ────────
@@ -2971,8 +2516,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
@@ -3004,14 +2547,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['subaccountId', 'artefactTitle'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   config_publish_workflow_output_to_portal: {
@@ -3038,14 +2573,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    idempotency: {
-      keyShape: ['playbookSlug', 'title'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   config_send_workflow_email_digest: {
@@ -3071,14 +2598,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['subject'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
 
   // ── ClientPulse Phase 4 intervention primitives ─────────────────────────
@@ -3109,14 +2628,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['automationId', 'contactId'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   'crm.send_email': {
     actionType: 'crm.send_email',
@@ -3145,14 +2656,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['toContactId', 'subject'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
   'crm.send_sms': {
     actionType: 'crm.send_sms',
@@ -3180,14 +2683,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['toContactId', 'body'],
-      scope: 'subaccount',
-      ttlClass: 'short',
-      reclaimEligibility: 'disabled',
-    },
   },
   'crm.create_task': {
     actionType: 'crm.create_task',
@@ -3216,14 +2711,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    idempotency: {
-      keyShape: ['assigneeUserId', 'title', 'dueAt'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'disabled',
-    },
   },
   config_update_organisation_config: {
     actionType: 'config_update_organisation_config',
@@ -3249,8 +2736,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
   notify_operator: {
     actionType: 'notify_operator',
@@ -3280,8 +2765,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 
   // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ─────────
@@ -3308,8 +2791,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   challenge_assumptions: {
@@ -3330,8 +2811,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: false,
   },
 
   'crm.query': {
@@ -3363,8 +2842,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     onFailure: 'skip',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
   },
 
   // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────
@@ -3406,385 +2883,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-  },
-
-  // ── Finance Admin-Ops + SDR + Retention skills (v7.1) ───────────────────
-  // 14 new entries per system-agents-v7.1 spec, Chunk 03
-
-  list_my_subordinates: {
-    actionType: 'list_my_subordinates',
-    description: 'List the agents or users that report to the calling manager in the delegation hierarchy.',
-    actionCategory: 'worker',
-    topics: ['universal'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['scope'],
-    parameterSchema: z.object({
-      scope: z.enum(['children', 'descendants']).default('children'),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
-  },
-
-  spawn_sub_agents: {
-    actionType: 'spawn_sub_agents',
-    description: 'Spawn one or more sub-agents to execute work in parallel under the calling agent\'s delegation authority. Foundation delegation primitive — available to all agents.',
-    actionCategory: 'worker',
-    topics: ['universal'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['agent_slugs', 'task_description', 'context'],
-    parameterSchema: z.object({
-      agent_slugs: z.array(z.string()).describe('Slugs of the sub-agents to spawn'),
-      task_description: z.string().describe('Description of the task to delegate'),
-      context: z.record(z.unknown()).optional().describe('Context to pass to the sub-agents'),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-    managerAllowlistMember: true,
-  },
-
-  generate_invoice: {
-    actionType: 'generate_invoice',
-    description: 'Generate a draft invoice for an engagement billing period and record it internally.',
-    actionCategory: 'worker',
-    topics: ['finance'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['engagement_id', 'billing_period_start', 'billing_period_end', 'line_items'],
-    parameterSchema: z.object({
-      engagement_id: z.string(),
-      billing_period_start: z.string(),
-      billing_period_end: z.string(),
-      line_items: z.array(z.object({ description: z.string(), amount: z.number() })).optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['engagement_id', 'billing_period_start', 'billing_period_end'],
-      scope: 'subaccount',
-      ttlClass: 'permanent',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  send_invoice: {
-    actionType: 'send_invoice',
-    description: 'Send a generated invoice to the client via the connected billing provider.',
-    actionCategory: 'api',
-    topics: ['finance'],
-    isExternal: true,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['invoice_id', 'recipient_email'],
-    parameterSchema: z.object({
-      invoice_id: z.string(),
-      recipient_email: z.string().optional(),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['invoice_id'],
-      scope: 'subaccount',
-      ttlClass: 'permanent',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  reconcile_transactions: {
-    actionType: 'reconcile_transactions',
-    description: 'Pull transaction records from the connected accounting/billing provider and reconcile against internal records.',
-    actionCategory: 'api',
-    topics: ['finance'],
-    isExternal: true,
-    readPath: 'liveFetch',
-    liveFetchRationale: 'Provider API — transaction data requires live fetch from Stripe/Xero/QuickBooks',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['date_from', 'date_to', 'provider'],
-    parameterSchema: z.object({
-      date_from: z.string(),
-      date_to: z.string().optional(),
-      provider: z.enum(['stripe', 'xero', 'quickbooks']).optional(),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
-  },
-
-  chase_overdue: {
-    actionType: 'chase_overdue',
-    description: 'Send a dunning communication to a client for an overdue invoice at the specified dunning step.',
-    actionCategory: 'api',
-    topics: ['finance'],
-    isExternal: true,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['invoice_id', 'dunning_step'],
-    parameterSchema: z.object({
-      invoice_id: z.string(),
-      dunning_step: z.number().int().min(1).max(5),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['invoice_id', 'dunning_step'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  process_bill: {
-    actionType: 'process_bill',
-    description: 'Record an incoming bill from a vendor and queue it for payment approval.',
-    actionCategory: 'worker',
-    topics: ['finance'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['external_bill_id', 'amount', 'due_date', 'vendor_name'],
-    parameterSchema: z.object({
-      external_bill_id: z.string(),
-      amount: z.number(),
-      due_date: z.string(),
-      vendor_name: z.string().optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['external_bill_id', 'amount', 'due_date'],
-      scope: 'subaccount',
-      ttlClass: 'permanent',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  track_subscriptions: {
-    actionType: 'track_subscriptions',
-    description: 'Retrieve current subscription data from the connected billing provider for monitoring and reporting.',
-    actionCategory: 'api',
-    topics: ['finance'],
-    isExternal: true,
-    readPath: 'liveFetch',
-    liveFetchRationale: 'Provider API — subscription data requires live fetch from Stripe/Chargebee',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['provider', 'status_filter'],
-    parameterSchema: z.object({
-      provider: z.enum(['stripe', 'chargebee']).optional(),
-      status_filter: z.string().optional(),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
-  },
-
-  prepare_month_end: {
-    actionType: 'prepare_month_end',
-    description: 'Prepare month-end close package: reconcile transactions, summarise P&L, flag outstanding items.',
-    actionCategory: 'worker',
-    topics: ['finance'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['period_start', 'period_end', 'include_reconciliation'],
-    parameterSchema: z.object({
-      period_start: z.string(),
-      period_end: z.string(),
-      include_reconciliation: z.boolean().optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
-    idempotencyStrategy: 'keyed_write',
-    sideEffectClass: 'write',
-    directExternalSideEffect: false,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['period_start', 'period_end'],
-      scope: 'subaccount',
-      ttlClass: 'permanent',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  discover_prospects: {
-    actionType: 'discover_prospects',
-    description: 'Search for prospect contacts matching specified criteria via the connected prospecting provider.',
-    actionCategory: 'api',
-    topics: ['outreach', 'sdr'],
-    isExternal: true,
-    readPath: 'liveFetch',
-    liveFetchRationale: 'Provider API — prospect discovery requires live search against enrichment/prospecting APIs',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['company_domain', 'job_titles', 'location', 'limit'],
-    parameterSchema: z.object({
-      company_domain: z.string().optional(),
-      job_titles: z.array(z.string()).optional(),
-      location: z.string().optional(),
-      limit: z.number().int().min(1).max(50).optional(),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'read',
-    directExternalSideEffect: true,
-  },
-
-  draft_outbound: {
-    actionType: 'draft_outbound',
-    description: 'Draft a personalised outbound message for a prospect based on context and tone guidance.',
-    actionCategory: 'worker',
-    topics: ['outreach', 'sdr'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['prospect_name', 'prospect_title', 'company', 'context', 'tone'],
-    parameterSchema: z.object({
-      prospect_name: z.string(),
-      prospect_title: z.string().optional(),
-      company: z.string(),
-      context: z.string().optional(),
-      tone: z.enum(['professional', 'casual', 'bold']).optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-  },
-
-  score_lead: {
-    actionType: 'score_lead',
-    description: 'Score a lead based on provided signals and return a priority score with reasoning.',
-    actionCategory: 'worker',
-    topics: ['outreach', 'sdr'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['lead_id', 'signals'],
-    parameterSchema: z.object({
-      lead_id: z.string(),
-      signals: z.record(z.unknown()).optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-  },
-
-  book_meeting: {
-    actionType: 'book_meeting',
-    description: 'Book a meeting with a prospect via the connected calendar provider.',
-    actionCategory: 'api',
-    topics: ['outreach', 'sdr'],
-    isExternal: true,
-    readPath: 'none',
-    defaultGateLevel: 'review',
-    createsBoardTask: true,
-    payloadFields: ['prospect_email', 'requested_slot', 'meeting_type'],
-    parameterSchema: z.object({
-      prospect_email: z.string(),
-      requested_slot: z.string(),
-      meeting_type: z.enum(['discovery', 'demo', 'follow_up']).optional(),
-    }),
-    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['timeout', 'network_error'], doNotRetryOn: ['validation_error'] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
-    idempotencyStrategy: 'locked',
-    sideEffectClass: 'write',
-    directExternalSideEffect: true,
-    // reclaimEligibility justification: stub handler, worst-case runtime < 1 min (well below 5-min threshold)
-    idempotency: {
-      keyShape: ['prospect_email', 'requested_slot'],
-      scope: 'subaccount',
-      ttlClass: 'long',
-      reclaimEligibility: 'eligible',
-    },
-  },
-
-  score_nps_csat: {
-    actionType: 'score_nps_csat',
-    description: 'Compute NPS and CSAT scores for an account from collected feedback responses.',
-    actionCategory: 'worker',
-    topics: ['retention'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['account_id', 'period'],
-    parameterSchema: z.object({
-      account_id: z.string().optional(),
-      period: z.string().optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
-  },
-
-  prepare_renewal_brief: {
-    actionType: 'prepare_renewal_brief',
-    description: 'Prepare a structured renewal brief for an account including health signals, expansion opportunities, and risk factors.',
-    actionCategory: 'worker',
-    topics: ['retention'],
-    isExternal: false,
-    readPath: 'none',
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
-    payloadFields: ['account_id', 'renewal_date'],
-    parameterSchema: z.object({
-      account_id: z.string(),
-      renewal_date: z.string().optional(),
-    }),
-    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-    idempotencyStrategy: 'read_only',
-    sideEffectClass: 'none',
-    directExternalSideEffect: false,
   },
 };
 

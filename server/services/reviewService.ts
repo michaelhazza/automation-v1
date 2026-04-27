@@ -57,6 +57,15 @@ export const reviewService = {
       });
     }
 
+    // Home dashboard live-update — `action: 'new'` path from spec §5.1.
+    // Emitted from the service (not a route) because review items are created
+    // from many call sites (flowExecutor, skillExecutor, configUpdateOrganisationService,
+    // clientPulseInterventionContextService) — emitting once here covers them all.
+    emitOrgUpdate(action.organisationId, 'dashboard.approval.changed', {
+      action: 'new',
+      subaccountId: action.subaccountId ?? null,
+    });
+
     // Feature 4 — optionally post to Slack if org has a review channel configured
     postReviewItemToSlack(item.id, action.organisationId).catch((err) => {
       console.warn('[ReviewService] Slack posting failed (non-blocking):', err instanceof Error ? err.message : err);

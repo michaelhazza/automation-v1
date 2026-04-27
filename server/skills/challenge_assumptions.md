@@ -3,7 +3,6 @@ name: Challenge Assumptions
 description: Adversarial analysis identifying the weakest assumptions in a proposed action when stakes are high.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

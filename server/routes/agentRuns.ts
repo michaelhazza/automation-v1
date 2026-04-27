@@ -364,7 +364,7 @@ router.get(
       sinceDays: sinceDays ? Number(sinceDays) : undefined,
     });
 
-    res.json(stats);
+    res.json({ data: stats, serverTimestamp: new Date().toISOString() });
   })
 );
 

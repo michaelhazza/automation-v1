@@ -58,11 +58,6 @@ export const EVENT_NAMES = [
   'skill.gate.decision',
   'skill.action.proposed',
   'skill.action.failed',
-  // v7.1 — idempotency + side-effect-class wrapper events
-  'skill.error',
-  'skill.idempotency.hit',
-  'skill.warn',
-  'skill.blocked',
   'skill.tripwire.triggered',
   'agent.middleware.decision',
   'agent.loop.terminated',

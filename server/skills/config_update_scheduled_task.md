@@ -3,7 +3,6 @@ name: Config Update Scheduled Task
 description: Update a scheduled task's description, schedule, agent assignment, or limits.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

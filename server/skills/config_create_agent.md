@@ -3,7 +3,6 @@ name: Config Create Agent
 description: Create a new org-level agent with name, prompt, model settings, and default skills.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

@@ -1,4 +1,4 @@
-﻿import { eq, and, isNull, count, inArray, lt, sql } from 'drizzle-orm';
+﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
 import { insertOutcomeSafe } from './delegationOutcomeService.js';
@@ -56,38 +56,6 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-// ── System Agents v7.1 imports ────────────────────────────────────────────
-import {
-  hashKeyShape,
-  ttlClassToExpiresAt,
-  assertHandlerInvokedWithClaim,
-  IDEMPOTENCY_CLAIM_TIMEOUT_MS,
-} from './skillIdempotencyKeysPure.js';
-import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
-import { skillIdempotencyKeys } from '../db/schema/skillIdempotencyKeys.js';
-import { hashActionArgs } from './actionService.js';
-import { systemAgents } from '../db/schema/systemAgents.js';
-import { resolveSubordinates } from '../tools/config/configSkillHandlersPure.js';
-import {
-  executeGenerateInvoice,
-  executeSendInvoice,
-  executeReconcileTransactions,
-  executeChaseOverdue,
-  executeProcessBill,
-  executeTrackSubscriptions,
-  executePrepareMonthEnd,
-} from './adminOpsService.js';
-import {
-  executeDiscoverProspects,
-  executeDraftOutbound,
-  executeScoreLead,
-  executeBookMeeting,
-} from './sdrService.js';
-import {
-  executeScoreNpsCsat,
-  executePrepareRenewalBrief,
-} from './retentionSuccessService.js';
-
 // ---------------------------------------------------------------------------
 // Register worker adapter for execution layer (handles review-gated worker actions)
 // ---------------------------------------------------------------------------
@@ -113,6 +81,7 @@ registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx
     case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
     case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
     case 'update_crm': return executeCrmUpdateApproved(payload, context);
+    case 'update_financial_record': return executeFinancialRecordUpdateApproved(payload, context);
     case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
     case 'deliver_report': return executeDeliverReportApproved(payload, context);
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
@@ -429,82 +398,6 @@ export function setHandoffJobSender(sender: (name: string, data: object) => Prom
   pgBossSend = sender;
 }
 
-// ---------------------------------------------------------------------------
-// checkSkillPreconditions — dispatches per-skill env / config checks before
-// write-class handler invocation. Specific checks are implemented internally
-// by the domain service handlers (they self-block). This function provides
-// the dispatch point for the side-effect-class wrapper.
-// ---------------------------------------------------------------------------
-
-async function checkSkillPreconditions(
-  actionType: string,
-  _input: Record<string, unknown>,
-  _context: SkillExecutionContext,
-): Promise<{ status: 'ok' } | { status: 'blocked'; reason: string; provider?: string; requires?: string[] }> {
-  switch (actionType) {
-    case 'send_invoice':
-    case 'chase_overdue':
-      if (!process.env['STRIPE_API_KEY']) {
-        return { status: 'blocked', reason: 'provider_not_configured', provider: 'stripe', requires: ['STRIPE_API_KEY'] };
-      }
-      break;
-    case 'book_meeting':
-      if (!process.env['GOOGLE_CALENDAR_CLIENT_ID']) {
-        return { status: 'blocked', reason: 'provider_not_configured', provider: 'google_calendar', requires: ['GOOGLE_CALENDAR_CLIENT_ID'] };
-      }
-      break;
-    // generate_invoice, process_bill, prepare_month_end: no external provider — always ok
-    default:
-      break;
-  }
-  return { status: 'ok' };
-}
-
-// ---------------------------------------------------------------------------
-// executeListMySubordinates — queries system_agents to resolve the calling
-// agent's children or descendants in the system agent hierarchy.
-// ---------------------------------------------------------------------------
-
-async function executeListMySubordinates(
-  input: Record<string, unknown>,
-  context: SkillExecutionContext,
-): Promise<unknown> {
-  const scope = (input['scope'] as 'children' | 'descendants') ?? 'children';
-
-  // Find the caller's system_agents row via the agents → system_agents join.
-  // The context.agentId is the agents.id (org-level agent FK).
-  const [agentRow] = await db
-    .select({ systemAgentId: agents.systemAgentId })
-    .from(agents)
-    .where(and(eq(agents.id, context.agentId), eq(agents.organisationId, context.organisationId)))
-    .limit(1);
-
-  if (!agentRow?.systemAgentId) {
-    return { success: false, error: 'Calling agent has no linked system_agents row' };
-  }
-
-  const callerSystemAgentId = agentRow.systemAgentId;
-
-  // Fetch all active system_agents in one read — the full table is small (dozens of rows).
-  // Soft-deleted rows are filtered at the SQL layer so a deleted parent or
-  // child cannot reappear in the hierarchy resolver's output.
-  const allAgents = await db.select({
-    id: systemAgents.id,
-    slug: systemAgents.slug,
-    name: systemAgents.name,
-    title: systemAgents.agentTitle,
-    agentRole: systemAgents.agentRole,
-    parentSystemAgentId: systemAgents.parentSystemAgentId,
-    deletedAt: systemAgents.deletedAt,
-    status: systemAgents.status,
-  })
-  .from(systemAgents)
-  .where(isNull(systemAgents.deletedAt));
-
-  const subordinates = resolveSubordinates({ callerSystemAgentId, scope, allAgents });
-  return { success: true, scope, agents: subordinates };
-}
-
 /**
  * Signature for a skill handler entry in SKILL_HANDLERS. Each entry is an
  * async function that receives the raw tool input and the current skill
@@ -655,39 +548,39 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Auto-gated skills (action record for audit, executes synchronously) ──
   create_task: async (input, context) => {
     requireSubaccountContext(context, 'create_task');
-    return executeWithActionAudit('create_task', input, context, (processedInput) => executeCreateTask(processedInput, context));
+    return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
   },
   triage_intake: async (input, context) => {
     requireSubaccountContext(context, 'triage_intake');
-    return executeWithActionAudit('triage_intake', input, context, (processedInput) => executeTriageIntake(processedInput, context));
+    return executeWithActionAudit('triage_intake', input, context, () => executeTriageIntake(input, context));
   },
   move_task: async (input, context) => {
-    return executeWithActionAudit('move_task', input, context, (processedInput) => executeMoveTask(processedInput, context));
+    return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
   },
   add_deliverable: async (input, context) => {
-    return executeWithActionAudit('add_deliverable', input, context, (processedInput) => executeAddDeliverable(processedInput, context));
+    return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
   },
   reassign_task: async (input, context) => {
     requireSubaccountContext(context, 'reassign_task');
-    return executeWithActionAudit('reassign_task', input, context, (processedInput) => executeReassignTask(processedInput, context));
+    return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
   },
   update_task: async (input, context) => {
-    return executeWithActionAudit('update_task', input, context, (processedInput) => executeUpdateTask(processedInput, context));
+    return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
   },
   read_inbox: async (input, context) => {
-    return executeWithActionAudit('read_inbox', input, context, (processedInput) => executeReadInbox(processedInput, context));
+    return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
   },
   fetch_url: async (input, context) => {
-    return executeWithActionAudit('fetch_url', input, context, (processedInput) => executeFetchUrl(processedInput, context));
+    return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
   },
   scrape_url: async (input, context) => {
-    return executeWithActionAudit('scrape_url', input, context, (processedInput) => executeScrapeUrl(processedInput, context));
+    return executeWithActionAudit('scrape_url', input, context, () => executeScrapeUrl(input, context));
   },
   scrape_structured: async (input, context) => {
-    return executeWithActionAudit('scrape_structured', input, context, (processedInput) => executeScrapeStructured(processedInput, context));
+    return executeWithActionAudit('scrape_structured', input, context, () => executeScrapeStructured(input, context));
   },
   monitor_webpage: async (input, context) => {
-    return executeWithActionAudit('monitor_webpage', input, context, (processedInput) => executeMonitorWebpage(processedInput, context));
+    return executeWithActionAudit('monitor_webpage', input, context, () => executeMonitorWebpage(input, context));
   },
 
   // ── Workflow Studio tools (system-admin only; agent: Workflow-author) ──
@@ -724,31 +617,31 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
   read_codebase: async (input, context) => {
     requireSubaccountContext(context, 'read_codebase');
-    return executeWithActionAudit('read_codebase', input, context, (processedInput) => executeReadCodebase(processedInput, context));
+    return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
   },
   search_codebase: async (input, context) => {
     requireSubaccountContext(context, 'search_codebase');
-    return executeWithActionAudit('search_codebase', input, context, (processedInput) => executeSearchCodebase(processedInput, context));
+    return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
   },
   run_tests: async (input, context) => {
     requireSubaccountContext(context, 'run_tests');
-    return executeWithActionAudit('run_tests', input, context, (processedInput) => executeRunTests(processedInput, context));
+    return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
   },
   analyze_endpoint: async (input, context) => {
     requireSubaccountContext(context, 'analyze_endpoint');
-    return executeWithActionAudit('analyze_endpoint', input, context, (processedInput) => executeAnalyzeEndpoint(processedInput, context));
+    return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
   },
   report_bug: async (input, context) => {
     requireSubaccountContext(context, 'report_bug');
-    return executeWithActionAudit('report_bug', input, context, (processedInput) => executeReportBug(processedInput, context));
+    return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
   },
   capture_screenshot: async (input, context) => {
     requireSubaccountContext(context, 'capture_screenshot');
-    return executeWithActionAudit('capture_screenshot', input, context, (processedInput) => executeCaptureScreenshot(processedInput, context));
+    return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
   },
   run_playwright_test: async (input, context) => {
     requireSubaccountContext(context, 'run_playwright_test');
-    return executeWithActionAudit('run_playwright_test', input, context, (processedInput) => executeRunPlaywrightTest(processedInput, context));
+    return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
   },
 
   // ── Dev review-gated skills (safeMode-checked, require subaccount) ───
@@ -912,18 +805,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   search_knowledge_base: async (input, context) => {
     // Auto-gated stub — integration not yet wired
-    return executeWithActionAudit('search_knowledge_base', input, context, async (processedInput) => {
-      const searchQuery = typeof processedInput.query === 'string' ? processedInput.query : '';
-      const searchCategory = typeof processedInput.intent_category === 'string' ? processedInput.intent_category : undefined;
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        query: searchQuery,
-        intent_category: searchCategory ?? null,
-        results: [],
-        message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
-      };
-    });
+    const searchQuery = typeof input.query === 'string' ? input.query : '';
+    const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
+    return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      query: searchQuery,
+      intent_category: searchCategory ?? null,
+      results: [],
+      message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
+    }));
   },
 
   // ── Social Media Agent skills ────────────────────────────────────────
@@ -944,54 +835,43 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('publish_post', input, context);
   },
   read_analytics: async (input, context) => {
-    // Auto-gated stub — platform integrations not yet wired.
-    // Pre-call date-range guard runs against raw input so we fail fast before
-    // the action row is even proposed; the lambda re-reads the same fields
-    // from processedInput so any Zod defaults materialise consistently.
+    // Auto-gated stub — platform integrations not yet wired
+    const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
     const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+    // Validate date range
     if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_analytics', input, context, async (processedInput) => {
-      const analyticsplatforms = Array.isArray(processedInput.platforms) ? processedInput.platforms : [];
-      const dateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
-      const dateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        platforms: analyticsplatforms,
-        date_from: dateFromInner,
-        date_to: dateToInner,
-        results: [],
-        message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
-      };
-    });
+    return executeWithActionAudit('read_analytics', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      platforms: analyticsplatforms,
+      date_from: dateFrom,
+      date_to: dateTo,
+      results: [],
+      message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
+    }));
   },
 
   // ── Ads Management Agent skills ──────────────────────────────────────
   read_campaigns: async (input, context) => {
-    // Auto-gated stub — ads platform integrations not yet wired.
-    // Pre-call guard runs against raw input; lambda re-reads from processedInput.
+    // Auto-gated stub — ads platform integrations not yet wired
+    const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
     const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_campaigns', input, context, async (processedInput) => {
-      const adsPlatform = typeof processedInput.platform === 'string' ? processedInput.platform : '';
-      const adsDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
-      const adsDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        platform: adsPlatform,
-        date_from: adsDateFromInner,
-        date_to: adsDateToInner,
-        campaigns: [],
-        message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
-      };
-    });
+    return executeWithActionAudit('read_campaigns', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      platform: adsPlatform,
+      date_from: adsDateFrom,
+      date_to: adsDateTo,
+      campaigns: [],
+      message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
+    }));
   },
   analyse_performance: async (input) => {
     return executeMethodologySkill('analyse_performance', input, {
@@ -1036,17 +916,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Email Outreach Agent skills ──────────────────────────────────────
   enrich_contact: async (input, context) => {
     // Auto-gated stub — enrichment integration not yet wired
-    return executeWithActionAudit('enrich_contact', input, context, async (processedInput) => {
-      const enrichEmail = typeof processedInput.contact_email === 'string' ? processedInput.contact_email : '';
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        contact: enrichEmail,
-        matched: false,
-        fields: {},
-        message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
-      };
-    });
+    const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
+    return executeWithActionAudit('enrich_contact', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      contact: enrichEmail,
+      matched: false,
+      fields: {},
+      message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
+    }));
   },
   draft_sequence: async (input) => {
     return executeMethodologySkill('draft_sequence', input, {
@@ -1081,44 +959,34 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
 
   // ── Finance Agent skills ─────────────────────────────────────────────
   read_revenue: async (input, context) => {
-    // Pre-call date-range guard runs against raw input; lambda re-reads from processedInput.
     const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_revenue', input, context, async (processedInput) => {
-      const revDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
-      const revDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        date_from: revDateFromInner,
-        date_to: revDateToInner,
-        total_revenue: null,
-        message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
-      };
-    });
+    return executeWithActionAudit('read_revenue', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      date_from: revDateFrom,
+      date_to: revDateTo,
+      total_revenue: null,
+      message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
+    }));
   },
   read_expenses: async (input, context) => {
-    // Pre-call date-range guard runs against raw input; lambda re-reads from processedInput.
     const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
     const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
     if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
       return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
     }
-    return executeWithActionAudit('read_expenses', input, context, async (processedInput) => {
-      const expDateFromInner = typeof processedInput.date_from === 'string' ? processedInput.date_from : '';
-      const expDateToInner = typeof processedInput.date_to === 'string' ? processedInput.date_to : new Date().toISOString().slice(0, 10);
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        date_from: expDateFromInner,
-        date_to: expDateToInner,
-        total_expenses: null,
-        message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
-      };
-    });
+    return executeWithActionAudit('read_expenses', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      date_from: expDateFrom,
+      date_to: expDateTo,
+      total_expenses: null,
+      message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
+    }));
   },
   analyse_financials: async (input) => {
     return executeMethodologySkill('analyse_financials', input, {
@@ -1136,6 +1004,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
     });
   },
+  update_financial_record: async (input, context) => {
+    return proposeReviewGatedAction('update_financial_record', input, context);
+  },
+
   // ── Strategic Intelligence Agent skills ──────────────────────────────
   generate_competitor_brief: async (input) => {
     return executeMethodologySkill('generate_competitor_brief', input, {
@@ -1374,16 +1246,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── CRM/Pipeline Agent skills ────────────────────────────────────────
   read_crm: async (input, context) => {
     // Auto-gated stub — CRM integration not yet wired
-    return executeWithActionAudit('read_crm', input, context, async (processedInput) => {
-      const crmQueryType = typeof processedInput.query_type === 'string' ? processedInput.query_type : '';
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        query_type: crmQueryType,
-        records: [],
-        message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
-      };
-    });
+    const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
+    return executeWithActionAudit('read_crm', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      query_type: crmQueryType,
+      records: [],
+      message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
+    }));
   },
   analyse_pipeline: async (input) => {
     return executeMethodologySkill('analyse_pipeline', input, {
@@ -1429,18 +1299,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Knowledge Management Agent skills ────────────────────────────────
   read_docs: async (input, context) => {
     // Auto-gated stub — documentation integration not yet wired
-    return executeWithActionAudit('read_docs', input, context, async (processedInput) => {
-      const docPageId = typeof processedInput.page_id === 'string' ? processedInput.page_id : '';
-      const docPageTitle = typeof processedInput.page_title === 'string' ? processedInput.page_title : '';
-      return {
-        status: 'stub',
-        dataAvailability: 'stub' as const,
-        page_id: docPageId,
-        page_title: docPageTitle,
-        content: null,
-        message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
-      };
-    });
+    const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
+    const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
+    return executeWithActionAudit('read_docs', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      page_id: docPageId,
+      page_title: docPageTitle,
+      content: null,
+      message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
+    }));
   },
   propose_doc_update: async (input, context) => {
     return proposeReviewGatedAction('propose_doc_update', input, context);
@@ -1452,70 +1320,70 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // ── Phase 2: Workflow orchestration ──────────────────────────────────
   assign_task: async (input, context) => {
     const { executeAssignTask } = await import('../tools/internal/assignTask.js');
-    return executeWithActionAudit('assign_task', input, context, (processedInput) =>
-      executeAssignTask(processedInput, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
+    return executeWithActionAudit('assign_task', input, context, () =>
+      executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
     );
   },
 
   // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
   query_subaccount_cohort: async (input, context) => {
     const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('query_subaccount_cohort', input, context, (processedInput) =>
-      executeQuerySubaccountCohort(processedInput, context));
+    return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
+      executeQuerySubaccountCohort(input, context));
   },
   read_org_insights: async (input, context) => {
     const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('read_org_insights', input, context, (processedInput) =>
-      executeReadOrgInsights(processedInput, context));
+    return executeWithActionAudit('read_org_insights', input, context, () =>
+      executeReadOrgInsights(input, context));
   },
   write_org_insight: async (input, context) => {
     const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('write_org_insight', input, context, (processedInput) =>
-      executeWriteOrgInsight(processedInput, context));
+    return executeWithActionAudit('write_org_insight', input, context, () =>
+      executeWriteOrgInsight(input, context));
   },
   compute_health_score: async (input, context) => {
     const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('compute_health_score', input, context, (processedInput) =>
-      executeComputeHealthScore(processedInput, context));
+    return executeWithActionAudit('compute_health_score', input, context, () =>
+      executeComputeHealthScore(input, context));
   },
   detect_anomaly: async (input, context) => {
     const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('detect_anomaly', input, context, (processedInput) =>
-      executeDetectAnomaly(processedInput, context));
+    return executeWithActionAudit('detect_anomaly', input, context, () =>
+      executeDetectAnomaly(input, context));
   },
   compute_churn_risk: async (input, context) => {
     const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('compute_churn_risk', input, context, (processedInput) =>
-      executeComputeChurnRisk(processedInput, context));
+    return executeWithActionAudit('compute_churn_risk', input, context, () =>
+      executeComputeChurnRisk(input, context));
   },
   compute_staff_activity_pulse: async (input, context) => {
     const { executeComputeStaffActivityPulse } = await import('./computeStaffActivityPulseService.js');
-    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async (processedInput) => {
-      const subaccountId = (processedInput.subaccount_id as string | undefined) ?? context.subaccountId;
+    return executeWithActionAudit('compute_staff_activity_pulse', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
       if (!subaccountId) throw new Error('subaccount_id is required');
       return executeComputeStaffActivityPulse({
         organisationId: context.organisationId,
         subaccountId,
-        sourceRunId: processedInput.source_run_id as string | undefined,
+        sourceRunId: input.source_run_id as string | undefined,
       });
     });
   },
   scan_integration_fingerprints: async (input, context) => {
     const { executeScanIntegrationFingerprints } = await import('./scanIntegrationFingerprintsService.js');
-    return executeWithActionAudit('scan_integration_fingerprints', input, context, async (processedInput) => {
-      const subaccountId = (processedInput.subaccount_id as string | undefined) ?? context.subaccountId;
+    return executeWithActionAudit('scan_integration_fingerprints', input, context, async () => {
+      const subaccountId = (input.subaccount_id as string | undefined) ?? context.subaccountId;
       if (!subaccountId) throw new Error('subaccount_id is required');
       return executeScanIntegrationFingerprints({
         organisationId: context.organisationId,
         subaccountId,
-        sourceRunId: processedInput.source_run_id as string | undefined,
+        sourceRunId: input.source_run_id as string | undefined,
       });
     });
   },
   generate_portfolio_report: async (input, context) => {
     const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
-    return executeWithActionAudit('generate_portfolio_report', input, context, (processedInput) =>
-      executeGeneratePortfolioReport(processedInput, context));
+    return executeWithActionAudit('generate_portfolio_report', input, context, () =>
+      executeGeneratePortfolioReport(input, context));
   },
   trigger_account_intervention: async (input, context) => {
     return proposeReviewGatedAction('trigger_account_intervention', input, context);
@@ -1795,67 +1663,67 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // Mutation tools (review-gated via action registry)
   config_create_agent: async (input, context) => {
     const { executeConfigCreateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_agent', input, context, (processedInput) => executeConfigCreateAgent(processedInput, context));
+    return executeWithActionAudit('config_create_agent', input, context, () => executeConfigCreateAgent(input, context));
   },
   config_update_agent: async (input, context) => {
     const { executeConfigUpdateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_agent', input, context, (processedInput) => executeConfigUpdateAgent(processedInput, context));
+    return executeWithActionAudit('config_update_agent', input, context, () => executeConfigUpdateAgent(input, context));
   },
   config_activate_agent: async (input, context) => {
     const { executeConfigActivateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_activate_agent', input, context, (processedInput) => executeConfigActivateAgent(processedInput, context));
+    return executeWithActionAudit('config_activate_agent', input, context, () => executeConfigActivateAgent(input, context));
   },
   config_link_agent: async (input, context) => {
     const { executeConfigLinkAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_link_agent', input, context, (processedInput) => executeConfigLinkAgent(processedInput, context));
+    return executeWithActionAudit('config_link_agent', input, context, () => executeConfigLinkAgent(input, context));
   },
   config_update_link: async (input, context) => {
     const { executeConfigUpdateLink } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_link', input, context, (processedInput) => executeConfigUpdateLink(processedInput, context));
+    return executeWithActionAudit('config_update_link', input, context, () => executeConfigUpdateLink(input, context));
   },
   config_set_link_skills: async (input, context) => {
     const { executeConfigSetLinkSkills } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_skills', input, context, (processedInput) => executeConfigSetLinkSkills(processedInput, context));
+    return executeWithActionAudit('config_set_link_skills', input, context, () => executeConfigSetLinkSkills(input, context));
   },
   config_set_link_instructions: async (input, context) => {
     const { executeConfigSetLinkInstructions } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_instructions', input, context, (processedInput) => executeConfigSetLinkInstructions(processedInput, context));
+    return executeWithActionAudit('config_set_link_instructions', input, context, () => executeConfigSetLinkInstructions(input, context));
   },
   config_set_link_schedule: async (input, context) => {
     const { executeConfigSetLinkSchedule } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_schedule', input, context, (processedInput) => executeConfigSetLinkSchedule(processedInput, context));
+    return executeWithActionAudit('config_set_link_schedule', input, context, () => executeConfigSetLinkSchedule(input, context));
   },
   config_set_link_limits: async (input, context) => {
     const { executeConfigSetLinkLimits } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_limits', input, context, (processedInput) => executeConfigSetLinkLimits(processedInput, context));
+    return executeWithActionAudit('config_set_link_limits', input, context, () => executeConfigSetLinkLimits(input, context));
   },
   config_create_subaccount: async (input, context) => {
     const { executeConfigCreateSubaccount } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_subaccount', input, context, (processedInput) => executeConfigCreateSubaccount(processedInput, context));
+    return executeWithActionAudit('config_create_subaccount', input, context, () => executeConfigCreateSubaccount(input, context));
   },
   config_create_scheduled_task: async (input, context) => {
     const { executeConfigCreateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_scheduled_task', input, context, (processedInput) => executeConfigCreateScheduledTask(processedInput, context));
+    return executeWithActionAudit('config_create_scheduled_task', input, context, () => executeConfigCreateScheduledTask(input, context));
   },
   config_update_scheduled_task: async (input, context) => {
     const { executeConfigUpdateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_scheduled_task', input, context, (processedInput) => executeConfigUpdateScheduledTask(processedInput, context));
+    return executeWithActionAudit('config_update_scheduled_task', input, context, () => executeConfigUpdateScheduledTask(input, context));
   },
   config_attach_data_source: async (input, context) => {
     const { executeConfigAttachDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_attach_data_source', input, context, (processedInput) => executeConfigAttachDataSource(processedInput, context));
+    return executeWithActionAudit('config_attach_data_source', input, context, () => executeConfigAttachDataSource(input, context));
   },
   config_update_data_source: async (input, context) => {
     const { executeConfigUpdateDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_data_source', input, context, (processedInput) => executeConfigUpdateDataSource(processedInput, context));
+    return executeWithActionAudit('config_update_data_source', input, context, () => executeConfigUpdateDataSource(input, context));
   },
   config_remove_data_source: async (input, context) => {
     const { executeConfigRemoveDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_remove_data_source', input, context, (processedInput) => executeConfigRemoveDataSource(processedInput, context));
+    return executeWithActionAudit('config_remove_data_source', input, context, () => executeConfigRemoveDataSource(input, context));
   },
   config_restore_version: async (input, context) => {
     const { executeConfigRestoreVersion } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_restore_version', input, context, (processedInput) => executeConfigRestoreVersion(processedInput, context));
+    return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
   },
 
   // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
@@ -1931,11 +1799,11 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   // Phase G — portal / email skills (spec §11.6) — action_call only.
   config_publish_workflow_output_to_portal: async (input, context) => {
     const { executeConfigPublishWorkflowOutputToPortal } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, (processedInput) => executeConfigPublishWorkflowOutputToPortal(processedInput, context));
+    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, () => executeConfigPublishWorkflowOutputToPortal(input, context));
   },
   config_send_workflow_email_digest: async (input, context) => {
     const { executeConfigSendWorkflowEmailDigest } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_send_workflow_email_digest', input, context, (processedInput) => executeConfigSendWorkflowEmailDigest(processedInput, context));
+    return executeWithActionAudit('config_send_workflow_email_digest', input, context, () => executeConfigSendWorkflowEmailDigest(input, context));
   },
 
   // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
@@ -1955,108 +1823,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       success: true,
       result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
     };
-  },
-
-  // ── System Agents v7.1 — Hierarchy ───────────────────────────────────────
-  list_my_subordinates: async (input, context) =>
-    executeWithActionAudit('list_my_subordinates', input, context, (processedInput) => executeListMySubordinates(processedInput, context)),
-
-  // ── System Agents v7.1 — Admin Ops (finance) ─────────────────────────────
-  generate_invoice: async (input, context) => {
-    requireSubaccountContext(context, 'generate_invoice');
-    return executeWithActionAudit('generate_invoice', input, context, (processedInput) => executeGenerateInvoice(processedInput, context));
-  },
-  send_invoice: async (input, context) => {
-    requireSubaccountContext(context, 'send_invoice');
-    return executeWithActionAudit('send_invoice', input, context, (processedInput) => executeSendInvoice(processedInput, context));
-  },
-  reconcile_transactions: async (input, context) => {
-    requireSubaccountContext(context, 'reconcile_transactions');
-    return executeWithActionAudit('reconcile_transactions', input, context, (processedInput) => executeReconcileTransactions(processedInput, context));
-  },
-  chase_overdue: async (input, context) => {
-    requireSubaccountContext(context, 'chase_overdue');
-    return executeWithActionAudit('chase_overdue', input, context, (processedInput) => executeChaseOverdue(processedInput, context));
-  },
-  process_bill: async (input, context) => {
-    requireSubaccountContext(context, 'process_bill');
-    return executeWithActionAudit('process_bill', input, context, (processedInput) => executeProcessBill(processedInput, context));
-  },
-  track_subscriptions: async (input, context) => {
-    requireSubaccountContext(context, 'track_subscriptions');
-    return executeWithActionAudit('track_subscriptions', input, context, (processedInput) => executeTrackSubscriptions(processedInput, context));
-  },
-  prepare_month_end: async (input, context) => {
-    requireSubaccountContext(context, 'prepare_month_end');
-    return executeWithActionAudit('prepare_month_end', input, context, (processedInput) => executePrepareMonthEnd(processedInput, context));
-  },
-
-  // ── System Agents v7.1 — SDR ──────────────────────────────────────────────
-  discover_prospects: async (input, context) => {
-    requireSubaccountContext(context, 'discover_prospects');
-    return executeWithActionAudit('discover_prospects', input, context, (processedInput) => executeDiscoverProspects(processedInput, context));
-  },
-  draft_outbound: async (input, context) => {
-    requireSubaccountContext(context, 'draft_outbound');
-    return executeWithActionAudit('draft_outbound', input, context, (processedInput) => executeDraftOutbound(processedInput, context));
-  },
-  score_lead: async (input, context) =>
-    executeWithActionAudit('score_lead', input, context, (processedInput) => executeScoreLead(processedInput, context)),
-  book_meeting: async (input, context) => {
-    requireSubaccountContext(context, 'book_meeting');
-    return executeWithActionAudit('book_meeting', input, context, (processedInput) => executeBookMeeting(processedInput, context));
-  },
-
-  // ── System Agents v7.1 — Retention/Success ────────────────────────────────
-  score_nps_csat: async (input, context) =>
-    executeWithActionAudit('score_nps_csat', input, context, (processedInput) => executeScoreNpsCsat(processedInput, context)),
-  prepare_renewal_brief: async (input, context) =>
-    executeWithActionAudit('prepare_renewal_brief', input, context, (processedInput) => executePrepareRenewalBrief(processedInput, context)),
-
-  // ── System Monitor skills (Phase 2 — Slice C) ────────────────────────
-  read_incident: async (input, context) => {
-    const { executeReadIncident } = await import('./systemMonitor/skills/readIncident.js');
-    return executeReadIncident(input, context);
-  },
-  read_agent_run: async (input, context) => {
-    const { executeReadAgentRun } = await import('./systemMonitor/skills/readAgentRun.js');
-    return executeReadAgentRun(input, context);
-  },
-  read_skill_execution: async (input, context) => {
-    const { executeReadSkillExecution } = await import('./systemMonitor/skills/readSkillExecution.js');
-    return executeReadSkillExecution(input, context);
-  },
-  read_recent_runs_for_agent: async (input, context) => {
-    const { executeReadRecentRunsForAgent } = await import('./systemMonitor/skills/readRecentRunsForAgent.js');
-    return executeReadRecentRunsForAgent(input, context);
-  },
-  read_baseline: async (input, context) => {
-    const { executeReadBaseline } = await import('./systemMonitor/skills/readBaseline.js');
-    return executeReadBaseline(input, context);
-  },
-  read_heuristic_fires: async (input, context) => {
-    const { executeReadHeuristicFires } = await import('./systemMonitor/skills/readHeuristicFires.js');
-    return executeReadHeuristicFires(input, context);
-  },
-  read_connector_state: async (input, context) => {
-    const { executeReadConnectorState } = await import('./systemMonitor/skills/readConnectorState.js');
-    return executeReadConnectorState(input, context);
-  },
-  read_dlq_recent: async (input, context) => {
-    const { executeReadDlqRecent } = await import('./systemMonitor/skills/readDlqRecent.js');
-    return executeReadDlqRecent(input, context);
-  },
-  read_logs_for_correlation_id: async (input, context) => {
-    const { executeReadLogsForCorrelationId } = await import('./systemMonitor/skills/readLogsForCorrelationId.js');
-    return executeReadLogsForCorrelationId(input, context);
-  },
-  write_diagnosis: async (input, context) => {
-    const { executeWriteDiagnosis } = await import('./systemMonitor/skills/writeDiagnosis.js');
-    return executeWriteDiagnosis(input, context);
-  },
-  write_event: async (input, context) => {
-    const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
-    return executeWriteEvent(input, context);
   },
 };
 
@@ -2116,12 +1882,7 @@ async function executeWithActionAudit(
   actionType: string,
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-  // ChatGPT R1 #3 — executor must receive parsedInput (Zod defaults
-  // materialised + canonicalised) so the value used to compute the
-  // idempotency hash matches the value the handler executes against.
-  // Capturing raw `input` in the closure caused defaults/transforms
-  // to drift between key and execution.
-  executor: (processedInput: Record<string, unknown>) => Promise<unknown>
+  executor: () => Promise<unknown>
 ): Promise<unknown> {
   // Sprint 2 P1.1 Layer 3: when a toolCallId is on the context, build a
   // deterministic key that matches the one proposeActionMiddleware already
@@ -2190,214 +1951,6 @@ async function executeWithActionAudit(
       gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
     }, { parentSpan: pipelineSpan });
 
-    // ── Cross-run idempotency wrapper (§9.3.1) ─────────────────────────────
-    const def = getActionDefinition(actionType);
-
-    // M5 — run parameterSchema.parse first so Zod defaults are materialised
-    // before canonicalisation (§8.1.1). Falls through to raw input only when
-    // no schema is declared (legacy entries — every new skill in v7.1 has one).
-    let parsedInput: Record<string, unknown> = input;
-    if (def?.parameterSchema) {
-      try {
-        parsedInput = def.parameterSchema.parse(input) as Record<string, unknown>;
-      } catch (zerr) {
-        createEvent('skill.error', {
-          skillName: actionType, reason: 'validation_failed', error: String(zerr).slice(0, 200),
-        }, { level: 'ERROR' });
-        pipelineSpan.end({ output: { status: 'blocked', reason: 'validation_failed' } });
-        return { status: 'blocked', reason: 'validation_failed', error: String(zerr) };
-      }
-    }
-
-    // M4 — preconditions are internal-only checks; run BEFORE the idempotency
-    // INSERT so a precondition-blocked write does not leave an in_flight row
-    // that locks the key forever. Per spec §16A.1 the no-side-effect-before-claim
-    // invariant only governs external side effects; precondition inspection is
-    // pure config reads.
-    if (def?.sideEffectClass === 'write') {
-      const preconditions = await checkSkillPreconditions(actionType, parsedInput, context);
-      if (preconditions.status === 'blocked') {
-        createEvent('skill.blocked', {
-          skillName: actionType, reason: preconditions.reason,
-          provider: (preconditions as Record<string, unknown>)['provider'],
-          requires: (preconditions as Record<string, unknown>)['requires'],
-        });
-        pipelineSpan.end({ output: preconditions });
-        return preconditions;
-      }
-    }
-
-    let keyHash: string | undefined;
-    let isFirstWriter = false;
-
-    if (def?.idempotency) {
-      // M7 — explicit subaccount-context guard. The schema requires NOT NULL;
-      // silently coercing null to '' produced un-matchable rows and hid the
-      // root cause when context wasn't propagated correctly.
-      if (!context.subaccountId) {
-        throw new Error(`Skill '${actionType}' requires subaccount context for cross-run idempotency.`);
-      }
-      const subaccountId = context.subaccountId;
-
-      const requestHash = hashActionArgs(parsedInput);
-      keyHash = hashKeyShape(def.idempotency.keyShape, parsedInput);
-
-      assertRlsAwareWrite('skill_idempotency_keys');
-
-      // S7 — confirm the org session var is set before the INSERT. Without it
-      // the RLS policy silently rejects the write, producing zero rows and
-      // making the wrapper believe a prior writer already claimed the key —
-      // the cross-run guarantee would then be silently void.
-      const sessionCheck = await db.execute(sql`SELECT current_setting('app.organisation_id', true) AS org`);
-      const sessionRow = (sessionCheck as unknown as { rows: Array<{ org?: string | null }> }).rows[0];
-      if (!sessionRow?.org) {
-        throw new Error(`Skill '${actionType}' invoked outside withOrgTx — RLS session var not set; cross-run idempotency cannot be enforced.`);
-      }
-
-      const insertResult = await db.execute(sql`
-        INSERT INTO skill_idempotency_keys
-          (subaccount_id, organisation_id, skill_slug, key_hash, request_hash, status, expires_at)
-        VALUES (
-          ${subaccountId},
-          ${context.organisationId},
-          ${actionType},
-          ${keyHash},
-          ${requestHash},
-          'in_flight',
-          ${ttlClassToExpiresAt(def.idempotency.ttlClass)}
-        )
-        ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
-        RETURNING (xmax = 0) AS is_first_writer
-      `);
-
-      isFirstWriter = ((insertResult as unknown as { rows: unknown[] }).rows[0] as { is_first_writer?: boolean } | undefined)?.is_first_writer === true;
-
-      if (!isFirstWriter) {
-        const [existing] = await db.select()
-          .from(skillIdempotencyKeys)
-          .where(and(
-            eq(skillIdempotencyKeys.subaccountId, subaccountId),
-            eq(skillIdempotencyKeys.skillSlug, actionType),
-            eq(skillIdempotencyKeys.keyHash, keyHash),
-          ))
-          .limit(1);
-
-        if (!existing) {
-          // Race: INSERT returned 0 rows (DO NOTHING) but the row is gone — proceed as first writer
-          isFirstWriter = true;
-        } else {
-          if (existing.requestHash !== requestHash) {
-            createEvent('skill.error', { skillName: actionType, reason: 'idempotency_collision', key_hash: keyHash }, { level: 'ERROR' });
-            // ChatGPT R1 #2 — terminalise the freshly-proposed action row before
-            // returning. Without this, every idempotency-hit reply leaves an
-            // unresolved 'approved' row that never closes the audit loop.
-            await actionService.markFailed(
-              proposed.actionId,
-              context.organisationId,
-              'idempotency_collision: same idempotency key with different request hash',
-              'IDEMPOTENCY_COLLISION',
-            );
-            pipelineSpan.end({ output: { status: 'idempotency_collision' } });
-            return { status: 'idempotency_collision', error: 'Same idempotency key with different request hash' };
-          }
-
-          if (existing.status === 'completed') {
-            createEvent('skill.idempotency.hit', { skillName: actionType, key_hash: keyHash });
-            // ChatGPT R1 #2 — close out the freshly-proposed action row by
-            // mirroring the cached response. The action's effective outcome is
-            // the cached one; recording it here keeps the audit trail complete
-            // and prevents dangling 'approved' rows on every replay.
-            await actionService.markCompleted(
-              proposed.actionId,
-              context.organisationId,
-              existing.responsePayload,
-              'success',
-            );
-            pipelineSpan.end({ output: existing.responsePayload });
-            return existing.responsePayload as unknown;
-          }
-
-          if (existing.status === 'in_flight') {
-            const reclaimEligible = def.idempotency.reclaimEligibility === 'eligible';
-            const ageMs = Date.now() - new Date(existing.createdAt).getTime();
-
-            if (!reclaimEligible) {
-              if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs }, { level: 'WARNING' });
-              }
-              // ChatGPT R1 #2 — block the freshly-proposed action row with a
-              // machine-readable concurrent_execute reason. The handler did not
-              // run, but the row would otherwise sit in 'approved' forever.
-              await actionService.markBlocked(
-                proposed.actionId,
-                context.organisationId,
-                'concurrent_execute',
-                'Another caller is processing this idempotent request (reclaim disabled)',
-              );
-              pipelineSpan.end({ output: { status: 'in_flight' } });
-              return { status: 'in_flight', message: 'Another caller is processing this idempotent request (reclaim disabled)', retryable_after_ms: 5000 };
-            }
-
-            if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
-              const reclaim = await db.update(skillIdempotencyKeys)
-                .set({ createdAt: new Date(), requestHash, responsePayload: {} })
-                .where(and(
-                  eq(skillIdempotencyKeys.subaccountId, subaccountId),
-                  eq(skillIdempotencyKeys.skillSlug, actionType),
-                  eq(skillIdempotencyKeys.keyHash, keyHash),
-                  eq(skillIdempotencyKeys.status, 'in_flight'),
-                  lt(skillIdempotencyKeys.createdAt, new Date(Date.now() - IDEMPOTENCY_CLAIM_TIMEOUT_MS)),
-                ))
-                .returning({ sub: skillIdempotencyKeys.subaccountId });
-
-              if (reclaim.length >= 1) {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_reclaimed', key_hash: keyHash, age_ms: ageMs }, { level: 'WARNING' });
-                isFirstWriter = true;
-              } else {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash }, { level: 'WARNING' });
-                // ChatGPT R1 #2 — same reasoning as the reclaim-disabled
-                // branch: the row never executes here, so block it.
-                await actionService.markBlocked(
-                  proposed.actionId,
-                  context.organisationId,
-                  'concurrent_execute',
-                  'Another caller reclaimed this in_flight request',
-                );
-                pipelineSpan.end({ output: { status: 'in_flight' } });
-                return { status: 'in_flight', message: 'Another caller reclaimed this in_flight request', retryable_after_ms: 1000 };
-              }
-            } else {
-              // ChatGPT R1 #2 — block the freshly-proposed action row while
-              // another caller is still within the claim window.
-              await actionService.markBlocked(
-                proposed.actionId,
-                context.organisationId,
-                'concurrent_execute',
-                'Another caller is processing this idempotent request',
-              );
-              pipelineSpan.end({ output: { status: 'in_flight' } });
-              return { status: 'in_flight', message: 'Another caller is processing this idempotent request', retryable_after_ms: Math.max(1000, IDEMPOTENCY_CLAIM_TIMEOUT_MS - ageMs) };
-            }
-          }
-
-          if (existing.status === 'failed') {
-            // ChatGPT R1 #2 — terminalise as failed; caller must submit a new
-            // idempotency key to retry, so this action row is unrecoverable.
-            await actionService.markFailed(
-              proposed.actionId,
-              context.organisationId,
-              'previous_failure: prior attempt failed; submit a new idempotency key to retry',
-              'PREVIOUS_FAILURE',
-            );
-            pipelineSpan.end({ output: { status: 'previous_failure' } });
-            return { status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' };
-          }
-        }
-      }
-
-      assertHandlerInvokedWithClaim(isFirstWriter);
-    }
-
     // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
@@ -2405,106 +1958,21 @@ async function executeWithActionAudit(
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
-    // S8 — handler exception path must mark the in_flight row terminal so the
-    // key is not stuck for the rest of the TTL. Without this, a thrown error
-    // leaves an orphan row that blocks all retries until the cleanup job runs.
-    let result: unknown;
     const executeSpan = createSpan('skill.phase.execute', { skillName: actionType }, { parentSpan: pipelineSpan });
-    try {
-      result = await runWithProcessors(
-        actionType,
-        parsedInput,
-        context,
-        (processedInput) => executor(processedInput),
-        proposed.actionId,
-      );
-      executeSpan.end({ output: result });
-    } catch (handlerErr) {
-      executeSpan.end({ output: { error: String(handlerErr) } });
-      if (def?.idempotency && isFirstWriter && keyHash && context.subaccountId) {
-        await db.update(skillIdempotencyKeys)
-          .set({
-            responsePayload: { error: String(handlerErr).slice(0, 1000) },
-            status: 'failed',
-          })
-          .where(and(
-            eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
-            eq(skillIdempotencyKeys.skillSlug, actionType),
-            eq(skillIdempotencyKeys.keyHash, keyHash),
-            eq(skillIdempotencyKeys.status, 'in_flight'),
-          ));
-      }
-      throw handlerErr;
-    }
+    const result = await runWithProcessors(
+      actionType,
+      input,
+      context,
+      (_processedInput) => executor(),
+      proposed.actionId,
+    );
+    executeSpan.end({ output: result });
 
-    // Read fail-soft logging (§9.3.2 + §9.3.3)
-    if (def?.sideEffectClass === 'read') {
-      const r = result as Record<string, unknown> | null;
-      if (r?.status === 'not_configured' || r?.status === 'transient_error') {
-        createEvent('skill.warn', {
-          skillName: actionType,
-          reason: String(r.status),
-          warning: r['warning'],
-          retryable: r.status === 'transient_error',
-        }, { level: 'WARNING' });
-      }
-    }
-
-    // M6 — distinguish terminal completion ('completed' / 'failed') from
-    // recoverable handler responses ('blocked' / 'not_configured' / 'transient_error').
-    // Only success or hard error closes the state machine; recoverable
-    // statuses delete the in_flight row so a later replay (with provider
-    // configured / transient cleared) can claim fresh per spec §16A.7.
-    const resultObj = (result ?? {}) as Record<string, unknown>;
-    const handlerStatus = typeof resultObj['status'] === 'string' ? String(resultObj['status']) : undefined;
-    const isSuccess = resultObj['success'] === true;
-    const isRecoverable = handlerStatus === 'blocked' || handlerStatus === 'not_configured' || handlerStatus === 'transient_error';
-
-    if (def?.idempotency && isFirstWriter && keyHash && context.subaccountId) {
-      const subaccountId = context.subaccountId;
-      if (isRecoverable) {
-        // Drop the claim entirely — the next call should re-attempt.
-        await db.delete(skillIdempotencyKeys)
-          .where(and(
-            eq(skillIdempotencyKeys.subaccountId, subaccountId),
-            eq(skillIdempotencyKeys.skillSlug, actionType),
-            eq(skillIdempotencyKeys.keyHash, keyHash),
-            eq(skillIdempotencyKeys.status, 'in_flight'),
-          ));
-      } else {
-        const updateResult = await db.update(skillIdempotencyKeys)
-          .set({
-            responsePayload: resultObj,
-            status: isSuccess ? 'completed' : 'failed',
-          })
-          .where(and(
-            eq(skillIdempotencyKeys.subaccountId, subaccountId),
-            eq(skillIdempotencyKeys.skillSlug, actionType),
-            eq(skillIdempotencyKeys.keyHash, keyHash),
-            eq(skillIdempotencyKeys.status, 'in_flight'),
-          ))
-          .returning({ status: skillIdempotencyKeys.status });
-
-        if (updateResult.length === 0) {
-          // Terminal race lost — read and return the winning row's payload
-          createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARNING' });
-          const [winner] = await db.select()
-            .from(skillIdempotencyKeys)
-            .where(and(
-              eq(skillIdempotencyKeys.subaccountId, subaccountId),
-              eq(skillIdempotencyKeys.skillSlug, actionType),
-              eq(skillIdempotencyKeys.keyHash, keyHash),
-            ))
-            .limit(1);
-          if (winner) return winner.responsePayload as unknown;
-        }
-      }
-    }
-
-    if (isSuccess) {
+    const resultObj = result as Record<string, unknown>;
+    if (resultObj?.success) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
-    } else if (!isRecoverable) {
-      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj['error'] ?? 'Unknown error'));
+    } else {
+      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
     }
 
     pipelineSpan.end({ output: result });
@@ -2517,27 +1985,12 @@ async function executeWithActionAudit(
       pipelineSpan.end({ output: { success: false, error: err.reason } });
       return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
     }
-    // M3 — for write/idempotent skills the catch path MUST NOT bypass the
-    // claim by re-running the executor directly. Doing so re-fires external
-    // side effects with no audit row, no manager guard re-check, and no
-    // idempotency row — defeating the spec §16A.0 ordering invariant.
-    // Surface a structured error instead.
-    const def = getActionDefinition(actionType);
-    const guarded = def?.idempotency !== undefined || def?.sideEffectClass === 'write';
     createEvent('skill.action.failed', {
-      skillName: actionType, error: String(err).slice(0, 200), guarded,
+      skillName: actionType, error: String(err).slice(0, 200),
     }, { parentSpan: pipelineSpan, level: 'ERROR' });
-    console.error(`[ActionAudit] Failed to track ${actionType} (guarded=${guarded}):`, err);
+    console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
     pipelineSpan.end({ output: { error: String(err) } });
-    if (guarded) {
-      return { success: false, error: `Wrapper failure for guarded skill '${actionType}': ${String(err).slice(0, 200)}` };
-    }
-    // ChatGPT R1 #3 — unguarded fallback: the wrapper failed before
-    // parameterSchema.parse could materialise defaults. Pass the raw input
-    // so the executor sees the same value it would have under the prior
-    // closure-capture behaviour (no behavioural regression for legacy
-    // skills without a Zod schema).
-    return executor(input);
+    return executor();
   }
 }
 
@@ -3063,6 +2516,45 @@ async function executeCrmUpdateApproved(
     fields_updated: Object.keys(updates),
     status: 'pending_integration',
     message: `CRM update approved for ${recordType} ${recordIdentifier}. Integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeFinancialRecordUpdateApproved — MVP stub for update_financial_record.
+// ---------------------------------------------------------------------------
+
+async function executeFinancialRecordUpdateApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const recordType = String(payload.record_type ?? '');
+  const recordDescription = String(payload.record_description ?? '');
+  const updates = payload.updates as Record<string, unknown> ?? {};
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!recordType) return { success: false, error: 'record_type is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: [
+          `FINANCIAL_RECORD_UPDATE_APPROVED:${recordType}`,
+          `description: ${recordDescription}`,
+          `fields: ${Object.keys(updates).join(', ')}`,
+          `reasoning: ${reasoning}`,
+        ].join('\n'),
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    record_type: recordType,
+    fields_written: Object.keys(updates),
+    status: 'pending_integration',
+    message: `Financial record update approved (${recordType}: ${recordDescription}). Accounting integration not yet connected — action logged.`,
   };
 }
 

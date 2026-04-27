@@ -314,14 +314,6 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **Nearest-common-ancestor routing for cross-subtree reassignment** — ChatGPT suggested automatic NCA-based routing so two peer subtrees can exchange work without requiring the subaccount root as middleman. Out of scope for v1 where root-only is a deliberate simplification; revisit when a real cross-subtree workflow emerges that root-funnelling demonstrably bottlenecks. Requires algorithmic design + prompt-scaffolding decision about how the NCA is surfaced to the caller.
 - [ ] **Violation sampling / alerting tier above §17.3 rejection-rate metric** — ChatGPT suggested a sampling-based alert ladder (page on sustained rejection-rate anomalies, digest on daily trend breaks). Ops/observability concern rather than a delegation-contract concern; belongs in a post-launch monitoring spec or the ops playbook, not in this spec. Revisit after Phase 4 ships and there is a baseline rejection-rate distribution to calibrate against.
 
-### system-monitoring-agent-fixes (2026-04-27)
-
-**Source log:** `tasks/review-logs/chatgpt-spec-review-system-monitoring-agent-fixes-2026-04-27T09-44-46Z.md`
-**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
-**PR:** #217 — https://github.com/michaelhazza/automation-v1/pull/217
-
-- [ ] **Proof-of-life severity weighting — `synthetic_fires_in_proof_window` non-trivial / non-low-severity gate.** [auto] ChatGPT round 3 §5: refine §9.1 proof-of-life so it requires at least one *non-trivial* synthetic check (or a non-silence + non-low-severity signal), not just any synthetic fire. **Why deferred:** ChatGPT itself frames as "correctly out of scope for now" — introduces subjectivity, requires a taxonomy or severity-weighting model the system does not currently have. Round 1 finding 5 + round 2 finding 3 already excluded silence-check fires from proof-of-life; this would extend the exclusion to a *severity tier*, not just a *check-id*. **Reconsider per trigger:** when the synthetic-check fleet grows beyond the current two checks (silent-agent-success + incident-silence) AND there is empirical evidence of "low-signal synthetic fires masking real degradation" — at that point the taxonomy investment is worth the subjectivity cost. Until then, the round 2 §9.6 "three independent mechanisms" model is the right fail-quiet posture.
-
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -334,9 +326,10 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
-### PR #217 — system-monitoring-agent-fixes (2026-04-27 — ChatGPT review round 3)
+### PR #218 — create-views (2026-04-28 — ChatGPT review round 1)
 
-- [ ] **Counter metric / aggregation for `triage.terminal_event_suppressed` transitions.** [user] ChatGPT round 3 §3: a counter on suppressed terminal events would become a leading indicator of triage-coordination contention or staleness-sweep aggressiveness. Currently we only emit the warn-log line at suppression points (`triageHandler.ts:368-370,405-407` and `writeDiagnosis.ts:111-121`). **Why deferred:** ChatGPT explicitly frames as "Not for this PR, just flagging" — observability follow-up, not a behavioural fix. **Reconsider per trigger:** when (a) we adopt a counter/metric primitive (currently no in-repo metrics infra), or (b) suppression rates become non-zero in production and we need quantitative monitoring rather than log-grep. Source: ChatGPT round 3 round-summary observation; session log `tasks/review-logs/chatgpt-pr-review-system-monitoring-agent-fixes-2026-04-27T22-12-04Z.md`.
+- [ ] [user] **Spec ambiguity — "RLS protected tables list" in `docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md`** — ChatGPT flagged the phrase as unclear. Not a runtime issue; the spec is finalised and merged-into-history for this PR. Resolve as part of a future spec-hygiene sweep (clarify which exact tables the spec considered "RLS protected" and whether the phrase was meant as a constraint or context). Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-create-views-2026-04-27T23-05-35Z.md`. PR #218 — https://github.com/michaelhazza/automation-v1/pull/218.
+- [ ] [user] **Codify "Suppression is success" pattern under single-writer invariants — codebase-wide enforcement** — ChatGPT explicitly framed this as forward-looking standardisation across the codebase, not a change for PR #218 (reinforced again in round 2's "what I'd do next, optional, not blocking"). Single-writer event emitters that lose a coordination race must return `success: true, suppressed: true` rather than `success: false`; returning failure triggers retries, false incident signals, and broken metrics. The architecture.md one-liner at § "Home dashboard live reactivity" already names the pattern, and the system-monitoring `writeDiagnosis` enforces it. Follow-up work: (a) extract a reusable utility (e.g. `suppressedSuccess(reason)` returning `{ success: true, suppressed: true, reason }`) so single-writer emitters call one helper instead of hand-rolling the shape, (b) add a lightweight lint or grep-based guard that flags `success: false` returns in files matching the single-writer emitter pattern (or, conversely, requires `suppressed: true` whenever the emitter detects a coordination loser), (c) sweep existing single-writer emitters for the anti-pattern, (d) consider promoting to a `DEVELOPMENT_GUIDELINES.md §8` rule, (e) KNOWLEDGE.md pattern entry captured at session finalize. The lint/grep guard is what turns this from "well understood" into "impossible to violate quietly". Source: ChatGPT PR review rounds 1 & 2; session log `tasks/review-logs/chatgpt-pr-review-create-views-2026-04-27T23-05-35Z.md`. PR #218 — https://github.com/michaelhazza/automation-v1/pull/218.
 
 ### PR #182 — claude/build-paperclip-hierarchy-ymgPW (2026-04-23 — ChatGPT review rounds 2 & 3)
 
@@ -1079,181 +1072,35 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - **Files affected:** `workflowEngineService` (~5 remaining status-write sites), `agentExecutionService` (terminal write in agentic loop), `briefApprovalService.decideApproval`, `workflowRunService` (run-level terminal aggregation), plus `shared/stateMachineGuards.ts` (extend with intermediate transition tables).
   - **Suggested next-spec framing:** enumerate every status-write site by kind, define the canonical transition tables (allowed `from → to` per status family), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and decide whether to promote intermediate-transition violations from warn-log to throw once telemetry confirms zero false-positives.
 
----
+- [ ] **HOME-DASHBOARD-REACTIVITY-TASK14** — Wire `dashboard.queue.changed` emitter to job queue mutation path (best-effort, deferred from home dashboard reactivity spec §5.5).
+  - **Captured:** 2026-04-27
+  - **Severity:** low (QueueHealthSummary still refreshes on WebSocket reconnect; maximum staleness bounded by reconnect cycle)
+  - **Scope:** find pg-boss enqueue/complete sites; add `emitToSysadmin('dashboard.queue.changed', 'system', { pendingDelta: 0 })` — payload ignored by client, used as invalidation signal only.
+  - **Files to investigate:** `server/services/jobQueueHealthService.ts`, pg-boss wrapper if any.
 
-## Deferred from spec-conformance review — system-agents-v7-1-migration (2026-04-27)
-
-**Captured:** 2026-04-27T07:41:47Z
-**Source log:** `tasks/review-logs/spec-conformance-log-system-agents-v7-1-migration-2026-04-27T07-41-47Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md`
-
-- [ ] REQ-43 — `enrich_contact` `provider` parameter enum diverges from spec
-  - Spec section: §7.5.1
-  - Gap: spec specifies `provider: z.enum(['default', 'hunter']).optional()`; implementation uses `z.enum(['hunter', 'apollo', 'clearbit']).optional()`. Provider option set differs from spec.
-  - Suggested approach: decide whether the richer enum (`hunter | apollo | clearbit`) is the intended evolution and update the spec, or narrow the enum to match the spec's `default | hunter` shape — pre-prod, framing assumption permits either direction; pick once and align.
-- [ ] REQ-44 — `enrich_contact` handler does not route to Hunter on `provider: 'hunter'`
-  - Spec section: §7.5.1, §8.3
-  - Gap: spec says "Handler in `SKILL_HANDLERS` reads `input.provider`. When `'hunter'`, routes to the new `hunterProvider.ts`"; the current handler in `server/services/skillExecutor.ts:1021` is a stub that ignores `input.provider`.
-  - Suggested approach: extend the existing `enrich_contact` handler to dispatch on `input.provider`. When `'hunter'`, call `hunterProvider.domainSearch` / `hunterProvider.emailFinder` (already implemented). Otherwise fall through to the existing stub. Provider stub already fail-soft on missing env, so the wrapper's `read` path absorbs it correctly.
-- [ ] REQ-45 — `managerAllowlistMember: true` missing on `write_workspace` and `update_task`
-  - Spec section: §8.3 (Universal-bundle skills)
-  - Gap: spec lists 10 universal-bundle skills to mark `managerAllowlistMember: true` (incl. `write_workspace`, `update_task`); implementation marks 9. The two outliers have no `ACTION_REGISTRY` entry at all (pre-existing "pre-registry foundational skill" carveout per `verify-agent-skill-contracts.ts`).
-  - Suggested approach: spec assumes `write_workspace` and `update_task` exist as registry entries; the codebase treats them as pre-registry foundational skills that bypass the registry contract. Either (a) add registry entries for both with `managerAllowlistMember: true` (and accept the broader implications — `idempotencyStrategy`, `parameterSchema`, etc.), or (b) update the spec to acknowledge the pre-registry pattern and exempt these two skills.
-- [ ] REQ-49 — `SideEffectBeforeClaimError` class not implemented as a named class
-  - Spec section: §16A.1
-  - Gap: spec defines `export class SideEffectBeforeClaimError extends Error { readonly name = 'SideEffectBeforeClaimError' as const; ... }`; implementation throws a generic `Error` from `assertHandlerInvokedWithClaim`. Behavioural contract preserved (assertion throws in test mode); the class-name distinction is only observable in `instanceof` checks.
-  - Suggested approach: introduce the named class in `skillIdempotencyKeysPure.ts`, throw it from `assertHandlerInvokedWithClaim`, and update tests to assert `instanceof SideEffectBeforeClaimError`. Low blast radius — the test assertion currently uses `err instanceof Error` so adoption can be staged.
-- [ ] REQ-56 — `executeListMySubordinates` lives in `skillExecutor.ts` instead of `configSkillHandlersPure.ts`
-  - Spec section: §4.11a, §9.2
-  - Gap: spec says "append `executeListMySubordinates` (reuses existing `computeDescendantIds`) " in `server/tools/config/configSkillHandlersPure.ts`; implementation places it in `server/services/skillExecutor.ts:468` and uses `resolveSubordinates` instead of `computeDescendantIds`. Functionally equivalent, but file location and helper choice both diverge.
-  - Suggested approach: relocate the handler to `configSkillHandlersPure.ts` and refactor to consume `computeDescendantIds`. Alternatively update the spec to reflect the chosen location if the design has settled.
-- [ ] REQ-58 (now MECHANICAL — fixed in this run) — Cleanup-job logging tags `skill_idempotency_keys.cleanup.batch` + `.complete` were missing → fixed.
-- [ ] REQ-68 — `skill.blocked` log emit rate-limiting (1/min per (skill, subaccount)) missing
-  - Spec section: §18.1, AC #33
-  - Gap: spec mandates the wrapper rate-limits `skill.blocked` emits to ≤1/min per `(skill, subaccount)` with a suppression-summary line at minute close; current implementation emits unconditionally. AC #33 manual test would fail.
-  - Suggested approach: add a per-(skill, subaccount) emit-throttle (small Map keyed on `${slug}:${subaccountId}` → last-emit-ms + suppressed-count) alongside the wrapper in `server/services/skillExecutor.ts`. Mirror the in-memory LRU pattern used by `googlePlacesProvider.ts` / `hunterProvider.ts`. Emit a `skill.blocked.suppressed` summary with the suppressed count at the next minute boundary.
-- [ ] REQ-69 — `in_flight_reclaim_disabled` log emit rate-limiting missing
-  - Spec section: §18.1, §16A.8 step 5
-  - Gap: spec says the wrapper logs `skill.warn` with `reason: 'in_flight_reclaim_disabled'` rate-limited to 1/min per `(skill, subaccount)`; current implementation emits on every replay over the timeout.
-  - Suggested approach: same primitive as REQ-68; share the throttle Map across both signal classes if convenient.
-- [ ] REQ-83 — `architecture.md § "Key files per domain"` row for `companies/automation-os/agents/<slug>/AGENTS.md` not added
-  - Spec section: §4.16
-  - Gap: spec mandates a documentation row mapping the system-agent-definition entry point. Index drift now: a developer adding a new agent has no anchor in the architecture doc.
-  - Suggested approach: append a row to the table in `architecture.md` line ~3026 (Task | Start here): "Define a new system agent | `companies/automation-os/agents/<slug>/AGENTS.md` (frontmatter follows the existing pattern; seed loads via `companyParser.toSystemAgentRows`) + `scripts/seed.ts` (Phase 2 system-agent upserts) + `scripts/regenerate-company-manifest.ts` (manifest regenerator)".
-- [ ] REQ-84 — `skill_idempotency_keys` row not added to architecture.md's RLS-protected enumeration
-  - Spec section: §4.16
-  - Gap: spec mandates inclusion in the architecture-doc RLS-protected list. `architecture.md` has no central RLS-protected list per se — the canonical list lives in `server/config/rlsProtectedTables.ts` (which DOES include the entry, REQ-7 PASS). The "list" reference in the spec is ambiguous.
-  - Suggested approach: clarify which list the spec means. Two options: (a) append a sentence to the RLS section in `architecture.md` naming `skill_idempotency_keys` as one of the protected tables; (b) update the spec to remove the reference (the manifest in `rlsProtectedTables.ts` is already the source of truth). Option (b) is cleaner if the team prefers code-as-source-of-truth.
-- [ ] REQ-85 — `tasks/current-focus.md` not updated to point at this spec / branch
-  - Spec section: §4.16
-  - Gap: current-focus.md still describes the previous sprint (LAEL-P1-1, DR1/DR3, etc.); no pointer to v7.1 migration.
-  - Suggested approach: update current-focus.md's active-spec section to point at `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md` and branch `claude/audit-system-agents-46kTN`. If the v7.1 work is about to merge, the post-merge update goes under "Recently shipped to `main`".
-- [ ] REQ-86 — `docs/capabilities.md` not updated with the 7 new agents
-  - Spec section: §4.16
-  - Gap: spec mandates appending the 7 new agents (head-of-product-engineering, head-of-growth, head-of-client-services, head-of-commercial, admin-ops-agent, retention-success-agent, sdr-agent) to the customer-facing roster in vendor-neutral, marketing-ready terms.
-  - Suggested approach: write each agent's customer-facing one-liner per the editorial rules in `docs/capabilities.md § Editorial Rules` (no LLM provider names, vendor-neutral, marketing-ready). Anchor on the existing roster section in `docs/capabilities.md` and add seven entries in alphabetical order.
-
-## Deferred from pr-reviewer review — system-agents-v7-1-migration (2026-04-27)
-
-The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NICE-TO-HAVE findings. M1–M7 + S2/S7/S8/S9 were resolved in commit batch immediately following the review (M8 verified as already correct: `system_agents_slug_idx` was the actual original index name, dropped correctly by 0233). The items below are the remaining SHOULD-FIX/NICE-TO-HAVE plus one directional spec contradiction.
-
-- [ ] DIRECTIONAL — `head-of-growth` declares `read_campaigns` and `read_analytics` but both have `directExternalSideEffect: true`
-  - Source: spec §10.1.2 vs §9.4 + §8.2 line 797
-  - Gap: spec §10.1.2 puts these on head-of-growth's per-manager declared bundle, but the manager guard's second check (`directExternalSideEffect: true`) blocks them, and §8.2 line 797 explicitly says external-API reads should not run from a manager. The implementation is consistent with §9.4/§8.2 (rejects them) but contradicts §10.1.2.
-  - Suggested approach: pick one — (a) remove `read_campaigns`/`read_analytics` from `head-of-growth/AGENTS.md` so the manager delegates via `spawn_sub_agents` to `ads-management-agent`/`social-media-agent` (consistent with the spec's "managers orchestrate" stance); or (b) carve out a per-manager-declared exemption in the second guard check too. Option (a) is more consistent with the broader §6 architecture.
-- [ ] S1 — Manager-guard performs 2 DB roundtrips per tool call with no caching
-  - Source: pr-reviewer
-  - Gap: every tool invocation by every agent runs `agents` → `systemAgents` SELECTs in `proposeAction.ts:286-305`. Spec §9.4 referenced `resolveAgentRole(...)` cache; not implemented.
-  - Suggested approach: cache `(agentRole, defaultSystemSkillSlugs)` keyed on `agentId` for the duration of the run on the middleware context or a per-runId LRU.
-- [ ] S3 — `request_hash` uses 64-bit truncated digest (`hashActionArgs.slice(0,16)`); idempotency key uses full 256-bit
-  - Source: pr-reviewer
-  - Gap: 64-bit truncation has ~2^32 collision probability. Mixed precision is implicit; collisions could mask "different request, same key" cases.
-  - Suggested approach: introduce a separate `computeRequestHashForIdempotency` that returns the full SHA-256 digest, and use it in `executeWithActionAudit`. Leave the legacy `hashActionArgs` for actions-table use. Document the divergence.
-- [ ] S4 — `googlePlacesProvider` and `hunterProvider` caches are unbounded and process-wide
-  - Source: pr-reviewer
-  - Gap: `Map<string, ...>` grows monotonically; `JSON.stringify(input)` is order-dependent so semantically identical inputs miss the cache; tenants share cache pressure.
-  - Suggested approach: use the project's LRU primitive keyed on `canonicaliseForHash(input)` with a 500-entry cap.
-- [ ] S5 — Domain handlers (`adminOpsService`, `sdrService`, `retentionSuccessService`) accept `_context: unknown`
-  - Source: pr-reviewer
-  - Gap: handlers cannot type-safely reach `context.organisationId`/`context.subaccountId` if a future change needs them; TS can't enforce correct usage at the call sites.
-  - Suggested approach: import `SkillExecutionContext` (or extract to a shared types file) and type the second parameter accordingly.
-- [ ] S6 — `verify-agent-skill-contracts.ts` skill list parser is regex-based and brittle
-  - Source: pr-reviewer
-  - Gap: regex `/^skills:\s*\n((?:[ \t]+-[ \t]+\S+\n?)*)/m` stops on any irregularity; a typo silently truncates the list and hides skill references from the gate.
-  - Suggested approach: use the same YAML parser the seed uses (`gray-matter` / `yaml.parse`).
-- [ ] S10 — `skillIdempotencyKeysCleanupJob` can exceed `MAX_ROWS_PER_RUN` ceiling on a batch boundary
-  - Source: pr-reviewer
-  - Gap: loop terminates when `totalDeleted >= MAX_ROWS_PER_RUN` is checked, but a batch-of-1000 can push past the cap because the check runs *before* the increment. Cap is 10,000 but actual could hit 10,999.
-  - Suggested approach: add `if (totalDeleted >= MAX_ROWS_PER_RUN) break;` after the increment.
-- [ ] N1 — `send_invoice.md` skill description says "Returns not_configured" but runtime returns `{ status: 'blocked', reason: 'provider_not_configured' }`
-  - Source: pr-reviewer
-  - Gap: write skills return `'blocked'`, not `'not_configured'` (which is for `'read'` skills). Audit all 14 new skill `.md` files for this drift.
-  - Suggested approach: sweep `server/skills/*.md` for the 14 new skills; correct the documented contract.
-- [ ] N2 — Hierarchy depth-guard error wording confuses hops and depth
-  - Source: pr-reviewer; `scripts/seed.ts:599-600`
-  - Gap: cosmetic — message says "depth > 3" but the guard fires at hops ≥ 2 (4 nodes). Clarify the wording.
-- [ ] N3 — `proposeAction.ts` middleware error handling uses `console.error` instead of structured logger
-  - Source: pr-reviewer; `proposeAction.ts:92, 400`
-  - Gap: drift from other middleware files; bypasses log levels and structured tagging.
-  - Suggested approach: import `server/lib/logger.ts` and use it consistently.
-- [ ] N4 — `googlePlacesProvider.searchPlaces` types `data.results` items inline
-  - Source: pr-reviewer
-  - Gap: 30-line inline type would read better as a named interface alongside `PlaceSummary`.
-- [ ] N5 — `_down/0233_system_agents_v7_1.sql` rollback comment lacks a Spec: reference
-  - Source: pr-reviewer
-- [ ] N6 — `proposeAction.ts` top-of-file docstring lists 5 responsibilities but the v7.1 manager-role guard adds a sixth
-  - Source: pr-reviewer
-- [ ] N7 — `skillIdempotencyKeysPure.test.ts:61-68` `same key values in different input key order → same hash` is a tautology
-  - Source: pr-reviewer
-  - Gap: `hashKeyShape` builds a NEW object from `keyShape` order before canonicalising, so the test passes regardless of canonicaliseForHash's behaviour. The actual canonicalisation property is tested separately at line 115.
-  - Suggested approach: either remove the redundant test or strengthen it by computing the SHA against a hand-canonicalised string.
+- [ ] **CHATGPT-PR211-R4-RUN-DEBUGGER-VIEW** — Operability surface for run / approval / state-machine debugging. Reviewer round-4 post-merge non-blocking suggestion.
+  - **Captured:** 2026-04-27 (chatgpt-pr-review round 4 — final verdict)
+  - **Severity:** medium (operability bottleneck — system is now correct but non-trivial to reason about).
+  - **Scope:** new product surface (admin / engineer-facing UI) + read-only query layer over existing event / status / artefact tables. NOT a new primitive — composes existing data.
+  - **Surface (per round-4 reviewer):** unified timeline view per `agent_run` / `workflow_run` showing:
+    1. **State transitions over time** — every `state_transition` log line (R3-2 `describeTransition` output) plotted on a timeline; distinguishes `guarded:true` (asserted) from `guarded:false` (logged-only).
+    2. **Artefact chain evolution** — for `brief` runs, the lifecycle pointer graph (`parentArtefactId` → `artefactId`) animated forward through time; chainTips / superseded / current visible at each step.
+    3. **Decision points** — every `proposeAction` audit + `decideApproval` outcome, with the artefact context that drove the decision.
+    4. **Guard violations** — any `InvalidTransitionError` thrown / logged by `assertValidTransition`; any `cached_context.write_missing_scope` warning emitted by `logCachedContextWrite`.
+  - **Why this is the next bottleneck:** rounds 2–3 of the chatgpt-pr-review iteration shipped layered defence (assert + WHERE-guard + log) and pointer-based lifecycle resolution. The system is now resistant to common failure modes — but when something DOES go wrong, the operator's only entry point is grepping logs across multiple services. A unified debugger view collapses that diagnostic loop. Reviewer R2-7 / R3-7 / R4-3 all converge on this as "the next bottleneck is operability, not correctness".
+  - **Files affected:** new admin route under `client/src/pages/admin/` (or extend an existing `RunDetailPage`); new `server/routes/admin/runDebugger.ts` query layer aggregating from `agent_run_events`, `workflow_run_events`, `conversation_messages.artefacts`, application logs (state_transition / cached_context.write).
+  - **Rationale for defer to Phase 2:** post-merge work — the PR #211 surface is correctness hardening; the debugger view is an observability product feature. Reviewer explicitly said "do NOT add more invariants" / "you're done for this phase". Worth a dedicated spec that decides log-source (structured DB events vs application log scrape), retention window, admin-only vs engineer-only access, and whether the view is real-time (WS) or post-hoc.
+  - **Suggested next-spec framing:** start with a 2-day spike that prototypes the artefact-chain timeline only (lowest risk, highest reuse — same view feeds brief debugging, run debugging, approval-flow debugging). Confirm the data layer can answer the four query shapes above without a new schema. Then decide whether to extend or replace the existing `client/src/pages/admin/RunsPage` / `RunDetailPage`.
 
 ---
 
-## Deferred from spec-conformance review — system-monitoring-agent (2026-04-27)
+## Deferred from spec-conformance review — home-dashboard-reactivity (2026-04-27)
 
-**Captured:** 2026-04-27T06:52:33Z
-**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-2026-04-27T06-52-33Z.md`
-**Spec:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
-**Resolved:** 2026-04-27 — all six directional gaps addressed in the same session as the spec-conformance fixes; see triageHandler.ts, sweepHandler.ts, sweepCoverageDegraded.ts, sweepTickHistory.ts, queueService.ts, systemIncidentService.ts, and migration 0236.
+**Captured:** 2026-04-27T21:02:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-home-dashboard-reactivity-2026-04-27T20-57-33Z.md`
+**Spec:** `tasks/builds/home-dashboard-reactivity/spec.md` (paired plan: `docs/superpowers/plans/2026-04-27-home-dashboard-reactivity.md`)
 
-- [x] REQ 2.4 — Sweep cron interval is hard-coded `*/15 * * * *` (every 15 min), spec §9.3 mandates default 5 minutes
-  - Spec section: §9.3 Sweep job — "**Tick:** every 5 minutes via pg-boss schedule. Configurable via `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES`."
-  - Gap: `server/services/queueService.ts:1131` schedules `system-monitor-sweep` with cron `*/15 * * * *`. Spec default is 5; window is 15. The spec relies on the 5-min interval / 15-min window combination for "rolling 15 minutes... overlaps adjacent ticks by 10 minutes intentionally" (§9.3). At the current 15-min interval, no window overlap occurs and a degraded run completing at a tick boundary could be missed.
-  - Suggested approach: make the sweep schedule honour `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES` (env var defaults to 5) — either by using pg-boss's dynamic-schedule API or by having the registration code build the cron string from the env var. Confirm cost impact (3× more sweep ticks at default) and decide whether the runtime cap on `loadCandidates` (200 candidate hard ceiling) is sufficient backstop. Consider the same treatment for `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` and `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` if they suffer the same hardcoded-cron pattern.
+Both items closed in this PR (2026-04-28) per user direction. Resolution:
+- **REQ #13 — `action: 'new'` emit on review item creation.** RESOLVED. Emit added inside `reviewService.createReviewItem` (`server/services/reviewService.ts:60-67`). Single call site closes all 6 caller paths.
+- **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** RESOLVED. Single emit added per bulk request in `server/routes/reviewItems.ts` bulk-approve (after `reviewService.bulkApprove`) and bulk-reject (after `reviewService.bulkReject`). `subaccountId: null` per spec contract (string | null) — bulk batches may span subaccounts and the payload field is informational only (§4.3 payload-not-trusted rule).
 
-- [x] REQ 2.15 + 2.16 — `rateLimit.ts` module is defined but never wired into the triage flow
-  - Spec section: §9.9 Rate limiting — "Max **2 triage attempts per fingerprint per 24-hour rolling window**. ... Configurable via `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT`."
-  - Gap: `server/services/systemMonitor/triage/rateLimit.ts` exports `checkRateLimit` (env-driven, default 2) and `maybeAutoEscalate` (calls existing manual-escalate path on window expiry for high/critical). Neither is imported or invoked anywhere in the codebase. The active triage path uses `triageAdmitPure.ts:7` which hard-codes `TRIAGE_ATTEMPT_CAP = 5` and does not honor the spec's env var. Effect: rate limit is 5, not 2; auto-escalation past the window is dead code; smoke step 8 in `staging-smoke-checklist.md` (which expects 3rd attempt blocked) will not pass against staging defaults.
-  - Suggested approach: wire `checkRateLimit` into `triageHandler.runTriage` immediately after `checkAdmit` returns admitted (or fold the rate-limit check into the admit verdict). On rate-limited verdict, write `agent_triage_skipped` event with `reason='rate_limited'` and call `maybeAutoEscalate` for high/critical incidents. Remove the `TRIAGE_ATTEMPT_CAP = 5` constant from `triageAdmitPure.ts` (or keep as a hard ceiling separate from the rate limit). Add an integration test that asserts: third attempt within window → blocked + `agent_triage_skipped` event + `triage_attempt_count` = 2.
-
-- [x] REQ F.2 — `investigate_prompt_outcome` event metadata is missing four required fields
-  - Spec section: §11.2 Event type `investigate_prompt_outcome`
-  - Gap: `server/services/systemIncidentService.ts:175-187` writes the event with metadata `{ wasSuccessful, promptWasUseful, partial, text }`. Spec §11.2 requires additional metadata: `linked_pr_url` (from incident's `linkedPrUrl` column), `resolved_at` (timestamp of the resolve), `diagnosis_run_id` (from `agent_diagnosis_run_id`), `heuristic_fires` (array of heuristic IDs that fired on this incident — joinable from `system_monitor_heuristic_fires` via `produced_incident_id`).
-  - Suggested approach: in `recordPromptFeedback`, after loading the incident, also fetch `resolvedAt`, `linkedPrUrl`, `agentDiagnosisRunId`, and the list of `heuristic_id` values from `system_monitor_heuristic_fires` where `produced_incident_id = id`. Add them to the event payload. Decide whether the heuristic-fires lookup should happen in the same transaction (consistency vs latency trade-off) — likely yes since the data is small.
-
-- [x] REQ 1.2 — `sweep-coverage-degraded` synthetic check is a stub
-  - Spec section: §8.2 row 8 — "fires when ... rolling-window sweep coverage rate drops below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95)"
-  - Gap: `server/services/systemMonitor/synthetic/sweepCoverageDegraded.ts` returns `{ fired: false }` unconditionally. Per progress.md "stub returning fired:false (activates Slice C)", but Slice C did not activate it. Spec §12.5 names this signal as load-bearing for the "monitor-the-monitor" health invariant.
-  - Suggested approach: implement per spec §8.2 + §12.5. Read the `sweep_completed` log/event series for the last `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` ticks (default 6 = 30 min). Compute coverage rate per tick (`metadata.candidates_evaluated / source-table active-entity count for the window`). If rolling average < `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95), fire with offending tick stats in metadata. Note: requires a queryable source for sweep ticks — either persist `sweep_completed` events (currently logger-only — see writeDiagnosis path), persist `system_monitor_sweep_ticks` rows, or query pg-boss completed-job history.
-
-- [x] REQ E.1 (subset) — Hardcoded skill-execution iteration cap and other constants in triage handler
-  - Spec section: §9.10 env-var inventory; §9.7 length cap mention
-  - Gap: `triageHandler.ts` hardcodes `TRIAGE_MAX_ITERATIONS = 10` and `TRIAGE_MAX_TOKENS = 8_096` without env-var fallbacks. `selectTopForTriage.ts` has been fixed to honor env vars (mechanical fix in this run), but the iteration / token caps remain hardcoded. Spec §12.4 names "5-minute soft timeout" but no env var; likely fine as documented constants. Lower priority than other items.
-  - Suggested approach: lift `TRIAGE_MAX_ITERATIONS` to an env var (`SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS`) so noisy production scenarios can be tuned without redeploy. Document the choice in §12.2 inventory.
-
-- [x] REQ E.2 — `write_event` skill DB-stored definition narrower than runtime ALLOWED_TYPES
-  - Spec section: §9.4 + §12.1 (event registry)
-  - Gap: `migrations/0234_system_monitor_skills.sql:57` registers `write_event` with `enum: ["diagnosis", "note", "escalation_blocked"]` in the JSON definition. The runtime handler at `server/services/systemMonitor/skills/writeEvent.ts:10-22` accepts a much wider set including `agent_diagnosis_added`, `prompt_generated`, `agent_triage_skipped`, etc. The agent reads its tool definitions from the DB (via the system-managed agent infrastructure), so the LLM will only know about the narrow enum and may fail to call `write_event` with `agent_diagnosis_added` (which §9.7 system prompt instructs it to do).
-  - Suggested approach: ship a corrective migration (`migrations/<NNNN>_system_monitor_write_event_enum_widen.sql`) that updates the `system_skills.definition` JSON for `write_event` with the full ALLOWED_TYPES list. Migrations are append-only — do not edit 0234. Verify the agent's tool registration path actually reads from `system_skills.definition` (not from the TypeScript module).
-
-## Follow-ups surfaced during pr-reviewer pass — system-monitoring-agent (2026-04-27)
-
-- [ ] Rate-limit scope is per-incident, not per-fingerprint as spec §9.9 requires
-  - Spec §9.9: "A new incident on an existing fingerprint (recurrence after resolution) inherits the fingerprint's recent triage history."
-  - Gap: `system_incidents.triage_attempt_count` is a per-row column. A fingerprint that recurs (new incident row after resolve) starts at `triage_attempt_count = 0`, so the rate limit does not actually carry across recurrences. Pre-existing — not introduced by the spec-conformance directional fixes. The new `checkRateLimit` wiring in `triageHandler.ts` reads this per-row counter.
-  - Suggested approach: aggregate triage attempts via a fingerprint-keyed query at admit time (`SELECT SUM(triage_attempt_count) WHERE fingerprint = ? AND last_triage_attempt_at >= NOW() - WINDOW`), or denormalise onto a small `system_monitor_fingerprint_state` table indexed by fingerprint. Decide whether `lastTriageAttemptAt` aggregation needs the same treatment.
-
-- [ ] Persist sweep tick history to DB (multi-instance correctness for `sweep-coverage-degraded`)
-  - Captured by pr-reviewer (S2) on the directional fixes. The current ring buffer in `server/services/systemMonitor/synthetic/sweepTickHistory.ts` is process-local. Acceptable for staging (single instance) and explicitly listed as one of three valid options in the original spec-conformance log. For production multi-instance deploys, promote to a `system_monitor_sweep_ticks` table keyed by `bucket_key UNIQUE` with `(candidates_evaluated, limit_reached, load_failed, completed_at)` and a 7-day retention sweep.
-  - Roughly 12 inserts/hour at default cadence — negligible cost. Update `sweepCoverageDegraded` to read from the table instead of the in-memory buffer.
-
-- [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
-  - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
-  - Pre-existing. Process-local cache that captures the first-seen org's agent row id and reuses it for the lifetime of the process. Production has a fixed system-ops org so this is fine today; future dual-org / test-env scenarios could collide. Cheap fix: switch to `Map<organisationId, agentId>`.
-
-## Deferred from spec-conformance review — system-monitoring-agent-fixes (2026-04-27)
-
-**Captured:** 2026-04-27T11:41:03Z
-**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-fixes-2026-04-27T11-41-03Z.md`
-**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
-
-- [ ] REQ #29 — Tier-1 items in `tasks/post-merge-system-monitor.md` not yet checked off with cross-reference to this spec
-  - Spec section: §14.5 A5.1, §14.6 (Definition of done bullet 5)
-  - Gap: All five Tier-1 items in `tasks/post-merge-system-monitor.md` remain `- [ ]`. Spec A5.1 requires they be marked `- [x]` with a one-line cross-reference to `tasks/builds/system-monitoring-agent-fixes/spec.md` after merge. Tier-2 items correctly remain `- [ ]`. This is a docs cross-link, not runtime behaviour.
-  - Suggested approach: Update `tasks/post-merge-system-monitor.md` in the same merge commit (or immediately after merge) — for each of the five Tier-1 items (rate-limit retry idempotency, list filter `triageStatus=failed AND diagnosisStatus=none`, backend staleness guard, write-vs-declared synthetic check, incident-silence synthetic check), flip `- [ ]` → `- [x]` and append `— closed by tasks/builds/system-monitoring-agent-fixes/spec.md (PR <merge-commit-or-PR-#>).` Defer until merge so the cross-reference can name the actual PR/commit.
-
-- [ ] Spec defect — §9.1 SQL references non-existent `system_incidents.metadata` column
-  - Spec section: §9.1, §4.5, §9.6 (and §14.3 A3.6 acceptance test which depends on the exclusion working)
-  - Gap: The `incidentSilence` SQL in spec §9.1 (and the verbatim implementation at `server/services/systemMonitor/synthetic/incidentSilence.ts`) references `si.metadata->>'checkId'` in two places (the `incidents_in_window` exclusion and the `synthetic_fires_in_proof_window` exclusion). The `system_incidents` table has no `metadata` column — the closest equivalent is `latest_error_detail` (jsonb), populated by `recordIncident` from the `errorDetail` parameter (see `server/services/incidentIngestor.ts:241,251`). When the synthetic-checks tick runs `incidentSilence` against a real database, the query will fail with `ERROR: column si.metadata does not exist`. The implementation faithfully follows the spec — this is a SPEC defect, not an implementation defect.
-  - Suggested approach: open a `spec-reviewer` (or `chatgpt-spec-review`) round on `tasks/builds/system-monitoring-agent-fixes/spec.md` §9.1 to swap `si.metadata->>'checkId'` for `si.latest_error_detail->>'checkId'` in BOTH the `incidents_in_window` and `synthetic_fires_in_proof_window` exclusions, and update §9.6 / §14.3 (A3.6) cross-references. Once the spec is corrected, mirror the rename in `incidentSilence.ts` (and any acceptance-test seeding fixtures that stamp the metadata key). Verify the `synthetic-check fired` row produced by `recordIncident` actually persists `errorDetail.metadata.checkId` into `latest_error_detail` so the proof-of-life exclusion can match — `syntheticChecksTickHandler.ts:46` passes `result.metadata` as `errorDetail`, so `latest_error_detail->>'checkId'` should match the `metadata.checkId: 'incident-silence'` value emitted by `incidentSilence`. Confirm by reading one synthetic-check `system_incidents` row after a tick.

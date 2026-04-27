@@ -83,11 +83,10 @@ ALTER TABLE executions
   FOREIGN KEY (process_id) REFERENCES automations(id);
 
 -- Update FK to automation_engines on executions
--- Column is engine_id (added in 0018), not workflow_engine_id.
-ALTER TABLE executions DROP CONSTRAINT IF EXISTS executions_engine_id_fkey;
+ALTER TABLE executions DROP CONSTRAINT IF EXISTS executions_workflow_engine_id_fkey;
 ALTER TABLE executions
   ADD CONSTRAINT executions_automation_engine_id_fkey
-  FOREIGN KEY (engine_id) REFERENCES automation_engines(id);
+  FOREIGN KEY (workflow_engine_id) REFERENCES automation_engines(id);
 
 -- tasks table: FK to processes needs updating
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_process_id_fkey;
