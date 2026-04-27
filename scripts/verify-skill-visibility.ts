@@ -36,7 +36,40 @@ interface Violation {
   message: string;
 }
 
+// Foundational-skill self-containment assertion (spec §7.4)
+// Every APP_FOUNDATIONAL_SKILLS member must have no external API integration.
+// Fields directExternalSideEffect / mcp.annotations.openWorldHint may be absent pre-chunk-03 — treat absent as false.
+async function assertFoundationalSelfContainment(): Promise<void> {
+  // Dynamic import to avoid circular dep issues at gate-runner level
+  const { ACTION_REGISTRY } = await import('../server/config/actionRegistry.js');
+  const { APP_FOUNDATIONAL_SKILLS } = await import('./lib/skillClassification.js');
+  const violations: string[] = [];
+
+  for (const slug of APP_FOUNDATIONAL_SKILLS) {
+    const entry = ACTION_REGISTRY[slug as keyof typeof ACTION_REGISTRY];
+    if (!entry) continue; // not yet in registry — chunk-03 will add it
+
+    const isApiCategory = (entry as { actionCategory?: string }).actionCategory === 'api';
+    const openWorldHint = (entry as { mcp?: { annotations?: { openWorldHint?: boolean } } }).mcp?.annotations?.openWorldHint === true;
+    const directExternal = (entry as { directExternalSideEffect?: boolean }).directExternalSideEffect === true;
+
+    if (isApiCategory || openWorldHint || directExternal) {
+      violations.push(
+        `${slug}: foundational skill must not have external integrations (actionCategory=${(entry as { actionCategory?: string }).actionCategory}, openWorldHint=${openWorldHint}, directExternalSideEffect=${directExternal})`,
+      );
+    }
+  }
+
+  if (violations.length > 0) {
+    console.error('✗ foundational-skill self-containment: violations found:');
+    violations.forEach((v) => console.error(`  ${v}`));
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
+  await assertFoundationalSelfContainment();
+
   let files: string[];
   try {
     files = await readdir(SKILLS_DIR);
