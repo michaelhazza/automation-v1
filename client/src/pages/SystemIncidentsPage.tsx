@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../lib/api';
 import Modal from '../components/Modal';
+import DiagnosisAnnotation from '../components/system-incidents/DiagnosisAnnotation';
+import InvestigatePromptBlock from '../components/system-incidents/InvestigatePromptBlock';
+import FeedbackWidget from '../components/system-incidents/FeedbackWidget';
+import DiagnosisFilterPill, { type DiagnosisFilter } from '../components/system-incidents/DiagnosisFilterPill';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +23,12 @@ interface SystemIncident {
   acknowledgedAt: string | null;
   resolvedAt: string | null;
   organisationId: string | null;
+  // Phase 2 triage fields
+  agentDiagnosis: Record<string, unknown> | null;
+  investigatePrompt: string | null;
+  triageAttemptCount: number;
+  lastTriageAttemptAt: string | null;
+  promptWasUseful: boolean | null;
 }
 
 interface IncidentEvent {
@@ -201,6 +211,19 @@ function IncidentDetailDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {error && <div className="text-red-600 text-[13px] bg-red-50 rounded p-2">{error}</div>}
 
+          {/* Diagnosis annotation (top of drawer body) */}
+          <DiagnosisAnnotation
+            agentDiagnosis={incident.agentDiagnosis ?? null}
+            investigatePrompt={incident.investigatePrompt ?? null}
+            triageAttemptCount={incident.triageAttemptCount ?? 0}
+            lastTriageAttemptAt={incident.lastTriageAttemptAt ?? null}
+            severity={incident.severity}
+            source={incident.source}
+          />
+
+          {/* Investigate prompt block */}
+          <InvestigatePromptBlock investigatePrompt={incident.investigatePrompt ?? null} />
+
           <div className="grid grid-cols-2 gap-3 text-[12px]">
             <div><span className="text-slate-500">Error code</span><div className="font-mono text-slate-800 mt-0.5">{incident.errorCode ?? '—'}</div></div>
             <div><span className="text-slate-500">Occurrences</span><div className="font-semibold text-slate-800 mt-0.5">{incident.occurrenceCount}</div></div>
@@ -235,6 +258,15 @@ function IncidentDetailDrawer({
               Suppress
             </button>
           </div>
+
+          {/* Feedback widget (after resolve, for agent-diagnosed incidents) */}
+          <FeedbackWidget
+            incidentId={incident.id}
+            status={incident.status}
+            agentDiagnosis={incident.agentDiagnosis ?? null}
+            promptWasUseful={incident.promptWasUseful ?? null}
+            onFeedbackSaved={onRefresh}
+          />
 
           {/* Events timeline */}
           <div>
@@ -330,6 +362,7 @@ export default function SystemIncidentsPage() {
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(['open', 'investigating', 'remediating', 'escalated']));
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<Set<string>>(new Set());
+  const [diagnosisFilter, setDiagnosisFilter] = useState<DiagnosisFilter>('all');
   const [selectedIncident, setSelectedIncident] = useState<SystemIncident | null>(null);
   const [badgeCount, setBadgeCount] = useState(0);
 
@@ -337,12 +370,13 @@ export default function SystemIncidentsPage() {
     try {
       const params = new URLSearchParams();
       if (statusFilter.size > 0) params.set('status', [...statusFilter].join(','));
+      if (diagnosisFilter !== 'all') params.set('diagnosis', diagnosisFilter);
       const { data } = await api.get(`/api/system/incidents?${params.toString()}`);
       setIncidents(data.incidents ?? []);
     } catch { /* silent */ } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, diagnosisFilter]);
 
   const fetchBadge = useCallback(async () => {
     try {
@@ -386,7 +420,7 @@ export default function SystemIncidentsPage() {
   const handleSort = (col: SortCol, dir: SortDir) => { setSortCol(col); setSortDir(dir); };
   const handleToggleOpen = (col: SortCol) => setOpenCol((c) => (c === col ? null : col));
 
-  const hasAnyFilter = statusFilter.size < allStatuses.length || severityFilter.size > 0 || sourceFilter.size > 0;
+  const hasAnyFilter = statusFilter.size < allStatuses.length || severityFilter.size > 0 || sourceFilter.size > 0 || diagnosisFilter !== 'all';
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -403,7 +437,7 @@ export default function SystemIncidentsPage() {
         <div className="flex items-center gap-2">
           {hasAnyFilter && (
             <button
-              onClick={() => { setStatusFilter(new Set(['open', 'investigating', 'remediating', 'escalated'])); setSeverityFilter(new Set()); setSourceFilter(new Set()); }}
+              onClick={() => { setStatusFilter(new Set(['open', 'investigating', 'remediating', 'escalated'])); setSeverityFilter(new Set()); setSourceFilter(new Set()); setDiagnosisFilter('all'); }}
               className="text-[12px] text-indigo-600 hover:text-indigo-800 font-medium"
             >
               Clear all
@@ -413,6 +447,11 @@ export default function SystemIncidentsPage() {
             Refresh
           </button>
         </div>
+      </div>
+
+      {/* Diagnosis filter */}
+      <div className="px-6 py-2 border-b border-slate-100 bg-white">
+        <DiagnosisFilterPill value={diagnosisFilter} onChange={(v) => { setDiagnosisFilter(v); }} />
       </div>
 
       {/* Table */}
