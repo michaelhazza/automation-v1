@@ -21,14 +21,27 @@ import { toolOutputSchemaMismatch } from './skillExecution/toolOutputSchemaMisma
 import { skillLatencyAnomaly } from './skillExecution/skillLatencyAnomaly.js';
 import { toolFailedButAgentClaimedSuccess } from './skillExecution/toolFailedButAgentClaimedSuccess.js';
 
-// Infrastructure
+// Infrastructure (day-one)
 import { jobCompletedNoSideEffect } from './infrastructure/jobCompletedNoSideEffect.js';
 import { connectorEmptyResponseRepeated } from './infrastructure/connectorEmptyResponseRepeated.js';
+
+// Infrastructure (Phase 2.5)
+import { cacheHitRateDegradation } from './infrastructure/cacheHitRateDegradation.js';
+import { latencyCreep } from './infrastructure/latencyCreep.js';
+import { retryRateIncrease } from './infrastructure/retryRateIncrease.js';
+import { authRefreshSpike } from './infrastructure/authRefreshSpike.js';
+import { llmFallbackUnexpected } from './infrastructure/llmFallbackUnexpected.js';
+
+// Systemic (Phase 2.5)
+import { successRateDegradationTrend } from './systemic/successRateDegradationTrend.js';
+import { outputEntropyCollapse } from './systemic/outputEntropyCollapse.js';
+import { toolSelectionDrift } from './systemic/toolSelectionDrift.js';
+import { costPerOutcomeIncreasing } from './systemic/costPerOutcomeIncreasing.js';
 
 export type { Heuristic };
 export type { HeuristicContext, HeuristicResult, Candidate, Evidence, EvidenceItem, Baseline, BaselineReader, Severity, EntityKind, BaselineEntityKind, BaselineRequirement, SuppressionRule } from './types.js';
 
-/** All 14 day-one (Phase 2.0) heuristics. Phase 2.5 modules added in Slice D. */
+/** All 23 heuristics: 14 day-one (Phase 2.0) + 9 Phase 2.5. */
 export const HEURISTICS: Heuristic[] = [
   // Agent quality (9)
   emptyOutputBaselineAware,
@@ -44,16 +57,30 @@ export const HEURISTICS: Heuristic[] = [
   toolOutputSchemaMismatch,
   skillLatencyAnomaly,
   toolFailedButAgentClaimedSuccess,
-  // Infrastructure (2)
+  // Infrastructure day-one (2)
   jobCompletedNoSideEffect,
   connectorEmptyResponseRepeated,
+  // Infrastructure Phase 2.5 (5)
+  cacheHitRateDegradation,
+  latencyCreep,
+  retryRateIncrease,
+  authRefreshSpike,
+  llmFallbackUnexpected,
+  // Systemic Phase 2.5 (4)
+  successRateDegradationTrend,
+  outputEntropyCollapse,
+  toolSelectionDrift,
+  costPerOutcomeIncreasing,
 ];
 
 /**
  * Returns all heuristics whose phase matches SYSTEM_MONITOR_HEURISTIC_PHASES.
  * Default: both '2.0' and '2.5' are active.
  */
-export function getActiveHeuristics(): Heuristic[] {
+export function getEligibleHeuristics(): Heuristic[] {
   const phases = parseHeuristicPhases(process.env.SYSTEM_MONITOR_HEURISTIC_PHASES);
   return HEURISTICS.filter(h => matchesPhase(h, phases));
 }
+
+/** Alias for getEligibleHeuristics — use either name. */
+export const getActiveHeuristics = getEligibleHeuristics;
