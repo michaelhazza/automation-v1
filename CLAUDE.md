@@ -68,6 +68,15 @@ Run these after every non-trivial change. No task is complete until all relevant
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
 
+### Gate-cadence rule (overrides default per-change verification for `npm run test:gates`)
+
+`npm run test:gates` (and the umbrella `npm test`, which runs gates first) is **expensive** — it spans every contract / RLS / schema gate in the repo and routinely takes minutes. It is NOT part of the per-change verification loop. Only run it when the user signals **"we're done, prepare for merge"** (or equivalent — typically after `final-review` finishes and we're staging the PR for merge). For routine mid-iteration verification:
+- Use `npx tsc --noEmit` for typecheck.
+- Use `bash scripts/run-all-unit-tests.sh` (or a single targeted `npx tsx <file>`) for unit tests.
+- Use `npm run build:client` / `npm run build:server` only when the change touches the build surface.
+
+This rule applies to all sessions, including review-loop iterations. Skipping the gates suite mid-iteration is the correct default; running it pre-merge is the correct exception.
+
 ---
 
 ## 5. Demand Elegance
@@ -148,6 +157,18 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 - Each session writes to its own `tasks/builds/<slug>/progress.md` — never to a shared file
 - `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
 - Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
+
+---
+
+## 13. Doc style: agent-facing is dense, human-facing is readable
+
+Documentation falls into two classes — write each accordingly.
+
+**Agent-facing** (loaded into LLM context routinely): `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `KNOWLEDGE.md`, all skill files, `references/**`, agent definitions, this file. Optimise for tokens and signal density: bullets over prose, short sentences, no preambles, no reassurance text, no marketing language. Code examples only when copy-paste is the point — otherwise reference the canonical source. Every line should earn its tokens.
+
+**Human-facing** (read by people, not loaded into context routinely): `docs/capabilities.md`, `README.md`, customer-visible specs, marketing copy, public-facing docs. Optimise for clarity and tone: full sentences, narrative flow, vendor-neutral product language. Editorial rules apply (see `docs/capabilities.md § Editorial Rules`).
+
+If unsure: would Claude read this in most sessions? Yes → agent-facing. When editing an agent-facing doc, condense rather than expand — if a rule cannot be stated in ≤2 sentences, the detail belongs in `architecture.md` or `KNOWLEDGE.md` with a one-line pointer in the rule doc.
 
 ---
 
