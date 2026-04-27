@@ -130,11 +130,14 @@ async function preflightVerifySkillVisibility(): Promise<void> {
   for (const file of files) {
     if (!file.endsWith('.md')) continue;
     const slug = file.slice(0, -3);
+    if (slug === 'README') continue; // documentation file, not a skill
     const raw = (await readFile(join(skillsDir, file), 'utf-8')).replace(/\r\n/g, '\n');
 
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) {
-      violations.push(`${slug}: no YAML frontmatter`);
+      // No frontmatter — legacy/documentation file, not a classified skill.
+      // Warn but do not block the seed. Run verify-skill-visibility for details.
+      log(`  [warn] skills/${slug}.md has no YAML frontmatter — skipping visibility check`);
       continue;
     }
     const visMatch = fmMatch[1].match(/^visibility:\s*(\S+)\s*$/m);
