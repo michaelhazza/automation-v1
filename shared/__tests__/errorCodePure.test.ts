@@ -97,6 +97,28 @@ test('Error-like object with .code is recognised', () => {
   assertEqual(getErrorCode(err), 'custom_failure', 'Error-like .code');
 });
 
+test('thrown Error without .code returns defaultCode', () => {
+  const err = new Error('connection refused');
+  assertEqual(getErrorCode(err), null, 'no default → null');
+  assertEqual(getErrorCode(err, 'unknown_error'), 'unknown_error', 'with default');
+});
+
+test('null with defaultCode returns the default', () => {
+  assertEqual(getErrorCode(null, 'unknown_error'), 'unknown_error', 'null + default');
+});
+
+test('Error.message is NOT treated as the code', () => {
+  // Critical: free-text messages are not stable codes. The helper must
+  // refuse to elevate a thrown Error's message to the code slot — that
+  // would let consumers branch on user-visible English strings.
+  const err = new Error('approval_already_decided');
+  assertEqual(getErrorCode(err), null, 'message-as-code is rejected');
+});
+
+test('defaultCode is returned for unrelated objects', () => {
+  assertEqual(getErrorCode({ foo: 'bar' }, 'unknown_error'), 'unknown_error', 'unrelated obj + default');
+});
+
 console.log('');
 console.log(`Passed: ${passed}`);
 console.log(`Failed: ${failed}`);

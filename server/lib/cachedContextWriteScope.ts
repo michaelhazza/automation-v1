@@ -24,34 +24,54 @@
 
 import { logger } from './logger.js';
 
+export type CachedContextOperation = 'insert' | 'update' | 'delete' | 'archive' | 'restore' | 'deprecate';
+
 export interface CachedContextWriteScope {
   /** Org the write belongs to. Always required. */
   organisationId: string;
   /** Subaccount the write belongs to. `null` for legitimately org-scoped writes. */
   subaccountId: string | null;
+  /** Canonical table name this write targets (e.g. `'reference_documents'`). */
+  table: string;
+  /**
+   * Logical operation kind. `'insert'` for create paths, `'update'` for
+   * mutating paths (rename, deprecate, restore), etc. Distinguishing kinds
+   * keeps log queries usefully filterable (e.g. "every insert in the last
+   * hour where subaccountId was null").
+   */
+  operation: CachedContextOperation;
 }
 
 /**
- * Log a cached-context table write with its scope tuple. Callers SHOULD
- * invoke this once per logical write boundary (create / update / delete
- * entry points), not once per UPDATE statement — repeated calls inside a
- * transaction add noise without adding signal.
+ * Log a cached-context table write with its full scope tuple. Callers
+ * SHOULD invoke this once per logical write boundary (create / update /
+ * delete entry points), not once per UPDATE statement — repeated calls
+ * inside a transaction add noise without adding signal.
  *
- * Argument `site` is the call-site identifier (e.g.
- * `'referenceDocumentService.create'`) so log queries can group by
- * source.
+ * Logged fields are explicit (not nested under metadata) so log-query
+ * tools can index and filter on them directly:
+ *   - `site` — call-site identifier (e.g. `referenceDocumentService.create`)
+ *   - `table` — canonical table name
+ *   - `operation` — `insert` / `update` / `delete` / `archive` / ...
+ *   - `organisationId` / `subaccountId` — scope tuple
+ *   - `hasSubaccountId` — boolean shortcut for the most-queried filter
+ *   - `isOrgScopedWrite` — alias of `!hasSubaccountId`, kept for clarity
  */
 export function logCachedContextWrite(
   site: string,
   scope: CachedContextWriteScope,
   metadata?: Record<string, unknown>,
 ): void {
+  const hasSubaccountId = scope.subaccountId !== null && scope.subaccountId !== undefined;
   logger.info('cached_context.write', {
     event: 'cached_context.write',
     site,
+    table: scope.table,
+    operation: scope.operation,
     organisationId: scope.organisationId,
     subaccountId: scope.subaccountId,
-    isOrgScopedWrite: scope.subaccountId === null,
+    hasSubaccountId,
+    isOrgScopedWrite: !hasSubaccountId,
     ...(metadata ?? {}),
   });
 
@@ -66,6 +86,8 @@ export function logCachedContextWrite(
     logger.warn('cached_context.write_missing_scope', {
       event: 'cached_context.write_missing_scope',
       site,
+      table: scope.table,
+      operation: scope.operation,
       organisationId: scope.organisationId,
     });
   }

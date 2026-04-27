@@ -23,8 +23,9 @@
 
 /**
  * Extract a stable error code from any of the legacy or current error
- * shapes used across the codebase. Returns `null` when no recognisable
- * code can be derived.
+ * shapes used across the codebase. Returns the `defaultCode` argument
+ * (which itself defaults to `null`) when no recognisable code can be
+ * derived.
  *
  * Recognised inputs:
  *   - `'code_string'`                          → returns 'code_string'
@@ -32,16 +33,28 @@
  *   - `{ error: 'code_string' }`               → returns 'code_string'
  *   - `{ error: { code: 'code_string' } }`     → returns 'code_string'
  *   - `Error` instance with a `.code` property → returns the code
- *   - anything else                            → returns null
+ *   - thrown `new Error('msg')` (no .code)     → returns `defaultCode`
+ *   - anything else                            → returns `defaultCode`
+ *
+ * Pass an explicit fallback (e.g. `'unknown_error'`) to convert "no code
+ * found" into a recognisable sentinel for downstream branching:
+ *
+ *   const code = getErrorCode(err, 'unknown_error');
+ *   logger.warn('skill.failed', { code, raw: err });
+ *
+ * Note: `Error.message` is intentionally NOT treated as an error code.
+ * Free-text messages are not stable codes and should be logged
+ * separately (e.g. as a `message` field) rather than smuggled through
+ * the code channel.
  */
-export function getErrorCode(input: unknown): string | null {
-  if (input === null || input === undefined) return null;
-  if (typeof input === 'string') return input.length > 0 ? input : null;
+export function getErrorCode(input: unknown, defaultCode: string | null = null): string | null {
+  if (input === null || input === undefined) return defaultCode;
+  if (typeof input === 'string') return input.length > 0 ? input : defaultCode;
 
   if (typeof input === 'object') {
     const obj = input as Record<string, unknown>;
 
-    // Direct .code on the object
+    // Direct .code on the object (covers Error subclasses with a .code field)
     if (typeof obj.code === 'string' && obj.code.length > 0) return obj.code;
 
     // .error as a flat string (common HTTP / skill return shape)
@@ -54,5 +67,5 @@ export function getErrorCode(input: unknown): string | null {
     }
   }
 
-  return null;
+  return defaultCode;
 }

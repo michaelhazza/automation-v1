@@ -197,3 +197,78 @@ User also accepted ChatGPT's refinements on R2-1 (timestamp nuance) and R2-2 (sp
 
 **Round 2 complete.** ChatGPT's two "must do before merge" items (R2-6 assertValidTransition, R2-1 ordering) shipped. R2-5 + R2-4 shipped as low-effort high-leverage additions. R2-2 split into F2a/F2b with F2b's minimal log/assert shipped now and full enforcement deferred. R2-3 rejected as subsumed by R2-6 + F2b. R2-7 captured as a "next phase" pointer (operability is the next bottleneck per ChatGPT's meta-observation). PR remains mergeable.
 
+---
+
+## Round 3 — 2026-04-27T (post round 2 commits `da31bfa7` / `f24a7220`)
+
+### ChatGPT Feedback (raw)
+
+```
+[Round 3 raw feedback — 7 findings; ChatGPT pushed for last 1–2% edge tightenings:
+ R3-1 stable sort tiebreaker, R3-2 unguarded transition logging, R3-3 getErrorCode
+ fallback for thrown Errors, R3-4 structured cached-context log fields, R3-5
+ allowlist annotation function-name binding, R3-6 lifecycle determinism check,
+ R3-7 meta "diminishing returns" note.]
+```
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| R3-1 | Sort needs stable tiebreaker (artefactId) — multi-WS sequence can oscillate without it | technical | implement | auto (implement) | low-medium | Real correctness bug. ISO timestamps with second-precision can collide; tiebreak by `artefactId` (immutable, unique) gives deterministic ordering across re-sorts. |
+| R3-2 | assertValidTransition coverage gap on resume/retry/agentic-loop terminal-write paths | technical | implement (log-only signal — full coverage stays in F6 follow-up) | auto (implement) | low | Added `describeTransition()` companion in `shared/stateMachineGuards.ts`. Wired at the two non-IEE agent-run terminal writes in `agentExecutionService` (`finishLoop_normal`, `finishLoop_catch`) with `guarded: false` so log queries can quantify the unguarded surface area. Full assertion adoption stays as `CHATGPT-PR211-F6 (FOLLOW-UP)`. |
+| R3-3 | `getErrorCode` returns null for `new Error('msg')` — caller-side string parsing leaks back in | technical | implement | auto (implement) | low | Added optional `defaultCode` parameter (default null preserved for back-compat). Caller passes `'unknown_error'` to convert "no code found" into a recognisable sentinel. Importantly: `Error.message` is NOT treated as a code (free text ≠ stable code) — explicit test asserts this. |
+| R3-4 | F2b log: add explicit `table` / `operation` / `hasSubaccountId` fields | technical | implement | auto (implement) | low | Cheap now, painful later. Promoted `CachedContextWriteScope` to require `table` + `operation` and added a `hasSubaccountId` boolean shortcut so log queries don't need to derive it. |
+| R3-5 | Allowlist annotation must bind to function name (rename / move drift) | technical | implement | auto (implement) | low | Doc-rule extension: `// @rls-allowlist-bypass: <table> <function_name> [ref: ...]` — `<function_name>` MUST match the immediately-following declaration. Reviewer grep `@rls-allowlist-bypass` lists every annotated caller; mismatched annotations are surface-able by inspection. No CI gate (deliberate — matches F2 reasoning). |
+| R3-6 | Lifecycle determinism: confirm `resolveLifecyclePure` stable under reordered inputs | technical | implement | auto (implement) | low | Added 2 pure tests proving `chainTips` / `superseded` are by-key identical across 4 input permutations. Resolver is pointer-based (parentArtefactId lookups), so determinism follows from algorithm — tests prevent regression. |
+| R3-7 | Meta: "you're done with correctness work; diminishing returns from here" | n/a | no-op | no-op | n/a | Acknowledged. Operability / debuggability is the next phase per ChatGPT round 2 R2-7. |
+
+### Auto-applied this round
+
+- **R3-1:**
+  - `client/src/pages/BriefDetailPage.tsx` — `mergeArtefactById` sort comparator now does primary-by-`serverCreatedAt`, tiebreak-by-`artefactId`. Inline comment explains the oscillation failure mode the tiebreaker fixes.
+
+- **R3-2:**
+  - `shared/stateMachineGuards.ts` — added `describeTransition()` + `TransitionEvent` interface as a logging companion to `assertValidTransition`. Returns a structured payload for the caller's logger so `shared/` stays free of logger imports.
+  - `server/services/agentExecutionService.ts` — wired at the two non-IEE agent-run terminal writes (`finishLoop_normal` line ~1419, `finishLoop_catch` line ~1814) with `guarded: false`.
+
+- **R3-3:**
+  - `shared/errorCode.ts` — added `defaultCode` parameter (default `null`); added `Error.message` rejection clarification to JSDoc.
+  - `shared/__tests__/errorCodePure.test.ts` — 4 new tests: thrown-Error fallback, null-with-default, message-rejection, unrelated-obj-with-default.
+
+- **R3-4:**
+  - `server/lib/cachedContextWriteScope.ts` — promoted `CachedContextWriteScope` to require `table` + `operation`; added `hasSubaccountId` boolean and `CachedContextOperation` type union.
+  - `server/services/referenceDocumentService.ts` and `server/services/documentBundleService.ts` — call sites updated to pass the new fields.
+
+- **R3-5:**
+  - `scripts/rls-not-applicable-allowlist.txt` — extended format-rules header with the function-name-binding requirement and the rationale for it.
+
+- **R3-6:**
+  - `client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts` — 2 new pure tests: chainTips identical across 4 orderings; superseded set identical across 3 orderings.
+
+### Round 3 summary
+
+| Outcome | Count | Items |
+|---------|-------|-------|
+| Auto-implemented | 6 | R3-1, R3-2, R3-3, R3-4, R3-5, R3-6 |
+| No-op (informational) | 1 | R3-7 |
+| **Total findings** | **7** | |
+
+### Files changed this round
+
+- `client/src/pages/BriefDetailPage.tsx` (R3-1)
+- `shared/stateMachineGuards.ts` (R3-2)
+- `server/services/agentExecutionService.ts` (R3-2)
+- `shared/errorCode.ts` (R3-3)
+- `shared/__tests__/errorCodePure.test.ts` (R3-3)
+- `server/lib/cachedContextWriteScope.ts` (R3-4)
+- `server/services/referenceDocumentService.ts` (R3-4)
+- `server/services/documentBundleService.ts` (R3-4)
+- `scripts/rls-not-applicable-allowlist.txt` (R3-5)
+- `client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts` (R3-6)
+- `tasks/review-logs/chatgpt-pr-review-impl-pre-launch-hardening-2026-04-26T23-59-09Z.md` (this log)
+
+### Verdict
+
+**Round 3 complete.** ChatGPT's three "must do before merge (fast)" items shipped (R3-1 stable tiebreaker, R3-2 unguarded-transition logging, R3-3 getErrorCode fallback). The two "nice to have" items shipped as well (R3-4 structured log fields, R3-5 function-name binding). R3-6 lifecycle determinism verified via test. R3-7 acknowledged — next phase is operability, not correctness. Per ChatGPT round-3 final verdict: PR is "architecturally sound, internally consistent, hardened enough for production".
+

@@ -67,6 +67,8 @@ export async function create(input: {
   logCachedContextWrite('referenceDocumentService.create', {
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
+    table: 'reference_documents',
+    operation: 'insert',
   }, { name: input.name });
 
   // Count tokens for all model families before any DB write. If this fails the

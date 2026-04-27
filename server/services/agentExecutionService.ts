@@ -3,6 +3,7 @@ import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { describeTransition } from '../../shared/stateMachineGuards.js';
 import {
   agents,
   subaccounts,
@@ -1416,6 +1417,19 @@ export const agentExecutionService = {
       // UPDATE rather than an overwrite. `.returning()` lets us detect
       // that and log rather than silently drift from the first writer's
       // value.
+      //
+      // Round-3 review note: this terminal write does not yet flow through
+      // `assertValidTransition`. The `runResultStatus IS NULL` predicate
+      // already guards against overwriting a terminal row, but we log the
+      // transition with `guarded: false` so operators can quantify the
+      // unguarded-by-assert surface area against the F6 follow-up spec.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: finalStatus,
+        site: 'agentExecutionService.finishLoop_normal',
+        guarded: false,
+      }));
       const terminalUpdate = await db.update(agentRuns).set({
         status: finalStatus,
         runResultStatus: derivedRunResultStatus,
@@ -1811,6 +1825,15 @@ export const agentExecutionService = {
         /* hasError */ true,
         /* hadUncertainty */ false,
       );
+      // Round-3 review note: catch-block terminal write logged with
+      // `guarded: false` for the same reason as `finishLoop_normal` above.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: 'failed',
+        site: 'agentExecutionService.finishLoop_catch',
+        guarded: false,
+      }));
       const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',
         runResultStatus: catchRunResultStatus,

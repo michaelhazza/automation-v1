@@ -75,10 +75,17 @@ function mergeArtefactById(
   return [...merged].sort((a, b) => {
     const ta = a.serverCreatedAt;
     const tb = b.serverCreatedAt;
-    if (ta && tb) return ta < tb ? -1 : ta > tb ? 1 : 0;
-    if (!ta && tb) return 1;   // a has no server stamp — push to end
-    if (ta && !tb) return -1;  // b has no server stamp — push to end
-    return 0;
+    // Primary: server timestamp (chronological). When both present.
+    if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
+    // Tiebreak: artefactId lex order. Required to keep order STABLE across
+    // multiple WS update rounds — without a deterministic secondary key,
+    // entries with equal (or both-missing) timestamps can oscillate as
+    // successive WS events trigger re-sort, producing visible flicker.
+    // artefactId is unique per artefact and never changes after creation,
+    // so it's the correct stable tiebreaker.
+    if (ta && !tb) return -1;  // a stamped, b not → a first
+    if (!ta && tb) return 1;   // b stamped, a not → b first
+    return a.artefactId < b.artefactId ? -1 : a.artefactId > b.artefactId ? 1 : 0;
   });
 }
 

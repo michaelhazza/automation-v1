@@ -80,6 +80,8 @@ export async function create(input: {
   logCachedContextWrite('documentBundleService.create', {
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
+    table: 'document_bundles',
+    operation: 'insert',
   }, { name: input.name });
   const db = getOrgScopedDb('documentBundleService.create');
   try {

@@ -139,3 +139,48 @@ export function assertValidTransition(t: TransitionAssertion): void {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Observability companion — for sites that cannot yet adopt the assertion
+// ---------------------------------------------------------------------------
+
+export interface TransitionEvent {
+  kind: StateMachineKind;
+  recordId: string;
+  /**
+   * Previous status. May be omitted at sites where the caller does not have
+   * a row in scope (e.g. write-then-check using `.returning()`); consumers
+   * read `from === undefined` as "not observed".
+   */
+  from?: string;
+  to: string;
+  /** Identifier for the call site, e.g. `agentExecutionService.finishLoop_normal`. */
+  site: string;
+  /** Whether this site has already enforced the transition via assertValidTransition. */
+  guarded: boolean;
+}
+
+/**
+ * Build a structured payload describing a status transition. Returned to
+ * the caller so the calling module can log via its own logger; this keeps
+ * `shared/` free of server/client logger dependencies.
+ *
+ * Usage:
+ *   logger.info('state_transition', describeTransition({ ... }));
+ *
+ * Sites that go through assertValidTransition pass `guarded: true`. Sites
+ * that have not yet adopted the assertion pass `guarded: false` so log
+ * queries can distinguish enforced vs observed transitions and quantify
+ * the remaining unguarded surface area.
+ */
+export function describeTransition(event: TransitionEvent): Record<string, unknown> {
+  return {
+    event: 'state_transition',
+    kind: event.kind,
+    recordId: event.recordId,
+    from: event.from ?? null,
+    to: event.to,
+    site: event.site,
+    guarded: event.guarded,
+  };
+}
