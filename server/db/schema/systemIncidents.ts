@@ -12,6 +12,10 @@ export type SystemIncidentSource = 'route' | 'job' | 'agent' | 'connector' | 'sk
 export type SystemIncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type SystemIncidentClassification = 'user_fault' | 'system_fault' | 'persistent_defect';
 export type SystemIncidentStatus = 'open' | 'investigating' | 'remediating' | 'resolved' | 'suppressed' | 'escalated';
+// Triage + diagnosis status — explicit lifecycle signals consumed by the UI in
+// place of inferred booleans. See migration 0237 for the column contract.
+export type SystemIncidentTriageStatus = 'pending' | 'running' | 'failed' | 'completed';
+export type SystemIncidentDiagnosisStatus = 'none' | 'valid' | 'partial' | 'invalid';
 
 export const systemIncidents = pgTable(
   'system_incidents',
@@ -76,6 +80,12 @@ export const systemIncidents = pgTable(
     triageAttemptCount: integer('triage_attempt_count').notNull().default(0),
     lastTriageAttemptAt: timestamp('last_triage_attempt_at', { withTimezone: true }),
     sweepEvidenceRunIds: uuid('sweep_evidence_run_ids').array().notNull().default(sql`'{}'`),
+
+    // Explicit triage + diagnosis lifecycle (migration 0237). The UI reads these
+    // directly instead of inferring state from agentDiagnosis/investigatePrompt
+    // null-checks or 5-minute time windows on lastTriageAttemptAt.
+    triageStatus: text('triage_status').notNull().default('pending').$type<SystemIncidentTriageStatus>(),
+    diagnosisStatus: text('diagnosis_status').notNull().default('none').$type<SystemIncidentDiagnosisStatus>(),
   },
   (table) => ({
     // One active incident per fingerprint. Resolved/suppressed rows do not block

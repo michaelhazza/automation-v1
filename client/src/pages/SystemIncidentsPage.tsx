@@ -29,6 +29,11 @@ interface SystemIncident {
   triageAttemptCount: number;
   lastTriageAttemptAt: string | null;
   promptWasUseful: boolean | null;
+  // Explicit lifecycle status published by the backend (migration 0237).
+  // The UI consumes these instead of inferring state from null-checks /
+  // 5-minute time windows. See server/db/schema/systemIncidents.ts.
+  triageStatus: 'pending' | 'running' | 'failed' | 'completed';
+  diagnosisStatus: 'none' | 'valid' | 'partial' | 'invalid';
 }
 
 interface IncidentEvent {
@@ -214,11 +219,11 @@ function IncidentDetailDrawer({
           {/* Diagnosis annotation (top of drawer body) */}
           <DiagnosisAnnotation
             agentDiagnosis={incident.agentDiagnosis ?? null}
-            investigatePrompt={incident.investigatePrompt ?? null}
             triageAttemptCount={incident.triageAttemptCount ?? 0}
-            lastTriageAttemptAt={incident.lastTriageAttemptAt ?? null}
             severity={incident.severity}
             source={incident.source}
+            triageStatus={incident.triageStatus ?? 'pending'}
+            diagnosisStatus={incident.diagnosisStatus ?? 'none'}
           />
 
           {/* Investigate prompt block */}

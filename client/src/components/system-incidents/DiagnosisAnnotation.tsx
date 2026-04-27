@@ -1,44 +1,46 @@
 // Renders the agent_diagnosis block in the incident detail drawer.
 // Shows 5 distinct states per spec §10.3.
+//
+// Backend-driven state (migration 0237): the validation-failed banner reads
+// `diagnosisStatus === 'partial'` and the in-flight banner reads
+// `triageStatus === 'running'`. Earlier versions inferred these from
+// `investigatePrompt === null` and a 5-minute window on `lastTriageAttemptAt`,
+// which misrepresented crashed jobs and silent validation failures.
 import { useState } from 'react';
 
 const TRIAGE_ATTEMPT_CAP = 5;
-const IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
 type Severity = 'low' | 'medium' | 'high' | 'critical';
 type Source = string;
+type TriageStatus = 'pending' | 'running' | 'failed' | 'completed';
+type DiagnosisStatus = 'none' | 'valid' | 'partial' | 'invalid';
 
 function isSweepEligible(severity: Severity, source: Source): boolean {
   return severity !== 'low' && source !== 'self';
 }
 
-function isInFlight(lastTriageAttemptAt: string | null): boolean {
-  if (!lastTriageAttemptAt) return false;
-  return Date.now() - new Date(lastTriageAttemptAt).getTime() < IN_FLIGHT_WINDOW_MS;
-}
-
 interface Props {
   agentDiagnosis: Record<string, unknown> | null;
-  investigatePrompt: string | null;
   triageAttemptCount: number;
-  lastTriageAttemptAt: string | null;
   severity: Severity;
   source: Source;
+  triageStatus: TriageStatus;
+  diagnosisStatus: DiagnosisStatus;
 }
 
 export default function DiagnosisAnnotation({
   agentDiagnosis,
-  investigatePrompt,
   triageAttemptCount,
-  lastTriageAttemptAt,
   severity,
   source,
+  triageStatus,
+  diagnosisStatus,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   // State 1: diagnosis present
   if (agentDiagnosis !== null) {
-    const validationFailed = agentDiagnosis !== null && investigatePrompt === null;
+    const validationFailed = diagnosisStatus === 'partial' || diagnosisStatus === 'invalid';
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[12px]">
         <div className="flex items-center justify-between mb-2">
@@ -82,8 +84,8 @@ export default function DiagnosisAnnotation({
     );
   }
 
-  // State 4: in-flight (triaging)
-  if (triageAttemptCount > 0 && isInFlight(lastTriageAttemptAt)) {
+  // State 4: in-flight (triaging) — backend-driven, replaces 5-min time window.
+  if (triageStatus === 'running') {
     return (
       <div className="flex items-center gap-2 text-[12px] text-slate-600">
         <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
@@ -102,7 +104,13 @@ export default function DiagnosisAnnotation({
         </div>
       );
     }
-    // Triage attempted but stalled
+    // Triage attempted but stalled — distinguish terminal failure from "not yet
+    // run" using the explicit triageStatus rather than inferring from timing.
+    if (triageStatus === 'failed') {
+      return (
+        <div className="text-[12px] text-slate-500 italic">Triage attempted but no diagnosis recorded yet.</div>
+      );
+    }
     return (
       <div className="text-[12px] text-slate-500 italic">Triage attempted but no diagnosis recorded yet.</div>
     );

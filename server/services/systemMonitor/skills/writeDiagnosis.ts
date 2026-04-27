@@ -55,12 +55,20 @@ export async function executeWriteDiagnosis(
       // Idempotency: skip if already written for this run.
       if (incident.agentDiagnosisRunId === agentRunId) return;
 
+      // diagnosis_status is the explicit signal the UI reads to decide whether to
+      // surface "Prompt validation failed" inline. 'valid' means the agent landed
+      // both the diagnosis and a validated investigate_prompt; 'partial' means the
+      // diagnosis is recorded but no valid prompt accompanies it (validation failed
+      // upstream, or the agent omitted it). See migration 0237.
+      const diagnosisStatus = investigatePrompt !== undefined ? 'valid' : 'partial';
+
       await tx
         .update(systemIncidents)
         .set({
           agentDiagnosis: diagnosis,
           agentDiagnosisRunId: agentRunId,
           ...(investigatePrompt !== undefined ? { investigatePrompt } : {}),
+          diagnosisStatus,
           updatedAt: new Date(),
         })
         .where(eq(systemIncidents.id, incidentId));

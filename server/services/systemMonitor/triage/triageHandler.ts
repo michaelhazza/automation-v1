@@ -263,12 +263,15 @@ export async function runTriage(incidentId: string): Promise<TriageResult> {
     updatedAt: new Date(),
   });
 
-  // 5. Increment triage attempt counter before the run
+  // 5. Increment triage attempt counter and flip triage_status → 'running' before the run.
+  // The UI reads triage_status directly to render the in-flight banner, replacing
+  // the previous 5-minute time-window inference (which misrepresented crashed jobs).
   await db
     .update(systemIncidents)
     .set({
       triageAttemptCount: sql`${systemIncidents.triageAttemptCount} + 1`,
       lastTriageAttemptAt: new Date(),
+      triageStatus: 'running',
       updatedAt: new Date(),
     })
     .where(eq(systemIncidents.id, incidentId));
@@ -292,13 +295,21 @@ export async function runTriage(incidentId: string): Promise<TriageResult> {
     })
     .where(eq(agentRuns.id, runId));
 
-  // 8. Emit outcome event
+  // 8. Flip triage_status to its terminal value + emit outcome event.
   if (loopResult.success) {
+    await db
+      .update(systemIncidents)
+      .set({ triageStatus: 'completed', updatedAt: new Date() })
+      .where(eq(systemIncidents.id, incidentId));
     // The write_diagnosis skill emits agent_diagnosis_added inside the loop.
     // Log completion for observability; the DB event is the agent's responsibility.
     logger.info('triage_completed', { incidentId, runId });
     return { status: 'completed' };
   } else {
+    await db
+      .update(systemIncidents)
+      .set({ triageStatus: 'failed', updatedAt: new Date() })
+      .where(eq(systemIncidents.id, incidentId));
     await db.insert(systemIncidentEvents).values({
       incidentId,
       eventType: 'agent_triage_failed',
