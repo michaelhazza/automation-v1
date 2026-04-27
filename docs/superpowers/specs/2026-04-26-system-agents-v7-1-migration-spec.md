@@ -29,6 +29,7 @@
 14. Phase 9 — Local-dev reset paths + rollback
 15. Contracts (data shapes crossing service boundaries)
 16. Permissions / RLS posture for new tenant-scoped tables
+16A. Execution-safety contracts (idempotency / retry / concurrency / state machine)
 17. Execution model (sync / async / inline / queued)
 18. Logging contract for new skills
 19. Phase sequencing — dependency graph
@@ -59,13 +60,22 @@ This migration moves the Automation OS company roster from the v6 flat-under-Orc
 
 **Why this is one spec, not several.** The five invariants are coupled: the schema migration is a hard prerequisite for the local-dev reset; the action-registry extensions are consumed by both the manager guard and the side-effect wrapper; the new agents reference new skills which reference new handlers which reference the new action-registry fields. Splitting into five PRs creates merge ordering hazards with no benefit at this stage.
 
+**Post-main-merge audit (2026-04-27).** This spec was originally drafted on 2026-04-26 against `main` at SHA `b5fcb314`. The 87-commit pre-launch-hardening sprint subsequently merged into `main`, advancing it to SHA `a87f45ef` and introducing migrations 0228–0232, a new RLS canonical pattern, the `rlsBoundaryGuard` runtime/dev-time guard, and a mandatory §10 Execution-safety contracts section in `docs/spec-authoring-checklist.md`. The spec was audited against the new state and updated:
+- Migration renumbered from `0228` → `0233` (next free number; renumber again before merge per `DEVELOPMENT_GUIDELINES.md` §6.2).
+- RLS policy rewritten to canonical post-0227 shape (`<table>_org_isolation` naming, `DROP POLICY IF EXISTS` first, `USING` + `WITH CHECK` clauses, three-clause null-safe predicate).
+- New §16.4 multi-tenant safety checklist (per `DEVELOPMENT_GUIDELINES.md` §9, 8 items).
+- New §16.5 RLS runtime guard call-site posture (`assertRlsAwareWrite` for raw-SQL writes; Drizzle typed writes auto-Proxy-guarded).
+- New §16A Execution-safety contracts (idempotency posture, retry classification, concurrency guard, terminal event guarantee, no-silent-partial, unique-to-HTTP mapping, state-machine closure).
+- New §15.5 source-of-truth precedence subsection (per checklist §3 update).
+- §6.4 down-migration policy updated — ships as a no-op stub per emerging convention from migrations 0228–0231.
+
 ---
 
 ## 2. Scope & non-goals
 
 ### In scope
 
-- Schema migration `0228_system_agents_v7_1.sql` — partial-unique indexes on `system_agents.slug` and `agents.(organisation_id, slug)` `WHERE deleted_at IS NULL`, plus the new `skill_idempotency_keys` table.
+- Schema migration `0233_system_agents_v7_1.sql` — partial-unique indexes on `system_agents.slug` and `agents.(organisation_id, slug)` `WHERE deleted_at IS NULL`, plus the new `skill_idempotency_keys` table. (Renumbered from `0228` after main absorbed migrations 0228–0232 from the pre-launch hardening sprint; renumber again before merge if main advances further per `DEVELOPMENT_GUIDELINES.md` §6.2.)
 - 14 new skill files in `server/skills/<slug>.md` + classification updates + visibility application.
 - Action-registry extensions: `sideEffectClass`, `idempotency` block, `directExternalSideEffect`, `managerAllowlistMember` flag.
 - Skill-executor extensions: 14 new handlers, manager-role guard, side-effect-class wrapper, cross-run idempotency wrapper.
@@ -116,7 +126,8 @@ Every file the implementation touches. Prose elsewhere in this spec must referen
 
 | Path | Purpose |
 |------|---------|
-| `migrations/0228_system_agents_v7_1.sql` | Partial-unique-index swap on `system_agents.slug` + `agents.(organisation_id, slug)`; create `skill_idempotency_keys` table + RLS policy + supporting indexes |
+| `migrations/0233_system_agents_v7_1.sql` | Partial-unique-index swap on `system_agents.slug` + `agents.(organisation_id, slug)`; create `skill_idempotency_keys` table + RLS policy (canonical post-0227 shape: `<table>_org_isolation`, `DROP POLICY IF EXISTS` first, `USING` + `WITH CHECK`) + supporting indexes |
+| `migrations/_down/0233_system_agents_v7_1.sql` | **NEW** — No-op reversal stub with explanatory header (matches the emerging convention from migrations 0228–0231 in main). Operational rollback is via §14 Path A re-seed; the partial indexes are forward-compatible with the v6 state. |
 
 ### 4.2 Schema files (3 modified, 1 new)
 
@@ -131,7 +142,7 @@ Every file the implementation touches. Prose elsewhere in this spec must referen
 
 | Path | Change |
 |------|--------|
-| `server/config/rlsProtectedTables.ts` | Append `skill_idempotency_keys` entry pointing at migration `0228` |
+| `server/config/rlsProtectedTables.ts` | Append `skill_idempotency_keys` entry pointing at migration `0233` |
 
 ### 4.4 Skill files (14 new, 1 deleted)
 
@@ -291,7 +302,7 @@ The phase order below is **load-bearing**. Reordering causes silent failures (th
 
 ### 6.1 Migration file
 
-**Path:** `migrations/0228_system_agents_v7_1.sql`
+**Path:** `migrations/0233_system_agents_v7_1.sql`
 
 The migration does three things, in this order, in a single transaction:
 
@@ -300,7 +311,7 @@ The migration does three things, in this order, in a single transaction:
 3. **Create the matching RLS policy** keyed on `current_setting('app.organisation_id', true)` — same shape as every other tenant-isolated table, per `architecture.md §1155`.
 
 ```sql
--- migrations/0228_system_agents_v7_1.sql
+-- migrations/0233_system_agents_v7_1.sql
 -- v7.1 system-agents migration: active-row uniqueness + cross-run idempotency table.
 
 BEGIN;
@@ -346,9 +357,18 @@ CREATE INDEX skill_idempotency_keys_org_idx
 ALTER TABLE skill_idempotency_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE skill_idempotency_keys FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation_skill_idempotency_keys
-  ON skill_idempotency_keys
-  USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
+DROP POLICY IF EXISTS skill_idempotency_keys_org_isolation ON skill_idempotency_keys;
+CREATE POLICY skill_idempotency_keys_org_isolation ON skill_idempotency_keys
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
 COMMIT;
 ```
@@ -356,6 +376,12 @@ COMMIT;
 **Why include `organisation_id`** (not just `subaccount_id`):
 - The RLS policy needs an org column to match the manifest pattern in `rlsProtectedTables.ts`. Every other RLS-protected table is keyed on `current_setting('app.organisation_id', true)`. Adding `organisation_id` keeps the new table consistent with the existing convention and lets `verify-rls-coverage.sh` recognise it.
 - It is denormalised relative to `subaccount_id` — handlers must populate both. The wrapper (§9) does this from `SkillExecutionContext`.
+
+**Policy shape rationale (post-pre-launch-hardening canonical pattern, see migration `0227_rls_hardening_corrective.sql`):**
+- `DROP POLICY IF EXISTS` first so the migration is idempotent and safe to re-run after a dev reset.
+- Naming convention `<table>_org_isolation` matches every post-0227 migration; `verify-rls-coverage.sh` recognises this name.
+- `WITH CHECK` clause is **mandatory** — without it, INSERTs that bypass `USING` (e.g. a row with mismatched `organisation_id`) succeed silently. The hardening sweep added this guard to all post-0227 policies.
+- Three-clause `USING` / `WITH CHECK` predicate (NOT NULL, non-empty, equality cast) defends against the edge case where `app.organisation_id` is unset — without the null/empty guards the `::uuid` cast fails with a misleading error rather than rejecting the row cleanly.
 
 **Why `status` is a CHECK column, not an enum type:** lower migration risk — no `CREATE TYPE` required; pre-prod doesn't yet justify schema-level enum churn. The wrapper writes `'in_flight'` first, then updates to `'completed'` or `'failed'`.
 
@@ -406,25 +432,30 @@ slugActiveIdx: uniqueIndex('system_agents_slug_active_idx')
 {
   tableName: 'skill_idempotency_keys',
   schemaFile: 'skillIdempotencyKeys.ts',
-  policyMigration: '0228_system_agents_v7_1.sql',
+  policyMigration: '0233_system_agents_v7_1.sql',
   rationale: 'Cross-run idempotency keys for write skills — request payload hashes can encode customer PII (email recipient hashes, invoice amounts, contact updates).',
 },
 ```
 
-`verify-rls-coverage.sh` will pass because the migration creates the policy in the same file. `verify-rls-session-var-canon.sh` will pass because the policy uses `app.organisation_id` (the canonical session var).
+`verify-rls-coverage.sh` passes because the migration creates the policy in the same file. `verify-rls-session-var-canon.sh` passes because the policy uses `app.organisation_id` (the canonical session var). `verify-rls-protected-tables.sh` passes because (a) `skill_idempotency_keys` is on the manifest, and (b) the table is not in `scripts/rls-not-applicable-allowlist.txt`.
 
 ### 6.4 Down-migration
 
-A `migrations/_down/0228_system_agents_v7_1.sql` is **NOT** required per repo convention (down-migrations are deferred until production per `docs/spec-context.md` `migration_safety_tests: defer_until_live_data_exists`). If a rollback is needed in dev, run the §14 Rollback path.
+A `migrations/_down/0233_system_agents_v7_1.sql` ships as a **no-op stub** with a header comment explaining that the migration is purely additive and forward-compatible — rolling back to pre-0233 leaves the partial indexes in place (they coexist with v6 row state) and dropping the new `skill_idempotency_keys` table is unsafe because in-flight idempotency rows may exist. Operational rollback is via §14 Path A re-seed.
+
+This matches the emerging convention from migrations 0228–0231 in main, which all ship `_down/` companions even when the reversal is a no-op or documentation-only.
 
 ### 6.5 Verification (run after migration)
 
 - `psql $DATABASE_URL -c "\d+ system_agents"` shows `system_agents_slug_active_idx` as a partial unique with `WHERE deleted_at IS NULL`.
 - `psql $DATABASE_URL -c "\d+ agents"` shows `agents_org_slug_active_uniq` as the partial unique.
-- `psql $DATABASE_URL -c "\d+ skill_idempotency_keys"` shows the table + RLS enabled (`Row security: ENABLED`).
+- `psql $DATABASE_URL -c "\d+ skill_idempotency_keys"` shows the table + RLS enabled (`Row security: ENABLED, FORCED`).
+- `psql $DATABASE_URL -c "\d skill_idempotency_keys"` shows policy `skill_idempotency_keys_org_isolation` with both `USING` and `WITH CHECK` clauses present.
 - `npm run typecheck` passes (Drizzle schema parses).
 - `bash scripts/verify-rls-coverage.sh` passes.
+- `bash scripts/verify-rls-protected-tables.sh` passes.
 - `bash scripts/verify-rls-session-var-canon.sh` passes.
+- `bash scripts/verify-migration-sequencing.sh` passes (no out-of-order migrations).
 
 ---
 
@@ -1350,7 +1381,7 @@ Failure aborts the seed with a clear error.
 
 ### 14.1 Path A (recommended) — soft-delete state, re-seed
 
-Fastest, cleanest, FK-safe. No seed-script changes required after Phase 8. **Prerequisite:** the `0228` migration from §6 must already be applied — without it, soft-deleted rows still occupy the slug under the old full-unique index and re-seed fails on a unique-constraint violation.
+Fastest, cleanest, FK-safe. No seed-script changes required after Phase 8. **Prerequisite:** the `0233` migration from §6 must already be applied — without it, soft-deleted rows still occupy the slug under the old full-unique index and re-seed fails on a unique-constraint violation.
 
 ```bash
 # 1. All file-on-disk changes from Phases 2–7 are merged on the working branch.
@@ -1441,7 +1472,7 @@ npm run seed
 
 The seed is idempotent against any prior agent state, so reverting the file changes and re-seeding is a clean rollback. Custom (non-system-managed) agents in the dev org are protected by the existing `existingCustomAgents` guard in `activateBaselineSystemAgents` (Phase 5).
 
-> **Note on the `0228` migration in rollback:** the partial-unique indexes are forward-compatible with the v6 state — a v6 seed against a DB with the partial indexes works correctly because no soft-deleted rows yet exist. No down-migration is required for rollback.
+> **Note on the `0233` migration in rollback:** the partial-unique indexes are forward-compatible with the v6 state — a v6 seed against a DB with the partial indexes works correctly because no soft-deleted rows yet exist. The `_down/0233_system_agents_v7_1.sql` reversal file ships as a no-op (per emerging convention — see migration 0228's `_down`); rolling back to pre-0233 is achieved by leaving the partial indexes in place and re-seeding via Path A.
 
 ---
 
@@ -1528,6 +1559,18 @@ Returned by handlers that touch multiple resources and can land in an intermedia
 
 The wrapper auto-creates the recovery task via the existing `taskService.createTask` primitive when it sees `status: 'partial'`.
 
+### 15.5 Source-of-truth precedence (per `docs/spec-authoring-checklist.md` §3)
+
+For every fact represented in more than one place, the winning representation is pinned below. This prevents the implementation from making inconsistent choices when two representations disagree.
+
+| Fact | Representations | Winner | Read path |
+|------|-----------------|--------|-----------|
+| Whether a skill side effect has executed | `actions.idempotencyKey` (within-run) **and** `skill_idempotency_keys.status = 'completed'` (cross-run) | **`skill_idempotency_keys`** for cross-run replay; **`actions.idempotencyKey`** for within-run dedup | The wrapper checks `skill_idempotency_keys` first; only on a miss does it cascade to the existing within-run `actions` dedup. |
+| The cached response payload of a completed skill | `skill_idempotency_keys.response_payload` (canonical) **and** the agent's transient run-loop memory | **`skill_idempotency_keys.response_payload`** | The wrapper short-circuits on cache hit and returns the persisted payload — never the agent's in-memory state. |
+| An agent's parent in the hierarchy | `system_agents.reportsTo` (text slug at the `companies/automation-os/` level) **and** `system_agents.parentSystemAgentId` (uuid FK at the DB level) | **`system_agents.parentSystemAgentId`** (DB) at runtime; `reportsTo` (text) is the seed-time source-of-truth | At runtime, queries always resolve via the FK; seed (Phase 8) is the only writer of the FK and derives it from the `reportsTo` slug. |
+| Active vs deleted system-agent row | `system_agents.deleted_at IS NULL` **and** `subaccount_agents.is_active = true` | **`system_agents.deleted_at IS NULL`** | A row is "active" iff its system-agent ancestor is non-deleted; `subaccount_agents.is_active` is a per-subaccount activation toggle (a non-deleted system agent may still be inactive in a given subaccount). |
+| Skill side-effect classification | `actions.idempotencyStrategy` (legacy enum, per-skill) **and** `actions.sideEffectClass` (new field, this spec §8) | **`sideEffectClass`** is authoritative for the v7.1 wrapper; `idempotencyStrategy` is unchanged for backward compatibility but no longer the canonical signal | The wrapper reads `sideEffectClass` exclusively; `idempotencyStrategy` is left in place for any pre-existing handlers that key off it. |
+
 ---
 
 ## 16. Permissions / RLS posture for new tenant-scoped tables
@@ -1536,7 +1579,7 @@ The wrapper auto-creates the recovery task via the existing `taskService.createT
 
 The only new tenant-scoped table. Posture per the four checklist items in `docs/spec-authoring-checklist.md` §4:
 
-1. **RLS policy in same migration that creates the table** — yes, see §6.1 (`CREATE POLICY tenant_isolation_skill_idempotency_keys`).
+1. **RLS policy in same migration that creates the table** — yes, see §6.1 (`CREATE POLICY skill_idempotency_keys_org_isolation`, with both `USING` and `WITH CHECK` clauses per the post-pre-launch-hardening canonical pattern).
 2. **Entry in `server/config/rlsProtectedTables.ts`** — yes, see §6.3.
 3. **Route-level guard** — n/a; the table is never accessed via HTTP. Read/write only by the in-process `executeWithActionAudit` wrapper, which runs inside `withOrgTx` (the agent execution path is already principal-scoped per `architecture.md §1116`).
 4. **Principal-scoped context** — yes, by inheritance: agent execution runs inside `withPrincipalContext` which sets `app.organisation_id`. The wrapper does not need to manage the session var explicitly.
@@ -1554,6 +1597,119 @@ No new permission keys are introduced.
 ### 16.3 No new HTTP-accessible operations
 
 The cleanup of expired `skill_idempotency_keys` rows runs as a daily pg-boss job (registered in `server/jobs/index.ts`). This is a backend job, not an HTTP route — same posture as every other ledger-cleanup job in the codebase.
+
+### 16.4 Multi-tenant safety checklist (per `DEVELOPMENT_GUIDELINES.md` §9)
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| Org-scoped at the table level | ✅ | §6.1 (`organisation_id NOT NULL`), §6.3 (manifest entry), §6.1 (canonical org-isolation policy in migration `0233`) |
+| Org-scoped at the query level | ✅ | §9 wrapper: every `SELECT`/`INSERT`/`UPDATE` on `skill_idempotency_keys` filters on `(subaccount_id, skill_slug, key_hash)` and runs inside `withOrgTx`; `organisation_id` is denormalised and validated via `WITH CHECK` |
+| Service-layer mediated | ✅ | All access flows through `server/services/skillExecutor.ts` and (for cleanup) `server/jobs/skillIdempotencyKeysCleanupJob.ts`; no route file imports the table |
+| Subaccount-resolved | ✅ | Inherited from agent execution context — `executeWithActionAudit` runs after `resolveSubaccount` has populated the principal context |
+| Gates green | ✅ | §6.5 verification list (rls-coverage + rls-protected-tables + rls-session-var-canon + migration-sequencing) |
+| Background jobs follow admin/org tx pattern | ✅ | `skillIdempotencyKeysCleanupJob` mirrors `memoryDedupJob.ts` — admin connection for iteration, `withOrgTx` per tenant write (§9.5) |
+| New table has principal-scoped context | ✅ | Inherits agent execution context (§16.1 item 4) |
+| Down-migration shipped (no-op stub) | ✅ | §6.4 |
+
+### 16.5 RLS runtime guard call-site posture
+
+The cross-run idempotency wrapper in `executeWithActionAudit` (§9) writes to `skill_idempotency_keys` via raw `.execute(sql\`...\`)` because Drizzle's typed `.insert()` does not expose the `xmax = 0 AS is_first_writer` pattern needed for the first-writer-wins INSERT. Per `server/lib/rlsBoundaryGuard.ts`, raw-SQL writes to RLS-protected tables must call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the write or `verify-rls-protected-tables.sh` will flag the call site as an advisory violation.
+
+The wrapper code in `server/services/skillExecutor.ts` therefore does:
+
+```ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
+// ... inside executeWithActionAudit, before the first-writer-wins INSERT:
+assertRlsAwareWrite('skill_idempotency_keys');
+const result = await tx.execute(sql`
+  INSERT INTO skill_idempotency_keys ...
+  ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
+  RETURNING xmax = 0 AS is_first_writer
+`);
+```
+
+The cleanup job (§9.5) uses Drizzle's typed `.delete()` and is therefore auto-guarded by the runtime Proxy in `getOrgScopedDb`; no explicit `assertRlsAwareWrite` call is needed in that path.
+
+---
+
+## 16A. Execution-safety contracts (per `docs/spec-authoring-checklist.md` §10)
+
+Mandatory section for any spec that introduces external-side-effect writes or state-machine rows. Pinned for `skill_idempotency_keys` and the side-effect-class wrapper.
+
+### 16A.1 Idempotency posture
+
+| Operation | Posture | Mechanism |
+|-----------|---------|-----------|
+| `skill_idempotency_keys` first-writer INSERT | **key-based** | Composite primary key `(subaccount_id, skill_slug, key_hash)`. Unique constraint at the DB level; `ON CONFLICT DO NOTHING RETURNING xmax = 0 AS is_first_writer` decides who runs the side effect. |
+| `skill_idempotency_keys` terminal UPDATE (`in_flight` → `completed`/`failed`) | **state-based** | `UPDATE ... WHERE status = 'in_flight'` — 0 rows updated = another writer terminated us, treat as a no-op. |
+| Skill side-effect execution (the actual `send_invoice`, `send_email`, etc. call) | **non-idempotent (intentional)** | The external provider may or may not be idempotent — we cannot assume. The guarded boundary is the `skill_idempotency_keys` row above; the wrapper guarantees the side effect runs at most once per `(subaccount_id, skill_slug, key_hash)` tuple across runs. |
+| `system_agents` / `agents` upsert during seed | **state-based** | `WHERE slug = ? AND deleted_at IS NULL` (with the §6.1 partial unique index providing the race-claim ordering). |
+
+### 16A.2 Retry classification
+
+| Operation | Class | Notes |
+|-----------|-------|-------|
+| `executeWithActionAudit` cross-run wrapper | **guarded** | The first-writer-wins INSERT and the state-based terminal UPDATE form the guard. Callers retry freely. |
+| Skill handlers' external calls (provider HTTP) | **unsafe** | Wrapped by the guarded boundary above — caller bears no retry risk because the wrapper short-circuits on replay. |
+| `system_agents` upsert in `seed.ts` | **safe** | Drizzle upsert + partial unique index; no external side effect. |
+| Side-effect-class write blocked by `requires` precondition | **safe** | Returns `{ status: 'blocked' }`; no state mutation; freely retryable. |
+| `skillIdempotencyKeysCleanupJob` deletion of expired rows | **safe** | DELETE is idempotent at the row level; running twice produces the same end state. |
+
+### 16A.3 Concurrency guard for racing writes
+
+| Race scenario | Guard | Losing-caller response |
+|---------------|-------|------------------------|
+| Two queue retries fire `send_invoice` for the same `(engagement_id, period)` simultaneously | First-writer-wins INSERT on `skill_idempotency_keys` (`ON CONFLICT DO NOTHING RETURNING xmax = 0`) | Loser reads the existing row; if `status = 'in_flight'` polls for completion, if `status = 'completed'` returns cached `response_payload` immediately, emits `skill.idempotency.hit`. |
+| Two callers race the terminal UPDATE (`in_flight` → `completed` vs `failed`) | `UPDATE ... WHERE status = 'in_flight'` returning row count | 0-rows-updated = the other path won; logger emits `skill.warn` with `reason: 'terminal_race_lost'`, return the winner's row contents to the caller. |
+| Two seed runs hit `system_agents.slug` for the same active row | Partial unique index `system_agents_slug_active_idx` | Drizzle upsert handles it via `ON CONFLICT DO UPDATE` — no caller-visible failure. |
+| Same `key_hash` arrives with a **mismatched** `request_hash` (idempotency collision) | `request_hash` stored on the existing row; wrapper compares before returning cached payload | Wrapper returns `{ status: 'idempotency_collision' }`; emits `skill.error` with both hashes; caller surfaces as a structured failure (does not retry). |
+
+### 16A.4 Terminal event guarantee
+
+The skill execution chain emits exactly one terminal event per `(runId, toolCallId)` tuple:
+- `skill.success` — handler returned `{ status: 'ok' }`.
+- `skill.blocked` — handler returned `{ status: 'blocked' }` (expected, not paged).
+- `skill.error` — handler threw or returned `{ status: 'error' }`.
+
+Post-terminal prohibition: once a terminal event is emitted for a `(runId, toolCallId)` tuple, no further events with that correlation key may be emitted (per `docs/pre-launch-hardening-invariants.md §7.7`). The cross-run idempotency wrapper does NOT emit a fresh terminal event on a cache hit — it emits `skill.idempotency.hit` (non-terminal observability event) and returns the prior terminal payload to the caller.
+
+### 16A.5 No-silent-partial-success
+
+Skill handlers that can partially complete (e.g. `discover_prospects` returns 12 of 50 candidates because a rate limit hit) emit `{ status: 'partial', returned, expected, reason }`. The wrapper persists this as `status = 'completed'` on `skill_idempotency_keys` (the cross-run guard's contract is "the side effect ran"); the per-call status discrimination is in the response payload, not the idempotency row. Replay of a `partial` result returns the same partial payload — never a fresh attempt at the missing elements.
+
+### 16A.6 Unique-constraint-to-HTTP mapping
+
+| Constraint | Trigger | Mapping |
+|------------|---------|---------|
+| `skill_idempotency_keys_pkey` (composite PK) | First-writer INSERT during normal operation | Not bubbled — the `ON CONFLICT DO NOTHING` clause turns the violation into a 0-rows return; wrapper handles it inline. |
+| `system_agents_slug_active_idx` | Two seeds racing the same slug | Not bubbled — Drizzle upsert's `ON CONFLICT DO UPDATE` handles it. |
+| `agents_org_slug_active_uniq` | Same as above | Same as above. |
+| `skill_idempotency_keys_pkey` with mismatched `request_hash` | Idempotency collision (different request, same key) | Wrapper returns `{ status: 'idempotency_collision' }` to the agent; agent surfaces as a structured failure response (no HTTP boundary involved — the table is never accessed via HTTP). |
+
+No HTTP routes touch these tables, so no HTTP status codes are issued. The agent-execution path consumes the wrapper's structured response directly.
+
+### 16A.7 State machine closure — `skill_idempotency_keys.status`
+
+**Status set is closed.** Adding a new value requires a spec amendment + a CHECK constraint extension migration.
+
+| From → To | Allowed | Mechanism |
+|-----------|---------|-----------|
+| (insert) → `in_flight` | ✅ | First-writer INSERT (§16A.1) |
+| `in_flight` → `completed` | ✅ | Wrapper terminal UPDATE on handler success |
+| `in_flight` → `failed` | ✅ | Wrapper terminal UPDATE on handler exception or `{ status: 'error' }` |
+| `in_flight` → `in_flight` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `completed` → `completed` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `failed` → `failed` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `completed` → `failed` | ❌ FORBIDDEN | Terminal corruption — would erase a successful side effect's record. Wrapper's `WHERE status = 'in_flight'` predicate refuses the UPDATE. |
+| `failed` → `completed` | ❌ FORBIDDEN | Same reason — would silently overwrite a recorded failure. Wrapper's predicate refuses the UPDATE. |
+| Any → `in_flight` (after a terminal) | ❌ FORBIDDEN | Cannot demote terminal state. Wrapper's predicate refuses the UPDATE. |
+
+**Execution-record requirement:** before any terminal-state write, the wrapper must hold a row produced by the first-writer INSERT (`is_first_writer = true`). A losing first-writer never attempts a terminal UPDATE — it reads and returns the existing row.
+
+**Concurrency guard predicate (mandatory):** every terminal UPDATE includes `WHERE status = 'in_flight'`. 0-rows-updated is observable and emits `skill.warn` with `reason: 'terminal_race_lost'`.
+
+`skill_idempotency_keys` is intentionally **not** wired through `shared/stateMachineGuards.ts` (which is scoped to `agent_run | workflow_run | workflow_step_run` per its current implementation). The optimistic predicate in the wrapper provides equivalent enforcement for this narrower table; integrating with the shared guard module is deferred until a fourth state machine kind is added (which would justify the abstraction).
 
 ---
 
@@ -1640,7 +1796,7 @@ The migration is complete when **all** of the following hold. Numbered for trace
 19. **No orphan skills.** Every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list **OR** carries `reusable: true` in its own frontmatter.
 20. **No orphan agents.** Every active `system_agents` row except `orchestrator`, `portfolio-health-agent`, and `workflow-author` has a non-null `parent_system_agent_id` referencing another active row.
 21. **Active-row uniqueness.** `\d+ system_agents` shows `system_agents_slug_active_idx` and `\d+ agents` shows `agents_org_slug_active_uniq` — both as `WHERE (deleted_at IS NULL)` partial uniques.
-22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0228`.
+22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table).
 23. **Static gates.** `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` (relevant set) exit 0.
 
 ---
@@ -1693,11 +1849,15 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 
 ## 24. Cross-references
 
-- **Master brief:** `docs/automation-os-system-agents-master-brief-v7.1.md` (§§1–13 captured; §§14–22 + Appendices A–F pending).
-- **Migration brief:** `docs/automation-os-system-agents-v7.1-migration-brief.md` (the source of this spec's structural decisions).
-- **Predecessor master brief:** `docs/automation-os-system-agents-brief-v6.md` (carry-forward reference for agents 14–22 until the v7.1 capture is complete).
+- **Master brief:** `docs/automation-os-system-agents-master-brief-v7.1.md` (complete — all 22 agents + Appendices A–F).
+- **Migration brief:** ~~`docs/automation-os-system-agents-v7.1-migration-brief.md`~~ — deleted in the 2026-04-27 cleanup; structural decisions absorbed into this spec and the master brief.
+- **Predecessor master brief:** ~~`docs/automation-os-system-agents-brief-v6.md`~~ — deleted in the 2026-04-27 cleanup; superseded by master brief v7.1.
 - **Spec context:** `docs/spec-context.md` (framing assumptions consumed by `spec-reviewer`).
-- **Spec-authoring checklist:** `docs/spec-authoring-checklist.md` (§§1–9; this spec self-checked against the checklist).
+- **Spec-authoring checklist:** `docs/spec-authoring-checklist.md` (§§0–10; this spec self-checked against the updated 10-section checklist post-pre-launch-hardening).
+- **Development guidelines:** `DEVELOPMENT_GUIDELINES.md` (§6 Migration discipline, §8.7 State/Lifecycle invariants, §8.10 Race-claim ordering, §8.11 Idempotency keys, §9 Multi-tenant safety checklist).
+- **Pre-launch hardening invariants:** `docs/pre-launch-hardening-invariants.md` — §7.7 post-terminal event prohibition is referenced by §16A.4.
+- **RLS canonical pattern reference:** migration `0227_rls_hardening_corrective.sql` — the `<table>_org_isolation` naming, `DROP POLICY IF EXISTS` first, three-clause `USING` + `WITH CHECK` predicate that this spec's §6.1 follows.
+- **RLS runtime guard:** `server/lib/rlsBoundaryGuard.ts` — `assertRlsAwareWrite` is called from the §9 wrapper per §16.5.
 - **Architecture:** `architecture.md` § "Row-Level Security — Three-Layer Fail-Closed Data Isolation", § "Canonical RLS session variables (hard rule)", § "Key files per domain".
 - **Lead-discovery dev brief:** `docs/dev-briefs/sdr-lead-discovery.md` — referenced by master brief §1 and migration brief §5. **Not present on disk at spec-authoring time** (2026-04-26). The §7.5 / §8.2 plumbing for `discover_prospects` + Hunter / Places providers is fully specified in this spec without it; if the implementing PR encounters open questions on the SDR provider plumbing, surface them to the user rather than blocking on the missing dev brief.
 - **Hierarchy infrastructure dev brief (deferred):** `docs/hierarchical-delegation-dev-brief.md`.
