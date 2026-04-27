@@ -36,3 +36,32 @@ ChatGPT review pass on the system-monitoring-agent-fixes PR surfaced 5 findings:
 - The edited file (`silentAgentSuccess.ts`) has zero typecheck errors after the change. Change is to a string description literal only — no logic, type, or contract surface affected.
 
 ---
+
+## Round 2 — 2026-04-27T22:30:23Z
+
+### ChatGPT Feedback (raw)
+ChatGPT round-2 pass surfaced 4 findings:
+
+1. **Double-write claim on failure path** — alleges `writeDiagnosis` and the triage handler both write to `system_incidents` outside one transaction in the failure path, violating the single-writer invariant.
+2. *(no item — three-finding numbering held by the agent's response)*
+3. **Suppression error semantics** — `writeDiagnosis` currently returns `{ success: false, error: 'TERMINAL_TRANSITION_LOST', retryable: false }` when its predicated UPDATE returns 0 rows. ChatGPT recommends standardising on `{ success: true, suppressed: true }` (Option A) so suppression is treated as a benign race outcome rather than a tool-loop failure that the agent might retry. The triage handler's terminal-flip path should mirror the same shape.
+4. **Duplicate `lastTriageAttemptAt` assignment claim** — alleges the column is assigned twice in the increment UPDATE.
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Double-write on failure path | technical | reject | reject | high | False positive — confirmed by user. The failure path's status flip + event INSERT runs inside a single `db.transaction` (triageHandler.ts:370–390); the `agent_runs` UPDATE outside the tx is on a different table and does not violate the single-writer invariant on `system_incidents`. No code change. |
+| 3. Suppression error semantics (Option A) | technical | implement | implement | medium | User-approved. Suppression is a benign race outcome, not an error. Returning `success: false` with an error code falsely signals a failure to the agent's tool loop and risks retry noise. The new shape `{ success: true, suppressed: true, reason: 'terminal_transition_lost' }` aligns with the §11.0 single-writer invariant and the existing `triage.terminal_event_suppressed` log line. Mirror in `runTriage` with `{ status, suppressed: true }`. |
+| 4. Duplicate `lastTriageAttemptAt` assignment | technical | reject | reject | low | False positive — confirmed by user. The increment UPDATE assigns `lastTriageAttemptAt: now` exactly once (triageHandler.ts:271). No duplicate. No code change. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+- [user] `server/services/systemMonitor/skills/writeDiagnosis.ts` — replaced the suppression return shape with `{ success: true, suppressed: true, reason: 'terminal_transition_lost' }`. Updated the file header docstring to document the race outcome explicitly. Removed the `TERMINAL_TRANSITION_LOST` error code; symbol is now absent from the codebase (verified via grep).
+- [user] `server/services/systemMonitor/triage/triageHandler.ts` — extended `TriageResult` with optional `suppressed?: boolean` flag. Both terminal-flip suppression branches (`completed` and `failed`) now return `{ status, ...(reason ?), suppressed: true }` when their predicated UPDATE returns 0 rows. Restructured the `if/else` to early-return on the success branch for clarity. The `triage.terminal_event_suppressed` warn log lines are preserved for observability.
+- [docs] `tasks/builds/system-monitoring-agent-fixes/spec.md` — updated the `writeDiagnosis.ts` row in §3.2 to reflect the new return shape and to note the mirroring in the triage handler. Per CLAUDE.md §11 (Docs Stay In Sync With Code).
+
+### Notes
+- Typecheck (`npx tsc --noEmit`) — zero errors in the changed files. Pre-existing errors in `ClarificationInbox.tsx` and `SkillAnalyzerExecuteStep.tsx` persist (unrelated, predate this branch turn).
+- Grep confirms the `TERMINAL_TRANSITION_LOST` literal is fully removed from the codebase (production code + spec). No callers of the old field exist.
+- No tests assert on the old suppression shape (verified via grep over `*.test.ts`). The triage durability integration test asserts only on `result.status` and `result.reason` for the duplicate-job idempotent skip path — unaffected.
+
+---

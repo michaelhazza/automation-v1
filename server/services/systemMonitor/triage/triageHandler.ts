@@ -186,6 +186,12 @@ async function runToolLoop(
 export interface TriageResult {
   status: 'skipped' | 'failed' | 'completed';
   reason?: string;
+  // §11.0 suppression flag: true when the terminal-flip UPDATE returned 0 rows
+  // because the row was already in a terminal state (staleness sweep / another
+  // writer won the race). Suppression is a benign race outcome, not an error —
+  // status still reflects what this writer attempted, but suppressed=true tells
+  // observers the underlying transition was claimed elsewhere.
+  suppressed?: boolean;
 }
 
 export async function runTriage(incidentId: string, jobId: string): Promise<TriageResult> {
@@ -357,12 +363,12 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
       // The write_diagnosis skill emits agent_diagnosis_added inside the loop.
       // Log completion for observability; the DB event is the agent's responsibility.
       logger.info('triage_completed', { incidentId, runId });
-    } else {
-      logger.warn('triage.terminal_event_suppressed', {
-        incidentId, runId, attempted: 'completed', reason: 'row_already_terminal',
-      });
+      return { status: 'completed' };
     }
-    return { status: 'completed' };
+    logger.warn('triage.terminal_event_suppressed', {
+      incidentId, runId, attempted: 'completed', reason: 'row_already_terminal',
+    });
+    return { status: 'completed', suppressed: true };
   } else {
     // §11.0 + §11.3: status flip and event INSERT are atomic — operators never see
     // a 'failed' row without an agent_triage_failed event.
@@ -394,11 +400,11 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
         runId,
         reason: loopResult.terminatedReason,
       });
-    } else {
-      logger.warn('triage.terminal_event_suppressed', {
-        incidentId, runId, attempted: 'failed', reason: 'row_already_terminal',
-      });
+      return { status: 'failed', reason: loopResult.terminatedReason };
     }
-    return { status: 'failed', reason: loopResult.terminatedReason };
+    logger.warn('triage.terminal_event_suppressed', {
+      incidentId, runId, attempted: 'failed', reason: 'row_already_terminal',
+    });
+    return { status: 'failed', reason: loopResult.terminatedReason, suppressed: true };
   }
 }

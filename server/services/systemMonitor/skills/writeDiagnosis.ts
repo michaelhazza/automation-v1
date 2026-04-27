@@ -4,6 +4,11 @@
 // When investigatePrompt is provided, validates it per spec §9.8. Returns
 // { success: false, error: 'PROMPT_VALIDATION_FAILED', retryable: true } on rejection —
 // the agent's run loop retries up to 2× before the triage handler emits agent_triage_failed.
+//
+// Terminal-transition race (§11.0): if the predicated UPDATE returns 0 rows because the
+// row is no longer triage_status='running' (staleness sweep / another writer won), this
+// is a benign race outcome — not a failure. Returns { success: true, suppressed: true }
+// so the agent's tool loop does not treat it as an error and does not retry.
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
 import { systemIncidents } from '../../../db/schema/systemIncidents.js';
@@ -104,11 +109,14 @@ export async function executeWriteDiagnosis(
     });
 
     if (result.suppressed) {
+      // §11.0 single-writer invariant: another writer (typically the staleness sweep)
+      // already claimed the terminal transition. Suppression is the correct outcome,
+      // not an error — the agent's tool loop should not retry. Return success with
+      // the suppressed flag for observability.
       return {
-        success: false,
-        error: 'TERMINAL_TRANSITION_LOST',
-        retryable: false,
-        details: 'incident triage_status was no longer running — diagnosis suppressed per §11.0',
+        success: true,
+        suppressed: true,
+        reason: 'terminal_transition_lost',
       };
     }
 
