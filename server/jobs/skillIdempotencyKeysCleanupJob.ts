@@ -11,6 +11,7 @@ import { sql } from 'drizzle-orm';
 import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
 // Use withAdminConnection to bypass RLS for the cross-org sweep
 import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
 
 const BATCH_SIZE = 1_000;
 const MAX_ROWS_PER_RUN = 10_000;
@@ -18,6 +19,8 @@ const SOURCE = 'skillIdempotencyKeysCleanupJob';
 
 export async function runSkillIdempotencyKeysCleanup(): Promise<void> {
   let totalDeleted = 0;
+  let batchCount = 0;
+  const start = Date.now();
 
   await withAdminConnection(
     { source: SOURCE, reason: 'Nightly retention sweep of skill_idempotency_keys' },
@@ -36,8 +39,18 @@ export async function runSkillIdempotencyKeysCleanup(): Promise<void> {
         `);
         const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
         totalDeleted += deleted;
+        batchCount += 1;
+        // Spec §16.3 — per-batch log emit (AC #32)
+        logger.info('skill_idempotency_keys.cleanup.batch', { batch: batchCount, rows: deleted });
         if (deleted < BATCH_SIZE) break;
       }
     },
   );
+
+  // Spec §16.3 — terminal completion log emit (AC #32)
+  logger.info('skill_idempotency_keys.cleanup.complete', {
+    total: totalDeleted,
+    batches: batchCount,
+    duration_ms: Date.now() - start,
+  });
 }

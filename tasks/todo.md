@@ -1067,3 +1067,57 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - **Files affected:** `workflowEngineService` (~5 remaining status-write sites), `agentExecutionService` (terminal write in agentic loop), `briefApprovalService.decideApproval`, `workflowRunService` (run-level terminal aggregation), plus `shared/stateMachineGuards.ts` (extend with intermediate transition tables).
   - **Suggested next-spec framing:** enumerate every status-write site by kind, define the canonical transition tables (allowed `from → to` per status family), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and decide whether to promote intermediate-transition violations from warn-log to throw once telemetry confirms zero false-positives.
 
+---
+
+## Deferred from spec-conformance review — system-agents-v7-1-migration (2026-04-27)
+
+**Captured:** 2026-04-27T07:41:47Z
+**Source log:** `tasks/review-logs/spec-conformance-log-system-agents-v7-1-migration-2026-04-27T07-41-47Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md`
+
+- [ ] REQ-43 — `enrich_contact` `provider` parameter enum diverges from spec
+  - Spec section: §7.5.1
+  - Gap: spec specifies `provider: z.enum(['default', 'hunter']).optional()`; implementation uses `z.enum(['hunter', 'apollo', 'clearbit']).optional()`. Provider option set differs from spec.
+  - Suggested approach: decide whether the richer enum (`hunter | apollo | clearbit`) is the intended evolution and update the spec, or narrow the enum to match the spec's `default | hunter` shape — pre-prod, framing assumption permits either direction; pick once and align.
+- [ ] REQ-44 — `enrich_contact` handler does not route to Hunter on `provider: 'hunter'`
+  - Spec section: §7.5.1, §8.3
+  - Gap: spec says "Handler in `SKILL_HANDLERS` reads `input.provider`. When `'hunter'`, routes to the new `hunterProvider.ts`"; the current handler in `server/services/skillExecutor.ts:1021` is a stub that ignores `input.provider`.
+  - Suggested approach: extend the existing `enrich_contact` handler to dispatch on `input.provider`. When `'hunter'`, call `hunterProvider.domainSearch` / `hunterProvider.emailFinder` (already implemented). Otherwise fall through to the existing stub. Provider stub already fail-soft on missing env, so the wrapper's `read` path absorbs it correctly.
+- [ ] REQ-45 — `managerAllowlistMember: true` missing on `write_workspace` and `update_task`
+  - Spec section: §8.3 (Universal-bundle skills)
+  - Gap: spec lists 10 universal-bundle skills to mark `managerAllowlistMember: true` (incl. `write_workspace`, `update_task`); implementation marks 9. The two outliers have no `ACTION_REGISTRY` entry at all (pre-existing "pre-registry foundational skill" carveout per `verify-agent-skill-contracts.ts`).
+  - Suggested approach: spec assumes `write_workspace` and `update_task` exist as registry entries; the codebase treats them as pre-registry foundational skills that bypass the registry contract. Either (a) add registry entries for both with `managerAllowlistMember: true` (and accept the broader implications — `idempotencyStrategy`, `parameterSchema`, etc.), or (b) update the spec to acknowledge the pre-registry pattern and exempt these two skills.
+- [ ] REQ-49 — `SideEffectBeforeClaimError` class not implemented as a named class
+  - Spec section: §16A.1
+  - Gap: spec defines `export class SideEffectBeforeClaimError extends Error { readonly name = 'SideEffectBeforeClaimError' as const; ... }`; implementation throws a generic `Error` from `assertHandlerInvokedWithClaim`. Behavioural contract preserved (assertion throws in test mode); the class-name distinction is only observable in `instanceof` checks.
+  - Suggested approach: introduce the named class in `skillIdempotencyKeysPure.ts`, throw it from `assertHandlerInvokedWithClaim`, and update tests to assert `instanceof SideEffectBeforeClaimError`. Low blast radius — the test assertion currently uses `err instanceof Error` so adoption can be staged.
+- [ ] REQ-56 — `executeListMySubordinates` lives in `skillExecutor.ts` instead of `configSkillHandlersPure.ts`
+  - Spec section: §4.11a, §9.2
+  - Gap: spec says "append `executeListMySubordinates` (reuses existing `computeDescendantIds`) " in `server/tools/config/configSkillHandlersPure.ts`; implementation places it in `server/services/skillExecutor.ts:468` and uses `resolveSubordinates` instead of `computeDescendantIds`. Functionally equivalent, but file location and helper choice both diverge.
+  - Suggested approach: relocate the handler to `configSkillHandlersPure.ts` and refactor to consume `computeDescendantIds`. Alternatively update the spec to reflect the chosen location if the design has settled.
+- [ ] REQ-58 (now MECHANICAL — fixed in this run) — Cleanup-job logging tags `skill_idempotency_keys.cleanup.batch` + `.complete` were missing → fixed.
+- [ ] REQ-68 — `skill.blocked` log emit rate-limiting (1/min per (skill, subaccount)) missing
+  - Spec section: §18.1, AC #33
+  - Gap: spec mandates the wrapper rate-limits `skill.blocked` emits to ≤1/min per `(skill, subaccount)` with a suppression-summary line at minute close; current implementation emits unconditionally. AC #33 manual test would fail.
+  - Suggested approach: add a per-(skill, subaccount) emit-throttle (small Map keyed on `${slug}:${subaccountId}` → last-emit-ms + suppressed-count) alongside the wrapper in `server/services/skillExecutor.ts`. Mirror the in-memory LRU pattern used by `googlePlacesProvider.ts` / `hunterProvider.ts`. Emit a `skill.blocked.suppressed` summary with the suppressed count at the next minute boundary.
+- [ ] REQ-69 — `in_flight_reclaim_disabled` log emit rate-limiting missing
+  - Spec section: §18.1, §16A.8 step 5
+  - Gap: spec says the wrapper logs `skill.warn` with `reason: 'in_flight_reclaim_disabled'` rate-limited to 1/min per `(skill, subaccount)`; current implementation emits on every replay over the timeout.
+  - Suggested approach: same primitive as REQ-68; share the throttle Map across both signal classes if convenient.
+- [ ] REQ-83 — `architecture.md § "Key files per domain"` row for `companies/automation-os/agents/<slug>/AGENTS.md` not added
+  - Spec section: §4.16
+  - Gap: spec mandates a documentation row mapping the system-agent-definition entry point. Index drift now: a developer adding a new agent has no anchor in the architecture doc.
+  - Suggested approach: append a row to the table in `architecture.md` line ~3026 (Task | Start here): "Define a new system agent | `companies/automation-os/agents/<slug>/AGENTS.md` (frontmatter follows the existing pattern; seed loads via `companyParser.toSystemAgentRows`) + `scripts/seed.ts` (Phase 2 system-agent upserts) + `scripts/regenerate-company-manifest.ts` (manifest regenerator)".
+- [ ] REQ-84 — `skill_idempotency_keys` row not added to architecture.md's RLS-protected enumeration
+  - Spec section: §4.16
+  - Gap: spec mandates inclusion in the architecture-doc RLS-protected list. `architecture.md` has no central RLS-protected list per se — the canonical list lives in `server/config/rlsProtectedTables.ts` (which DOES include the entry, REQ-7 PASS). The "list" reference in the spec is ambiguous.
+  - Suggested approach: clarify which list the spec means. Two options: (a) append a sentence to the RLS section in `architecture.md` naming `skill_idempotency_keys` as one of the protected tables; (b) update the spec to remove the reference (the manifest in `rlsProtectedTables.ts` is already the source of truth). Option (b) is cleaner if the team prefers code-as-source-of-truth.
+- [ ] REQ-85 — `tasks/current-focus.md` not updated to point at this spec / branch
+  - Spec section: §4.16
+  - Gap: current-focus.md still describes the previous sprint (LAEL-P1-1, DR1/DR3, etc.); no pointer to v7.1 migration.
+  - Suggested approach: update current-focus.md's active-spec section to point at `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md` and branch `claude/audit-system-agents-46kTN`. If the v7.1 work is about to merge, the post-merge update goes under "Recently shipped to `main`".
+- [ ] REQ-86 — `docs/capabilities.md` not updated with the 7 new agents
+  - Spec section: §4.16
+  - Gap: spec mandates appending the 7 new agents (head-of-product-engineering, head-of-growth, head-of-client-services, head-of-commercial, admin-ops-agent, retention-success-agent, sdr-agent) to the customer-facing roster in vendor-neutral, marketing-ready terms.
+  - Suggested approach: write each agent's customer-facing one-liner per the editorial rules in `docs/capabilities.md § Editorial Rules` (no LLM provider names, vendor-neutral, marketing-ready). Anchor on the existing roster section in `docs/capabilities.md` and add seven entries in alphabetical order.
+

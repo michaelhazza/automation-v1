@@ -206,3 +206,14 @@ test('assertHandlerInvokedWithClaim(false) in test env — throws', () => {
     process.env['NODE_ENV'] = original;
   }
 });
+
+// Spec AC #37(c) — production no-op contract
+test('assertHandlerInvokedWithClaim(false) in production env — returns silently (no-op)', () => {
+  const original = process.env['NODE_ENV'];
+  process.env['NODE_ENV'] = 'production';
+  try {
+    assert.doesNotThrow(() => assertHandlerInvokedWithClaim(false));
+  } finally {
+    process.env['NODE_ENV'] = original;
+  }
+});
