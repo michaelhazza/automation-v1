@@ -515,19 +515,18 @@ async function phase3_playbookAuthor(): Promise<void> {
       } as never)
       .returning();
     log(`  [ok]   Created Playbook Author system agent: ${created.id}`);
-    // NOTE: no return here — fall through to orphan cleanup + hierarchy assertions
+  } else {
+    await db
+      .update(systemAgents)
+      .set({
+        name: 'Playbook Author',
+        masterPrompt,
+        defaultSystemSkillSlugs: TOOL_SKILLS,
+        updatedAt: new Date(),
+      } as never)
+      .where(eq(systemAgents.id, existing.id));
+    log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
   }
-
-  await db
-    .update(systemAgents)
-    .set({
-      name: 'Playbook Author',
-      masterPrompt,
-      defaultSystemSkillSlugs: TOOL_SKILLS,
-      updatedAt: new Date(),
-    } as never)
-    .where(eq(systemAgents.id, existing.id));
-  log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
 
   // v7.1 — Orphan cleanup: soft-delete any system_agents row whose slug is
   // no longer in (parsed.agents.slug ∪ 'workflow-author'). Cascade soft-delete
@@ -860,7 +859,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   const PLAYBOOK_SLUG = 'intelligence-briefing';
 
   const [mod] = await db
-    .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
+    .select({ id: modules.id, onboardingWorkflowSlugs: modules.onboardingWorkflowSlugs })
     .from(modules)
     .where(and(eq(modules.slug, REPORTING_MODULE_SLUG), isNull(modules.deletedAt)))
     .limit(1);
@@ -870,7 +869,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
     return;
   }
 
-  const already = (mod.onboardingPlaybookSlugs ?? []).includes(PLAYBOOK_SLUG);
+  const already = (mod.onboardingWorkflowSlugs ?? []).includes(PLAYBOOK_SLUG);
   if (already) {
     log(`  [skip] '${PLAYBOOK_SLUG}' already in '${REPORTING_MODULE_SLUG}'`);
     return;
@@ -879,7 +878,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   await db
     .update(modules)
     .set({
-      onboardingPlaybookSlugs: sql`array_append(${modules.onboardingPlaybookSlugs}, ${PLAYBOOK_SLUG})`,
+      onboardingWorkflowSlugs: sql`array_append(${modules.onboardingWorkflowSlugs}, ${PLAYBOOK_SLUG})`,
       updatedAt: new Date(),
     })
     .where(eq(modules.id, mod.id));
@@ -1401,9 +1400,15 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
  * organisation (linked via systemAgentId) and, for subaccount-scoped agents,
  * link it into the given subaccount via `subaccount_agents`.
  *
- * Org-scoped system agents (executionScope: 'org' — e.g. portfolio-health-agent)
- * are activated at org level but NOT linked to the subaccount, matching how
- * they run in production.
+ * Org-scoped system agents (executionScope: 'org') are activated at org level
+ * (via ensureOrgSubaccount) but NOT linked to the regular subaccount.
+ *
+ * Two-pass design for fresh databases:
+ *   Pass 1 — upsert all `agents` rows; build sysAgentId → orgAgentId map.
+ *   Pass 2 — upsert `subaccount_agents` rows in topological order (root first),
+ *            wiring parentSubaccountAgentId from the already-inserted parent row.
+ *   This avoids the subaccount_agents_one_root_per_subaccount constraint violation
+ *   that would occur if all rows were inserted with parentSubaccountAgentId = null.
  */
 async function activateBaselineSystemAgents(
   organisationId: string,
@@ -1421,18 +1426,7 @@ async function activateBaselineSystemAgents(
     return;
   }
 
-  let orgAgentsCreated = 0;
-  let orgAgentsUpdated = 0;
-  let subaccountLinksCreated = 0;
-  let subaccountLinksUpdated = 0;
-  let orgScopedSkipped = 0;
-
-  // Pre-fetch every existing non-system-managed agent in this org. Any slug
-  // that already belongs to a custom (non-system-managed) agent is off-limits
-  // to the baseline activation loop — overwriting it would destroy user
-  // customisation. This generalises the Reporting Agent slug-collision case
-  // (the Reporting Agent is created in Phase 6d as a non-system-managed
-  // custom agent with slug 'reporting-agent') without hardcoding the slug.
+  // Pre-fetch every existing non-system-managed agent in this org.
   const existingCustomAgents = await db
     .select({ slug: agents.slug })
     .from(agents)
@@ -1445,14 +1439,22 @@ async function activateBaselineSystemAgents(
     );
   const customSlugs = new Set(existingCustomAgents.map((a) => a.slug));
 
+  let orgAgentsCreated = 0;
+  let orgAgentsUpdated = 0;
+  let subaccountLinksCreated = 0;
+  let subaccountLinksUpdated = 0;
+  let orgScopedSkipped = 0;
+
+  // ── Pass 1: upsert all `agents` rows ──────────────────────────────────────
+  // Skip system-scoped agents (e.g. system_monitor) — those run exclusively
+  // under the system-ops org and are seeded in Phase 4, not here.
+  // sysAgentId → orgAgentId
+  const sysToOrgId = new Map<string, string>();
+
   for (const sysAgent of allSystemAgents) {
-    // Skip any slug that collides with a custom (non-system-managed) agent
-    // already in this org. Covers the Reporting Agent case and any future
-    // situation where a custom agent happens to share a slug with a system
-    // agent — the custom agent wins, the system agent is left alone.
+    if (sysAgent.executionScope === 'system') continue;
     if (customSlugs.has(sysAgent.slug)) continue;
 
-    // Upsert the org-level agent row (agents table)
     const [existingOrgAgent] = await db
       .select()
       .from(agents)
@@ -1502,7 +1504,7 @@ async function activateBaselineSystemAgents(
           icon: sysAgent.icon ?? null,
           agentRole: sysAgent.agentRole ?? null,
           agentTitle: sysAgent.agentTitle ?? null,
-          masterPrompt: '', // system-managed agents inherit masterPrompt at runtime
+          masterPrompt: '',
           additionalPrompt: '',
           modelProvider: sysAgent.modelProvider,
           modelId: sysAgent.modelId,
@@ -1516,117 +1518,141 @@ async function activateBaselineSystemAgents(
       orgAgentsCreated += 1;
     }
 
-    // Org-scoped agents (e.g. portfolio-health-agent) are linked to the org
-    // subaccount, not the regular subaccount. They should NOT be linked to
-    // client subaccounts. Post-migration 0106: all agents are subaccount-scoped.
-    if (sysAgent.executionScope === 'org') {
-      // Deactivate any existing link to the regular subaccount
-      await db
-        .update(subaccountAgents)
-        .set({ isActive: false, updatedAt: new Date() })
-        .where(
-          and(
-            eq(subaccountAgents.subaccountId, subaccountId),
-            eq(subaccountAgents.agentId, orgAgentId),
-            eq(subaccountAgents.isActive, true),
-          ),
-        );
+    sysToOrgId.set(sysAgent.id, orgAgentId);
+  }
 
-      // Link to the org subaccount instead
-      const { ensureOrgSubaccount } = await import('../server/services/orgSubaccountService.js');
-      const orgSa = await ensureOrgSubaccount(organisationId, '');
-      if (orgSa) {
-        const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
-        const [existingOrgLink] = await db
-          .select()
-          .from(subaccountAgents)
-          .where(
-            and(
-              eq(subaccountAgents.subaccountId, orgSa.id),
-              eq(subaccountAgents.agentId, orgAgentId),
-            ),
-          )
-          .limit(1);
+  // ── Pass 2a: org-scoped agents (link to org subaccount) ───────────────────
+  const { ensureOrgSubaccount } = await import('../server/services/orgSubaccountService.js');
+  const orgSa = await ensureOrgSubaccount(organisationId, '');
 
-        if (existingOrgLink) {
-          await db
-            .update(subaccountAgents)
-            .set({
-              isActive: true,
-              skillSlugs,
-              tokenBudgetPerRun: sysAgent.defaultTokenBudget,
-              maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-              updatedAt: new Date(),
-            })
-            .where(eq(subaccountAgents.id, existingOrgLink.id));
-          subaccountLinksUpdated += 1;
-        } else {
-          await db.insert(subaccountAgents).values({
-            organisationId,
-            subaccountId: orgSa.id,
-            agentId: orgAgentId,
-            isActive: true,
-            skillSlugs,
-            tokenBudgetPerRun: sysAgent.defaultTokenBudget,
-            maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-            timeoutSeconds: 300,
-          });
-          subaccountLinksCreated += 1;
-        }
-      }
-      orgScopedSkipped += 1;
-      continue;
-    }
+  for (const sysAgent of allSystemAgents) {
+    if (sysAgent.executionScope !== 'org') continue;
+    if (customSlugs.has(sysAgent.slug)) continue;
+    const orgAgentId = sysToOrgId.get(sysAgent.id);
+    if (!orgAgentId) continue;
 
-    // Upsert the subaccount_agents link row
-    const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
-    const [existingLink] = await db
-      .select()
-      .from(subaccountAgents)
+    // Deactivate any existing link to the regular subaccount
+    await db
+      .update(subaccountAgents)
+      .set({ isActive: false, updatedAt: new Date() })
       .where(
         and(
           eq(subaccountAgents.subaccountId, subaccountId),
           eq(subaccountAgents.agentId, orgAgentId),
+          eq(subaccountAgents.isActive, true),
         ),
-      )
-      .limit(1);
+      );
 
-    if (existingLink) {
-      // Refresh all mutable fields so upstream changes to the system agent's
-      // default budgets propagate to every org. Without this, existing
-      // subaccount links drift permanently from the current defaults.
-      await db
-        .update(subaccountAgents)
-        .set({
+    if (orgSa) {
+      const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
+      const [existingOrgLink] = await db
+        .select()
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, orgSa.id),
+            eq(subaccountAgents.agentId, orgAgentId),
+          ),
+        )
+        .limit(1);
+
+      if (existingOrgLink) {
+        await db
+          .update(subaccountAgents)
+          .set({
+            isActive: true,
+            skillSlugs,
+            tokenBudgetPerRun: sysAgent.defaultTokenBudget,
+            maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
+            updatedAt: new Date(),
+          })
+          .where(eq(subaccountAgents.id, existingOrgLink.id));
+        subaccountLinksUpdated += 1;
+      } else {
+        await db.insert(subaccountAgents).values({
+          organisationId,
+          subaccountId: orgSa.id,
+          agentId: orgAgentId,
           isActive: true,
           skillSlugs,
           tokenBudgetPerRun: sysAgent.defaultTokenBudget,
           maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
-          updatedAt: new Date(),
-        })
-        .where(eq(subaccountAgents.id, existingLink.id));
-      subaccountLinksUpdated += 1;
-    } else {
-      await db.insert(subaccountAgents).values({
+          timeoutSeconds: 300,
+        });
+        subaccountLinksCreated += 1;
+      }
+    }
+    orgScopedSkipped += 1;
+  }
+
+  // ── Pass 2b: subaccount-scoped agents — topological order ─────────────────
+  // Sort by depth so each parent SA row exists before its children are inserted.
+  // This ensures parentSubaccountAgentId is always set correctly on first insert,
+  // avoiding the subaccount_agents_one_root_per_subaccount unique-index violation.
+  const sysAgentById = new Map(allSystemAgents.map((a) => [a.id, a]));
+  function sysDepth(id: string): number {
+    const a = sysAgentById.get(id);
+    if (!a || !a.parentSystemAgentId) return 0;
+    return 1 + sysDepth(a.parentSystemAgentId);
+  }
+  const subaccountScopedAgents = allSystemAgents
+    .filter((a) => a.executionScope !== 'org' && a.executionScope !== 'system' && !customSlugs.has(a.slug))
+    .sort((a, b) => sysDepth(a.id) - sysDepth(b.id));
+
+  // Clear existing system-managed SA rows for this subaccount before re-seeding.
+  // This handles corrupted partial state from previously failed seed runs (e.g.
+  // a non-root agent ended up as the lone root, blocking the real root insert).
+  // Safe for dev: the seed owns these rows. Custom (non-system-managed) SA rows
+  // are untouched because we filter by the sysToOrgId agent set.
+  const systemOrgAgentIds = [...sysToOrgId.values()];
+  if (systemOrgAgentIds.length > 0) {
+    await db
+      .delete(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, subaccountId),
+          inArray(subaccountAgents.agentId, systemOrgAgentIds),
+        ),
+      );
+  }
+
+  // orgAgentId → subaccountAgentId (starts empty; populated as rows are inserted)
+  const orgToSaId = new Map<string, string>();
+
+  for (const sysAgent of subaccountScopedAgents) {
+    const orgAgentId = sysToOrgId.get(sysAgent.id);
+    if (!orgAgentId) continue;
+
+    const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
+
+    // Resolve parent SA ID (topological order guarantees the parent's SA row
+    // is already in orgToSaId when this child is processed).
+    let parentSaId: string | null = null;
+    if (sysAgent.parentSystemAgentId) {
+      const parentOrgId = sysToOrgId.get(sysAgent.parentSystemAgentId);
+      if (parentOrgId) parentSaId = orgToSaId.get(parentOrgId) ?? null;
+    }
+
+    const [inserted] = await db
+      .insert(subaccountAgents)
+      .values({
         organisationId,
         subaccountId,
         agentId: orgAgentId,
+        parentSubaccountAgentId: parentSaId,
         isActive: true,
         skillSlugs,
         tokenBudgetPerRun: sysAgent.defaultTokenBudget,
         maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
         timeoutSeconds: 300,
-      });
-      subaccountLinksCreated += 1;
-    }
+      })
+      .returning({ id: subaccountAgents.id });
+    orgToSaId.set(orgAgentId, inserted.id);
+    subaccountLinksCreated += 1;
   }
 
-  log(
-    `  [ok]   org agents:         ${orgAgentsCreated} created, ${orgAgentsUpdated} updated`,
-  );
-  log(
-    `  [ok]   subaccount links:   ${subaccountLinksCreated} created, ${subaccountLinksUpdated} updated`,
-  );
+  log(`  [ok]   org agents:         ${orgAgentsCreated} created, ${orgAgentsUpdated} updated`);
+  log(`  [ok]   subaccount links:   ${subaccountLinksCreated} created, ${subaccountLinksUpdated} updated`);
   if (orgScopedSkipped > 0) {
     log(`  [ok]   org-scoped skipped: ${orgScopedSkipped} (activated at org only)`);
   }
@@ -1700,6 +1726,7 @@ async function main(): Promise<void> {
 main()
   .catch((err) => {
     console.error('\n✗ Seed failed:', err instanceof Error ? err.message : err);
+    if (err?.cause) console.error('Caused by:', err.cause);
     process.exitCode = 1;
   })
   .finally(() => pool.end());
