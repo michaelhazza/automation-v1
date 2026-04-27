@@ -2,7 +2,7 @@
 
 > **Source brief:** `tasks/builds/home-dashboard-reactivity/brief.md`
 > **Branch:** `create-views`
-> **Status:** Draft — pending `spec-reviewer`
+> **Status:** Final — 2026-04-27. ChatGPT review complete (2 rounds, 22 findings applied). Ready for implementation.
 
 ---
 
