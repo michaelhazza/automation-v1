@@ -14,7 +14,7 @@ export { isSilentAgentRatioElevated } from './silentAgentSuccessPure.js';
 
 export const silentAgentSuccess: SyntheticCheck = {
   id: 'silent-agent-success',
-  description: "A system-managed agent completed ≥30% of its runs in the last hour with no observable side effects (no agent_execution_events, system_incident_events, or skill_executions rows).",
+  description: "A system-managed agent completed ≥30% of its runs in the last hour with no observable side effects (no agent_execution_events rows AND no system_incident_events rows authored by the run).",
   defaultSeverity: 'medium',
 
   async run(ctx: HeuristicContext): Promise<SyntheticResult> {
