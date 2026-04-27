@@ -279,6 +279,7 @@ export default function DashboardPage({ user }: { user: User }) {
             ? `${activeAgents.length} AI agent${activeAgents.length === 1 ? '' : 's'} ready to work.`
             : "Let's get your AI team set up."}
         </p>
+        <FreshnessIndicator lastUpdatedAt={lastUpdatedAt} />
       </div>
 
       {/* ── Metric cards ──────────────────────────────────────────────────── */}
@@ -338,7 +339,7 @@ export default function DashboardPage({ user }: { user: User }) {
 
       {/* ── System admin: Queue health summary ───────────────────────────── */}
       {user.role === 'system_admin' && (
-        <QueueHealthSummary />
+        <QueueHealthSummary refreshToken={queueRefreshToken} />
       )}
 
       {/* ── Pending approval ──────────────────────────────────────────────── */}
@@ -359,6 +360,9 @@ export default function DashboardPage({ user }: { user: User }) {
           </div>
         </div>
       )}
+
+      {/* [LAYOUT-RESERVED: Piece 3 — Operational metrics] */}
+      <OperationalMetricsPlaceholder />
 
       {/* ── Your workspaces ───────────────────────────────────────────────── */}
       <div className="mb-8">
@@ -413,7 +417,12 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* ── Recent activity ───────────────────────────────────────────────── */}
       <div className="mb-8">
         <h2 className="text-[17px] font-bold text-slate-900 tracking-tight mb-3.5">Recent activity</h2>
-        <UnifiedActivityFeed orgId={user.organisationId} limit={20} />
+        <UnifiedActivityFeed
+          orgId={user.organisationId}
+          limit={20}
+          refreshToken={activityRefreshToken}
+          expectedTimestamp={activityTs.current}
+        />
       </div>
     </div>
   );
