@@ -7,6 +7,7 @@ import {
   suppressIncidentBody,
   listIncidentsQuery,
   testTriggerBody,
+  recordPromptFeedbackBody,
 } from '../schemas/systemIncidents.js';
 import type { SystemIncidentStatus } from '../db/schema/systemIncidents.js';
 
@@ -28,6 +29,7 @@ router.get('/api/system/incidents', ...SA, asyncHandler(async (req, res) => {
     sort: query.sort,
     limit: query.limit ? parseInt(query.limit, 10) : undefined,
     offset: query.offset ? parseInt(query.offset, 10) : undefined,
+    diagnosis: query.diagnosis,
   };
   const result = await systemIncidentService.listIncidents(filters);
   res.json(result);
@@ -114,11 +116,25 @@ router.post('/api/system/incidents/:id/suppress', ...SA, asyncHandler(async (req
   res.json(incident);
 }));
 
-// ─── Escalate (stub — filled in commit 12) ───────────────────────────────────
+// ─── Escalate ────────────────────────────────────────────────────────────────
 
 router.post('/api/system/incidents/:id/escalate', ...SA, asyncHandler(async (req, res) => {
   const result = await systemIncidentService.escalateIncidentToAgent(req.params.id, req.user!.id, req.user!.role);
   res.json(result);
+}));
+
+// ─── Record prompt feedback ───────────────────────────────────────────────────
+
+router.post('/api/system/incidents/:id/feedback', ...SA, asyncHandler(async (req, res) => {
+  // guard-ignore-next-line: input-validation reason="recordPromptFeedbackBody Zod parse handles validation"
+  const body = recordPromptFeedbackBody.parse(req.body);
+  await systemIncidentService.recordPromptFeedback(
+    req.params.id,
+    body,
+    req.user!.id,
+    req.user!.role,
+  );
+  res.json({ message: 'Feedback recorded' });
 }));
 
 export default router;

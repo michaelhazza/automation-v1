@@ -1,6 +1,6 @@
 // System Incident Service — CRUD + lifecycle actions for system_incidents.
 // All mutating methods write a system_incident_events row inside the same tx.
-import { eq, and, or, inArray, isNull, sql, desc, asc, count } from 'drizzle-orm';
+import { eq, and, or, inArray, isNull, isNotNull, sql, desc, asc, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { taskService } from './taskService.js';
 import { resolveSystemOpsContext } from './systemOperationsOrgResolver.js';
@@ -36,6 +36,7 @@ export interface IncidentListFilters {
   sort?: 'last_seen_desc' | 'first_seen_desc' | 'occurrence_count_desc' | 'severity_desc';
   limit?: number;
   offset?: number;
+  diagnosis?: 'all' | 'diagnosed' | 'awaiting' | 'not-triaged';
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,29 @@ export const systemIncidentService = {
     if (!filters.includeTestIncidents) {
       conditions.push(eq(systemIncidents.isTestIncident, false) as unknown as ReturnType<typeof eq>);
     }
+    if (filters.diagnosis === 'diagnosed') {
+      conditions.push(isNotNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
+    } else if (filters.diagnosis === 'awaiting') {
+      // agent_diagnosis IS NULL AND eligible for auto-triage (not low severity, not self-check) AND attempt count < cap
+      conditions.push(isNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
+      conditions.push(
+        and(
+          sql`${systemIncidents.severity} != 'low'`,
+          sql`${systemIncidents.source} != 'self'`,
+          sql`${systemIncidents.triageAttemptCount} < 5`,
+        ) as unknown as ReturnType<typeof eq>,
+      );
+    } else if (filters.diagnosis === 'not-triaged') {
+      // agent_diagnosis IS NULL AND not eligible (low severity OR self-check OR rate-limited at cap)
+      conditions.push(isNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
+      conditions.push(
+        or(
+          sql`${systemIncidents.severity} = 'low'`,
+          sql`${systemIncidents.source} = 'self'`,
+          sql`${systemIncidents.triageAttemptCount} >= 5`,
+        ) as unknown as ReturnType<typeof eq>,
+      );
+    }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -118,6 +142,50 @@ export const systemIncidentService = {
       .orderBy(asc(systemIncidentEvents.occurredAt));
 
     return { incident, events };
+  },
+
+  async recordPromptFeedback(
+    id: string,
+    input: { wasSuccessful: 'yes' | 'no' | 'partial'; text?: string },
+    userId: string,
+    actorRole?: string,
+  ): Promise<void> {
+    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+
+    const [incident] = await db.select({
+      id: systemIncidents.id,
+      agentDiagnosis: systemIncidents.agentDiagnosis,
+      promptWasUseful: systemIncidents.promptWasUseful,
+    }).from(systemIncidents).where(eq(systemIncidents.id, id)).limit(1);
+
+    if (!incident) throw { statusCode: 404, message: 'Incident not found' };
+    if (incident.agentDiagnosis === null) throw { statusCode: 422, message: 'Incident has no agent diagnosis to provide feedback on' };
+    if (incident.promptWasUseful !== null) throw { statusCode: 409, message: 'Feedback already recorded for this incident' };
+
+    const now = new Date();
+    const promptWasUseful = input.wasSuccessful !== 'no';
+
+    await db.transaction(async (tx) => {
+      await tx.update(systemIncidents).set({
+        promptWasUseful,
+        promptFeedbackText: input.text ?? null,
+        updatedAt: now,
+      }).where(eq(systemIncidents.id, id));
+
+      await tx.insert(systemIncidentEvents).values({
+        incidentId: id,
+        eventType: 'investigate_prompt_outcome',
+        actorKind: 'user',
+        actorUserId: userId,
+        payload: {
+          wasSuccessful: input.wasSuccessful,
+          promptWasUseful,
+          partial: input.wasSuccessful === 'partial',
+          text: input.text ?? null,
+        },
+        occurredAt: now,
+      });
+    });
   },
 
   async acknowledgeIncident(id: string, userId: string, actorRole?: string): Promise<SystemIncident> {
