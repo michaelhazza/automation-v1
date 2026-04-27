@@ -158,3 +158,18 @@ Post-integrity sanity: §16A.0 is a new section but introduces no new symbols (i
 - [auto] 2: Added §16A.1 "Runtime test-mode contract (mandatory)" subsection with the full `SideEffectBeforeClaimError` class definition, the `assertHandlerInvokedWithClaim` pure helper, three pure-function test cases, and a wrapper call-site code example; added the `assertHandlerInvokedWithClaim(isFirstWriter)` call into the §9.3.1 wrapper code snippet at the closing brace of the side-effect-bearing branch (with a trailing-comment cross-reference back to §16A.1); extended the §4.11c file-inventory description for `skillIdempotencyKeysPure.test.ts`; extended §23 testing-posture line; new AC #37.
 - [auto] 3: Added §16A.7 "Operator recovery path (mandatory)" subsection — two sanctioned paths (re-dispatch with new key = preferred; explicit row DELETE + runbook log = last resort) and three explicit forbidden actions (status UPDATE, request_hash/response_payload mutation, bulk date-clearing); new AC #38.
 - [auto] 4: New §16A.0 "Idempotency guarantees summary (audit-friendly consolidation)" 9-row table with columns Guarantee / What it says / Where it lives / Where it is enforced; closing "How to extend this table" rule binding future amendments to (a) row here + (b) section reference + (c) gate reference.
+
+---
+
+## Final Summary
+
+- **Rounds:** 3 (Round 1: 13 findings + 1 integrity; Round 2: 5 findings + 0 integrity; Round 3: 4 findings + 0 integrity)
+- **Auto-accepted (technical):** 22 applied | 0 rejected | 0 deferred
+- **User-decided:** 0 applied | 0 rejected | 0 deferred (zero user-facing findings across all 3 rounds — the spec is internal-quality through and through, matching the prior `system-monitoring-agent` review pattern documented in KNOWLEDGE.md 2026-04-26 entry "Default-to-user-facing triage with internal-quality specs achieves 100% autonomy").
+- **Index write failures:** N/A — `tasks/review-logs/_index.jsonl` is not present in this repo (forward-compatible feature, not yet enabled). No write attempts made; no failures.
+- **Deferred to tasks/todo.md:** None. Zero deferrals across all 3 rounds. (The single in-spec deferral — heartbeat-extending takeover variant for `reclaimEligibility: 'disabled'` skills — was added to spec §21 in round 2, not routed to `tasks/todo.md`.)
+- **KNOWLEDGE.md updated:** yes — 3 new entries appended (safe-by-default for binary-risk fields; defence-in-depth pair static-gate + test-mode hook; late-round consolidation block as audit entry point).
+- **Consistency warnings:** none. Round 2 finding #1 (per-skill `reclaimEligibility` gating) and round 3 finding #1 (default → `'disabled'`) refined the same surface monotonically — not contradictions.
+- **Implementation readiness checklist:** all 5 items pass (inputs defined, outputs defined, failure modes covered, ordering guarantees explicit, no unresolved forward references). Spec is implementation-ready.
+- **Verdict from final round:** "production-grade on the spec. No correctness gaps. No conflicting rules. Edge cases covered. Failure modes explicitly handled. If you apply the 3 tightenings above, this becomes reference-quality and resistant to future regression." — all 3 tightenings + the optional consolidation block applied.
+- **PR:** #212 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/212
