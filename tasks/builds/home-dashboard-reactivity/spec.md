@@ -227,6 +227,8 @@ interface EventEnvelope {
 > The dashboard does not consume the payload for data — it uses the event only as an **invalidation signal** that triggers a refetch. Payload fields above are informational and may be used for future optimistic updates; the source of truth is always the refetch response.
 >
 > **Payload-not-trusted rule (global):** This principle applies to every dashboard block in this spec. No block uses event payload fields to update its displayed state. The payload is informational only and may be used for future optimistic updates. The API response is always the source of truth.
+>
+> **No optimistic UI:** No dashboard block performs optimistic updates. All displayed state is derived exclusively from refetch responses. Payload data is never written to component state.
 
 **`dashboard.queue.changed`**
 
@@ -305,6 +307,8 @@ if (!parentIsSubAgent) {
 
 Sub-agent runs (internal orchestration) do not represent user-visible activity on the home dashboard and must not trigger a feed refresh.
 
+> **`parentIsSubAgent` definition:** This boolean is derived from the existing sub-agent detection logic already present in `agentRunFinalizationService.ts`. Confirm the exact field or method used at implementation time — do not recompute it independently. The same check that governs whether a run's results roll up to a parent agent is the correct gate for this emit.
+
 `orgId` is resolvable from `parentAgentId` or `ieeRun` — confirm the lookup at implementation time using the same pattern as the existing subaccount lookup in this function.
 
 ### 5.3 `dashboard.activity.updated` — `server/services/workflowEngineService.ts`
@@ -358,7 +362,7 @@ Values come from the recalculated summary — use the same values being persiste
 emitToSysadmin('dashboard.queue.changed', 'system', { pendingDelta });
 ```
 
-**Scope limitation:** This emit is best-effort — it is acceptable for the `QueueHealthSummary` to occasionally show briefly stale data if the queue mutation path is not easily instrumented. The reconnect refetch (§8) covers the staleness recovery case. If the queue mutation path is not straightforward to identify within the time budget, this emitter may be deferred to a follow-up; document this as a known gap if so.
+**Scope limitation:** This emit is best-effort — it is acceptable for the `QueueHealthSummary` to occasionally show briefly stale data if the queue mutation path is not easily instrumented. Maximum staleness is bounded by the next reconnect refetch cycle (§8), which re-fetches all groups including queue health. If the queue mutation path is not straightforward to identify within the time budget, this emitter may be deferred to a follow-up; document this as a known gap if so.
 
 ---
 
@@ -437,6 +441,8 @@ function applyIfNewer(
 ```
 
 ISO-8601 string comparison is lexicographically monotonic and correct for this purpose (no library needed).
+
+> **Equal timestamp behaviour:** Strict `>` is intentional — equal timestamps are treated as non-newer and the callback is not invoked. Two responses with the same `serverTimestamp` represent equivalent snapshots; applying the second would cause a redundant re-render without changing state. Do not change this to `>=`.
 
 **Source-of-truth precedence:** The `serverTimestamp` from the API response is the sole version discriminator. Local state (`useState` values), socket event timestamps, and client-generated timestamps are never used as version comparators.
 
@@ -636,6 +642,8 @@ async function refetchActivity() {
 
 > **Activity group atomicity:** The stats card and the feed are version-aligned via the `expectedTimestamp` prop (§6.5). When `refetchActivity` updates `activityTs` to `groupTs`, the feed's next internal fetch must return `serverTimestamp ≥ groupTs` or the result is discarded. This guarantees the user never sees the stats card and the feed reflecting different points in time within the Activity group.
 
+> **Dual-fetch failure behaviour:** `Promise.all` rejects if either `/api/activity` or `/api/agent-activity/stats` fails. The `catch` block handles this — neither `applyIfNewer` nor `markFresh` is called. No partial update is applied. This is the correct failure mode: the Activity group is either fully updated or not updated at all. Do not "optimise" this into individual try/catches with partial applies — that would break group atomicity.
+
 ### 7.3 `WorkspaceFeatureCard(ClientPulse)` update
 
 `WorkspaceFeatureCard` accepts a `summary` prop of type `React.ReactNode`. In `DashboardPage`, the summary is computed from the health state:
@@ -723,7 +731,7 @@ function refetchAll() {
 }
 ```
 
-Since each `refetch*` function has its own in-flight guard, calling them all simultaneously is safe — they execute in parallel as independent HTTP calls.
+Since each `refetch*` function has its own in-flight guard, calling them all simultaneously is safe — they execute in parallel as independent HTTP calls. If a reconnect-triggered refetch arrives while a previous refetch is already in-flight for that group, the coalescing logic in §6.3 guarantees a trailing refetch executes after the in-flight one resolves — no reconnect state is lost even under rapid network instability.
 
 ### 8.3 Initial mount
 
