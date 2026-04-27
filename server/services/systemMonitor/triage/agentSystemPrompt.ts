@@ -1,6 +1,7 @@
 // The system_monitor agent's stored prompt template (spec §9.7).
-// This constant is used by migration 0235 to populate system_agents.master_prompt.
-// Stored in code so migrations import it without embedding a multi-KB SQL literal.
+// Used by scripts/seed.ts (Phase 4) to populate system_agents.master_prompt
+// for the system_monitor row. Single source of truth — also imported by
+// triageHandler.ts at runtime.
 
 export const SYSTEM_MONITOR_PROMPT = `You are the System Monitor — a system-managed diagnostic agent. Your job is to
 read evidence about a single incident or sweep cluster, form a diagnosis, and

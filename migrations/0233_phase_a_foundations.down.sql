@@ -1,7 +1,9 @@
 -- Down migration for 0233_phase_a_foundations.sql
--- Removes all Phase A additions in reverse order.
--- Note: does not remove the system_monitor system agent row or system principal
--- user — those are seed data and removal may cause FK violations if referenced.
+-- Removes all Phase A schema additions in reverse order.
+-- Note: seed rows (system_monitor system_agent, system principal user, 11
+-- system_skills) are owned by scripts/seed.ts — not removed here. Re-running
+-- the seed re-creates them; rolling back this migration alone leaves them
+-- as orphans referencing dropped columns/tables.
 
 ALTER TABLE system_incidents DROP COLUMN IF EXISTS investigate_prompt;
 ALTER TABLE system_incidents DROP COLUMN IF EXISTS agent_diagnosis;

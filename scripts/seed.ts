@@ -17,27 +17,34 @@
  *
  *
  * Phases:
- *   [1/5] System bootstrap
+ *   [1/7] System bootstrap
  *         - system organisation ("System")
  *         - system admin user
  *
- *   [2/5] System agents (Automation OS company — the 16 business agents)
+ *   [2/7] System agents (Automation OS company — the 16 business agents)
  *         - reads companies/automation-os/COMPANY.md and agents/<slug>/AGENTS.md
  *         - upserts 16 rows into system_agents
  *         - sets up the reportsTo hierarchy
  *
- *   [3/5] Playbook Author system agent (separate — Studio tool runner)
+ *   [3/7] Playbook Author system agent (separate — Studio tool runner)
  *         - reads server/agents/workflow-author/master-prompt.md
- *         - upserts a 17th system_agents row (isSystemManaged: true)
+ *         - upserts a 17th system_agents row
  *         - wires the 5 playbook_* Studio tool skills
  *
- *   [4/5] Playbook templates
+ *   [4/7] System Monitor system agent + skills
+ *         - upserts the system_monitor system_agent row (master prompt from
+ *           server/services/systemMonitor/triage/agentSystemPrompt.ts)
+ *         - upserts 11 system_skills rows (9 read + 2 write)
+ *         - upserts the system principal user in the system-ops org
+ *         - upserts the org-side agents row in the system-ops org
+ *
+ *   [5/7] Playbook templates
  *         - discovers server/workflows/*.workflow.ts, imports each, and upserts
  *           via WorkflowTemplateService (DAG-validated)
  *         - seeds the portfolio-health-sweep template directly (non-standard
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
- *   [5/5] Dev fixtures (skipped in production)
+ *   [6/7] Dev fixtures (skipped in production)
  *         - Synthetos organisation + org admin user
  *         - Synthetos Workspace subaccount (16 system agents activated here)
  *         - Breakout Solutions subaccount (reporting agent only — for testing)
@@ -45,12 +52,16 @@
  *         - subaccount_agent link
  *         - integration_connection placeholders (web_login + slack, status=error)
  *
+ *   [7/7] Configuration Assistant runtime guidelines memory block
+ *         - seeds the guidelines block for every org that has the
+ *           Configuration Assistant agent activated
+ *
  *
  * Usage:
  *   # Full dev seed (includes Synthetos demo org + reporting agent)
  *   npx tsx scripts/seed.ts
  *
- *   # Production seed — Phases 1-4 only, no dev fixtures
+ *   # Production seed — Phases 1-5 + 7 only, no dev fixtures
  *   npx tsx scripts/seed.ts --production
  *   NODE_ENV=production npx tsx scripts/seed.ts
  *
@@ -80,6 +91,7 @@ import { subaccountAgents } from '../server/db/schema/subaccountAgents.js';
 import { integrationConnections } from '../server/db/schema/integrationConnections.js';
 import {
   systemAgents,
+  systemSkills,
   systemPlaybookTemplates,
   systemPlaybookTemplateVersions,
 } from '../server/db/schema/index.js';
@@ -89,6 +101,12 @@ import { classifySkill } from './lib/skillClassification.js';
 import { WorkflowTemplateService } from '../server/services/workflowTemplateService.js';
 import type { WorkflowDefinition } from '../server/lib/workflow/types.js';
 import { seedConfigAgentGuidelinesAll } from './seedConfigAgentGuidelines.js';
+import {
+  SYSTEM_MONITOR_SKILL_SEEDS,
+  SYSTEM_MONITOR_SKILL_SLUGS,
+  SYSTEM_PRINCIPAL_USER,
+} from './lib/systemMonitorSeed.js';
+import { SYSTEM_MONITOR_PROMPT } from '../server/services/systemMonitor/triage/agentSystemPrompt.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -165,7 +183,7 @@ async function preflightVerifySkillVisibility(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase1_systemBootstrap(): Promise<string> {
-  logPhase(1, 6, 'System bootstrap');
+  logPhase(1, 7, 'System bootstrap');
 
   // 1a. System organisation — upsert
   const systemOrgId = await upsertOrganisation({
@@ -198,7 +216,7 @@ async function phase1_systemBootstrap(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Upsert helpers — used by Phase 1 and Phase 5
+// Upsert helpers — used by Phase 1 and Phase 6
 // ---------------------------------------------------------------------------
 
 type OrgPlan = 'starter' | 'pro' | 'agency';
@@ -254,7 +272,7 @@ async function upsertOrganisation(values: {
  * the seed against a database where a user has changed their password via
  * the UI would otherwise silently revert it to the seed default. This
  * protection applies to both the system admin (Phase 1) and the dev org
- * admin (Phase 5) — seed password behaviour must be write-once.
+ * admin (Phase 6) — seed password behaviour must be write-once.
  *
  * Other mutable fields (organisationId, firstName, lastName, role, status)
  * are always updated on re-run, so renaming or re-scoping a user still
@@ -350,7 +368,7 @@ async function upsertSubaccount(values: {
 // ---------------------------------------------------------------------------
 
 async function phase2_systemAgents(): Promise<void> {
-  logPhase(2, 6, 'System agents (Automation OS company)');
+  logPhase(2, 7, 'System agents (Automation OS company)');
 
   const companyDir = resolve('companies/automation-os');
   let parsed: ParsedCompany;
@@ -441,7 +459,7 @@ async function phase2_systemAgents(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase3_playbookAuthor(): Promise<void> {
-  logPhase(3, 6, 'Playbook Author system agent');
+  logPhase(3, 7, 'Playbook Author system agent');
 
   const SLUG = 'workflow-author';
   const PROMPT_PATH = resolve(process.cwd(), 'server/agents/workflow-author/master-prompt.md');
@@ -510,11 +528,188 @@ async function phase3_playbookAuthor(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 — Playbook templates
+// Phase 4 — System Monitor system agent
+// ---------------------------------------------------------------------------
+// Seeds the system_monitor system agent, its 11 system_skills (9 read + 2
+// write), the system principal user, and the org-side agents row in the
+// system-ops org. Schema for these rows comes from migration 0233 (tables,
+// columns, execution_scope='system' CHECK widening).
+
+async function phase4_systemMonitor(): Promise<void> {
+  logPhase(4, 7, 'System Monitor system agent + skills');
+
+  const SLUG = 'system_monitor';
+
+  // ── 1. Upsert the 11 system_monitor skills ────────────────────────────────
+  let skillsCreated = 0;
+  let skillsUpdated = 0;
+  for (const seed of SYSTEM_MONITOR_SKILL_SEEDS) {
+    const [existing] = await db
+      .select({ id: systemSkills.id })
+      .from(systemSkills)
+      .where(eq(systemSkills.slug, seed.slug));
+
+    if (existing) {
+      await db
+        .update(systemSkills)
+        .set({
+          name: seed.name,
+          description: seed.description,
+          definition: seed.definition,
+          handlerKey: seed.handlerKey,
+          sideEffects: seed.sideEffects,
+          visibility: 'none',
+          isActive: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(systemSkills.id, existing.id));
+      skillsUpdated += 1;
+    } else {
+      await db.insert(systemSkills).values({
+        slug: seed.slug,
+        handlerKey: seed.handlerKey,
+        name: seed.name,
+        description: seed.description,
+        definition: seed.definition,
+        sideEffects: seed.sideEffects,
+        visibility: 'none',
+        isActive: true,
+      });
+      skillsCreated += 1;
+    }
+  }
+  log(`  [ok]   skills: ${skillsCreated} created, ${skillsUpdated} updated`);
+
+  // ── 2. Upsert the system_monitor system_agent row ─────────────────────────
+  const description =
+    'Autonomous agent that diagnoses system incidents and generates investigation prompts.';
+
+  const [existingAgent] = await db
+    .select({ id: systemAgents.id })
+    .from(systemAgents)
+    .where(and(eq(systemAgents.slug, SLUG), isNull(systemAgents.deletedAt)));
+
+  let systemAgentId: string;
+  if (existingAgent) {
+    await db
+      .update(systemAgents)
+      .set({
+        name: 'System Monitor',
+        description,
+        masterPrompt: SYSTEM_MONITOR_PROMPT,
+        modelProvider: 'anthropic',
+        modelId: 'claude-sonnet-4-6',
+        temperature: 0.3,
+        maxTokens: 8096,
+        defaultSystemSkillSlugs: SYSTEM_MONITOR_SKILL_SLUGS,
+        executionScope: 'system',
+        isPublished: true,
+        status: 'active',
+        updatedAt: new Date(),
+      } as never)
+      .where(eq(systemAgents.id, existingAgent.id));
+    systemAgentId = existingAgent.id;
+    log(`  [ok]   Updated system_monitor system agent: ${systemAgentId}`);
+  } else {
+    const [created] = await db
+      .insert(systemAgents)
+      .values({
+        name: 'System Monitor',
+        slug: SLUG,
+        description,
+        masterPrompt: SYSTEM_MONITOR_PROMPT,
+        modelProvider: 'anthropic',
+        modelId: 'claude-sonnet-4-6',
+        temperature: 0.3,
+        maxTokens: 8096,
+        defaultSystemSkillSlugs: SYSTEM_MONITOR_SKILL_SLUGS,
+        executionScope: 'system',
+        isPublished: true,
+        version: 1,
+        status: 'active',
+      } as never)
+      .returning({ id: systemAgents.id });
+    systemAgentId = created.id;
+    log(`  [ok]   Created system_monitor system agent: ${systemAgentId}`);
+  }
+
+  // ── 3. Resolve system-ops org (created by migration 0225) ─────────────────
+  const [systemOrg] = await db
+    .select({ id: organisations.id })
+    .from(organisations)
+    .where(eq(organisations.isSystemOrg, true));
+
+  if (!systemOrg) {
+    throw new Error(
+      'system-ops organisation not found — migration 0225 should have created it. Has the migrate step run?',
+    );
+  }
+
+  // ── 4. Upsert the system principal user ───────────────────────────────────
+  // Owns system-initiated agent runs. Idempotent on the fixed UUID.
+  await db
+    .insert(users)
+    .values({
+      id: SYSTEM_PRINCIPAL_USER.id,
+      organisationId: systemOrg.id,
+      email: SYSTEM_PRINCIPAL_USER.email,
+      passwordHash: SYSTEM_PRINCIPAL_USER.passwordHash,
+      firstName: SYSTEM_PRINCIPAL_USER.firstName,
+      lastName: SYSTEM_PRINCIPAL_USER.lastName,
+      role: SYSTEM_PRINCIPAL_USER.role,
+      status: SYSTEM_PRINCIPAL_USER.status,
+    } as never)
+    .onConflictDoNothing({ target: users.id });
+  log(`  [ok]   System principal user: ${SYSTEM_PRINCIPAL_USER.email}`);
+
+  // ── 5. Upsert the org-side agents row in system-ops ───────────────────────
+  // The org-facing record linked to the system_monitor system agent.
+  const [existingOrgAgent] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.organisationId, systemOrg.id),
+        eq(agents.slug, SLUG),
+        isNull(agents.deletedAt),
+      ),
+    );
+
+  if (existingOrgAgent) {
+    await db
+      .update(agents)
+      .set({
+        name: 'System Monitor',
+        systemAgentId,
+        isSystemManaged: true,
+        status: 'active',
+        updatedAt: new Date(),
+      })
+      .where(eq(agents.id, existingOrgAgent.id));
+    log(`  [ok]   Updated system_monitor org agent: ${existingOrgAgent.id}`);
+  } else {
+    const [created] = await db
+      .insert(agents)
+      .values({
+        organisationId: systemOrg.id,
+        systemAgentId,
+        isSystemManaged: true,
+        name: 'System Monitor',
+        slug: SLUG,
+        masterPrompt: '',
+        status: 'active',
+      })
+      .returning({ id: agents.id });
+    log(`  [ok]   Created system_monitor org agent: ${created.id}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Playbook templates
 // ---------------------------------------------------------------------------
 
-async function phase4_playbookTemplates(): Promise<void> {
-  logPhase(4, 6, 'Playbook templates');
+async function phase5_playbookTemplates(): Promise<void> {
+  logPhase(5, 7, 'Playbook templates');
 
   await seedPlaybookFiles();
   await seedPortfolioHealthPlaybook();
@@ -722,11 +917,11 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 — Dev fixtures (Breakout Solutions demo org)
+// Phase 6 — Dev fixtures (Breakout Solutions demo org)
 // ---------------------------------------------------------------------------
 
-async function phase5_devFixtures(): Promise<void> {
-  logPhase(5, 6, 'Dev fixtures (Synthetos demo org)');
+async function phase6_devFixtures(): Promise<void> {
+  logPhase(6, 7, 'Dev fixtures (Synthetos demo org)');
 
   const ORG_NAME = 'Synthetos';
   const ORG_SLUG = 'synthetos';
@@ -1101,7 +1296,7 @@ async function activateBaselineSystemAgents(
   // that already belongs to a custom (non-system-managed) agent is off-limits
   // to the baseline activation loop — overwriting it would destroy user
   // customisation. This generalises the Reporting Agent slug-collision case
-  // (the Reporting Agent is created in Phase 5d as a non-system-managed
+  // (the Reporting Agent is created in Phase 6d as a non-system-managed
   // custom agent with slug 'reporting-agent') without hardcoding the slug.
   const existingCustomAgents = await db
     .select({ slug: agents.slug })
@@ -1318,18 +1513,19 @@ async function main(): Promise<void> {
   await phase1_systemBootstrap();
   await phase2_systemAgents();
   await phase3_playbookAuthor();
-  await phase4_playbookTemplates();
+  await phase4_systemMonitor();
+  await phase5_playbookTemplates();
 
   if (!IS_PRODUCTION) {
-    await phase5_devFixtures();
+    await phase6_devFixtures();
   } else {
-    console.log('\n[5/6] Dev fixtures — skipped (production mode)\n');
+    console.log('\n[6/7] Dev fixtures — skipped (production mode)\n');
   }
 
-  // Phase 6 — Configuration Assistant runtime guidelines memory block.
+  // Phase 7 — Configuration Assistant runtime guidelines memory block.
   // Runs in both production and dev. Seeds the guidelines block for every
   // org that has the Configuration Assistant agent activated. Idempotent.
-  logPhase(6, 6, 'Configuration Assistant guidelines block');
+  logPhase(7, 7, 'Configuration Assistant guidelines block');
   await seedConfigAgentGuidelinesAll(db, log);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
