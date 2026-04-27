@@ -62,7 +62,8 @@ export async function aggregateAgentRuns(
         a.config_hash              AS entity_change_marker,
         ar.duration_ms,
         ar.input_tokens,
-        ar.output_tokens
+        ar.output_tokens,
+        ar.run_result_status
       FROM agent_runs ar
       JOIN agents a ON a.id = ar.agent_id
       WHERE ar.completed_at > NOW() - (${windowDays} || ' days')::interval
@@ -87,6 +88,14 @@ export async function aggregateAgentRuns(
       SELECT entity_id, entity_change_marker, 'token_count_input'  AS metric_name, input_tokens::numeric   AS value FROM runs
       UNION ALL
       SELECT entity_id, entity_change_marker, 'token_count_output' AS metric_name, output_tokens::numeric  AS value FROM runs
+      UNION ALL
+      -- success_rate: 1 if run_result_status='success', 0 otherwise (per Phase 2.5 §9.6)
+      SELECT entity_id, entity_change_marker, 'success_rate'       AS metric_name,
+             CASE WHEN run_result_status = 'success' THEN 1.0 ELSE 0.0 END AS value FROM runs
+      UNION ALL
+      -- cost_per_outcome: total tokens on successful runs (tokens_per_successful_run per Phase 2.5 §9.6)
+      SELECT entity_id, entity_change_marker, 'cost_per_outcome'   AS metric_name,
+             (input_tokens + output_tokens)::numeric AS value FROM runs WHERE run_result_status = 'success'
     ) unpivoted
     WHERE value IS NOT NULL
     GROUP BY entity_id, entity_change_marker, metric_name
