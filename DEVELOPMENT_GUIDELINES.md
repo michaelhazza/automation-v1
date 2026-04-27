@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (condensed §§1–4 to one-liners; SQL templates and code examples moved to architecture.md; §10 format rules and finishing-branch trigger added; §§8.10–8.16 + §2 maintenance-job rule + §9 cross-entity rule from pre-launch-hardening reviews)
+**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -125,12 +125,9 @@ Every phase of the audit remediation reused existing primitives: `withOrgTx`, `w
 
 From the moment Phase 1 of the 2026-04-25 remediation starts until the Phase 4 ship gate is green, no new product features merge to `main`. Feature branches may exist; they wait. This is a one-time structural reset — when `docs/spec-context.md` reflects all phases complete, remove this constraint.
 
-### 8.6 Rate limiter rollback
+### 8.6 Infrastructure migrations ship with an env-flag rollback shim
 
-The DB-backed rate limiter ships with an env-flag rollback shim:
-- `USE_DB_RATE_LIMITER=false` → reverts to in-memory behaviour without a code revert
-- The shim has identical function signatures — no caller changes needed
-- Flip the flag, restart workers, observe
+Significant infrastructure migrations ship with an env-flag rollback shim that has identical function signatures to the new path — no caller changes required to revert.
 
 ### 8.7 State/Lifecycle invariants are mandatory for specs that touch state machines
 
@@ -178,7 +175,7 @@ Every entry in a project allow-list (RLS exceptions, gate suppressions, baseline
 
 ## 9. Multi-tenant safety checklist (every new feature)
 
-Before any PR that touches tenant data merges, answer YES to all five:
+Before any PR that touches tenant data merges, answer YES to all eight:
 
 - [ ] **Org-scoped at the table level.** New table has `organisation_id NOT NULL`, `RLS_PROTECTED_TABLES` entry, and canonical org-isolation policy in the same migration.
 - [ ] **Org-scoped at the query level.** Every read/write by ID also filters by `organisationId` explicitly.
