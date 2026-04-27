@@ -122,7 +122,7 @@ Anything else this spec touches reuses an existing primitive without modificatio
 
 Every file the implementation touches. Prose elsewhere in this spec must reference one of these entries — if a section names a file that isn't here, the spec has drifted and the inventory is the authoritative anchor.
 
-### 4.1 Migrations (1 new)
+### 4.1 Migrations (1 new + 1 down stub)
 
 | Path | Purpose |
 |------|---------|
@@ -720,6 +720,8 @@ Stub semantics:
 - Handlers that wrap external providers (`send_invoice`, `reconcile_transactions`, `chase_overdue`, `track_subscriptions`, `discover_prospects`, `book_meeting`) — when the relevant provider is not configured, return `{ status: 'not_configured', warning, data: null }` for `sideEffectClass: 'read'` skills, or `{ status: 'blocked', reason: 'provider_not_configured', requires: ['STRIPE_API_KEY' | ...] }` for `sideEffectClass: 'write'` skills.
 - Handlers that synthesise text via the LLM (`draft_outbound`, `prepare_renewal_brief`, `prepare_month_end`) — call `routeCall` from `llmRouter.ts` with the agent's configured model. No new infrastructure.
 
+**Principal-context propagation (per `scripts/verify-principal-context-propagation.sh`):** any handler in the three new service modules that calls `canonicalDataService.<method>(...)` MUST pass `fromOrgId(context.organisationId, context.subaccountId)` as the first argument (the gate is now call-site granular, A1b post-hardening). Handlers that do NOT touch `canonicalDataService` need no annotation. Handlers that import `canonicalDataService` solely for type references (no invocation) declare `// @principal-context-import-only — reason: <one-sentence>` at the top of the file (matches the convention applied to `actionRegistry.ts` in main).
+
 ### 9.2 `executeListMySubordinates` (the only foundational new handler)
 
 Builds on the existing `computeDescendantIds` utility in `server/tools/config/configSkillHandlersPure.ts`. Inputs:
@@ -762,12 +764,19 @@ The wrapper sits at `server/services/skillExecutor.ts:1881`. Two extensions:
 Inserted **before** `actionService.lockForExecution` and **after** `proposeAction` returns `auto`-approved status:
 
 ```ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
 const def = getActionDefinition(actionType);
 if (def?.idempotency) {
   const requestHash = hashActionArgs(input);  // existing utility
   const keyHash = hashKeyShape(def.idempotency.keyShape, input);  // NEW pure helper
 
-  // First-writer-wins INSERT
+  // First-writer-wins INSERT — raw SQL because Drizzle's typed `.insert()`
+  // cannot express `RETURNING xmax = 0 AS is_first_writer`. Per §16.5,
+  // raw-SQL writes to RLS-protected tables must call `assertRlsAwareWrite`
+  // immediately before the write or `verify-rls-protected-tables.sh`
+  // flags the call site as an advisory violation.
+  assertRlsAwareWrite('skill_idempotency_keys');
   const insertResult = await db.execute(sql`
     INSERT INTO skill_idempotency_keys
       (subaccount_id, organisation_id, skill_slug, key_hash, request_hash, status, expires_at)
@@ -820,18 +829,45 @@ if (def?.idempotency) {
 }
 ```
 
-After the executor runs, the wrapper persists the result:
+After the executor runs, the wrapper persists the result. The terminal UPDATE includes the **mandatory** `WHERE status = 'in_flight'` predicate per §16A.7 (state machine closure) — this prevents post-terminal corruption and provides the optimistic concurrency guard:
 
 ```ts
 if (def?.idempotency && isFirstWriter) {
-  await db.update(skillIdempotencyKeys)
+  const updateResult = await db.update(skillIdempotencyKeys)
     .set({
       responsePayload: result,
       status: resultObj?.success ? 'completed' : 'failed',
     })
-    .where(/* same primary key */);
+    .where(and(
+      eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+      eq(skillIdempotencyKeys.skillSlug, actionType),
+      eq(skillIdempotencyKeys.keyHash, keyHash),
+      eq(skillIdempotencyKeys.status, 'in_flight'),  // §16A.7 — terminal-only-from-in_flight invariant
+    ))
+    .returning({ status: skillIdempotencyKeys.status });
+
+  if (updateResult.length === 0) {
+    // Lost the terminal race — another path already wrote completed/failed.
+    // Read the winning row, emit observability event, return its payload.
+    createEvent('skill.warn', {
+      skillName: actionType,
+      reason: 'terminal_race_lost',
+      key_hash: keyHash,
+    });
+    const [winner] = await db.select()
+      .from(skillIdempotencyKeys)
+      .where(and(
+        eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+        eq(skillIdempotencyKeys.skillSlug, actionType),
+        eq(skillIdempotencyKeys.keyHash, keyHash),
+      ))
+      .limit(1);
+    return winner.responsePayload;
+  }
 }
 ```
+
+The `.update()` call uses Drizzle's typed builder, which is auto-Proxy-guarded by `getOrgScopedDb` — no explicit `assertRlsAwareWrite` needed for this path.
 
 #### 9.3.2 Side-effect-class wrapper (`sideEffectClass`)
 
@@ -905,8 +941,11 @@ In `registerAdapter('worker', ...)` (top of `skillExecutor.ts`), the `case 'upda
 - `npm run typecheck` passes.
 - `npm run lint` passes.
 - `bash scripts/verify-no-silent-failures.sh` passes (the new wrapper paths emit structured logs, not silent returns).
+- `bash scripts/verify-principal-context-propagation.sh` passes — every `canonicalDataService.<method>(` call site in the new service modules (`adminOpsService.ts`, `sdrService.ts`, `retentionSuccessService.ts`) passes a `fromOrgId(...)` first argument or the file declares `// @principal-context-import-only`.
+- `bash scripts/verify-rls-protected-tables.sh` passes — the `assertRlsAwareWrite('skill_idempotency_keys')` call in §9.3.1 satisfies the write-path advisory check; no other raw-SQL writes to RLS-protected tables are introduced by this phase.
 - Manual test: invoke `draft_post` from a `head-of-growth` test run → wrapper returns `{ action: 'block', reason: 'manager_role_violation' }`.
 - Manual test: invoke `send_invoice` twice with the same `(engagement_id, billing_period_start, billing_period_end)` → second call returns the cached payload with `skill.idempotency.hit` log.
+- Manual test: race two terminal UPDATEs on the same idempotency row → losing path's `WHERE status = 'in_flight'` returns 0 rows; logger emits `skill.warn` with `reason: 'terminal_race_lost'`; both callers receive the winner's payload (per §16A.3 + §16A.7).
 
 ---
 
@@ -1796,8 +1835,11 @@ The migration is complete when **all** of the following hold. Numbered for trace
 19. **No orphan skills.** Every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list **OR** carries `reusable: true` in its own frontmatter.
 20. **No orphan agents.** Every active `system_agents` row except `orchestrator`, `portfolio-health-agent`, and `workflow-author` has a non-null `parent_system_agent_id` referencing another active row.
 21. **Active-row uniqueness.** `\d+ system_agents` shows `system_agents_slug_active_idx` and `\d+ agents` shows `agents_org_slug_active_uniq` — both as `WHERE (deleted_at IS NULL)` partial uniques.
-22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table).
-23. **Static gates.** `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` (relevant set) exit 0.
+22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table; the §9.3.1 `assertRlsAwareWrite` call covers the raw-SQL write-path advisory).
+23. **Principal-context propagation.** `bash scripts/verify-principal-context-propagation.sh` exits 0 — every `canonicalDataService` call site in the new service modules passes a PrincipalContext-shaped first argument, or the file declares `@principal-context-import-only`.
+24. **Migration sequencing.** `bash scripts/verify-migration-sequencing.sh` exits 0 — migration `0233_system_agents_v7_1.sql` is correctly numbered and the `_down/` reversal stub exists.
+25. **State-machine closure.** `skill_idempotency_keys.status` CHECK constraint is in place (`status IN ('in_flight','completed','failed')`); manual psql probe inserting `'completed'` directly fails with `23514 check_violation`; manual UPDATE attempting `completed → failed` returns 0 rows (the wrapper's `WHERE status = 'in_flight'` predicate refuses the transition per §16A.7).
+26. **Static gates.** `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` (relevant set) exit 0.
 
 ---
 
