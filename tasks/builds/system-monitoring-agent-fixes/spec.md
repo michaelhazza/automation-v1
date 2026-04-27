@@ -211,6 +211,8 @@ Silent = none of the above. Verifiable with a single LEFT JOIN query (one row pe
 
 **Observability contract for system-managed agents.** All system-managed agents (rows in `agents` with `is_system_managed = true`) MUST write at least one of `agent_execution_events`, `system_incident_events`, or `skill_executions` per completed run to remain observable to this check. New write surfaces introduced by future system-managed agents MUST also emit at least one `agent_execution_events` row per run — even if the primary write is to a new table — so this side-effect probe stays stable as the fleet grows. This is an internal contract on system-managed agents; it does not apply to tenant-scoped agents and is not surfaced to operators.
 
+**Timing clause — synchronous emission required.** The required `agent_execution_events` (or other side-effect) row MUST be written synchronously *during the run lifecycle* — i.e. before the `agent_runs` row transitions to `status='completed'`. A system-managed agent that defers side effects asynchronously (e.g. enqueues a follow-up job that writes downstream rows after the run completes, or batches writes via a downstream queue) MUST still emit at least one `agent_execution_events` row inside the run lifecycle to remain observable to this check. This prevents the check from drifting into false positives as the fleet evolves toward async patterns: a run that "looks completed but its side effects are still in flight" would otherwise be indistinguishable from a genuinely silent run at the moment the check executes. The synchronous-emission rule is the load-bearing invariant — `agent_runs.status='completed'` MUST mean "this run produced at least one observable marker by the time it claimed success."
+
 ### 4.5 `incident-silence` synthetic-check result contract
 
 | Field | Value |
@@ -490,13 +492,14 @@ SELECT
               AND si.metadata->>'checkId' = 'incident-silence'))  AS incidents_in_window,
   (SELECT COUNT(*) FROM system_incidents si, params
    WHERE si.source = 'synthetic'
-     AND si.created_at >= params.proof_cutoff)                    AS synthetic_fires_in_proof_window
+     AND si.created_at >= params.proof_cutoff
+     AND NOT (si.metadata->>'checkId' = 'incident-silence'))      AS synthetic_fires_in_proof_window
 ```
 
 `$silenceCutoff = ctx.now - SYSTEM_MONITOR_INCIDENT_SILENCE_HOURS hours` (default 12h).
 `$proofCutoff = ctx.now - SYSTEM_MONITOR_INCIDENT_SILENCE_PROOF_OF_LIFE_HOURS hours` (default 24h).
 
-The `incidents_in_window` count **excludes** rows written by this check itself (`source='synthetic' AND metadata.checkId='incident-silence'`). Rationale and the sustained-signal contract that depends on this exclusion: see [§9.6](#96-sustained-silence-signal-contract).
+The `incidents_in_window` count **excludes** rows written by this check itself (`source='synthetic' AND metadata.checkId='incident-silence'`). The `synthetic_fires_in_proof_window` count **also excludes** silence-check rows (`metadata.checkId='incident-silence'`) — proof-of-life MUST be carried by an independent synthetic check, not by the silence check itself. Without this exclusion, a system whose only signal is the silence detector would self-validate proof-of-life from its own prior fires, masking the underlying outage. Rationale and the sustained-signal contract that depends on both exclusions: see [§9.6](#96-sustained-silence-signal-contract).
 
 ### 9.2 Pure helper
 
@@ -511,9 +514,13 @@ export function isMonitoringSilent(
 
 Pure-helper test asserts: `(0, 0) → false (cold-start)`, `(0, 1) → true`, `(0, 5) → true`, `(1, 0) → false`, `(1, 5) → false`.
 
+The `syntheticFiresInProofWindow` parameter receives the SQL-side excluded count per §9.1 (silence-check rows already filtered out), so the helper itself is exclusion-agnostic — it asserts the predicate "no incidents AND at least one *independent* synthetic fire." Test cases stay numeric; the SQL-side exclusion is verified by the integration smoke check in §14.3 (A3.3).
+
 ### 9.3 Why proof-of-life
 
 A literally idle staging environment will have zero incidents and zero synthetic fires — that is *correct silence*, not failure. The proof-of-life gate says: only fire if *something* recently fired. The 24h proof window is wider than the 12h silence window so a healthy system that just had its last incident 13h ago still has proof-of-life from a synthetic fire at hour 22, 21, 20, etc. — the check tolerates uneven activity but catches genuine silence.
+
+**Why proof-of-life excludes silence-check fires.** Per §9.1, the `synthetic_fires_in_proof_window` count filters out rows where `metadata.checkId='incident-silence'`. Proof-of-life MUST be carried by an *independent* synthetic check (e.g. `agentRunSuccessRateLow`, `pgBossQueueStalled`, `silentAgentSuccess`, etc.) — not by this check's own prior fires. Without that exclusion, a system whose only living signal is the silence detector itself would validate its own proof-of-life: every silence-check fire would count as proof that monitoring is alive, and the check would re-fire on its own ecosystem rather than on real activity. The exclusion is symmetric with the `incidents_in_window` exclusion in §9.1: silence-check rows are neither monitoring activity (don't count toward `incidents_in_window`) nor proof-of-life (don't count toward `synthetic_fires_in_proof_window`). Real synthetic-check fires are the only proof-of-life. If every other synthetic check has been silent for 24h *and* no real incidents in 12h, the check correctly *stops* firing — because at that point the substrate is so dark we can't distinguish "outage" from "genuinely idle," and emitting a silence-check incident would not change that.
 
 ### 9.4 Severity
 
@@ -525,14 +532,15 @@ Single global resource (`resourceKind='system'`, `resourceId='monitoring'`). Fin
 
 ### 9.6 Sustained-silence signal contract
 
-Silence-check incidents do **not** count as monitoring activity. The §9.1 query explicitly excludes rows where `source='synthetic' AND metadata.checkId='incident-silence'` from `incidents_in_window`, so a system whose only signal is the silence detector itself is **still considered silent** — the underlying substrate is still dark, and that's what we want to surface.
+Silence-check incidents do **not** count as monitoring activity, and they do **not** count as proof-of-life. The §9.1 query excludes rows where `metadata.checkId='incident-silence'` from *both* `incidents_in_window` and `synthetic_fires_in_proof_window`. A system whose only signal is the silence detector itself is **still considered silent** AND has no proof-of-life from itself — the underlying substrate is still dark, and that's what we want to surface.
 
-Two independent mechanisms cooperate:
+Three independent mechanisms cooperate:
 
-1. **Sustained-signal counting (§9.1 predicate):** the silence detector ignores its own prior fires when computing `incidents_in_window`. As long as the underlying silence persists past `silenceCutoff` and proof-of-life still holds, the check *would* re-fire every tick. This is what keeps the signal alive instead of self-healing after one row.
-2. **Active-incident dedup (§9.5):** the partial unique index `system_incidents_active_fingerprint_idx` on fingerprint `synthetic:incident-silence:system:monitoring` ensures at most one *active* row exists at any moment. Per-tick re-fires bump `occurrence_count` on the existing active incident rather than creating duplicates. Operators see one open incident with a rising occurrence count, not a flood of new incidents.
+1. **Sustained-signal counting (§9.1 `incidents_in_window` predicate):** the silence detector ignores its own prior fires when computing `incidents_in_window`. As long as the underlying silence persists past `silenceCutoff` and proof-of-life still holds, the check *would* re-fire every tick. This is what keeps the signal alive instead of self-healing after one row.
+2. **Independent proof-of-life (§9.1 `synthetic_fires_in_proof_window` predicate):** the silence detector ignores its own prior fires when computing proof-of-life as well. Proof-of-life is carried only by *other* synthetic checks (or real incidents), so the silence detector cannot validate its own ecosystem. If every other monitoring signal is dead, the silence check stops firing — because at that point we cannot distinguish outage from idle, and emitting silence-on-silence is not informative.
+3. **Active-incident dedup (§9.5):** the partial unique index `system_incidents_active_fingerprint_idx` on fingerprint `synthetic:incident-silence:system:monitoring` ensures at most one *active* row exists at any moment. Per-tick re-fires bump `occurrence_count` on the existing active incident rather than creating duplicates. Operators see one open incident with a rising occurrence count, not a flood of new incidents.
 
-Together: the check fires every tick while underlying silence persists (sustained signal), but the operator sees a single active incident with an incrementing `occurrence_count` (clean inbox). When the operator resolves the incident *and* the underlying silence is still present, the next tick creates a new active incident — by design, because resolution is operator intent, and intent should be respected. When real activity returns (any non-silence-check incident written within the silence window, or proof-of-life still holding with at least one real incident), `incidents_in_window` becomes ≥ 1 and the check stops firing naturally.
+Together: while underlying silence persists *and* an independent synthetic check is still firing within the proof-of-life window, the check re-fires every tick (sustained signal), but the operator sees a single active incident with an incrementing `occurrence_count` (clean inbox). When the operator resolves the incident *and* the underlying silence is still present *and* proof-of-life still holds, the next tick creates a new active incident — by design, because resolution is operator intent, and intent should be respected. When real activity returns (any non-silence-check incident written within the silence window), `incidents_in_window` becomes ≥ 1 and the check stops firing naturally. When *every* synthetic check goes dark for 24h, proof-of-life fails and the check also stops firing — correct fail-quiet posture for total-substrate-down.
 
 No infinite-loop risk: the dedup index caps active-row count at 1, and `occurrence_count` is the only thing that grows while silence persists.
 
@@ -582,6 +590,16 @@ CLAUDE.md frontend rule 4 ("inline state beats dashboards") and the existing `Di
 
 Section 10 of the spec-authoring checklist. Each new write path has its idempotency posture, retry classification, concurrency guard, and terminal-event story explicitly pinned.
 
+### 11.0 Centralised invariant — single-writer terminal-event rule
+
+**This rule is normative and applies to every writer in the triage flow without exception.**
+
+> **Triage terminal-event invariant:** A terminal event for a triage attempt (`agent_diagnosis_added`, `agent_triage_failed`, `agent_triage_timed_out`) MUST only be emitted by a writer whose `UPDATE` flipped `triage_status` from `'running'` to a terminal value (`'completed'` or `'failed'`) in the same transaction. Every such writer MUST include `WHERE triage_status = 'running'` in its UPDATE and MUST inspect the affected row count before emitting the event. If the UPDATE returns 0 rows, the writer MUST suppress its terminal event — another writer (the tool loop completing late, or the staleness sweep, or a parallel handler invocation) has already won the transition.
+
+**Why this is the load-bearing rule.** Three independent writers can race for the same `(incidentId, attempt)` row: the tool-loop success path, the tool-loop failure path, and the staleness sweep. Without a single-writer invariant, a late tool-loop completion firing after a sweep already flipped the row would emit a `'completed'`-shaped event on top of an `'agent_triage_timed_out'` event — producing a `completed after failed` corruption visible to operators and downstream consumers. The `WHERE triage_status = 'running'` predicate plus the row-count check is the only guard between the spec and that corruption: every emitter follows the same rule, the row transition is serialised by Postgres, exactly one writer wins, only that writer emits.
+
+**Where this is enforced.** §11.3 enumerates the three writers (tool-loop success, tool-loop failure, staleness sweep) and their concrete UPDATE-then-event sequences. §7.1 covers the duplicate-job early-return path that is *not* a terminal event (no event emission) and therefore not bound by this invariant. Any future writer that can transition `triage_status` to a terminal value MUST be added to §11.3's enumeration AND MUST conform to this invariant — adding a writer without conforming is a §11.0 violation and a blocking spec amendment.
+
 ### 11.1 Triage attempt increment
 
 | Concern | Posture |
@@ -616,12 +634,13 @@ The triage flow has exactly one terminal event per logical attempt. The closure 
 
 Post-terminal prohibition: once a row has `triage_status IN ('completed', 'failed')`, the sweep predicate excludes it (`WHERE triage_status = 'running'`), so no spurious `agent_triage_timed_out` can fire after a real terminal event landed. The three terminal events are mutually exclusive per logical attempt.
 
-**Invariant — no double terminal events per attempt.** A terminal event (`agent_diagnosis_added`, `agent_triage_failed`, `agent_triage_timed_out`) MUST only be emitted by a writer that itself flipped `triage_status` from `'running'` to a terminal value (`'completed'` or `'failed'`) in the same transaction. All emitters MUST verify the row was in `triage_status = 'running'` at the moment of their UPDATE (via the predicate's row-count return) before writing the event. Concretely:
-- The tool-loop success path: the `write_diagnosis` skill's UPDATE includes `WHERE triage_status = 'running'`; the `agent_diagnosis_added` event INSERT runs in the same transaction and only if the UPDATE returned 1 row.
-- The tool-loop failure path: the failure handler's UPDATE includes `WHERE triage_status = 'running'`; `agent_triage_failed` only fires on a 1-row return.
-- The sweep path: per §7.2 / §11.2, the predicate (`triage_status = 'running' AND last_triage_attempt_at < cutoff AND last_triage_job_id IS NOT NULL`) is the guard; `agent_triage_timed_out` is emitted once per row in the UPDATE...RETURNING set, in the same transaction.
+**Conformance to §11.0.** Each of the three writers below conforms to the centralised single-writer terminal-event invariant in §11.0 — every UPDATE includes `WHERE triage_status = 'running'`, every event INSERT is gated on the UPDATE returning 1 row, and every emitter suppresses its event on a 0-row return.
 
-This makes the closure self-enforcing at every emitter rather than relying on absence-of-race-condition between three independent writers. A late-arriving tool-loop completion that races a sweep tick will find its UPDATE matches 0 rows (the sweep already flipped the row to `'failed'`) and MUST suppress its terminal event accordingly. Symmetrically, a sweep tick racing a late tool-loop completion finds its UPDATE matches 0 rows and emits no event. Exactly one writer wins the row transition per attempt; only that writer emits the terminal event.
+- **Tool-loop success path:** the `write_diagnosis` skill's UPDATE includes `WHERE triage_status = 'running'`; the `agent_diagnosis_added` event INSERT runs in the same transaction and only if the UPDATE returned 1 row.
+- **Tool-loop failure path:** the failure handler's UPDATE includes `WHERE triage_status = 'running'`; `agent_triage_failed` only fires on a 1-row return.
+- **Staleness-sweep path:** per §7.2 / §11.2, the predicate (`triage_status = 'running' AND last_triage_attempt_at < cutoff AND last_triage_job_id IS NOT NULL`) is the guard; `agent_triage_timed_out` is emitted once per row in the UPDATE...RETURNING set, in the same transaction. A sweep tick that finds 0 rows (because a tool-loop writer just won the transition) emits no event.
+
+**Race resolution.** A late-arriving tool-loop completion that races a sweep tick finds its UPDATE matches 0 rows (the sweep already flipped the row to `'failed'`) and per §11.0 MUST suppress its terminal event. Symmetrically, a sweep tick racing a late tool-loop completion finds its UPDATE matches 0 rows and emits no event. Exactly one writer wins the row transition per attempt; only that writer emits the terminal event. The closure is self-enforcing at every emitter rather than relying on absence-of-race-condition between three independent writers.
 
 ### 11.4 Synthetic check writes
 
@@ -760,9 +779,10 @@ A reviewer can confirm this spec is satisfied by running each check below and ob
 |---|---|---|
 | A3.1 | Run `incidentSilencePure.test.ts`. | Pass. |
 | A3.2 | Inspect `SYNTHETIC_CHECKS` array. | Includes `incidentSilence` entry. |
-| A3.3 | Seed test DB: zero `system_incidents` in last 12h, one `system_incidents` row with `source='synthetic'` created 18h ago. Run synthetic-checks tick. | Incident created with fingerprint `synthetic:incident-silence:system:monitoring`, severity=`high`. |
+| A3.3 | Seed test DB: zero non-silence `system_incidents` in last 12h, one `system_incidents` row with `source='synthetic'` and `metadata.checkId != 'incident-silence'` (e.g. `agentRunSuccessRateLow`) created 18h ago. Run synthetic-checks tick. | Incident created with fingerprint `synthetic:incident-silence:system:monitoring`, severity=`high`. |
 | A3.4 | Seed test DB: zero `system_incidents` ever. | No incident (cold-start tolerance). |
-| A3.5 | Seed test DB: one `system_incidents` in last 12h. | No incident. |
+| A3.5 | Seed test DB: one non-silence `system_incidents` in last 12h. | No incident. |
+| A3.6 | Seed test DB: zero non-silence `system_incidents` in last 12h, BUT three `system_incidents` rows with `source='synthetic' AND metadata.checkId='incident-silence'` created 6h / 12h / 18h ago. Run synthetic-checks tick. | No incident — silence-check rows do not count as proof-of-life (§9.6, §9.1 `synthetic_fires_in_proof_window` exclusion). |
 
 ### 14.4 Phase 4 (G5)
 

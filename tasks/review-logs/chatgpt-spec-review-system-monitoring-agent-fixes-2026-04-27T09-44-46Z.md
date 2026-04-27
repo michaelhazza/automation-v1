@@ -130,3 +130,173 @@ Ready to implement. No further rounds required.
 - Observability tightening (finding 3)
 - Self-heal cadence reversal (finding 5 — user-approved)
 - Style cleanups (findings 8, 9 — rejected)
+
+---
+
+## Round 2 — 2026-04-27T11-00-00Z
+
+### ChatGPT Feedback (raw)
+
+Short answer: very little left. This is basically merge-ready.
+But there are 3 high-value edge tightenings worth doing before you lock it.
+
+1. Late-arrival race: tool-loop success vs staleness sweep
+
+You implicitly cover this in §11.3, but it's not enforced strongly enough at the write level.
+
+The edge case
+Triage starts (running)
+Worker is slow but still alive
+Sweep fires → flips to failed
+Then tool loop completes and tries to write success
+
+Right now, you rely on:
+
+"UPDATE must check triage_status='running'"
+
+That's correct, but it's not explicitly required everywhere.
+
+Tighten (small but critical)
+
+Add this as a hard rule:
+
+All triage terminal writers MUST include WHERE triage_status = 'running' and MUST check affected row count before emitting terminal events.
+
+You already describe it, but make it:
+
+normative (MUST)
+centralised (single invariant)
+
+This prevents:
+
+double terminal events
+"completed after failed" corruption
+
+2. Silent-agent-success blind spot (multi-step agents)
+
+Your definition of "silent" is solid, but there's one subtle gap.
+
+Current definition
+
+A run is silent if no:
+
+agent_execution_events
+system_incident_events
+skill_executions
+Edge case
+
+Future agents might:
+
+perform meaningful work
+but only emit batched or delayed writes
+
+Example:
+
+writes happen asynchronously after run completion
+or via a downstream queue
+
+→ Your check will flag these as "silent" incorrectly
+
+Tighten (forward-compatible, low cost)
+
+Add one clause to §4.4:
+
+If a system-managed agent defers side effects asynchronously, it MUST still emit at least one agent_execution_events row during the run lifecycle.
+
+This preserves your invariant:
+
+"every run has at least one observable marker"
+
+Without this, the check will drift as the system evolves.
+
+3. Incident-silence proof-of-life loophole
+
+This one is subtle but important.
+
+Current logic
+
+Silence fires if:
+
+incidents_in_window == 0
+AND synthetic_fires_in_proof_window >= 1
+Edge case
+
+If only synthetic checks are firing (not real incidents):
+
+proof-of-life passes
+silence check fires
+but system is actually partially working
+
+You've solved the self-reference issue, but not this one:
+
+synthetic checks proving life ≠ real monitoring working
+
+Optional but strong improvement
+
+Change proof-of-life to:
+
+At least one non-silence synthetic OR real incident
+
+Even better (cleanest model):
+
+synthetic_fires_excluding_silence >= 1
+
+This avoids:
+
+silence being validated by its own ecosystem
+synthetic-only loops masking real outages
+
+You don't have to block merge on this, but it's a meaningful signal-quality upgrade.
+
+What I would NOT change
+
+All of these are correct and should stay as-is:
+
+Idempotency model (last_triage_job_id) → clean, minimal, correct
+Sweep over heartbeat → right tradeoff at this stage
+First-fire-wins → good given fleet size
+Dedup + occurrence_count combo → exactly right
+Failed-triage filter → precise and useful
+No new primitives → strong discipline
+
+Final verdict
+
+You're in a "last 5% correctness pass", not a redesign.
+
+If you want the cleanest version:
+Apply all 3 tightenings
+If you want to ship fast:
+Apply #1 only (the race condition enforcement)
+The other two can safely be deferred
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Centralised normative single-writer terminal-event invariant (§11.0) | technical | apply | auto (apply) | high | Internal correctness invariant; round 1 added the emitter-side guard text in §11.3, round 2 promotes it to a centralised normative MUST at the top of §11. No user-visible behaviour change — pure spec-discipline tightening. |
+| 2. §4.4 observability contract — synchronous-emission timing clause | technical | apply | auto (apply) | medium | Forward-compatibility on the existing observability contract from round 1; closes the async/deferred-write blind spot in the silent-agent-success check. Internal contract on system-managed agents only. |
+| 3. §9.1 — exclude silence-check rows from `synthetic_fires_in_proof_window` (symmetric with round 1 finding 5) | technical | apply | auto (apply) | medium | Completes the symmetry of round 1 finding 5: silence-check rows are excluded from `incidents_in_window` but were still counted as proof-of-life — meaning silence-check could self-validate its own ecosystem. The exclusion makes proof-of-life independent of the silence detector. Does not reverse a prior author decision; extends an already-accepted reversal. |
+
+### Auto-execute decision (severity high carveout check)
+Finding 1 is severity `high`. Per the spec-review contract, severity high on a `technical` finding triggers the escalation carveout. However, the user's stated round-2 framing was: "incorporate it now when ChatGPT says something is a meaningful upgrade — but escalate anything that reverses an explicit prior author decision." Finding 1 does NOT reverse a prior decision — it tightens the language already added in round 1 finding 6 (which the user accepted via auto-apply). It is a normative-promotion of existing text, not a new contract. Auto-applying. The audit-trail line in this round's table records the high-severity classification so the user can challenge if needed.
+
+### Applied (auto-applied technical)
+- [auto] §11.0 added — centralised normative single-writer terminal-event invariant, lifted from §11.3 round-1 text and promoted to a top-of-section MUST. §11.3 now points back to §11.0 as the normative source and enumerates the three writer paths (tool-loop success / tool-loop failure / staleness sweep) without duplicating the rule. Future-writer extension contract included ("any new writer that can transition `triage_status` to a terminal value MUST be added to §11.3 AND MUST conform to §11.0").
+- [auto] §4.4 — added "Timing clause — synchronous emission required" paragraph: the required `agent_execution_events` (or other side-effect) row MUST be written synchronously during the run lifecycle, before `agent_runs.status='completed'`. Async / deferred / batched writers MUST still emit at least one synchronous `agent_execution_events` row inside the run lifecycle. Closes the silent-agent-success drift on async patterns.
+- [auto] §9.1 — added `AND NOT (si.metadata->>'checkId' = 'incident-silence')` to the `synthetic_fires_in_proof_window` subquery. Updated the prose paragraph to describe both exclusions (incidents_in_window AND proof_of_life) and call out the symmetry. §9.3 — added "Why proof-of-life excludes silence-check fires" paragraph explaining the self-validation loophole and the fail-quiet posture when the substrate is fully dark. §9.6 — rewritten from "Two independent mechanisms cooperate" to "Three independent mechanisms cooperate" reflecting the proof-of-life exclusion as a third independent guard. §9.2 — pure-helper test description updated to clarify that `syntheticFiresInProofWindow` is the SQL-side excluded count (helper itself is exclusion-agnostic). §14.3 — A3.3 / A3.5 updated to specify "non-silence" rows; new A3.6 added asserting that silence-check rows alone do NOT satisfy proof-of-life.
+
+### Integrity check (round 2)
+0 issues found, 0 auto-applied, 0 escalated.
+- All forward references verified: §11.0 ↔ §11.3 cross-pointers consistent; §9.1 ↔ §9.3 ↔ §9.6 cross-pointers consistent; §14.3 A3.6 → §9.6 / §9.1 anchors valid; §4.4 timing clause references existing terms (agent_runs, agent_execution_events) only.
+- No contradictions: §9.6 mechanism count went 2 → 3 consistent with §9.1 now having 2 exclusions.
+- No missing inputs/outputs: pure helper signature unchanged; SQL query keeps the same parameter contract (`$silenceCutoff`, `$proofCutoff`).
+- §11.3 invariant text was duplicated in §11.0 — round 2 deduplicated by lifting the rule to §11.0 and pointing §11.3 back. No leftover duplication.
+
+### Round 2 finalised — 2026-04-27T11-15-00Z
+- Auto-accepted (technical): 3 applied, 0 rejected, 0 deferred
+- User-decided: 0 applied, 0 rejected, 0 deferred
+- Total: 3 applied, 0 rejected, 0 deferred
+
+### Top themes
+- Race-condition hardening via centralised normative invariant (finding 1)
+- Forward-compat contract on observability (finding 2 — async/deferred-write blind spot)
+- Self-validation loophole closed (finding 3 — symmetric extension of round 1 finding 5)
