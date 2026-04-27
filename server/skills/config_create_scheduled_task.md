@@ -2,7 +2,7 @@
 name: Config Create Scheduled Task
 description: Create a recurring scheduled task with title, description, assigned agent, and schedule.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

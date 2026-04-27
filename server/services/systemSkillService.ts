@@ -35,6 +35,8 @@ export interface SystemSkill {
   visibility: SkillVisibility;
   definition: AnthropicTool;
   instructions: string | null;
+  /** F11 — whether this skill produces side-effects at runtime (Riley §6.4). */
+  sideEffects: boolean;
 }
 
 /** Optional transaction handle — when provided, the method runs against the
@@ -64,6 +66,7 @@ function toPublic(row: SystemSkillRow): SystemSkill {
     visibility,
     definition: row.definition as AnthropicTool,
     instructions: row.instructions ?? null,
+    sideEffects: row.sideEffects,
   };
 }
 
@@ -108,6 +111,8 @@ export interface CreateSystemSkillInput {
   instructions?: string | null;
   visibility?: SkillVisibility;
   isActive?: boolean;
+  /** F11 — whether this skill has side-effects at runtime. Default true (safe). */
+  sideEffects?: boolean;
 }
 
 export interface UpdateSystemSkillPatch {
@@ -117,6 +122,8 @@ export interface UpdateSystemSkillPatch {
   instructions?: string | null;
   visibility?: SkillVisibility;
   isActive?: boolean;
+  /** F11 — whether this skill has side-effects at runtime. */
+  sideEffects?: boolean;
   // Note: slug and handlerKey are intentionally not patchable — the
   // handlerKey = slug invariant is locked at create time. See §5.5.
 }
@@ -322,6 +329,7 @@ export const systemSkillService = {
           instructions: input.instructions ?? null,
           visibility: input.visibility ?? 'none',
           isActive: input.isActive ?? true,
+          sideEffects: input.sideEffects ?? true,
         })
         .returning();
 
@@ -369,6 +377,7 @@ export const systemSkillService = {
       if (patch.instructions !== undefined) update.instructions = patch.instructions;
       if (patch.visibility !== undefined) update.visibility = patch.visibility;
       if (patch.isActive !== undefined) update.isActive = patch.isActive;
+      if (patch.sideEffects !== undefined) update.sideEffects = patch.sideEffects;
 
       const rows = await tx
         .update(systemSkills)

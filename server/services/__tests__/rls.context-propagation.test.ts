@@ -72,6 +72,13 @@ function assert(cond: unknown, message: string): void {
   if (!cond) throw new Error(message);
 }
 
+// Tables that enforce org isolation via parent-EXISTS (no direct organisation_id
+// column). The generic Layer A and write-rejection tests use
+// `WHERE organisation_id = ...` / `INSERT (id, organisation_id)` which would
+// fail with a column-not-found error for these tables. They are skipped in the
+// generic loop and covered by dedicated parent-EXISTS tests below.
+const PARENT_EXISTS_TABLES: ReadonlySet<string> = new Set(['reference_document_versions']);
+
 // ---------------------------------------------------------------------------
 // Fixtures: create two throwaway organisations and seed one row per protected
 // table against each. The seeding has to run under admin_role because the
@@ -191,18 +198,108 @@ async function main(): Promise<void> {
 
   try {
     for (const entry of RLS_PROTECTED_TABLES) {
-      await test(
-        `[Layer A] ${entry.tableName}: tenant-scoped read under withOrgTx(orgA) sees no orgB rows`,
-        () => assertLayerAVisibility(entry.tableName),
-      );
+      if (!PARENT_EXISTS_TABLES.has(entry.tableName)) {
+        await test(
+          `[Layer A] ${entry.tableName}: tenant-scoped read under withOrgTx(orgA) sees no orgB rows`,
+          () => assertLayerAVisibility(entry.tableName),
+        );
+      }
       await test(
         `[Layer B] ${entry.tableName}: unscoped read returns zero rows`,
         () => assertLayerBFailClosed(entry.tableName),
       );
+      if (!PARENT_EXISTS_TABLES.has(entry.tableName)) {
+        await test(
+          `[Layer B] ${entry.tableName}: unscoped INSERT is rejected`,
+          () => assertLayerBWriteRejected(entry.tableName),
+        );
+      }
+    }
+
+    // Dedicated parent-EXISTS tests for reference_document_versions
+    let parentDocIdA: string | null = null;
+    let parentDocIdB: string | null = null;
+    try {
+      // Seed: one reference_document per org, one version per document.
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        const resA = await tx.execute(sql`
+          INSERT INTO reference_documents (organisation_id, name)
+          VALUES (${ORG_A}::uuid, 'RLS Test Doc A')
+          RETURNING id
+        `);
+        parentDocIdA = (resA as unknown as Array<{ id: string }>)[0]?.id ?? null;
+        const resB = await tx.execute(sql`
+          INSERT INTO reference_documents (organisation_id, name)
+          VALUES (${ORG_B}::uuid, 'RLS Test Doc B')
+          RETURNING id
+        `);
+        parentDocIdB = (resB as unknown as Array<{ id: string }>)[0]?.id ?? null;
+
+        await tx.execute(sql`
+          INSERT INTO reference_document_versions
+            (document_id, version, content, content_hash, token_counts, serialized_bytes_hash, change_source)
+          VALUES
+            (${parentDocIdA}::uuid, 1, 'version A', 'hash-rls-a', '{}', 'shash-rls-a', 'manual')
+        `);
+        await tx.execute(sql`
+          INSERT INTO reference_document_versions
+            (document_id, version, content, content_hash, token_counts, serialized_bytes_hash, change_source)
+          VALUES
+            (${parentDocIdB}::uuid, 1, 'version B', 'hash-rls-b', '{}', 'shash-rls-b', 'manual')
+        `);
+      });
+
       await test(
-        `[Layer B] ${entry.tableName}: unscoped INSERT is rejected`,
-        () => assertLayerBWriteRejected(entry.tableName),
+        `[Layer A] reference_document_versions: org-scoped context sees own versions, not other org's`,
+        async () => {
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`SELECT set_config('app.organisation_id', ${ORG_A}, true)`);
+            const rows = await tx.execute(sql`
+              SELECT COUNT(*)::int AS c FROM reference_document_versions
+              WHERE document_id = ${parentDocIdB}::uuid
+            `);
+            const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
+            assert(
+              count === 0,
+              `Layer A (orgA ctx) leaked ${count} reference_document_versions belonging to orgB`,
+            );
+          });
+        },
       );
+
+      await test(
+        `[Layer B] reference_document_versions: unscoped INSERT (new version for orgA doc) is rejected`,
+        async () => {
+          let rejected = false;
+          try {
+            await db.execute(sql`
+              INSERT INTO reference_document_versions
+                (document_id, version, content, content_hash, token_counts, serialized_bytes_hash, change_source)
+              VALUES
+                (${parentDocIdA}::uuid, 99, 'rejected', 'hash-rej', '{}', 'shash-rej', 'manual')
+            `);
+          } catch {
+            rejected = true;
+          }
+          assert(
+            rejected,
+            `Layer B (no ALS ctx) allowed an INSERT into reference_document_versions — RLS WITH CHECK is NOT fail-closed`,
+          );
+        },
+      );
+    } finally {
+      if (parentDocIdA || parentDocIdB) {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL ROLE admin_role`);
+          if (parentDocIdA) {
+            await tx.execute(sql`DELETE FROM reference_documents WHERE id = ${parentDocIdA}::uuid`);
+          }
+          if (parentDocIdB) {
+            await tx.execute(sql`DELETE FROM reference_documents WHERE id = ${parentDocIdB}::uuid`);
+          }
+        });
+      }
     }
   } finally {
     await cleanupFixtures();

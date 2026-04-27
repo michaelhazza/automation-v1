@@ -2,7 +2,7 @@
 name: Config List Data Sources
 description: List data sources attached to a given agent, link, or task.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

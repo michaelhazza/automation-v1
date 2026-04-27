@@ -141,6 +141,63 @@ test('status pending → updated → final: final is tip', () => {
   assert(r.chainTips.get('A')?.artefactId === 'C', 'C (final) is tip');
 });
 
+// ── Determinism under reorder (R3-6) ──────────────────────────────────────────
+//
+// The UI sorts artefacts by serverCreatedAt before passing them to the
+// resolver, which means input array order can change between renders.
+// `resolveLifecyclePure` must produce identical chainTips / orphans /
+// superseded sets regardless of input order — the resolver is pointer-based
+// (parentArtefactId lookups), not position-based.
+
+test('determinism: chainTips identical across input permutations', () => {
+  const A = makeStructured('A');
+  const B = makeStructured('B', 'A');
+  const C = makeStructured('C', 'B');
+  const D = makeStructured('D'); // independent root
+  const E = makeStructured('E', 'D');
+
+  const orderings: BriefChatArtefact[][] = [
+    [A, B, C, D, E],
+    [E, D, C, B, A],
+    [C, A, E, B, D],
+    [B, D, A, E, C],
+  ];
+
+  const results = orderings.map((arr) => resolveLifecyclePure({ artefacts: arr }));
+
+  // chainTips should be IDENTICAL by-key across all orderings.
+  for (let i = 1; i < results.length; i++) {
+    const ref = results[0]!;
+    const cur = results[i]!;
+    assert(ref.chainTips.size === cur.chainTips.size, `chainTips size differs at ordering ${i}`);
+    for (const [rootId, tip] of ref.chainTips) {
+      const curTip = cur.chainTips.get(rootId);
+      assert(curTip?.artefactId === tip.artefactId, `chainTip mismatch for root ${rootId} at ordering ${i}`);
+    }
+    assert(ref.orphans.length === cur.orphans.length, `orphans count differs at ordering ${i}`);
+    assert(ref.superseded.size === cur.superseded.size, `superseded size differs at ordering ${i}`);
+  }
+});
+
+test('determinism: superseded sets identical across input permutations', () => {
+  const A = makeStructured('A');
+  const B = makeStructured('B', 'A');
+  const C = makeStructured('C', 'B');
+
+  const r1 = resolveLifecyclePure({ artefacts: [A, B, C] });
+  const r2 = resolveLifecyclePure({ artefacts: [C, B, A] });
+  const r3 = resolveLifecyclePure({ artefacts: [B, A, C] });
+
+  // Superseded set for chain rooted at A should be {B, A} regardless of order.
+  for (const r of [r1, r2, r3]) {
+    const supers = r.superseded.get('A');
+    assert(supers !== undefined, 'A has superseded list');
+    const ids = new Set(supers!.map((s) => s.artefactId));
+    assert(ids.has('B') && ids.has('A'), 'superseded contains both ancestors');
+    assert(!ids.has('C'), 'tip is NOT in superseded');
+  }
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 console.log('');

@@ -25,8 +25,12 @@ export const bundleSuggestionDismissals = pgTable(
     dismissedAt: timestamp('dismissed_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    userDocSetUniq: uniqueIndex('bundle_suggestion_dismissals_user_doc_set_uq')
-      .on(t.userId, t.docSetHash),
+    // BUNDLE-DISMISS-RLS: 3-column unique key includes organisation_id so that
+    // dismissals in org A never collide with dismissals for the same user+hash
+    // in org B (multi-org users scenario). Migration 0231 drops the old
+    // 2-column index and creates this one.
+    orgUserDocSetUniq: uniqueIndex('bundle_suggestion_dismissals_org_user_doc_set_uq')
+      .on(t.organisationId, t.userId, t.docSetHash),
     userIdx: index('bundle_suggestion_dismissals_user_idx').on(t.userId),
     orgIdx: index('bundle_suggestion_dismissals_org_idx').on(t.organisationId),
   })

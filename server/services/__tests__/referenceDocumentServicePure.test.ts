@@ -51,7 +51,9 @@ test('serializeDocument embeds document id and version in metadata header', () =
 
 test('serializeDocument embeds the content after the metadata separator', () => {
   const out = serializeDocument({ documentId: 'doc-1', version: 1, content: 'my content' });
-  const contentSection = out.split('---\n')[1];
+  // Split on '\n---\n' (metadata separator) to isolate the content section.
+  // Splitting on '---\n' would also match the '---DOC_START---\n' delimiter.
+  const contentSection = out.split('\n---\n')[1];
   assert.ok(contentSection?.includes('my content'), 'content should appear after --- separator');
 });
 

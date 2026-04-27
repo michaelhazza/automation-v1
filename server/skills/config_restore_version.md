@@ -2,7 +2,7 @@
 name: Config Restore Version
 description: Restore an entity to a previous version from config history.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

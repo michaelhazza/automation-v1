@@ -77,6 +77,11 @@ export interface WriteMessageResult {
   // Structured per-artefact breakdown of write-time lifecycle rejections.
   // Omitted when no conflicts occurred so successful writes stay terse.
   lifecycleConflicts?: LifecycleConflictSignal[];
+  // Server-stamped copies of the accepted artefacts (carrying serverCreatedAt
+  // populated at persistence time). Returned so callers that include an
+  // artefact in their HTTP response can hand the client the same shape that
+  // was just persisted and emitted on the websocket.
+  stampedArtefacts: BriefChatArtefact[];
 }
 
 /**
@@ -166,6 +171,16 @@ export async function writeConversationMessage(
     });
   }
 
+  // Stamp serverCreatedAt at persistence time so the UI can keep timeline
+  // order consistent when WS events for distinct artefactIds arrive out of
+  // logical order. Per-artefact stamping (rather than message-level) is
+  // necessary because one message may emit multiple artefacts and the UI
+  // renders them as individual timeline entries.
+  const persistedAt = new Date().toISOString();
+  const stampedArtefacts = acceptedArtefacts.map((a) =>
+    a.serverCreatedAt ? a : { ...a, serverCreatedAt: persistedAt },
+  );
+
   // Insert message — copy org/subaccount from parent conversation for RLS
   const [message] = await db
     .insert(conversationMessages)
@@ -175,7 +190,7 @@ export async function writeConversationMessage(
       subaccountId: conv.subaccountId ?? null,
       role: input.role,
       content: input.content,
-      artefacts: acceptedArtefacts,
+      artefacts: stampedArtefacts,
       senderUserId: input.senderUserId ?? null,
       senderAgentId: input.senderAgentId ?? null,
       triggeredRunId: input.triggeredRunId ?? null,
@@ -192,8 +207,9 @@ export async function writeConversationMessage(
     artefactCount: acceptedArtefacts.length,
   });
 
-  // Emit per-artefact Brief-room events
-  for (const artefact of acceptedArtefacts) {
+  // Emit per-artefact Brief-room events. Use the stamped copies so WS
+  // consumers see the same `serverCreatedAt` that was just persisted.
+  for (const artefact of stampedArtefacts) {
     if (artefact.parentArtefactId) {
       emitBriefArtefactUpdated(input.briefId, { messageId, artefact });
     } else {
@@ -206,6 +222,7 @@ export async function writeConversationMessage(
     artefactsAccepted: acceptedArtefacts.length,
     artefactsRejected,
     assistantPending: input.role === 'user',
+    stampedArtefacts,
     ...(lifecycleConflicts.length > 0 ? { lifecycleConflicts } : {}),
   };
 }

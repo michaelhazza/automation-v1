@@ -40,11 +40,10 @@ async function contactsInactiveOverDaysHandler(
   args: CanonicalQueryHandlerArgs,
 ): Promise<ExecutorResult> {
   const sinceDaysAgo = resolveSinceDaysAgo(args);
-  const result = await canonicalDataService.listInactiveContacts({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.listInactiveContacts(principal, {
     sinceDaysAgo,
-    limit:        args.limit,
+    limit: args.limit,
   });
   return {
     ...result,
@@ -58,11 +57,10 @@ async function accountsAtRiskBandHandler(
 ): Promise<ExecutorResult> {
   const bandFilter = args.filters.find(f => f.field === 'band');
   const band = (bandFilter?.value as string) ?? 'red';
-  const result = await canonicalDataService.getAccountsAtRiskBand({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
-    band:         band as 'red' | 'yellow' | 'green',
-    limit:        args.limit,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.getAccountsAtRiskBand(principal, {
+    band: band as 'red' | 'yellow' | 'green',
+    limit: args.limit,
   });
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }
@@ -72,9 +70,8 @@ async function pipelineVelocityHandler(
 ): Promise<ExecutorResult> {
   const from = args.dateContext?.from ? new Date(args.dateContext.from) : new Date(Date.now() - 30 * 86400_000);
   const to   = args.dateContext?.to   ? new Date(args.dateContext.to)   : new Date();
-  const result = await canonicalDataService.getPipelineVelocity({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.getPipelineVelocity(principal, {
     from,
     to,
   });
@@ -86,12 +83,11 @@ async function staleOpportunitiesHandler(
 ): Promise<ExecutorResult> {
   const sinceDaysAgo = resolveSinceDaysAgo(args);
   const stageFilter  = args.filters.find(f => f.field === 'stage');
-  const result = await canonicalDataService.listStaleOpportunities({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
-    stageKey:     stageFilter?.value as string | undefined,
-    staleSince:   new Date(Date.now() - sinceDaysAgo * 86400_000),
-    limit:        args.limit,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.listStaleOpportunities(principal, {
+    stageKey:   stageFilter?.value as string | undefined,
+    staleSince: new Date(Date.now() - sinceDaysAgo * 86400_000),
+    limit:      args.limit,
   });
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }
@@ -101,12 +97,11 @@ async function upcomingAppointmentsHandler(
 ): Promise<ExecutorResult> {
   const from = args.dateContext?.from ? new Date(args.dateContext.from) : new Date();
   const to   = args.dateContext?.to   ? new Date(args.dateContext.to)   : new Date(Date.now() + 7 * 86400_000);
-  const result = await canonicalDataService.listUpcomingAppointments({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.listUpcomingAppointments(principal, {
     from,
     to,
-    limit:        args.limit,
+    limit: args.limit,
   });
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }
@@ -114,20 +109,16 @@ async function upcomingAppointmentsHandler(
 async function contactsByTagHandler(
   args: CanonicalQueryHandlerArgs,
 ): Promise<ExecutorResult> {
-  const result = await canonicalDataService.countContactsByTag({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
-  });
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.countContactsByTag(principal);
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }
 
 async function opportunitiesByStageHandler(
   args: CanonicalQueryHandlerArgs,
 ): Promise<ExecutorResult> {
-  const result = await canonicalDataService.countOpportunitiesByStage({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
-  });
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.countOpportunitiesByStage(principal);
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }
 
@@ -136,12 +127,11 @@ async function revenueTrendHandler(
 ): Promise<ExecutorResult> {
   const from = args.dateContext?.from ? new Date(args.dateContext.from) : new Date(Date.now() - 30 * 86400_000);
   const to   = args.dateContext?.to   ? new Date(args.dateContext.to)   : new Date();
-  const result = await canonicalDataService.getRevenueTrend({
-    orgId:        args.orgId,
-    subaccountId: args.subaccountId,
+  const principal = fromOrgId(args.orgId, args.subaccountId);
+  const result = await canonicalDataService.getRevenueTrend(principal, {
     from,
     to,
-    limit:        args.limit,
+    limit: args.limit,
   });
   return { ...result, actualCostCents: 0, source: 'canonical' };
 }

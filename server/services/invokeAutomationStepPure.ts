@@ -10,7 +10,17 @@
 
 import type { Automation } from '../db/schema/automations.js';
 import type { InvokeAutomationStep, AutomationStepError } from '../lib/workflow/types.js';
-import { validateInput, validateOutput } from '../lib/workflow/invokeAutomationSchemaValidator.js';
+import { validateInput, validateOutput, type SchemaValidationResult } from '../lib/workflow/invokeAutomationSchemaValidator.js';
+
+// F15 — named export for the pure-test surface (same implementation as the
+// internal validateInput; exposed here so callers don't reach into the lib
+// directly).
+export function validateInputAgainstSchema(
+  data: unknown,
+  schemaText: string | null | undefined,
+): SchemaValidationResult {
+  return validateInput(data, schemaText);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ Every finding is triaged into one of the two buckets. Every triage decision, eve
 ## Before doing anything else, read:
 1. `CLAUDE.md` — project conventions, architecture rules, decision criteria
 2. `architecture.md` — all patterns and constraints you will use to adjudicate ChatGPT suggestions
+3. `DEVELOPMENT_GUIDELINES.md` — locked build-discipline rules (RLS, service-tier, gates, migrations, §8 development discipline) used to evaluate whether a ChatGPT suggestion contradicts existing locked policy. Always read for any non-trivial review; skip only when the diff is pure docs / pure copy changes with no code.
 
 ---
 
@@ -135,6 +136,9 @@ For each round:
       (Rationale: silent defers accumulate invisible technical debt.)
     - `scope_signal` is "architectural" — large blast radius. The user should
       see it before it lands.
+    - Severity is `high` or `critical` — even a mechanical fix is worth a look
+      when the underlying issue is serious. Low/medium severity technical items
+      still auto-apply.
     - The recommendation contradicts a documented convention in `CLAUDE.md` or
       `architecture.md` (use `[missing-doc]` prefix in rationale as before).
     - You are not confident the fix is correct — downgrade to `defer` and
@@ -474,7 +478,8 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
   product behaviour.
 - **Escalation carveouts.** Technical findings escalate to the approval gate
   when the recommendation is `defer`, the `scope_signal` is `architectural`,
-  the rationale carries `[missing-doc]`, or you are not confident in the fix.
+  severity is `high` or `critical`, the rationale carries `[missing-doc]`, or
+  you are not confident in the fix.
 - **User-facing findings.** The user makes the final call — no silent
   auto-implement, auto-reject, or auto-defer for anything triaged `user-facing`
   or escalated from `technical`. Your recommendation is advisory only.

@@ -1,0 +1,15 @@
+# Derived-data null-safety allowlist
+# Fields produced by background jobs that must be read defensively.
+# One field name per line. Comments (#) and blank lines are ignored.
+# Only add fields produced by the four Phase-1 in-scope jobs:
+#   bundleUtilizationJob, measureInterventionOutcomeJob,
+#   ruleAutoDeprecateJob, connectorPollingSync.
+# Adding fields outside those four domains is out-of-Phase-1-scope drift.
+
+# bundleUtilizationJob → document_bundles.utilization_by_model_family
+utilizationByModelFamily
+
+# connectorPollingSync → integration_connections
+lastSuccessfulSyncAt
+lastSyncError
+lastSyncErrorAt

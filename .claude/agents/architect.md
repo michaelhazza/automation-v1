@@ -137,14 +137,39 @@ These are non-negotiable. Every plan must respect them:
 
 ## Gate-Timing Rule (applies to every multi-chunk plan)
 
-**Bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers. Do NOT schedule them per-chunk.**
+**Bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers. They run TWICE TOTAL per build — once at the start, once at the very end. Anywhere else is forbidden.**
 
-Every plan you produce must follow this pattern:
-- **Baseline** (before Chunk 1 begins) — run all relevant gates once to capture the current violation set. Note the count; any violations that already existed are not the implementer's fault.
-- **Per-chunk verification** — `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. No bash gate scripts.
-- **Final gate pass** (after ALL chunks AND spec-conformance have completed) — run the full gate set once to confirm everything is clean.
+This rule exists because gate scripts run for 30s–2min each; running them per-chunk multiplies build wall-clock by N×gate-count for no signal. The baseline establishes a known starting point; the final pass confirms the end state. Anything in between is wasted compute.
 
-In the plan's "Verification commands" sections, list only `npm run build:server` and unit-test commands for per-chunk steps. Move the full gate-script list to a single "Programme-end verification" section at the bottom of the plan. Explicitly note in the Executor notes: "Gate scripts run twice: baseline before Chunk 1 and final pass after all chunks. Never between chunks."
+Every plan you produce must follow this exact pattern:
+
+### Phase 0 — Baseline & pre-existing fixes (before Chunk 1 begins)
+
+1. Run all relevant gates once to capture the current violation set.
+2. **If any pre-existing violations would block or interact with the planned work** (e.g. the chunks extend the violating code, or the new code depends on the violated invariant), fix them as the first chunk of the plan. Then re-run only the affected gate(s) to confirm green before starting Chunk 1.
+3. Pre-existing violations that do NOT block the planned work go in a "Known baseline violations" section of the plan and are ignored for the rest of the build — they are not the implementer's burden.
+
+### Development phases (Chunks 1..N)
+
+- **Per-chunk verification commands MUST be limited to:** `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. Nothing else.
+- **Forbidden mid-build, in any form:**
+  - `scripts/verify-*.sh` of any kind
+  - "Run verify-X to confirm no regression" — never write this in a plan
+  - Whole-repo lint or full test-suite passes between chunks
+  - Any gate run framed as "sanity check" / "regression check" / "quick re-verify"
+- If a chunk's correctness depends on a gate-level invariant, write a targeted unit test for that invariant inside the chunk. Do not lean on the gate script.
+
+### Final phase — Programme-end verification (after ALL chunks AND spec-conformance complete)
+
+- Run the full gate set once. This is the ONLY post-baseline gate run.
+- Spec-conformance runs BEFORE the final gate pass, not after — if spec-conformance applies fixes, those fixes are part of what the final gate pass validates.
+
+### What this means for the plan document
+
+- Each chunk's "Verification commands" section lists ONLY `npm run build:server` + targeted unit tests. It must not contain any `scripts/verify-*.sh` invocation.
+- The plan ends with a single "Programme-end verification" section listing the full gate set, ordered after spec-conformance.
+- The plan's "Executor notes" must include this line verbatim: **"Gate scripts run TWICE TOTAL per this plan: once during Phase 0 baseline (and any pre-existing-violation fixes) and once during Programme-end verification after all chunks AND spec-conformance. Running them between chunks, after individual fixes, or as 'regression sanity checks' is forbidden — it adds wall-clock cost without adding signal."**
+- Do not introduce hedging language ("optionally", "if helpful", "feel free to") around gate timing. Subagents read hedges as permission.
 
 ---
 

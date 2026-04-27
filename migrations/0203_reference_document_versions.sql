@@ -53,6 +53,11 @@ ALTER TABLE reference_documents
 
 ALTER TABLE reference_document_versions ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: pre-FORCE-RLS migration with a parent-EXISTS policy shape
+-- (no organisation_id column on this table). 0227's canonical-policy hardening
+-- pass excluded this table for that reason; the FORCE RLS hardening with a
+-- parent-EXISTS WITH CHECK clause is routed to a separate follow-on migration.
+-- Tracked in tasks/todo.md.
 CREATE POLICY reference_document_versions_org_isolation ON reference_document_versions
   USING (
     EXISTS (

@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-25 (derived from full-codebase audit + remediation spec)
+**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -25,194 +25,68 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 
 ## 1. Multi-tenancy and RLS (non-negotiable)
 
-### 1.1 The canonical org session variable
+> Templates, code examples, and the canonical RLS policy SQL live in [`architecture.md` § Row-Level Security](./architecture.md#row-level-security-rls--three-layer-fail-closed-data-isolation). The rules below are checklist items — see architecture.md before writing the migration.
 
-**`app.organisation_id` is the ONLY valid Postgres session variable for org scoping.** It is set by:
-- `server/middleware/auth.ts` (HTTP request path)
-- `server/lib/createWorker.ts` (background worker path)
-
-`app.current_organisation_id` is a phantom — it is **never set anywhere** in the codebase. Any policy, query, or code that references it fails open (because `current_setting('app.current_organisation_id', true)` returns NULL, and `NULL = anything` is NULL, not false — Postgres RLS treats NULL as "exclude row" but application-level null comparisons silently pass). Never use this variable.
-
-Detection gate: `scripts/verify-rls-session-var-canon.sh`
-
-### 1.2 Every new tenant table ships with full RLS in the same migration
-
-A migration that creates a table with tenant data must, **in the same migration file**, include:
-
-```sql
-ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
-ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS <table>_org_isolation ON <table>;
-
-CREATE POLICY <table>_org_isolation ON <table>
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
-```
-
-Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR.
-
-**Why both USING and WITH CHECK?** `USING` controls reads. `WITH CHECK` controls writes. Without `WITH CHECK`, an INSERT or UPDATE with no valid session var will succeed silently.
-
-**Why FORCE ROW LEVEL SECURITY?** Without `FORCE`, table owners (the DB user running migrations) bypass RLS entirely. On a connection without an org session var, the table owner would see all rows across all tenants.
-
-**Why IS NOT NULL + non-empty guards?** `current_setting('app.organisation_id', true)` returns NULL when unset (the `true` flag is "missing-OK"). Casting NULL::uuid returns NULL, and `organisation_id = NULL` evaluates to NULL (not false). The explicit guards avoid relying on NULL-comparison semantics — both reads and writes are unambiguously blocked when the session var is unset.
-
-### 1.3 Defence-in-depth: always filter by organisationId in application code
-
-**Never rely on RLS alone.** Every read and write that takes a row by ID must also filter by `organisationId` explicitly:
-
-```ts
-// Bad — relies on RLS alone
-const row = await tx.select().from(items).where(eq(items.id, id));
-
-// Good — defence-in-depth
-const row = await tx.select().from(items)
-  .where(and(eq(items.id, id), eq(items.organisationId, organisationId)));
-```
-
-This is not redundant. If RLS is ever silently disabled by a migration regression, the application-level filter still protects the caller.
-
-Detection gate: `scripts/verify-org-scoped-writes.sh`
-
-### 1.4 Subaccount resolution is mandatory before using a subaccount ID
-
-Any route with a `:subaccountId` URL parameter must call `resolveSubaccount(req.params.subaccountId, req.orgId!)` before using the ID downstream. The function verifies that the subaccount belongs to the requesting org. Skipping it allows horizontal privilege escalation even with RLS in place — a request scoped to org A can reference subaccount IDs belonging to org B.
-
-```ts
-// Required at the top of every handler that consumes req.params.subaccountId
-const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-// Pass subaccount.id downstream — never pass req.params.subaccountId directly
-```
-
-Detection gate: `scripts/verify-subaccount-resolution.sh`
-
-### 1.5 Corrective migrations follow the 0213 precedent
-
-When a table has broken or missing RLS and must be repaired:
-1. **Never edit the historical migration.** Migrations are append-only.
-2. Write a new migration with the next available number.
-3. Use `DROP POLICY IF EXISTS <old_policy_name> ON <table>` for **every** historical policy name (the old policy may have been named `*_tenant_isolation`, `*_org_isolation`, `*_subaccount_isolation`, etc. — enumerate them all).
-4. Follow with `CREATE POLICY <table>_org_isolation ON <table>` using the canonical shape above.
-5. Reference: `migrations/0213_fix_cached_context_rls.sql` (the precedent), `migrations/0200_fix_universal_brief_rls.sql` (canonical policy shape source).
+- **`app.organisation_id` is the only valid org session variable.** `app.current_organisation_id` is a phantom — never used. Detection gate: `scripts/verify-rls-session-var-canon.sh`.
+- **Every new tenant table ships full RLS in the same migration** (canonical policy template in architecture.md). Add the table to `server/config/rlsProtectedTables.ts` in the same PR.
+- **Always filter by `organisationId` in application code, even with RLS.** Reads and writes by ID must include an explicit `eq(items.organisationId, organisationId)`. Detection gate: `scripts/verify-org-scoped-writes.sh`.
+- **Routes with `:subaccountId` must call `resolveSubaccount(req.params.subaccountId, req.orgId!)` before consuming the ID.** Pass `subaccount.id` downstream, never the raw param. Detection gate: `scripts/verify-subaccount-resolution.sh`.
+- **Corrective migrations follow the 0213 precedent.** Append-only — write a new migration that drops every historical policy name and creates the canonical one. Reference: `migrations/0213_fix_cached_context_rls.sql`.
 
 ---
 
 ## 2. Service / Route / Lib tier boundaries
 
-### 2.1 Routes never own DB access
+> Detailed patterns and "when to create a service" criteria live in [`architecture.md` § Service Layer](./architecture.md#service-layer).
 
-`server/routes/**` calls `server/services/**`. Routes do not import `db` directly. This is enforced by `scripts/verify-rls-contract-compliance.sh`.
-
-The only acceptable patterns are:
-- Route handler calls `serviceMethod(req.orgId!, req.params.id, …)` — org-scoped service
-- Route handler is a thin adapter with no DB logic
-
-### 2.2 Lib files do not own DB access either
-
-`server/lib/**` files are for pure helpers and small utilities. When a lib file starts importing `db`, it has outgrown the tier. Move the DB-touching code to a peer service in `server/services/**`; the pure helpers stay in lib.
-
-### 2.3 New service files have a high bar
-
-A new service file is justified only when:
-- The route has **more than one DB interaction**, OR
-- The logic is **reused by more than one caller**
-
-If neither condition holds, the single DB call goes inline in the route (wrapped in `withOrgTx`) and no new service file is created. **Max one service per domain.** Two service files covering the same business domain in the same PR is a signal the split is wrong — merge them.
-
-### 2.4 Three patterns for service-tier DB access
-
-1. **Org-scoped service** — use `withOrgTx(organisationId, async (tx) => { … })` from `server/instrumentation.ts`. Every query inside runs with `app.organisation_id` set.
-2. **Admin/system service** — use `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Bypasses RLS by design. For routes with `requireSystemAdmin` middleware or system-scoped tables.
-3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
+- **Routes and `server/lib/**` never import `db` directly** — call a service. Enforced by `scripts/verify-rls-contract-compliance.sh`.
+- **A new service file requires multiple DB interactions or multiple callers.** Otherwise the call goes inline in the route wrapped in `withOrgTx`. Max one service per domain.
+- **Use the right access pattern**: `withOrgTx` (org-scoped), `withAdminConnection` (system/admin), pure helper (no DB), admin+per-tenant `withOrgTx` (jobs writing tenant data — mirror `memoryDedupJob.ts`), log-and-swallow with `getOrgScopedDb()` inside the `try` block (never above it).
+- **Maintenance jobs that advertise per-org partial-success use one admin transaction per organisation, or SAVEPOINT subtransactions inside an outer admin tx that holds the advisory lock — never a single shared admin tx across all orgs.**
 
 ---
 
 ## 3. Schema layer rules
 
-### 3.1 Schema files are leaves — no upward imports
-
-`server/db/schema/**` files may only import from:
-- `drizzle-orm` and `drizzle-orm/pg-core`
-- `shared/types/**`
-- Other `server/db/schema/**` files
-
-They must never import from `server/services/**`, `server/lib/**`, `server/routes/**`, or `server/middleware/**`. A single schema file importing from services creates circular dependency cascades (one violation drove 175 cycles in the 2026-04-25 audit).
-
-**The fix pattern:** extract the type to `shared/types/` → schema file imports from `shared/types/` → service re-exports from the new location for backward compatibility.
-
-### 3.2 New types that cross the schema/service boundary go in `shared/types/`
-
-If a type is used by both a schema file (as a JSONB column type) and a service (as a return type), it belongs in `shared/types/`, not in `server/services/`. Examples: `AgentRunCheckpoint`, `SerialisableMiddlewareContext`.
+- **Schema files are leaves.** `server/db/schema/**` may only import from `drizzle-orm`, `shared/types/**`, and other schema files — never from `services/`, `lib/`, `routes/`, or `middleware/`. One violation drove 175 circular cycles in the 2026-04-25 audit.
+- **Types crossing the schema/service boundary live in `shared/types/`.** If a type is used by both a schema file (as a JSONB column) and a service (as a return type), put it in `shared/types/` and have services re-export for backward compat.
 
 ---
 
-## 4. LLM routing
+## 4. LLM routing and canonical reads
 
-### 4.1 All LLM calls go through `llmRouter`
-
-Never import symbols from `server/services/providers/anthropicAdapter.ts` (or any other adapter) in production code outside `llmRouter`. This includes `countTokens` — it is a billable API call, not a local utility.
-
-Detection gate: `scripts/verify-no-direct-adapter-calls.sh`
-
-### 4.2 Canonical-table reads go through `canonicalDataService`
-
-Any SELECT against a `canonical_*` table must go through `canonicalDataService`, not a direct Drizzle query. The service handles cross-tenant isolation and principal-aware row scoping.
-
-`canonicalDataService` is a **read-only abstraction layer** — it never writes, never triggers background work, never caches with mutation. Methods added to it must be read-only queries with no side effects.
-
-Detection gate: `scripts/verify-canonical-read-interface.sh`
-
-### 4.3 Principal context propagation
-
-Every call to `canonicalDataService` must pass a `PrincipalContext`. Use `fromOrgId(organisationId, subaccountId?)` to synthesise one from a legacy org-scoped call signature during the migration window.
-
-Detection gate: `scripts/verify-principal-context-propagation.sh`
+- **All LLM calls go through `llmRouter`.** Never import provider adapters (`anthropicAdapter`, etc.) in production code, including `countTokens` (billable). Detection gate: `scripts/verify-no-direct-adapter-calls.sh`.
+- **Reads from `canonical_*` tables go through `canonicalDataService`** — read-only, no writes, no side effects, no mutation-caching. Detection gate: `scripts/verify-canonical-read-interface.sh`.
+- **Every `canonicalDataService` call passes a `PrincipalContext`.** Use `fromOrgId(orgId, subaccountId?)` for legacy call sites. Detection gate: `scripts/verify-principal-context-propagation.sh`.
+- **`withPrincipalContext` only works inside an active `withOrgTx`.** Job handlers and other non-request contexts must construct a `PrincipalContext` via `fromOrgId` and pass it as the first parameter — never wrap with `withPrincipalContext`.
 
 ---
 
 ## 5. Gates are the source of truth
 
-### 5.1 Gates block merges — no exceptions
+- **Blocking gates block merges — no exceptions.** No `--ignore` flags, no `# baseline-allow` on blocking gates, no deletion. Run all gates with `npm run test:gates`.
+- **Historical baseline files need both conditions:** filename in the gate's `HISTORICAL_BASELINE_FILES` array AND a `-- @rls-baseline:` annotation in the file. One without the other still fails the gate.
+- **Re-run gates before each new phase.** Gate state drifts in pre-production — reconcile live violations against the spec's planned scope, never apply a stale fix list.
+- **Warning-level gates are observability signals, not blockers.** A point-specific `# baseline-allow` with an explanatory comment is the right way to acknowledge a reviewed pattern. Never use blanket suppression.
 
-A failing blocking gate means the PR does not merge. Do not add `--ignore` flags, `# baseline-allow` suppressions on blocking gates, or delete the gate. If a blocking gate cannot pass for a legitimate reason, the spec documents the reason and updates the gate's baseline mechanism — not the gate's hard rule.
+### Gate authoring rules
 
-Run all gates:
-```bash
-npm run test:gates
-```
-
-### 5.2 Historical baseline files require two conditions
-
-When a gate produces noise from historical migration files that were repaired by a later migration:
-1. Add the filename to the gate's `HISTORICAL_BASELINE_FILES` array (hard-coded allowlist).
-2. Add `-- @rls-baseline: phantom-var policy replaced at runtime by migration 0213_fix_cached_context_rls.sql` to the relevant line in the historical migration file.
-
-Both conditions must be met. A file in the allowlist without the annotation, or an annotated file not in the allowlist, still emits a gate violation.
-
-### 5.3 Re-run gates before starting each phase
-
-Gate state drifts in pre-production codebases. Before starting a new phase of work, re-run the relevant gates and reconcile the live violation set against the spec's planned scope. Do not blindly apply a fix list that no longer reflects reality.
-
-### 5.4 Warning-level gates are signals, not blockers
-
-Gates that emit `WARNING` (not `BLOCKING FAIL`) are observability signals. A `# baseline-allow` directive at a specific match point with an explanatory comment is the correct way to acknowledge a reviewed, intentionally-permitted pattern. Never use blanket suppression.
+- **Self-test fixtures must not carry gate-recognised suppression annotations.** A fixture with `@null-safety-exempt` or `guard-ignore-next-line` proves only that the gate respects suppression — not that detection works. Remove all suppression annotations from deliberate-violation fixture files.
+- **Scan-path override env vars must disable the matching path exclusions.** An override env var (e.g. `DERIVED_DATA_NULL_SAFETY_SCAN_DIR`) that points at a fixture directory is useless if the gate still applies `! -path "*/__tests__/*"`. Remove that exclusion when the override is set.
+- **Grep-based gates must skip `import type` lines.** Type-only imports are erased at compile time and should not trigger import-presence gates. Pipe through `grep -v "import type"` before the pattern match, or document the limitation and require `guard-ignore-next-line` at affected call sites.
+- **Advisory gate runners must use `|| true`.** Any script that captures advisory gate output via `OUTPUT="$(bash gate.sh 2>&1)"` under `set -euo pipefail` must append `|| true`: `OUTPUT="$(bash gate.sh 2>&1 || true)"`. Without it, promoting the gate from advisory to blocking will kill the runner before the count line is parsed.
+- **Calibration constants must enumerate every exclusion.** When a gate subtracts a hard-coded constant from a raw count, each excluded occurrence must be listed as an inline comment with a unique grep pattern (one hit per exclusion). A bare magic number is unverifiable — the next author cannot tell whether it's still correct. `scripts/verify-skill-read-paths.sh` is the canonical example.
+- **`actionType` regex must include dots.** The pattern `actionType: '[a-z_]+'` does not match dot-namespaced types (`crm.fire_automation`, `crm.query`, etc.). Use `[a-z_.]+` or document the exclusion explicitly.
+- **Strip CRLF when parsing files on Windows.** Windows-authored files contain `\r\n`. Bash scripts that join or split lines must pipe through `tr -d '\r'`; JS parsers must `.replace(/\r/g, '')` before splitting on `\n`. The `guard-utils.sh` jq wrapper already does this — new scripts must replicate it.
 
 ## 6. Migration discipline
 
 1. **Migrations are append-only.** Never edit a historical migration file after it has run.
 2. **Migration numbers are assigned at merge time.** Use `<NNNN>_<name>.sql` as a placeholder during PR development; rename the file to claim the next available number immediately before merge (after rebasing onto latest `main`).
-3. **System-scoped tables** (no `organisation_id`) must document in the migration header why they are not added to `RLS_PROTECTED_TABLES`.
+3. **System-scoped tables** (no `organisation_id`) must document in the migration header why they are not added to `RLS_PROTECTED_TABLES`. Every migration that creates a table must either add it to the registry with a full policy **or** include a `-- system-scoped: <reason>` header comment. Neither = gate failure, not just a review comment.
 4. **Drizzle schema changes** that accompany a migration land in the same PR. The schema file and the migration are a unit.
-5. **Corrective migrations** follow the §1.5 precedent: enumerate all historical policy names, DROP them, then CREATE with the canonical policy shape.
+5. **Corrective migrations** follow §1's bullet on corrective migrations: enumerate all historical policy names, DROP them, then CREATE with the canonical policy shape.
+6. **`policyMigration` in `rlsProtectedTables.ts` must point at the migration that physically runs `CREATE POLICY ... ON <table>`.** If a corrective migration's header NOTE explicitly excludes a table, the manifest entry for that table must still reference the original policy migration, not the corrective one. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm the authoritative file when in doubt.
 
 ---
 
@@ -223,7 +97,9 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 - **Gates pass = done.** A green gate run is the definition of done for a phase.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
 - **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
+- **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
 - **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
+- **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
 When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
 
@@ -249,24 +125,90 @@ Every phase of the audit remediation reused existing primitives: `withOrgTx`, `w
 
 From the moment Phase 1 of the 2026-04-25 remediation starts until the Phase 4 ship gate is green, no new product features merge to `main`. Feature branches may exist; they wait. This is a one-time structural reset — when `docs/spec-context.md` reflects all phases complete, remove this constraint.
 
-### 8.6 Rate limiter rollback
+### 8.6 Infrastructure migrations ship with an env-flag rollback shim
 
-The DB-backed rate limiter ships with an env-flag rollback shim:
-- `USE_DB_RATE_LIMITER=false` → reverts to in-memory behaviour without a code revert
-- The shim has identical function signatures — no caller changes needed
-- Flip the flag, restart workers, observe
+Significant infrastructure migrations ship with an env-flag rollback shim that has identical function signatures to the new path — no caller changes required to revert.
+
+### 8.7 State/Lifecycle invariants are mandatory for specs that touch state machines
+
+Any spec that introduces or modifies a state machine (step transitions, run aggregation, approval boundaries, resume paths, job status) must include a dedicated State/Lifecycle section pinning: (1) valid transitions, (2) execution-record requirement before terminal-state writes, (3) concurrency guard predicate on terminal-state writes (e.g. `UPDATE ... WHERE status = 'review_required'`), (4) whether the status set is closed.
+
+Detection: if a spec mentions "state", "transition", "status", "approved", "completed", "failed", "resume", or "cancel" without this section, add one before review.
+
+### 8.8 Cross-spec consistency sweep is mandatory for multi-chunk work
+
+Multi-chunk / multi-phase / parallel-PR implementations require a cross-spec consistency pass before freeze, reading all specs simultaneously to check: (a) identifier naming across specs, (b) shared contracts identical across consumers, (c) no primitive introduced in two places, (d) no contradictory assumptions about cross-cutting decisions. Individual per-spec review cannot catch this drift.
+
+### 8.9 One PR per feature branch; one PR per sprint
+
+Multi-chunk work uses one integration branch and one PR to main. Per-chunk branches PR into the integration branch, never directly to main. One-PR-per-chunk topologies create redundant integration points and force a consolidation step that integration-branch discipline avoids.
+
+### 8.10 Race-claim ordering
+
+Operations with both a state write and an external side effect persist the state-claim first, verify the claim succeeded, and only then trigger the side effect.
+
+### 8.11 Idempotency keys
+
+Idempotency keys for actions are keyed on the canonical entity ID, never on the variant of the action.
+
+### 8.12 External-call ordering
+
+Run external calls that can fail (LLM classifiers, third-party APIs) before persisting the rows that depend on them — never insert rows then call out.
+
+### 8.13 Discriminated-union validators
+
+Adding a new kind to a discriminated union and updating the validator's allow-list happens in the same commit.
+
+### 8.14 Resume-path gate bypass
+
+Resume paths after gate clearance pass an explicit bypass flag through gate resolution — never re-resolve the gate on resume.
+
+### 8.15 Cross-path lifecycle hooks
+
+Cross-cutting lifecycle hooks (heartbeat, audit, cost tracking) fire from every execution path that completes the relevant unit, never from one path only.
+
+### 8.16 Allow-list discipline
+
+Every entry in a project allow-list (RLS exceptions, gate suppressions, baseline files) cites a linked invariant ID, spec section anchor, or migration filename — bare rationale text is not enough.
+
+### 8.17 Multi-source UI merges sort by server time with a stable tiebreaker
+
+UI surfaces that consume the same logical event from optimistic and websocket sources (or any two replay paths) merge by stable record ID and sort by server-stamped timestamp with an immutable secondary key — never primary-only.
+
+### 8.18 Terminal state-machine writes flow through `assertValidTransition`
+
+Every code path that writes a terminal status to a state-machine row (run, step, action) calls `shared/stateMachineGuards.ts` immediately before the UPDATE; sites that have not yet adopted it emit a `state_transition` log with `guarded: false` — silent unguarded writes are not allowed.
+
+### 8.19 Error codes are extracted via the single shared helper
+
+`shared/errorCode.ts` (`getErrorCode`) is the only place that branches on error shape (`string` / `{ code }` / `{ error: string }` / `{ error: { code } }`); `Error.message` is free text and is never promoted to the code channel.
+
+### 8.20 Deferred enforcement requires an observability log at the same boundary
+
+When a mechanical isolation or transition assertion is deferred, the matching boundary still ships a structured log NOW with table, operation, and scope-tuple booleans — write-side boundaries get the log even when the read-side spec slips.
+
+### 8.21 Pure functions whose inputs may reorder are tested under input permutation
+
+Any pure resolver / reducer / ranker whose source array can be reordered between renders ships with a determinism test that exercises ≥3 input orderings and asserts by-key identical output.
+
+### 8.22 Allow-list annotations name the function they cover
+
+Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
 
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)
 
-Before any PR that touches tenant data merges, answer YES to all five:
+Before any PR that touches tenant data merges, answer YES to all eight:
 
 - [ ] **Org-scoped at the table level.** New table has `organisation_id NOT NULL`, `RLS_PROTECTED_TABLES` entry, and canonical org-isolation policy in the same migration.
 - [ ] **Org-scoped at the query level.** Every read/write by ID also filters by `organisationId` explicitly.
 - [ ] **Service-layer mediated.** No route or lib file imports `db` directly.
 - [ ] **Subaccount-resolved.** Every route with `:subaccountId` calls `resolveSubaccount(...)` before using the ID.
 - [ ] **Gates green.** All RLS gates plus the architectural-contract gates pass on the feature branch before review.
+- [ ] **Background jobs follow the admin/org tx pattern.** Any new maintenance job that writes tenant rows mirrors `memoryDedupJob.ts` (admin connection for iteration, `withOrgTx` per tenant write).
+- [ ] **Log-and-swallow services keep `getOrgScopedDb` inside `try`.** No resolution above the catch boundary.
+- [ ] **Cross-entity ID verified.** Server-side handlers that take a parent ID in the URL and a client-supplied child ID in the body verify the child belongs to the parent before any write.
 
 ---
 
@@ -277,6 +219,19 @@ Before any PR that touches tenant data merges, answer YES to all five:
 - `docs/spec-context.md` flips `live_users: yes` → update §8.5 (feature freeze no longer applies; rollout model changes).
 - A new gate is introduced → add its detection reference to the relevant section.
 - A pattern from `KNOWLEDGE.md` reaches "stable, enforce everywhere" status → migrate it here.
+- **After finishing a development branch** → the `finishing-a-development-branch` skill (Step 2) scans code review output and appends qualifying findings here.
+
+### Format rules for all new additions
+
+Every new bullet added to this document must meet **all** of the following:
+
+- **One sentence preferred, two sentences maximum.** If you can't state the rule concisely, it is not ready for this document.
+- **No code blocks.** Code examples belong in `architecture.md` or `KNOWLEDGE.md`.
+- **No "why" explanations inline.** The rule stands alone. Rationale goes in the PR description or `KNOWLEDGE.md`.
+- **Class-level rule only.** Must prevent a repeatable class of mistake, not describe a one-off fix.
+- **Universally applicable.** Must apply across features, not be specific to one domain or PR.
+
+If a finding does not meet every criterion, it goes to `KNOWLEDGE.md` instead — not here with a caveat.
 
 ---
 

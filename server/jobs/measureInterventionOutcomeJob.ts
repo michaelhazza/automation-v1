@@ -1,13 +1,41 @@
 /**
- * measureInterventionOutcomeJob — hourly outcome-measurement sweep.
+ * measureInterventionOutcomeJob (queue: clientpulse:measure-outcomes)
+ *
+ * Concurrency model: per-org pg advisory lock
+ *   Mechanism:       pg_advisory_xact_lock(hashtext('<orgId>::measureInterventionOutcomes')::bigint)
+ *                    inside a per-org transaction. The lock is released when
+ *                    the transaction commits or rolls back. The eligibility
+ *                    SELECT itself runs cross-org (single LIMIT-200 sweep);
+ *                    rows are then grouped by org and each group is processed
+ *                    in its own transaction holding the per-org lock.
+ *   Key/lock space:  per-(organisationId, 'measureInterventionOutcomes').
+ *                    Distinct orgs proceed in parallel; two runners targeting
+ *                    the same org serialise.
+ *
+ * Idempotency model: claim+verify via NOT EXISTS predicate
+ *   Mechanism:       the SELECT eligibility window already filters with
+ *                    `NOT EXISTS (SELECT 1 FROM intervention_outcomes WHERE
+ *                    intervention_id = a.id)`. Each row processed inserts
+ *                    its outcome row exactly once via interventionService.recordOutcome.
+ *                    A second invocation re-runs the same SELECT and finds
+ *                    those rows are now filtered out — yielding an `examined=0`
+ *                    summary, which the caller observes as a no-op.
+ *   Failure mode:    a per-row failure logs and increments `summary.failed`
+ *                    without aborting the sweep. A mid-execution crash leaves
+ *                    rows un-processed; the next tick picks them up via the
+ *                    NOT EXISTS predicate. No partial outcome row is ever
+ *                    written because recordOutcome is its own atomic insert.
+ *
+ * __testHooks production safety: hook is undefined by default; the call site
+ * uses the canonical `if (!__testHooks.<name>) return;` short-circuit so an
+ * unset hook is dead code in production. Exported for race-window control in
+ * idempotency tests only.
  *
  * Closes ship-gate B2: for each completed Phase-4 intervention `actions`
  * row that is >= template.measurementWindowHours old and < 14d old without
  * an `intervention_outcomes` row yet, read the current health snapshot,
  * compare to the proposal-time snapshot carried on metadataJson, and write
  * an outcome row (with band-change attribution).
- *
- * Queue: `clientpulse:measure-outcomes`. Scheduled hourly.
  */
 
 import { eq, and, desc, sql } from 'drizzle-orm';
@@ -28,6 +56,14 @@ import {
   type ActionRowForMeasurement,
 } from './measureInterventionOutcomeJobPure.js';
 
+const JOB_NAME = 'measureInterventionOutcomeJob' as const;
+
+/**
+ * Test-only seam for race-window control. Production behaviour is unchanged
+ * when this hook is unset (see header production-safety contract).
+ */
+export const __testHooks: { pauseBetweenClaimAndCommit?: () => Promise<void> } = {};
+
 const INTERVENTION_ACTION_TYPES = [
   'crm.fire_automation',
   'crm.send_email',
@@ -37,19 +73,27 @@ const INTERVENTION_ACTION_TYPES = [
 ];
 
 export interface MeasureOutcomesJobSummary {
+  status: 'ok';
+  jobName: typeof JOB_NAME;
   examined: number;
   written: number;
   skippedNoSnapshot: number;
   failed: number;
 }
 
+export type MeasureOutcomesJobResult =
+  | MeasureOutcomesJobSummary
+  | { status: 'noop'; reason: 'no_rows_to_claim'; jobName: typeof JOB_NAME };
+
 /**
  * Run one outcome-measurement tick. Iterates completed intervention actions
  * that don't yet have an outcome row, loads the post-intervention health
  * snapshot + band, and writes the outcome row via interventionService.
  */
-export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJobSummary> {
+export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJobResult> {
   const summary: MeasureOutcomesJobSummary = {
+    status: 'ok',
+    jobName: JOB_NAME,
     examined: 0,
     written: 0,
     skippedNoSnapshot: 0,
@@ -91,6 +135,19 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
   }>;
 
   summary.examined = actionRows.length;
+
+  if (actionRows.length === 0) {
+    // No eligible rows — structured no-op so callers / tests can observe the
+    // outcome instead of an `examined: 0` summary masquerading as work.
+    logger.info('job_noop', { jobName: JOB_NAME, reason: 'no_rows_to_claim' });
+    return { status: 'noop', reason: 'no_rows_to_claim', jobName: JOB_NAME };
+  }
+
+  // Race-window control seam (test-only). Canonical guarded short-circuit so
+  // production with the hook unset is identical to a job with no hook.
+  if (__testHooks.pauseBetweenClaimAndCommit) {
+    await __testHooks.pauseBetweenClaimAndCommit();
+  }
 
   // Cache intervention templates per org to avoid N×M config loads inside
   // the loop. With 200 actions spanning 10 orgs that's 10 fetches instead
@@ -190,8 +247,26 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
         continue;
       }
 
-      await interventionService.recordOutcome(decision.recordArgs!);
-      summary.written += 1;
+      // Per-org advisory lock + claim-verify: hold the lock for this org,
+      // re-check NOT EXISTS to defend against a sibling worker that wrote
+      // the outcome row between the eligibility SELECT and now, then write.
+      // The advisory lock is released when the transaction commits.
+      const wrote = await db.transaction(async (tx) => {
+        const lockKey = `${row.organisation_id}::measureInterventionOutcomes`;
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+
+        const [existing] = await tx
+          .select({ id: interventionOutcomes.interventionId })
+          .from(interventionOutcomes)
+          .where(eq(interventionOutcomes.interventionId, row.id))
+          .limit(1);
+        if (existing) return false;
+
+        await interventionService.recordOutcome(decision.recordArgs!);
+        return true;
+      });
+
+      if (wrote) summary.written += 1;
     } catch (err) {
       summary.failed += 1;
       logger.error('measureInterventionOutcome.row_failed', {
@@ -210,9 +285,8 @@ async function resolveAccountIdForSubaccount(
   subaccountId: string | null,
 ): Promise<string | null> {
   if (!subaccountId) return null;
-  // Delegate to canonicalDataService so reads stay behind the canonical interface.
-  // getAccountsByOrg returns all accounts for the org; filter client-side by subaccountId.
-  const accounts = await canonicalDataService.getAccountsByOrg(organisationId);
-  const account = accounts.find(a => a.subaccountId === subaccountId);
+  // Targeted single-row SELECT scoped to both organisationId and subaccountId.
+  const principal = fromOrgId(organisationId, subaccountId);
+  const account = await canonicalDataService.findAccountBySubaccountId(principal, subaccountId);
   return account?.id ?? null;
 }

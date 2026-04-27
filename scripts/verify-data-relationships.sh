@@ -29,11 +29,11 @@ classify_and_exit() {
   local severity=$1
   local message=$2
   case $severity in
-    OK|PASS) echo "$message"; exit 0 ;;
-    BLOCKING) echo "[BLOCKING] $message"; exit 1 ;;
-    WARNING|WARN) echo "[WARNING] $message"; exit 2 ;;
-    INFO) echo "[INFO] $message"; exit 3 ;;
-    *) echo "[ERROR] Unknown severity: $severity"; exit 1 ;;
+    OK|PASS) echo "$message"; echo "[GATE] data-relationships: violations=0"; exit 0 ;;
+    BLOCKING) echo "[BLOCKING] $message"; echo "[GATE] data-relationships: violations=1"; exit 1 ;;
+    WARNING|WARN) echo "[WARNING] $message"; echo "[GATE] data-relationships: violations=0"; exit 2 ;;
+    INFO) echo "[INFO] $message"; echo "[GATE] data-relationships: violations=0"; exit 3 ;;
+    *) echo "[ERROR] Unknown severity: $severity"; echo "[GATE] data-relationships: violations=1"; exit 1 ;;
   esac
 }
 

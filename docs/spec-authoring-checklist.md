@@ -12,6 +12,7 @@ Use it when drafting any **Significant** or **Major** spec (per the task classif
 
 ## Table of contents
 
+0. Verify present state (before you write)
 1. Existing primitives search (before you write)
 2. File inventory lock
 3. Contracts section (mandatory)
@@ -21,8 +22,39 @@ Use it when drafting any **Significant** or **Major** spec (per the task classif
 7. Deferred items section (mandatory, even if empty)
 8. Self-consistency pass (last step before review)
 9. Testing posture sanity check
+10. Execution-safety contracts (new writes and state machines)
 
 Appendix — Pre-review checklist summary
+
+---
+
+## Section 0 — Verify present state (before you write)
+
+Before authoring any spec that draws from deferred items in `tasks/todo.md` (or from a prior mini-spec), run a present-state verification pass on each cited item. **Do not assume the deferred item is still open.**
+
+### Why this matters
+
+Surrounding work routinely closes deferred items between mini-spec authoring and spec drafting. On the pre-launch hardening sprint, a mini-spec claimed 60 open RLS gaps; verification found 2 — migration 0227 had already closed the other 58. Without the verification step the spec would have re-litigated 58 already-fixed items, consuming review cycles and producing invalid scope.
+
+### The verification pass
+
+For each cited deferred item:
+
+1. Does the file / migration / column / function the item references still exist?
+2. Is the gap still present, or has surrounding work closed it?
+3. Record one of:
+   - `verified open: <evidence>` — the gap exists in the current codebase
+   - `verified closed by <commit-sha or migration number>` — the gap is gone
+
+Record the findings in a verification log (e.g. `tasks/builds/<slug>/verification-log.md`) so the spec reviewer has evidence, not assertions.
+
+### When to apply
+
+Any spec that begins with "address items from `tasks/todo.md`" or "implement deferred work from mini-spec X." Not needed for greenfield specs that introduce genuinely new behaviour with no prior deferred items.
+
+### Reviewer signal this prevents
+
+"This spec re-specifies items already closed by migration N" — caught at the start of the pre-launch hardening sprint Chunk 1 verification pass. The larger the gap between mini-spec authoring and spec drafting, the higher the risk.
 
 ---
 
@@ -102,9 +134,20 @@ For every data shape that crosses a service boundary or is consumed by a parser,
 
 A contract without a worked example is ambiguous at the boundary the parser cares about. Example: "score is a number between 0 and 100" does not say whether missing dimensions produce `null`, `0`, or a skipped key — and the parser has to make a choice either way. Pin it in the spec, not in the implementation.
 
+### Source-of-truth precedence (mandatory when multiple representations exist)
+
+If the spec introduces behaviour where the same fact is represented in more than one place (execution record, step status, JSONB artefact, audit log, in-memory state), declare the source-of-truth precedence explicitly:
+
+- Which representation wins when two representations disagree?
+- What is the correct read path? (e.g. "execution record > artefact JSONB > log entry")
+
+Add this as a named subsection in the spec's Contracts block, not as a prose aside. If the precedence is implicit, the implementation will make inconsistent choices and the inconsistency is invisible until it manifests as a concurrency bug under load.
+
 ### Reviewer signal this prevents
 
 "X is processed by Y but the payload shape is never defined" — caught on geo-seo, skill-analyzer-v2, improvements-roadmap, robust-scraping, memory-and-briefings.
+
+"Multiple representations of the same fact, no declared winner" — caught during the pre-launch hardening cross-spec consistency sweep (Phase 5/6 alignment on execution record vs artefact precedence).
 
 ---
 
@@ -249,19 +292,87 @@ If your spec's test plan proposes anything in the `none_for_now` or `defer_until
 
 ---
 
+## Section 10 — Execution-safety contracts (new writes and state machines)
+
+Before sending any spec for review that introduces new write paths, state machine transitions, or externally-triggered operations, verify each of the following is pinned in the spec. These are routinely missing from first-draft specs and are the root cause of the most expensive post-ship bugs.
+
+### 10.1 Idempotency posture
+
+For every externally-triggered write, state one of:
+
+- `key-based` — a unique key (e.g. `(artefactId, decision)`) guarantees exactly-once with a DB unique constraint. Name the key and the index.
+- `state-based` — the write is guarded by an optimistic predicate (`UPDATE ... WHERE status = 'expected_pre_state'`). Name the predicate.
+- `non-idempotent (intentional)` — the operation is inherently non-idempotent; state why and what the caller's retry contract is.
+
+Do not describe an operation as "idempotent" without naming which of the three applies. "We'll handle retries" is not an idempotency posture.
+
+### 10.2 Retry classification
+
+For every write or external call, declare one of: `safe` (unconditionally retryable), `guarded` (retryable with an idempotency key or optimistic predicate), or `unsafe` (caller bears retry risk). Any `unsafe` operation must be wrapped by a `safe` or `guarded` boundary before the caller can retry it. Name the boundary.
+
+### 10.3 Concurrency guard for racing writes
+
+If two concurrent callers can race to write the same terminal state (e.g. two approve requests for the same decision, two job instances for the same org), the spec must declare the concurrency guard:
+
+- Optimistic predicate: `UPDATE ... WHERE status = 'review_required'` → 0 rows affected = conflict
+- Unique constraint: DB-level (`UNIQUE (artefact_id, decision)`) + catch `23505` → defined HTTP status
+- First-commit-wins: the 0-rows-updated path returns the winning decision to the losing caller
+
+Name the guard, the DB mechanism, and the losing-caller response. "The DB will handle it" is not a guard.
+
+### 10.4 Terminal event guarantee
+
+Every cross-flow chain that emits events must declare:
+
+- Exactly one terminal event (the event that marks the logical run complete)
+- Post-terminal prohibition — no further events with the same correlation key after the terminal
+- The terminal event's `status` field: `success | partial | failed`
+
+If the chain has multiple success paths or multiple error paths, each path gets exactly one terminal event — they are mutually exclusive.
+
+### 10.5 No-silent-partial-success
+
+Every flow that can partially complete must emit an explicit `status: 'partial'` terminal event (not `status: 'success'` with a silent partial-failure). Name the conditions under which `partial` fires vs `failed`.
+
+### 10.6 Unique-constraint-to-HTTP mapping
+
+For every DB unique constraint the spec introduces, pin the HTTP status returned to the caller when the constraint is violated. Never let a `23505 unique_violation` bubble as a 500 — map it to a named status (409, 422, or 200-idempotent-hit) and document which one and why.
+
+### 10.7 State machine closure (if the spec introduces or modifies a state machine)
+
+If the spec introduces or modifies a state machine (step transitions, run aggregation, approval boundaries, status enums), include a State/Lifecycle subsection that pins:
+
+- Valid transitions (and which transitions are forbidden)
+- What execution record must exist before a terminal state is written
+- Whether the status set is closed (adding a new status value requires a spec amendment)
+
+A spec that describes behaviour without pinning valid transitions and forbidden transitions will have its state machine diverge from implementation within two feature cycles.
+
+### Reviewer signal this prevents
+
+"No idempotency posture declared" / "What happens when two callers race here?" / "How does the caller know if this partially failed?" — all caught in the pre-launch hardening pre-implementation hardening pass (amendments v2–v5, Chunks 3, 4, 5). These gaps are architectural, not stylistic — they produce correctness bugs at production load.
+
+---
+
 ## Appendix — Pre-review checklist summary
 
 Before invoking `spec-reviewer` on a draft spec, answer yes to all of the following:
 
+- [ ] **[Section 0]** Every cited deferred item verified as still open (or annotated as `verified closed by <commit>`)
 - [ ] Every new primitive has a "why not reuse" paragraph
 - [ ] Every new file / column / migration / endpoint is in the file inventory
 - [ ] Every data shape crossing a boundary has a Contracts entry with an example
+- [ ] Every contract that writes to multiple representations declares the source-of-truth precedence
 - [ ] Every new tenant-scoped table has RLS policy + manifest entry + route guard + principal-scoped context (or a documented reason for opting out)
 - [ ] Execution model (sync/async, inline/queued, cached/dynamic) is picked explicitly and the prose + inventory + goals all agree
 - [ ] Phase dependency graph has no backward references, no orphaned deferrals, no phase-boundary contradictions
 - [ ] `## Deferred Items` section exists (even if "None.")
 - [ ] Self-consistency pass complete: Goals ↔ Implementation match; every load-bearing claim has a named mechanism
 - [ ] Testing plan consistent with `docs/spec-context.md`
+- [ ] **[Section 10]** Every externally-triggered write has an idempotency posture, retry classification, and concurrency guard declared
+- [ ] **[Section 10]** Every cross-flow chain has a declared terminal event + post-terminal prohibition
+- [ ] **[Section 10]** Every DB unique constraint has a named HTTP mapping (no bubbled 500s from `23505`)
+- [ ] **[Section 10]** If a state machine is introduced or modified: valid transitions, forbidden transitions, and status-set closure are declared
 
 If every box is checked, the spec is ready for `spec-reviewer`. If any box is unchecked and you're intentionally leaving it so (e.g. deferring the contract to implementation), mark the deviation inline in the spec's framing section — don't leave it implicit.
 

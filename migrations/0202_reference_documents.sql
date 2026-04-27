@@ -56,6 +56,10 @@ CREATE INDEX reference_documents_active_idx
 
 ALTER TABLE reference_documents ENABLE ROW LEVEL SECURITY;
 
+-- @rls-baseline: pre-FORCE-RLS migration. CREATE POLICY exists at the canonical
+-- org-isolation shape; FORCE RLS hardening is intentionally deferred because the
+-- companion versions table (0203) needs a parent-EXISTS policy variant that
+-- does not exist in 0227. Tracked in tasks/todo.md as a follow-on migration.
 CREATE POLICY reference_documents_org_isolation ON reference_documents
   USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
 
