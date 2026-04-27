@@ -8,12 +8,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md
-**Active plan:** docs/superpowers/plans/2026-04-26-audit-remediation-followups.md
-**Active build slug:** audit-remediation-followups (Wave 1)
-**Last updated:** 2026-04-26
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Last updated:** 2026-04-27
 
 ---
+
+**Also merge-ready:** PR #216 (branch `claude/audit-system-agents-46kTN`) — system-agents v7.1 migration (manager-role guard, cross-run idempotency, 14 new skills). Full review pipeline complete: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer blocking M1–M7 + S2/S7–S9 fixed in-branch → dual-reviewer Codex quota exhausted (no findings) → ChatGPT PR review 1 round (3 blocking findings implemented: idempotency scope corrected to 'subaccount', action rows terminalised on all early-return paths, parsedInput threaded to executor; 2 deferred). Session log: `tasks/review-logs/chatgpt-pr-review-claude-audit-system-agents-46kTN-2026-04-27T08-36-18Z.md`. Final HEAD: `3f5286b0`. Awaiting merge into `main`.
 
 **In-flight spec:** `docs/superpowers/specs/2026-04-25-codebase-audit-remediation-spec.md` — PR #196 (branch `feat/codebase-audit-remediation-spec`) merge-ready after the full review pipeline. Phases 1+2+3 of 5 shipped (Phase 1 RLS hardening, Phase 2 gate compliance, Phase 3 architectural integrity). Pipeline outcomes: spec-conformance CONFORMANT_AFTER_FIXES (1 mechanical fix; 4 directional items routed to backlog) → pr-reviewer REQUEST_CHANGES (3 blocking + 2 strong fixed in-branch; 5 deferred) → dual-reviewer PR ready (3 iterations, 1 minor comment fix) → 2 rounds ChatGPT PR review with verdict APPROVED with controlled rollout (Round 1: 3 auto-rejects no-op + 7 escalated all defer; Round 2: 2 high-leverage additions H1 + B2-ext routed to follow-up spec). 136 files vs origin/main (+38k / -1.3k). Session log: `tasks/review-logs/chatgpt-pr-review-feat-codebase-audit-remediation-spec-2026-04-25T20-31-09Z.md`. **Pre-merge gate (G1):** migration verification per follow-up spec (fresh DB bootstrap + staging migrate + FORCE RLS smoke test) — must run before merge. **Post-merge action (G2):** smoke-test runbook per follow-up spec (agent / automation / webhook / job cycle + log/LLM/job monitoring). All other findings deferred to `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` (20 items across 8 groups A–H, sequenced post-merge backlog). Phases 4+5 of original spec also pending (separate future PRs). Final HEAD at session close: pending close-out commit (last named: `a83e28f2`). Awaiting merge into `main`.
 
