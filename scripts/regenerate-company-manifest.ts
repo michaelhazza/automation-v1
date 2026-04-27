@@ -101,7 +101,7 @@ async function main() {
       console.error('ERROR: manifest file not found — run without --check to generate it');
       process.exit(1);
     }
-    if (onDisk === generated) {
+    if (onDisk.replace(/\r\n/g, '\n') === generated) {
       console.log('OK: manifest is up to date');
       process.exit(0);
     } else {
