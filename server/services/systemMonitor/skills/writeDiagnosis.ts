@@ -120,7 +120,10 @@ export async function executeWriteDiagnosis(
       };
     }
 
-    return { success: true };
+    // Explicit `suppressed: false` for contract symmetry with the suppression
+    // branch above — consumers can rely on the field always being present
+    // rather than coercing `undefined → false`.
+    return { success: true, suppressed: false };
   } catch (err) {
     return { success: false, error: String(err) };
   }

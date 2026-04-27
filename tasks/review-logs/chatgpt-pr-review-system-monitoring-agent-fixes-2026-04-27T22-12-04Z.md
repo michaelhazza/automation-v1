@@ -65,3 +65,31 @@ ChatGPT round-2 pass surfaced 4 findings:
 - No tests assert on the old suppression shape (verified via grep over `*.test.ts`). The triage durability integration test asserts only on `result.status` and `result.reason` for the duplicate-job idempotent skip path — unaffected.
 
 ---
+
+## Round 3 — 2026-04-28T<auto>
+
+### ChatGPT Feedback (raw)
+ChatGPT round-3 final pass — described as "no new blockers, only cleanup items":
+
+1. **Duplicated fields in increment UPDATE** — ChatGPT now claims both `lastTriageAttemptAt` AND `updatedAt` are duplicated in the triageHandler.ts increment UPDATE, retracting their round-2 "false positive" admission and asserting the duplication does exist (rationalising the round-2 mistake as "older diff view").
+2. **`writeDiagnosis` success path missing explicit `suppressed: false`** — the suppression branch returns `{ success: true, suppressed: true }` but the normal-path success returns `{ success: true }`. Recommends symmetry: `{ success: true, suppressed: false }`.
+3. **Observability: counter metric for suppressed terminal-event transitions** — explicitly out-of-scope per ChatGPT ("Not for this PR, just flagging").
+
+Plus a "what's solid" recap (idempotent increment, race-claim ordering, single-writer invariant, suppression as first-class outcome, atomic staleness sweep, synthetic-check schema alignment, integration-test coordination proof).
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Duplicated `lastTriageAttemptAt` + `updatedAt` in increment UPDATE | technical | reject | auto (reject) | low | False positive — verified by re-reading `triageHandler.ts:271–285`. The increment UPDATE assigns `lastTriageAttemptAt: now` exactly once (line 276) and `updatedAt: now` exactly once (line 279). ChatGPT's "retraction of earlier admission" is itself hallucinated — same false positive pattern as round 2 finding 4. No code change. |
+| 2. `writeDiagnosis` success path explicit `suppressed: false` for symmetry | technical | implement | auto (implement) | low | Verified at `writeDiagnosis.ts:123` — the normal-path return was `{ success: true }`. The suppression branch (line 116–120) returns `suppressed: true` explicitly. Symmetry is a real contract improvement: consumers no longer need to coerce `undefined → false`. Mechanical, no logic surface change, no architectural blast radius — auto-applied. |
+| 3. Counter metric for `triage.terminal_event_suppressed` transitions | technical | defer | defer (user-pre-decided) | low | Escalation carveout (technical defer) bypassed by user pre-decision in round 3 prompt: "defer #3 to tasks/todo.md as a follow-up observability item". Routed to `tasks/todo.md § PR Review deferred items / PR #217`. ChatGPT itself framed as out-of-scope for this PR. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+- [auto] `server/services/systemMonitor/skills/writeDiagnosis.ts` — added explicit `suppressed: false` on the normal-path success return. Comment notes the symmetry intent so consumers can rely on the field always being present.
+
+### Notes
+- Typecheck (`npx tsc --noEmit`) — zero errors in the changed file. Pre-existing errors in `ClarificationInbox.tsx` and `SkillAnalyzerExecuteStep.tsx` persist (unrelated, same as rounds 1 + 2).
+- Round 3 ChatGPT feedback contained one verified-real cleanup (Finding #2), one re-asserted hallucination (Finding #1 — same false positive as round 2 finding 4, re-claimed under "retraction of false positive" framing), and one explicitly-out-of-scope observability nudge (Finding #3).
+- Top themes: error_handling (suppression contract symmetry), other (hallucinated duplicate-field claim).
+
+---
