@@ -37,7 +37,7 @@ export interface IncidentListFilters {
   sort?: 'last_seen_desc' | 'first_seen_desc' | 'occurrence_count_desc' | 'severity_desc';
   limit?: number;
   offset?: number;
-  diagnosis?: 'all' | 'diagnosed' | 'awaiting' | 'not-triaged';
+  diagnosis?: 'all' | 'diagnosed' | 'awaiting' | 'not-triaged' | 'failed-triage';
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +110,11 @@ export const systemIncidentService = {
           sql`${systemIncidents.source} = 'self'`,
           sql`${systemIncidents.triageAttemptCount} >= 5`,
         ) as unknown as ReturnType<typeof eq>,
+      );
+    } else if (filters.diagnosis === 'failed-triage') {
+      conditions.push(eq(systemIncidents.triageStatus, 'failed') as unknown as ReturnType<typeof eq>);
+      conditions.push(
+        inArray(systemIncidents.diagnosisStatus, ['none', 'partial', 'invalid']) as unknown as ReturnType<typeof eq>,
       );
     }
 

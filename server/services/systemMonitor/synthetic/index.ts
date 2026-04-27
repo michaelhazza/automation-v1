@@ -7,6 +7,8 @@ import { heartbeatSelf } from './heartbeatSelf.js';
 import { connectorErrorRateElevated } from './connectorErrorRateElevated.js';
 import { agentRunSuccessRateLow } from './agentRunSuccessRateLow.js';
 import { sweepCoverageDegraded } from './sweepCoverageDegraded.js';
+import { silentAgentSuccess } from './silentAgentSuccess.js';
+import { incidentSilence } from './incidentSilence.js';
 
 export const SYNTHETIC_CHECKS: SyntheticCheck[] = [
   pgBossQueueStalled,
@@ -17,6 +19,8 @@ export const SYNTHETIC_CHECKS: SyntheticCheck[] = [
   connectorErrorRateElevated,
   agentRunSuccessRateLow,
   sweepCoverageDegraded,
+  silentAgentSuccess,
+  incidentSilence,
 ];
 
 export type { SyntheticCheck };

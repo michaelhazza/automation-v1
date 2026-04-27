@@ -2,6 +2,7 @@ import { recordIncident } from '../../incidentIngestor.js';
 import { logger } from '../../../lib/logger.js';
 import { baselineReader } from '../baselines/baselineReader.js';
 import { SYNTHETIC_CHECKS } from './index.js';
+import { runStaleTriageSweep } from '../triage/staleTriageSweep.js';
 import type { HeuristicContext } from '../heuristics/types.js';
 
 export async function runSyntheticChecksTick(): Promise<void> {
@@ -18,6 +19,14 @@ export async function runSyntheticChecksTick(): Promise<void> {
   };
 
   logger.info('synthetic_checks_tick_start', { checkCount: SYNTHETIC_CHECKS.length });
+
+  try {
+    await runStaleTriageSweep(now);
+  } catch (err) {
+    logger.error('stale_triage_sweep_error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   for (const check of SYNTHETIC_CHECKS) {
     try {

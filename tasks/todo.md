@@ -314,6 +314,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **Nearest-common-ancestor routing for cross-subtree reassignment** — ChatGPT suggested automatic NCA-based routing so two peer subtrees can exchange work without requiring the subaccount root as middleman. Out of scope for v1 where root-only is a deliberate simplification; revisit when a real cross-subtree workflow emerges that root-funnelling demonstrably bottlenecks. Requires algorithmic design + prompt-scaffolding decision about how the NCA is surfaced to the caller.
 - [ ] **Violation sampling / alerting tier above §17.3 rejection-rate metric** — ChatGPT suggested a sampling-based alert ladder (page on sustained rejection-rate anomalies, digest on daily trend breaks). Ops/observability concern rather than a delegation-contract concern; belongs in a post-launch monitoring spec or the ops playbook, not in this spec. Revisit after Phase 4 ships and there is a baseline rejection-rate distribution to calibrate against.
 
+### system-monitoring-agent-fixes (2026-04-27)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-system-monitoring-agent-fixes-2026-04-27T09-44-46Z.md`
+**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
+**PR:** #217 — https://github.com/michaelhazza/automation-v1/pull/217
+
+- [ ] **Proof-of-life severity weighting — `synthetic_fires_in_proof_window` non-trivial / non-low-severity gate.** [auto] ChatGPT round 3 §5: refine §9.1 proof-of-life so it requires at least one *non-trivial* synthetic check (or a non-silence + non-low-severity signal), not just any synthetic fire. **Why deferred:** ChatGPT itself frames as "correctly out of scope for now" — introduces subjectivity, requires a taxonomy or severity-weighting model the system does not currently have. Round 1 finding 5 + round 2 finding 3 already excluded silence-check fires from proof-of-life; this would extend the exclusion to a *severity tier*, not just a *check-id*. **Reconsider per trigger:** when the synthetic-check fleet grows beyond the current two checks (silent-agent-success + incident-silence) AND there is empirical evidence of "low-signal synthetic fires masking real degradation" — at that point the taxonomy investment is worth the subjectivity cost. Until then, the round 2 §9.6 "three independent mechanisms" model is the right fail-quiet posture.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -325,6 +333,10 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 ---
 
 ## PR Review deferred items
+
+### PR #217 — system-monitoring-agent-fixes (2026-04-27 — ChatGPT review round 3)
+
+- [ ] **Counter metric / aggregation for `triage.terminal_event_suppressed` transitions.** [user] ChatGPT round 3 §3: a counter on suppressed terminal events would become a leading indicator of triage-coordination contention or staleness-sweep aggressiveness. Currently we only emit the warn-log line at suppression points (`triageHandler.ts:368-370,405-407` and `writeDiagnosis.ts:111-121`). **Why deferred:** ChatGPT explicitly frames as "Not for this PR, just flagging" — observability follow-up, not a behavioural fix. **Reconsider per trigger:** when (a) we adopt a counter/metric primitive (currently no in-repo metrics infra), or (b) suppression rates become non-zero in production and we need quantitative monitoring rather than log-grep. Source: ChatGPT round 3 round-summary observation; session log `tasks/review-logs/chatgpt-pr-review-system-monitoring-agent-fixes-2026-04-27T22-12-04Z.md`.
 
 ### PR #182 — claude/build-paperclip-hierarchy-ymgPW (2026-04-23 — ChatGPT review rounds 2 & 3)
 
@@ -1229,3 +1241,19 @@ The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NIC
 - [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
   - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
   - Pre-existing. Process-local cache that captures the first-seen org's agent row id and reuses it for the lifetime of the process. Production has a fixed system-ops org so this is fine today; future dual-org / test-env scenarios could collide. Cheap fix: switch to `Map<organisationId, agentId>`.
+
+## Deferred from spec-conformance review — system-monitoring-agent-fixes (2026-04-27)
+
+**Captured:** 2026-04-27T11:41:03Z
+**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-fixes-2026-04-27T11-41-03Z.md`
+**Spec:** `tasks/builds/system-monitoring-agent-fixes/spec.md`
+
+- [ ] REQ #29 — Tier-1 items in `tasks/post-merge-system-monitor.md` not yet checked off with cross-reference to this spec
+  - Spec section: §14.5 A5.1, §14.6 (Definition of done bullet 5)
+  - Gap: All five Tier-1 items in `tasks/post-merge-system-monitor.md` remain `- [ ]`. Spec A5.1 requires they be marked `- [x]` with a one-line cross-reference to `tasks/builds/system-monitoring-agent-fixes/spec.md` after merge. Tier-2 items correctly remain `- [ ]`. This is a docs cross-link, not runtime behaviour.
+  - Suggested approach: Update `tasks/post-merge-system-monitor.md` in the same merge commit (or immediately after merge) — for each of the five Tier-1 items (rate-limit retry idempotency, list filter `triageStatus=failed AND diagnosisStatus=none`, backend staleness guard, write-vs-declared synthetic check, incident-silence synthetic check), flip `- [ ]` → `- [x]` and append `— closed by tasks/builds/system-monitoring-agent-fixes/spec.md (PR <merge-commit-or-PR-#>).` Defer until merge so the cross-reference can name the actual PR/commit.
+
+- [ ] Spec defect — §9.1 SQL references non-existent `system_incidents.metadata` column
+  - Spec section: §9.1, §4.5, §9.6 (and §14.3 A3.6 acceptance test which depends on the exclusion working)
+  - Gap: The `incidentSilence` SQL in spec §9.1 (and the verbatim implementation at `server/services/systemMonitor/synthetic/incidentSilence.ts`) references `si.metadata->>'checkId'` in two places (the `incidents_in_window` exclusion and the `synthetic_fires_in_proof_window` exclusion). The `system_incidents` table has no `metadata` column — the closest equivalent is `latest_error_detail` (jsonb), populated by `recordIncident` from the `errorDetail` parameter (see `server/services/incidentIngestor.ts:241,251`). When the synthetic-checks tick runs `incidentSilence` against a real database, the query will fail with `ERROR: column si.metadata does not exist`. The implementation faithfully follows the spec — this is a SPEC defect, not an implementation defect.
+  - Suggested approach: open a `spec-reviewer` (or `chatgpt-spec-review`) round on `tasks/builds/system-monitoring-agent-fixes/spec.md` §9.1 to swap `si.metadata->>'checkId'` for `si.latest_error_detail->>'checkId'` in BOTH the `incidents_in_window` and `synthetic_fires_in_proof_window` exclusions, and update §9.6 / §14.3 (A3.6) cross-references. Once the spec is corrected, mirror the rename in `incidentSilence.ts` (and any acceptance-test seeding fixtures that stamp the metadata key). Verify the `synthetic-check fired` row produced by `recordIncident` actually persists `errorDetail.metadata.checkId` into `latest_error_detail` so the proof-of-life exclusion can match — `syntheticChecksTickHandler.ts:46` passes `result.metadata` as `errorDetail`, so `latest_error_detail->>'checkId'` should match the `metadata.checkId: 'incident-silence'` value emitted by `incidentSilence`. Confirm by reading one synthetic-check `system_incidents` row after a tick.

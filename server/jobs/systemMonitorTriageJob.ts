@@ -22,7 +22,7 @@ import { withSystemPrincipal } from '../services/principal/systemPrincipal.js';
 import { runTriage } from '../services/systemMonitor/triage/triageHandler.js';
 import { logger } from '../lib/logger.js';
 
-export async function handleSystemMonitorTriage(job: { data: { incidentId: string } }): Promise<void> {
+export async function handleSystemMonitorTriage(job: { id: string; data: { incidentId: string } }): Promise<void> {
   const { incidentId } = job.data;
   if (!incidentId) {
     logger.error('system_monitor_triage_job_missing_incident_id', { jobData: job.data });
@@ -31,7 +31,7 @@ export async function handleSystemMonitorTriage(job: { data: { incidentId: strin
 
   await withSystemPrincipal(async () => {
     try {
-      await runTriage(incidentId);
+      await runTriage(incidentId, job.id);
     } catch (err) {
       logger.error('system_monitor_triage_job_failed', {
         incidentId,

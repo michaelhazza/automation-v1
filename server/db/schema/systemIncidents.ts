@@ -79,6 +79,7 @@ export const systemIncidents = pgTable(
     promptFeedbackText: text('prompt_feedback_text'),
     triageAttemptCount: integer('triage_attempt_count').notNull().default(0),
     lastTriageAttemptAt: timestamp('last_triage_attempt_at', { withTimezone: true }),
+    lastTriageJobId: text('last_triage_job_id'),
     sweepEvidenceRunIds: uuid('sweep_evidence_run_ids').array().notNull().default(sql`'{}'`),
 
     // Explicit triage + diagnosis lifecycle (migration 0237). The UI reads these

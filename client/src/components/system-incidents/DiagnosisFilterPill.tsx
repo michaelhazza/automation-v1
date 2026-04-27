@@ -2,13 +2,14 @@
 // Four values: all / diagnosed / awaiting / not-triaged.
 // ANDs with existing filters; no count badges (per CLAUDE.md frontend rules).
 
-export type DiagnosisFilter = 'all' | 'diagnosed' | 'awaiting' | 'not-triaged';
+export type DiagnosisFilter = 'all' | 'diagnosed' | 'awaiting' | 'not-triaged' | 'failed-triage';
 
 const PILL_OPTIONS: Array<{ value: DiagnosisFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'diagnosed', label: 'Diagnosed by agent' },
   { value: 'awaiting', label: 'Awaiting diagnosis' },
   { value: 'not-triaged', label: 'Not auto-triaged' },
+  { value: 'failed-triage', label: 'Failed triage' },
 ];
 
 interface Props {

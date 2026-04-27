@@ -1179,7 +1179,7 @@ export const queueService = {
       });
 
       // System Monitor — triage (no schedule; enqueued by incidentIngestor + sweep handler)
-      await (boss as any).work('system-monitor-triage', { teamSize: 4, teamConcurrency: 4 }, async (job: { data: { incidentId: string } }) => {
+      await (boss as any).work('system-monitor-triage', { teamSize: 4, teamConcurrency: 4 }, async (job: { id: string; data: { incidentId: string } }) => {
         try {
           const { handleSystemMonitorTriage } = await import('../jobs/systemMonitorTriageJob.js');
           await handleSystemMonitorTriage(job);
