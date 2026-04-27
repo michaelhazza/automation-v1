@@ -190,6 +190,13 @@ Wiring landed in `server/services/llmRouter.ts`:
 
 **Verification.** Diff inspection confirmed paired emission and tx atomicity. Server-side typecheck not runnable in this env (no node_modules); errors observed are pre-existing `Cannot find module 'drizzle-orm'` etc.
 
+**Deferred follow-up — pr-reviewer Strong-4 (2026-04-27): runtime tests for the new transactional payload-write path.** Test coverage is missing for the four pairing/atomicity invariants:
+1. `budget_blocked` path — no `llm.requested`, no `llm.completed`, no `agent_run_llm_payloads` row.
+2. Non-`agent_run` caller (sourceType ∈ {`system`, `analyzer`}) — no events, no payload row, ledger commits.
+3. `parse_failure` on attempt 1 + success on attempt 2 — exactly one `llm.requested` + exactly one `llm.completed`, paired.
+4. Streaming path that completes — exactly one of each event, paired.
+Per `DEVELOPMENT_GUIDELINES.md §7`, runtime tests for non-pure logic are deferred until the testing posture flips. Pick this up at that flip — the gate predicates are pure-testable today (extract them if useful), the full integration assertions need a running DB.
+
 ### LAEL-P1-2 — Remaining P1 emission sites
 
 All non-critical (graded-failure tier; drop + warn on transient DB failure, no retry).

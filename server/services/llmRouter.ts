@@ -860,6 +860,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         llmRequestId &&
         !llmRequestedEmitted
       ) {
+        // Must be assigned BEFORE tryEmitAgentEvent — `llm.completed`'s
+        // durationMs subtracts this value from Date.now(); a bogus 0
+        // start would surface as a multi-decade duration on the timeline.
         llmCallStartedAt = Date.now();
         tryEmitAgentEvent({
           runId:          ctx.runId,
@@ -874,10 +877,23 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
             model:                mappedModel,
             attempt,
             featureTag:           ctx.featureTag ?? 'unknown',
+            // INPUT-side context-token estimate (sum of system + messages
+            // + tool defs as caller computed it). Not a streamed-output
+            // preview. Spec §5.3 names the field `payloadPreviewTokens`
+            // — the name is ambiguous; pin the meaning here.
             payloadPreviewTokens: params.estimatedContextTokens ?? 0,
           },
           linkedEntity: { type: 'llm_request', id: llmRequestId },
         });
+        // The captured `provider` / `mappedModel` / `attempt` reflect the
+        // FIRST attempt that reached this emit site, NOT the eventually-
+        // successful provider when fallback fires later. This is intentional:
+        // emitting per-attempt would create unpaired `llm.requested` rows
+        // when retries fail and break the pairing invariant. The
+        // `llm.completed` event is the source of truth for outcome — its
+        // `status` reflects the actual terminal state (success, error,
+        // timeout, ...) and the ledger row carries `attemptNumber` +
+        // `fallbackChain` for the per-attempt audit trail.
         llmRequestedEmitted = true;
       }
 
