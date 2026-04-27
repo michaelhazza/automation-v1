@@ -180,6 +180,43 @@ export default function DashboardPage({ user }: { user: User }) {
     if (user.role === 'system_admin') refetchQueue();
   }
 
+  // ── Socket subscriptions (org room — auto-joined on connect) ─────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const EVENT_TO_GROUP = {
+    'dashboard.approval.changed':      refetchApprovals,
+    'dashboard.activity.updated':      refetchActivity,
+    'dashboard.client.health.changed': refetchClientHealth,
+  } as const;
+
+  useSocket('dashboard.approval.changed',      useCallback(() => { void refetchApprovals(); }, []));
+  useSocket('dashboard.activity.updated',      useCallback(() => { void refetchActivity(); }, []));
+  useSocket('dashboard.client.health.changed', useCallback(() => { void refetchClientHealth(); }, []));
+
+  useSocketRoom(
+    'sysadmin',
+    user.role === 'system_admin' ? 'system' : null,
+    {
+      'dashboard.queue.changed': () => refetchQueue(),
+    },
+    () => { if (user.role === 'system_admin') refetchQueue(); },
+  );
+
+  const connected = useSocketConnected();
+
+  useEffect(() => {
+    const wasConnected = prevConnected.current;
+    prevConnected.current = connected;
+
+    // Only act on the false→true transition (reconnect), not initial mount (null→true).
+    if (wasConnected === false && connected === true) {
+      if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+      reconnectDebounce.current = setTimeout(() => {
+        refetchAll();
+      }, RECONNECT_DEBOUNCE_MS);
+    }
+  }, [connected]);
+
   useEffect(() => {
     Promise.all([
       api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
