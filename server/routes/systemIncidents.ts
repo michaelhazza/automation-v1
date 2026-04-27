@@ -7,6 +7,7 @@ import {
   suppressIncidentBody,
   listIncidentsQuery,
   testTriggerBody,
+  recordPromptFeedbackBody,
 } from '../schemas/systemIncidents.js';
 import type { SystemIncidentStatus } from '../db/schema/systemIncidents.js';
 
@@ -28,6 +29,7 @@ router.get('/api/system/incidents', ...SA, asyncHandler(async (req, res) => {
     sort: query.sort,
     limit: query.limit ? parseInt(query.limit, 10) : undefined,
     offset: query.offset ? parseInt(query.offset, 10) : undefined,
+    diagnosis: query.diagnosis,
   };
   const result = await systemIncidentService.listIncidents(filters);
   res.json(result);
@@ -57,7 +59,7 @@ router.get('/api/system/incidents/suppressions', ...SA, asyncHandler(async (req,
 // ─── Delete suppression ──────────────────────────────────────────────────────
 
 router.delete('/api/system/incidents/suppressions/:id', ...SA, asyncHandler(async (req, res) => {
-  await systemIncidentService.removeSuppression(req.params.id, req.user!.id);
+  await systemIncidentService.removeSuppression(req.params.id, req.user!.id, req.user!.role);
   res.json({ message: 'Suppression removed' });
 }));
 
@@ -66,7 +68,7 @@ router.delete('/api/system/incidents/suppressions/:id', ...SA, asyncHandler(asyn
 router.post('/api/system/incidents/test-trigger', ...SA, asyncHandler(async (req, res) => {
   // guard-ignore-next-line: input-validation reason="testTriggerBody Zod parse handles validation"
   const body = testTriggerBody.parse(req.body ?? {});
-  const incident = await systemIncidentService.createTestIncident(req.user!.id, body.triggerNotifications);
+  const incident = await systemIncidentService.createTestIncident(req.user!.id, body.triggerNotifications, req.user!.role);
   res.status(201).json(incident);
 }));
 
@@ -80,7 +82,7 @@ router.get('/api/system/incidents/:id', ...SA, asyncHandler(async (req, res) => 
 // ─── Ack ─────────────────────────────────────────────────────────────────────
 
 router.post('/api/system/incidents/:id/ack', ...SA, asyncHandler(async (req, res) => {
-  const incident = await systemIncidentService.acknowledgeIncident(req.params.id, req.user!.id);
+  const incident = await systemIncidentService.acknowledgeIncident(req.params.id, req.user!.id, req.user!.role);
   res.json(incident);
 }));
 
@@ -94,6 +96,7 @@ router.post('/api/system/incidents/:id/resolve', ...SA, asyncHandler(async (req,
     req.user!.id,
     body.resolutionNote,
     body.linkedPrUrl,
+    req.user!.role,
   );
   res.json(incident);
 }));
@@ -108,15 +111,30 @@ router.post('/api/system/incidents/:id/suppress', ...SA, asyncHandler(async (req
     req.user!.id,
     body.reason,
     body.duration,
+    req.user!.role,
   );
   res.json(incident);
 }));
 
-// ─── Escalate (stub — filled in commit 12) ───────────────────────────────────
+// ─── Escalate ────────────────────────────────────────────────────────────────
 
 router.post('/api/system/incidents/:id/escalate', ...SA, asyncHandler(async (req, res) => {
-  const result = await systemIncidentService.escalateIncidentToAgent(req.params.id, req.user!.id);
+  const result = await systemIncidentService.escalateIncidentToAgent(req.params.id, req.user!.id, req.user!.role);
   res.json(result);
+}));
+
+// ─── Record prompt feedback ───────────────────────────────────────────────────
+
+router.post('/api/system/incidents/:id/feedback', ...SA, asyncHandler(async (req, res) => {
+  // guard-ignore-next-line: input-validation reason="recordPromptFeedbackBody Zod parse handles validation"
+  const body = recordPromptFeedbackBody.parse(req.body);
+  await systemIncidentService.recordPromptFeedback(
+    req.params.id,
+    body,
+    req.user!.id,
+    req.user!.role,
+  );
+  res.json({ message: 'Feedback recorded' });
 }));
 
 export default router;

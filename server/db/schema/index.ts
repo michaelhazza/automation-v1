@@ -234,3 +234,7 @@ export * from './delegationOutcomes.js';
 export * from './systemIncidents.js';
 export * from './systemIncidentEvents.js';
 export * from './systemIncidentSuppressions.js';
+
+// System Monitor Active Layer — baselines + heuristic fires (migration 0233)
+export * from './systemMonitorBaselines.js';
+export * from './systemMonitorHeuristicFires.js';

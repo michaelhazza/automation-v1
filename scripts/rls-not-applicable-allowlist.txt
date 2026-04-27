@@ -66,3 +66,5 @@
 #
 # (Currently empty — every tenant table on `main` is registered in
 # rlsProtectedTables.ts. Add new entries below as needed.)
+system_monitor_baselines  System-scoped baseline statistics for the system monitor agent, accessed only via sysadmin-gated service layer with explicit allowRlsBypass — no per-tenant data, no org isolation needed. [ref: phase-A-1-2-spec.md §4.3]
+system_monitor_heuristic_fires  System-scoped heuristic evaluation audit log for the system monitor agent, accessed only via sysadmin-gated service layer with explicit allowRlsBypass — no per-tenant data, no org isolation needed. [ref: phase-A-1-2-spec.md §4.3]
