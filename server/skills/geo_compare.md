@@ -3,6 +3,7 @@ name: GEO Competitive Comparison
 description: Competitive GEO analysis — benchmarks a client site against 2-3 competitors across all GEO dimensions to identify relative strengths and gaps.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

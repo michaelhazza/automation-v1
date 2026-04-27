@@ -155,6 +155,9 @@ const envSchema = z.object({
     .positive()
     .optional()
     .default(30),
+  // Lead discovery (SDR Agent)
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
+  HUNTER_API_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

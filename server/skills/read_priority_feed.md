@@ -3,6 +3,7 @@ name: Read Priority Feed
 description: Read, claim, or release items from the prioritized work feed.
 isActive: true
 visibility: basic
+reusable: true
 ---
 
 ## Parameters

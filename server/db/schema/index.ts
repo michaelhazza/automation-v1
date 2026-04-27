@@ -234,3 +234,6 @@ export * from './delegationOutcomes.js';
 export * from './systemIncidents.js';
 export * from './systemIncidentEvents.js';
 export * from './systemIncidentSuppressions.js';
+
+// System Agents v7.1 — cross-run skill idempotency keys (migration 0233)
+export * from './skillIdempotencyKeys.js';

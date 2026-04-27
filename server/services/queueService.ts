@@ -595,6 +595,18 @@ export const queueService = {
           throw err;
         }
       });
+      // System Agents v7.1 — skill_idempotency_keys nightly retention sweep (5:30am UTC).
+      await (boss as any).work('maintenance:skill-idempotency-keys-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSkillIdempotencyKeysCleanup } = await import('../jobs/skillIdempotencyKeysCleanupJob.js');
+          await withTimeout(runSkillIdempotencyKeysCleanup().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:skill-idempotency-keys-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
       // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
       await (boss as any).work('maintenance:fast-path-decisions-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1075,6 +1087,7 @@ export const queueService = {
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
+      await boss.schedule('maintenance:skill-idempotency-keys-cleanup', '30 5 * * *', {}); // 5:30am daily — after priority-feed-cleanup (5am)
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
       // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
