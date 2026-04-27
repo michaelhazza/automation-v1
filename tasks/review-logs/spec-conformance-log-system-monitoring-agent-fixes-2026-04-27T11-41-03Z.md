@@ -7,6 +7,7 @@
 **Scope:** ALL — caller confirmed all four chunks (1 — triage durability, 2 — silentAgentSuccess, 3 — incidentSilence, 4 — failed-triage filter pill) implemented.
 **Changed-code set:** 17 files (10 modified + new staged in working tree, 12 untracked new files including 2 migrations + 6 source/test files + plan)
 **Run at:** 2026-04-27T11:41:03Z
+**Commit at finish:** `31b761e8`
 
 ---
 
