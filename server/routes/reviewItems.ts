@@ -7,7 +7,7 @@ import { actionService } from '../services/actionService.js';
 import { queueService } from '../services/queueService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitOrgUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getMajorThresholds } from '../services/pulseConfigService.js';
 import { buildDraftFromAction, getRunTotalCostMinor, getRunTotalCostMinorBatch } from '../services/pulseService.js';
 import { classify, buildAckText } from '../services/pulseLaneClassifier.js';
@@ -174,6 +174,10 @@ router.post(
 
       const subaccountId = action.subaccountId;
       if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'approved',
+        subaccountId: action.subaccountId ?? null,
+      });
     }
 
     res.json({ ...result, lane });
@@ -222,6 +226,10 @@ router.post(
 
       const subaccountId = action.subaccountId;
       if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'rejected' });
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'rejected',
+        subaccountId: action.subaccountId ?? null,
+      });
     }
 
     res.json(result);
