@@ -80,21 +80,25 @@ This table is the single source of truth for what the spec touches. Any prose re
 | File | Phase | Purpose |
 |---|---|---|
 | `migrations/0239_system_incidents_last_triage_job_id.sql` | 1 | Adds `last_triage_job_id text` column to `system_incidents`. Down migration: `migrations/0239_system_incidents_last_triage_job_id.down.sql`. |
-| `server/services/systemMonitor/triage/staleTriageSweep.ts` | 1 | Pure + IO split. Exports `findStaleTriageRowsSql(now, staleAfterMs)` (pure SQL builder) and `runStaleTriageSweep()` (executes UPDATE...RETURNING + writes events). |
+| `server/services/systemMonitor/triage/staleTriageSweep.ts` | 1 | IO module. Re-exports `parseStaleAfterMinutesEnv` from `staleTriageSweepPure.ts`; exports `runStaleTriageSweep()` (executes UPDATE...RETURNING + writes events) and `findStaleTriageRowsSql(now, staleAfterMs)` (documented SQL fragment for the predicate shape). |
+| `server/services/systemMonitor/triage/staleTriageSweepPure.ts` | 1 | Pure helpers: `parseStaleAfterMinutesEnv(raw?)` and `staleCutoff(now, staleAfterMs)`. No DB import — satisfies §7 / verify-pure-helper-convention for the sibling `*Pure.test.ts`. |
 | `server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts` | 1 | Pure-helper test of the staleness predicate boundary AND `parseStaleAfterMinutesEnv` (NaN / empty / non-positive / valid env values). Runnable via `npx tsx`. |
 | `server/services/systemMonitor/triage/triageIdempotencyPure.ts` | 1 | Pure helper: `shouldIncrementAttemptCount(currentJobId, candidateJobId): boolean`. |
 | `server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts` | 1 | Pure-helper test for the idempotency predicate. |
-| `server/services/systemMonitor/synthetic/silentAgentSuccess.ts` | 2 | New `SyntheticCheck` registered in `SYNTHETIC_CHECKS` array. |
-| `server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts` | 2 | Pure-helper test of the threshold predicate. |
-| `server/services/systemMonitor/synthetic/incidentSilence.ts` | 3 | New `SyntheticCheck` registered in `SYNTHETIC_CHECKS` array. |
-| `server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts` | 3 | Pure-helper test of the silence predicate. |
+| `server/services/systemMonitor/synthetic/silentAgentSuccess.ts` | 2 | New `SyntheticCheck` registered in `SYNTHETIC_CHECKS` array. Imports its predicate / env parsers from `silentAgentSuccessPure.ts`. |
+| `server/services/systemMonitor/synthetic/silentAgentSuccessPure.ts` | 2 | Pure helpers: `isSilentAgentRatioElevated`, `parseRatioThresholdEnv`, `parseMinSamplesEnv`. No DB import. |
+| `server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts` | 2 | Pure-helper test of the threshold predicate AND env-parser NaN / non-positive / valid cases. |
+| `server/services/systemMonitor/synthetic/incidentSilence.ts` | 3 | New `SyntheticCheck` registered in `SYNTHETIC_CHECKS` array. Imports its predicate / env parsers from `incidentSilencePure.ts`. |
+| `server/services/systemMonitor/synthetic/incidentSilencePure.ts` | 3 | Pure helpers: `isMonitoringSilent`, `parseSilenceHoursEnv`, `parseProofOfLifeHoursEnv`. No DB import. |
+| `server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts` | 3 | Pure-helper test of the silence predicate AND env-parser NaN / non-positive / valid cases. |
 
 ### 3.2 Modified files
 
 | File | Phase | Change |
 |---|---|---|
 | [`server/db/schema/systemIncidents.ts`](../../../server/db/schema/systemIncidents.ts) | 1 | Add `lastTriageJobId: text('last_triage_job_id')` column matching migration 0239. No type alias change. |
-| [`server/services/systemMonitor/triage/triageHandler.ts`](../../../server/services/systemMonitor/triage/triageHandler.ts) | 1 | (a) Add `jobId: string` parameter to `runTriage`. (b) Replace the unconditional increment at line 269-277 with an idempotent UPDATE predicated on `last_triage_job_id IS DISTINCT FROM $jobId`. (c) Step 5 sets `triageStatus='running'` *only if* the increment fires. (d) Pass `jobId` from caller. |
+| [`server/services/systemMonitor/triage/triageHandler.ts`](../../../server/services/systemMonitor/triage/triageHandler.ts) | 1 | (a) Add `jobId: string` parameter to `runTriage`. (b) Replace the unconditional increment at line 269-277 with an idempotent UPDATE predicated on `last_triage_job_id IS DISTINCT FROM $jobId`. (c) Step 5 sets `triageStatus='running'` *only if* the increment fires. (d) Pass `jobId` from caller. (e) Run the idempotent UPDATE *before* the `agent_runs` INSERT so a duplicate-job retry never leaves an orphan run row (§8.10 race-claim ordering). |
+| [`server/services/systemMonitor/skills/writeDiagnosis.ts`](../../../server/services/systemMonitor/skills/writeDiagnosis.ts) | 1 | Add `WHERE triage_status = 'running'` to the systemIncidents UPDATE and gate the `diagnosis` event INSERT on `RETURNING ... .length === 1` per §11.0 / §11.3. On suppression, return `{ success: false, error: 'TERMINAL_TRANSITION_LOST', retryable: false }`. |
 | [`server/jobs/systemMonitorTriageJob.ts`](../../../server/jobs/systemMonitorTriageJob.ts) | 1 | Pass `job.id` (pg-boss job UUID) into `runTriage`. Update job-shape type to include `id: string`. |
 | [`server/services/systemMonitor/synthetic/index.ts`](../../../server/services/systemMonitor/synthetic/index.ts) | 2, 3 | Append `silentAgentSuccess` and `incidentSilence` to the `SYNTHETIC_CHECKS` array. |
 | [`server/services/systemMonitor/synthetic/syntheticChecksTickHandler.ts`](../../../server/services/systemMonitor/synthetic/syntheticChecksTickHandler.ts) | 1 | Add `runStaleTriageSweep()` call inside the same tick (cheap UPDATE; runs alongside the existing check loop). Wrapped in try/catch so a sweep error never kills the synthetic-check tick. |

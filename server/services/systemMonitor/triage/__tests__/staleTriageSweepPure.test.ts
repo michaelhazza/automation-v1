@@ -1,17 +1,10 @@
-// guard-ignore-file: pure-helper-convention reason="Pure helper test — no DB, no framework, npx tsx runnable"
 /**
  * staleTriageSweepPure — unit tests for parseStaleAfterMinutesEnv and cutoff logic.
  *
  * Runnable via:
  *   npx tsx server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts
  */
-export {};
-
-await import('dotenv/config');
-process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
-process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
-
-const { parseStaleAfterMinutesEnv } = await import('../staleTriageSweep.js');
+import { parseStaleAfterMinutesEnv, staleCutoff } from '../staleTriageSweepPure.js';
 
 let passed = 0;
 let failed = 0;
@@ -65,23 +58,20 @@ test('parseStaleAfterMinutesEnv: valid 30 → 30', () => {
 // Cutoff calculation correctness
 test('cutoff: now - 10min is exactly 10 minutes before now', () => {
   const now = new Date('2026-04-27T14:00:00.000Z');
-  const staleAfterMs = 10 * 60 * 1000;
-  const cutoff = new Date(now.getTime() - staleAfterMs);
+  const cutoff = staleCutoff(now, 10 * 60 * 1000);
   check(cutoff.getTime() === new Date('2026-04-27T13:50:00.000Z').getTime(), 'cutoff should be 13:50');
 });
 
 test('cutoff: row at cutoff-1ms is stale (< cutoff)', () => {
   const now = new Date('2026-04-27T14:00:00.000Z');
-  const staleAfterMs = 10 * 60 * 1000;
-  const cutoff = new Date(now.getTime() - staleAfterMs);
+  const cutoff = staleCutoff(now, 10 * 60 * 1000);
   const rowAt = new Date(cutoff.getTime() - 1);
   check(rowAt < cutoff, 'row 1ms before cutoff should be stale');
 });
 
 test('cutoff: row exactly at cutoff is NOT stale (not < cutoff)', () => {
   const now = new Date('2026-04-27T14:00:00.000Z');
-  const staleAfterMs = 10 * 60 * 1000;
-  const cutoff = new Date(now.getTime() - staleAfterMs);
+  const cutoff = staleCutoff(now, 10 * 60 * 1000);
   const rowAt = new Date(cutoff.getTime());
   check(!(rowAt < cutoff), 'row exactly at cutoff should not be stale');
 });

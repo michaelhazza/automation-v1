@@ -1,4 +1,4 @@
-// guard-ignore-file: pure-helper-convention reason="Integration test requiring real DATABASE_URL — gracefully skips when none available"
+// guard-ignore-file: pure-helper-convention reason="Integration test (not a *Pure.test.ts) — gated on a real DATABASE_URL probe before dynamically importing the IO modules; static sibling imports would force module-load before the skip check."
 /**
  * triageDurability — G1+G2 coordination contract (spec §7.3).
  *
@@ -40,11 +40,11 @@ const { eq, sql } = await import('drizzle-orm');
 const { runTriage, __testHooks } = await import('../triageHandler.js');
 const { runStaleTriageSweep } = await import('../staleTriageSweep.js');
 
-// Verify migration 0238 has been applied before running any test.
+// Verify migration 0239 has been applied before running any test.
 try {
   await db.execute(sql`SELECT last_triage_job_id FROM system_incidents LIMIT 0`);
 } catch {
-  console.log('\nSKIP: migration 0238 not applied (column last_triage_job_id missing).');
+  console.log('\nSKIP: migration 0239 not applied (column last_triage_job_id missing).');
   console.log('Apply the migration and re-run.\n');
   process.exit(0);
 }

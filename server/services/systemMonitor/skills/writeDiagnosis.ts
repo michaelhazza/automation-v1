@@ -39,7 +39,7 @@ export async function executeWriteDiagnosis(
   }
 
   try {
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // Advisory lock scoped to this incident — prevents concurrent triage writes.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('triage:' || ${incidentId}::text)::bigint)`);
 
@@ -53,7 +53,9 @@ export async function executeWriteDiagnosis(
 
       const incident = rows[0]!;
       // Idempotency: skip if already written for this run.
-      if (incident.agentDiagnosisRunId === agentRunId) return;
+      if (incident.agentDiagnosisRunId === agentRunId) {
+        return { ok: true as const, suppressed: false as const };
+      }
 
       // diagnosis_status is the explicit signal the UI reads to decide whether to
       // surface "Prompt validation failed" inline. 'valid' means the agent landed
@@ -62,7 +64,12 @@ export async function executeWriteDiagnosis(
       // upstream, or the agent omitted it). See migration 0237.
       const diagnosisStatus = investigatePrompt !== undefined ? 'valid' : 'partial';
 
-      await tx
+      // §11.0 single-writer terminal-event invariant (per spec §11.3): the UPDATE
+      // includes WHERE triage_status='running' and the agent_diagnosis_added event
+      // INSERT runs in the same transaction, gated on the UPDATE returning 1 row.
+      // A 0-row return means the staleness sweep (or another writer) already
+      // claimed the row's terminal transition — suppress the event.
+      const updated = await tx
         .update(systemIncidents)
         .set({
           agentDiagnosis: diagnosis,
@@ -71,7 +78,15 @@ export async function executeWriteDiagnosis(
           diagnosisStatus,
           updatedAt: new Date(),
         })
-        .where(eq(systemIncidents.id, incidentId));
+        .where(
+          sql`${systemIncidents.id} = ${incidentId}::uuid
+            AND ${systemIncidents.triageStatus} = 'running'`,
+        )
+        .returning({ id: systemIncidents.id });
+
+      if (updated.length !== 1) {
+        return { ok: true as const, suppressed: true as const };
+      }
 
       await tx
         .insert(systemIncidentEvents)
@@ -84,7 +99,18 @@ export async function executeWriteDiagnosis(
           correlationId: context.runId,
           occurredAt: new Date(),
         });
+
+      return { ok: true as const, suppressed: false as const };
     });
+
+    if (result.suppressed) {
+      return {
+        success: false,
+        error: 'TERMINAL_TRANSITION_LOST',
+        retryable: false,
+        details: 'incident triage_status was no longer running — diagnosis suppressed per §11.0',
+      };
+    }
 
     return { success: true };
   } catch (err) {

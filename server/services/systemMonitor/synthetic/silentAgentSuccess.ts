@@ -3,19 +3,14 @@ import { db } from '../../../db/index.js';
 import type { SyntheticCheck, SyntheticResult } from './types.js';
 import { bucket15min } from './types.js';
 import type { HeuristicContext } from '../heuristics/types.js';
+import {
+  SILENT_AGENT_SUCCESS_LOOKBACK_MS,
+  isSilentAgentRatioElevated,
+  parseMinSamplesEnv,
+  parseRatioThresholdEnv,
+} from './silentAgentSuccessPure.js';
 
-const LOOKBACK_MS = 60 * 60 * 1000; // 1 hour
-
-export function isSilentAgentRatioElevated(
-  totalCompleted: number,
-  silentCount: number,
-  ratioThreshold: number,
-  minSamples: number,
-): boolean {
-  if (totalCompleted < minSamples) return false;
-  if (totalCompleted <= 0) return false;
-  return silentCount / totalCompleted >= ratioThreshold;
-}
+export { isSilentAgentRatioElevated } from './silentAgentSuccessPure.js';
 
 export const silentAgentSuccess: SyntheticCheck = {
   id: 'silent-agent-success',
@@ -23,14 +18,9 @@ export const silentAgentSuccess: SyntheticCheck = {
   defaultSeverity: 'medium',
 
   async run(ctx: HeuristicContext): Promise<SyntheticResult> {
-    const since = new Date(ctx.now.getTime() - LOOKBACK_MS);
-    const minSamples = parseInt(
-      process.env.SYSTEM_MONITOR_SILENT_SUCCESS_MIN_SAMPLES ?? '5',
-      10,
-    );
-    const ratioThreshold = parseFloat(
-      process.env.SYSTEM_MONITOR_SILENT_SUCCESS_RATIO_THRESHOLD ?? '0.30',
-    );
+    const since = new Date(ctx.now.getTime() - SILENT_AGENT_SUCCESS_LOOKBACK_MS);
+    const minSamples = parseMinSamplesEnv();
+    const ratioThreshold = parseRatioThresholdEnv();
 
     const rows = await db.execute<{
       slug: string;
@@ -77,7 +67,7 @@ export const silentAgentSuccess: SyntheticCheck = {
           totalCompleted: total,
           silentCount: silent,
           ratio: total > 0 ? silent / total : 0,
-          lookbackMs: LOOKBACK_MS,
+          lookbackMs: SILENT_AGENT_SUCCESS_LOOKBACK_MS,
         },
       };
     }

@@ -3,33 +3,9 @@ import { db } from '../../../db/index.js';
 import { systemIncidents } from '../../../db/schema/systemIncidents.js';
 import { systemIncidentEvents } from '../../../db/schema/systemIncidentEvents.js';
 import { logger } from '../../../lib/logger.js';
+import { parseStaleAfterMinutesEnv, staleCutoff } from './staleTriageSweepPure.js';
 
-// Pure: builds the SQL fragment. Exported as a pure helper for documentation
-// and testing the predicate shape — the actual execution uses the ORM builder.
-export function findStaleTriageRowsSql(now: Date, staleAfterMs: number) {
-  const cutoff = new Date(now.getTime() - staleAfterMs);
-  return sql`UPDATE system_incidents
-    SET triage_status = 'failed', updated_at = ${now}
-    WHERE triage_status = 'running'
-      AND last_triage_attempt_at < ${cutoff}
-      AND last_triage_job_id IS NOT NULL
-    RETURNING id, last_triage_attempt_at, triage_attempt_count`;
-}
-
-// Pure helper: parse SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES with explicit
-// NaN / non-positive guards. `parseInt('', 10)` returns NaN, and `??` only
-// catches null/undefined — so a malformed env value (e.g. `''`, `'abc'`,
-// `'0'`, `'-5'`) would silently produce NaN minutes and disable the sweep.
-// Always fall back to the default in that case.
-export function parseStaleAfterMinutesEnv(
-  raw: string | undefined = process.env.SYSTEM_MONITOR_TRIAGE_STALE_AFTER_MINUTES,
-): number {
-  const DEFAULT_MINUTES = 10;
-  if (raw === undefined || raw === '') return DEFAULT_MINUTES;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MINUTES;
-  return parsed;
-}
+export { parseStaleAfterMinutesEnv } from './staleTriageSweepPure.js';
 
 // IO: executes UPDATE...RETURNING in a transaction with the events INSERT.
 // One agent_triage_timed_out event per flipped row, atomically with the status flip.
@@ -39,8 +15,8 @@ export async function runStaleTriageSweep(now: Date = new Date()): Promise<{ fli
     return { flipped: 0 };
   }
 
-  const staleAfterMs = parseStaleAfterMinutesEnv() * 60 * 1000;
-  const cutoff = new Date(now.getTime() - staleAfterMs);
+  const staleAfterMinutes = parseStaleAfterMinutesEnv();
+  const cutoff = staleCutoff(now, staleAfterMinutes * 60 * 1000);
 
   const flippedRows = await db.transaction(async (tx) => {
     const rows = await tx
@@ -69,7 +45,7 @@ export async function runStaleTriageSweep(now: Date = new Date()): Promise<{ fli
         actorAgentRunId: null,
         payload: {
           reason: 'staleness_sweep',
-          staleAfterMinutes: parseStaleAfterMinutesEnv(),
+          staleAfterMinutes,
           lastTriageAttemptAt: row.lastTriageAttemptAt?.toISOString() ?? null,
           triageAttemptCount: row.triageAttemptCount,
         },
@@ -88,4 +64,17 @@ export async function runStaleTriageSweep(now: Date = new Date()): Promise<{ fli
   }
 
   return { flipped: flippedRows.length };
+}
+
+// Pure: kept as a documented SQL fragment for the predicate shape. The runtime
+// path uses the ORM builder above for Date parameter serialisation; this remains
+// exported because the spec (§7.2) references it as the canonical predicate.
+export function findStaleTriageRowsSql(now: Date, staleAfterMs: number) {
+  const cutoff = staleCutoff(now, staleAfterMs);
+  return sql`UPDATE system_incidents
+    SET triage_status = 'failed', updated_at = ${now}
+    WHERE triage_status = 'running'
+      AND last_triage_attempt_at < ${cutoff}
+      AND last_triage_job_id IS NOT NULL
+    RETURNING id, last_triage_attempt_at, triage_attempt_count`;
 }

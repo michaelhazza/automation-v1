@@ -1,17 +1,14 @@
-// guard-ignore-file: pure-helper-convention reason="Pure helper test — no DB, no framework, npx tsx runnable"
 /**
- * incidentSilencePure — unit tests for isMonitoringSilent.
+ * incidentSilencePure — unit tests for isMonitoringSilent and env parsers.
  *
  * Runnable via:
  *   npx tsx server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts
  */
-export {};
-
-await import('dotenv/config');
-process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
-process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
-
-const { isMonitoringSilent } = await import('../incidentSilence.js');
+import {
+  isMonitoringSilent,
+  parseSilenceHoursEnv,
+  parseProofOfLifeHoursEnv,
+} from '../incidentSilencePure.js';
 
 let passed = 0;
 let failed = 0;
@@ -50,6 +47,44 @@ test('(1, 0) → false (has incident, no proof-of-life)', () => {
 
 test('(1, 5) → false (has incident despite synthetic fires)', () => {
   check(!isMonitoringSilent(1, 5), 'expected false: incident in window = not silent');
+});
+
+// Env-parser hardening (mirrors parseStaleAfterMinutesEnv guards).
+
+test('parseSilenceHoursEnv: undefined → default 12', () => {
+  check(parseSilenceHoursEnv(undefined) === 12, 'expected 12 for undefined');
+});
+
+test('parseSilenceHoursEnv: empty string → default 12', () => {
+  check(parseSilenceHoursEnv('') === 12, 'expected 12 for empty string');
+});
+
+test('parseSilenceHoursEnv: non-numeric → default 12', () => {
+  check(parseSilenceHoursEnv('abc') === 12, 'expected 12 for non-numeric');
+});
+
+test('parseSilenceHoursEnv: zero → default 12 (non-positive)', () => {
+  check(parseSilenceHoursEnv('0') === 12, 'expected 12 for zero');
+});
+
+test('parseSilenceHoursEnv: valid 6 → 6', () => {
+  check(parseSilenceHoursEnv('6') === 6, 'expected 6 for valid string "6"');
+});
+
+test('parseProofOfLifeHoursEnv: undefined → default 24', () => {
+  check(parseProofOfLifeHoursEnv(undefined) === 24, 'expected 24 for undefined');
+});
+
+test('parseProofOfLifeHoursEnv: non-numeric → default 24', () => {
+  check(parseProofOfLifeHoursEnv('abc') === 24, 'expected 24 for non-numeric');
+});
+
+test('parseProofOfLifeHoursEnv: zero → default 24 (non-positive)', () => {
+  check(parseProofOfLifeHoursEnv('0') === 24, 'expected 24 for zero');
+});
+
+test('parseProofOfLifeHoursEnv: valid 48 → 48', () => {
+  check(parseProofOfLifeHoursEnv('48') === 48, 'expected 48 for valid string "48"');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

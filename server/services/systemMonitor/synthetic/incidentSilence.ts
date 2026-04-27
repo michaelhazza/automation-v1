@@ -3,13 +3,13 @@ import { db } from '../../../db/index.js';
 import type { SyntheticCheck, SyntheticResult } from './types.js';
 import { bucket15min } from './types.js';
 import type { HeuristicContext } from '../heuristics/types.js';
+import {
+  isMonitoringSilent,
+  parseProofOfLifeHoursEnv,
+  parseSilenceHoursEnv,
+} from './incidentSilencePure.js';
 
-export function isMonitoringSilent(
-  incidentsInWindow: number,
-  syntheticFiresInProofWindow: number,
-): boolean {
-  return incidentsInWindow === 0 && syntheticFiresInProofWindow >= 1;
-}
+export { isMonitoringSilent } from './incidentSilencePure.js';
 
 export const incidentSilence: SyntheticCheck = {
   id: 'incident-silence',
@@ -17,14 +17,8 @@ export const incidentSilence: SyntheticCheck = {
   defaultSeverity: 'high',
 
   async run(ctx: HeuristicContext): Promise<SyntheticResult> {
-    const silenceHours = parseInt(
-      process.env.SYSTEM_MONITOR_INCIDENT_SILENCE_HOURS ?? '12',
-      10,
-    );
-    const proofOfLifeHours = parseInt(
-      process.env.SYSTEM_MONITOR_INCIDENT_SILENCE_PROOF_OF_LIFE_HOURS ?? '24',
-      10,
-    );
+    const silenceHours = parseSilenceHoursEnv();
+    const proofOfLifeHours = parseProofOfLifeHoursEnv();
 
     const silenceCutoff = new Date(ctx.now.getTime() - silenceHours * 60 * 60 * 1000);
     const proofCutoff = new Date(ctx.now.getTime() - proofOfLifeHours * 60 * 60 * 1000);

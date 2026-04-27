@@ -254,38 +254,14 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
     return { status: 'skipped', reason: 'auto_escalated' };
   }
 
-  // 3-4. Resolve system ops context + create agent_runs row.
-  // When __testHooks.stubSystemOpsContext is set, skip DB resolution and the
-  // agentRuns INSERT so tests can run without seeding a full org/agent context.
-  let organisationId: string;
-  let agentId: string;
-  const runId = crypto.randomUUID();
-
-  if (__testHooks.stubSystemOpsContext && process.env.NODE_ENV === 'test') {
-    ({ organisationId, agentId } = __testHooks.stubSystemOpsContext);
-  } else {
-    ({ organisationId } = await resolveSystemOpsContext());
-    agentId = await resolveSystemMonitorAgentId(organisationId);
-    await db.insert(agentRuns).values({
-      id: runId,
-      organisationId,
-      agentId,
-      runType: 'triggered',
-      runSource: 'system',
-      executionScope: 'subaccount',
-      principalType: 'service',
-      principalId: 'system_monitor',
-      status: 'running',
-      runMetadata: { incidentId },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  }
-
-  // 5. Idempotent increment: predicated UPDATE on last_triage_job_id IS DISTINCT FROM $jobId.
+  // 3. Idempotent increment: predicated UPDATE on last_triage_job_id IS DISTINCT FROM $jobId.
   // Returns 1 row if this is a new attempt; 0 rows if this jobId already claimed the attempt
   // (pg-boss internal retry). §11.0: single-writer invariant — only proceed to the LLM tool
   // loop if this UPDATE wins the race.
+  //
+  // §8.10 race-claim ordering: the atomic state-claim runs BEFORE any side effect
+  // (agent_runs INSERT, system-ops resolution). A duplicate-job retry must not leave
+  // an orphan agent_runs row stuck at status='running' — moved here from after step 4.
   const now = new Date();
   const incrementResult = await db
     .update(systemIncidents)
@@ -313,6 +289,36 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   // the increment fired without the terminal flip overwriting the state.
   if (__testHooks.throwAfterIncrement && process.env.NODE_ENV === 'test') {
     throw new Error('__testHooks.throwAfterIncrement: frozen after increment for test assertion');
+  }
+
+  // 4-5. Resolve system ops context + create agent_runs row.
+  // Runs only after the idempotent claim succeeded — guarantees no orphan agent_runs row
+  // on duplicate-job retries. When __testHooks.stubSystemOpsContext is set, skip DB
+  // resolution and the agentRuns INSERT so tests can run without seeding a full
+  // org/agent context.
+  let organisationId: string;
+  let agentId: string;
+  const runId = crypto.randomUUID();
+
+  if (__testHooks.stubSystemOpsContext && process.env.NODE_ENV === 'test') {
+    ({ organisationId, agentId } = __testHooks.stubSystemOpsContext);
+  } else {
+    ({ organisationId } = await resolveSystemOpsContext());
+    agentId = await resolveSystemMonitorAgentId(organisationId);
+    await db.insert(agentRuns).values({
+      id: runId,
+      organisationId,
+      agentId,
+      runType: 'triggered',
+      runSource: 'system',
+      executionScope: 'subaccount',
+      principalType: 'service',
+      principalId: 'system_monitor',
+      status: 'running',
+      runMetadata: { incidentId },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
   }
 
   // 6. Run the LLM tool loop

@@ -1,17 +1,14 @@
-// guard-ignore-file: pure-helper-convention reason="Pure helper test — no DB, no framework, npx tsx runnable"
 /**
- * silentAgentSuccessPure — unit tests for isSilentAgentRatioElevated.
+ * silentAgentSuccessPure — unit tests for isSilentAgentRatioElevated and env parsers.
  *
  * Runnable via:
  *   npx tsx server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts
  */
-export {};
-
-await import('dotenv/config');
-process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
-process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
-
-const { isSilentAgentRatioElevated } = await import('../silentAgentSuccess.js');
+import {
+  isSilentAgentRatioElevated,
+  parseMinSamplesEnv,
+  parseRatioThresholdEnv,
+} from '../silentAgentSuccessPure.js';
 
 let passed = 0;
 let failed = 0;
@@ -53,6 +50,48 @@ test('3/4 → false because below minSamples (4 < 5)', () => {
 
 test('0/0 → false (zero total)', () => {
   check(!isSilentAgentRatioElevated(0, 0, THRESHOLD, MIN_SAMPLES), 'expected false: total = 0');
+});
+
+// Env-parser hardening (mirrors parseStaleAfterMinutesEnv guards).
+
+test('parseRatioThresholdEnv: undefined → default 0.30', () => {
+  check(parseRatioThresholdEnv(undefined) === 0.30, 'expected 0.30 for undefined');
+});
+
+test('parseRatioThresholdEnv: empty string → default 0.30', () => {
+  check(parseRatioThresholdEnv('') === 0.30, 'expected 0.30 for empty string');
+});
+
+test('parseRatioThresholdEnv: non-numeric → default 0.30', () => {
+  check(parseRatioThresholdEnv('abc') === 0.30, 'expected 0.30 for non-numeric');
+});
+
+test('parseRatioThresholdEnv: zero → default 0.30 (non-positive)', () => {
+  check(parseRatioThresholdEnv('0') === 0.30, 'expected 0.30 for zero');
+});
+
+test('parseRatioThresholdEnv: negative → default 0.30 (non-positive)', () => {
+  check(parseRatioThresholdEnv('-0.1') === 0.30, 'expected 0.30 for negative');
+});
+
+test('parseRatioThresholdEnv: valid 0.5 → 0.5', () => {
+  check(parseRatioThresholdEnv('0.5') === 0.5, 'expected 0.5 for valid string "0.5"');
+});
+
+test('parseMinSamplesEnv: undefined → default 5', () => {
+  check(parseMinSamplesEnv(undefined) === 5, 'expected 5 for undefined');
+});
+
+test('parseMinSamplesEnv: non-numeric → default 5', () => {
+  check(parseMinSamplesEnv('abc') === 5, 'expected 5 for non-numeric');
+});
+
+test('parseMinSamplesEnv: zero → default 5 (non-positive)', () => {
+  check(parseMinSamplesEnv('0') === 5, 'expected 5 for zero');
+});
+
+test('parseMinSamplesEnv: valid 10 → 10', () => {
+  check(parseMinSamplesEnv('10') === 10, 'expected 10 for valid string "10"');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
