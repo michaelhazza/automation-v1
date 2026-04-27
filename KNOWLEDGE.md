@@ -1037,3 +1037,47 @@ When a reviewer iteration produces a Round 1 finding that is reasonable to defer
 **Applied to:** PR #211 R2-6 (`assertValidTransition`) — Round 1 deferred F6 on architectural-scope grounds (multiple call sites, new primitive). Round 2 ChatGPT marked it "the most important decision in this round" / "cheap now, very expensive later". User explicitly directed implement — minimal coverage shipped (terminal-write boundaries only, 5 sites), remaining coverage routed to `CHATGPT-PR211-F6 (FOLLOW-UP)`.
 
 **Anti-pattern.** Honouring the round-1 defer mechanically when round-2 cost-curve evidence has emerged. The defer was a routing decision, not a contract.
+
+### [2026-04-28] Pattern — "Suppression is success" under single-writer invariants
+
+A single-writer event emitter (one process / one row / one path is authoritative for a given fact at a given time) sometimes loses a coordination race — another writer got there first, or a stamped-newer payload made this write redundant. The losing path must NOT return `success: false`. It must return `success: true, suppressed: true` (with a `reason` if useful).
+
+**Why.** `success: false` is "this thing didn't happen and is broken." Suppression is "this thing didn't happen because it didn't need to — the invariant is intact." Returning failure on a coordination loser triggers four downstream regressions:
+
+1. **Retry storms.** Caller retries on `success: false`; every retry re-loses the coordination race and amplifies the storm.
+2. **False incident signals.** Alerting fires on the failure rate; oncall sees an "outage" that is the system working as designed.
+3. **Broken metrics.** "Write success rate" drops; the chart is meaningless because half the failures are healthy suppressions.
+4. **Alert fatigue.** Operators learn to ignore the alert. The next time it fires for a real reason, they ignore it too.
+
+**Pattern shape.**
+
+```ts
+// Coordination loser path:
+if (existingTimestamp >= incomingTimestamp) {
+  return { success: true, suppressed: true, reason: 'stale_payload' };
+}
+
+// Or:
+if (alreadyClaimedBy(otherWriter)) {
+  return { success: true, suppressed: true, reason: 'lost_claim' };
+}
+```
+
+The shape `{ success: true, suppressed: true, reason }` lets callers distinguish "wrote new state" from "no-op'd safely" without treating the latter as failure. Metrics that care about throughput should bucket suppressed separately; metrics that care about correctness should treat suppressed as success.
+
+**Where it applies.** Any single-writer emitter that can lose a coordination race:
+- Diagnosis writers (system-monitoring `writeDiagnosis` — already enforces this; PR #218).
+- Status-transition writers under last-write-wins ordering (terminal status reached via a different path).
+- Cache populators where a fresher value already landed.
+- Idempotent webhook receivers where the same event-id was processed by a sibling pod.
+- Notification dedup paths where the same digest was sent N seconds ago.
+
+**Where it does NOT apply.** Multi-writer or non-coordinated paths where `success: false` genuinely means "broken": database connection lost, malformed payload, permission denied, downstream API 5xx. The pattern is specifically for the class where "another writer beat me" is a healthy outcome.
+
+**Architectural anchor.** `architecture.md § Home dashboard live reactivity` (line 1515) — names the pattern at the point where it's first enforced. Any new single-writer emitter should cite that anchor or extend it.
+
+**Applied to:** PR #218 — `writeDiagnosis` in the system-monitoring agent emits `{ success: true, suppressed: true }` on coordination losers; the home-dashboard reactivity client treats suppressed-success identically to fresh-success for metric and freshness purposes (no retry, no error toast). Forward-looking codebase-wide enforcement (reusable utility + lint/grep guard) routed to `tasks/todo.md § PR Review deferred items / PR #218`.
+
+**Detection heuristic.** When reviewing a single-writer emitter, grep the diff for `success: false` returns. Each hit must be either: (a) a genuine failure mode (DB / network / permission / malformed input), or (b) a coordination loser that should be flipped to `success: true, suppressed: true`. The grep pattern + a follow-up lint guard are the path from "well understood" to "impossible to violate quietly".
+
+**ChatGPT review framing.** Both PR #218 review rounds reinforced this — Round 1 flagged the pattern as forward-looking standardisation; Round 2's optional follow-up explicitly named "codify suppression = success as a reusable utility or invariant check + add a lightweight lint or grep-based guard to prevent regressions" as the highest-leverage next step. The review rounds form the canonical citation for why the pattern matters at the codebase level, not just the system-monitoring level.
