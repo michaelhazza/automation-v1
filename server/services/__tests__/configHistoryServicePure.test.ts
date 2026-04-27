@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Inline pure simulation — tests version-counter retry logic with no imports from parent directory"
 /**
  * configHistoryServicePure unit tests — runnable via:
  *   npx tsx server/services/__tests__/configHistoryServicePure.test.ts

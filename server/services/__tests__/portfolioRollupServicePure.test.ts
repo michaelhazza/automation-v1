@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Inline pure simulation — constants inlined to avoid drizzle-orm transitive import; no sibling import needed"
 /**
  * portfolioRollupServicePure.test.ts — auto-enable threshold + aggregation math
  *

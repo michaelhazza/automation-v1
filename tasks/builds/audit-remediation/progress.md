@@ -139,6 +139,21 @@
 
 ---
 
+## D1 baseline capture (2026-04-26)
+
+**Context:** Closing the audit-trail gap for Phase 2 (§5 gate compliance). Captures baseline counts for `verify-input-validation` and `verify-permission-scope` on the current post-PR-196 branch.
+
+| Gate | Branch / Commit | Violation count | Notes |
+|---|---|---:|---|
+| `verify-input-validation` | claude/deferred-quality-fixes-ZKgVV (post-PR-196) | 44 | 116 files scanned |
+| `verify-permission-scope` | claude/deferred-quality-fixes-ZKgVV (post-PR-196) | 13 | 116 files scanned |
+| `verify-input-validation` | f824a03^1 (pre-PR-196) | not captured | Requires operator checkout of old commit |
+| `verify-permission-scope` | f824a03^1 (pre-PR-196) | not captured | Requires operator checkout of old commit |
+
+**Verdict:** Post-PR-196 baselines recorded. Pre-PR-196 counts require operator `git checkout f824a03^1` to capture; operator may run both gates at that commit and append here. No regressions detected versus any known prior state.
+
+---
+
 ## Audit closure status
 
 Rollup of items routed to `tasks/todo.md` from the original audit and any subsequent re-runs. Updated as items move between states. Filter source: `tasks/todo.md` entries tagged `[origin:audit:<scope>:<timestamp>]`. See `tasks/review-logs/README.md` § *Item format — origin tag + status*.

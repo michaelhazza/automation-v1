@@ -39,10 +39,19 @@ fi
 VIOLATIONS=0
 
 # ── Historical baseline ───────────────────────────────────────────────────────
-# Migrations 0204–0208 and 0212 were authored before FORCE ROW LEVEL SECURITY
+# Migrations 0202–0208 and 0212 were authored before FORCE ROW LEVEL SECURITY
 # and the canonical session-var pattern were established. They are immutable;
-# migration 0213 repairs their policies at runtime and migration 0227 applies
-# FORCE RLS. Files in this list are exempt from the FORCE RLS and CREATE POLICY
+# migration 0213 repairs the policies on 0204–0208 / 0212 at runtime and
+# migration 0227 applies FORCE RLS to those.
+#
+# 0202 (reference_documents) and 0203 (reference_document_versions) are no
+# longer baselined here. Migration 0229 is now the authoritative migration for
+# both tables — it adds FORCE RLS and proper CREATE POLICY (direct org-isolation
+# shape for reference_documents; parent-EXISTS shape for reference_document_versions),
+# and the manifest now points to 0229 for both entries. 0229 passes all gate
+# checks without baseline exemption.
+#
+# Files in this list are exempt from the FORCE RLS and CREATE POLICY
 # checks when they carry a @rls-baseline: annotation comment.
 HISTORICAL_BASELINE_FILES=(
   "0204_document_bundles.sql"

@@ -573,6 +573,13 @@ export const WorkflowRunService = {
       return { stepRunStatus: 'failed', newVersion: stepRun.version + 1 };
     }
 
+    // invoke_automation steps must re-dispatch the webhook rather than completing
+    // with stored output — route to the dedicated resume path (C4a-REVIEWED-DISP).
+    if (stepRun.stepType === 'invoke_automation') {
+      const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
+      return { stepRunStatus: stepOutcome, newVersion: stepRun.version + 1 };
+    }
+
     const finalOutput =
       decision === 'edited' && editedOutput
         ? editedOutput

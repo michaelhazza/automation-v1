@@ -350,6 +350,14 @@ export function validateEventPayload(
       return { ok: true };
     }
 
+    case 'run.terminal.summary_missing':
+      if (!isStr(p.runResultStatus)) return { ok: false, reason: 'run.terminal.summary_missing_missing_fields' };
+      return { ok: true };
+
+    case 'run.terminal.extracted_with_errorMessage':
+      if (!isNonNegInt(p.errorMessageLength)) return { ok: false, reason: 'run.terminal.extracted_with_errorMessage_missing_fields' };
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

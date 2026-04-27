@@ -84,10 +84,12 @@ try {
 } catch {
   // No client tree — nothing to check. Pass silently.
   console.log('[verify-help-hint-length] No client/src directory; skipping.');
+  console.log('[GATE] help-hint-length: violations=0');
   process.exit(0);
 }
 if (!stats.isDirectory()) {
   console.log('[verify-help-hint-length] client/src is not a directory; skipping.');
+  console.log('[GATE] help-hint-length: violations=0');
   process.exit(0);
 }
 
@@ -103,6 +105,7 @@ console.log(`[verify-help-hint-length] Scanned ${files.length} .tsx files.`);
 
 if (allViolations.length === 0) {
   console.log('[verify-help-hint-length] PASS — all <HelpHint text="…" /> literals ≤ 280 chars.');
+  console.log('[GATE] help-hint-length: violations=0');
   process.exit(0);
 }
 
@@ -113,4 +116,5 @@ for (const v of allViolations) {
 }
 console.error('');
 console.error('Shorten the text, or move the explanation to a dedicated docs surface. See §6.4 of docs/onboarding-playbooks-spec.md.');
+console.log(`[GATE] help-hint-length: violations=${allViolations.length}`);
 process.exit(1);

@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Imports sibling '../pulseService' without .js extension — gate regex requires .js suffix; import is valid per convention"
 /**
  * pulseServiceResolvedUrl.test.ts — Unit tests for resolvedUrl on PulseItem.
  *

@@ -1,0 +1,68 @@
+# RLS-not-applicable allowlist
+#
+# Tables that legitimately have an `organisation_id` column but are NOT covered
+# by an RLS policy. Each entry is a table name followed by a one-line rationale
+# explaining why RLS does not apply.
+#
+# Format:  <table_name>  <one-line rationale> [ref: <invariant-id-or-spec-section>]
+# Comment lines start with `#`.
+#
+# This file is consumed by:
+#   - scripts/verify-rls-protected-tables.sh (Phase 1 schema-vs-registry diff)
+#   - server/lib/rlsBoundaryGuard.ts (runtime guard, dev/test only)
+#
+# Adding an entry here is a security-posture change. Prefer registering the
+# table in `server/config/rlsProtectedTables.ts` and adding a `CREATE POLICY`
+# in the matching migration. Use this file only when RLS is genuinely not
+# applicable (system-admin tables, read replicas, intentionally cross-tenant
+# audit ledgers).
+#
+# Entry-format rules (enforced by reviewers, not the gate script):
+#   1. The rationale MUST be a single, complete sentence — no stub words.
+#   2. The rationale MUST end with `[ref: <id>]` citing one of:
+#        - an invariant ID from `docs/pre-launch-hardening-invariants.md`
+#          (e.g. `[ref: invariant-1.8]`)
+#        - a spec section anchor (e.g. `[ref: cached-context-spec-§8.6]`)
+#        - a migration filename for table-creation justifications
+#          (e.g. `[ref: migrations/0231_…sql]`)
+#   3. Reviewers reject any entry that says "see PR" or "ask <person>" — the
+#      reference must point at a durable, version-controlled source so the
+#      next reviewer can audit the entry without git archaeology.
+#   4. Functions that query an allow-listed table MUST carry a function-level
+#      annotation in the source so the RLS bypass is visible at the call
+#      site, not just at the table-listing site. Required form:
+#
+#        // @rls-allowlist-bypass: <table_name> <function_name> [ref: <invariant-id-or-spec-§>]
+#        async function fooJob() { ... }
+#
+#      The `<function_name>` MUST match the immediately-following function
+#      declaration's name verbatim. Binding the annotation to a specific
+#      function name (rather than just the file) prevents silent drift —
+#      if a developer renames or moves the annotated function, the
+#      annotation no longer matches its function and reviewers can grep
+#      for orphaned annotations:
+#
+#        # list every annotation
+#        grep -nE "@rls-allowlist-bypass" server/
+#        # spot-check: does the line immediately after each annotation
+#        # declare a function whose name matches the third token?
+#
+#      Without function-name binding, an allow-listed file could quietly
+#      grow new bypass call sites because the file itself is "covered" —
+#      this rule closes that gap.
+#
+#      Annotation enforcement is grep-based; no CI gate is added (a new
+#      gate is a new primitive — see DEVELOPMENT_GUIDELINES § 8.4 — and
+#      the grep is sufficient at the current call-volume).
+#
+# Rationale (why the format rules exist): allow-lists tend to become dumping
+# grounds for exceptions. Forcing every entry to cite an invariant or spec
+# section, and forcing every CALLER of an allow-listed table to annotate
+# its bypass intent at the function level, keeps the file scoped to
+# documented carve-outs and prevents both (a) a later "just add it to the
+# list" reflex AND (b) scope creep inside a file that is already on the
+# list, which would otherwise let unrelated cross-tenant logic drift in
+# under cover of a legitimate bypass.
+#
+# (Currently empty — every tenant table on `main` is registered in
+# rlsProtectedTables.ts. Add new entries below as needed.)

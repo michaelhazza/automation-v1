@@ -80,6 +80,10 @@ import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
+import {
+  assertValidTransition,
+  InvalidTransitionError,
+} from '../../shared/stateMachineGuards.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -114,6 +118,23 @@ function requireSubaccountId(run: WorkflowRun): string {
     );
   }
   return run.subaccountId;
+}
+
+// C4b-INVAL-RACE: re-read step run after external I/O to discard late writes
+// to invalidated steps. Returns the work result unchanged if the step is still
+// live; returns { discarded: true, reason: 'invalidated' } if a concurrent
+// edit invalidated the step while external I/O was in flight.
+async function withInvalidationGuard<T>(
+  stepRunId: string,
+  externalWork: () => Promise<T>,
+): Promise<T | { discarded: true; reason: 'invalidated' }> {
+  const result = await externalWork();
+  const [sr] = await db.select({ status: workflowStepRuns.status })
+    .from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId)).limit(1);
+  if (sr?.status === 'invalidated') {
+    return { discarded: true, reason: 'invalidated' };
+  }
+  return result;
 }
 
 function rehydrateDefinition(stored: Record<string, unknown>): WorkflowDefinition {
@@ -910,16 +931,41 @@ export const WorkflowEngineService = {
         // Mark the step run as failed and re-tick to evaluate failure policy.
         const sr = liveStepRuns.find((s) => s.stepId === step.id);
         if (sr) {
-          await db
-            .update(workflowStepRuns)
-            .set({
-              status: 'failed',
-              error: err instanceof Error ? err.message : String(err),
-              completedAt: new Date(),
-              version: sr.version + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(workflowStepRuns.id, sr.id));
+          // Defence-in-depth: skip the failure write if the row is already
+          // terminal. Logged + observable; we do not propagate the violation
+          // because the outer block is itself an error handler — re-throwing
+          // would brick the tick and prevent re-evaluation.
+          try {
+            assertValidTransition({
+              kind: 'workflow_step_run',
+              recordId: sr.id,
+              from: sr.status,
+              to: 'failed',
+            });
+            await db
+              .update(workflowStepRuns)
+              .set({
+                status: 'failed',
+                error: err instanceof Error ? err.message : String(err),
+                completedAt: new Date(),
+                version: sr.version + 1,
+                updatedAt: new Date(),
+              })
+              .where(eq(workflowStepRuns.id, sr.id));
+          } catch (assertErr) {
+            if (assertErr instanceof InvalidTransitionError) {
+              logger.warn('workflow_step_invalid_transition_skipped', {
+                event: 'state_machine.invalid_transition',
+                kind: assertErr.kind,
+                recordId: assertErr.recordId,
+                from: assertErr.from,
+                to: assertErr.to,
+                via: 'dispatch_error_path',
+              });
+            } else {
+              throw assertErr;
+            }
+          }
         }
         await this.enqueueTick(runId);
       }
@@ -1323,7 +1369,7 @@ export const WorkflowEngineService = {
 
         // Execute synchronously via the action pipeline.
         try {
-          const result = await executeActionCall({
+          const guardedResult = await withInvalidationGuard(sr.id, () => executeActionCall({
             organisationId: run.organisationId,
             subaccountId: requireSubaccountId(run),
             agentId: configAgentId,
@@ -1333,7 +1379,16 @@ export const WorkflowEngineService = {
             actionInputs: dispatchedActionInputs,
             idempotencyKey,
             timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
-          });
+          }));
+          if ('discarded' in guardedResult) {
+            logger.info('workflow_step_action_call_invalidation_discarded', {
+              event: 'step.dispatch.invalidation_discarded',
+              runId: run.id, stepRunId: sr.id, stepId: step.id,
+              status: 'success', discarded: true,
+            });
+            return;
+          }
+          const result = guardedResult;
 
           if (result.status === 'blocked') {
             await this.failStepRunInternal(
@@ -1483,7 +1538,7 @@ export const WorkflowEngineService = {
             options?: Record<string, unknown>
           ) => Promise<string | null>;
         };
-        await pgboss.send(
+        const agentSendResult = await withInvalidationGuard(sr.id, () => pgboss.send(
           AGENT_STEP_QUEUE,
           {
             WorkflowStepRunId: sr.id,
@@ -1502,7 +1557,15 @@ export const WorkflowEngineService = {
             singletonKey: `Workflow-step:${sr.id}:${sr.attempt}`,
             useSingletonQueue: true,
           }
-        );
+        ));
+        if (typeof agentSendResult === 'object' && agentSendResult !== null && 'discarded' in agentSendResult) {
+          logger.info('workflow_step_agent_dispatch_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
 
         logger.info('workflow_agent_step_dispatched', {
           event: 'step.dispatched',
@@ -1529,13 +1592,22 @@ export const WorkflowEngineService = {
           .set({ status: 'running', startedAt: new Date(), version: sr.version + 1, updatedAt: new Date() })
           .where(eq(workflowStepRuns.id, sr.id));
 
-        const result = await invokeAutomationStep({
+        const invokeGuardResult = await withInvalidationGuard(sr.id, () => invokeAutomationStep({
           step: autoStep,
           runId: run.id,
           stepRunId: sr.id,
           run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
           templateCtx: ctx as unknown as Record<string, unknown>,
-        });
+        }));
+        if ('discarded' in invokeGuardResult) {
+          logger.info('workflow_step_invoke_automation_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
+        const result = invokeGuardResult;
 
         if (result.status === 'ok') {
           const output = result.output ?? {};
@@ -1650,6 +1722,156 @@ export const WorkflowEngineService = {
     const row = rows[0];
     if (!row || row.outputJson === null || !row.outputHash) return null;
     return { attempt: row.attempt, output: row.outputJson, outputHash: row.outputHash };
+  },
+
+  // ─── C4a-REVIEWED-DISP: resume an invoke_automation step after user approval ─
+
+  /**
+   * Resumes an `invoke_automation` step that was held at `review_required`.
+   * Guard: `UPDATE WHERE status = 'review_required' RETURNING *` — if zero
+   * rows returned, a concurrent approval already won; return `alreadyResumed: true`.
+   * Per pre-launch-hardening-spec §4.4 (Option A) and §4.5.2.
+   */
+  async resumeInvokeAutomationStep(
+    stepRunId: string,
+  ): Promise<{ alreadyResumed: boolean; stepOutcome: 'completed' | 'failed' }> {
+    // Optimistic transition: awaiting_approval → running (the guard IS the lock)
+    const [updated] = await db
+      .update(workflowStepRuns)
+      .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(workflowStepRuns.id, stepRunId),
+        eq(workflowStepRuns.status, 'awaiting_approval'),
+      ))
+      .returning();
+
+    if (!updated) {
+      logger.info('step.resume.guard_blocked', {
+        event: 'step.resume.guard_blocked',
+        stepRunId,
+        status: 'success',
+        alreadyResumed: true,
+      });
+      // Another concurrent winner already owns this step; treat as completed from our perspective.
+      return { alreadyResumed: true, stepOutcome: 'completed' };
+    }
+
+    const sr = updated;
+    logger.info('step.resume.started', {
+      event: 'step.resume.started',
+      stepRunId,
+      runId: sr.runId,
+      automationId: sr.stepId,
+    });
+
+    // Load the workflow run and its definition
+    const [run] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, sr.runId))
+      .limit(1);
+    if (!run) {
+      await this.failStepRunInternal(sr, 'resume_run_not_found');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const definition = await loadDefinitionForRun(run);
+    if (!definition) {
+      await this.failStepRunInternal(sr, 'resume_definition_not_found');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const step = findStepInDefinition(definition, sr.stepId) as InvokeAutomationStep | undefined;
+    if (!step || step.type !== 'invoke_automation') {
+      await this.failStepRunInternal(sr, 'resume_step_not_invoke_automation');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const startMs = Date.now();
+    const ctx = run.contextJson as unknown as RunContext;
+
+    const invokeGuardResult = await withInvalidationGuard(sr.id, () =>
+      invokeAutomationStep({
+        step,
+        runId: run.id,
+        stepRunId: sr.id,
+        run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
+        templateCtx: ctx as unknown as Record<string, unknown>,
+        // Approved upstream — bypass the gate so the resume path dispatches
+        // instead of re-emitting review_required and falling through to error.
+        bypassGate: true,
+      }),
+    );
+
+    if ('discarded' in invokeGuardResult) {
+      logger.info('step.resume.invalidation_discarded', {
+        event: 'step.resume.invalidation_discarded',
+        stepRunId,
+        runId: run.id,
+        status: 'success',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    }
+
+    const result = invokeGuardResult;
+    const latencyMs = Date.now() - startMs;
+
+    if (result.status === 'ok') {
+      const output = result.output ?? {};
+      await this.completeStepRunInternal(sr, output, hashValue(output), 'invoke_automation');
+      logger.info('step.resume.completed', {
+        event: 'step.resume.completed',
+        stepRunId,
+        runId: run.id,
+        executionStatus: 'completed',
+        latencyMs,
+        status: 'success',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    }
+
+    // Defensive: review_required must never reach the resume path —
+    // resumeInvokeAutomationStep passes bypassGate: true to invokeAutomationStep
+    // exactly so this branch never fires. If it does, fail loudly so the bug
+    // is observable rather than silently dispatching nothing.
+    if (result.status === 'review_required') {
+      const reason = 'resume_review_required_after_bypass: gate returned review despite bypass';
+      logger.error('step.resume.review_required_unexpected', {
+        event: 'step.resume.review_required_unexpected',
+        stepRunId,
+        runId: run.id,
+        latencyMs,
+        status: 'failed',
+      });
+      await this.failStepRunInternal(sr, reason);
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    // error — respect failurePolicy: 'continue' as in the primary dispatch path
+    const errorReason = `invoke_automation_error: ${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`;
+    if (step.failurePolicy === 'continue') {
+      await this.completeStepRunInternal(sr, { error: result.error }, hashValue(result.error), 'invoke_automation_continue');
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    } else {
+      await this.failStepRunInternal(sr, errorReason);
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
   },
 
   async failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
@@ -2467,6 +2689,12 @@ export const WorkflowEngineService = {
     } catch (err) {
       logger.error('workflow_context_overflow', { runId: run.id, bytes: nextBytes });
       const failedAt = new Date();
+      assertValidTransition({
+        kind: 'workflow_run',
+        recordId: run.id,
+        from: run.status,
+        to: 'failed',
+      });
       await db
         .update(workflowRuns)
         .set({
@@ -2491,6 +2719,13 @@ export const WorkflowEngineService = {
       });
       return;
     }
+
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'completed',
+    });
 
     await db.transaction(async (tx) => {
       await tx
@@ -2632,6 +2867,12 @@ export const WorkflowEngineService = {
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.id, stepRunId));
     if (!sr) return;
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'failed',
+    });
     await db
       .update(workflowStepRuns)
       .set({

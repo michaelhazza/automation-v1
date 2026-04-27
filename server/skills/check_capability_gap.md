@@ -2,7 +2,7 @@
 name: Check Capability Gap
 description: Classify a required-capability list into configured, configurable, or unsupported. Core skill for Orchestrator routing path selection.
 isActive: true
-visibility: system
+visibility: basic
 ---
 
 ## Parameters

@@ -103,7 +103,19 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 - Services contain all business logic. Routes are thin wrappers.
 - Services throw errors as `{ statusCode: number, message: string, errorCode?: string }` — `asyncHandler` catches these.
 - One service per domain. Target max ~500 lines; `skillExecutor.ts` (65KB) is the exception.
-- Never access `db` directly in a route — call a service.
+- Never access `db` directly in a route — call a service. `server/lib/**` files are pure helpers and must not import `db` either.
+
+### When to create a new service file
+
+A new service file is justified only when (a) the route has more than one DB interaction, OR (b) the logic is reused by more than one caller. If neither holds, the single DB call goes inline in the route wrapped in `withOrgTx` and no new service is created. Two service files covering the same domain in one PR is a signal the split is wrong — merge them.
+
+### Five patterns for service-tier DB access
+
+1. **Org-scoped service** — wrap in `withOrgTx(organisationId, async (tx) => { … })` from `server/instrumentation.ts`. Every query inside runs with `app.organisation_id` set.
+2. **Admin/system service** — use `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Bypasses RLS by design. For routes with `requireSystemAdmin` middleware or system-scoped tables.
+3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
+4. **Background / maintenance jobs that write tenant data** — acquire an admin connection for top-level iteration, then call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts`. A job that skips this pattern silently no-ops on every write because RLS sees no session var.
+5. **Log-and-swallow services** (bookkeeping, audit inserts, best-effort mirrors — anything whose contract says "must not block execution") — `getOrgScopedDb()` must be the first line **inside** the `try` block, never above it. Placing it above the catch turns a missing-org-context throw into a hard failure that escapes the error boundary.
 
 ---
 
@@ -1352,6 +1364,54 @@ Session variables are set via `server/db/withPrincipalContext.ts` which wraps `w
 **Legacy compat (migration 0169):** Fallback policies allow access when `app.current_principal_type` is NULL/empty, covering callers not yet migrated to `withPrincipalContext`. These will be removed in P3C when all callers are migrated.
 
 The canonical manifest lives in `server/config/rlsProtectedTables.ts`. Every new tenant-owned table must be added to this manifest in the same commit as its `CREATE POLICY` migration. CI gate `verify-rls-coverage.sh` fails if the manifest references a table without a corresponding policy in any migration.
+
+#### Canonical org-isolation policy template
+
+Every new tenant table ships with this exact policy in the same migration that creates the table. Both `USING` (read) and `WITH CHECK` (write) are required; without `WITH CHECK`, an INSERT/UPDATE with no session var succeeds silently. `FORCE ROW LEVEL SECURITY` prevents the table owner (the migration role) from bypassing RLS. The `IS NOT NULL` + non-empty guards exist because `current_setting(..., true)` returns NULL when unset and `organisation_id = NULL` evaluates to NULL (not false).
+
+```sql
+ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS <table>_org_isolation ON <table>;
+
+CREATE POLICY <table>_org_isolation ON <table>
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+```
+
+Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR. `policyMigration` in that manifest must point at the migration that physically runs `CREATE POLICY ... ON <table>` — when a corrective migration's header NOTE explicitly excludes a table, the manifest still references the original. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm.
+
+#### Corrective migrations (when RLS is broken or missing)
+
+Migrations are append-only. To repair: write a new migration with the next number, `DROP POLICY IF EXISTS` for **every** historical policy name on the table (enumerate `*_tenant_isolation`, `*_org_isolation`, `*_subaccount_isolation`, etc.), then `CREATE POLICY <table>_org_isolation` with the canonical shape. Reference: `migrations/0213_fix_cached_context_rls.sql` (precedent), `migrations/0200_fix_universal_brief_rls.sql` (canonical policy shape source).
+
+#### Application-level defence-in-depth
+
+Never rely on RLS alone. Every read and write that takes a row by ID must also filter by `organisationId` explicitly in the query:
+
+```ts
+// Bad — relies on RLS alone
+const row = await tx.select().from(items).where(eq(items.id, id));
+
+// Good — defence-in-depth
+const row = await tx.select().from(items)
+  .where(and(eq(items.id, id), eq(items.organisationId, organisationId)));
+```
+
+If RLS is silently disabled by a migration regression, the application-level filter still protects the caller. Detection gate: `scripts/verify-org-scoped-writes.sh`.
+
+#### Subaccount resolution (mandatory before consuming `:subaccountId`)
+
+Any route with a `:subaccountId` URL parameter calls `resolveSubaccount(req.params.subaccountId, req.orgId!)` before using the ID. The function verifies the subaccount belongs to the requesting org. Skipping it allows horizontal privilege escalation even with RLS in place — a request scoped to org A can reference subaccount IDs belonging to org B. Pass `subaccount.id` downstream — never `req.params.subaccountId` directly. Detection gate: `scripts/verify-subaccount-resolution.sh`.
 
 ### Layer A / 1B — Service-layer org-scoped DB
 
@@ -3044,6 +3104,16 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
 - **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
+
+### Gate scripts (`scripts/verify-*.sh` / `scripts/verify-*.mjs`)
+
+**Gate output standard (`[GATE]` line).** Every `scripts/verify-*.sh` and `scripts/verify-*.mjs` gate must emit `[GATE] <guard_id>: violations=<count>` as the final application-level stdout line. The canonical parser is `grep -E '^\[GATE\] [a-z0-9-]+: violations=[0-9]+$' | tail -n 1`. Framework-level output (diagnostic echoes, framework logs) may appear after the `[GATE]` line; application-level output (violation reports, summaries) must not. Scripts sourcing `scripts/lib/guard-utils.sh` get this line automatically via `emit_summary()`; standalone scripts must emit it explicitly before each exit path.
+
+**Derived-data null-safety.** Service code that reads fields populated by background jobs (`bundleUtilizationJob`, `measureInterventionOutcomeJob`, `ruleAutoDeprecateJob`, `connectorPollingSync`) must handle null/undefined defensively — these fields may not be populated on first use. Non-null assertions (`data!`) and unconditional throws on missing derived data are prohibited. Use `logDataDependencyMissing` from `server/lib/derivedDataMissingLog.ts` and return null/empty/sentinel instead. The helper uses Pattern B (first-occurrence WARN, subsequent occurrences DEBUG via in-memory `Set<string>` keyed `<service>.<field>:<orgId>`) — low-volume paths, process-restart resets the set. See Phase 1 scope in `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §H1`.
+
+**RLS write boundary.** Server code MUST write tenant tables through `getOrgScopedDb('<service>')` (which runs under `withOrgTx` and binds `app.organisation_id`). Admin/cross-tenant writes MUST go through `withAdminConnectionGuarded({ allowRlsBypass: <bool> }, fn)` from `server/lib/rlsBoundaryGuard.ts`. `allowRlsBypass: true` requires an inline single-sentence justification comment within ±1 line of the call site. Tables that legitimately have `organisation_id` but no RLS policy must appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. The runtime guard is dev/test only — production behaviour is enforced at the database layer by the RLS policy itself. The CI gate `scripts/verify-rls-protected-tables.sh` enforces all three boundaries (schema-vs-registry diff, `allowRlsBypass: true` justification comment, and an advisory grep for raw `.execute(sql\`...\`)` writes near tenant tables without an `assertRlsAwareWrite('<table>')` partner). See `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §A2`.
+
+**Job concurrency + idempotency standard.** Every `server/jobs/*.ts` entry-point function must declare its concurrency model and idempotency model in a top-of-file comment block (see `server/jobs/bundleUtilizationJob.ts` for the canonical shape). Default lock scope is per-org via `pg_advisory_xact_lock(hashtext('<orgId>::<jobName>')::bigint)`; deviation (global, per-entity) requires an inline justification comment in the header — `ruleAutoDeprecateJob`'s global lock is the documented exception (nightly cadence, no per-org parallelism need). Jobs return `{ status: 'noop', reason, jobName }` (with `reason` ∈ `'lock_held' | 'no_rows_to_claim' | 'predicate_filtered' | 'already_processed'`) when work is filtered out — the noop must mean "nothing changed". Mid-execution partial state must roll back via the wrapping transaction. Each job exposes a `__testHooks` seam (default `undefined`, guarded at the call site by `if (!__testHooks.<name>) return; await __testHooks.<name>();`) for race-window control inside idempotency tests; the seam is dead code in production. See §B2 / §B2-ext in `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md` for the per-job mechanism table.
 
 ---
 

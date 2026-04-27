@@ -4,7 +4,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 
 > **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, three-tier agent model, skill system, and all patterns specific to this application. Read it before making backend changes.
 >
-> **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, and multi-tenant safety checklist. Read it before any PR that touches tenant data, migrations, schema, or the service/route/lib tier.
+> **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, multi-tenant safety checklist, and the §8 development-discipline rule set. Read it before any non-trivial PR — the §8 rules (idempotency, error handling, sort tiebreakers, lifecycle hooks, deferred-enforcement logging, etc.) apply across `server/`, `client/`, and `shared/`, not just backend tenant code.
 >
 > **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills. **Editorial Rules** (vendor-neutral, marketing-ready, model-agnostic) live in `docs/capabilities.md` § *Editorial Rules* — violations block the edit.
 
@@ -67,6 +67,15 @@ Run these after every non-trivial change. No task is complete until all relevant
   - What you tried
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
+
+### Gate-cadence rule (overrides default per-change verification for `npm run test:gates`)
+
+`npm run test:gates` (and the umbrella `npm test`, which runs gates first) is **expensive** — it spans every contract / RLS / schema gate in the repo and routinely takes minutes. It is NOT part of the per-change verification loop. Only run it when the user signals **"we're done, prepare for merge"** (or equivalent — typically after `final-review` finishes and we're staging the PR for merge). For routine mid-iteration verification:
+- Use `npx tsc --noEmit` for typecheck.
+- Use `bash scripts/run-all-unit-tests.sh` (or a single targeted `npx tsx <file>`) for unit tests.
+- Use `npm run build:client` / `npm run build:server` only when the change touches the build surface.
+
+This rule applies to all sessions, including review-loop iterations. Skipping the gates suite mid-iteration is the correct default; running it pre-merge is the correct exception.
 
 ---
 
@@ -148,6 +157,18 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 - Each session writes to its own `tasks/builds/<slug>/progress.md` — never to a shared file
 - `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
 - Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
+
+---
+
+## 13. Doc style: agent-facing is dense, human-facing is readable
+
+Documentation falls into two classes — write each accordingly.
+
+**Agent-facing** (loaded into LLM context routinely): `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `KNOWLEDGE.md`, all skill files, `references/**`, agent definitions, this file. Optimise for tokens and signal density: bullets over prose, short sentences, no preambles, no reassurance text, no marketing language. Code examples only when copy-paste is the point — otherwise reference the canonical source. Every line should earn its tokens.
+
+**Human-facing** (read by people, not loaded into context routinely): `docs/capabilities.md`, `README.md`, customer-visible specs, marketing copy, public-facing docs. Optimise for clarity and tone: full sentences, narrative flow, vendor-neutral product language. Editorial rules apply (see `docs/capabilities.md § Editorial Rules`).
+
+If unsure: would Claude read this in most sessions? Yes → agent-facing. When editing an agent-facing doc, condense rather than expand — if a rule cannot be stated in ≤2 sentences, the detail belongs in `architecture.md` or `KNOWLEDGE.md` with a one-line pointer in the rule doc.
 
 ---
 

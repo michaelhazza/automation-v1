@@ -57,6 +57,9 @@ export const workflowRuns = pgTable(
       .references(() => workflowTemplateVersions.id),
     // Sprint 4 P3.1 — execution mode: auto (default), supervised, background, bulk
     runMode: text('run_mode').notNull().default('auto').$type<WorkflowRunMode>(),
+    // F6 — Riley safety posture (explore = review all side-effecting steps;
+    // execute = auto-dispatch). Orthogonal to run_mode.
+    safetyMode: text('safety_mode').notNull().default('explore').$type<'explore' | 'execute'>(),
     status: text('status').notNull().default('pending').$type<WorkflowRunStatus>(),
     contextJson: jsonb('context_json').notNull().default({}).$type<Record<string, unknown>>(),
     contextSizeBytes: integer('context_size_bytes').notNull().default(0),

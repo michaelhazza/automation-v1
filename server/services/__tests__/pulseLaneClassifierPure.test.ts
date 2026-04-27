@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Uses node:module createRequire to stub the action registry; no static sibling import due to dynamic stub setup"
 /**
  * pulseLaneClassifierPure.test.ts — Pulse v1 lane classifier pure tests.
  *

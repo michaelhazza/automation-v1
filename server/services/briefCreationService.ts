@@ -4,11 +4,9 @@ import { eq, and, asc } from 'drizzle-orm';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
 import { findOrCreateBriefConversation } from './briefConversationService.js';
-import { writeConversationMessage } from './briefConversationWriter.js';
-import { classifyChatIntent, DEFAULT_CHAT_TRIAGE_CONFIG } from './chatTriageClassifier.js';
-import { generateSimpleReply } from './briefSimpleReplyGeneratorPure.js';
 import { logFastPathDecision } from './fastPathDecisionLogger.js';
-import { logger } from '../lib/logger.js';
+import { handleBriefMessage } from './briefMessageHandlerPure.js';
+import { classifyChatIntent, DEFAULT_CHAT_TRIAGE_CONFIG } from './chatTriageClassifier.js';
 
 export async function createBrief(input: {
   organisationId: string;
@@ -18,13 +16,16 @@ export async function createBrief(input: {
   source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
   uiContext: BriefUiContext;
 }): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }> {
-  const triageInput = {
+  // Classify BEFORE persisting the brief. classifyChatIntent can throw (LLM
+  // outage, classifier internal error); running it first means a failure
+  // never leaves an orphaned task / conversation in the DB. Phase 6 of the
+  // pre-launch hardening sprint moved this call inside handleBriefMessage,
+  // which inverted the ordering — restore the pre-Phase-6 invariant here.
+  const fastPathDecision = await classifyChatIntent({
     text: input.text,
     uiContext: input.uiContext,
     config: DEFAULT_CHAT_TRIAGE_CONFIG,
-  };
-
-  const fastPathDecision = await classifyChatIntent(triageInput);
+  });
 
   const title = input.text.length > 100 ? input.text.slice(0, 97) + '…' : input.text;
 
@@ -51,44 +52,26 @@ export async function createBrief(input: {
     createdByUserId: input.submittedByUserId,
   });
 
+  // Pass the precomputed decision so handleBriefMessage skips its own
+  // classify call — keeps the dispatch logic in one place without
+  // double-charging the classifier.
+  await handleBriefMessage({
+    conversationId: conversation.id,
+    briefId,
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    text: input.text,
+    uiContext: input.uiContext,
+    isFollowUp: false,
+    prefetchedDecision: fastPathDecision,
+  });
+
   // Shadow-eval logging — best-effort, never blocks
   void logFastPathDecision(fastPathDecision, {
     briefId,
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
   });
-
-  if (fastPathDecision.route === 'simple_reply' || fastPathDecision.route === 'cheap_answer') {
-    // Inline response — no Orchestrator needed
-    const artefact = generateSimpleReply(fastPathDecision, triageInput);
-    await writeConversationMessage({
-      conversationId: conversation.id,
-      briefId,
-      organisationId: input.organisationId,
-      subaccountId: input.subaccountId,
-      role: 'assistant',
-      content: '',
-      artefacts: [artefact],
-    });
-  } else {
-    // needs_orchestrator or needs_clarification → dispatch Orchestrator non-blocking
-    import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
-      enqueueOrchestratorRoutingIfEligible({
-        id: briefId,
-        organisationId: input.organisationId,
-        status: 'inbox',
-        assignedAgentId: null,
-        isSubTask: false,
-        createdByAgentId: null,
-        description: input.text,
-      }, { scope: fastPathDecision.scope }),
-    ).catch((err: unknown) => {
-      logger.error('briefCreationService.orchestrator_enqueue_failed', {
-        briefId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  }
 
   return { briefId, fastPathDecision, conversationId: conversation.id };
 }

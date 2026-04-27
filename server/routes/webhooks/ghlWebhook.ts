@@ -109,10 +109,11 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
     }
 
     const orgId = config.organisationId;
+    const principal = fromOrgId(orgId, dbAccount.subaccountId ?? undefined);
 
     switch (normalised.entityType) {
       case 'contact':
-        await canonicalDataService.upsertContact(orgId, dbAccount.id, {
+        await canonicalDataService.upsertContact(principal, dbAccount.id, {
           externalId: normalised.entityExternalId,
           firstName: normalised.data.firstName as string | undefined,
           lastName: normalised.data.lastName as string | undefined,
@@ -123,7 +124,7 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
         break;
 
       case 'opportunity':
-        await canonicalDataService.upsertOpportunity(orgId, dbAccount.id, {
+        await canonicalDataService.upsertOpportunity(principal, dbAccount.id, {
           externalId: normalised.entityExternalId,
           name: normalised.data.name as string | undefined,
           stage: normalised.data.pipelineStageId as string | undefined,
@@ -133,7 +134,7 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
         break;
 
       case 'conversation':
-        await canonicalDataService.upsertConversation(orgId, dbAccount.id, {
+        await canonicalDataService.upsertConversation(principal, dbAccount.id, {
           externalId: normalised.entityExternalId,
           status: normalised.data.status as string | undefined,
           messageCount: normalised.data.messageCount as number | undefined,
@@ -142,7 +143,7 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
         break;
 
       case 'revenue':
-        await canonicalDataService.upsertRevenue(orgId, dbAccount.id, {
+        await canonicalDataService.upsertRevenue(principal, dbAccount.id, {
           externalId: normalised.entityExternalId,
           amount: normalised.data.amount ? String(Number(normalised.data.amount) / 100) : '0',
           status: normalised.data.status as string | undefined,

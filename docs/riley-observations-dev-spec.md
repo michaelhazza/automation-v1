@@ -1310,15 +1310,7 @@ ticks_since_last_meaningful_run >= heartbeat_min_ticks_before_mandatory_run
 
 Prevents permanent silence. If we've been skipping for 6 ticks (24h at 4h cadence), force a run on the next tick to check state regardless of delta. The first-tick branch keeps the §7.10 edge-1 behaviour ("always run first tick") mechanically derivable from the rule, rather than an exception layered on top.
 
-**Rule 3 — Explicit trigger**
-
-```
-any_user_initiated_check_queued = true
-```
-
-If a user has explicitly requested a check via the agent's config page ("Check now" button) or via API since the last tick, always run.
-
-**Rule 4 — State-flag**
+**Rule 3 — State-flag** *(renumbered from Rule 4 — Rule 3 "Explicit trigger" dropped from v1; see F21 in pre-launch-hardening-spec.md)*
 
 ```
 subaccount_has_requires_attention_flag = true
@@ -1345,10 +1337,10 @@ interface HeartbeatGateInput {
   };
 }
 
+// F21: 'explicit_trigger' dropped from v1 (Rule 3 removed).
 type HeartbeatGateReason =
   | 'event_delta'
   | 'time_threshold'
-  | 'explicit_trigger'
   | 'state_flag'
   | 'no_signal'
   | 'gate_error';
@@ -1397,7 +1389,7 @@ Flow:
    });
    ```
 
-6. If decision is `shouldRun: true` → dispatch. Update `last_tick_evaluated_at = now()` in the same transaction that enqueues the run. When the dispatched run subsequently produces "meaningful" output (definition deferred to architect per §12.17; recommendation: `status='completed'` AND at least one action proposed OR memory block written), the run-completion hook updates `last_meaningful_tick_at = now()` and resets `ticks_since_last_meaningful_run = 0` on `subaccount_agents`.
+6. If decision is `shouldRun: true` → dispatch. Update `last_tick_evaluated_at = now()` in the same transaction that enqueues the run. When the dispatched run subsequently produces "meaningful" output (F22 pinned definition: `status='completed' AND (actionProposedCount >= 1 OR memoryBlockWrittenCount >= 1)` — see `computeMeaningfulOutputPure` in `agentRunFinalizationServicePure.ts`), the run-completion hook updates `last_meaningful_tick_at = now()` and resets `ticks_since_last_meaningful_run = 0` on `subaccount_agents`.
 7. If decision is `shouldRun: false` → emit `heartbeat.tick.gated` telemetry, update `last_tick_evaluated_at = now()`, increment `ticks_since_last_meaningful_run += 1`, return.
 
 **Ownership of `last_meaningful_tick_at` / counter-reset writes.** The recommendation is to site these writes alongside the existing `agent_runs.completed_at` write — `server/services/agentRunFinalizationService.ts` is the candidate hook (it already handles terminal-state transitions for agent runs; see its docblock). Architect confirms during plan decomposition (see §12.17); if a different completion hook is used in the heartbeat-originated path, name it in the plan.

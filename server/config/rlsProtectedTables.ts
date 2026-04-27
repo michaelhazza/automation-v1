@@ -5,7 +5,7 @@
  * Security enabled with a tenant-isolation policy keyed on
  * `current_setting('app.organisation_id', true)`. The list is consumed by:
  *
- *   - `scripts/gates/verify-rls-coverage.sh` — CI gate that fails when a
+ *   - `scripts/verify-rls-coverage.sh` — CI gate that fails when a
  *     manifest entry has no matching `CREATE POLICY` in any migration.
  *     Every migration that adds a new tenant-owned table is expected to
  *     append the table to this manifest in the same commit.
@@ -462,17 +462,22 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   // canonical 0079/0200 pattern.
   // 0227 — Phase 1 RLS hardening: FORCE RLS on 2 tables that were missing it
   // in their original migrations 0202 and 0203.
+  // 0229 — dedicated corrective migration that adds FORCE RLS + proper CREATE
+  // POLICY on reference_documents (direct org-isolation shape) and
+  // reference_document_versions (parent-EXISTS policy shape, no organisation_id
+  // column). 0229 is the authoritative manifest pointer for both tables;
+  // 0202/0203 are no longer baselined in verify-rls-coverage.sh.
   {
     tableName: 'reference_documents',
     schemaFile: 'referenceDocuments.ts',
-    policyMigration: '0227_rls_hardening_corrective.sql',
+    policyMigration: '0229_reference_documents_force_rls_parent_exists.sql',
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
     tableName: 'reference_document_versions',
     schemaFile: 'referenceDocumentVersions.ts',
-    policyMigration: '0227_rls_hardening_corrective.sql',
-    rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states.',
+    policyMigration: '0229_reference_documents_force_rls_parent_exists.sql',
+    rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states. Policy uses parent-EXISTS shape (no organisation_id column); 0229 is the manifest pointer migration.',
   },
   {
     tableName: 'document_bundles',

@@ -20,6 +20,7 @@ You operate fully autonomously. Make all accept/reject decisions independently b
 Before starting, read:
 1. `CLAUDE.md` — project conventions and architecture rules (your adjudication criteria)
 2. `architecture.md` — patterns and constraints specific to this codebase
+3. `DEVELOPMENT_GUIDELINES.md` — locked build-discipline rules (RLS, service-tier, gates, migrations, §8 development discipline). Always read for any non-trivial review; skip only when the diff is pure docs / pure copy changes with no code.
 
 Locate the Codex binary:
 ```bash

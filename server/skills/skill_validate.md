@@ -2,7 +2,7 @@
 name: Validate Skill Definition
 description: Validate a proposed skill definition against Anthropic tool-definition schema and Zod rules.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -122,8 +122,9 @@ export const connectorPollingService = {
       await getProviderRateLimiter(config.connectorType).acquire(config.id);
       const accounts = await adapter.ingestion.listAccounts(connection as never, connConfig);
 
+      const orgPrincipal = fromOrgId(config.organisationId);
       for (const account of accounts) {
-        await canonicalDataService.upsertAccount(config.organisationId, config.id, {
+        await canonicalDataService.upsertAccount(orgPrincipal, config.id, {
           externalId: account.externalId,
           displayName: account.displayName,
           status: account.status,
@@ -143,29 +144,34 @@ export const connectorPollingService = {
       let accountsSynced = 0;
 
       for (const dbAccount of dbAccounts) {
+        // Per-account principal — carries the subaccountId so downstream
+        // canonicalDataService methods that need it (none in this loop today,
+        // but the surface contract requires the principal regardless) get the
+        // tenant-scoped context they expect.
+        const accountPrincipal = fromOrgId(config.organisationId, dbAccount.subaccountId ?? undefined);
         try {
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const contacts = await adapter.ingestion.fetchContacts(connection as never, dbAccount.externalId);
           for (const c of contacts) {
-            await canonicalDataService.upsertContact(config.organisationId, dbAccount.id, c as never);
+            await canonicalDataService.upsertContact(accountPrincipal, dbAccount.id, c as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const opportunities = await adapter.ingestion.fetchOpportunities(connection as never, dbAccount.externalId);
           for (const o of opportunities) {
-            await canonicalDataService.upsertOpportunity(config.organisationId, dbAccount.id, o as never);
+            await canonicalDataService.upsertOpportunity(accountPrincipal, dbAccount.id, o as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const conversations = await adapter.ingestion.fetchConversations(connection as never, dbAccount.externalId);
           for (const c of conversations) {
-            await canonicalDataService.upsertConversation(config.organisationId, dbAccount.id, c as never);
+            await canonicalDataService.upsertConversation(accountPrincipal, dbAccount.id, c as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const revenue = await adapter.ingestion.fetchRevenue(connection as never, dbAccount.externalId);
           for (const r of revenue) {
-            await canonicalDataService.upsertRevenue(config.organisationId, dbAccount.id, {
+            await canonicalDataService.upsertRevenue(accountPrincipal, dbAccount.id, {
               ...r,
               amount: String(r.amount),
             } as never);
@@ -199,8 +205,7 @@ export const connectorPollingService = {
                 }
                 const metricVersion = metricDef?.version ?? 1;
 
-                await canonicalDataService.upsertMetric({
-                  organisationId: config.organisationId,
+                await canonicalDataService.upsertMetric(accountPrincipal, {
                   accountId: dbAccount.id,
                   metricSlug: m.metricSlug,
                   currentValue: String(m.currentValue),
@@ -217,8 +222,7 @@ export const connectorPollingService = {
                   metadata: m.metadata ?? null,
                 });
 
-                await canonicalDataService.appendMetricHistory({
-                  organisationId: config.organisationId,
+                await canonicalDataService.appendMetricHistory(accountPrincipal, {
                   accountId: dbAccount.id,
                   metricSlug: m.metricSlug,
                   periodType: m.periodType,
