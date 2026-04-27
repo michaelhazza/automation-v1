@@ -1067,6 +1067,12 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - **Files affected:** `workflowEngineService` (~5 remaining status-write sites), `agentExecutionService` (terminal write in agentic loop), `briefApprovalService.decideApproval`, `workflowRunService` (run-level terminal aggregation), plus `shared/stateMachineGuards.ts` (extend with intermediate transition tables).
   - **Suggested next-spec framing:** enumerate every status-write site by kind, define the canonical transition tables (allowed `from → to` per status family), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and decide whether to promote intermediate-transition violations from warn-log to throw once telemetry confirms zero false-positives.
 
+- [ ] **HOME-DASHBOARD-REACTIVITY-TASK14** — Wire `dashboard.queue.changed` emitter to job queue mutation path (best-effort, deferred from home dashboard reactivity spec §5.5).
+  - **Captured:** 2026-04-27
+  - **Severity:** low (QueueHealthSummary still refreshes on WebSocket reconnect; maximum staleness bounded by reconnect cycle)
+  - **Scope:** find pg-boss enqueue/complete sites; add `emitToSysadmin('dashboard.queue.changed', 'system', { pendingDelta: 0 })` — payload ignored by client, used as invalidation signal only.
+  - **Files to investigate:** `server/services/jobQueueHealthService.ts`, pg-boss wrapper if any.
+
 - [ ] **CHATGPT-PR211-R4-RUN-DEBUGGER-VIEW** — Operability surface for run / approval / state-machine debugging. Reviewer round-4 post-merge non-blocking suggestion.
   - **Captured:** 2026-04-27 (chatgpt-pr-review round 4 — final verdict)
   - **Severity:** medium (operability bottleneck — system is now correct but non-trivial to reason about).
@@ -1080,4 +1086,24 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - **Files affected:** new admin route under `client/src/pages/admin/` (or extend an existing `RunDetailPage`); new `server/routes/admin/runDebugger.ts` query layer aggregating from `agent_run_events`, `workflow_run_events`, `conversation_messages.artefacts`, application logs (state_transition / cached_context.write).
   - **Rationale for defer to Phase 2:** post-merge work — the PR #211 surface is correctness hardening; the debugger view is an observability product feature. Reviewer explicitly said "do NOT add more invariants" / "you're done for this phase". Worth a dedicated spec that decides log-source (structured DB events vs application log scrape), retention window, admin-only vs engineer-only access, and whether the view is real-time (WS) or post-hoc.
   - **Suggested next-spec framing:** start with a 2-day spike that prototypes the artefact-chain timeline only (lowest risk, highest reuse — same view feeds brief debugging, run debugging, approval-flow debugging). Confirm the data layer can answer the four query shapes above without a new schema. Then decide whether to extend or replace the existing `client/src/pages/admin/RunsPage` / `RunDetailPage`.
+
+---
+
+## Deferred from spec-conformance review — home-dashboard-reactivity (2026-04-27)
+
+**Captured:** 2026-04-27T21:02:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-home-dashboard-reactivity-2026-04-27T20-57-33Z.md`
+**Spec:** `tasks/builds/home-dashboard-reactivity/spec.md` (paired plan: `docs/superpowers/plans/2026-04-27-home-dashboard-reactivity.md`)
+
+Both items are scope-edge cases the spec mentions but the plan explicitly carves out as documented-gap candidates. Neither blocks the core reactivity contract — the pipeline should NOT silently treat them as resolved; the human should explicitly choose whether to close them in this PR or document them as known limitations.
+
+- [ ] **REQ #13 — `action: 'new'` emit on review item creation.** Spec §5.1 says it's in scope. Plan Task 10.4 explicitly carves out a "document as known gap" option if creation happens outside the route. Implementation surface: `reviewService.createReviewItem` (`server/services/reviewService.ts:35`) has 6 callers — `clientPulseInterventionContextService`, `configUpdateOrganisationService`, `flowExecutorService`, `skillExecutor.ts` × 2 (lines 1940 + 2088), plus indirect via reviewService itself. Without this emit, the home-dashboard "Pending approval" count does not live-update when a new review item is created — only on subsequent approve/reject or reconnect.
+  - Spec section: §5.1 (`server/routes/reviewItems.ts` — `action: 'new'` path)
+  - Gap: No `emitOrgUpdate(orgId, 'dashboard.approval.changed', { action: 'new', subaccountId })` is emitted anywhere in the codebase.
+  - Suggested approach: emit once inside `reviewService.createReviewItem` using `action.organisationId` (closes all 6 caller paths in one place) — but this is a design call: emitting deep in the service forces the convention that future callers also surface dashboard events, which may or may not match the layering preference. Alternative: emit at each of the 6 caller sites (more explicit, more drift risk).
+
+- [ ] **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** `server/routes/reviewItems.ts` `POST /api/review-items/bulk-approve` (lines 241–317) and `POST /api/review-items/bulk-reject` (lines 321–334) do not emit `dashboard.approval.changed`. A user bulk-approving items would not see the home-dashboard "Pending approval" count refresh until the next reconnect cycle.
+  - Spec section: §5.1 trigger language ("After a successful approve or reject on a review item") — broad reading includes bulk paths; plan §10 names only the single endpoint paths.
+  - Gap: Bulk paths are silent on the dashboard channel; only single-item paths emit.
+  - Suggested approach: emit once per bulk request after the bulk write succeeds (single dashboard refetch instead of N refetches; less chatty for moderate batches). Payload tradeoff: bulk has no canonical `subaccountId` — either pass `null` (loses subaccount context) or use the most-common subaccount across the batch (uncommon in practice). The single-emit-per-bulk-request approach is recommended unless the dashboard's coalescing window can't keep up. NOTE: reviewer should consider whether bulk endpoints route through the same `reviewService` mutation method as single endpoints — if so, the cleanest fix overlaps with REQ #13 (emit from inside the service for both).
 
