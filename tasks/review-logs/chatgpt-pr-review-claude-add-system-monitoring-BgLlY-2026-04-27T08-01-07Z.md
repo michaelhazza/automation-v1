@@ -158,3 +158,70 @@ user's routing override:
 - Files changed this round: 5 modified, 2 new (migration up/down)
 - Deferred items routed to: `tasks/post-merge-system-monitor.md` (per user routing override)
 
+---
+
+## Round 2 — 2026-04-27T08-30-00Z
+
+### ChatGPT Feedback (raw)
+
+(Round 2 raw text not pasted into this session — user supplied per-item
+decisions directly: items 1+2 implement, items 3+4 defer to
+`tasks/post-merge-system-monitor.md` § Correctness. Round 2 followed up on
+the round-1 implementation of backend-published `triage_status` /
+`diagnosis_status` and surfaced four further refinements on the same
+`DiagnosisAnnotation.tsx` / `SystemIncidentsPage.tsx` surface.)
+
+### Recommendations and Decisions
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Scope | Rationale |
+|---|---------|--------|----------------|----------------|----------|-------|-----------|
+| 1 | Differentiate `triage failed` copy from generic fallback in `DiagnosisAnnotation.tsx` (both branches currently render identical "Triage attempted but no diagnosis recorded yet." text) | user-facing | implement | implement | medium | standard | Visible operator copy. Failed-terminal vs not-yet-run are different states; identical copy hides the distinction the migration-0237 fields enable. User approved as recommended |
+| 2 | Split `partial` (amber) vs `invalid` (red) banners in `DiagnosisAnnotation.tsx` (currently both render the same red "Prompt validation failed" line) | user-facing | implement | implement | medium | standard | Visible operator copy. `partial` (diagnosis recorded, no validated investigate prompt — operator review recommended) is a softer state than `invalid` (validation terminally failed — operator must investigate). Severity-of-banner should match severity-of-state. User approved as recommended |
+| 3 | Filter semantics for `triageStatus=failed AND diagnosisStatus=none` on the incidents list filter pill | user-facing | defer | defer | low | standard | Real workflow gap (operators can't isolate "auto-triage attempted but failed" cleanly) but UI string + filter contract need spec design. Defer to `tasks/post-merge-system-monitor.md` § Correctness per user routing override |
+| 4 | Backend staleness guard for worker-death recovery (stale `triageStatus='running'` if worker dies mid-run) | technical | defer | defer (escalated to user) | medium | architectural | Real correctness concern but requires picking a pattern (sweep flip vs heartbeat TTL). Likely converges with the round-1 deferred correlation-ID propagation invariant. Carveout: technical-defer + architectural — surfaced; user confirmed defer. Routed to `tasks/post-merge-system-monitor.md` § Correctness per user routing override |
+
+### Triage summary (pre-implementation)
+- Auto-accepted (technical): 0 — finding 4 is technical but escalated (architectural defer), no auto-applies
+- Escalated to user: 4 — findings 1, 2, 3, 4
+
+### User decisions — received 2026-04-27T08-25-00Z
+
+User reply: **all: as recommended**. Decisions applied verbatim. Routing
+override (carried from round 1): the two defers route to
+`tasks/post-merge-system-monitor.md` § Correctness rather than
+`tasks/todo.md`.
+
+### Implemented (round 2 — user-approved user-facing)
+
+- `[user]` `client/src/components/system-incidents/DiagnosisAnnotation.tsx` —
+  - Item 1: failed-triage copy now reads "Auto-triage failed — manual escalate available." in an amber-banner style matching the rate-limited state, distinguishing terminal failure from "not yet run" (which keeps the existing slate-italic fallback).
+  - Item 2: split the diagnosis-status banner into two branches — `invalid` renders red "Prompt validation failed — operator should investigate manually." (pre-existing copy); `partial` renders amber "Diagnosis recorded without a validated investigate prompt — operator review recommended." (new). The combined `validationFailed` flag is removed.
+  - Top-of-file comment updated to describe the new banner contract.
+
+### Deferred (round 2)
+
+Both deferred items written to `tasks/post-merge-system-monitor.md` §
+Correctness fixes per the user's routing override:
+
+- `[user]` Item 3 — list filter semantics for `failed AND none`
+- `[user]` Item 4 — backend staleness guard for worker-death recovery
+
+### Verification
+
+- `npx tsc --noEmit` shows ONLY the same two pre-existing errors confirmed in
+  round 1 (`ClarificationInbox.tsx`, `SkillAnalyzerExecuteStep.tsx`) — neither
+  file touched by this round, no new typecheck errors introduced.
+- `npm run lint` does not exist in this repo (no `lint` script in
+  `package.json`); typecheck is the canonical mid-iteration check per the
+  CLAUDE.md gate-cadence rule.
+- `DiagnosisAnnotation.tsx` is a leaf component with no companion `*Pure.test.ts`
+  — visual rendering is exercised through the parent page; no automated test
+  to update.
+
+### Round 2 summary
+
+- Top themes: ui_copy_differentiation, banner_severity_split, deferred_filter_semantics, deferred_backend_staleness
+- Auto-accepted (technical): 0 implement, 0 reject, 0 defer
+- User-decided: 2 implement (#1, #2), 0 reject, 2 defer (#3, #4)
+- Files changed this round: 1 modified (`DiagnosisAnnotation.tsx`), 1 modified (`tasks/post-merge-system-monitor.md`)
+- Deferred items routed to: `tasks/post-merge-system-monitor.md` § Correctness fixes (per user routing override)
+

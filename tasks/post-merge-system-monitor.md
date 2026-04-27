@@ -19,6 +19,31 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
       Fix: idempotency-key the increment on `(incidentId, jobId)` — only increment
       once per pg-boss job id, not once per handler invocation.
 
+- [ ] **List filter semantics for `triageStatus=failed AND diagnosisStatus=none`**
+      (round 2, item 3) — `[user]` — The diagnosis filter pill on the incidents
+      list (`SystemIncidentsPage.tsx`) currently maps the status enum directly,
+      which means a worker-died incident (`triageStatus='running'` left stale,
+      then transitioned to `'failed'` with no diagnosis row) ends up in `none`
+      under the filter. Operators looking for "auto-triage attempted but failed"
+      cannot easily isolate the bucket without reading the column directly.
+      Fix: extend filter pill semantics to expose a `failed-no-diagnosis`
+      grouping (server-side join on `triageStatus='failed' AND diagnosisStatus
+      IN ('none','partial','invalid')`) and surface it as a distinct option
+      alongside `none / valid / partial / invalid`. UI string + filter contract
+      need spec design — defer until the post-launch operator workflow review.
+
+- [ ] **Backend staleness guard for worker-death recovery** (round 2, item 4) —
+      `[user]` — `triageHandler.ts` writes `triageStatus='running'` at the start
+      of an attempt. If the worker dies mid-run (OOM, segfault, host shutdown),
+      the row stays at `'running'` indefinitely and the UI shows an eternal
+      "Triaging…" banner. Backend fix: add a staleness guard — either (a) a
+      sweep that flips `'running' → 'failed'` after `attemptStartedAt` exceeds
+      a max-attempt-duration (e.g. 10 min), or (b) a heartbeat column updated
+      by the handler with a TTL check on read. Option (a) is simpler; option
+      (b) generalises to any long-running async work. Resolve which pattern
+      is canonical before implementing — likely converges with the
+      correlation-ID propagation invariant (item 7c).
+
 ## Observability
 
 - [ ] **Synthetic check: write success vs declared success mismatch** (item 6a) —

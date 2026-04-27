@@ -1,9 +1,11 @@
 // Renders the agent_diagnosis block in the incident detail drawer.
 // Shows 5 distinct states per spec §10.3.
 //
-// Backend-driven state (migration 0237): the validation-failed banner reads
-// `diagnosisStatus === 'partial'` and the in-flight banner reads
-// `triageStatus === 'running'`. Earlier versions inferred these from
+// Backend-driven state (migration 0237): the diagnosis-status banner reads
+// `diagnosisStatus` directly (`invalid` → red "validation failed",
+// `partial` → amber "no validated prompt"); the in-flight banner reads
+// `triageStatus === 'running'`; the failed banner reads
+// `triageStatus === 'failed'`. Earlier versions inferred these from
 // `investigatePrompt === null` and a 5-minute window on `lastTriageAttemptAt`,
 // which misrepresented crashed jobs and silent validation failures.
 import { useState } from 'react';
@@ -40,7 +42,6 @@ export default function DiagnosisAnnotation({
 
   // State 1: diagnosis present
   if (agentDiagnosis !== null) {
-    const validationFailed = diagnosisStatus === 'partial' || diagnosisStatus === 'invalid';
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[12px]">
         <div className="flex items-center justify-between mb-2">
@@ -52,9 +53,14 @@ export default function DiagnosisAnnotation({
             {expanded ? 'Collapse' : 'Expand'}
           </button>
         </div>
-        {validationFailed && (
+        {diagnosisStatus === 'invalid' && (
           <div className="text-red-600 text-[11px] mb-2 font-medium">
             Prompt validation failed — operator should investigate manually.
+          </div>
+        )}
+        {diagnosisStatus === 'partial' && (
+          <div className="text-amber-700 text-[11px] mb-2 font-medium">
+            Diagnosis recorded without a validated investigate prompt — operator review recommended.
           </div>
         )}
         {expanded ? (
@@ -108,7 +114,9 @@ export default function DiagnosisAnnotation({
     // run" using the explicit triageStatus rather than inferring from timing.
     if (triageStatus === 'failed') {
       return (
-        <div className="text-[12px] text-slate-500 italic">Triage attempted but no diagnosis recorded yet.</div>
+        <div className="text-[12px] text-amber-700 bg-amber-50 rounded p-2 border border-amber-200">
+          Auto-triage failed — manual escalate available.
+        </div>
       );
     }
     return (
