@@ -333,6 +333,27 @@ Automation OS is a consumer-simple product built on enterprise-grade backend cap
 
 ---
 
+## Investigate-Fix Protocol
+
+When given a prompt that begins with `# Investigate-Fix Request`, the prompt
+follows the contract defined in `docs/investigate-fix-protocol.md`. Read
+that document, then:
+
+1. Treat the `## Scope` section as authoritative — do not modify files
+   outside it without explicit user approval.
+2. Treat the `## Do not change without confirmation` list as a hard gate.
+3. Execute `## Investigation steps` in order. If a step is impossible,
+   stop and report — do not improvise.
+4. Produce proposed changes for user review per `## Expected output`.
+   Do not commit, push, deploy, or merge without explicit user approval.
+5. If the incident's hypothesis is wrong, report what you found and stop —
+   do not pursue an unbounded investigation.
+
+Iterating on the protocol itself: see the document. Update it when new
+patterns emerge.
+
+---
+
 ## User Preferences
 
 - Concise communication, no emojis
