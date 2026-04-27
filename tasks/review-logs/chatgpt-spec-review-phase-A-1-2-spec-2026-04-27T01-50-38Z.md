@@ -104,3 +104,130 @@ Cross-references introduced this round:
 
 Post-integrity sanity (4c): re-scanned heading list — §7.6 and §12.5 are properly nested sub-sections; §0–§19 top-level headings unchanged; ToC entries unchanged (sub-sections do not require ToC entries per existing pattern with §7.4 / §7.5 / §12.4). The Spec Status block correctly version-bumped from v1 to v1.1 with the Round 5 (2026-04-27) line and the 38-finding total. No empty sections produced. Pass.
 
+---
+
+## Round 2 — 2026-04-27T<round-2>
+
+### ChatGPT Feedback (raw)
+
+```
+Good pass. You closed the biggest structural risks. What's left now is mostly edge-condition hardening and future-proofing, not architectural changes.
+
+Below is Round 2 focused only on things that could still bite you in production.
+
+Executive Summary
+Spec is now build-ready and robust
+Remaining gaps are:
+- Incident lifecycle completeness
+- Concurrency edge cases (double-fire + race windows)
+- Heuristic tuning safety (false positive containment)
+- Sweep coverage guarantees
+No structural changes required, just tightening invariants
+
+1. Incident Lifecycle — Missing "Resolution Model"
+You've defined ingestion, triage, investigation — but you haven't fully locked what ends an incident.
+Current gap: no strict definition of resolved vs ignored vs superseded; whether incidents can re-open.
+Why this matters: without this, duplicate incidents over time, noisy dashboards, broken "monitor the monitor" metrics.
+Fix — add: ### Incident lifecycle states (normative)
+open → triaged → investigating → resolved | ignored | superseded
+Definitions: resolved/ignored/superseded.
+Invariant: Only one OPEN incident may exist per (entity_kind, entity_id, heuristic_type)
+Invariant: Incident re-open — resolved/ignored MUST NOT re-open. New occurrences MUST create a new incident with a new id.
+
+2. Concurrency — Double-Fire Race Window
+Two workers detect same anomaly, both pass "no open incident" check, both insert incident.
+Risk: duplicate incidents despite idempotent jobs.
+Fix — partial unique index on (entity_kind, entity_id, heuristic_type) WHERE status IN ('open', 'triaged', 'investigating') + INSERT ... ON CONFLICT DO NOTHING.
+
+3. Heuristic Safety — False Positive Containment
+You defined purity. Good. But you didn't define how aggressive heuristics are allowed to be.
+Risk: early heuristics are noisy, system floods incidents, trust collapses quickly.
+Fix — add a global guardrail: A heuristic MUST NOT emit incidents if baseline sample size < MIN_SAMPLE_THRESHOLD or confidence score < MIN_CONFIDENCE.
+Initial defaults: MIN_SAMPLE_THRESHOLD = 30, MIN_CONFIDENCE = >= 0.7 recommended.
+Invariant: Rate limiting — A single heuristic MUST NOT generate more than N incidents per entity per hour (default N=1).
+
+4. Sweep Coverage — Silent Blind Spot Risk
+You mention sweeps, but not coverage guarantees. If sweeps silently degrade, some entities never checked, monitoring becomes partial without visibility.
+Fix — add: Every active entity MUST be evaluated at least once per SWEEP_WINDOW (e.g. 24h). System MUST track: last_evaluated_at per entity. Violation emits: system_monitor.coverage_gap event.
+
+5. Baseline Drift — Over-Correction Risk
+You added invalidation. Good. But baselines can shift too fast if recalculated aggressively — anomalies get "absorbed" into baseline, system stops detecting real issues.
+Fix — Baseline updates MUST be smoothed: rolling window minimum size enforced, sudden shifts (>X%) require gradual incorporation (e.g. EMA or capped delta).
+Invariant: Baseline MUST NOT change more than MAX_DELTA per update cycle.
+
+6. Investigate-Fix — Determinism Gap
+You added versioning in prompt body. Good. Still missing: same incident could generate slightly different prompts over time if context changes.
+Risk: inconsistent debugging, hard to reproduce results.
+Fix — Invariant: Investigate prompt determinism. Given the same incident_id + underlying logs snapshot + protocol version, the generated investigate_prompt MUST be deterministic. And: snapshot log references (IDs or time window), not live queries.
+
+7. Event Ordering — Subtle but Important
+You added registry. Good. Missing: event ordering across async flows is not guaranteed.
+Risk: timeline reconstruction breaks, debugging becomes unreliable.
+Fix — Invariant: Event ordering. Events MUST include occurred_at (event time) + recorded_at (write time). Consumers MUST NOT assume strict ordering by insertion.
+
+8. Retry Semantics — Clarify One Thing
+You reference retries, but not classification.
+Add: Retry classification: transient → automatic retry with backoff, permanent → emit terminal failure event no retry, unknown → bounded retry (max N attempts). No infinite retries allowed.
+
+9. One Small Naming Fix (Worth Doing)
+Even if rejected earlier, this one is low effort, high clarity:
+Lock: incident_ingest (function/process), incident (entity)
+Avoid: mixing "ingestor", "ingest", "pipeline"
+
+Final Verdict: Production-safe with these additions.
+```
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| 1. Incident lifecycle states `open → triaged → investigating → resolved \| ignored \| superseded` + uniqueness on `(entity_kind, entity_id, heuristic_type)` | technical | reject | auto (reject) | n/a | False premise. The Phase 0 incident state machine ALREADY exists with `open \| investigating \| remediating \| resolved \| suppressed \| escalated` (`server/db/schema/systemIncidents.ts:13`). Phase 0 §5.6 ALREADY enforces a partial unique index on `fingerprint` WHERE status IN active states, with `ON CONFLICT (fingerprint) DO UPDATE SET occurrence_count = occurrence_count + 1` semantics. Phase 0 §4.1 ALREADY commits to "Once resolved, a new occurrence will open a fresh incident row" — the exact "no re-open, new id on recurrence" semantic ChatGPT proposes. ChatGPT's `(entity_kind, entity_id, heuristic_type)` uniqueness would FIGHT the existing fingerprint-based design — the spec deliberately treats fingerprint (not heuristic_type) as the canonical identity per §4.8, and per §9.3 multiple heuristics firing on the same candidate produce ONE incident with multiple fires (clustering), not one per heuristic. Adopting ChatGPT's schema would break Phase 0's clustering. The proposed `triaged` state has no operational meaning — Phase 0's `investigating` covers it. `ignored` maps to existing `suppressed`. `superseded` is the existing "resolved + new row on recurrence" pattern. Round 1's already-covered rejection rationale stands. |
+| 2. Cross-job race — partial unique index + INSERT...ON CONFLICT DO NOTHING | technical | reject | auto (reject) | n/a | Already implemented. Phase 0 §5.6 (`phase-0-spec.md:707-720`) shows the exact INSERT...ON CONFLICT...DO UPDATE pattern with the partial unique index on `fingerprint` WHERE status IN active states. Two workers detecting the same anomaly produce the same fingerprint (per §4.8 deterministic identity rule); both INSERTs collide on the partial unique index; ON CONFLICT DO UPDATE bumps `occurrence_count` instead of writing a duplicate. ChatGPT's proposed key `(entity_kind, entity_id, heuristic_type)` is **incorrect** (see finding 1) and would break clustering. The existing fingerprint-based mechanism completes the race-protection picture. The recommended ON CONFLICT DO NOTHING (vs DO UPDATE) is also a regression — Phase 0's DO UPDATE is what enables the `occurrence_count` bump that operators rely on for "this fingerprint is recurring" signal. |
+| 3. Heuristic firing constraint — MIN_SAMPLE_THRESHOLD, MIN_CONFIDENCE, per-heuristic per-entity per-hour rate limit | technical | partial-apply (contract + per-entity fire-rate cap as opt-in heuristic field; reject the specific value changes) | auto (mixed) | medium | The two threshold controls already exist and are named in the spec — `BaselineRequirement.minSampleCount` (default 10, §6.2/§7.4), `SYSTEM_MONITOR_MIN_CONFIDENCE` (default 0.5, §9.10) — but the **invariant statement** ("a heuristic MUST NOT emit incident-eligible fires when X / Y / Z") is implicit, not normative. Promoting to a constraint contract in §6.3 makes it a code-review block. The **per-entity fire-rate cap** is a genuine new control — fingerprint-based incident dedup (Phase 0 partial unique index) collapses INCIDENTS, but a heuristic firing 100×/hour on the same entity still produces 100 audit rows and 100 confidence calls — opt-in `firesPerEntityPerHour?` on `Heuristic` is the right surface. Reject the proposed default value bumps (sample 10→30, confidence 0.5→0.7) — those are tuning preferences, not contract additions, and §6.5 PR-based tuning is the correct mechanism per the spec's existing decision tree. Apply: contract paragraph in §6.3 + new optional field on `Heuristic` interface §6.2 + opt-in cap enforcement at orchestrator. |
+| 4. Sweep coverage — `last_evaluated_at` per entity + `coverage_gap` event | technical | partial-apply (new `sweep-coverage-degraded` synthetic check + sweep coverage invariant in §12.5; reject per-entity column) | auto (mixed) | medium | The sweep coverage rate is ALREADY named as a derived health signal in §12.5 (Round 1 v1.1), but it's an observability signal, not an active alarm. Promoting it to a synthetic check that fires an incident when coverage drops below threshold makes the rate **operationally surfaced** rather than dashboard-only — operators see a fired incident in the existing queue, no new dashboard required. Reject `last_evaluated_at` per entity — entities not in the sweep window are by definition not anomalous (§9.3 uses 15-min window of activity); adding a per-entity column would be a third source of truth (§4.10.7) for state already encoded by the window definition. The `coverage_gap` event premise is right; the `last_evaluated_at` column is wrong. Apply: new synthetic check `sweep-coverage-degraded` + two new env vars + an invariant paragraph in §12.5. |
+| 5. Baseline smoothing — EMA / capped delta / MAX_DELTA per update cycle | technical | reject | auto (reject) | n/a | Already covered by the existing aggregate model. §7.3 describes a 7-day rolling-window aggregate computed via percentiles (p50/p95/p99) — a single anomalous run is 1/N where N is thousands of observations, so single-event noise is already smoothed by construction. EMA / capped-delta is the right pattern for streaming-update models that don't store the underlying observations; the spec's percentile-aggregate model recomputes from raw rows on every refresh tick (§4.8 idempotency mechanism: "Replay-safe deterministic recompute"). The "absorbing anomalies" worry would apply if the baseline updated incrementally per-observation; it does not. ChatGPT's identity-drift concern (entity changed, baseline becomes stale) is already addressed by §7.6 (Round 1 v1.1) — reset on prompt_hash / model / version change. Drift-over-time history is already deferred to Phase 3 (§7.2). Adding EMA / MAX_DELTA on top would fight the existing rolling-window aggregate (percentiles don't have a delta the way EMA does). |
+| 6. Investigate prompt determinism — same incident + log snapshot + protocol → same prompt | technical | reject | auto (reject) | n/a | Wrong frame for an LLM-generated prompt. LLM output is non-deterministic by construction (sampling temperature, stochastic decoding); forcing determinism would require either a templated prompt (defeats the purpose of an LLM) or caching the prompt text (which the spec already does via `system_incidents.investigate_prompt`, §4.5). The actual operationalised concern — "stable references in the prompt body so re-reading the prompt is reproducible" — is already addressed in §9.7: "Cite evidence. Every claim in your diagnosis must be backed by a specific read — a row id, a file:line reference, a baseline reading, a heuristic fire id. Never fabricate a file path or a line number." Snapshot log references via stable IDs (run id, fire id, baseline reading) is exactly what §9.7 requires. The audit trail of historical prompts lives in the `system_incident_events` log (§9.8 — "subsequent triages overwrite the prior diagnosis and prompt; the audit trail is the system_incident_events log"). Already covered — no spec change. |
+| 7. Event ordering — `occurred_at` + `recorded_at`, no strict insertion order | technical | partial-apply (clarifying rule in §4.10.8 + optional `metadata.occurred_at` per §12.1 carve-out; reject column-on-every-event) | auto (mixed) | low | §4.9.9 already names the ordering rule ("Ordered by `created_at` and surrogate `id` (uuid v7)"), and §4.10.8 already requires server-only timestamps. The genuine gap ChatGPT names: events written via outbox / async write may have a meaningful gap between event time and row write time. The synchronous-write majority (every event in §12.1 currently written inside its source tx — §9.2 outbox tx, §9.8 write_diagnosis) does not need a separate field — `created_at` IS the event time. The async-emitted minority (`agent_diagnosis_added`, `prompt_generated` if deferred) MAY carry `metadata.occurred_at`. Apply: clarifying rule in §4.10.8 + optional-metadata carve-out in §12.1. Reject column-on-every-event — would duplicate `created_at` for the synchronous majority (§4.10.7 second source of truth). |
+| 8. Retry classification — transient / permanent / unknown | technical | reject | auto (reject) | n/a | Already covered by §12.4 (retry defaults table) + §4.7 (per-component failure mode tables) + §4.10.4 (Failure Mode × Idempotency). pg-boss does not classify retries — it retries 3x then DLQ, where the `dlq-not-drained` synthetic check (§8.2) is the catch-all. The "permanent failure → emit terminal event, no retry" pattern IS already in the spec via `agent_triage_failed` events with `reason='prompt_validation' / 'agent_run_failed' / 'timeout' / 'self_stuck'` (§9.8 — "After 2 failures: agent_triage_failed event with reason=prompt_validation"; §9.11 — same for self_stuck). The "bounded retry max N" is the existing pg-boss-3 + agent-loop-2 model. Adding a generic transient/permanent classifier on top would duplicate the existing per-failure-type handling without adding clarity. |
+| 9. Naming — lock `incident_ingest` (function), `incident` (entity), avoid `ingestor` / `ingest` / `pipeline` | technical | reject | auto (reject) | n/a | Same false-positive as Round 1 finding 8b. The spec consistently uses `incidentIngestor` (the service module name, e.g. lines 2281, 2282, 2373, 2479, file inventory), `incident` (the entity), and `recordIncident` (the public mutation). `incident_ingest` does NOT appear anywhere in the spec. Adopting ChatGPT's proposal would create a new naming variant where none exists. Round 1 rejection rationale stands — the spec is internally consistent; ChatGPT's recommendation introduces drift rather than removing it. |
+
+(Round 2: 9 distinct findings — 6 auto-reject as already-covered or wrong frame, 3 partial-apply [findings 3, 4, 7]. Zero user-facing. Zero `[missing-doc]` escalations. Zero defers.)
+
+### Applied (auto-applied technical findings)
+
+- [auto] Added Heuristic firing constraint contract (normative) in §6.3 — three-row table covering sample threshold (existing `minSampleCount`, default 10), confidence threshold (existing `SYSTEM_MONITOR_MIN_CONFIDENCE`, default 0.5), and new opt-in per-entity fire-rate cap (`firesPerEntityPerHour?`); explanatory paragraphs on why the cap is opt-in and why no global "max N incidents per entity per hour" rule (would conflict with Phase 0 fingerprint-based dedup) — finding 3 (apply portion). Reject portion (specific default-value changes 10→30, 0.5→0.7) explained inline as "starting values, not invariants" with §6.5 PR-based tuning as the correct mechanism.
+- [auto] Added optional `firesPerEntityPerHour?: number` field to `Heuristic` interface in §6.2 with inline comment describing orchestrator-side enforcement and `metadata.suppression_id = 'rate_capped'` audit row pattern — finding 3 (apply portion, interface change).
+- [auto] Added new synthetic check `sweep-coverage-degraded` to §8.2 day-one set — `high` severity, reads `sweep_completed` event series + active-entity row count, fires when rolling coverage rate drops below threshold for `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` (default 6). No new data primitive — uses §12.5's existing health signal as the source — finding 4 (apply portion).
+- [auto] Added two env vars `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` (default 6) + `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95) to §8.4 (per-section list) and §12.2 (consolidated list) — finding 4 (apply portion).
+- [auto] Added Sweep coverage invariant (normative) to §12.5 — promotes the §12.5 sweep coverage rate from observability signal to active health invariant via `sweep-coverage-degraded`; explicitly rejects per-entity `last_evaluated_at` column with §4.10.7 third-source-of-truth rationale — finding 4 (apply portion). Reject portion (per-entity column) explained inline.
+- [auto] Added Event-time vs write-time clarification (normative) to §4.10.8 — `created_at` = `recorded_at` (write time); `metadata.occurred_at` MAY be present on async-emitted events when the gap is meaningful (`agent_diagnosis_added`, `prompt_generated`); consumers prefer `metadata.occurred_at` when present and fall back to `created_at`; explicit "no new column on every event row" rationale citing §4.10.7 — finding 7 (apply portion).
+- [auto] Added optional `metadata.occurred_at` rule to §12.1 — names the carve-out events (`agent_diagnosis_added`, `prompt_generated`, future async-emitted) and clarifies that the synchronous-write majority does not need it — finding 7 (apply portion).
+- [auto] Updated Spec Status to v1.2 (Round 6 ChatGPT pass); recorded total findings (47: 31 applied / 14 rejected / 0 deferred / 5 partial-applies) and the latest review meta.
+
+### Rejected (with rationale logged in the table)
+
+- Finding 1 (incident lifecycle states + entity-heuristic uniqueness) — Phase 0 §5.6 + `systemIncidents.ts:13` already implement the full state machine + fingerprint-based partial unique index; ChatGPT's proposal would break clustering and contradict the canonical identity rule (§4.8).
+- Finding 2 (race protection via partial unique index + ON CONFLICT) — Phase 0 §5.6 already implements this on `fingerprint` (correct identity), with DO UPDATE (preserves `occurrence_count` bump signal); ChatGPT's DO NOTHING would be a regression.
+- Finding 3 reject portion (default-value bumps) — sample/confidence default changes are tuning, not contract; §6.5 PR-based tuning is the mechanism.
+- Finding 4 reject portion (per-entity `last_evaluated_at` column) — third source of truth (§4.10.7) for state already encoded by the sweep window definition.
+- Finding 5 (baseline smoothing — EMA / MAX_DELTA) — wrong frame for the percentile-aggregate model; existing 7-day rolling window already smooths; identity-drift covered by §7.6.
+- Finding 6 (prompt determinism) — wrong frame for LLM output; the underlying concern (stable references) is already in §9.7.
+- Finding 7 reject portion (column-on-every-event) — would duplicate `created_at` for the synchronous-write majority.
+- Finding 8 (retry classification) — already covered by §12.4 + §4.7 + §4.10.4 + per-failure-type events (`agent_triage_failed.reason`).
+- Finding 9 (naming) — false positive; spec uses `incidentIngestor` consistently, `incident_ingest` does not appear.
+
+### Integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Cross-references introduced this round:
+- §6.3 firing-constraint contract — references `BaselineReader` (§7.5, present), `requiresBaseline` (§6.2, present), `system_monitor_heuristic_fires` (§4.5, present), `phase-0-spec.md §5.6` (external, present), §4.5 / §4.10.7 / §6.5 / §9.2 / §9.3 / §9.10 (all present).
+- §6.2 new `firesPerEntityPerHour?` field — additive, optional, does not break existing heuristics.
+- §8.2 new `sweep-coverage-degraded` synthetic check — references `sweep_completed` event (§12.1, present), §12.5 health signal (present), the new env vars (added below).
+- §8.4 + §12.2 new env vars `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` + `SYSTEM_MONITOR_COVERAGE_THRESHOLD` — additive.
+- §12.5 sweep coverage invariant — references §8.2 new check (added), §12.1 `sweep_completed` (present), §4.10.7 (present), §9.3 (present).
+- §4.10.8 event-time vs write-time rule — references §4.10.7 (present), §4.9.9 (present), §9.2 outbox (present), §9.8 (present).
+- §12.1 optional `metadata.occurred_at` rule — references §4.10.8 (present, just extended).
+
+Post-integrity sanity (4c): no integrity-check applied any mechanical fix this round (no broken refs found by the pass), so 4c is a no-op. Re-scanned heading list — no new top-level or sub-headings added; existing structure preserved. ToC unchanged. Spec Status block correctly version-bumped from v1.1 to v1.2 with the Round 6 (2026-04-27) line and the 47-finding total. No empty sections produced. Pass.
+

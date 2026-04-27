@@ -823,6 +823,16 @@ The ten subsections below cover: (1-4) the four primary axis interactions, (5-6)
 
 **Why the server-only rule.** Client clocks drift; phones lie about timezone; multi-process deployments under load see different OS clocks. Treating the server (with NTP-synced clocks) as the single time source is the cheapest correctness guarantee. This is consistent with the inherited Phase 0/0.5 convention; restating here so new paths in this spec do not accidentally accept client-supplied timestamps.
 
+**Event-time vs write-time (occurred_at vs recorded_at).** Most events introduced by this spec are written **synchronously inside the same transaction** as the action that produced them (per §9.2 outbox pattern; per §9.8 `write_diagnosis` in-line with the agent run that produced the diagnosis). For these, `created_at` (= write time) IS the event time — no distinction is needed. Some events have a meaningful gap: an agent finishes its diagnosis at moment T_diagnose; the `agent_diagnosis_added` row lands at T_write > T_diagnose if the write is queued through an outbox / async channel. For events where the gap is meaningful, the contract:
+
+- The DB row's `created_at` carries the **write time** (the `recorded_at` semantic — when the row landed).
+- The event's `metadata` MAY carry an explicit `occurred_at` field (ISO 8601 UTC, server-derived from the underlying source — e.g. `agent_runs.completed_at` for agent-emitted events) when the gap exceeds tx commit latency.
+- Consumers reconstructing a timeline MUST prefer `metadata.occurred_at` when present and fall back to `created_at` otherwise.
+- Consumers MUST NOT assume strict ordering by row `id` for cross-process / async-emitted events — `id` is uuid v7 (per §4.9.9 ordering rules) which IS time-ordered for synchronous writes but does not carry the `occurred_at` semantics for async-emitted events.
+- Synchronous events (the majority — §9.2 outbox tx, §9.8 write_diagnosis) DO NOT need `metadata.occurred_at`; `created_at` is the authoritative event time and the existing ordering rule (§4.9.9 — by `created_at` + surrogate `id`) holds.
+
+**No new column on every event row.** Adding an `occurred_at` column to `system_incident_events` for every row would duplicate `created_at` in the synchronous-write majority case (per §4.10.7 — second source of truth for state already encoded). The metadata-field carve-out is the minimal addition: only async-emitted events with a meaningful gap carry the field; everything else continues to use `created_at`.
+
 **4.10.9 Delivery vs outcome model.** The execution model in this spec is **at-least-once delivery, effectively-exactly-once outcome via idempotency**. Naming both halves separately because conflating them is the failure pattern this rule prevents.
 
 - **At-least-once delivery.** pg-boss retries failed jobs (§12.4 — default 3 retries), `recordIncident` is called by multiple sources for the same logical event (sync mode + async worker + sweep cluster), webhooks fan out at-least-once (§4.9.7). The system never assumes "this will run exactly once" at the delivery layer.
@@ -1092,6 +1102,13 @@ interface Heuristic {
   // Suppression rules. Evaluated AFTER predicate fires. Any true → fire is dropped, audit row written.
   suppressions: SuppressionRule[];
 
+  // Optional per-entity fire-rate cap. When set, the orchestrator caps how many fires
+  // this heuristic produces against the same (entityKind, entityId) per rolling hour.
+  // Excess fires write audit rows with metadata.suppression_id = 'rate_capped' and
+  // produced_incident_id = null. Default unset = no cap (most heuristics rely on the
+  // fingerprint partial unique index for incident-volume containment, see §6.3).
+  firesPerEntityPerHour?: number;
+
   // Hot path. Returns one of:
   //   - { fired: false }
   //   - { fired: true, evidence: Evidence, confidence: number }
@@ -1157,6 +1174,20 @@ The agent only triages when at least one heuristic fires with per-fire confidenc
 - "Suppress if this is the first run of the day and the system was idle for >12h" — cold-start anomalies.
 
 Suppressions are first-class: every suppressed fire writes a `system_monitor_heuristic_fires` row with `produced_incident_id = null` and `metadata.suppression_id` set, so we can see "this heuristic would have fired 50× this week, but 47 were suppressed by rule X" — that's signal that either the rule is right (the heuristic is too eager) or the rule is wrong (we're hiding a real pattern).
+
+**Heuristic firing constraint (normative).** A heuristic MUST NOT emit an incident-eligible fire when any of the following conditions hold. These are the false-positive containment rails — they exist to prevent the early-stage noise that erodes operator trust before the calibration loop (§6.5) has data to tune from.
+
+| Constraint | Rule | Enforcement | Default value |
+|---|---|---|---|
+| Sample threshold | If a `requiresBaseline` entry's `BaselineReader.get(...)` returns a row with `sample_count < minSampleCount`, the heuristic returns `{ fired: false, reason: 'insufficient_data' }`. | §6.2 interface — gating is built into the registry invocation path (§6.4). | `minSampleCount = 10` per heuristic; raise in registry config when an early heuristic shows noise. |
+| Confidence threshold | The orchestrator (sweep handler §9.3, incident-driven handler §9.2) only acts on a fire when `HeuristicResult.confidence >= SYSTEM_MONITOR_MIN_CONFIDENCE`. Lower-confidence fires still write a `system_monitor_heuristic_fires` audit row but do NOT escalate to triage. | Orchestrator-side check (sweep handler — line `result.confidence >= MIN_CONFIDENCE`). Heuristics MAY return `confidence < threshold`; the orchestrator is the gate. | `SYSTEM_MONITOR_MIN_CONFIDENCE = 0.5` (env-configurable per §9.10). Per-heuristic `Heuristic.confidence` registry default is 0.7+ recommended for new heuristics; tuned via §6.5 PR workflow. |
+| Per-entity fire-rate cap | Optional `firesPerEntityPerHour?: number` field on `Heuristic`. When set, the orchestrator caps how many fires this heuristic produces against the same `(entityKind, entityId)` per rolling hour. Excess fires write `system_monitor_heuristic_fires` rows with `metadata.suppression_id = 'rate_capped'` and `produced_incident_id = null`. | Orchestrator-side check against the `system_monitor_heuristic_fires` audit table (count rows where `heuristic_id`, `entity_kind`, `entity_id` match within the last hour). | Unset by default — most heuristics are bounded by their own predicates and the fingerprint partial unique index already collapses recurring incidents into one open row with bumped `occurrence_count`. Set explicitly on heuristics flagged as noisy during calibration (§6.5). Recommended starting value when set: `1` (one fire per entity per hour). |
+
+**Defaults are starting values, not invariants.** The `minSampleCount = 10`, `SYSTEM_MONITOR_MIN_CONFIDENCE = 0.5`, and `firesPerEntityPerHour` default-unset values are the **initial calibration**. The §6.5 PR-based tuning workflow is the mechanism for adjusting them after observed noise. The constraint contract above is what is invariant; the specific numbers are not.
+
+**Why the per-entity fire-rate cap is opt-in, not global.** Most heuristics fire on a stable fingerprint that the Phase 0 partial unique index on `system_incidents.fingerprint` already collapses (§4.5 / `phase-0-spec.md §5.6` ON CONFLICT semantics) — a noisy heuristic firing 100× per hour against the same entity produces ONE open incident with `occurrence_count = 100`, not 100 incidents. The cap is therefore not needed for incident-volume containment; it is needed for AUDIT-volume containment when a heuristic's fires are themselves the cost lever (e.g. each fire writes a heavy `system_monitor_heuristic_fires` row with detailed evidence). Opt-in keeps the registry simple by default and allows narrow targeting.
+
+**Why no global "max N incidents per entity per hour" rule.** Such a rule would conflict with the existing fingerprint-based dedupe — the partial unique index already enforces "one open incident per fingerprint." Adding a separate per-entity rule would either duplicate the existing enforcement or introduce a second dedup model that can disagree with the first (per §4.10.7 — second source of truth). The cap above operates at the FIRE layer, not the incident layer, and is therefore additive without conflict.
 
 ### 6.4 Registration and invocation
 
@@ -1417,6 +1448,7 @@ type SyntheticResult =
 | `heartbeat-self` | The synthetic-check job records its own heartbeat to a known KV. If the heartbeat hasn't been updated in N minutes when read, fire on next tick. | `critical` | Two-tick design: tick 1 writes `last_heartbeat = NOW()` to `system_kv`. Tick 2 reads it; if older than 3× tick interval, fire. (Detects "the synthetic-check job is itself broken" — closes the meta-loop.) |
 | `connector-error-rate-elevated` | A connector has produced > N errors in the last hour without a successful poll between them. | `high` | For each connector: if `connector_polls WHERE error IS NOT NULL AND created_at > NOW() - 1h` count ≥ 3 AND no successful poll in same window, fire. |
 | `agent-run-success-rate-low` | A system-managed agent's success rate over the last hour is below baseline minus 30%. | `medium` | Read baseline `success_rate` for the agent; if last-hour rate is < `baseline.p50 - 0.30`, fire. Requires baseline (`requiresBaseline`); skips with `insufficient_data` if no baseline. |
+| `sweep-coverage-degraded` | The sweep job's coverage rate over the last N ticks dropped below threshold — the monitor is silently leaving entities unevaluated. | `high` | Read the `sweep_completed` event series for the last `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` ticks (default 6 = 30 min). Compute the §12.5 sweep coverage rate (`metadata.candidates_evaluated / source-table active-entity count for the window`) per tick. If the rolling average is below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95), fire with the offending tick stats in `metadata`. The check uses the same source-of-truth as the §12.5 health signal — no new data primitive. |
 
 Phase 2.5 may add more synthetic checks; this is the day-one set.
 
@@ -1449,6 +1481,8 @@ Synthetic incidents are **first-class** in the existing UI — they appear on th
 | `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | `dlq-not-drained` threshold. |
 | `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | `heartbeat-self` tolerance in ticks. |
 | `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | Per-agent inactivity thresholds for `no-agent-runs-in-window`. JSON map of `{agentSlug: minutes}`. |
+| `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` | `6` | Rolling-window length (in sweep ticks) for `sweep-coverage-degraded`. 6 ticks × 5-min sweep = 30 min lookback. |
+| `SYSTEM_MONITOR_COVERAGE_THRESHOLD` | `0.95` | Coverage-rate floor for `sweep-coverage-degraded`. Drop below this for the lookback window → fire. |
 
 Per-check enable/disable is via heuristic-style suppression, not env vars — keeps the env surface minimal.
 
@@ -2178,6 +2212,8 @@ All event types append to `system_incident_events`. The Phase 0/0.5 enum is exte
 
 **Naming convention.** All event types are kebab-case-with-underscores in DB rows (consistent with Phase 0/0.5 — `incident_opened`, `status_changed`, `escalation`, etc.). Structured logger event names are the same string, lowercased.
 
+**Optional `metadata.occurred_at` field.** Per the §4.10.8 event-time vs write-time rule: events whose underlying action time differs meaningfully from row write time MAY include `occurred_at` (ISO 8601 UTC) in `metadata`. The synchronous-write majority (every event in this table written inside its source transaction) does not need it — `created_at` is authoritative. The async-emitted carve-out applies to: `agent_diagnosis_added` (metadata MAY carry `occurred_at` = `agent_runs.completed_at` if the diagnosis row write was deferred), `prompt_generated` (same reasoning), and any future event added through an outbox / queue with non-trivial commit latency. Consumers reconstructing a timeline prefer `metadata.occurred_at` when present and fall back to `created_at` otherwise.
+
 **Event registry invariant.** The §12.1 table above IS the registry. Every event type emitted by code introduced in this spec MUST appear in this table — there is no inline event-type declaration scattered across handlers. New event types added by future PRs MUST extend this table in the same commit; Phase 0/0.5 inherited types live in their respective specs and are referenced (not duplicated) here. Implementation: the event-type literal is defined once as a TypeScript union (`shared/types/systemIncidentEvent.ts` or equivalent — final path resolved by architect) and every emitter imports the union. A CI gate (Slice C) greps for raw string literals matching event-type-shaped patterns (`event_type:\s*['"]`) outside the union definition file and fails on hit. Inline event-type strings without registry entries are a code-review block.
 
 **Event consumers.** The triage drawer (§10) renders the subset relevant to operator-facing context: `agent_diagnosis_added`, `agent_triage_skipped`, `agent_triage_failed`, `agent_auto_escalated`, `prompt_generated`, `investigate_prompt_outcome`. The other event types are audit-only — visible via direct SQL or via a future audit log surface.
@@ -2197,6 +2233,8 @@ Consolidated. Defaults are production-safe — running with all defaults yields 
 | `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | §8.4 | `dlq-not-drained` threshold. |
 | `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | §8.4 | `heartbeat-self` tolerance. |
 | `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | §8.4 | Per-agent inactivity thresholds. |
+| `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` | `6` | §8.4 | Rolling-window length for `sweep-coverage-degraded`. |
+| `SYSTEM_MONITOR_COVERAGE_THRESHOLD` | `0.95` | §8.4 | Coverage-rate floor for `sweep-coverage-degraded`. |
 | `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` | `15` | §7.3 | Baseline refresh tick. |
 | `SYSTEM_MONITOR_BASELINE_WINDOW_DAYS` | `7` | §7.3 | Rolling baseline window. |
 | `SYSTEM_MONITOR_BASELINE_REFRESH_ENABLED` | `true` | §7.3 | Kill switch for baseline refresh. |
@@ -2340,6 +2378,8 @@ The monitor produces incidents about the rest of the system; without an equivale
 | Sweep cap-hit rate | `count(sweep_capped) / count(sweep_completed)` | `system_incident_events` event_type filters |
 
 **Why no new primitive.** Each signal above is computable from event rows or DB rows already specified. Adding a `system_monitor_health_metrics` table or a metrics-service push would be a third source of truth (per §4.10.7 — work-product / events / idempotency / logs already cover this) and would fight the existing audit surface. Phase 3 may build the dashboard that visualises these queries; Phase 2 ships the data primitives the dashboard reads.
+
+**Sweep coverage invariant (normative).** The sweep coverage rate above is not just a dashboard signal — it is an active health invariant. The `sweep-coverage-degraded` synthetic check (§8.2) reads the `sweep_completed` event series and fires an incident when the rolling rate drops below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95). Operators MUST see a fired incident, not a silently-degraded sweep. The invariant: if the sweep is not evaluating (≥ threshold)% of the active entities in its window, the system MUST emit a `source='synthetic'` incident with `check_id='sweep-coverage-degraded'` so the operator's existing incident queue surfaces the gap. No per-entity `last_evaluated_at` column is added — the sweep window's natural definition (entities active in the last 15 min, per §9.3) plus the per-tick `candidates_evaluated` count plus the active-entity row count is sufficient signal; adding a per-entity column would be a third source of truth (per §4.10.7) for state already encoded by the window definition.
 
 **Operator surfacing.** Until Phase 3 builds the dashboard, these signals are queryable directly. Worth surfacing on day one in the existing system-incidents admin page (§10) is at least the "Auto-triage rate" tile and the "Triage skip rate by reason" tile — both can be inline state on an existing surface (per `docs/frontend-design-principles.md` rule 4: inline state beats dashboards), no new page needed. Final UI scope is an architect call; the spec only names the signals + their sources.
 
@@ -3001,10 +3041,10 @@ A small list, mainly to close the loop on architectural conversations the team h
 
 ## Spec Status
 
-**Status:** Finalised — v1.1 (Execution Ready, post-merge audit alignment + ChatGPT round 5 tightening)
-**Last review:** ChatGPT spec review — 4 rounds (2026-04-26 v1.0) + 1 round (2026-04-27 v1.1, principal usage matrix + enqueue idempotency invariant + baseline drift reset + heuristic boundary contract + protocol version stamping rule + monitor-the-monitor health signals + event registry invariant).
-**Total findings processed:** 30 (v1.0) + 8 (v1.1) = 38 (28 applied, 8 rejected, 0 deferred, 2 partial-applies).
-**Latest round (v1.1) outcome:** Tightened normative invariants without changing observable behaviour. Two findings rejected as already-covered (partial-success contract, naming drift / system-principal duplication false positive). All findings auto-triaged technical; zero user-facing decisions required.
+**Status:** Finalised — v1.2 (Execution Ready, post-merge audit alignment + ChatGPT round 5/6 tightening)
+**Last review:** ChatGPT spec review — 4 rounds (2026-04-26 v1.0) + 1 round (2026-04-27 v1.1, principal usage matrix + enqueue idempotency invariant + baseline drift reset + heuristic boundary contract + protocol version stamping rule + monitor-the-monitor health signals + event registry invariant) + 1 round (2026-04-27 v1.2, heuristic firing-constraint contract + per-entity fire-rate cap + sweep-coverage-degraded synthetic check + sweep coverage invariant + event-time vs write-time clarification).
+**Total findings processed:** 30 (v1.0) + 8 (v1.1) + 9 (v1.2) = 47 (31 applied, 14 rejected, 0 deferred, 5 partial-applies).
+**Latest round (v1.2) outcome:** Tightened false-positive containment + sweep observability invariants without changing observable behaviour. Six findings rejected as already-covered (incident lifecycle states / fingerprint-based dedup race / baseline smoothing / prompt determinism / retry classification / naming drift); three partial-applies (heuristic firing constraint, sweep coverage invariant + new synthetic check, event-time vs write-time clarification). All findings auto-triaged technical; zero user-facing decisions required.
 **Next step:** implementation per §15 rollout plan (Slice A → B → C → D).
 
 ---
