@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const domainCache = new Map<string, { result: DomainSearchResponse; expiresAt: number }>();
+const emailCache = new Map<string, { result: EmailFinderResponse; expiresAt: number }>();
 
 export interface HunterEmail {
   value: string;
@@ -79,6 +80,12 @@ export async function emailFinder(input: { domain: string; firstName: string; la
     return { status: 'not_configured', warning: 'HUNTER_API_KEY not set', data: null };
   }
 
+  const cacheKey = crypto.createHash('sha256').update(`email:${input.domain}:${input.firstName}:${input.lastName}`).digest('hex');
+  const cached = emailCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
   try {
     const url = new URL('https://api.hunter.io/v2/email-finder');
     url.searchParams.set('domain', input.domain);
@@ -95,10 +102,12 @@ export async function emailFinder(input: { domain: string; firstName: string; la
     }
 
     const json = (await response.json()) as { data?: { email?: string; score?: number } };
-    return {
+    const result: EmailFinderResponse = {
       status: 'ok',
       data: { email: json.data?.email ?? '', confidence: json.data?.score ?? 0 },
     };
+    emailCache.set(cacheKey, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+    return result;
   } catch {
     return { status: 'transient_error', warning: 'Hunter.io email-finder request failed', data: null };
   }
