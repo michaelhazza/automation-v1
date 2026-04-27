@@ -11,6 +11,14 @@ const ALLOWED_TYPES = new Set<SystemIncidentEventType>([
   'diagnosis',
   'note',
   'escalation_blocked',
+  'agent_diagnosis_added',
+  'agent_triage_skipped',
+  'agent_triage_failed',
+  'heuristic_fired',
+  'heuristic_suppressed',
+  'sweep_completed',
+  'sweep_capped',
+  'prompt_generated',
 ]);
 
 export async function executeWriteEvent(
@@ -64,12 +72,12 @@ export async function executeWriteEvent(
 
 export const WRITE_EVENT_DEFINITION = {
   name: 'write_event',
-  description: "Append a system incident event of an allowed type ('diagnosis', 'note', 'escalation_blocked'). Idempotent on (incidentId, eventType, agentRunId).",
+  description: "Append a system incident event of an agent-allowed type. Idempotent on (incidentId, eventType, agentRunId). Lifecycle transitions (status_change, ack, resolve) are not allowed.",
   input_schema: {
     type: 'object' as const,
     properties: {
       incidentId: { type: 'string', description: 'UUID of the incident to append an event to.' },
-      eventType: { type: 'string', description: "Event type to write. Allowed: 'diagnosis', 'note', 'escalation_blocked'.", enum: ['diagnosis', 'note', 'escalation_blocked'] },
+      eventType: { type: 'string', description: "Event type to write. See allowed list in write_event handler.", enum: ['diagnosis', 'note', 'escalation_blocked', 'agent_diagnosis_added', 'agent_triage_skipped', 'agent_triage_failed', 'heuristic_fired', 'heuristic_suppressed', 'sweep_completed', 'sweep_capped', 'prompt_generated'] },
       agentRunId: { type: 'string', description: 'UUID of the agent run writing this event (used for idempotency).' },
       payload: { type: 'object', description: 'Optional structured payload for the event.' },
     },

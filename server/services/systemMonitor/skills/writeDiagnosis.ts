@@ -1,11 +1,14 @@
 // writeDiagnosis — writes agent_diagnosis + investigate_prompt on a locked-to-incident row.
 // Idempotent on (incidentId, agentRunId): if agent_diagnosis_run_id already equals agentRunId,
 // the write is a no-op and success is returned.
-// NOTE: The prompt-validation retry-up-to-2 loop is added in Slice C Commit 3.
+// When investigatePrompt is provided, validates it per spec §9.8. Returns
+// { success: false, error: 'PROMPT_VALIDATION_FAILED', retryable: true } on rejection —
+// the agent's run loop retries up to 2× before the triage handler emits agent_triage_failed.
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
 import { systemIncidents } from '../../../db/schema/systemIncidents.js';
 import { systemIncidentEvents } from '../../../db/schema/systemIncidentEvents.js';
+import { validateInvestigatePrompt } from '../triage/promptValidation.js';
 import type { SkillExecutionContext } from '../../skillExecutor.js';
 
 export async function executeWriteDiagnosis(
@@ -20,6 +23,20 @@ export async function executeWriteDiagnosis(
   if (!incidentId) return { success: false, error: 'incidentId is required' };
   if (!agentRunId) return { success: false, error: 'agentRunId is required' };
   if (!diagnosis) return { success: false, error: 'diagnosis is required' };
+
+  // Validate investigate_prompt before touching the DB — return a retryable error
+  // so the agent's run loop can correct and retry (max 2 retries per spec §9.8).
+  if (investigatePrompt !== undefined) {
+    const validation = validateInvestigatePrompt(investigatePrompt);
+    if (!validation.valid) {
+      return {
+        success: false,
+        error: 'PROMPT_VALIDATION_FAILED',
+        retryable: true,
+        details: validation.errors,
+      };
+    }
+  }
 
   try {
     await db.transaction(async (tx) => {
@@ -76,7 +93,7 @@ export const WRITE_DIAGNOSIS_DEFINITION = {
       incidentId: { type: 'string', description: 'UUID of the system incident to annotate.' },
       agentRunId: { type: 'string', description: 'UUID of the agent run producing this diagnosis.' },
       diagnosis: { type: 'object', description: 'Structured diagnosis object written to agent_diagnosis column.' },
-      investigatePrompt: { type: 'string', description: 'Optional investigate prompt text (200–6,000 chars). Validated in full in Slice C Commit 3.' },
+      investigatePrompt: { type: 'string', description: 'Optional investigate prompt text (200–6,000 chars, all §5.2 sections required). Returns PROMPT_VALIDATION_FAILED if invalid — retry with corrected text.' },
     },
     required: ['incidentId', 'agentRunId', 'diagnosis'],
   },
