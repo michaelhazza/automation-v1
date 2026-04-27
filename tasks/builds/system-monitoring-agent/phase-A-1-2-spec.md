@@ -53,7 +53,7 @@ This section captures every binding decision made during scoping, in CEO-level p
 | P1 | Is the Phase 0 incident sink live? | Yes — PR #188 merged. `system_incidents`, `system_incident_events`, `system_incident_suppressions` exist. Ingest hooks live in global error handler, asyncHandler, DLQ monitor, agent-run terminal-failed transition, connector polling, skill execution, LLM router. | Phase A builds **on** the existing sink; does not rebuild it. |
 | P2 | Is there a system-managed agent precedent? | Yes — Orchestrator (migration 0157) and Portfolio Health Agent (migration 0068). Both use `isSystemManaged=true` flag. | `system_monitor` follows the same pattern; see §9.1. |
 | P3 | Does pg-boss have a job-handler convention for system-scoped agents? | Yes — Orchestrator triggers agent runs via pg-boss handlers. | `system-monitor-triage` and `system-monitor-sweep` jobs follow the existing handler convention; see §9.2 / §9.3. |
-| P4 | Is there a principal-context primitive that supports `scope='system'`? | **Partial.** Phase 0/0.5 used Option A (request-attached `req.principal` carrying user context). System-scoped agent runs need a synthesised system-principal. `phase-0-spec.md §7.4` flagged this as Option B, deferred. | Phase A §4.3 builds Option B. **Hard prerequisite for Phase 2.** |
+| P4 | Is there a principal-context primitive that supports `type='system'`? | **Partial.** Phase 0/0.5 used Option A (request-attached `req.principal` carrying user context). The existing `PrincipalContext` discriminated union has three variants — `UserPrincipal | ServicePrincipal | DelegatedPrincipal` — discriminated by `type`. System-scoped agent runs need a fourth `SystemPrincipal` variant added to that union. `phase-0-spec.md §7.4` flagged this as Option B, deferred. | Phase A §4.3 builds Option B. **Hard prerequisite for Phase 2.** |
 | P5 | Is there a baselining primitive (rolling p50/p95 per agent / skill / connector)? | **No.** No service computes per-entity rolling stats today. | Phase A §7 builds it. **Hard prerequisite for baseline-relative heuristics.** |
 | P6 | Is Claude Code already integrated with this repo? | Yes — `CLAUDE.md` is the canonical project-instruction file, read by every Claude Code session in this repo. | Investigate-Fix Protocol references go in `CLAUDE.md`; see §5.3. |
 | P7 | Is `docs/` an established home for protocol documents? | Yes — `docs/capabilities.md`, `docs/spec-context.md`, `docs/codebase-audit-framework.md`, `docs/frontend-design-principles.md`. | `docs/investigate-fix-protocol.md` lives alongside; see §5.1. |
@@ -116,7 +116,7 @@ Spec-internal terms with specific meanings. Used throughout the document. Naming
 | **Fingerprint** | A stable, content-derived hash that identifies an incident class. Inherited unchanged from Phase 0/0.5 (§5.2 of `phase-0-spec.md`). Used as the dedup / throttle / rate-limit key. |
 | **Incident** | A row in `system_incidents`. Created by `recordIncident()` either reactively (from error hooks) or by a synthetic check or by a sweep cluster. Has severity, status, source, fingerprint, and (after triage) `agent_diagnosis` + `investigate_prompt`. |
 | **Investigate-Fix Protocol** | The shared markdown contract in `docs/investigate-fix-protocol.md` (§5) that defines (a) how the monitor agent formats `investigate_prompt` text and (b) how Claude Code consumes it. Versioned by git history of the doc. |
-| **System principal** | The synthesised principal context (`scope='system'`, sentinel `userId`, `isSystemPrincipal=true`) used by system-managed agent runs and pg-boss handlers that have no inbound HTTP request. Set via `withSystemPrincipal()` (§4.3). |
+| **System principal** | The synthesised principal context — a new `SystemPrincipal` variant of the existing `PrincipalContext` union (`type='system'`, sentinel `id` UUID, `isSystemPrincipal=true`) — used by system-managed agent runs and pg-boss handlers that have no inbound HTTP request. Set via `withSystemPrincipal()` (§4.3). |
 | **Kill switch** | An env-var-based on/off flag for one layer of the system. The hierarchy is documented in §12.2. Always defaults to `true` (system on); the operator sets `false` to disable. |
 
 ## 1. Summary
@@ -248,7 +248,7 @@ The long-term goal — articulated since the Phase 0 spec — is a system-manage
 
 - GA.1 `recordIncident()` is idempotent on an optional `idempotencyKey` per fingerprint. Two calls with the same key within a 60-second dedupe window do not double-increment `occurrence_count`.
 - GA.2 Per-fingerprint ingestion throttle. `lastSeen[fp] < 1s ago` causes the second call to be silently dropped (counted in a process-local metric, not raised as an error).
-- GA.3 A system-principal context primitive exists. Calling code can synthesise a principal with `scope: 'system'` for use by system-managed agent runs and authenticated server-to-server calls.
+- GA.3 A system-principal context primitive exists. Calling code can synthesise a principal with `type: 'system'` (a new `SystemPrincipal` variant added to the existing `PrincipalContext` union) for use by system-managed agent runs and authenticated server-to-server calls.
 - GA.4 Service-layer `assertSystemAdminContext(ctx)` is wired into every `system_incidents` mutation entry point as defence-in-depth. Failures throw a typed error before the DB write.
 - GA.5 The `investigate_prompt` text column exists on `system_incidents`. Nullable. No length cap. Surfaced via a new GET endpoint shape and the existing list/detail endpoints.
 - GA.6 Baselining primitive: rolling p50/p95/p99/median for runtime and token-count is computed per `(entity_kind, entity_id)` over the last 7 days, refreshed every 15 minutes, exposed as a read API for heuristics.
@@ -298,7 +298,7 @@ These are deliberate omissions, not deferred work:
 - **NG7 No real-time WebSocket push of agent diagnoses.** The existing Phase 0.5 WebSocket fans out incident-open / status-change events. Diagnosis annotations land via the same channel piggybacked on the existing event types — no new WS event type, no new client-side handler.
 - **NG8 No new admin UI page.** All UI changes extend the existing `SystemIncidentsPage`. No new route, no new navigation entry.
 - **NG9 No baseline storage in a new persistent table for tenants.** Baseline storage is global / system-scoped — not partitioned by tenant. Per-tenant baselines are Phase 3.
-- **NG10 No prompt versioning.** The Investigate-Fix Protocol doc is versioned by git history. Generated `investigate_prompt` text does not carry a protocol-version stamp — protocol drift is observable from the git log of the doc, sufficient for the iteration loop.
+- **NG10 No structured protocol-version column on `system_incidents`.** The generated `investigate_prompt` body carries an in-text `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line per §5.2 / §5.5, and the protocol doc itself is versioned by git history. What is deliberately omitted is a separate `system_incidents.investigate_protocol_version` column or any other structured per-row stamp — the prompt body is the work product (per §4.10.7) and is the single source of truth for the version that produced an incident's prompt. Adding a column would create a duplicate source of truth and require a backfill story for pre-bump rows. If Phase 3 needs a structured stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
 
 ### 3.3 Success criteria — observable, measurable
 
@@ -306,7 +306,7 @@ These are deliberate omissions, not deferred work:
 |---|---|---|
 | S1 | Idempotency window functional. | Unit test: two `recordIncident` calls with same `idempotencyKey` within 60s produce one row, one `occurrence_count` increment. |
 | S2 | Per-fp throttle blocks tight loops. | Unit test: 100 calls in 1s with same fingerprint → 1 ingest, 99 throttled (counter incremented). |
-| S3 | System-principal context usable end-to-end. | Integration test: enqueue `system-monitor-triage`, handler runs, `req.principal.scope === 'system'` in agent invocation. |
+| S3 | System-principal context usable end-to-end. | Integration test: enqueue `system-monitor-triage`, handler runs, `req.principal.type === 'system'` in agent invocation. |
 | S4 | `assertSystemAdminContext` blocks unauthorised caller. | Unit test: call any `system_incidents` mutation service method with a non-sysadmin context → typed error before DB write. |
 | S5 | Synthetic checks detect a stalled queue. | Smoke test: pause pg-boss processing for 5 min; verify `system-monitor-synthetic-checks` produces an incident with `source='synthetic'`. |
 | S6 | Synthetic checks tolerate idle baseline. | Smoke test: cold-start staging, run synthetic checks for 1h, no false positives. |
@@ -367,13 +367,16 @@ Phase A is **dead-code-by-design** — none of these primitives are user-visible
 **Option B shape.**
 
 - New module: `server/services/principal/systemPrincipal.ts` (final path resolved by architect).
-- Exports `getSystemPrincipal(): Principal` — returns a singleton with:
-  - `scope: 'system'`
-  - `userId: SYSTEM_PRINCIPAL_USER_ID` (a sentinel UUID seeded via migration into `users` table with `is_system: true`, email `system@platform.local`, no password, no auth, never logs in)
+- Adds a fourth `SystemPrincipal` variant to the existing `PrincipalContext` discriminated union (`UserPrincipal | ServicePrincipal | DelegatedPrincipal`, defined in `server/services/principal/types.ts`). The variant follows the existing convention — discriminated by the `type` field, same shape conventions as the other three variants (`id`, `organisationId`, `subaccountId`, `teamIds`).
+- Exports `getSystemPrincipal(): SystemPrincipal` — returns a singleton with:
+  - `type: 'system'` (the discriminator field used by every variant in the existing union)
+  - `id: SYSTEM_PRINCIPAL_USER_ID` (the sentinel user UUID — see seed details below; mirrors the `id` field name used by every other variant)
   - `subaccountId: null` (system principals are not subaccount-scoped)
-  - `organisationId: SYSTEM_OPERATIONS_ORG_ID` (the `isSystemOrg=true` org seeded in Phase 0/0.5)
-  - `permissions: ['system_monitor.*']` — minimal scope, expanded only by explicit grant
-  - `isSystemPrincipal: true` discriminator
+  - `organisationId: SYSTEM_OPERATIONS_ORG_ID` (the `isSystemOrg=true` org seeded in Phase 0/0.5; see `server/db/schema/organisations.ts` `is_system_org` column)
+  - `teamIds: []` (no team membership; system principal does not participate in team-overlap RLS predicates)
+  - `isSystemPrincipal: true` boolean — narratively useful (cheap truthy check at call sites that don't need to widen `type` first); does not conflict with the `type` discriminator
+
+The seed user row backing `SYSTEM_PRINCIPAL_USER_ID` is created in the `users` table with `role: 'system_admin'` (the existing role enum already includes `'system_admin'`), placed in the system org (`is_system_org=true`), with `email: 'system@platform.local'`, no functional password (random hash, never used), `status: 'active'`, never logs in. There is **no** `is_system` column on `users`; the `role='system_admin'` placement plus `is_system_org=true` org membership is the actual codebase pattern. Permission scoping for the system principal is the existing role-bypass mechanism (`server/lib/permissions.ts`: "system_admin users bypass all permission checks") — there is no per-key permissions array on the principal object, so the spec does not introduce one.
 
 - The principal is **immutable**, **process-singleton**, and **safe to log** (no PII).
 
@@ -382,25 +385,47 @@ Phase A is **dead-code-by-design** — none of these primitives are user-visible
   ```ts
   bossHandler('system-monitor-sweep', async (job) => {
     return withSystemPrincipal(async (ctx) => {
-      // ctx.principal.scope === 'system'
+      // ctx.principal.type === 'system'
       ...
     });
   });
   ```
 
-**RLS interaction.** `phase-0-spec.md §7.4` deferred this. Decision now: **system-principal bypasses RLS for `system_*` tables only.** Three-layer fail-closed (RLS → app guard → service guard) becomes:
+**RLS interaction.** `phase-0-spec.md §7.4` deferred this. Decision now matches the actual codebase posture as of `main`:
 
-| Layer | For tenant tables | For `system_incidents` etc. |
+- **`system_*` tables (`system_incidents`, `system_incident_events`, `system_incident_suppressions` — and the new `system_monitor_baselines` + `system_monitor_heuristic_fires` introduced by this spec) intentionally bypass RLS.** This is the existing posture documented in `server/config/rlsProtectedTables.ts` (the "Explicit RLS-bypass tables" comment block) and in the `system_incidents` schema file header (`BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer`). Sysadmin gating at the route layer (`requireSystemAdmin` middleware) plus the new service-layer guard `assertSystemAdminContext(ctx)` (§4.4) are the only enforcement walls. There is no per-row RLS policy. The new system-monitor tables follow the same posture and are listed in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale, per the post-merge `verify-rls-protected-tables.sh` schema-vs-registry gate (architect-output `audit-remediation-followups §A2`).
+- **Tenant-scoped tables (`agent_runs`, `skill_executions`, `agent_run_messages`, `connector_polls`, `llm_requests`, etc.) keep their existing RLS policies unchanged.** Those policies are generated by `server/services/principal/rlsPredicateSqlBuilderPure.ts` and dispatch on `current_setting('app.current_principal_type', true)` for `'service' | 'user' | 'delegated'`. They do **not** include a `'system'` branch — adding one would mean re-issuing every tenant policy and is out of scope for this spec.
+- **The system monitor's cross-tenant reads against tenant tables therefore go through `withAdminConnectionGuarded({ allowRlsBypass: true, source: '<job_name>', reason: '<one-sentence justification>' }, fn)`** — the post-merge admin-bypass pattern from `audit-remediation-followups §B10-MAINT-RLS` (`server/lib/rlsBoundaryGuard.ts`). The guard records every bypass to stderr (or `audit_events` per opt-in) and is the codebase's single audited route for cross-org reads. Maintenance-job precedents using this pattern: `bundleUtilizationJob`, `measureInterventionOutcomeJob`, `fastPathRecalibrateJob`, `ruleAutoDeprecateJob`.
+
+The three-layer fail-closed (RLS → app guard → service guard) decomposes by table class:
+
+| Layer | Tenant tables (read-only access by system monitor) | `system_*` tables (this spec's writes + reads) |
 |---|---|---|
-| Postgres RLS | enforces tenant scope | denies all rows by default; PERMITs only when `current_setting('app.principal_scope', true) = 'system'` |
-| Drizzle app guard | tenant filter | system filter |
-| Service guard | `requireOrgScoped(ctx)` | `assertSystemAdminContext(ctx)` (§4.4) |
+| Postgres RLS | enforces tenant isolation by `current_principal_type ∈ {service, user, delegated}` | none — table-level RLS is intentionally absent |
+| Cross-org access mechanism | `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason }, fn)` | n/a — sysadmin-gated direct access |
+| Service guard | `requireOrgScoped(ctx)` (existing) | `assertSystemAdminContext(ctx)` (§4.4) |
+| Route guard | route's own auth middleware | `requireSystemAdmin` (existing Phase 0/0.5) |
 
-The session-variable approach (`SET LOCAL app.principal_scope = 'system'` inside `withSystemPrincipal`) is the standard Drizzle + RLS pattern (`architecture.md §Row-Level Security`).
+**`withSystemPrincipal` purpose.** It establishes a uniform `PrincipalContext` shape (the new `SystemPrincipal` variant) at handler entry so every downstream code path — service-layer guards, audit-event writes, structured logs, the existing `withPrincipalContext` wrapper if a tenant-scoped operation needs to be performed — sees a stable, typed principal value. Concretely:
+
+- For `system_*` writes (this spec's primary write surface): `assertSystemAdminContext(ctx)` reads `ctx.principal.type === 'system'` and admits the call.
+- For tenant-table reads done from the same handler: the handler enters `withAdminConnectionGuarded(...)` with an explicit `source` + `reason` derived from the job name. The system principal is **not** used to satisfy a tenant RLS policy — it is used to identify the caller in audit/logs. The admin-bypass guard is what actually permits the read.
+- `withPrincipalContext(principal, work)` (the existing helper at `server/db/withPrincipalContext.ts`) requires being called inside an active `withOrgTx(...)` block — it sets only the four principal session variables on top of an already-open org transaction. `withSystemPrincipal` therefore composes with, not in place of, `withOrgTx`. When the system monitor needs to operate against a specific tenant org (e.g. an enrichment read scoped to that org), the wiring is `withSystemPrincipal(... withOrgTx(targetOrgId, ... withPrincipalContext(systemPrincipal, ...)))`. When the system monitor reads cross-org, it uses `withAdminConnectionGuarded` directly and `withPrincipalContext` is not involved.
+
+**Principal usage matrix (normative).** The decision tree above is consolidated as a hard rule:
+
+| Operation type | Required wrapper |
+|---|---|
+| `system_*` table read or write | `withSystemPrincipal` (Condition A from §4.4 admits `assertSystemAdminContext`) |
+| Cross-tenant read of tenant tables | `withSystemPrincipal` + `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason })` |
+| Single-tenant read or write of tenant tables (specific orgId) | `withSystemPrincipal(... withOrgTx(orgId, ... withPrincipalContext(systemPrincipal, ...)))` |
+| Cross-tenant write of tenant tables | FORBIDDEN — this spec does not introduce such a path. Any future cross-tenant write requires explicit `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason })` plus a `[missing-doc]`-grade architectural review; not permitted under the current spec. |
+
+**Invariant.** A system principal MUST NEVER be relied on to satisfy a tenant RLS policy. Tenant-table policies dispatch on `current_principal_type ∈ {service, user, delegated}` (line 397) and the `'system'` branch is intentionally absent. All cross-tenant access against tenant tables MUST go through `withAdminConnectionGuarded` with an explicit `source` + `reason`. The system principal carries identity-for-audit; the admin-bypass guard carries authorization-for-read. Conflating the two is a code-review block.
 
 **Why singleton, not per-call.** Avoids accidental duplication / divergence. The principal carries no per-call state — it's a stable identity object.
 
-**Test plan.** Unit: `getSystemPrincipal()` returns the same object across calls. Integration: pg-boss handler wrapped in `withSystemPrincipal` can SELECT from `system_incidents`; same handler unwrapped fails RLS. Integration: system principal cannot SELECT from a tenant-scoped table (e.g. `agent_runs`) without explicit cross-scope grant — verifies blast radius is contained.
+**Test plan.** Unit: `getSystemPrincipal()` returns the same object across calls. Integration: a pg-boss handler wrapped in `withSystemPrincipal` produces a `ctx.principal.type === 'system'` value at every downstream service-method entry; `assertSystemAdminContext` admits it. Integration: cross-org reads from inside the handler succeed only via `withAdminConnectionGuarded({ allowRlsBypass: true, ... })` — a direct cross-org read attempted via `getOrgScopedDb` without the guard fails the new `verify-rls-protected-tables.sh` runtime guard in dev/test. Integration: service-method calls into `system_incidents` mutations from a non-sysadmin caller throw `UnauthorizedSystemAccessError` regardless of which connection is used.
 
 **Migration.** Seed the system user row + the system org row (latter already exists from Phase 0/0.5 per Q2 in `phase-0-spec.md §0.2`). New migration adds the system user only.
 
@@ -410,27 +435,29 @@ The session-variable approach (`SET LOCAL app.principal_scope = 'system'` inside
 
 **Shape.**
 
-- New helper: `assertSystemAdminContext(ctx: PrincipalContext): asserts ctx is SystemAdminContext`.
-- Throws `UnauthorizedSystemAccessError` (typed) if:
-  - `ctx.principal.scope !== 'system'` AND
-  - `ctx.principal.permissions` does not include `system_admin.write`
-- System principals (from §4.3) pass automatically. Sysadmin users with `system_admin.write` permission pass.
-- All other principals (regular users, even with `org_admin` or `subaccount_admin`) fail.
+- New helper: `assertSystemAdminContext(ctx: PrincipalContext, opts?: { actorRole?: 'system_admin' | string }): asserts ctx is SystemAdminContext`.
+- Throws `UnauthorizedSystemAccessError` (typed; `code = 'unauthorized_system_access'` per the `shared/errorCode.ts` Branch A contract) if neither admission condition holds:
+  - **Condition A — system principal:** `ctx.principal.type === 'system'` (system-managed agent runs and pg-boss handlers wrapped in `withSystemPrincipal`).
+  - **Condition B — sysadmin user:** the call originated from an inbound HTTP request and `opts.actorRole === 'system_admin'`. The route layer's existing `requireSystemAdmin` middleware (`server/middleware/auth.ts`) already gates this and attaches the role to `req.user`; service-method callers that arrive via a sysadmin route pass `actorRole` through. Architect resolves whether `actorRole` is plumbed via an explicit parameter, an `AsyncLocalStorage` request-context channel, or a thin wrapper that pre-binds the role at the route boundary.
+- The codebase has no per-key permissions array on `PrincipalContext` and no `system_admin.write` permission key — `system_admin` is a **role** (`users.role` enum value) that bypasses all permission checks (`server/lib/permissions.ts`). The guard therefore admits via role rather than per-key permission.
+- All other principals (regular users with `org_admin` / `manager` / `user` / `client_user` roles) fail.
 
 **Wiring.** Called as the **first line** of every `system_incidents` mutation service method:
 
 ```ts
-async function resolveIncident(ctx: PrincipalContext, id: string, ...) {
-  assertSystemAdminContext(ctx);
+async function resolveIncident(ctx: PrincipalContext, id: string, ..., opts?: { actorRole?: string }) {
+  assertSystemAdminContext(ctx, opts);
   // ...
 }
 ```
+
+Route-layer callers pass `{ actorRole: req.user.role }` after the existing `requireSystemAdmin` middleware has run; pg-boss handlers wrapped in `withSystemPrincipal` omit the option (admission is via Condition A). Architect resolves whether `actorRole` becomes an `AsyncLocalStorage` channel rather than an explicit parameter — the spec only mandates that the guard sees both signals.
 
 Applied to: `createIncidentManually`, `updateIncidentStatus`, `acknowledgeIncident`, `resolveIncident`, `suppressFingerprint`, `unsuppressFingerprint`, `escalateToAgent`, `triggerTestIncident`, plus the new mutations introduced in this spec (`annotateDiagnosis`, `recordPromptFeedback` — §10, §11).
 
 **Not called on read methods.** Reads still gate via `requireSystemAdmin` middleware + RLS. Defence-in-depth is for mutations only — read paths do not have the same blast radius.
 
-**Test plan.** Unit: each mutation service method, called with a non-sysadmin context, throws `UnauthorizedSystemAccessError`. Unit: same methods called with a sysadmin or system context succeed. Integration: a contrived "internal service calls service method directly without middleware" path is blocked.
+**Test plan.** Unit: each mutation service method, called with a non-sysadmin context (regular user `role`, no `actorRole` opt) throws `UnauthorizedSystemAccessError` with `code='unauthorized_system_access'`. Unit: same methods called with a `type='system'` principal succeed. Unit: same methods called with a regular `UserPrincipal` plus `{ actorRole: 'system_admin' }` succeed. Integration: a contrived "internal service calls service method directly without middleware" path is blocked because no `actorRole` is passed and the `type` is not `'system'`.
 
 ### 4.5 Schema additions
 
@@ -467,6 +494,7 @@ All additive. No column modifications to existing Phase 0/0.5 tables. No data ba
 | `stddev` | `double precision` |  |
 | `min` | `double precision` |  |
 | `max` | `double precision` |  |
+| `entity_change_marker` | `text` | nullable — current change-bearing attribute of the source entity (agent `prompt_hash`, agent `model`, skill `version`, connector schema marker — per §7.6). On mismatch with the source row at refresh time, the baseline row is reset (`sample_count = 0`) and re-accumulates from post-change runs only. |
 | `created_at` | `timestamp` | refresh time |
 
 Unique constraint: `(entity_kind, entity_id, metric_name)` — one current-baseline row per (entity, metric). Refresh updates in place via UPSERT, not append. Historical baselines are not preserved — Phase 3 may add a `system_monitor_baselines_history` table for drift detection.
@@ -496,10 +524,10 @@ Single migration file (final number TBD by architect — auto-incremented from c
 3. ... (remaining new columns from §4.5)
 4. `CREATE TABLE system_monitor_baselines (...);` with unique index.
 5. `CREATE TABLE system_monitor_heuristic_fires (...);`
-6. `INSERT INTO users (id, email, is_system, ...) VALUES (SYSTEM_PRINCIPAL_USER_ID, 'system@platform.local', true, ...);` — system principal seed.
-7. RLS policy additions for the two new tables (system-only access, mirrors `system_incidents`).
+6. `INSERT INTO users (id, organisation_id, email, password_hash, first_name, last_name, role, status) VALUES (SYSTEM_PRINCIPAL_USER_ID, SYSTEM_OPERATIONS_ORG_ID, 'system@platform.local', '<random non-functional hash>', 'System', 'Principal', 'system_admin', 'active');` — system principal seed. The `users` table has no `is_system` column; the `role='system_admin'` value combined with placement in the `is_system_org=true` org is the existing codebase pattern for distinguishing the system principal from human sysadmins. The non-functional `password_hash` ensures no inbound login flow can authenticate as this user — the row exists only as a foreign-key target for system-managed activity.
+7. **No RLS policies** for the two new tables. They follow the existing `system_*` bypass posture (`server/db/schema/systemIncidents.ts` header: `BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer`). The same-commit registry hygiene step is to add both tables to `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale ending `[ref: <this-spec-section>]` per the entry-format rules in the allowlist file. The `verify-rls-protected-tables.sh` schema-vs-registry diff (`audit-remediation-followups §A2`) blocks merge if either table is missing from one of `RLS_PROTECTED_TABLES` or the allowlist.
 
-No column drops, no type changes, no constraint tightening on existing data. Migration is idempotent-friendly via `IF NOT EXISTS` where Drizzle generator allows.
+No column drops, no type changes, no constraint tightening on existing data. Migration is idempotent-friendly via `IF NOT EXISTS` where Drizzle generator allows. The architect resolves the migration filename per the post-merge `verify-migration-sequencing.sh` gate (`audit-remediation-followups §G1`) — sequencing must follow the canonical NNNN-naming convention and cannot leave gaps.
 
 **Rollback.** Drop the two new tables, drop the new columns. The system user row is left in place (deleting a referenced FK is messier than the row's footprint).
 
@@ -511,10 +539,11 @@ This subsection makes the per-component failure surface explicit. Constraints de
 
 | Failure mode | Detection signal | System behaviour |
 |---|---|---|
-| `withSystemPrincipal` not invoked at handler entry | RLS denies all `system_*` table reads; query returns empty result or `permission denied` error | Hard fail. Handler logs `error('system-principal-context-missing', { handler, jobId })` and rethrows. pg-boss retries up to job retry limit (default 3); after that the job lands in DLQ and triggers the existing Phase 0/0.5 DLQ ingest hook. |
-| Wrong `organisation_id` on synthesised principal (drift from `SYSTEM_OPERATIONS_ORG_ID`) | Cross-tenant read anomaly in audit log: system principal reading rows it should not be able to | Block at `assertSystemAdminContext` (§4.4) — typed `UnauthorizedSystemAccessError`. Audit log row written. RLS provides a second wall; even if the assertion is bypassed, the session-variable RLS denies the read. |
-| Partial propagation — `withSystemPrincipal` covers part of a code path, then async work outside the scope queries with the wrong context | Mixed scoped + unscoped queries produce inconsistent results in the same handler | Reject the request. The integration test in §14.2 (`systemPrincipal.integration.test.ts`) explicitly probes this — a cross-scope query inside `withSystemPrincipal` for a tenant-write operation must fail. AsyncLocalStorage ensures any awaited continuation inside the wrapper inherits the context; code that breaks the context (e.g. `setImmediate` outside an `await`) fails the integration test. |
-| `assertSystemAdminContext` bypassed (e.g. a new mutation method forgets to call it) | A mutation method completes against `system_incidents` from a non-sysadmin caller in CI integration test | Build fails. Slice C ships a CI gate that greps every `system_incidents` mutation method for an `assertSystemAdminContext(ctx)` call as the first executable line. Missing → CI red. |
+| `withSystemPrincipal` not invoked at handler entry | Service-layer guard `assertSystemAdminContext(ctx)` throws on the first mutation call inside the handler, because `ctx` carries the absent / wrong principal | Hard fail. Handler logs `error('system-principal-context-missing', { handler, jobId })` and rethrows. pg-boss retries up to job retry limit (default 3); after that the job lands in DLQ and triggers the existing Phase 0/0.5 DLQ ingest hook. The `verify-principal-context-propagation.sh` gate (audit-remediation-followups §A1b, call-site granularity) catches the missing wrap at build time. |
+| Wrong `organisation_id` on synthesised principal (drift from `SYSTEM_OPERATIONS_ORG_ID`) | Cross-tenant read attempted against tenant tables fails the `withAdminConnectionGuarded` source/reason check OR is logged as a suspicious bypass; cross-tenant write attempt is blocked by the runtime `rlsBoundaryGuard` | Block at `assertSystemAdminContext` (§4.4) for `system_*` mutations. For tenant-table operations, the `withAdminConnectionGuarded` audit log + the `rlsBoundaryGuard` runtime guard surface the mismatch in dev/test; production traffic that reaches the DB still fails at the tenant-table RLS policy because no `'system'` branch is recognised in the existing predicate. |
+| Partial propagation — `withSystemPrincipal` covers part of a code path, then async work outside the scope queries with the wrong context | Mixed scoped + unscoped queries produce inconsistent results in the same handler | Reject the work. The integration test in §14.2 (`systemPrincipal.integration.test.ts`) explicitly probes this — a continuation that breaks the AsyncLocalStorage scope sees `ctx.principal` of the outer caller (or none), and the next service-method call fails `assertSystemAdminContext`. |
+| `assertSystemAdminContext` bypassed (e.g. a new mutation method forgets to call it) | A mutation method completes against `system_incidents` from a non-sysadmin caller in CI integration test | Build fails. Slice C ships a CI gate that greps every `system_incidents` mutation method for an `assertSystemAdminContext(ctx)` call as the first executable line. Missing → CI red. The gate composes with the existing `verify-principal-context-propagation.sh` call-site coverage rule. |
+| Cross-tenant read attempted via `getOrgScopedDb` instead of `withAdminConnectionGuarded({ allowRlsBypass: true })` | Dev/test: `rlsBoundaryGuard` throws `RlsBoundaryAdminWriteToProtectedTable` or returns zero rows under tenant RLS. Prod: tenant RLS silently returns zero rows. | The handler must use the admin-bypass guard with explicit `source` + `reason`. The post-merge `verify-rls-protected-tables.sh` gate scans for raw-SQL writes near tenant tables and flags suspicious patterns; the runtime guard is the second wall. |
 
 **4.7.2 `recordIncident` ingest path (§4.1, §4.2).**
 
@@ -522,7 +551,7 @@ This subsection makes the per-component failure surface explicit. Constraints de
 |---|---|---|
 | Idempotency LRU evicts a key inside the 60s window (LRU full of newer keys) | `system_incident_ingest_idempotent_evictions` counter increments; second call with same key writes a second row | Soft fail. Metric increments; second row treated as a real second occurrence. Acceptable degradation — the LRU is a soft optimisation, not a correctness guarantee. Post-incident review catches if the eviction rate exceeds a threshold (Phase 3 dashboard signal). |
 | Throttle map full (50,000 unique fingerprints) | `system_incident_ingest_throttle_map_evictions` counter increments | Oldest fingerprints lose their throttle protection. Tight-loop traffic on a recently-evicted fingerprint will not be throttled until the next call sets the entry. Acceptable — eviction rate is a tunable; if elevated, raise the cap or shorten throttle window. |
-| `recordIncident` called from a handler that did not synthesise a principal | Sync mode: throws inside the route's auth middleware before reaching `recordIncident`. Async mode: the worker reads the queued payload but writing to `system_incident_events` fails RLS | Async mode: worker logs `error('incident-ingest-no-principal', ...)`, message stays on the queue, retries up to retry limit. Sync mode: 401/403 from the route. |
+| `recordIncident` called from a handler that did not synthesise a principal | Sync mode: throws inside the route's auth middleware before reaching `recordIncident`. Async mode: the worker reads the queued payload but the inner mutation (write to `system_incident_events`) fails the service-layer `assertSystemAdminContext` guard because `ctx` is missing / non-sysadmin | Async mode: worker logs `error('incident-ingest-no-principal', ...)`, message stays on the queue, retries up to retry limit. Sync mode: 401/403 from the route. (Note: `system_*` tables themselves have no RLS — the wall is the service guard, not the database.) |
 | Async ingest worker stalled (pg-boss queue not draining) | Synthetic check `pg-boss-queue-stalled` fires (§8.2) on the `system-incident-ingest-async` queue | High-severity incident emitted via `source='synthetic'`. The Phase 0/0.5 self-check (`system-monitor-self-check`) provides a second signal. |
 
 **4.7.3 Sweep job (§9.3).**
@@ -567,6 +596,24 @@ This subsection makes the per-component failure surface explicit. Constraints de
 
 ### 4.8 Global idempotency invariant + key-format conventions
 
+**Alignment with the post-merge B2 standard.** Every new pg-boss job introduced by this spec — `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh`, `system-monitor-triage`, `system-monitor-sweep` — adheres to the codebase-wide B2 idempotency + concurrency standard finalised in `audit-remediation-followups §B2/B2-ext` (precedent jobs: `bundleUtilizationJob`, `connectorPollingSync`, `measureInterventionOutcomeJob`, `fastPathDecisionsPruneJob`, `fastPathRecalibrateJob`, `ruleAutoDeprecateJob`). The standard requires:
+
+1. **Top-of-file Concurrency model + Idempotency model declaration.** Every job file opens with a JSDoc block naming (a) the concurrency mechanism, (b) the key/lock space, (c) the idempotency mechanism, (d) the failure mode. The `verify-background-jobs-readiness.sh` gate fails when either declaration is absent or under-specified.
+2. **Per-key advisory lock for serialisation.** `pg_advisory_xact_lock(hashtext('<key>')::bigint)` inside the work transaction; the lock releases on commit/rollback. Two runners with the same key serialise; distinct keys proceed in parallel. Spec key namespaces (`triage:<incidentId>`, `sweep-tick:<bucketKey>`, `baseline-refresh`, `synthetic-checks`) become the lock keys directly.
+3. **One of three idempotency mechanisms** depending on action shape: replay-safe deterministic recompute (baseline refresh — UPSERT into `system_monitor_baselines`), claim+verify with `NOT EXISTS` (sweep — only-process-candidates-not-already-triaged), or composite-key INSERT...ON CONFLICT (`write_diagnosis`, `write_event`, `recordPromptFeedback`).
+4. **Failure-mode declaration.** What happens if the work crashes mid-execution: which writes are atomic, which are replay-safe on retry, which feed the DLQ ingest hook (Phase 0/0.5).
+
+The four spec jobs map onto the standard as follows:
+
+| Job | Concurrency mechanism | Idempotency mechanism | Lock key |
+|---|---|---|---|
+| `system-monitor-synthetic-checks` (60s tick) | pg-boss `singletonKey: 'synthetic-checks'` + `pg_advisory_xact_lock(hashtext('synthetic-checks')::bigint)` inside the tick handler | Per-check claim+verify: each check writes `recordIncident` with a deterministic `idempotencyKey = synthetic:<check_id>:<resourceId>:<bucketKey>` (LRU-deduped per §4.1) | `synthetic-checks` |
+| `system-monitor-baseline-refresh` (15-min tick) | pg-boss `singletonKey: 'baseline-refresh'` + per-`(entity_kind, entity_id, metric_name)` advisory lock per row | Replay-safe deterministic recompute: aggregate query → UPSERT into `system_monitor_baselines` keyed on the unique constraint. Idempotent because the source rows are append-only and the aggregate is deterministic at any point in time. | `baseline-refresh` (per-tick) + `baseline-refresh:<entity_kind>:<entity_id>:<metric_name>` (per-row, optional) |
+| `system-monitor-triage` (per-incident) | pg-boss `singletonKey: triage:<incidentId>` + `pg_advisory_xact_lock(hashtext('triage:<incidentId>')::bigint)` | Composite-key idempotent INSERT inside `write_diagnosis`: unique on `(system_incidents.id, agent_diagnosis_run_id)`. Second call with same `(incidentId, agentRunId)` is a no-op. | `triage:<incidentId>` |
+| `system-monitor-sweep` (5-min tick) | pg-boss `singletonKey: sweep-tick:<bucketKey>` + `pg_advisory_xact_lock(hashtext('sweep-tick:<bucketKey>')::bigint)` | Claim+verify: per-candidate `triage:<candidateKind>:<candidateId>:<bucketKey>` enqueue; pg-boss singleton collapses duplicates. The triage job itself is idempotent on `(incidentId, agentRunId)` (above). | `sweep-tick:<bucketKey>` |
+
+**Cross-tenant reads.** The sweep job reads `agent_runs`, `skill_executions`, `agent_run_messages`, `llm_requests`, and pg-boss queue state across all orgs. Per §4.3, every cross-tenant read is performed inside `withAdminConnectionGuarded({ allowRlsBypass: true, source: 'system_monitor_sweep', reason: '<one-sentence justification>' }, fn)`. Same posture for the synthetic-checks tick when it reads from tenant tables (e.g. `connector_polls`). Baseline refresh reads aggregate stats from tenant tables and writes only to system-scope `system_monitor_baselines` — same admin-bypass guard applies on the read side.
+
 **The invariant.** Every externally-triggerable action introduced by this spec MUST carry a deterministic idempotency key. "Externally-triggerable" means: any action enqueued by pg-boss, any HTTP mutation route the operator can hit, any reactive ingest path that may be retried, any sweep / synthetic-check / baseline-refresh tick. The key must be derivable from the action's identity (the inputs that uniquely determine "this is the same action"), not from a random UUID generated at enqueue time.
 
 **Why a deterministic key.** Random keys defeat the purpose — two retries of the same logical action with different random keys are treated as two distinct actions, double-executing the side effect. A deterministic key is the same on retry as on the original; idempotency layer collapses them.
@@ -578,6 +625,8 @@ This subsection makes the per-component failure surface explicit. Constraints de
 3. **Identity component** — the input fingerprint that uniquely identifies this logical action: `incidentId`, `(candidateKind, candidateId, bucketKey)`, `(checkId, resourceId, bucketKey)`, etc. Always derived from named action inputs; never from JSON-serialised payload + hash. Per §4.6 and the inherited Phase 0/0.5 fingerprint, the identity component is canonical by construction.
 
 **Cross-operation collision is invalid.** Two actions with different operation types MUST NOT share the same key. The leading-namespace convention (`triage:`, `sweep:`, `synthetic:`, etc.) enforces this structurally — a `triage:<incidentId>` key cannot collide with a `sweep:<candidateKind>:<candidateId>:<bucketKey>` key because the namespaces differ. Same key + different operation types is therefore a code bug (caller forgot the namespace prefix), not a runtime case the system must tolerate.
+
+**Enqueue idempotency invariant (cross-job).** Every enqueue path MUST use a deterministic key (per the structural rule above). Duplicate enqueues for the same logical action MUST EITHER (a) collapse at the queue layer via pg-boss `singletonKey` OR (b) be harmless because the downstream work-product write is itself idempotent (composite-key INSERT, claim+verify, replay-safe recompute — per the standard mechanisms above). No enqueue path may rely solely on downstream DB idempotency to control fan-out — the queue-layer collapse is what bounds compute cost; the work-product layer is what bounds outcome state. Both layers MUST be specified for every job. Note that incident-driven (§9.2) and sweep-driven (§9.3) triage jobs use **different namespaces** (`triage:<incidentId>` vs `sweep:<candidateKind>:<candidateId>:<bucketKey>`) by design — they enqueue distinct logical actions; convergence happens at the work-product layer (`(incidentId, agentRunId)` composite-key idempotency in `write_diagnosis`, §9.8), not at enqueue time. This is the intended pattern; collapsing the two namespaces would prevent the sweep from triaging a candidate the incident-driven trigger already enqueued.
 
 **Same key + different payload behaviour.** Per the storage table below, every layer's collision posture is named explicitly. The cross-cutting rule: the system MUST NOT silently merge differing payloads under the same key. Either the second write is rejected (work-product layer — `write_diagnosis`, `recordPromptFeedback`), or the mismatch is logged at `warn` and treated as a fresh row (LRU layer — see §4.7.2 + storage table below), or the second enqueue's payload is discarded and the singleton-collision return is logged (pg-boss layer). No silent merge anywhere.
 
@@ -774,6 +823,16 @@ The ten subsections below cover: (1-4) the four primary axis interactions, (5-6)
 
 **Why the server-only rule.** Client clocks drift; phones lie about timezone; multi-process deployments under load see different OS clocks. Treating the server (with NTP-synced clocks) as the single time source is the cheapest correctness guarantee. This is consistent with the inherited Phase 0/0.5 convention; restating here so new paths in this spec do not accidentally accept client-supplied timestamps.
 
+**Event-time vs write-time (occurred_at vs recorded_at).** Most events introduced by this spec are written **synchronously inside the same transaction** as the action that produced them (per §9.2 outbox pattern; per §9.8 `write_diagnosis` in-line with the agent run that produced the diagnosis). For these, `created_at` (= write time) IS the event time — no distinction is needed. Some events have a meaningful gap: an agent finishes its diagnosis at moment T_diagnose; the `agent_diagnosis_added` row lands at T_write > T_diagnose if the write is queued through an outbox / async channel. For events where the gap is meaningful, the contract:
+
+- The DB row's `created_at` carries the **write time** (the `recorded_at` semantic — when the row landed).
+- The event's `metadata` MAY carry an explicit `occurred_at` field (ISO 8601 UTC, server-derived from the underlying source — e.g. `agent_runs.completed_at` for agent-emitted events) when the gap exceeds tx commit latency.
+- Consumers reconstructing a timeline MUST prefer `metadata.occurred_at` when present and fall back to `created_at` otherwise.
+- Consumers MUST NOT assume strict ordering by row `id` for cross-process / async-emitted events — `id` is uuid v7 (per §4.9.9 ordering rules) which IS time-ordered for synchronous writes but does not carry the `occurred_at` semantics for async-emitted events.
+- Synchronous events (the majority — §9.2 outbox tx, §9.8 write_diagnosis) DO NOT need `metadata.occurred_at`; `created_at` is the authoritative event time and the existing ordering rule (§4.9.9 — by `created_at` + surrogate `id`) holds.
+
+**No new column on every event row.** Adding an `occurred_at` column to `system_incident_events` for every row would duplicate `created_at` in the synchronous-write majority case (per §4.10.7 — second source of truth for state already encoded). The metadata-field carve-out is the minimal addition: only async-emitted events with a meaningful gap carry the field; everything else continues to use `created_at`.
+
 **4.10.9 Delivery vs outcome model.** The execution model in this spec is **at-least-once delivery, effectively-exactly-once outcome via idempotency**. Naming both halves separately because conflating them is the failure pattern this rule prevents.
 
 - **At-least-once delivery.** pg-boss retries failed jobs (§12.4 — default 3 retries), `recordIncident` is called by multiple sources for the same logical event (sync mode + async worker + sweep cluster), webhooks fan out at-least-once (§4.9.7). The system never assumes "this will run exactly once" at the delivery layer.
@@ -948,6 +1007,15 @@ The protocol is a **living document**. It will be wrong on day one. Iteration is
 
 **When the agent's prompts consistently lead to one-shot fixes operators accept without rewriting**, that is the signal Phase 3 (auto-fix) is on solid ground. The protocol holds; the agent's diagnosis quality has stabilised; the auto-fix executor can be pointed at the same contract. There is no formal "auto-fix gate" threshold in this spec — Phase 3 is its own design exercise — but the feedback data accumulated here is the input to that decision.
 
+**Protocol version stamping (rule).** Every generated `investigate_prompt` carries a `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line at the top per §5.2. The version stamp is **stored in the prompt body** — not in a separate column on `system_incidents` — because the prompt body IS the historical record (per §4.10.7 source-of-truth: work-product wins; the prompt text is the work product). When the protocol bumps to `v2`:
+
+1. The agent's prompt template (§9.7) updates to emit `## Protocol\nv2 (per docs/investigate-fix-protocol.md)` in the same commit that updates `docs/investigate-fix-protocol.md`.
+2. Old incidents retain their original `## Protocol\nv1` text indefinitely. Pre-bump prompts are not retroactively rewritten — the original protocol-doc revision can be recovered via git blame on `docs/investigate-fix-protocol.md` if needed.
+3. Consumers (Claude Code via §5.3 hook, Phase 3 auto-fix executor, future analytics) MUST branch on the `## Protocol` line if they need version-specific behaviour. Reading a `v1` prompt under `v2` execution rules is a contract violation; readers MUST tolerate older versions or refuse to act.
+4. No `system_incidents.investigate_protocol_version` column is added. Adding one would create a duplicate source of truth (column vs prompt text) and require a backfill story for pre-bump rows. The prompt-body stamp is sufficient.
+
+**Why a version stamp at all.** Without it, a future operator reading an old prompt under new protocol assumptions could mis-execute (e.g. assume a section is required that didn't exist in `v1`). The stamp lets readers self-validate before acting.
+
 ## 6. Heuristic Registry (config-as-code)
 
 ### 6.1 Module location and shape
@@ -1034,6 +1102,13 @@ interface Heuristic {
   // Suppression rules. Evaluated AFTER predicate fires. Any true → fire is dropped, audit row written.
   suppressions: SuppressionRule[];
 
+  // Optional per-entity fire-rate cap. When set, the orchestrator caps how many fires
+  // this heuristic produces against the same (entityKind, entityId) per rolling hour.
+  // Excess fires write audit rows with metadata.suppression_id = 'rate_capped' and
+  // produced_incident_id = null. Default unset = no cap (most heuristics rely on the
+  // fingerprint partial unique index for incident-volume containment, see §6.3).
+  firesPerEntityPerHour?: number;
+
   // Hot path. Returns one of:
   //   - { fired: false }
   //   - { fired: true, evidence: Evidence, confidence: number }
@@ -1067,6 +1142,18 @@ type HeuristicResult =
 
 The `confidence` returned by `evaluate` may differ from the registry-level `confidence` — the latter is the **default** when the heuristic fires; the former is the **per-fire** value computed against the specific evidence. The downstream agent uses the per-fire confidence; the registry-level value is metadata for tuning.
 
+**Heuristic boundary contract (normative).** A heuristic's role is **detection only**. The contract:
+
+- A heuristic MAY read summary fields from candidates, query the baseline reader (§7.5), and consult its own internal logic.
+- A heuristic MAY return a `HeuristicResult` indicating fired / not-fired / insufficient-data / suppressed, with confidence and evidence.
+- A heuristic MUST NOT mutate any DB state. No `INSERT`, `UPDATE`, `DELETE` from inside `evaluate`. The `db` field on `HeuristicContext` is for **read-only** queries that the heuristic needs (e.g. "look up the baseline mean for this entity"). Detection: a CI gate (Slice C) greps every heuristic module for write-shaped Drizzle calls (`.insert(`, `.update(`, `.delete(`) and fails on hit.
+- A heuristic MUST NOT enqueue jobs, emit events outside the `HeuristicResult` return value, write incidents, or trigger any side effect beyond returning its result.
+- A heuristic MUST NOT call out to external services (no HTTP, no LLM calls, no skill invocation). The hot path is in-process pure-ish computation; expensive paths are explicitly out of scope.
+
+**Why.** All side effects (writing `system_monitor_heuristic_fires` rows, creating incidents, enqueueing triage jobs) belong to the **orchestration layer** — the sweep handler (§9.3) and the incident-driven triage handler (§9.2). Centralising side effects in the orchestrator keeps the system composable: heuristics can be unit-tested as pure functions, reused across triggers (sweep + incident-driven both invoke the same registry), and reasoned about without tracing into job logic. A heuristic that writes its own incident bypasses the rate limit, the throttle, the audit row, and the dedup window — every one of which lives in the orchestrator.
+
+**Future extension.** Phase 3 may introduce "remediation heuristics" that propose actions (not execute them). Even those return a `RemediationProposal` value to the orchestrator; the proposal is enacted by an explicit operator-approved or auto-remediation path, never by the heuristic itself.
+
 ### 6.3 Severity, confidence, expected FP rate, suppression
 
 **Severity.** What severity the *incident* gets if this heuristic is the top-fired contributor. The agent may upgrade severity (multiple heuristics fired, evidence converges) but never downgrades below this floor.
@@ -1087,6 +1174,20 @@ The agent only triages when at least one heuristic fires with per-fire confidenc
 - "Suppress if this is the first run of the day and the system was idle for >12h" — cold-start anomalies.
 
 Suppressions are first-class: every suppressed fire writes a `system_monitor_heuristic_fires` row with `produced_incident_id = null` and `metadata.suppression_id` set, so we can see "this heuristic would have fired 50× this week, but 47 were suppressed by rule X" — that's signal that either the rule is right (the heuristic is too eager) or the rule is wrong (we're hiding a real pattern).
+
+**Heuristic firing constraint (normative).** A heuristic MUST NOT emit an incident-eligible fire when any of the following conditions hold. These are the false-positive containment rails — they exist to prevent the early-stage noise that erodes operator trust before the calibration loop (§6.5) has data to tune from.
+
+| Constraint | Rule | Enforcement | Default value |
+|---|---|---|---|
+| Sample threshold | If a `requiresBaseline` entry's `BaselineReader.get(...)` returns a row with `sample_count < minSampleCount`, the heuristic returns `{ fired: false, reason: 'insufficient_data' }`. | §6.2 interface — gating is built into the registry invocation path (§6.4). | `minSampleCount = 10` per heuristic; raise in registry config when an early heuristic shows noise. |
+| Confidence threshold | The orchestrator (sweep handler §9.3, incident-driven handler §9.2) only acts on a fire when `HeuristicResult.confidence >= SYSTEM_MONITOR_MIN_CONFIDENCE`. Lower-confidence fires still write a `system_monitor_heuristic_fires` audit row but do NOT escalate to triage. | Orchestrator-side check (sweep handler — line `result.confidence >= MIN_CONFIDENCE`). Heuristics MAY return `confidence < threshold`; the orchestrator is the gate. | `SYSTEM_MONITOR_MIN_CONFIDENCE = 0.5` (env-configurable per §9.10). Per-heuristic `Heuristic.confidence` registry default is 0.7+ recommended for new heuristics; tuned via §6.5 PR workflow. |
+| Per-entity fire-rate cap | Optional `firesPerEntityPerHour?: number` field on `Heuristic`. When set, the orchestrator caps how many fires this heuristic produces against the same `(entityKind, entityId)` per rolling hour. Excess fires write `system_monitor_heuristic_fires` rows with `metadata.suppression_id = 'rate_capped'` and `produced_incident_id = null`. | Orchestrator-side check against the `system_monitor_heuristic_fires` audit table (count rows where `heuristic_id`, `entity_kind`, `entity_id` match within the last hour). | Unset by default — most heuristics are bounded by their own predicates and the fingerprint partial unique index already collapses recurring incidents into one open row with bumped `occurrence_count`. Set explicitly on heuristics flagged as noisy during calibration (§6.5). Recommended starting value when set: `1` (one fire per entity per hour). |
+
+**Defaults are starting values, not invariants.** The `minSampleCount = 10`, `SYSTEM_MONITOR_MIN_CONFIDENCE = 0.5`, and `firesPerEntityPerHour` default-unset values are the **initial calibration**. The §6.5 PR-based tuning workflow is the mechanism for adjusting them after observed noise. The constraint contract above is what is invariant; the specific numbers are not.
+
+**Why the per-entity fire-rate cap is opt-in, not global.** Most heuristics fire on a stable fingerprint that the Phase 0 partial unique index on `system_incidents.fingerprint` already collapses (§4.5 / `phase-0-spec.md §5.6` ON CONFLICT semantics) — a noisy heuristic firing 100× per hour against the same entity produces ONE open incident with `occurrence_count = 100`, not 100 incidents. The cap is therefore not needed for incident-volume containment; it is needed for AUDIT-volume containment when a heuristic's fires are themselves the cost lever (e.g. each fire writes a heavy `system_monitor_heuristic_fires` row with detailed evidence). Opt-in keeps the registry simple by default and allows narrow targeting.
+
+**Why no global "max N incidents per entity per hour" rule.** Such a rule would conflict with the existing fingerprint-based dedupe — the partial unique index already enforces "one open incident per fingerprint." Adding a separate per-entity rule would either duplicate the existing enforcement or introduce a second dedup model that can disagree with the first (per §4.10.7 — second source of truth). The cap above operates at the FIRE layer, not the incident layer, and is therefore additive without conflict.
 
 ### 6.4 Registration and invocation
 
@@ -1249,6 +1350,27 @@ The reader is **read-only**, **hot-path**, **no caching** beyond the connection-
 
 **No write API.** Baselines are written exclusively by the refresh job. Heuristics cannot mutate them.
 
+### 7.6 Baseline invalidation on entity drift
+
+**The drift problem.** A baseline keyed on `(entity_kind, entity_id, metric_name)` accumulates observations under the assumption that the entity's behaviour is stationary. When an entity changes materially — agent prompt rewritten, model swapped, skill version bumped, major config change — the prior observations no longer characterise the new behaviour. The 7-day rolling window slowly absorbs the new distribution, but until it does, baseline-dependent heuristics produce false positives ("this run looks anomalous against the old baseline" — yes, because the agent itself changed).
+
+**Reset trigger (invariant).** The baseline refresh job MUST treat any of the following as a reset signal for the affected entity, evicting the prior baseline row and starting fresh sample accumulation:
+
+- `agents.prompt_hash` change (system prompt or instructions edited).
+- `agents.model` change (LLM provider/model swapped).
+- `skills.version` change (skill spec / handler logic bumped).
+- `connector_configs` material schema change (connector type changed; provider switched).
+
+**Implementation.** The refresh job, on every tick, joins the source-entity table to the baseline row and compares the entity's current change-marker (prompt_hash / model / version) against a persisted `entity_change_marker` column added to `system_monitor_baselines`. On mismatch, the row is reset (sample_count → 0, percentiles cleared) and the new aggregate is computed against runs that occurred **after** the change. Pre-change runs are excluded from the post-reset baseline by the `created_at >= entity_changed_at` filter, where `entity_changed_at` is read from the source table.
+
+**Effect on heuristics.** A reset baseline has `sample_count` below the bootstrap threshold (`minSampleCount`, default 10) until enough post-change runs accumulate. Baseline-dependent heuristics return `insufficient_data` during the warm-up — the same cold-start handling as a brand-new entity (§7.4). This trades "anomaly detection silent on the post-change entity for ~10 runs" for "no false-positive storm immediately after a deploy." The trade is correct: false positives during config churn are the failure mode operators learned to ignore, which then masks the real anomalies.
+
+**Schema impact.** Additive: one new `entity_change_marker text` column on `system_monitor_baselines`, populated at refresh time from the source-entity row's change-bearing field. No data backfill — existing baselines start with `entity_change_marker = NULL` and are reset on the first refresh tick that observes the entity's current marker.
+
+**No history preservation.** Pre-reset baseline data is discarded. Phase 3 may add `system_monitor_baselines_history` for drift-over-time analysis (per §7.2 deferral); the reset signal would then write a history row before clearing.
+
+**Reset trigger as cross-cutting rule.** This is an instance of §4.10.7's source-of-truth hierarchy applied to baselines: when the source entity (work-product) changes its identity-defining attributes, derived state (baseline) MUST follow. Stale baselines are a third source of truth that operators cannot reconcile — the rule prevents that drift.
+
 ## 8. Phase 1 — Synthetic checks
 
 ### 8.1 Job: `system-monitor-synthetic-checks`
@@ -1326,6 +1448,7 @@ type SyntheticResult =
 | `heartbeat-self` | The synthetic-check job records its own heartbeat to a known KV. If the heartbeat hasn't been updated in N minutes when read, fire on next tick. | `critical` | Two-tick design: tick 1 writes `last_heartbeat = NOW()` to `system_kv`. Tick 2 reads it; if older than 3× tick interval, fire. (Detects "the synthetic-check job is itself broken" — closes the meta-loop.) |
 | `connector-error-rate-elevated` | A connector has produced > N errors in the last hour without a successful poll between them. | `high` | For each connector: if `connector_polls WHERE error IS NOT NULL AND created_at > NOW() - 1h` count ≥ 3 AND no successful poll in same window, fire. |
 | `agent-run-success-rate-low` | A system-managed agent's success rate over the last hour is below baseline minus 30%. | `medium` | Read baseline `success_rate` for the agent; if last-hour rate is < `baseline.p50 - 0.30`, fire. Requires baseline (`requiresBaseline`); skips with `insufficient_data` if no baseline. |
+| `sweep-coverage-degraded` | The sweep job's coverage rate over the last N ticks dropped below threshold — the monitor is silently leaving entities unevaluated. | `high` | Read the `sweep_completed` event series for the last `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` ticks (default 6 = 30 min). Compute the §12.5 sweep coverage rate (`metadata.candidates_evaluated / source-table active-entity count for the window`) per tick. If the rolling average is below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95), fire with the offending tick stats in `metadata`. The check uses the same source-of-truth as the §12.5 health signal — no new data primitive. |
 
 Phase 2.5 may add more synthetic checks; this is the day-one set.
 
@@ -1358,6 +1481,8 @@ Synthetic incidents are **first-class** in the existing UI — they appear on th
 | `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | `dlq-not-drained` threshold. |
 | `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | `heartbeat-self` tolerance in ticks. |
 | `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | Per-agent inactivity thresholds for `no-agent-runs-in-window`. JSON map of `{agentSlug: minutes}`. |
+| `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` | `6` | Rolling-window length (in sweep ticks) for `sweep-coverage-degraded`. 6 ticks × 5-min sweep = 30 min lookback. |
+| `SYSTEM_MONITOR_COVERAGE_THRESHOLD` | `0.95` | Coverage-rate floor for `sweep-coverage-degraded`. Drop below this for the lookback window → fire. |
 
 Per-check enable/disable is via heuristic-style suppression, not env vars — keeps the env surface minimal.
 
@@ -1747,7 +1872,7 @@ The agent calls `write_diagnosis(incidentId, { investigatePrompt: <text> })` onc
 
 Why on every payload, not on the table: the JSON shape is the contract; tables outlive single shapes. A future Phase 3 enhancement (e.g. richer evidence types) bumps to `schema_version: 'v2'` while old rows stay readable. Consumers (UI render, downstream analytics) check `schema_version` at read time.
 
-**No prompt-text version stamp.** The `investigate_prompt` text itself is markdown, not JSON. Its versioning is the `## Protocol` line at the top (`v1 (per docs/investigate-fix-protocol.md)` — §5.2). The protocol-doc version + the agent's stored prompt are the version pair; the text body does not need an explicit field. (Consistent with NG10 — no protocol-version stamp at runtime; per-payload `schema_version` is for the structured JSON only.)
+**No structured version field on the prompt payload.** The `investigate_prompt` text itself is markdown, not JSON. Its version is carried in-band by the `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line at the top of the body (§5.2 / §5.5). The protocol-doc revision + the agent's stored prompt body are the version pair; no separate JSON field, no `system_incidents.investigate_protocol_version` column. (Consistent with NG10 — the in-body `## Protocol` line is the runtime stamp; what is omitted is a structured per-row column. Per-payload `schema_version` applies to the structured JSON payloads only — `agent_diagnosis`, event `metadata` — not to the markdown prompt body.)
 
 **Display.** The triage drawer (§10) renders the `investigate_prompt` text inside a copy-formatted block with a one-click copy button. No syntax highlighting beyond markdown; the prompt is markdown-formatted and the existing markdown renderer is reused.
 
@@ -2087,6 +2212,10 @@ All event types append to `system_incident_events`. The Phase 0/0.5 enum is exte
 
 **Naming convention.** All event types are kebab-case-with-underscores in DB rows (consistent with Phase 0/0.5 — `incident_opened`, `status_changed`, `escalation`, etc.). Structured logger event names are the same string, lowercased.
 
+**Optional `metadata.occurred_at` field.** Per the §4.10.8 event-time vs write-time rule: events whose underlying action time differs meaningfully from row write time MAY include `occurred_at` (ISO 8601 UTC) in `metadata`. The synchronous-write majority (every event in this table written inside its source transaction) does not need it — `created_at` is authoritative. The async-emitted carve-out applies to: `agent_diagnosis_added` (metadata MAY carry `occurred_at` = `agent_runs.completed_at` if the diagnosis row write was deferred), `prompt_generated` (same reasoning), and any future event added through an outbox / queue with non-trivial commit latency. Consumers reconstructing a timeline prefer `metadata.occurred_at` when present and fall back to `created_at` otherwise.
+
+**Event registry invariant.** The §12.1 table above IS the registry. Every event type emitted by code introduced in this spec MUST appear in this table — there is no inline event-type declaration scattered across handlers. New event types added by future PRs MUST extend this table in the same commit; Phase 0/0.5 inherited types live in their respective specs and are referenced (not duplicated) here. Implementation: the event-type literal is defined once as a TypeScript union (`shared/types/systemIncidentEvent.ts` or equivalent — final path resolved by architect) and every emitter imports the union. A CI gate (Slice C) greps for raw string literals matching event-type-shaped patterns (`event_type:\s*['"]`) outside the union definition file and fails on hit. Inline event-type strings without registry entries are a code-review block.
+
 **Event consumers.** The triage drawer (§10) renders the subset relevant to operator-facing context: `agent_diagnosis_added`, `agent_triage_skipped`, `agent_triage_failed`, `agent_auto_escalated`, `prompt_generated`, `investigate_prompt_outcome`. The other event types are audit-only — visible via direct SQL or via a future audit log surface.
 
 ### 12.2 New env vars
@@ -2104,6 +2233,8 @@ Consolidated. Defaults are production-safe — running with all defaults yields 
 | `SYSTEM_MONITOR_DLQ_STALE_THRESHOLD_MINUTES` | `30` | §8.4 | `dlq-not-drained` threshold. |
 | `SYSTEM_MONITOR_HEARTBEAT_STALE_TICKS` | `3` | §8.4 | `heartbeat-self` tolerance. |
 | `SYSTEM_MONITOR_AGENT_INACTIVITY_THRESHOLDS_JSON` | `'{}'` | §8.4 | Per-agent inactivity thresholds. |
+| `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` | `6` | §8.4 | Rolling-window length for `sweep-coverage-degraded`. |
+| `SYSTEM_MONITOR_COVERAGE_THRESHOLD` | `0.95` | §8.4 | Coverage-rate floor for `sweep-coverage-degraded`. |
 | `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` | `15` | §7.3 | Baseline refresh tick. |
 | `SYSTEM_MONITOR_BASELINE_WINDOW_DAYS` | `7` | §7.3 | Rolling baseline window. |
 | `SYSTEM_MONITOR_BASELINE_REFRESH_ENABLED` | `true` | §7.3 | Kill switch for baseline refresh. |
@@ -2231,6 +2362,29 @@ Implicit "the system retries a few times then gives up" is not specified. This s
 
 **No retry past the documented count.** Three pg-boss retries is the maximum for any new queue introduced by this spec. The DLQ → synthetic check is the catch-all for persistent failure; the synthetic-check incident is then the operator's signal.
 
+### 12.5 Monitor-the-monitor — derived health signals
+
+The monitor produces incidents about the rest of the system; without an equivalent view of itself, it becomes a black box. This spec does not introduce new metric primitives — the building blocks already exist — but names the **derived** health signals an operator (or Phase 3 dashboard) computes from existing event sources. These signals are observable at any time via direct SQL or via a future audit surface; they are not pushed into a metrics service in Phase 2.
+
+| Health signal | Definition | Source events / tables (already specified) |
+|---|---|---|
+| Auto-triage rate | `count(agent_diagnosis_added) / count(incidents where severity ≥ medium AND source != 'self_check')` over a rolling window | `system_incident_events` (event_type filter) + `system_incidents` (severity, source filter) |
+| Triage skip rate (by reason) | `count(agent_triage_skipped) grouped by metadata.reason` | `system_incident_events` event_type=`agent_triage_skipped`, decomposed by `metadata.reason` (rate_limited / disabled / self_check / severity_floor / self_stuck) |
+| Triage failure rate (by reason) | `count(agent_triage_failed) grouped by metadata.reason` | `system_incident_events` event_type=`agent_triage_failed`, decomposed by `metadata.reason` (prompt_validation / agent_run_failed / timeout / self_stuck) |
+| False-positive feedback rate | `count(prompt_was_useful = false) / count(prompt_was_useful IS NOT NULL)` | `system_incidents.prompt_was_useful` + `investigate_prompt_outcome` events (§11.2) |
+| Avg time from incident → diagnosis | `avg(agent_diagnosis_added.created_at - incident_opened.created_at)` over the same incident_id | `system_incident_events` joined on `incident_id` |
+| Sweep coverage rate | `count(distinct candidates evaluated per tick) / count(distinct entities in the sweep window)` | `sweep_completed` event `metadata.candidates_evaluated` vs the source-table row count for the window |
+| Self-stuck rate | `count(agent_triage_failed WHERE metadata.reason='self_stuck' OR agent_triage_skipped WHERE metadata.reason='self_stuck')` over a rolling window | `system_incident_events` filter on the `self_stuck` reason values |
+| Sweep cap-hit rate | `count(sweep_capped) / count(sweep_completed)` | `system_incident_events` event_type filters |
+
+**Why no new primitive.** Each signal above is computable from event rows or DB rows already specified. Adding a `system_monitor_health_metrics` table or a metrics-service push would be a third source of truth (per §4.10.7 — work-product / events / idempotency / logs already cover this) and would fight the existing audit surface. Phase 3 may build the dashboard that visualises these queries; Phase 2 ships the data primitives the dashboard reads.
+
+**Sweep coverage invariant (normative).** The sweep coverage rate above is not just a dashboard signal — it is an active health invariant. The `sweep-coverage-degraded` synthetic check (§8.2) reads the `sweep_completed` event series and fires an incident when the rolling rate drops below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95). Operators MUST see a fired incident, not a silently-degraded sweep. The invariant: if the sweep is not evaluating (≥ threshold)% of the active entities in its window, the system MUST emit a `source='synthetic'` incident with `check_id='sweep-coverage-degraded'` so the operator's existing incident queue surfaces the gap. No per-entity `last_evaluated_at` column is added — the sweep window's natural definition (entities active in the last 15 min, per §9.3) plus the per-tick `candidates_evaluated` count plus the active-entity row count is sufficient signal; adding a per-entity column would be a third source of truth (per §4.10.7) for state already encoded by the window definition.
+
+**Operator surfacing.** Until Phase 3 builds the dashboard, these signals are queryable directly. Worth surfacing on day one in the existing system-incidents admin page (§10) is at least the "Auto-triage rate" tile and the "Triage skip rate by reason" tile — both can be inline state on an existing surface (per `docs/frontend-design-principles.md` rule 4: inline state beats dashboards), no new page needed. Final UI scope is an architect call; the spec only names the signals + their sources.
+
+**Phase 3 ladder.** When the volume of incidents makes manual SQL impractical, the dashboard work begins. The signals + their definitions above ARE the dashboard's spec.
+
 ## 13. File inventory
 
 Indicative inventory. Final paths and naming variants are an architect deliverable per §0.5. The table below is the authoritative list of net-new code surfaces and the existing files that need to change; the architect plan refines paths to match the repo's conventions at implementation time.
@@ -2243,8 +2397,8 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 |---|---|
 | `server/services/principal/systemPrincipal.ts` | `getSystemPrincipal`, `withSystemPrincipal` (§4.3). |
 | `server/services/principal/assertSystemAdminContext.ts` | Service-layer guard (§4.4). |
-| `server/services/incidentIngest/idempotency.ts` | LRU + TTL helpers (§4.1). |
-| `server/services/incidentIngest/throttle.ts` | Per-fingerprint throttle map (§4.2). |
+| `server/services/incidentIngestorIdempotency.ts` | LRU + TTL helpers (§4.1). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
+| `server/services/incidentIngestorThrottle.ts` | Per-fingerprint throttle map (§4.2). Sibling of existing `server/services/incidentIngestor.ts`; final naming resolved by architect. |
 | `migrations/<NNNN>_phase_a_foundations.sql` | Schema additions per §4.5 + system principal seed + agent row seed for `system_monitor`. |
 | `migrations/<NNNN>_phase_a_foundations.down.sql` | Local-revert mate. |
 
@@ -2335,10 +2489,10 @@ Indicative inventory. Final paths and naming variants are an architect deliverab
 
 | Path | Change |
 |---|---|
-| `server/services/incidentIngest/recordIncident.ts` (or post-merge equivalent) | Wrap with idempotency (§4.1) + throttle (§4.2). Accept new `idempotencyKey?` field. No fingerprint algorithm changes. |
+| `server/services/incidentIngestor.ts` (`recordIncident` function) | Wrap with idempotency (§4.1) + throttle (§4.2). Accept new `idempotencyKey?` field. No fingerprint algorithm changes. |
 | `server/services/systemIncidentService.ts` | Add `assertSystemAdminContext` as the first line of every mutation method (§4.4). Add new mutation: `recordPromptFeedback`. Existing methods otherwise unchanged. |
 | `server/db/schema.ts` (Drizzle) | Add columns to `system_incidents` per §4.5; add new tables `system_monitor_baselines` and `system_monitor_heuristic_fires`. Extend the `system_incident_events.event_type` enum per §12.1. |
-| `server/jobs/index.ts` (or job registration entry) | Register `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh`, `system-monitor-triage`, `system-monitor-sweep` queues. Idempotency strategy declared per architecture.md `verify-idempotency-strategy-declared.sh` requirement. |
+| `server/jobs/index.ts` (or job registration entry) | Register `system-monitor-synthetic-checks`, `system-monitor-baseline-refresh`, `system-monitor-triage`, `system-monitor-sweep` queues. Idempotency + concurrency strategy declared in each job file per the post-merge B2 standard (`audit-remediation-followups §B2/B2-ext`); enforced by `verify-background-jobs-readiness.sh` and `verify-idempotency-strategy-declared.sh`. |
 | `server/routes/systemIncidents.ts` | Add `?diagnosis=...` query param to the list endpoint (§10.5). |
 | `server/services/agentRunner.ts` (or post-merge equivalent system-managed agent dispatch) | Wire the system-principal context (§4.3) at the entry point of system-managed agent runs. |
 | `client/src/pages/SystemIncidentsPage.tsx` | Wire new components into the drawer (§10.1). Add diagnosis filter pill to filter bar (§10.5). |
@@ -2372,8 +2526,8 @@ Pure-function tests. Fast, deterministic, no DB, no network. CI-gating per archi
 |---|---|
 | `idempotency.ts` (§4.1) | 100 calls in 1s with same key → 1 ingest, 99 LRU hits. 2 calls 61s apart → 2 ingests (TTL respected). LRU eviction at 10,001st key drops oldest. Different fingerprints with same key → independent (key is `${fp}:${key}`). |
 | `throttle.ts` (§4.2) | 100 calls in 1s with same fp → 1 ingest, 99 throttled. 2 calls 1.1s apart with same fp → 2 ingests. Map eviction at 50,001st unique fp → oldest drops, metric increments. Fingerprint isolation: cross-fp calls do not interfere. |
-| `systemPrincipal.ts` (§4.3) | `getSystemPrincipal()` returns reference-equal singleton across calls. Principal carries `scope='system'`, `isSystemPrincipal=true`, no PII. |
-| `assertSystemAdminContext.ts` (§4.4) | Throws `UnauthorizedSystemAccessError` for: unauthenticated context, regular user context, org-admin context, subaccount-admin context. Passes for: system-principal context, sysadmin context with `system_admin.write` permission. |
+| `systemPrincipal.ts` (§4.3) | `getSystemPrincipal()` returns reference-equal singleton across calls. Principal carries `type='system'`, `isSystemPrincipal=true`, no PII. |
+| `assertSystemAdminContext.ts` (§4.4) | Throws `UnauthorizedSystemAccessError` (with `code='unauthorized_system_access'`) for: unauthenticated context, regular user with `role='user'`/`'manager'`/`'client_user'`, org-admin context (`role='org_admin'`), missing `actorRole` opt on a non-system principal. Passes for: `type='system'` principal (Condition A), or any principal with `actorRole: 'system_admin'` plumbed by the calling route (Condition B). |
 
 **Investigate-Fix Protocol (§5):**
 
@@ -2426,7 +2580,7 @@ DB required, full stack. Each test in its own transaction; rolled back at the en
 
 | Test | What it proves |
 |---|---|
-| `systemPrincipal.integration.test.ts` | `withSystemPrincipal` sets the session-variable; SELECT against `system_incidents` works inside the wrapper, fails outside. SELECT against `agent_runs` returns rows (system principal has read access to tenant tables for monitoring). SELECT against tenant-write tables (e.g. `subaccounts`) without explicit grant returns RLS-denied. |
+| `systemPrincipal.integration.test.ts` | `withSystemPrincipal` produces a `ctx.principal.type === 'system'` value at every downstream call site; `assertSystemAdminContext(ctx)` admits it. Direct SELECT against `system_incidents` works without the wrapper too (no RLS), but a `system_incidents` mutation called from a non-sysadmin caller throws `UnauthorizedSystemAccessError`. Cross-tenant SELECT against `agent_runs` from inside the system-monitor sweep handler returns rows when wrapped in `withAdminConnectionGuarded({ allowRlsBypass: true, source: 'system_monitor_sweep', reason: '...' })`, and returns zero rows when attempted via `getOrgScopedDb` without the guard (tenant RLS dispatches on `service|user|delegated`, none of which match the system principal). Cross-tenant WRITE against a tenant table (e.g. `subaccounts`) without `allowRlsBypass: true` is blocked by the runtime `rlsBoundaryGuard`. |
 | `idempotencyEndToEnd.integration.test.ts` | Two `recordIncident` calls with same `idempotencyKey` and fp → exactly 1 row in `system_incidents`, 1 event row, occurrence count = 1. Same key + different fp → 2 rows. Different key + same fp → 2 occurrences (correct — distinct operations). |
 | `throttleEndToEnd.integration.test.ts` | 100 fast calls with same fp → 1 row, 1 occurrence count, 99 throttled metrics. |
 | Phase 0/0.5 regression suite | All existing Phase 0/0.5 tests still pass (no schema or behaviour regressions). Run as part of every CI build. |
@@ -2604,6 +2758,12 @@ If any command fails three times in a row with the same error, stop and write a 
 | `git diff main...HEAD --stat` | Review the file-by-file diff size. Sanity check: anything outside the §13 inventory was modified for a reason captured in commit messages. |
 | Architecture / capabilities doc check | `architecture.md` System Monitor section is present and accurate. `docs/capabilities.md` includes the new capability. CLAUDE.md §5.3 section is present. |
 | `verify-idempotency-strategy-declared.sh` (or equivalent CI gate) | All new pg-boss queues have idempotency declared per architecture.md §Event-Driven Architecture. |
+| `verify-background-jobs-readiness.sh` | Every new job file declares the B2 standard top-of-file Concurrency model + Idempotency model + failure mode (per `audit-remediation-followups §B2`). |
+| `verify-principal-context-propagation.sh` | Every system-managed handler entry-point is wrapped in `withSystemPrincipal` at call-site granularity (per `audit-remediation-followups §A1b`). |
+| `verify-rls-protected-tables.sh` | New `system_monitor_baselines` and `system_monitor_heuristic_fires` tables appear in `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale ending in `[ref: <spec-section>]` (per `audit-remediation-followups §A2`). |
+| `verify-rls-coverage.sh` | No drift between the manifest and CREATE POLICY statements; new tables are correctly classified as bypass (no policy expected). |
+| `verify-migration-sequencing.sh` | The new migration's NNNN prefix follows the canonical sequence — no gaps, no out-of-order numbers (per `audit-remediation-followups §G1`). |
+| `verify-architect-context.sh` | If `architecture.md` System Monitor section grew in this build, it stays consistent with the architect-context expected manifest (per `audit-remediation-followups §C2`). |
 | `pr-reviewer` agent | Independent code review pass. (Caller invokes after the spec-conformance pass; per CLAUDE.md the user runs review tooling, not the executor mid-build.) |
 
 **No CI bypass.** If any check fails, fix the root cause. Do not skip hooks (`--no-verify`), do not silence linter rules, do not mark tests `.skip`. The CLAUDE.md verification protocol applies in full.
@@ -2619,7 +2779,7 @@ The risks below are the ones the build is most likely to mishandle if the execut
 | **False-positive fatigue** — the agent fires on noise often enough that operators stop reading its diagnoses | High | High | Operator workflow collapses; the whole project's value vanishes regardless of code quality | Per-heuristic `expectedFpRate` metadata (§6.3), per-heuristic suppression rules (§6.3), per-fire confidence threshold (§9.10), N≥10 baseline gate (§7.4), the feedback loop (§11) that surfaces miscalibrated heuristics, and the kill-switch hierarchy (§12.2) that lets operators disable a misbehaving heuristic without disabling the whole agent |
 | **Sweep token cost runaway** — a busy day produces enough sweep candidates that the agent burns budget on noise | Medium | High | LLM cost line item spikes; pre-production budget exhausted before learning what works | Two-pass design (cheap pre-pass + deep-read on fire) (§9.3), 50-candidate / 200-KB hard caps per sweep (§9.3), per-fingerprint rate limit (§9.9), `SYSTEM_MONITOR_MIN_CONFIDENCE` floor (§9.10), `sweep_capped` event for visibility on excess (§12.1) |
 | **Baseline cold-start** — fresh deploys produce false-positive storms because every signal looks anomalous against an empty baseline | Medium | Medium | The first hour after every deploy is noisy enough that operators tune out | `requiresBaseline` declarative gate per heuristic (§6.2), `minSampleCount` default of 10 (§7.4), heuristics that do NOT require a baseline are categorical (§9.5 — empty output, max-turns-hit, etc.), synthetic checks degrade to `fired: false` on missing baseline (§8.2 cold-start tolerance), success criterion S6 explicitly tests this |
-| **System-principal blast radius** — a code path that uses `withSystemPrincipal` for purposes outside its intended scope leaks privileged reads or writes | Medium | High | Privilege escalation latent in the codebase; might be discovered only via incident | Singleton, immutable principal object (§4.3), session-variable RLS gate scoped to `system_*` tables only (§4.3), defence-in-depth `assertSystemAdminContext` on every mutation (§4.4), tenant-table writes always denied even for system principal (§4.3), integration test that confirms tenant-write access is denied (§14.2) |
+| **System-principal blast radius** — a code path that uses `withSystemPrincipal` for purposes outside its intended scope leaks privileged reads or writes | Medium | High | Privilege escalation latent in the codebase; might be discovered only via incident | Singleton, immutable principal object (§4.3); cross-tenant reads MUST go through `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason }, fn)` with explicit justification (§4.3), audited by the post-merge runtime `rlsBoundaryGuard` (`audit-remediation-followups §A2`); defence-in-depth `assertSystemAdminContext` on every `system_*` mutation (§4.4); tenant-table RLS still enforces against the system principal because the predicate builder has no `'system'` branch — every tenant-table read therefore must declare bypass intent or fail closed (§4.3); integration test that confirms a guarded admin-bypass write to a tenant table is rejected when the caller did not declare `allowRlsBypass: true` (§14.2) |
 | **Prompt quality drift** — agent prompts work on day one, then degrade as the codebase changes and the protocol doesn't evolve | Medium | Medium | Operators silently rewrite prompts in their head; the data we capture stops reflecting reality | Prompt validation rejects malformed output before write (§9.8), feedback widget captures `wasSuccessful` per resolve (§10.4), `investigate_prompt_outcome` event log (§11.2), iteration cadence in §5.5, protocol doc is git-versioned for audit |
 | **Single-PR review surface** — one PR covering 11–13 days of work is harder to review than smaller PRs | High | Medium | Reviewer fatigue → either rubber-stamp (bad) or extended review cycle (slow) | Per-slice verification gates (§15.3) make each slice internally reviewable, commit-by-commit history is structured by slice, the `progress.md` handoff entries make slice intent traceable, the user has explicitly accepted the tradeoff (§2.4), and the spec passes ChatGPT spec review before the build starts so the reviewer's mental model is pre-aligned |
 | **Agent loop / recursion** — the agent triages an incident it itself caused (e.g. agent run failure → incident → triage attempt → another failure → another incident) | Low | High | Runaway agent invocations + cost spike + audit log pollution | Self-recursion guard on `metadata.isSelfCheck` (§9.2), exclusion of `source = 'self_check'` from auto-triage (§9.2), per-fingerprint rate limit (§9.9), kill switch (§9.10) as last resort, the agent itself runs as system principal so its own runs are visibly distinct in audit, the `system-monitor-self-check` (Phase 0/0.5) catches downstream symptoms |
@@ -2651,8 +2811,8 @@ This section is the **content** of each slice — what concretely lands in each 
 
 **Deliverables in landing order:**
 
-1. **Schema migration.** One file (`migrations/<NNNN>_phase_a_foundations.sql`) covering all of §4.5: new columns on `system_incidents`, the two new tables (`system_monitor_baselines`, `system_monitor_heuristic_fires`), the system-principal user seed, the `system_monitor` agent row seed, the new event-type enum values per §12.1, and RLS policies for the two new tables. Forward-only with a `.down.sql` mate per `phase-0-spec.md §6.3`.
-2. **System principal module.** `getSystemPrincipal`, `withSystemPrincipal`, the AsyncLocalStorage wiring, the session-variable RLS interaction. Plus the integration test that confirms tenant-write access is denied even for system principal.
+1. **Schema migration.** One file (`migrations/<NNNN>_phase_a_foundations.sql`) covering all of §4.5: new columns on `system_incidents`, the two new tables (`system_monitor_baselines`, `system_monitor_heuristic_fires`) with **no** RLS policies (per §4.6 step 7 — they follow the existing `system_*` bypass posture), the system-principal user seed (`role='system_admin'` in the `is_system_org=true` org per §4.6 step 6), the `system_monitor` agent row seed, the new event-type enum values per §12.1, registration of the two new tables in `scripts/rls-not-applicable-allowlist.txt`. Forward-only with a `.down.sql` mate per `phase-0-spec.md §6.3`.
+2. **System principal module.** `getSystemPrincipal`, `withSystemPrincipal`, the AsyncLocalStorage wiring, the cross-tenant-read posture using `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason })` per §4.3. Plus the integration test that confirms cross-tenant reads succeed only via the admin-bypass guard and that `system_*` mutations require Condition A or B from §4.4.
 3. **`assertSystemAdminContext` guard.** Helper module + the typed error. Wired into every `system_incidents` mutation method as the first line — including the new `recordPromptFeedback` mutation (will be added in Slice C; placeholder only here).
 4. **Idempotency layer.** LRU + TTL helper, with `IncidentInput.idempotencyKey?` field added to the existing `recordIncident` callable. Wraps the existing ingest path; no fingerprint algorithm change.
 5. **Per-fingerprint throttle.** Process-local map + eviction policy + the metric. Same wrapper site as idempotency; throttle runs first, then idempotency, then existing ingest.
@@ -2660,14 +2820,14 @@ This section is the **content** of each slice — what concretely lands in each 
 **Tests landed in this slice:**
 
 - Pure unit tests for idempotency and throttle (per §14.1).
-- System-principal singleton test, session-variable RLS test (per §14.1, §14.2).
+- System-principal singleton test, admin-bypass-guard cross-tenant-read test (per §14.1, §14.2).
 - `assertSystemAdminContext` matrix (per §14.1).
 
 **What is NOT in this slice.** No synthetic checks, no agent triggers, no UI changes, no protocol doc, no heuristic registry. All of those are Slices B and C.
 
 **Verification gate.** Per §15.3 row "A". Must pass before handoff.
 
-**Handoff.** `progress.md` entry includes: confirmed migration number; confirmed agent row landed; confirmed system principal can read system tables and is denied tenant writes. Outstanding for Slice B: synthetic checks, protocol doc, registry skeleton, baseline service.
+**Handoff.** `progress.md` entry includes: confirmed migration number; confirmed agent row landed; confirmed system principal admits via `assertSystemAdminContext` Condition A and can read tenant tables only through the admin-bypass guard; confirmed both new system-monitor tables are registered in `scripts/rls-not-applicable-allowlist.txt` and pass `verify-rls-protected-tables.sh`. Outstanding for Slice B: synthetic checks, protocol doc, registry skeleton, baseline service.
 
 ### 17.2 Slice B — Phase 1 + Protocol + Registry + Baselining
 
@@ -2710,6 +2870,10 @@ This section is the **content** of each slice — what concretely lands in each 
 5. **Rate-limit logic.** Per §9.9 — per-fingerprint counter on the incident row, 24h rolling window, auto-escalation past the rate limit for high/critical incidents respecting Phase 0/0.5 escalation guardrails.
 6. **UI extensions.** All four new components per §10: `DiagnosisAnnotation`, `InvestigatePromptBlock`, `FeedbackWidget`, `DiagnosisFilterPill`. Wired into `SystemIncidentsPage`. The `recordPromptFeedback` mutation route lands here (server-side per §10.4) plus the `?diagnosis=...` query param on the list endpoint per §10.5.
 7. **`investigate_prompt_outcome` event.** Lands as part of the feedback mutation flow.
+8. **CI gates introduced by this spec.** Two grep-based gates land in Slice C alongside the heuristics + handlers they enforce:
+   - **Heuristic-purity gate** — greps every module under `server/services/systemMonitor/heuristics/**` for write-shaped Drizzle calls (`.insert(`, `.update(`, `.delete(`) and fails on hit. Enforces the §6.2 boundary contract (no DB mutation from `evaluate`).
+   - **Event-registry gate** — greps for raw event-type literals (`event_type:\s*['"]`) outside the canonical TypeScript union file (final path resolved by architect; e.g. `shared/types/systemIncidentEvent.ts`) and fails on hit. Enforces the §12.1 registry invariant (no inline event-type strings).
+   Both gates compose with the existing `verify-rls-contract-compliance.sh` posture — additive scripts under `scripts/gates/`, wired into `npm run test:gates` per §5 of `DEVELOPMENT_GUIDELINES.md`.
 
 **Tests landed in this slice:**
 
@@ -2755,7 +2919,7 @@ The mechanics of handing off between slices are covered in §15.2 (the protocol)
 **Slice A → Slice B handoff.** The next executor needs to know:
 
 - The migration number that landed (so Slice B doesn't pick the same one for any follow-on file).
-- Confirmation that the system-principal user row + `system_monitor` agent row both exist in the dev DB (the executor reads `users WHERE is_system = true` and `agents WHERE slug = 'system_monitor'`).
+- Confirmation that the system-principal user row + `system_monitor` agent row both exist in the dev DB (the executor reads `users WHERE id = SYSTEM_PRINCIPAL_USER_ID` — the canonical lookup, since the row is identified by its sentinel UUID, not by an `is_system` column which the table does not have — and `agents WHERE slug = 'system_monitor'`).
 - Confirmation that the new tables exist with their columns and RLS policies in place.
 - Any architect-resolved file paths (Slice A may surface paths the spec deferred to architect; Slice B inherits them).
 
@@ -2805,7 +2969,7 @@ These items are deliberate omissions, not deferred work. Naming them here preven
 
 **No baseline storage in a tenant-partitioned table.** Baselines are global / system-scoped. Per-tenant baselines are Phase 3.
 
-**No prompt versioning at runtime.** The Investigate-Fix Protocol doc is git-versioned. Generated `investigate_prompt` text does not carry a protocol-version stamp — drift is observable from `git log docs/investigate-fix-protocol.md`. If Phase 3 needs a stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
+**No structured protocol-version column on `system_incidents`.** The Investigate-Fix Protocol doc is git-versioned, and the generated `investigate_prompt` body carries an in-text `## Protocol\nv<n> (per docs/investigate-fix-protocol.md)` line at the top per §5.2 / §5.5 — that line IS the runtime stamp. What is deliberately omitted is a separate `system_incidents.investigate_protocol_version` column or any other structured per-row field; the prompt body is the work product (§4.10.7) and is the single source of truth for an incident's protocol version. If Phase 3 needs a structured stamp (e.g. to gate auto-fix to a specific protocol version), it is added then.
 
 **No analytics view in this spec.** A sysadmin dashboard that visualises feedback rollups (per-heuristic FP rate over time, prompt effectiveness trend, week-over-week incident volume) is not built. The data is captured per §11; the visualisation is a Phase 3 deliverable, designed alongside the auto-fix gate.
 
@@ -2877,10 +3041,11 @@ A small list, mainly to close the loop on architectural conversations the team h
 
 ## Spec Status
 
-**Status:** Finalised — v1 (Execution Ready)
-**Last review:** ChatGPT spec review, 4 rounds (2026-04-26)
-**Total findings processed:** 30 (24 applied, 6 rejected, 0 deferred)
-**Round 4 outcome:** Consistency / deduplication pass — no duplicate rules found that warrant collapsing. Cross-section restatements (§4.10 cross-cutting rules vs §9.x / §12.x local mechanisms) are complementary by design with explicit cross-references already in place. Spec locked.
+**Status:** Finalised — v1.3 (Execution Ready, post-merge audit alignment + ChatGPT round 5/6 tightening + NG10 reconciliation)
+**Last review:** ChatGPT spec review — 4 rounds (2026-04-26 v1.0) + 1 round (2026-04-27 v1.1, principal usage matrix + enqueue idempotency invariant + baseline drift reset + heuristic boundary contract + protocol version stamping rule + monitor-the-monitor health signals + event registry invariant) + 1 round (2026-04-27 v1.2, heuristic firing-constraint contract + per-entity fire-rate cap + sweep-coverage-degraded synthetic check + sweep coverage invariant + event-time vs write-time clarification) + finalisation cleanup (2026-04-27 v1.3, NG10 reconciliation — restated as "no structured protocol-version column" to align with the in-body `## Protocol\nvN` stamp added in §5.5).
+**Total findings processed:** 30 (v1.0) + 8 (v1.1) + 9 (v1.2) + 1 finalisation cleanup = 48 (32 applied, 14 rejected, 0 deferred, 5 partial-applies).
+**Latest round (v1.2) outcome:** Tightened false-positive containment + sweep observability invariants without changing observable behaviour. Six findings rejected as already-covered (incident lifecycle states / fingerprint-based dedup race / baseline smoothing / prompt determinism / retry classification / naming drift); three partial-applies (heuristic firing constraint, sweep coverage invariant + new synthetic check, event-time vs write-time clarification). All findings auto-triaged technical; zero user-facing decisions required.
+**Finalisation cleanup (v1.3):** NG10 / §5.7 "no prompt-text version stamp" / §3.2-echo non-goal text restated to match the §5.5 protocol-version stamping rule introduced in v1.1. The prompt body now carries a `## Protocol\nv<n>` line; what NG10 omits is a structured `system_incidents.investigate_protocol_version` column. All three sites reconciled in one pass; no behaviour change, no schema change.
 **Next step:** implementation per §15 rollout plan (Slice A → B → C → D).
 
 ---
