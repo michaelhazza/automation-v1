@@ -105,6 +105,8 @@ User reply: `all as recommended` — **defer F2 and F6** (both routed to `tasks/
 
 ## Round 2 — 2026-04-27T (post round 1 commit `2a74291d`)
 
+- Round 2 commit: `da31bfa7` (pushed to `origin/impl/pre-launch-hardening`)
+
 ### ChatGPT Feedback (raw)
 
 ```
