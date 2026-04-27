@@ -71,3 +71,14 @@ These violations do NOT interact with the Chunk 01–07 scope (which adds exactl
 - Chunk 07 (Seed + gates): ✓ COMPLETE
 - Chunk 08 (Local-dev validation): ✓ COMPLETE (Phase 4 pre-existing weekly-digest issue noted)
 - Chunk 09 (Pre-merge verification): ✓ COMPLETE
+
+---
+
+## Review pipeline
+
+- **spec-conformance:** CONFORMANT_AFTER_FIXES — log `tasks/review-logs/spec-conformance-log-system-agents-v7-1-migration-2026-04-27T07-41-47Z.md`
+- **dual-reviewer:** Codex quota exhausted — no findings — log `tasks/review-logs/dual-review-log-system-agents-v7-1-migration-2026-04-27T08-09-48Z.md`
+- **pr-reviewer:** Blocking M1–M7 + S2/S7–S9 fixed in-branch (commit `b66fe0d7`)
+- **ChatGPT PR review:** 1 round — 3 blocking findings implemented (commits `1019abb3`, `675e5966`, `0d2b7e33`), 2 deferred to `tasks/todo.md` — log `tasks/review-logs/chatgpt-pr-review-claude-audit-system-agents-46kTN-2026-04-27T08-36-18Z.md`
+
+**Status: PR #216 — READY TO MERGE**
