@@ -15,6 +15,7 @@ export const retryRateIncrease: Heuristic = {
   requiresBaseline: [
     { entityKind: 'agent', metric: 'token_count_input', minSampleCount: MIN_SAMPLE_COUNT },
   ],
+  suppressions: [],
   firesPerEntityPerHour: 1,
 
   async evaluate(ctx: HeuristicContext, candidate: Candidate): Promise<HeuristicResult> {

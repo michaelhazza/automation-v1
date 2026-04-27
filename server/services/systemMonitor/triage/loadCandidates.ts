@@ -44,7 +44,7 @@ async function loadAgentRunCandidates(now: Date): Promise<Candidate[]> {
   const rows = await withAdminConnectionGuarded<Row[]>(
     { allowRlsBypass: true, source: 'system_monitor_sweep', reason: 'cross-tenant agent run sweep for heuristic evaluation' },
     async (adminDb) => {
-      const result = await adminDb.execute<Row>(sql`
+      const result: Row[] = await adminDb.execute(sql`
         SELECT
           ar.id                         AS run_id,
           ar.agent_id,
@@ -82,7 +82,7 @@ async function loadAgentRunCandidates(now: Date): Promise<Candidate[]> {
         ORDER BY ar.completed_at DESC
         LIMIT ${CANDIDATE_LIMIT}
       `);
-      return result.rows as Row[];
+      return result;
     },
   );
 

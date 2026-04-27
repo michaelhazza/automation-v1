@@ -14,6 +14,7 @@ export const costPerOutcomeIncreasing: Heuristic = {
   requiresBaseline: [
     { entityKind: 'agent', metric: 'cost_per_outcome', minSampleCount: MIN_SAMPLE_COUNT },
   ],
+  suppressions: [],
   firesPerEntityPerHour: 1,
 
   async evaluate(ctx: HeuristicContext, candidate: Candidate): Promise<HeuristicResult> {

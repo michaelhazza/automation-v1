@@ -15,6 +15,7 @@ export const latencyCreep: Heuristic = {
   requiresBaseline: [
     { entityKind: 'agent', metric: 'runtime_ms', minSampleCount: MIN_SAMPLE_COUNT },
   ],
+  suppressions: [],
   firesPerEntityPerHour: 2,
 
   async evaluate(ctx: HeuristicContext, candidate: Candidate): Promise<HeuristicResult> {

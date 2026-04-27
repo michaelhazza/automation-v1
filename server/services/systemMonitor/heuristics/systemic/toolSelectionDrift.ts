@@ -15,6 +15,7 @@ export const toolSelectionDrift: Heuristic = {
   requiresBaseline: [
     { entityKind: 'agent', metric: 'runtime_ms', minSampleCount: MIN_SAMPLE_COUNT },
   ],
+  suppressions: [],
   firesPerEntityPerHour: 1,
 
   async evaluate(ctx: HeuristicContext, candidate: Candidate): Promise<HeuristicResult> {

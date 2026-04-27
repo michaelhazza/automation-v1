@@ -11,7 +11,7 @@ import { db } from '../../../db/index.js';
 import { systemIncidentEvents } from '../../../db/schema/index.js';
 import { logger } from '../../../lib/logger.js';
 import { getEligibleHeuristics } from '../heuristics/index.js';
-import { makeBaselineReader } from '../baselines/baselineReader.js';
+import { baselineReader } from '../baselines/baselineReader.js';
 import { recordIncident } from '../../incidentIngestor.js';
 import { bucket15min, loadCandidates } from './loadCandidates.js';
 import { clusterFires, type HeuristicFireRecord } from './clusterFires.js';
@@ -40,7 +40,7 @@ export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
   const bucketKey = bucket15min(now);
 
   const heuristics = getEligibleHeuristics();
-  const baselines = makeBaselineReader();
+  const baselines = baselineReader;
 
   const firedRecords: HeuristicFireRecord[] = [];
   let suppressedCount = 0;

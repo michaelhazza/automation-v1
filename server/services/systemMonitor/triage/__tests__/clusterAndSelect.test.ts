@@ -38,7 +38,7 @@ function makeFireRecord(overrides: Partial<HeuristicFireRecord> = {}): Heuristic
     entityKind: overrides.entityKind ?? 'agent_run',
     entityId: overrides.entityId ?? 'entity-1',
     confidence: overrides.confidence ?? 0.8,
-    evidence: overrides.evidence ?? { signals: [] },
+    evidence: overrides.evidence ?? [],
     firedAt: overrides.firedAt ?? new Date(),
   };
 }
