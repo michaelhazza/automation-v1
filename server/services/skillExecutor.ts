@@ -2133,7 +2133,7 @@ async function executeWithActionAudit(
         RETURNING (xmax = 0) AS is_first_writer
       `);
 
-      isFirstWriter = (insertResult.rows[0] as { is_first_writer?: boolean } | undefined)?.is_first_writer === true;
+      isFirstWriter = ((insertResult as unknown as { rows: unknown[] }).rows[0] as { is_first_writer?: boolean } | undefined)?.is_first_writer === true;
 
       if (!isFirstWriter) {
         const [existing] = await db.select()
@@ -2167,7 +2167,7 @@ async function executeWithActionAudit(
 
             if (!reclaimEligible) {
               if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs }, { level: 'WARN' });
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs }, { level: 'WARNING' });
               }
               pipelineSpan.end({ output: { status: 'in_flight' } });
               return { status: 'in_flight', message: 'Another caller is processing this idempotent request (reclaim disabled)', retryable_after_ms: 5000 };
@@ -2186,10 +2186,10 @@ async function executeWithActionAudit(
                 .returning({ sub: skillIdempotencyKeys.subaccountId });
 
               if (reclaim.length >= 1) {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_reclaimed', key_hash: keyHash, age_ms: ageMs }, { level: 'WARN' });
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_reclaimed', key_hash: keyHash, age_ms: ageMs }, { level: 'WARNING' });
                 isFirstWriter = true;
               } else {
-                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash }, { level: 'WARN' });
+                createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash }, { level: 'WARNING' });
                 pipelineSpan.end({ output: { status: 'in_flight' } });
                 return { status: 'in_flight', message: 'Another caller reclaimed this in_flight request', retryable_after_ms: 1000 };
               }
@@ -2214,7 +2214,7 @@ async function executeWithActionAudit(
       if (preconditions.status === 'blocked') {
         createEvent('skill.blocked', {
           skillName: actionType, reason: preconditions.reason, provider: (preconditions as Record<string, unknown>)['provider'], requires: (preconditions as Record<string, unknown>)['requires'],
-        }, { level: 'INFO' });
+        });
         pipelineSpan.end({ output: preconditions });
         return preconditions;
       }
@@ -2246,7 +2246,7 @@ async function executeWithActionAudit(
           reason: String(r.status),
           warning: r['warning'],
           retryable: r.status === 'transient_error',
-        }, { level: 'WARN' });
+        }, { level: 'WARNING' });
       }
     }
 
@@ -2267,7 +2267,7 @@ async function executeWithActionAudit(
 
       if (updateResult.length === 0) {
         // Terminal race lost — read and return the winning row's payload
-        createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARN' });
+        createEvent('skill.warn', { skillName: actionType, reason: 'terminal_race_lost', key_hash: keyHash }, { level: 'WARNING' });
         const [winner] = await db.select()
           .from(skillIdempotencyKeys)
           .where(and(

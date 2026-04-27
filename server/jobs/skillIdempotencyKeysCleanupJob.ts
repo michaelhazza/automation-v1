@@ -34,7 +34,7 @@ export async function runSkillIdempotencyKeysCleanup(): Promise<void> {
             LIMIT ${BATCH_SIZE}
           )
         `);
-        const deleted = result.rowCount ?? 0;
+        const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
         totalDeleted += deleted;
         if (deleted < BATCH_SIZE) break;
       }
