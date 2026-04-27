@@ -343,8 +343,16 @@ export async function decideBriefApproval(
     }
   }
 
+  // Use the server-stamped copy as the base so the response carries the
+  // same `serverCreatedAt` value that was persisted and emitted on the
+  // websocket. Falls back to the pre-stamp object if the writer returned
+  // no stamped copy (defensive — should not occur on the success branch).
+  const persistedDecision = (writeResult.stampedArtefacts.find(
+    (a) => a.artefactId === pendingDecisionArtefact.artefactId,
+  ) ?? pendingDecisionArtefact) as BriefApprovalDecision;
+
   const decisionArtefact: BriefApprovalDecision = {
-    ...pendingDecisionArtefact,
+    ...persistedDecision,
     executionStatus,
   };
 

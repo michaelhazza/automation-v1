@@ -28,12 +28,30 @@
 #   3. Reviewers reject any entry that says "see PR" or "ask <person>" — the
 #      reference must point at a durable, version-controlled source so the
 #      next reviewer can audit the entry without git archaeology.
+#   4. Functions that query an allow-listed table MUST carry a function-level
+#      annotation in the source so the RLS bypass is visible at the call
+#      site, not just at the table-listing site. Required form:
+#
+#        // @rls-allowlist-bypass: <table_name> [ref: <invariant-id-or-spec-§>]
+#        async function fooJob() { ... }
+#
+#      `grep -nE "@rls-allowlist-bypass" server/` lists every annotated
+#      caller in <2 seconds — reviewers run this when auditing bypass
+#      surface area. The rule keeps blast radius tight: an allow-listed
+#      table cannot grow new query call sites unless every new caller
+#      stamps its intent. Annotation enforcement is grep-based; no CI
+#      gate is added (a new gate is a new primitive — see
+#      DEVELOPMENT_GUIDELINES § 8.4 — and the grep is sufficient at the
+#      current call-volume).
 #
 # Rationale (why the format rules exist): allow-lists tend to become dumping
 # grounds for exceptions. Forcing every entry to cite an invariant or spec
-# section keeps the file scoped to documented carve-outs and prevents a
-# later "just add it to the list" reflex from accumulating undocumented
-# bypasses.
+# section, and forcing every CALLER of an allow-listed table to annotate
+# its bypass intent at the function level, keeps the file scoped to
+# documented carve-outs and prevents both (a) a later "just add it to the
+# list" reflex AND (b) scope creep inside a file that is already on the
+# list, which would otherwise let unrelated cross-tenant logic drift in
+# under cover of a legitimate bypass.
 #
 # (Currently empty — every tenant table on `main` is registered in
 # rlsProtectedTables.ts. Add new entries below as needed.)

@@ -78,6 +78,15 @@ export interface BriefArtefactBase {
   relatedArtefactIds?: string[];
   /** Per-artefact contract version. Defaults to BRIEF_RESULT_CONTRACT_VERSION when omitted. */
   contractVersion?: number;
+  /**
+   * Server-authoritative ISO-8601 timestamp stamped at persistence time.
+   * Optional — older persisted artefacts may not carry it. Used by the UI
+   * to keep timeline order consistent when WS events for distinct
+   * artefactIds arrive out of logical order. The optimistic POST path
+   * sees this field on the server's response, so client-side merges that
+   * carry a `serverCreatedAt` can safely re-sort.
+   */
+  serverCreatedAt?: string;
 }
 
 // ---------------------------------------------------------------------------

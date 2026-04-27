@@ -80,6 +80,10 @@ import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
+import {
+  assertValidTransition,
+  InvalidTransitionError,
+} from '../../shared/stateMachineGuards.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -927,16 +931,41 @@ export const WorkflowEngineService = {
         // Mark the step run as failed and re-tick to evaluate failure policy.
         const sr = liveStepRuns.find((s) => s.stepId === step.id);
         if (sr) {
-          await db
-            .update(workflowStepRuns)
-            .set({
-              status: 'failed',
-              error: err instanceof Error ? err.message : String(err),
-              completedAt: new Date(),
-              version: sr.version + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(workflowStepRuns.id, sr.id));
+          // Defence-in-depth: skip the failure write if the row is already
+          // terminal. Logged + observable; we do not propagate the violation
+          // because the outer block is itself an error handler — re-throwing
+          // would brick the tick and prevent re-evaluation.
+          try {
+            assertValidTransition({
+              kind: 'workflow_step_run',
+              recordId: sr.id,
+              from: sr.status,
+              to: 'failed',
+            });
+            await db
+              .update(workflowStepRuns)
+              .set({
+                status: 'failed',
+                error: err instanceof Error ? err.message : String(err),
+                completedAt: new Date(),
+                version: sr.version + 1,
+                updatedAt: new Date(),
+              })
+              .where(eq(workflowStepRuns.id, sr.id));
+          } catch (assertErr) {
+            if (assertErr instanceof InvalidTransitionError) {
+              logger.warn('workflow_step_invalid_transition_skipped', {
+                event: 'state_machine.invalid_transition',
+                kind: assertErr.kind,
+                recordId: assertErr.recordId,
+                from: assertErr.from,
+                to: assertErr.to,
+                via: 'dispatch_error_path',
+              });
+            } else {
+              throw assertErr;
+            }
+          }
         }
         await this.enqueueTick(runId);
       }
@@ -2660,6 +2689,12 @@ export const WorkflowEngineService = {
     } catch (err) {
       logger.error('workflow_context_overflow', { runId: run.id, bytes: nextBytes });
       const failedAt = new Date();
+      assertValidTransition({
+        kind: 'workflow_run',
+        recordId: run.id,
+        from: run.status,
+        to: 'failed',
+      });
       await db
         .update(workflowRuns)
         .set({
@@ -2684,6 +2719,13 @@ export const WorkflowEngineService = {
       });
       return;
     }
+
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'completed',
+    });
 
     await db.transaction(async (tx) => {
       await tx
@@ -2825,6 +2867,12 @@ export const WorkflowEngineService = {
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.id, stepRunId));
     if (!sr) return;
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'failed',
+    });
     await db
       .update(workflowStepRuns)
       .set({

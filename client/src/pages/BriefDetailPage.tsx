@@ -43,20 +43,43 @@ interface BriefDetailPageProps {
  * dedup the same `artefactId` can render twice (one optimistic, one WS-confirmed).
  *
  * Replace-or-append semantics: if the incoming artefact's id already exists in
- * the list, replace the entry in place (preserving order); otherwise append.
- * Replace-in-place is the right policy because the WS-confirmed copy is
- * authoritative — it carries server-side fields (timestamps, derived state)
- * that the optimistic copy may not.
+ * the list, replace the entry in place; otherwise append. Replace-in-place is
+ * the right policy because the WS-confirmed copy is authoritative — it carries
+ * server-side fields (timestamps, derived state) that the optimistic copy
+ * may not.
+ *
+ * Ordering: when the incoming artefact carries a server-stamped
+ * `serverCreatedAt`, the merged list is re-sorted by that field so the
+ * timeline reflects logical write order rather than WS arrival order. This
+ * matters when distinct-artefactId events arrive out of order (delayed WS
+ * delivery, multi-emitter race). Optimistic inserts that lack a server
+ * timestamp skip the re-sort to avoid visible reflow before the
+ * WS-confirmed copy lands. ISO-8601 lexicographic compare is correct
+ * chronological order.
  */
 function mergeArtefactById(
   prev: BriefChatArtefact[],
   incoming: BriefChatArtefact,
 ): BriefChatArtefact[] {
   const idx = prev.findIndex((a) => a.artefactId === incoming.artefactId);
-  if (idx === -1) return [...prev, incoming];
-  const next = prev.slice();
-  next[idx] = incoming;
-  return next;
+  const merged = idx === -1
+    ? [...prev, incoming]
+    : (() => {
+        const next = prev.slice();
+        next[idx] = incoming;
+        return next;
+      })();
+
+  if (!incoming.serverCreatedAt) return merged;
+
+  return [...merged].sort((a, b) => {
+    const ta = a.serverCreatedAt;
+    const tb = b.serverCreatedAt;
+    if (ta && tb) return ta < tb ? -1 : ta > tb ? 1 : 0;
+    if (!ta && tb) return 1;   // a has no server stamp — push to end
+    if (ta && !tb) return -1;  // b has no server stamp — push to end
+    return 0;
+  });
 }
 
 function ArtefactItem({ artefact, isSuperseded, onSuggestionClick, onApprove, onReject }: {

@@ -101,3 +101,97 @@ User reply: `all as recommended` — **defer F2 and F6** (both routed to `tasks/
 
 **Round 1 complete.** Two implements applied, three rejects auto-decided against locked architectural decisions, two defers user-approved and routed for future specs. PR ready for next ChatGPT iteration if more feedback exists; otherwise PR is mergeable per the original ChatGPT verdict ("Ready to merge with minor tightening").
 
+---
+
+## Round 2 — 2026-04-27T (post round 1 commit `2a74291d`)
+
+### ChatGPT Feedback (raw)
+
+```
+[Round 2 raw feedback — 7 findings; ChatGPT challenged round-1 deferrals (especially F6),
+ raised new ordering bug R2-1, write-side write-leakage R2-2 split from F2, meta-invariant
+ R2-3, allowlist function-level annotation R2-4, getErrorCode helper R2-5, assertValidTransition
+ minimal R2-6, observability meta-observation R2-7. Full text preserved in commit message.]
+```
+
+### User direction
+
+User explicitly directed: **do not defer R2-6**. ChatGPT's follow-up review of triage agreed
+("R2-6 is the most important decision in this round" / "is cheap now, very expensive later").
+User also accepted ChatGPT's refinements on R2-1 (timestamp nuance) and R2-2 (split F2).
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| R2-1 | Artefact ordering: WS events for distinct artefactIds may arrive out of logical order; sort merged list by `serverCreatedAt` only when incoming has it | technical | implement | auto (implement) | medium | Real subtle bug. Server stamps `serverCreatedAt` at write time; client re-sorts only on stamped incomings to avoid optimistic flicker. Verified `resolveLifecyclePure` is pointer-based, not order-dependent — sort is safe. |
+| R2-2 | Write-path leakage: F2 deferred reads, but writes can still attach to wrong subaccount | technical-escalated | defer (extend F2 → F2a/F2b split) | auto (defer) | medium-high | Split F2 into F2a (read) and F2b (write). F2b shipped a minimal observability surface (`server/lib/cachedContextWriteScope.ts`) NOW; full assert promotion deferred under F2b in `tasks/todo.md`. Read leakage = exposure; write leakage = corruption — splitting reflects different blast radii. |
+| R2-3 | Meta-invariant: every invariant with runtime implication enforced at boundary, not just tested | technical | reject | auto (reject) | low | Subsumed by R2-6 (state-transition boundary) and F2b log (write-boundary). A philosophical meta-rule without specific code change adds no value beyond what R2-6 + F2b implement. |
+| R2-4 | Allowlist function-level annotation `// @rls-allowlist-bypass: <table> [ref: ...]` | technical | implement (minimal, no CI gate) | auto (implement) | low | Extended `scripts/rls-not-applicable-allowlist.txt` format-rules header with rule #4 requiring function-level annotation on every caller of an allow-listed table. Grep-based discoverability; no CI gate (matches F2 architectural choice — new gate is a new primitive). |
+| R2-5 | `getErrorCode(err)` helper — handles `string`, `{ code }`, `{ error: string }`, `{ error: { code } }`, `unknown` | technical | implement | auto (implement) | low | Soft helper, doesn't break Branch A (no envelope, no shape change). Stops string-parsing logic spreading across consumers. New file `shared/errorCode.ts` + 13 pure tests. Existing call sites migrate opportunistically. |
+| R2-6 | Centralised `assertValidTransition(from, to)` runtime guard — minimal version, do NOT defer | technical | implement | user-directed (implement) | medium | **User-directed implement — round-1 defer overturned.** Minimal coverage scope per ChatGPT advice: terminal-write boundaries only (post-terminal mutation, terminal→terminal, unknown-status target). New `shared/stateMachineGuards.ts` + 18 pure tests + wired at 5 critical sites in `workflowEngineService.ts` and `agentRunFinalizationService.ts`. Remaining call sites (decideApproval, intermediate non-terminal moves, run-aggregation paths) routed to follow-up under `CHATGPT-PR211-F6 (FOLLOW-UP)`. |
+| R2-7 | Operability/observability meta-observation | n/a | no-op | no-op | n/a | Informational — not actionable inside this PR. Captures that the next bottleneck is operability, not correctness. |
+
+### Auto-applied this round
+
+- **R2-1:**
+  - `shared/types/briefResultContract.ts` — added optional `serverCreatedAt` to `BriefArtefactBase`.
+  - `server/services/briefConversationWriter.ts` — stamps `serverCreatedAt` at persistence time; returns stamped copies via new `WriteMessageResult.stampedArtefacts`.
+  - `server/services/briefApprovalService.ts` — uses stamped copy for the response artefact so optimistic insert sees the same timestamp the WS event will carry.
+  - `client/src/pages/BriefDetailPage.tsx` — `mergeArtefactById` re-sorts by `serverCreatedAt` when incoming carries one; falls through to legacy replace-or-append for optimistic inserts without timestamps.
+
+- **R2-2 (F2b minimal):**
+  - `server/lib/cachedContextWriteScope.ts` — observability helper logging the `(organisationId, subaccountId)` scope tuple at every cached-context write boundary.
+  - `server/services/referenceDocumentService.ts:create` and `server/services/documentBundleService.ts:create` — wired as the representative call sites; remaining call sites adopt under the deferred F2b spec.
+
+- **R2-4:**
+  - `scripts/rls-not-applicable-allowlist.txt` — extended format-rules header with rule #4 (function-level `@rls-allowlist-bypass` annotation requirement, grep-based, no CI gate).
+
+- **R2-5:**
+  - `shared/errorCode.ts` — new `getErrorCode(input)` helper; handles flat string, `{ code }`, `{ error: string }`, `{ error: { code } }`, null/undefined, Error-like objects.
+  - `shared/__tests__/errorCodePure.test.ts` — 13 pure tests covering all input shapes.
+
+- **R2-6:**
+  - `shared/stateMachineGuards.ts` — new pure module; `assertValidTransition({ kind, recordId, from, to })` for `agent_run` / `workflow_run` / `workflow_step_run`. Throws `InvalidTransitionError` when `from` is terminal and `from !== to`, or when `to` is unknown. Same-state writes (idempotent retry) always pass.
+  - `shared/__tests__/stateMachineGuardsPure.test.ts` — 18 pure tests.
+  - `server/services/workflowEngineService.ts` — wired at `completeStepRunInternal` step terminal write, `completeStepRunInternal` context-overflow run-level terminal write, `failStepRun`, and dispatch-error path (log-and-skip variant since the outer block is itself an error handler).
+  - `server/services/agentRunFinalizationService.ts` — wired at `finaliseAgentRunFromIeeRun` pre-update assertion.
+
+### Routed to follow-up
+
+- **F2 → F2a (read-side mechanical enforcement)** — existing deferred item retained.
+- **F2b (write-side mechanical enforcement)** — new deferred item; promotes the log helper to a hard assertion with explicit `{ orgScoped: true }` discriminator.
+- **F6 FOLLOW-UP** — extend `assertValidTransition` coverage to remaining status-write sites; add transition tables for intermediate non-terminal moves.
+
+### Round 2 summary
+
+| Outcome | Count | Items |
+|---------|-------|-------|
+| Auto-implemented | 4 | R2-1, R2-4, R2-5, R2-6 |
+| Auto-rejected | 1 | R2-3 |
+| Auto-deferred (split into follow-ups) | 1 | R2-2 (→ F2b) |
+| No-op (informational) | 1 | R2-7 |
+| **Total findings** | **7** | |
+
+### Files changed this round
+
+- `shared/stateMachineGuards.ts` (new)
+- `shared/__tests__/stateMachineGuardsPure.test.ts` (new)
+- `shared/errorCode.ts` (new)
+- `shared/__tests__/errorCodePure.test.ts` (new)
+- `shared/types/briefResultContract.ts` (added `serverCreatedAt`)
+- `server/lib/cachedContextWriteScope.ts` (new)
+- `server/services/workflowEngineService.ts` (assertValidTransition wiring at 4 sites)
+- `server/services/agentRunFinalizationService.ts` (assertValidTransition wiring + import)
+- `server/services/briefConversationWriter.ts` (stamp `serverCreatedAt`; return stamped copies)
+- `server/services/briefApprovalService.ts` (use stamped copy in response)
+- `server/services/referenceDocumentService.ts` (logCachedContextWrite)
+- `server/services/documentBundleService.ts` (logCachedContextWrite)
+- `client/src/pages/BriefDetailPage.tsx` (sort by `serverCreatedAt` in `mergeArtefactById`)
+- `scripts/rls-not-applicable-allowlist.txt` (rule #4 — function-level annotation)
+- `tasks/todo.md` (F2 split into F2a + F2b; F6 follow-up entry)
+
+### Verdict
+
+**Round 2 complete.** ChatGPT's two "must do before merge" items (R2-6 assertValidTransition, R2-1 ordering) shipped. R2-5 + R2-4 shipped as low-effort high-leverage additions. R2-2 split into F2a/F2b with F2b's minimal log/assert shipped now and full enforcement deferred. R2-3 rejected as subsumed by R2-6 + F2b. R2-7 captured as a "next phase" pointer (operability is the next bottleneck per ChatGPT's meta-observation). PR remains mergeable.
+

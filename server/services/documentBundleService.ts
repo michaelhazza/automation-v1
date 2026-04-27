@@ -16,6 +16,7 @@ import type { DocumentBundleAttachment } from '../db/schema/documentBundleAttach
 import type { AttachmentSubjectType } from '../db/schema/documentBundleAttachments.js';
 import type { ReferenceDocument } from '../db/schema/referenceDocuments.js';
 import { computeDocSetHash } from './documentBundleServicePure.js';
+import { logCachedContextWrite } from '../lib/cachedContextWriteScope.js';
 
 // ---------------------------------------------------------------------------
 // documentBundleService — stateful I/O for document bundles
@@ -74,6 +75,12 @@ export async function create(input: {
   if (!input.name.trim()) {
     throw { statusCode: 400, code: CACHED_CONTEXT_BUNDLE_NAME_EMPTY, message: 'Bundle name cannot be empty' };
   }
+  // F2b — observability surface for cached-context writes (see
+  // server/lib/cachedContextWriteScope.ts).
+  logCachedContextWrite('documentBundleService.create', {
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+  }, { name: input.name });
   const db = getOrgScopedDb('documentBundleService.create');
   try {
     const [row] = await db.insert(documentBundles).values({

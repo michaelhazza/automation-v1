@@ -5,6 +5,7 @@ import type { ReferenceDocument, NewReferenceDocument } from '../db/schema/refer
 import type { ReferenceDocumentVersion } from '../db/schema/referenceDocumentVersions.js';
 import { hashContent, hashSerialized, serializeDocument, DOC_DELIMITER_END } from './referenceDocumentServicePure.js';
 import { countTokens, SUPPORTED_MODEL_FAMILIES } from './llmRouter.js';
+import { logCachedContextWrite } from '../lib/cachedContextWriteScope.js';
 
 // ---------------------------------------------------------------------------
 // Reference Document Service — stateful I/O
@@ -59,6 +60,14 @@ export async function create(input: {
   createdByUserId: string;
 }): Promise<ReferenceDocument> {
   assertNoDelimiter(input.content);
+
+  // F2b — observability surface for cached-context writes. Logs the scope
+  // tuple once per logical write boundary so a future leak (forgotten
+  // subaccount, accidental org-scope) surfaces in logs.
+  logCachedContextWrite('referenceDocumentService.create', {
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+  }, { name: input.name });
 
   // Count tokens for all model families before any DB write. If this fails the
   // document is not persisted — strict failure policy per spec §6.1.

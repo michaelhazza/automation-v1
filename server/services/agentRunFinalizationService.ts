@@ -35,6 +35,7 @@ import {
   computeMeaningfulOutputPure,
 } from './agentRunFinalizationServicePure.js';
 import { computeRunResultStatus } from './agentExecutionServicePure.js';
+import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths. The DB-touching entry points below are the only
@@ -283,6 +284,18 @@ export async function finaliseAgentRunFromIeeRun(
       : null;
 
     if (!parentAlreadyTerminal) {
+      // Defence-in-depth: explicit transition assertion before the terminal
+      // write. The WHERE clause below already gates on a non-terminal status
+      // set, but assertValidTransition surfaces the contract violation as a
+      // typed error rather than a silent no-op UPDATE. See
+      // shared/stateMachineGuards.ts.
+      assertValidTransition({
+        kind: 'agent_run',
+        recordId: parent.id,
+        from: parent.status,
+        to: terminalStatus,
+      });
+
       // Roll up token + call counts inside the transaction so late
       // llm_requests inserts (up to the FOR UPDATE lock) are included.
       // See aggregateTokensForIeeRun JSDoc for the race this avoids.
