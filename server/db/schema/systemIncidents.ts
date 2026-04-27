@@ -6,6 +6,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { tasks } from './tasks';
+import { agentRuns } from './agentRuns';
 
 export type SystemIncidentSource = 'route' | 'job' | 'agent' | 'connector' | 'skill' | 'llm' | 'synthetic' | 'self';
 export type SystemIncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -65,6 +66,16 @@ export const systemIncidents = pgTable(
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // Agent triage — Phase A+2 additions (migration 0233)
+    investigatePrompt: text('investigate_prompt'),
+    agentDiagnosis: jsonb('agent_diagnosis'),
+    agentDiagnosisRunId: uuid('agent_diagnosis_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    promptWasUseful: boolean('prompt_was_useful'),
+    promptFeedbackText: text('prompt_feedback_text'),
+    triageAttemptCount: integer('triage_attempt_count').notNull().default(0),
+    lastTriageAttemptAt: timestamp('last_triage_attempt_at', { withTimezone: true }),
+    sweepEvidenceRunIds: uuid('sweep_evidence_run_ids').array().notNull().default(sql`'{}'`),
   },
   (table) => ({
     // One active incident per fingerprint. Resolved/suppressed rows do not block
