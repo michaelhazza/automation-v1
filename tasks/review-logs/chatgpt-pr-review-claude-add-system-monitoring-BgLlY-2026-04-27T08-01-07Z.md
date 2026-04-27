@@ -225,3 +225,123 @@ Correctness fixes per the user's routing override:
 - Files changed this round: 1 modified (`DiagnosisAnnotation.tsx`), 1 modified (`tasks/post-merge-system-monitor.md`)
 - Deferred items routed to: `tasks/post-merge-system-monitor.md` § Correctness fixes (per user routing override)
 
+---
+
+## Round 3 — 2026-04-27T08-37-11Z
+
+### ChatGPT Feedback (raw)
+
+(Round 3 raw text not pasted into this session — user supplied per-item
+decisions directly. Round 3 produced three findings on the same
+`DiagnosisAnnotation.tsx` surface plus a defer-enrichment proposal on the
+deferred staleness-guard item:
+1. Tighten `partial`-banner copy to read as a stronger call-to-action
+   rather than the current advisory wording.
+2. Reorder the `triageAttemptCount > 0` branch so the explicit
+   `triageStatus === 'failed'` check fires before the rate-limited check
+   (currently rate-limit precedence wins when both conditions hold).
+3. Enrich the deferred staleness-guard item (round 2 #4) in
+   `tasks/post-merge-system-monitor.md` with implementation-coordination
+   notes — specifically: (a) the staleness flip MUST emit an incident
+   event, not just a silent column flip, and (b) the staleness recovery
+   path MUST coordinate with the deferred rate-limit retry idempotency
+   fix (item 7b) so a single never-completed attempt is not double-counted.)
+
+### Recommendations and Decisions
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Scope | Rationale |
+|---|---------|--------|----------------|----------------|----------|-------|-----------|
+| 1 | Tighten `partial`-banner copy in `DiagnosisAnnotation.tsx` | user-facing | reject | reject | low | standard | Visible operator copy. Current "Diagnosis recorded without a validated investigate prompt — operator review recommended." was deliberately set in round 2 to an amber-advisory tone to differentiate from the red-imperative `invalid` banner. Strengthening the copy collapses the round-2 severity split. User approved as recommended (reject, keep current) |
+| 2 | Reorder rate-limited-before-failed banner precedence in `DiagnosisAnnotation.tsx` | user-facing | reject | reject | low | standard | Visible operator behaviour. Rate-limit (≥ TRIAGE_ATTEMPT_CAP) is a structural-stop state — once an incident is rate-limited, it cannot be retried regardless of the last attempt's outcome, so surfacing the rate-limit banner first is the correct precedence. Reordering would let a `failed` banner mask the rate-limit signal. User approved as recommended (reject, keep current) |
+| 3 | Enrich deferred staleness-guard item (round 2 #4) with implementation-coordination notes — staleness flip MUST emit an incident event + MUST NOT double-count attempts (coordinate with item 7b) | technical | implement | auto (implement) | medium | standard | Defer-enrichment on a deferred item, not new code. Coordinating constraints between two deferred fixes (7b rate-limit retry idempotency + staleness guard) is documentation work that prevents the post-launch implementer from building one fix on top of the other's not-yet-finished assumptions. Mechanical edit, low blast radius — auto-applied per technical-implement path |
+
+### Triage summary (pre-implementation)
+- Auto-accepted (technical): 1 implement (#3 — defer-enrichment notes), 0 reject, 0 defer
+- Escalated to user: 2 — findings 1, 2 (both user-facing copy/precedence calls)
+
+### User decisions — received 2026-04-27T08-37-11Z
+
+User reply: **all: as recommended**. Decisions applied verbatim:
+- 1: reject (keep current partial-banner copy)
+- 2: reject (keep current rate-limited-before-failed banner precedence)
+
+### Implemented (round 3 — auto-applied technical)
+
+- `[auto]` `tasks/post-merge-system-monitor.md` — appended **Implementation
+  notes** subsection under deferred item 4 (backend staleness guard for
+  worker-death recovery) capturing two coordinating constraints: (a) the
+  staleness flip MUST emit an incident event mirroring `triage_failed`, not
+  a silent column flip, and (b) the staleness recovery path must idempotency-
+  key on `(incidentId, jobId)` to coordinate with deferred item 7b (rate-
+  limit retry idempotency) so a never-completed attempt is not double-charged.
+  Calls out that 7b + staleness guard share a failure surface and should be
+  implemented together.
+
+### Deferred (round 3)
+
+None — both user-decided items were rejects.
+
+### Verification
+
+- `npx tsc --noEmit` not re-run this round; the only edit is to a markdown
+  file (`tasks/post-merge-system-monitor.md`). No code change → no typecheck
+  surface affected.
+- No lint script in this repo (confirmed round 2). Markdown-only edit does not
+  require code-side gates.
+
+### Round 3 summary
+
+- Top themes: ui_copy_preservation, banner_precedence_preservation, defer_enrichment_documentation
+- Auto-accepted (technical): 1 implement (#3 — defer-enrichment notes), 0 reject, 0 defer
+- User-decided: 0 implement, 2 reject (#1, #2), 0 defer
+- Files changed this round: 1 modified (`tasks/post-merge-system-monitor.md`)
+- Deferred items routed to: none this round
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 1 implement | 3 reject | 4 defer
+  - Implement: round 3 #3 (defer-enrichment notes on staleness-guard item)
+  - Reject: round 1 #1, #3a, #7a (all already implemented before this PR — ChatGPT misread the diff)
+  - Defer: round 1 #2 (heuristic frozen context), #3b (baseline-update guard), #7b (rate-limit retry idempotency), #7c (correlation-ID propagation invariant)
+- User-decided: 3 implement | 2 reject | 4 defer
+  - Implement: round 1 #5 (backend-published `triage_status` + `diagnosis_status`), round 2 #1 (failed-triage copy), round 2 #2 (partial vs invalid banner split)
+  - Reject: round 3 #1 (keep current partial-banner copy), round 3 #2 (keep current rate-limited-before-failed precedence)
+  - Defer: round 1 #4-split-1 (resolution-tag taxonomy), round 1 #4-split-2 (auto-tuning feedback loop), round 1 #6a (synthetic check: write-success-vs-declared), round 1 #6b (synthetic check: incident-silence detection), round 2 #3 (filter semantics for `failed AND none`), round 2 #4 (backend staleness guard for worker-death recovery)
+- Total findings reviewed across the session: 17
+- Index write failures: 0
+- Deferred to `tasks/post-merge-system-monitor.md` (per user routing override; NOT `tasks/todo.md`):
+  - § Correctness fixes
+    - [auto] Rate-limit retry idempotency on triage attempts (round 1 #7b) — pg-boss retries can double-increment `triage_attempt_count` before the LLM tool loop runs
+    - [user] List filter semantics for `triageStatus=failed AND diagnosisStatus=none` (round 2 #3) — workflow gap; UI string + filter contract need spec design
+    - [user] Backend staleness guard for worker-death recovery (round 2 #4) — eternal "Triaging…" if worker dies mid-run; round 3 added implementation notes coordinating with 7b
+  - § Observability
+    - [user] Synthetic check: write-success-vs-declared mismatch (round 1 #6a) — surfaces silent agent failures
+    - [user] Synthetic check: incident-silence detection (round 1 #6b) — catches "monitoring system is broken" case
+    - [auto] Correlation-ID propagation enforced as invariant (round 1 #7c) — design level: gate? logger context? required field?
+  - § Architectural
+    - [auto] Frozen heuristic evaluation context (round 1 #2) — touches all 24 heuristic modules + types + CI gate
+    - [auto] Baseline-update guard during anomaly storms (round 1 #3b) — self-corrupting baselines under hot-anomaly conditions
+    - [user] Resolution-tag taxonomy (round 1 #4 split-1) — `confirmed_bug | false_positive | expected_behavior | tuning_required`
+    - [user] Auto-tuning feedback loop from resolution tags (round 1 #4 split-2) — investigate first; spec required before implementation
+- Architectural items surfaced to screen (user decisions):
+  - Frozen heuristic evaluation context (round 1 #2) — defer (as recommended)
+  - Resolution-tag taxonomy + auto-tuning feedback loop (round 1 #4) — defer + investigate-first split
+  - Correlation-ID propagation invariant (round 1 #7c) — defer (as recommended)
+  - Backend staleness guard (round 2 #4) — defer (as recommended)
+- Consistency Warnings: none. Reject pattern (3 auto-rejects in round 1 for already-implemented findings; 2 user-rejects in round 3 to preserve round-2 design choices) is internally consistent — round 3 rejects defended decisions made in round 2, so round 2's user-implements and round 3's user-rejects are coherent across the session.
+- KNOWLEDGE.md updated: yes (3 entries — see Pattern Extraction below)
+- architecture.md updated: no
+- PR: #215 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/215
+
+### Pattern Extraction
+
+Three patterns surfaced across the 3 rounds, each meriting a KNOWLEDGE.md entry:
+
+1. **ChatGPT default-to-additions on a strong-architecture PR — already-implemented findings dominate round 1 rejects** (3/3 round 1 auto-rejects were "this is already in the diff"). Mirrors the spec-review pattern from 2026-04-26 (post-merge observations: PR #196) but with a code-level twist: the misread is on the migration index (0224 partial unique index) and the CI gate script (`verify-event-type-registry.sh`) — both files small enough that a careful read would have caught them. Promote: when a reviewer recommends adding an invariant that a partial unique index or a CI gate already enforces, the rejection is "show the existing mechanism" — don't re-litigate. Updates existing entry `2026-04-25 Gotcha — Partial unique index predicate must match the upsert WHERE clause exactly` (related but distinct — that's about the predicate matching, this is about the reviewer not seeing the predicate exists).
+
+2. **Round-2 design splits get tested in round 3** (2/2 round 3 user-rejects defended round-2 decisions: amber-advisory `partial` vs red-imperative `invalid` split, and rate-limit-precedence-over-failed). When a reviewer proposes "tighten the copy" on a banner that was deliberately split into two severity tones in the previous round, the round 2 rationale IS the round 3 rejection rationale — surface the round-2 design intent in the round 3 reject, don't re-derive it from scratch. New pattern (no existing entry).
+
+3. **Defer-enrichment as a technical auto-apply** (round 3 #3). When a reviewer surfaces a coordination constraint between two deferred items (here: 7b rate-limit retry idempotency + staleness guard share a `triage_attempt_count` write surface), enriching the deferred entry with the constraint is documentation work that prevents the post-launch implementer from building one fix on top of the other's not-yet-finished assumptions. Auto-apply path: technical-implement, low blast radius (markdown-only), no user gate. New pattern (no existing entry).
+

@@ -43,6 +43,21 @@ or `[user]` (user approved the defer in the round 1 user-facing approval gate).
       (b) generalises to any long-running async work. Resolve which pattern
       is canonical before implementing — likely converges with the
       correlation-ID propagation invariant (item 7c).
+      - **Implementation notes** (added round 3, 2026-04-27 — ChatGPT review):
+        - The staleness flip MUST emit an incident event (e.g. `triage_timed_out`
+          or `triage_stale_recovered`) — a silent column flip leaves operators
+          and downstream observability blind. Mirror the existing `triage_failed`
+          event shape so consumers don't need a new branch.
+        - The flip MUST NOT double-count attempts. Coordinate with the
+          rate-limit retry idempotency fix (item 7b above): both touch
+          `triage_attempt_count`, and the staleness recovery path is exactly
+          the case where a naive increment would double-charge a single attempt
+          that the worker never actually completed. Idempotency-key the
+          increment on `(incidentId, jobId)` and let the staleness sweep flip
+          status without re-incrementing.
+        - These two fixes (7b + staleness guard) share the same failure surface
+          and should be implemented together to avoid building one on top of
+          the other's not-yet-finished assumptions.
 
 ## Observability
 
