@@ -4,7 +4,7 @@
 # by an RLS policy. Each entry is a table name followed by a one-line rationale
 # explaining why RLS does not apply.
 #
-# Format:  <table_name>  <one-line rationale>
+# Format:  <table_name>  <one-line rationale> [ref: <invariant-id-or-spec-section>]
 # Comment lines start with `#`.
 #
 # This file is consumed by:
@@ -16,6 +16,24 @@
 # in the matching migration. Use this file only when RLS is genuinely not
 # applicable (system-admin tables, read replicas, intentionally cross-tenant
 # audit ledgers).
+#
+# Entry-format rules (enforced by reviewers, not the gate script):
+#   1. The rationale MUST be a single, complete sentence — no stub words.
+#   2. The rationale MUST end with `[ref: <id>]` citing one of:
+#        - an invariant ID from `docs/pre-launch-hardening-invariants.md`
+#          (e.g. `[ref: invariant-1.8]`)
+#        - a spec section anchor (e.g. `[ref: cached-context-spec-§8.6]`)
+#        - a migration filename for table-creation justifications
+#          (e.g. `[ref: migrations/0231_…sql]`)
+#   3. Reviewers reject any entry that says "see PR" or "ask <person>" — the
+#      reference must point at a durable, version-controlled source so the
+#      next reviewer can audit the entry without git archaeology.
+#
+# Rationale (why the format rules exist): allow-lists tend to become dumping
+# grounds for exceptions. Forcing every entry to cite an invariant or spec
+# section keeps the file scoped to documented carve-outs and prevents a
+# later "just add it to the list" reflex from accumulating undocumented
+# bypasses.
 #
 # (Currently empty — every tenant table on `main` is registered in
 # rlsProtectedTables.ts. Add new entries below as needed.)

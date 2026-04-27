@@ -1035,3 +1035,28 @@ ChatGPT review of the audit-remediation-followups PR surfaced two architectural 
   - **Rationale for defer:** valid system-thinking improvement that would unify how jobs report outcome and how monitoring acts on partial-success. Not a bug; ChatGPT explicitly tagged it "optional but powerful." Tacking it onto this PR would balloon scope across all jobs without a clear contract sketch. Better as a dedicated spec that defines the union, the queueService logging shape, the monitoring consumer's expectations, and a migration plan that converts jobs incrementally rather than in one commit.
   - **Suggested next-spec framing:** define `JobResult = { kind: 'ok', detail?: ... } | { kind: 'noop', reason: string } | { kind: 'partial', completed: N, failed: M, errors: ... } | { kind: 'error', cause: ... }`. Specify how `queueService` logs each kind (current `logger.info('job_noop', ...)` already covers `noop`). Specify which monitoring signals each kind raises. Migrate jobs file-by-file behind the new return shape; old plain-`Promise<void>` jobs continue to work as `kind: 'ok'` until migrated.
 
+---
+
+## Deferred from chatgpt-pr-review — PR #211 pre-launch-hardening (round 1)
+
+**Captured:** 2026-04-26T23:59:09Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-impl-pre-launch-hardening-2026-04-26T23-59-09Z.md`
+**PR:** #211 — https://github.com/michaelhazza/automation-v1/pull/211
+**Branch:** `impl/pre-launch-hardening`
+
+User reply: `all as recommended` — both items deferred per agent recommendation. Items below are real architectural concerns flagged by ChatGPT but out of scope for the pre-launch hardening PR; each warrants its own scoped spec.
+
+- [ ] **CHATGPT-PR211-F2** — Mechanical enforcement for Option B-lite cached-context isolation: introduce a shared `assertSubaccountScopedRead(query, subaccountId)` helper used by every cached-context read site, plus a `scripts/verify-*.sh` CI gate that fails when a cached-context table is queried without the helper.
+  - **Severity:** medium (security posture / engineering ergonomics).
+  - **Scope:** architectural (new shared primitive + new CI gate + every cached-context call site).
+  - **Files affected:** `referenceDocumentService`, `documentBundleService`, `bundleResolutionService` (~6–10 read paths), plus a new helper module and a new verify script.
+  - **Rationale for defer:** spec § 8.7 (`docs/cached-context-infrastructure-spec.md`) explicitly names service-layer filtering as the **chosen authority** and Option B-lite as a first-class permanent decision. Adding the helper + CI gate is meaningful new architecture (`DEVELOPMENT_GUIDELINES.md § 8.4` requires a "why not reuse" paragraph for new primitives) and the scope_signal is architectural per the chatgpt-pr-review agent's escalation rules. Spec § 8.7 already documents the trigger for revisiting this: a concrete observed cross-subaccount data leak. Until that trigger fires, the existing service-layer-filter discipline is the locked design.
+  - **Suggested next-spec framing:** define the helper signature (read-vs-write variants, return type, failure mode — throw vs filter), enumerate every cached-context table the gate must cover, decide whether the CI gate is grep-based (cheap, false-positive-prone) or AST-based (expensive, accurate), and specify the migration plan that introduces the helper one service at a time without forcing every site to convert in one commit.
+
+- [ ] **CHATGPT-PR211-F6** — Centralised `assertValidTransition(from, to)` runtime guard for the run / step state machine, used at every status-write site.
+  - **Severity:** medium (lifecycle correctness / observability).
+  - **Scope:** architectural (new transition tables in `shared/runStatus.ts`, new guard primitive, every status-write site converted).
+  - **Files affected:** `workflowEngineService`, `agentExecutionService`, `decideApproval`, `completeStepRunFromReview`, run-aggregation paths, `shared/runStatus.ts` (new transition tables).
+  - **Rationale for defer:** invariants 6.1–6.5 in `docs/pre-launch-hardening-invariants.md` (lines 247–285) already pin transition rules and select static-grep + pure-test enforcement. A runtime guard is a meaningful addition but overlaps with the documented enforcement strategy and touches every status-write site in the system. Cleanest path is a dedicated lifecycle-guard spec rather than a drive-by addition in the hardening PR.
+  - **Suggested next-spec framing:** define the canonical transition tables (allowed `from → to` per status family — agent_runs, agent_run_steps, action lifecycle, brief artefacts), pick the failure mode (throw / log+metric / both), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and lay out a migration plan that adds the guard as a soft-warn first then promotes to hard-throw once telemetry confirms zero false-positives in production traffic for N days.
+

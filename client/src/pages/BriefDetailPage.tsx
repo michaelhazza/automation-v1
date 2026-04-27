@@ -34,6 +34,31 @@ interface BriefDetailPageProps {
   user: User;
 }
 
+/**
+ * Merge a single artefact into a list, deduplicating by `artefactId`.
+ *
+ * Rationale: artefacts can arrive from up to two sources for the same logical
+ * event — the optimistic POST-success path in `handleApprovalDecision`, and
+ * the `brief-artefact:new` / `brief-artefact:updated` websocket events. Without
+ * dedup the same `artefactId` can render twice (one optimistic, one WS-confirmed).
+ *
+ * Replace-or-append semantics: if the incoming artefact's id already exists in
+ * the list, replace the entry in place (preserving order); otherwise append.
+ * Replace-in-place is the right policy because the WS-confirmed copy is
+ * authoritative — it carries server-side fields (timestamps, derived state)
+ * that the optimistic copy may not.
+ */
+function mergeArtefactById(
+  prev: BriefChatArtefact[],
+  incoming: BriefChatArtefact,
+): BriefChatArtefact[] {
+  const idx = prev.findIndex((a) => a.artefactId === incoming.artefactId);
+  if (idx === -1) return [...prev, incoming];
+  const next = prev.slice();
+  next[idx] = incoming;
+  return next;
+}
+
 function ArtefactItem({ artefact, isSuperseded, onSuggestionClick, onApprove, onReject }: {
   artefact: BriefChatArtefact;
   isSuperseded: boolean;
@@ -100,7 +125,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         if (payload.artefact) {
           const art = payload.artefact;
           setArtefacts((prev: BriefChatArtefact[]) => {
-            const next = [...prev, art];
+            const next = mergeArtefactById(prev, art);
             setChainState({ artefacts: next });
             return next;
           });
@@ -111,7 +136,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         if (payload.artefact) {
           const art = payload.artefact;
           setArtefacts((prev: BriefChatArtefact[]) => {
-            const next = [...prev, art];
+            const next = mergeArtefactById(prev, art);
             setChainState({ artefacts: next });
             return next;
           });
@@ -160,7 +185,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
       const decisionArtefact = res.data?.artefact;
       if (decisionArtefact) {
         setArtefacts((prev) => {
-          const next = [...prev, decisionArtefact];
+          const next = mergeArtefactById(prev, decisionArtefact);
           setChainState({ artefacts: next });
           return next;
         });
