@@ -48,6 +48,42 @@ Resolution per item:
 - 5: defer (already in `tasks/todo.md`)
 
 ### Implemented (this round)
-_To be filled in after each commit lands._
+- [user-approved] Finding 1 — `server/config/actionRegistry.ts`: 4 entries (`config_create_agent`, `config_update_agent`, `config_activate_agent`, `config_create_subaccount`) switched from `idempotency.scope: 'org'` → `'subaccount'`. Commit `1019abb3`.
+- [user-approved] Finding 2 — `server/services/skillExecutor.ts:executeWithActionAudit`: 5 idempotency-hit early-return sites now terminalise the freshly-proposed action row before returning. `idempotency_collision` → `markFailed(IDEMPOTENCY_COLLISION)`; cached completed → `markCompleted(cachedPayload, 'success')`; in_flight branches (reclaim disabled / lost / within window) → `markBlocked('concurrent_execute')`; previous_failure → `markFailed(PREVIOUS_FAILURE)`. Direct status writes used because `transitionState()` rejects approved → completed (the LEGAL_TRANSITIONS machine assumes the row passed through `executing`). Commit `675e5966`.
+- [user-approved] Finding 3 — `server/services/skillExecutor.ts`: executor signature changed `() => Promise<unknown>` → `(processedInput: Record<string, unknown>) => Promise<unknown>`; `parsedInput` threaded through `runWithProcessors`; ~50 call sites updated to receive the parameter and pass it to the underlying handler in place of closure-captured raw `input`. Stub handlers that derived display values from outer-scope captures now re-derive them from `processedInput` inside the lambda. Unguarded fallback at line 2494 continues to pass raw `input` (those skills have no `parameterSchema`, so nothing to materialise). Commit `0d2b7e33`.
+- [user-deferred] Finding 4 — head-of-growth external reads vs manager guard: kept as `tasks/todo.md` line 1128 entry per user "all as recommended".
+- [user-deferred] Finding 5 — `request_hash` 64-bit truncated digest: kept as `tasks/todo.md` line 1136 entry per user "all as recommended".
+
+### Closing pipeline
+- `npx tsc --noEmit`: 11 errors total — 0 in `server/config/actionRegistry.ts` and 0 in `server/services/skillExecutor.ts`. The 11 errors are in `client/src/components/ClarificationInbox.tsx` (10) and `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx` (1). Reproduced with the `main` branch versions of those two files in place — pre-existing baseline cascade failures unrelated to this PR's three findings.
+- `bash scripts/run-all-unit-tests.sh`: 224 pass / 0 fail / 0 skip.
+- `npm run test:gates`: 45 passed / 5 warnings / 3 blocking failures. The 3 blocking failures (`verify-org-scoped-writes.sh` flagging `server/services/middleware/proposeAction.ts:292`, `verify-pure-helper-convention.sh` flagging 9 unrelated `*Pure.test.ts` files, `run-fixture-self-test.sh` self-test) all pre-date these three commits — none touch `actionRegistry.ts` or `skillExecutor.ts` and they reproduce against the parent commit `b66fe0d7`. Out of scope for this review session.
+
+### User Decision
+User reply (verbatim): "all as recommended"
+
+Resolution per item:
+- 1: implement → done (commit `1019abb3`)
+- 2: implement → done (commit `675e5966`)
+- 3: implement → done (commit `0d2b7e33`)
+- 4: defer (already in `tasks/todo.md` line 1128)
+- 5: defer (already in `tasks/todo.md` line 1136)
 
 ---
+
+## Final Summary
+- Rounds: 1
+- Auto-accepted (technical): 0 implemented | 0 rejected | 0 deferred
+- User-decided: 3 implemented | 0 rejected | 2 deferred
+- Index write failures: 0
+- Deferred to `tasks/todo.md` (already present, per user "all as recommended"):
+  - [user] head-of-growth external reads vs manager guard — directional spec contradiction; option (a) preferred (remove `read_campaigns`/`read_analytics` from head-of-growth/AGENTS.md and delegate via `spawn_sub_agents`).
+  - [user] `request_hash` 64-bit truncated digest — introduce `computeRequestHashForIdempotency` returning full SHA-256.
+- Architectural items surfaced to screen (user decisions):
+  - Finding 3 (parsed Zod input not passed to handlers) — implemented per user. Architectural-scope_signal because the executor contract changed across the file. Fix landed mechanically with `parsedInput` threaded through ~50 call sites; no behavioural change at runtime, but the value used to compute the cross-run idempotency hash now matches the value the handler executes against.
+- KNOWLEDGE.md updated: yes (3 entries — see commit message)
+- architecture.md updated: no — no structural change; the executor contract change is internal to `skillExecutor.ts` and not described in `architecture.md`'s public surface
+- PR: #216 — three findings landed; gate state unchanged from pre-session baseline (3 pre-existing blocking failures unrelated to this PR persist; user owns triage of those separately).
+
+### Consistency Warnings
+None — all 5 findings received clear user decisions in a single round.
