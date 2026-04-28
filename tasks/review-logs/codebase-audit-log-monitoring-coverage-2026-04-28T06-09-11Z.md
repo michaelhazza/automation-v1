@@ -189,3 +189,79 @@ This is the surface the operator copies the Investigate-Fix prompt from when inv
 ### 2.10 What this all adds up to
 
 The agent has the full pipeline from "fingerprint dedup → heuristic fire / synthetic fire / direct ingest → triage → diagnosis → paste-ready prompt → operator". The structural surface is complete. **The only structural item missing is the log buffer producer (G2).** Everything else flagged in this audit is producer-side: code paths that should emit `recordIncident(...)` but don't.
+
+---
+
+## 3. System Monitor agent — gaps that limit its diagnostic ability
+
+These are gaps **in the agent itself** (its skills, prompt, evidence reach). Producer-side gaps (i.e., code paths that should emit incidents but don't) are catalogued in §4–§5.
+
+### 3.1 G2 — `read_logs_for_correlation_id` is non-functional
+
+**Severity: CRITICAL.**
+
+`server/services/systemMonitor/logBuffer.ts` exports `appendLogLine(line: LogLine): void` and a 1000-line/500 KB rolling buffer keyed by correlation ID. The skill `read_logs_for_correlation_id` (`server/services/systemMonitor/skills/readLogsForCorrelationId.ts:1-50`) reads from this buffer and is the agent's primary mechanism for following a single request/run end-to-end.
+
+`grep -rn "appendLogLine" server` shows the function is **defined and imported by the skill, but never called by anything**. The logger (`server/lib/logger.ts:34-43`) emits to `console.{log,warn,error}` only.
+
+**Effect:** every call to `read_logs_for_correlation_id` returns `{success: true, lineCount: 0, lines: []}`. The agent is told "no log lines" and is forced to diagnose without runtime context. It will silently downgrade confidence on every triage. There is no error to flag the gap — the skill returns success.
+
+**Fix shape:** in `server/lib/logger.ts`, add an `appendLogLine` call inside `emit(entry)` when `entry.correlationId` is present. Keep it import-light (no DB, no async) so the logger stays pure. ~10 LOC. Spec authority: this matches `phase-A-1-2-spec.md § Phase A foundations` intent for the log buffer.
+
+### 3.2 Missing read skills the agent will reach for and cannot find
+
+The current 9 read skills cover runs, skills, baselines, heuristic fires, connectors, DLQ, and (broken) logs. The triage prompt encourages the agent to cite stable resource identifiers and surface what it cannot see — but the following common questions have no skill:
+
+| Question the agent will ask | Today's answer | Fix |
+|---|---|---|
+| "What does this agent's prompt look like?" | No skill — agent only sees the run, not the agent definition | Add `read_agent_definition(agentId)` |
+| "What recent incidents share this fingerprint or this organisation?" | No skill — must infer from events on a single incident | Add `read_recent_incidents(filters)` |
+| "What's the queue state right now? Backlog, active, failed counts?" | No skill — only `read_dlq_recent` for one queue | Add `read_pgboss_queue_state(queueName)` |
+| "What organisation / subaccount / config governs this run?" | No skill | Add `read_org_subaccount_summary(orgId, subaccountId?)` |
+| "What's the recent history of the same incident fingerprint over time?" | Partial — `read_incident` returns events for one row; no cross-fingerprint history | Extend `read_incident` to return prior closed rows for the same fingerprint |
+| "Did this run touch any external integration (connector adapter call)?" | No skill — only connector polling state | Add `read_connector_calls_for_run(runId)` once adapter call telemetry exists |
+
+**Severity: MEDIUM.** Each missing skill measurably narrows the diagnosis. The agent's prompt explicitly asks it to "surface what you cannot see" — adding these skills lets it actually see them. None are launch blockers individually, but together they are the difference between "useful diagnosis" and "thin diagnosis".
+
+### 3.3 No skill to clusterise across incidents
+
+`server/services/systemMonitor/triage/clusterFires.ts` clusters heuristic fires for the sweep handler, but there is **no read-skill** that exposes this clustering to the triage agent during diagnosis. So the agent triaging incident A cannot ask "is this part of a cluster of N similar incidents in the last hour?" — it must infer from the single fingerprint.
+
+**Severity: LOW.** Useful but not critical. The fingerprint dedup already collapses identical occurrences, so the temporal clustering primarily matters for "different fingerprints, same root cause" scenarios.
+
+### 3.4 Synthetic checks don't include action-execution-layer absence
+
+The 10 synthetic checks cover: agent run rates, connector poll freshness, DLQ drain, heartbeat, incident silence, queue stalled, silent agent success, sweep coverage. They do **not** cover:
+
+- **HITL approval timeouts** — an action sitting in `pending_review` for X hours with no human action. Should produce a synthetic-check incident the operator can triage.
+- **Workflow run stuck in non-terminal state** — beyond the watchdog's tick, an integration-style "no progress in N hours" check.
+- **Skill execution silence per skill** — a skill that historically fires N times/day suddenly fires 0 today.
+- **Brief artefact rejection rate** — % of artefacts being rejected by users. Quality regression signal.
+- **Scheduled task dispatch silence** — a schedule that should have produced a run in the last hour didn't.
+
+**Severity: MEDIUM.** Each is a "silent-failure" class the error sink cannot see. Adds to the agent's evidence base. Each new check is ~30–50 LOC following the existing `SyntheticCheck` interface (`syntheticChecksPure.ts`).
+
+### 3.5 Agent reads are unbounded — risk of token blow-up on busy days
+
+The triage agent reads up to 50 runs / 200 KB per sweep cluster (per spec Q8). But **per-incident** triage reads (`read_recent_runs_for_agent`, `read_heuristic_fires`, etc.) have no global cap on total bytes consumed in one triage. A single triage that bounces through 5–6 reads can blow past 1 MB of evidence input → token cost on the trigger model.
+
+**Severity: LOW.** Token budgets at the trigger-model layer should catch this, but a per-triage byte cap with truncation-and-warn is more defensible. Not a launch blocker.
+
+### 3.6 No "I don't know" fallback emission
+
+The prompt allows the agent to write "Hypothesis: insufficient evidence" — but doesn't write a structured signal anywhere that consumers (e.g., a future "needs human investigation now" filter) can pick up. The diagnosis row carries `confidence: low | medium | high`, but there's no `confidence: insufficient` value.
+
+**Severity: LOW.** Cosmetic — `confidence: 'low'` plus the word "insufficient" in the hypothesis text covers the case. Worth noting only because the human-fallback workflow may eventually want the explicit signal.
+
+### 3.7 Summary of agent-side gaps
+
+| ID | Gap | Severity |
+|---|---|---|
+| G2 | `logBuffer` has no producer; `read_logs_for_correlation_id` always empty | CRITICAL |
+| G10 | Missing read skills: agent definition, cross-incident history, queue state, org/subaccount summary | MEDIUM |
+| G12a | Missing synthetic checks: HITL timeout, workflow stuck, scheduled-task silence, skill silence, brief artefact rejection rate | MEDIUM |
+| (3.3) | No skill exposes cross-incident clustering | LOW |
+| (3.5) | Per-triage byte cap not enforced | LOW |
+| (3.6) | No `confidence: 'insufficient'` value | LOW |
+
+The CRITICAL one (G2) is mechanical and ~10 LOC. The MEDIUM ones add visible diagnostic value but are not launch blockers. The LOW ones are post-launch polish.
