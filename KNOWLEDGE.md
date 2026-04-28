@@ -1475,3 +1475,22 @@ await test('case 7', ...);
 This preserves the "standalone runnable" promise for env-free tests and gives a clean failure point (after test 6, before test 7) when env vars are absent — rather than crashing before any test runs.
 
 **Applied in:** `fakeProviderAdapter.test.ts` between Case 6 and Case 7.
+
+### [2026-04-28] Pattern — Use RETURNING to get fresh column values after an UPDATE that races with a concurrent write
+
+When a service does SELECT → UPDATE and a concurrent path can write a column between those two statements, the pre-read value is stale. The fix is to add that column to the `.returning()` clause — PostgreSQL's RETURNING returns the full row state at the moment the UPDATE lock is held, including columns not in the SET list.
+
+**Concrete case:** `agentRunCancelService.cancelRun` reads `ieeRunId` via SELECT, then runs the cancelling UPDATE. Between the two, `agentExecutionService` can transition the run to `delegated` and write `ieeRunId`. Because `'delegated'` is in the UPDATE's WHERE list, the UPDATE succeeds but the in-memory `ieeRunId` is still null — `cancelIeeRun` is skipped and the worker continues. Fix: `.returning({ id, ieeRunId })` and use `updated[0].ieeRunId` downstream.
+
+**Rule:** Any column read pre-UPDATE that a concurrent writer can change before the UPDATE lock should be read via RETURNING, not the pre-read snapshot.
+
+### [2026-04-28] Pattern — `cancelling` is a transient non-terminal status; treat it like a write-once signal, not a stable state
+
+`agent_runs.status = 'cancelling'` is set once by `agentRunCancelService` and must resolve to a terminal value promptly:
+- In-process loops: exit at the next iteration, write `'cancelled'`.
+- IEE-delegated runs: `cancelIeeRun` writes `iee_runs='cancelled'` + enqueues `iee-run-completed`; finaliser parks the parent.
+- If the pg-boss event publish fails: `reconcileStuckDelegatedRuns` sweeps `status IN ('delegated','cancelling')` after 120 s and calls `finaliseAgentRunFromIeeRun`.
+
+**Divergence case:** if the IEE worker completes before observing the cancel, the parent can transition `cancelling → completed` (not `cancelled`). This is logged as `agentRunFinalization.cancel_intent_divergence` and is expected best-effort behaviour, not a bug.
+
+**Do not add `'cancelling'` to terminal checks.** It is in `IN_FLIGHT_RUN_STATUSES`. The cancel button hides on `isTerminalRunStatus || status === 'cancelling'` — that guard is UI-only and does not make `cancelling` semantically terminal.
