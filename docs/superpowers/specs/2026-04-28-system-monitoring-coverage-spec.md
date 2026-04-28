@@ -799,3 +799,165 @@ Phase 1 lands successfully when:
 - `pr-reviewer` returns PASS or has its findings addressed.
 
 ---
+
+## §5 Phase 2 — `createWorker` conversion (workflow + IEE)
+
+**Goal:** close G4 for the workflow engine and verify (and fix if needed) the IEE workers route through `createWorker`. After Phase 2, every workflow / IEE job that fails goes through the standard retry → DLQ → incident pipeline established in Phase 1.
+
+### §5.1 Why workflow + IEE only, not the full G4 set
+
+The audit identified ~22 raw `boss.work(...)` registrations that bypass `createWorker`. Most live in `server/services/queueService.ts` — a single ~1100-line file. Converting all of them in this spec would:
+
+1. Inflate the change surface beyond what one PR can be reviewed against.
+2. Create merge conflicts with any other in-flight work touching `queueService.ts`.
+3. Mix critical-path infrastructure (workflow engine, IEE) with low-frequency maintenance jobs (memory dedup, ledger archive, etc.).
+
+This spec therefore takes a focused subset: the workflow engine (4 queues) and IEE (4 queues). These are the high-impact paths. The remaining ~14 `maintenance:*` queues are deferred to a follow-up spec — see §10.
+
+### §5.2 Workflow engine conversion
+
+**Files touched:** `server/services/workflowEngineService.ts` only.
+
+**Current state** (per audit log §5 G4):
+
+| Line | Queue | Registration shape |
+|---|---|---|
+| 3483 | `workflow-run-tick` | `await pgboss.work(TICK_QUEUE, { teamSize: 4, teamConcurrency: 1 }, …)` |
+| 3492 | `workflow-watchdog` | `await pgboss.work(WATCHDOG_QUEUE, { teamSize: 1, teamConcurrency: 1 }, …)` |
+| 3503 | `workflow-agent-step` | `await pgboss.work(AGENT_STEP_QUEUE, { teamSize: 4, teamConcurrency: 1 }, …)` |
+
+**Verify at implementation time:** `workflow-bulk-parent-check` — the audit log lists this as a queue with `deadLetter:` declared. Search `workflowEngineService.ts` for its registration and convert if present.
+
+#### §5.2.1 Conversion pattern for `workflow-run-tick` and `workflow-bulk-parent-check`
+
+These tick queues carry `runId` in their payload. Each run belongs to an organisation, but the tick handler reads the `workflow_runs` row (which has `organisationId`) inside the handler. The org context is therefore not in the payload's top-level `organisationId` field.
+
+**Approach:** opt out of the default org-tx prelude by passing `resolveOrgContext: () => null`, and rely on the existing handler to do its own org-scoped DB access.
+
+```ts
+import { createWorker } from '../lib/createWorker.js';
+
+// Replace `await pgboss.work(TICK_QUEUE, { teamSize: 4, teamConcurrency: 1 }, async (job) => { ... })` with:
+await createWorker({
+  queue: TICK_QUEUE as any,  // 'workflow-run-tick'
+  boss: pgboss as any,
+  concurrency: 4,
+  resolveOrgContext: () => null,  // tick reads org from workflow_runs row
+  handler: async (job) => {
+    const data = job.data as { runId: string };
+    await this.tick(data.runId);
+  },
+});
+```
+
+**Why `resolveOrgContext: () => null`?** The default resolver in `createWorker` reads `organisationId` from `job.data` and throws `missing_org_context` if absent. The tick queue's payload is `{ runId }` — the org is looked up inside `tick(runId)`. The opt-out preserves the existing handler logic.
+
+**Caveat:** the handler is now responsible for its own DB connection scoping. The existing `tick(runId)` already does `withAdminConnection(...)` or equivalent (verify at implementation). If it does NOT, that's a P0 bug independent of this spec — flag separately.
+
+#### §5.2.2 Conversion pattern for `workflow-watchdog`
+
+Watchdog is a cross-org sweep — opt out of org-tx prelude.
+
+```ts
+await createWorker({
+  queue: WATCHDOG_QUEUE as any,  // 'workflow-watchdog'
+  boss: pgboss as any,
+  concurrency: 1,
+  resolveOrgContext: () => null,
+  handler: async () => {
+    await this.watchdogSweep();
+  },
+});
+```
+
+#### §5.2.3 Conversion pattern for `workflow-agent-step`
+
+Agent-step queue carries `organisationId` directly in the payload (audit log shows `data.organisationId` referenced in the handler). Use the default org-resolver.
+
+```ts
+await createWorker({
+  queue: AGENT_STEP_QUEUE as any,  // 'workflow-agent-step'
+  boss: pgboss as any,
+  concurrency: 4,
+  // Default resolveOrgContext reads { organisationId, subaccountId? } from job.data.
+  handler: async (job) => {
+    const data = job.data as {
+      WorkflowStepRunId: string;
+      WorkflowRunId: string;
+      organisationId: string;
+      // ... existing fields
+    };
+    // existing handler body
+  },
+});
+```
+
+**Subtle change:** the default resolver opens a Drizzle transaction with `app.organisation_id` set. The existing handler may have its own org-scoped tx logic — verify at implementation that nesting doesn't conflict. If it does, opt out via `resolveOrgContext: () => null` and keep the handler's existing tx wiring.
+
+#### §5.2.4 What `createWorker` adds that raw `boss.work` lacks
+
+Per `server/lib/createWorker.ts:86-156`:
+
+1. **Centralised retry/timeout config** — reads `retryLimit`, `retryDelay`, `expireInSeconds` from `JOB_CONFIG`. Raw `boss.work` falls back to pg-boss defaults.
+2. **Timeout wrapping** — `withTimeout(runHandler(), timeoutMs)` enforces the handler completes within the configured window. Critical for the watchdog (long-running sweeps can hang).
+3. **Non-retryable error classification** — `isNonRetryable(err)` check + `boss.fail(job.id)` short-circuits hopeless retries, getting failures to the DLQ faster.
+4. **Org-tx prelude** — handler runs inside a `db.transaction` with `app.organisation_id` set (or opt-out via resolver).
+5. **Retry observability** — logs `[Worker:${queue}] Retry #${retryCount} for job ${job.id}` on every retry attempt.
+
+**Indirect benefit:** Phase 1's `system_incidents` pipeline expects these queues to flow through DLQs on retry exhaustion. Without `createWorker`'s retry config, the watchdog's missing `retryLimit` means pg-boss applies its default (which is queue-implementation-specific) — under load this can mean retries don't drain to the DLQ as expected.
+
+### §5.3 IEE worker verification
+
+**Goal:** verify each IEE queue's registration uses `createWorker`, or convert it if not.
+
+| Queue | Likely registration site |
+|---|---|
+| `iee-browser-task` | `server/services/ieeExecutionService.ts` |
+| `iee-dev-task` | `server/services/ieeExecutionService.ts` |
+| `iee-cleanup-orphans` | `server/services/ieeExecutionService.ts` (or an `iee-cleanup-orphans-job.ts`) |
+| `iee-run-completed` | `server/jobs/ieeRunCompletedHandler.ts` line 80 |
+
+**Audit-time evidence:** `server/jobs/ieeRunCompletedHandler.ts:80` shows `.work(QUEUE, { teamSize: 4, teamConcurrency: 1 }, async (job) => {...})`. This may or may not be inside a `createWorker` wrapper — read at implementation time.
+
+**Implementation pass:**
+
+1. `grep -nE "(boss|pgboss)\.work\(\\s*['\"](iee-)" server` — list raw registrations.
+2. For each, decide: convert to `createWorker` (preferred), or document why not.
+3. If converting `iee-run-completed`: payload is `{ ieeRunId, parentAgentRunId, organisationId? }`. Use default resolver if `organisationId` is always present; otherwise opt out.
+4. If converting `iee-cleanup-orphans`: cross-org sweep, opt out.
+
+**Risk:** Medium. IEE handlers have bespoke timeout logic (long browser sessions). Verify the timeout-wrapping in `createWorker` doesn't preempt the handler's own deadline. The current `JOB_CONFIG` has `expireInSeconds: 600` for `iee-browser-task` and `iee-dev-task`, which `createWorker` translates to a `900ms × 600 = 540_000ms` (9 min) timeout — comfortably above the handler's MAX_EXECUTION_TIME_MS per `jobConfig.ts:289-296` comment.
+
+### §5.4 Phase 2 commit ordering
+
+```
+commit 9:  refactor(workflows): convert workflow-run-tick to createWorker (G4-A)
+commit 10: refactor(workflows): convert workflow-watchdog to createWorker (G4-A)
+commit 11: refactor(workflows): convert workflow-agent-step to createWorker (G4-A)
+commit 12: refactor(workflows): convert workflow-bulk-parent-check to createWorker (G4-A) [if found]
+commit 13: refactor(iee): verify/convert IEE workers to createWorker (G4-B)
+```
+
+Each commit is self-contained — one queue per commit so a regression bisect maps directly to a single conversion.
+
+### §5.5 Phase 2 verification
+
+After Phase 2 lands:
+
+- `grep -E "(boss|pgboss)\.work\(.*'workflow-" server/services/workflowEngineService.ts` returns 0 matches.
+- `grep -nE "createWorker.*workflow-" server/services/workflowEngineService.ts` returns 4 matches (one per converted queue).
+- A workflow run that intentionally throws on first invocation lands in `workflow-run-tick__dlq`, and within 30s a `system_incidents` row exists with the matching `job:workflow-run-tick:dlq` fingerprint. (Same pattern as §4.8 round-trip.)
+- IEE smoke: kick off an IEE run that fails, verify failure surfaces as a `system_incidents` row.
+- `npm run lint` + `npx tsc --noEmit` pass.
+
+**Manual smoke if test infra not available:** run an end-to-end workflow with a step that calls a skill known to fail (e.g. a tool with a malformed schema). Assert via `psql` that a row appears in `system_incidents` within 30s of pg-boss giving up.
+
+### §5.6 Phase 2 acceptance
+
+- Each queue listed in §5.2 is registered via `createWorker`.
+- IEE queues are verified `createWorker`-routed (or converted in this phase).
+- §5.5 verification commands return the expected results.
+- `pr-reviewer` returns PASS or has its findings addressed.
+- `dual-reviewer` recommended on this phase since boot-time wiring is harder to spot-check (per audit log §6 single-pass branch outline).
+
+---
