@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { recordIncident } from './incidentIngestor.js';
-import { llmRequests, ieeRuns, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
+import { llmRequests, ieeRuns, agentRunLlmPayloads, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
 import { createGeneration, createEvent } from '../lib/tracing.js';
 import type { TaskType, SourceType, ExecutionPhase, RoutingMode, CallSite } from '../db/schema/index.js';
 import { RouterContractError } from '../../shared/iee/index.js';
@@ -29,6 +29,10 @@ import { generateIdempotencyKey } from './llmRouterIdempotencyPure.js';
 import { ReconciliationRequiredError } from '../lib/reconciliationRequiredError.js';
 import * as llmInflightPayloadStore from './llmInflightPayloadStore.js';
 import { logger } from '../lib/logger.js';
+import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
+import { buildPayloadRow } from './agentRunPayloadWriter.js';
+import { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
+export { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
 
 // ---------------------------------------------------------------------------
 // LLM Router — the financial chokepoint for every LLM call in the platform.
@@ -575,11 +579,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     });
     return idempotencyResult.response;
   }
-  // `idempotencyResult.provisionalRowId` is populated at this point but
-  // isn't threaded downstream — the terminal upsert at the bottom of
-  // routeCall uses the idempotencyKey as the conflict target, not the
-  // row id. Kept on the return shape for future debugging / breaker
-  // wiring without re-opening the concurrency window.
+  // `provisionalLedgerRowId` is the UUID of the `'started'` row created
+  // in the idempotency-check transaction above. The terminal upsert (both
+  // success and failure paths) writes to the same idempotencyKey, so the
+  // row's UUID does not change — `provisionalLedgerRowId` equals the final
+  // terminal `ledgerRowId`. Threaded to `llm.requested` (§1.1 LAEL-P1-1).
+  const provisionalLedgerRowId = idempotencyResult.provisionalRowId;
 
   try {
     reservationId = await budgetService.checkAndReserve(
@@ -746,6 +751,23 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let lastError: unknown = null;
   let fallbackIndex = -1;
 
+  // ── §1.1 LAEL-P1-1 pairing-completeness flags ────────────────────────────
+  // INVARIANT (locked): every emitted llm.requested is paired with exactly one
+  // llm.completed. Three independent emit sites uphold this — success path
+  // (§12c below), failure path (callStatus loop exit), and the finally-block
+  // fallback. The two flags + wrapping try/finally enforce it.
+  //
+  // `laelRequestEmitted` is set to true after emitting `llm.requested` so the
+  // finally block below can guarantee a matching `llm.completed` fires even if
+  // an exception escapes between the two emission sites. `laelCompletedEmitted`
+  // is set to true at each normal `llm.completed` emit site so the finally
+  // block does not double-emit on the normal paths.
+  let laelRequestEmitted = false;
+  let laelCompletedEmitted = false;
+  // `terminalStatus` carries the final status value for the finally fallback.
+  // Initialised to null; set by the success/failure paths before they emit.
+  let terminalStatus: string | null = null;
+
   providerLoop:
   for (const provider of fallbackChain) {
     fallbackIndex++;
@@ -842,17 +864,35 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         temperature: params.temperature,
       });
 
-      // TODO(live-agent-execution-log): emit llm.requested + llm.completed
-      // critical events and write the agent_run_llm_payloads row inside the
-      // terminal ledger transaction. Scaffolding lives in
-      // server/services/agentRunPayloadWriter.ts + agentExecutionEventService.
-      // Wiring here needs the provisional `started` ledger row's id which
-      // is currently local to the upsert block below — either thread the id
-      // up, or move the emission to the same transaction that writes the
-      // terminal row. When wiring, populate agent_run_llm_payloads.run_id
-      // from ctx.runId (spec §5.7 + post-review hardening — denormalised
-      // FK closes the "payload not run-scoped" finding). Spec:
-      // tasks/live-agent-execution-log-spec.md §4.5, §5.3.
+      // ── §1.1 LAEL-P1-1: llm.requested emission ──────────────────────────
+      // Fired BEFORE the provider dispatch so observers can measure the
+      // dispatch-to-completion window. provisionalLedgerRowId is the UUID of
+      // the `'started'` row created above — the upsert at terminal time will
+      // overwrite the row's fields but preserve the UUID, so this ID matches
+      // the final ledger row. Only emitted for agent_run sourceType with a
+      // valid runId (see shouldEmitLaelLifecycle — pre-dispatch terminals like
+      // budget_blocked/rate_limited have already thrown above, so the only
+      // in-scope status here is 'started').
+      if (ctx.sourceType === 'agent_run' && ctx.runId && provisionalLedgerRowId) {
+        tryEmitAgentEvent({
+          runId:          ctx.runId,
+          organisationId: ctx.organisationId,
+          subaccountId:   ctx.subaccountId ?? null,
+          sourceService:  'llmRouter',
+          payload: {
+            eventType:           'llm.requested',
+            critical:            true,
+            llmRequestId:        provisionalLedgerRowId,
+            provider,
+            model:               mappedModel,
+            attempt,
+            featureTag:          ctx.featureTag ?? 'unknown',
+            payloadPreviewTokens: 0,
+          },
+          linkedEntity: { type: 'llm_request', id: provisionalLedgerRowId },
+        });
+        laelRequestEmitted = true;
+      }
 
       try {
         providerResponse = await callWithTimeout(
@@ -1018,6 +1058,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       console.warn(`[llmRouter] Provider ${provider} exhausted — entering ${PROVIDER_COOLDOWN_MS}ms cooldown`);
     }
   }
+
+  // ── §1.1 LAEL-P1-1 pairing-completeness finally guard ──────────────────────
+  // Wraps the entire post-loop body so that if an exception escapes between
+  // `llm.requested` emission and the normal `llm.completed` emit sites, the
+  // finally block fires `llm.completed` as a fallback, ensuring every emitted
+  // `llm.requested` is paired with exactly one `llm.completed`. The normal
+  // paths set `laelCompletedEmitted = true` before emitting, so the finally
+  // block no-ops on the normal paths.
+  try {
 
   if (!providerResponse) {
     const e = lastError as { message?: string } | null | undefined;
@@ -1203,6 +1252,40 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         ),
         ledgerRowId,
         ledgerCommittedAt: ledgerCommittedAtISO,
+      });
+    }
+
+    // ── §1.1 LAEL-P1-1 — payload row + llm.completed (failure path) ─────
+    //
+    // Emitted AFTER the ledger row is written and AFTER the registry
+    // cleanup above, BEFORE rethrowing. On the failure path there is no
+    // provider response, so tokensIn/Out and costWithMarginCents are 0.
+    // `shouldEmitLaelLifecycle` returns false for pre-dispatch terminals
+    // (budget_blocked / rate_limited / provider_not_configured) — those
+    // paths throw earlier and never reach here. The only failure statuses
+    // that arrive here are post-dispatch errors (timeout, parse_failure,
+    // provider_unavailable, etc.) for which emission is appropriate.
+    terminalStatus = callStatus;
+    if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
+      // No payload row on failure — no provider response to persist.
+      laelCompletedEmitted = true;
+      tryEmitAgentEvent({
+        runId:          ctx.runId!,
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        sourceService:  'llmRouter',
+        payload: {
+          eventType:           'llm.completed',
+          critical:            true,
+          llmRequestId:        ledgerRowId,
+          status:              callStatus,
+          tokensIn:            0,
+          tokensOut:           0,
+          costWithMarginCents: 0,
+          durationMs:          Date.now() - providerStart,
+          payloadInsertStatus: 'failed',
+          payloadRowId:        null,
+        },
       });
     }
 
@@ -1495,6 +1578,103 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     currentRuntimeKey = null;
   }
 
+  // ── 12c. §1.1 LAEL-P1-1 — payload row + llm.completed (success path) ────
+  //
+  // PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
+  // emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
+  // Failure cases collapse to the same observable state
+  // (`payloadInsertStatus: 'failed'`, `payloadRowId: null`):
+  //   (a) provider failure — the failure path emits llm.completed without
+  //       running this section (no provider response to persist; spec Gap D).
+  //   (b) success-path INSERT failure — the wrap-tx below rolls back any
+  //       partial INSERT and the catch handler emits llm.completed with
+  //       payloadInsertStatus='failed'.
+  //   (c) finally-block fallback — request emitted but completion did not
+  //       reach either path; emits with payloadInsertStatus='failed'.
+  // To distinguish (a)/(b)/(c) for debugging, look for the
+  // `lael_payload_insert_failed` logger.warn — only case (b) emits it.
+  //
+  // Ordering: AFTER the ledger upsert (§12), AFTER the registry removal (§12b),
+  // BEFORE Langfuse / reservation commit. The payload insert is best-effort
+  // inside its own try/catch — a failure does NOT roll back the ledger row.
+  // `shouldEmitLaelLifecycle` gates on sourceType='agent_run' + runId present
+  // + terminalStatus not in the pre-dispatch blocked set. On the success path
+  // terminalStatus is always 'success', so the gate is effectively
+  // (sourceType === 'agent_run' && runId present).
+  //
+  // The payload INSERT runs inside its own db.transaction so that any thrown
+  // error during the insert (or while reading .returning()) triggers automatic
+  // rollback — guaranteeing the post-commit invariant
+  // (payloadInsertStatus === 'failed' iff no agent_run_llm_payloads row exists).
+  // The ledger row is intentionally NOT pulled into this tx — it was already
+  // committed above, and wrapping ledger + payload together would change cost-
+  // breaker ordering semantics (spec §4.5).
+  terminalStatus = 'success';
+  if (shouldEmitLaelLifecycle(ctx, 'success') && successLedgerRowId) {
+    let payloadRowId: string | null = null;
+    let payloadInsertStatus: 'ok' | 'failed' = 'failed';
+    try {
+      const systemPromptStr =
+        typeof params.system === 'string'
+          ? params.system
+          : params.system
+            ? `${params.system.stablePrefix}\n${params.system.dynamicSuffix}`
+            : '';
+      const payloadRow = buildPayloadRow({
+        systemPrompt:    systemPromptStr,
+        messages:        params.messages,
+        toolDefinitions: params.tools ?? [],
+        response:        providerResponse as unknown as Record<string, unknown>,
+        maxBytes:        64 * 1024,
+      });
+      payloadRowId = await db.transaction(async (tx) => {
+        const [inserted] = await tx.insert(agentRunLlmPayloads).values({
+          llmRequestId:   successLedgerRowId,
+          runId:          ctx.runId!,
+          organisationId: ctx.organisationId,
+          subaccountId:   ctx.subaccountId ?? null,
+          ...payloadRow,
+        }).returning({ id: agentRunLlmPayloads.llmRequestId });
+        return inserted?.id ?? null;
+      });
+      payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
+    } catch (err) {
+      // Payload is best-effort; ledger is canonical. The wrapping tx rolled back
+      // any partial INSERT, so the post-commit invariant holds without a defensive DELETE.
+      logger.warn('lael_payload_insert_failed', {
+        runId: ctx.runId, ledgerRowId: successLedgerRowId, error: err,
+      });
+      payloadInsertStatus = 'failed';
+      payloadRowId = null;
+    }
+
+    laelCompletedEmitted = true;
+    tryEmitAgentEvent({
+      runId:          ctx.runId!,
+      organisationId: ctx.organisationId,
+      subaccountId:   ctx.subaccountId ?? null,
+      sourceService:  'llmRouter',
+      payload: {
+        eventType:            'llm.completed',
+        critical:             true,
+        llmRequestId:         successLedgerRowId,
+        status:               'success',
+        tokensIn:             providerResponse.tokensIn,
+        tokensOut:            providerResponse.tokensOut,
+        costWithMarginCents:  costResult.costWithMarginCents,
+        durationMs:           providerLatencyMs,
+        payloadInsertStatus,
+        payloadRowId,
+      },
+    });
+
+    if (payloadInsertStatus === 'failed') {
+      logger.warn('lael_payload_insert_status', {
+        runId: ctx.runId, ledgerRowId: successLedgerRowId, payloadInsertStatus,
+      });
+    }
+  }
+
   // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
   createGeneration('llm.router.call', {
     model: actualModel,
@@ -1537,6 +1717,42 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   };
 
   return providerResponse;
+
+  } finally {
+    // Pairing-completeness safety net (§1.1 LAEL-P1-1). Fires only when
+    // `llm.requested` was emitted but `llm.completed` was NOT emitted by
+    // either the success or failure path — i.e., an unexpected exception
+    // escaped between the two emission sites. Uses fallback values:
+    // payloadInsertStatus='failed', payloadRowId=null, tokensIn/Out=0,
+    // costWithMarginCents=0. provisionalLedgerRowId is the row that was
+    // created before the provider call, so it is always available here.
+    if (
+      laelRequestEmitted &&
+      !laelCompletedEmitted &&
+      ctx.runId &&
+      provisionalLedgerRowId &&
+      shouldEmitLaelLifecycle(ctx, terminalStatus ?? 'failed')
+    ) {
+      tryEmitAgentEvent({
+        runId:          ctx.runId,
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        sourceService:  'llmRouter',
+        payload: {
+          eventType:           'llm.completed',
+          critical:            true,
+          llmRequestId:        provisionalLedgerRowId,
+          status:              terminalStatus ?? 'failed',
+          tokensIn:            0,
+          tokensOut:           0,
+          costWithMarginCents: 0,
+          durationMs:          Date.now() - providerStart,
+          payloadInsertStatus: 'failed',
+          payloadRowId:        null,
+        },
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ import type {
 import type { WorkflowDefinition, WorkflowStep, RunContext } from '../lib/workflow/types.js';
 import { logger } from '../lib/logger.js';
 import { WorkflowEngineService } from './workflowEngineService.js';
+import { resolveApprovalDispatchAction, type ApprovalDecision } from './resolveApprovalDispatchActionPure.js';
 import { WorkflowTemplateService } from './workflowTemplateService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 
@@ -538,7 +539,7 @@ export const WorkflowRunService = {
     organisationId: string,
     runId: string,
     stepRunId: string,
-    decision: 'approved' | 'rejected' | 'edited',
+    decision: ApprovalDecision,
     editedOutput: Record<string, unknown> | undefined,
     userId: string,
     expectedVersion?: number
@@ -573,9 +574,11 @@ export const WorkflowRunService = {
       return { stepRunStatus: 'failed', newVersion: stepRun.version + 1 };
     }
 
+    const action = resolveApprovalDispatchAction(stepRun, decision);
+
     // invoke_automation steps must re-dispatch the webhook rather than completing
     // with stored output — route to the dedicated resume path (C4a-REVIEWED-DISP).
-    if (stepRun.stepType === 'invoke_automation') {
+    if (action === 'redispatch') {
       const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
       return { stepRunStatus: stepOutcome, newVersion: stepRun.version + 1 };
     }

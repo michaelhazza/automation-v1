@@ -1775,6 +1775,7 @@ export const WorkflowEngineService = {
       stepRunId,
       runId: sr.runId,
       automationId: sr.stepId,
+      dispatch_source: 'approval_resume',
     });
 
     // Load the workflow run and its definition

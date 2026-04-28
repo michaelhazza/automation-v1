@@ -1188,5 +1188,94 @@ The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly
 
 - [ ] **PR-S2 — writeConversationMessage dedupe: spec §0.5 claim vs. reality.** Spec §0.5 says DR2's "no duplicate user messages on retry" depends on `writeConversationMessage` dedupe. Integration test 4 (conversationsRouteFollowUp) proves the function has NO built-in dedupe — a second call produces a second row. Current protection is route-level (branch-before-write, exactly one call per request). For network-level retry safety, one of: (a) add idempotency key on `(conversationId, content, senderUserId)` within a short window per CLAUDE.md §8.11, (b) add HTTP-level idempotency key header at the route, or (c) amend spec §0.5 to say "route-level, not DB-level". Not blocking today (the route is correct); label as a future hardening item.
 
-- [ ] **PR-N3 — two DB reads for same conversation in brief-followup path.** `conversations.ts:99` (`assertCanViewConversation`) selects the conversation; `briefConversationService.ts:124-132` re-selects it inside `handleConversationFollowUp`. The second could accept the first's result to drop one round-trip.
+- [x] **PR-N3 — two DB reads for same conversation in brief-followup path.** *(resolved 2026-04-28 in `da1c4f72` via R-4)* — added optional `prefetchedConv` parameter to `handleConversationFollowUp`; route caller now passes its already-resolved conv to skip the duplicate select. The `briefs.ts` caller (where `briefId` comes from URL params, not a pre-fetched conv) intentionally does not pass `prefetchedConv` and continues to re-select.
+
+## Deferred from spec-conformance review — pre-test-backend-hardening (2026-04-28)
+
+**Captured:** 2026-04-28T03:19:37Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-backend-hardening-2026-04-28T03-19-37Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md`
+
+- [ ] **REQ §1.1 Gap D — failure-path `agent_run_llm_payloads` row not inserted**
+  - Spec section: §1.1 Acceptance criteria ("A failed-mid-flight agent-run LLM call (provider error) produces llm.requested → llm.completed (with terminalStatus: 'failed' in the payload) and the corresponding agent_run_llm_payloads row.")
+  - Gap: implementation only inserts the payload row on the success path; the failure path emits `llm.completed` with `payloadInsertStatus: 'failed'` and `payloadRowId: null` and writes no row (`server/services/llmRouter.ts:1265` "No payload row on failure — no provider response to persist.").
+  - Suggested approach: persist a partial row on failure carrying the system prompt + messages + tool definitions, with a null/error response field; OR explicitly amend the spec to make the failure-path row optional. Decide before relying on `agent_run_llm_payloads` for failed-call observability.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE**
+  - Spec section: §1.1 Acceptance criteria ("the catch handler MUST treat that row as failed (set payloadInsertStatus: 'failed', payloadRowId: null) AND a follow-up DELETE on the contested key MUST run inside the same tx so the post-commit invariant holds")
+  - Gap: catch at `server/services/llmRouter.ts:1619-1628` sets the marker but never issues a follow-up DELETE. Implementation comment at lines 1586-1591 explicitly argues the payload insert must NOT be in a shared tx with the ledger write ("changes ordering semantics for the cost breaker") — directly contradicts the spec MUST.
+  - Suggested approach: either restructure so the payload insert + (on failure) DELETE run in a sibling tx that doesn't interleave with the cost-breaker logic, OR amend the spec to relax the post-commit invariant to "no-row-or-row, never partial" without the DELETE requirement. The current state silently accepts ambiguous post-commit visibility under driver retry conditions.
+
+- [ ] **REQ §1.1 Gap F — `llmRouterLaelIntegration.test.ts` is a stub**
+  - Spec section: §1.1 Tests + Definition of Done ("one integration test added and green")
+  - Gap: all three test cases in `server/services/__tests__/llmRouterLaelIntegration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. They pass trivially without exercising the emission + payload-insert code path.
+  - Suggested approach: implement against the existing test-DB harness already used by `pgboss-zod-hardening` integration tests. Cover: happy-path emission ordering, budget_blocked silence, non-agent-run silence. Until then, §1.1's structural invariants rely on manual smoke + 40-case pure-predicate test only.
+
+- [ ] **REQ §1.2 Gap B — AutomationStepError shape divergence on missing-connection**
+  - Spec section: §1.2 Approach step 2 (literal example shape with `type: 'configuration'`, `status: 'missing_connection'`, `context: { automationId, missingKeys }`)
+  - Gap: existing `AutomationStepError` interface (`server/lib/workflow/types.ts:79`) does not have `'configuration'` in its `type` literal union and lacks `status`/`context` fields. Implementation pragmatically uses `type: 'execution'`, sets `status: 'missing_connection'` only on the event payload (not on the error itself), and inlines `missing.join(', ')` into the error message instead of populating a structured `context.missingKeys`.
+  - Suggested approach: either extend `AutomationStepError` to add `'configuration'` to its `type` union and add optional `status` + `context` fields (then update all error-handler call sites to handle the richer shape) OR amend the spec example to match the existing type system. Today's behaviour satisfies the user-facing acceptance criterion via the message text but does not satisfy structured-context consumers.
+
+- [ ] **REQ §1.3 Gap C — `workflowEngineApprovalResumeDispatch.integration.test.ts` is a stub**
+  - Spec section: §1.3 Tests + Definition of Done ("integration test added and green") and Acceptance ("a double-approve … results in exactly one webhook dispatch, asserted by direct call-count on the test webhook receiver — NOT inferred from terminal status alone")
+  - Gap: all three test cases in `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. Spec explicitly demands call-count assertion, not terminal-status assertion.
+  - Suggested approach: build a fake-webhook-receiver harness (similar to nock) that increments a counter and exposes it for assertion. Wire through a test DB that supports the `awaiting_approval → running` UPDATE race the implementation relies on at `workflowEngineService.ts:1752-1759`. Progress.md acknowledges manual smoke as "the gating acceptance check" — that is not what the spec asks for.
+
+- [ ] **REQ §1.7 Gap A — async-worker path transitively calls `checkThrottle`**
+  - Spec section: §1.7 step 1 ("Async-worker exclusion contract (MUST hold): the async-worker ingestion path MUST NOT call checkThrottle.")
+  - Gap: `incidentIngestorAsyncWorker.ts:15` calls `ingestInline(payload.input)`. The branch wired `checkThrottle` into `ingestInline`. Therefore the async-worker path now transitively calls `checkThrottle`. The spec's MUST is structurally violated by the implementation choice.
+  - Suggested approach: choose one of (a) split the body of `ingestInline` so the worker calls a `_ingestInlineSkippingThrottle` variant — but that introduces a new primitive in violation of §0.3 (b) collapse the contract: amend the spec to drop the async-worker-exclusion MUST since `recordIncident` routes EITHER through async OR through sync (line 90: `if (isAsyncMode())`), so there's no double-throttle in any single request lifecycle anyway, OR (c) move the throttle check up into `recordIncident` and gate it on `isAsyncMode() === false`. Option (b) reflects what the implementer actually achieved (single throttle point, no double-throttle); option (c) is the closest mechanical fix to the spec's intent.
+  - **Update 2026-04-28:** Resolved in commit `7ebac102` via Option (c) — throttle moved to `recordIncident`'s sync branch; `ingestInline` is now throttle-free. Async-worker exclusion test added in commit fixing pr-reviewer S2.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE** *(superseded)*
+  - **Update 2026-04-28:** Initially "fixed" by adding a defensive DELETE in commit `7ebac102`, but pr-reviewer S1 flagged residual non-atomicity (DELETE could itself throw, leaving payload row visible with `payloadInsertStatus: 'failed'` event). Resolved by wrapping the INSERT in a `db.transaction` so any thrown error inside auto-rolls-back — eliminating the defensive DELETE entirely. The post-commit invariant now holds structurally.
+
+## Deferred from pr-reviewer review — pre-test-backend-hardening
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source log**: `tasks/review-logs/pr-review-log-pre-test-backend-hardening-2026-04-28T03-59-27Z.md`
+
+- [ ] **S4 — `decideApproval` returns inflated `newVersion` for the loser of an approve/approve race**
+  - File: `server/services/workflowRunService.ts:583`
+  - Issue: both winner and loser of a concurrent `decideApproval('approved')` race receive `newVersion: stepRun.version + 1`, but the actual post-commit DB version is `stepRun.version + 2` (one bump for `awaiting_approval → running`, one for `running → completed`). The loser gets a stale client cache key indistinguishable from the winner's response.
+  - Pre-existing behaviour, but spec §1.3 made the invocation pattern more concurrent. Worth a follow-up to either fetch the actual post-commit version after dispatch, or document `newVersion` as a "best-effort hint" in the API contract.
+
+- [x] **N1 — Decision-type drift in `resolveApprovalDispatchActionPure` not surfaced in helper signature** *(resolved 2026-04-28)*
+  - File: `server/services/resolveApprovalDispatchActionPure.ts`
+  - Resolution: added `export type ApprovalDecision = 'approved' | 'rejected' | 'edited'` to the helper file (now the canonical source of truth for the runtime decision shape). Updated the helper signature and the production caller `workflowRunService.decideApproval` to import the type rather than re-declaring the inline union. Drift between spec wording (`'approve' | 'reject'`) and codebase reality is now surfaced in one place. Route-layer request-validation types and DB column types intentionally retain their inline unions — they're separate concerns (HTTP body shape, persisted enum) from the runtime dispatch decision.
+
+- [ ] **N3 — Promote `requireUuid` to a shared validation helper when other boundaries hit malformed UUIDs**
+  - File: `server/services/briefArtefactValidatorPure.ts:83`
+  - Trigger: testing pass surfaces malformed UUIDs reaching other validation boundaries (`runId`, `subaccountId`, `automationId` from external clients with bad shape).
+  - Action when triggered: grep for `requireString` calls on `*Id` fields across `server/services/*ValidatorPure.ts` and promote `requireUuid` to a shared helper (likely `server/lib/validation/requireUuid.ts` or extend an existing pure-validator module).
+
+- [ ] **N4 — `__testHooks` discriminant-name regex test is fragile**
+  - File: `server/services/__tests__/reviewServiceIdempotency.test.ts:445–459`
+  - Issue: test reads `reviewService.ts` source via `readFileSync` and counts string-literal occurrences of `'idempotent_race'`. A future refactor that constants-extracts the literal (e.g. `const KIND_IDEMPOTENT_RACE = 'idempotent_race'`) preserves behaviour but reduces the count below 2, failing the test.
+  - Fix: assert on return-value shape instead of source-text layout — trigger a race and assert `result.wasIdempotent === true && getKindFromAuditTrail() === 'idempotent_race'`.
+
+- [ ] **N2 follow-up — Consider adding `firstObservedAt` to `clientpulse_cursor_secret_fallback` log entry**
+  - File: `server/services/clientPulseHighRiskService.ts:172–178`
+  - Spec §1.5 step 2 named the field; spec-conformance accepted the omission as PASS-with-deviation. Add the field if a downstream alert filter ever wants to deduplicate or correlate the one-shot warning across instances.
+
+## Deferred from chatgpt-pr-review — pre-test-backend-hardening (2026-04-28)
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source**: ChatGPT final-review round 1
+
+- [ ] **Migration 0240 — phase the conversations unique-index swap before any production deploy with a non-trivially-sized `conversations` table**
+  - File: `migrations/0240_conversations_org_scoped_unique.sql`
+  - Issue: current migration is a single-tx `DROP INDEX` → `CREATE UNIQUE INDEX` on `conversations`. Single-tx semantics mean no committed window where uniqueness protection is absent, but the `CREATE` takes an `ACCESS EXCLUSIVE` lock on the table for its full duration. Risk is lock duration, not data corruption — fine on a small / pre-launch table, painful on a non-trivial one.
+  - Trigger: any production deploy that runs migrations against a `conversations` table large enough for the `CREATE UNIQUE INDEX` lock to become a perceptible outage (rule of thumb: tens of millions of rows, or any row count where index build crosses ~seconds).
+  - Action when triggered: split into a two-step migration — (a) `CREATE UNIQUE INDEX CONCURRENTLY` on a temp name with the new column tuple; (b) once green, drop the old index and rename the new one. Both steps must run outside a transaction (`CONCURRENTLY` requires it). Accepts an intermediate state where both indexes coexist; safe because uniqueness is satisfied by either.
+  - Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, single-tx wrapper closes the read-side window". Phased migration is overkill at current scale and adds rollout complexity. Revisit before any deploy that violates the trigger above.
+  - Rejected option (2026-04-28): `CREATE UNIQUE INDEX CONCURRENTLY` with phased rollout. Rejected for this PR because (a) `CONCURRENTLY` cannot run inside a transaction (would force splitting into two migration files), (b) introduces an intermediate state where both indexes coexist, (c) adds rollout complexity disproportionate to current `conversations` table size and pre-launch posture. Becomes the correct option once the trigger condition above is met — operational interpretation: when a non-concurrent index build under production write load becomes observable in write-latency tail (rule of thumb ~100–300ms), not when row count crosses a specific threshold.
+
+- [ ] **LAEL + approval-resume integration test harness — convert deferred `test.skip` stubs to real assertions**
+  - Files: `server/services/__tests__/llmRouterLaelIntegration.test.ts`, `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
+  - Issue: both files exist as `test.skip` stubs because no shared fake-webhook / fake-provider harness is in place. The §1.3 "double-approve fires exactly one webhook" call-count assertion (the invariant the spec specifically demanded over a status-only check) is currently uncovered.
+  - Action: build the shared fake-webhook receiver + fake-provider adapter as the next chunk after this PR merges. Convert the six skipped tests to real assertions exercising the real DB transaction boundaries.
+  - Decision (2026-04-28): kept as `test.skip` (not as `assert.ok(true)` stubs) so green CI does not imply lifecycle coverage. Harness work scoped as a follow-up chunk, not a blocker for this PR.
 

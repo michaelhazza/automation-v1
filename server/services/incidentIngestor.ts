@@ -26,6 +26,7 @@ import {
   validateFingerprintOverride,
   shouldNotify,
 } from './incidentIngestorPure.js';
+import { checkThrottle } from './incidentIngestorThrottle.js';
 import type { SystemIncidentSeverity } from '../db/schema/systemIncidents.js';
 
 export type { IncidentInput };
@@ -89,6 +90,16 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
     if (isAsyncMode()) {
       await enqueueIngest(input);
     } else {
+      const fingerprint = computeFingerprint(input);
+      // Throttle is applied in the sync branch of recordIncident before calling ingestInline.
+      // The async-worker calls ingestInline directly and intentionally bypasses the throttle —
+      // pg-boss provides backpressure for the async path. Adding throttle in the async-worker
+      // violates spec §1.7 (2026-04-28 pre-test backend hardening). Throttle is process-local;
+      // cross-instance deduplication is not guaranteed.
+      if (checkThrottle(fingerprint)) {
+        logger.debug('incident_ingest_throttled', { fingerprint });
+        return;
+      }
       await ingestInline(input);
     }
   } catch (err) {
@@ -110,7 +121,9 @@ async function enqueueIngest(input: IncidentInput): Promise<void> {
 }
 
 /** Shared code path for sync mode and the async worker. */
-export async function ingestInline(input: IncidentInput): Promise<void> {
+export async function ingestInline(
+  input: IncidentInput
+): Promise<void> {
   // Validate fingerprintOverride before doing anything else
   if (input.fingerprintOverride && !validateFingerprintOverride(input.fingerprintOverride)) {
     logger.warn('incident_fingerprint_override_rejected', {
@@ -122,6 +135,7 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
   }
 
   const fingerprint = computeFingerprint(input);
+
   const classification = classify(input);
 
   // 1. Suppression check
