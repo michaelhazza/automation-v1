@@ -457,6 +457,15 @@ async function start() {
     // Sync mode (the default) writes incidents inline in the calling process and
     // has no consumer for this queue. Registering the worker unconditionally would
     // cause the queue to drain even in sync mode, which is harmless but confusing.
+    //
+    // Always log the resolved mode so operators see the active path at boot,
+    // independent of whether the async branch executes. Useful when triaging
+    // "why is the queue empty?" without needing to grep env config.
+    const ingestMode = process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async' ? 'async' : 'sync';
+    logger.info('incident_ingest_mode', {
+      mode: ingestMode,
+      asyncWorkerRegistered: ingestMode === 'async',
+    });
     if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
       const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
       await boss.work(
