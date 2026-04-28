@@ -477,6 +477,7 @@ When the loop exits for any reason, write a consolidated final report to `tasks/
 **Spec-context commit:** `<hash>`
 **Iterations run:** N of MAX_ITERATIONS
 **Exit condition:** iteration-cap | two-consecutive-mechanical-only | codex-found-nothing | zero-acceptance-drought
+**Verdict:** READY_FOR_BUILD | NEEDS_REVISION
 
 ---
 
@@ -524,6 +525,8 @@ This spec is now mechanically tight against the rubric and against Codex's best-
 
 **Recommended next step:** read the spec's framing sections (first ~200 lines) one more time, confirm the headline findings match your current intent, and then start implementation.
 ```
+
+The Verdict line MUST be one of `READY_FOR_BUILD` (no AUTO-DECIDED items remain unresolved AND no NEEDS_REVISION findings) or `NEEDS_REVISION` (any unresolved items, capped iterations with open issues, or framing-mismatch HITL pause). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Trailing prose is allowed (e.g. `**Verdict:** READY_FOR_BUILD (3 iterations, 5 mechanical fixes applied)`).
 
 ### Auto-commit-and-push the final report
 

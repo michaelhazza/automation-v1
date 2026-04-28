@@ -27,7 +27,7 @@ When the user says "run chatgpt-pr-review" (or equivalent):
 **First: check for an existing session log (resume detection)**
 Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
-- If a log exists whose filename contains the exact branch slug (derived from the branch name with `/` replaced by `-`) **and** the PR number (if already known): **skip steps 1–6 below**. Read the log, identify the last round number, and proceed directly to Per-Round Loop as round N+1. Print: "Resuming session from [log path] — on round N+1. Paste the next ChatGPT feedback."
+- If a log exists whose filename contains the exact branch slug (derived from the branch name with `/` replaced by `-`) **and** the PR number (if already known): **skip steps 1–8 below**. Read the log, identify the last round number, and print: "Resuming session from [log path] — last completed round was N. Say 'next round' to fire round N+1, or 'done' to finalise."
   - Exact slug match rule: branch `feature/foo` → slug `feature-foo`. A log for `feature-foo-bar` does NOT match slug `feature-foo`. Match the full slug, not a prefix or substring.
 - If no log exists: run the full On Start sequence below.
 
@@ -37,27 +37,42 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
    - If the command returns nothing (no PR): run `gh pr create --fill` to create one
 4. Always print the PR URL — whether just created or already existing
 5. Create the session log at `tasks/review-logs/chatgpt-pr-review-<branch-slug>-<YYYY-MM-DDThh-mm-ssZ>.md` and write the Session Info header (see Log Format)
-6. Print the ready message followed by the full diff:
+6. **Verify `OPENAI_API_KEY` is set.** If not, print:
 
-  Ready. PR #<N>: <url>
+   `error: OPENAI_API_KEY is not set. Add it to your shell or .env file before running this agent.`
 
-  Take that PR link (or the diff below) to ChatGPT. Paste their first
-  response back here with your usual phrase.
+   and stop. Do NOT fall back to the legacy copy/paste flow — the agent expects the API path.
 
-  --- DIFF ---
-  <git diff main...HEAD output>
+7. **Run round 1 immediately** by invoking the ChatGPT review CLI with the diff piped to stdin:
+
+   ```bash
+   git diff main...HEAD | npx tsx scripts/chatgpt-review.ts --mode pr
+   ```
+
+   Capture the stdout JSON — it conforms to the `ChatGPTReviewResult` contract at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md § C1`. The fields you will use:
+   - `findings[]` — pre-extracted, normalised, enum-locked. Use this directly for the per-round triage table.
+   - `verdict` — one of `APPROVED | CHANGES_REQUESTED | NEEDS_DISCUSSION`. Will be written into the log Session Info block at finalisation.
+   - `raw_response` — verbatim text the model returned. Preserve this in the round's "ChatGPT Feedback (raw)" log section so the audit trail shows exactly what the model said.
+
+   If the CLI exits non-zero, print its stderr and stop. Do NOT retry — the user resolves the issue (likely missing key or API error) and re-runs the agent.
+
+8. Print the ready message:
+
+   `Ready. PR #<N>: <url> — Round 1 in flight (calling OpenAI).`
 
 ---
 
 ## Per-Round Loop
 
-Trigger: User pastes raw ChatGPT response and says "what should we implement
-from this feedback, go ahead and do so" — or natural variants ("implement what
-makes sense", "go ahead with what's valid", etc.).
+Trigger: User says "next round", "another round", "go again", or equivalent —
+no paste required. Round 1 fires automatically on agent start (per On Start §7
+above); subsequent rounds fire on user signal.
 
-If the pasted content is ambiguous (ChatGPT asked a clarifying question, the
-response is cut off, or there are no distinct findings): say so and ask the user
-to paste again or clarify. Do not guess at intent.
+The agent runs `git diff main...HEAD | npx tsx scripts/chatgpt-review.ts --mode pr`
+to fetch fresh feedback against the latest diff (now including any code changes
+made in earlier rounds).
+
+If the CLI exits non-zero, print stderr and stop. Do not guess or retry.
 
 Session state: every finding gets a user decision in the round it appears. No
 "pending across rounds" concept — if the user says "defer", the item is routed
@@ -67,8 +82,14 @@ next round.
 
 For each round:
 
-1. Parse every distinct finding — each bullet, numbered item, or paragraph-level
-   suggestion is a separate finding.
+1. Use the `findings[]` array from the CLI's JSON output directly — each entry is
+   already a normalised finding with `id`, `title`, `severity`, `category`,
+   `finding_type`, `rationale`, and `evidence`. Do NOT re-parse `raw_response`;
+   the CLI has already done that work.
+
+   Edge cases:
+   - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
+   - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
 
 2. Triage each finding into one of two buckets:
 
@@ -323,7 +344,15 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - If one side was auto and the other user, note that in the Resolution —
      a user decision overriding a prior auto-apply is useful context for
      tuning the triage heuristic later.
-2. Write the Final Summary block to the session log
+2. Write the Final Summary block to the session log AND insert a `**Verdict:**`
+   header line into the **Session Info** block at the top of the log so the
+   Mission Control dashboard can parse it. The line MUST match one of:
+   - `**Verdict:** APPROVED` — zero blocking issues remain; PR is merge-ready.
+   - `**Verdict:** CHANGES_REQUESTED` — at least one accepted high/critical
+     finding still pending implementation.
+   - `**Verdict:** NEEDS_DISCUSSION` — review surfaced an architectural or
+     scope question that needs the user's input before a verdict can be set.
+   Trailing prose is allowed (e.g. `**Verdict:** APPROVED (3 rounds, 4 implement / 7 reject / 3 defer)`).
 3. Pattern extraction:
    - Before appending to KNOWLEDGE.md: grep for similar existing entry.
      Similar = same finding_type OR same leading phrase (first ~5 words).
