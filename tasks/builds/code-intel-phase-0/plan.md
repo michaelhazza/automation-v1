@@ -44,10 +44,14 @@ ts-morph based. Walks `server/`, `client/`, `shared/`. For each `.ts`/`.tsx` fil
 - Exports (named symbols + default export presence)
 - Inbound import edges (computed by inverting the imports map after the full walk)
 
+**Path normalisation (locked):** all paths emitted into shards and the digest MUST be repo-root-relative POSIX format — forward slashes, no leading `./` or `../`, no extension stripping, case-normalised on Windows via `.toLowerCase()` applied to the full path. Example: `server/services/agentExecutionService.ts`, never `./server/services/agentExecutionService.ts` or an absolute path. Consistency across shards matters more than aesthetics; this is locked so consumers never need to normalise before lookup.
+
+**Import resolution (locked):** ts-morph MUST resolve import strings through `tsconfig.json` — path aliases (`@/`, `~`, etc.), bare-directory index file resolution (`/foo` → `/foo/index.ts`), and omitted extensions. Always emit the final resolved file path, not the raw import string. Unresolvable imports (external packages, missing files) are silently dropped — they are already excluded by the `node_modules` filter or represent dead imports.
+
 Emits two artifacts:
 
 1. **`references/import-graph/{server,client,shared}.json`** — sharded per top-level directory. Each shard is a `{ files: { [path]: { imports: string[]; exports: string[]; importedBy: string[] } } }` map. Per-directory sharding so an Explore subagent can load only the slice it needs (~1–3 MB per shard rather than a 5–10 MB monolith).
-2. **`references/project-map.md`** — human-readable digest, ~50–100 lines. Sections (in order): top 20 files by inbound-import count (tie-break: ascending lexicographic path — output must be deterministic so re-runs don't churn the diff); service entry points by directory; files with zero inbound imports (dead-code candidates); per-directory file count + line count totals. Markdown tables, no prose.
+2. **`references/project-map.md`** — human-readable digest, ~50–100 lines. Sections (in order): top 20 files by inbound-import count (tie-break: ascending lexicographic path — output must be deterministic so re-runs don't churn the diff); service entry points by directory; files with zero inbound imports (dead-code candidates); per-directory file count + line count totals. Markdown tables, no prose. **Stable sort requirement:** snapshot inbound-import counts from the *current* shard state before beginning any batch pass, sort by count DESC then path ASC as a secondary tiebreaker. A file's count must not change mid-sort from a concurrent watcher event. This guarantees identical output across identical inputs.
 
 ### Caching
 
@@ -78,7 +82,7 @@ The `references/**` ignore is load-bearing — without it the watcher writes its
 
 **On each event:**
 
-- **`add` / `change`:** SHA256 the file, compare to cache. If unchanged (mtime touched, content identical — happens with some editors), skip. Otherwise re-extract via `ts-morph` (`Project.addSourceFileAtPath` + `getImportDeclarations` + `getExportSymbols`). Atomically rewrite the affected shard (write to `.tmp`, `rename` — OS-level atomic on POSIX and NTFS). Update `references/.code-graph-cache.json`. Re-emit `references/project-map.md` only on **topology change** (defined below).
+- **`add` / `change`:** SHA256 the file, compare to cache. If unchanged (mtime touched, content identical — happens with some editors), skip. Otherwise re-extract via `ts-morph` (`Project.addSourceFileAtPath` + `getImportDeclarations` + `getExportSymbols`). **Bidirectional edge update (mandatory):** before writing the new imports for file X, remove X from the `importedBy` array of every file it previously imported (read from the prior cache entry). Then write X's new imports and add X to each new import target's `importedBy`. Atomically rewrite all affected shards (write to `.tmp`, `rename` — OS-level atomic on POSIX and NTFS). Update `references/.code-graph-cache.json`. Re-emit `references/project-map.md` only on **topology change** (defined below). Without this reverse-index update, removing an import in file A leaves A's path in B's `importedBy` indefinitely — correct data on the next cold build but silently wrong throughout the session.
 - **`unlink`:** remove from cache and shard. Same dead-file pruning as cold-build.
 - **Rename:** chokidar reports renames as **`unlink` of the old path + `add` of the new path** — two separate events. Treat them that way; do NOT special-case rename detection. Inbound-edge updates (other files importing the renamed path) propagate naturally because those files' next save will re-extract their imports.
 
@@ -163,14 +167,15 @@ The following were live questions during synthesis but are now decided — the a
 - **Cold-build trigger:** `predev` script in `package.json` (see Lifecycle section).
 - **In-session refresh:** `chokidar` watcher launched detached by `predev`, lifecycle-bound to the dev server, singleton-enforced via `proper-lockfile` PID lock at `references/.watcher.lock`. Atomic shard writes via temp-file + rename. **Picked over the alternatives — startup-only regen (proven stale within minutes), lazy-on-read (read-side latency, complex coordination), git-hook-only (misses uncommitted changes mid-session), editor-save-hook (editor-coupled, leaves CLI workflows uncovered).**
 - **Failure handling for un-parseable files:** log + skip + write to `.skipped.txt`. Build fails only if per-directory skip rate >5% (see Done criteria).
+- **Path normalisation:** repo-root-relative POSIX (`server/services/foo.ts` form), case-normalised on Windows. See Generator section for full spec.
+- **Import resolution:** ts-morph must resolve through `tsconfig.json` path aliases and index files; always emit the resolved file path. See Generator section for full spec.
 
 ## Open questions for the architect
 
-Three genuinely-open decisions remain:
+Two genuinely-open decisions remain (path normalisation and import resolution are now locked above):
 
-1. **Path normalisation** — relative-from-repo-root vs absolute vs original-as-imported. Consistency across shards matters more than which form. Pick one and document it in the generator's header comment.
-2. **Generator placement** — `scripts/build-code-graph.ts` (top-level) vs `server/scripts/...` vs a new `tools/` directory. Use existing convention if one applies — check whether `scripts/` is the established home for cross-cutting build tooling.
-3. **`predev` invocation form** — direct `tsx scripts/build-code-graph.ts` vs a wrapper `npm run code-graph` that `predev` then calls. Trade: wrapper gives one canonical entry point for both `predev` and manual `npm run code-graph:rebuild`; direct call is one less indirection. Lean: wrapper, for symmetry with the other `npm run *` entries in `package.json`.
+1. **Generator placement** — `scripts/build-code-graph.ts` (top-level) vs `server/scripts/...` vs a new `tools/` directory. Use existing convention if one applies — check whether `scripts/` is the established home for cross-cutting build tooling.
+2. **`predev` invocation form** — direct `tsx scripts/build-code-graph.ts` vs a wrapper `npm run code-graph` that `predev` then calls. Trade: wrapper gives one canonical entry point for both `predev` and manual `npm run code-graph:rebuild`; direct call is one less indirection. Lean: wrapper, for symmetry with the other `npm run *` entries in `package.json`.
 
 ## Reference: parked Phase 1
 
