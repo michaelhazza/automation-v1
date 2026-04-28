@@ -1081,3 +1081,20 @@ The shape `{ success: true, suppressed: true, reason }` lets callers distinguish
 **Detection heuristic.** When reviewing a single-writer emitter, grep the diff for `success: false` returns. Each hit must be either: (a) a genuine failure mode (DB / network / permission / malformed input), or (b) a coordination loser that should be flipped to `success: true, suppressed: true`. The grep pattern + a follow-up lint guard are the path from "well understood" to "impossible to violate quietly".
 
 **ChatGPT review framing.** Both PR #218 review rounds reinforced this — Round 1 flagged the pattern as forward-looking standardisation; Round 2's optional follow-up explicitly named "codify suppression = success as a reusable utility or invariant check + add a lightweight lint or grep-based guard to prevent regressions" as the highest-leverage next step. The review rounds form the canonical citation for why the pattern matters at the codebase level, not just the system-monitoring level.
+
+---
+
+### [2026-04-28] Correction — Spec contracts MUST be declarative invariants, not verification instructions
+
+When applying review feedback to a spec, contracts that the implementation must hold MUST be written declaratively ("X MUST hold") with the failure mode explicitly forbidden, not as advisory verification steps ("verify X holds" or "the existing guard handles this").
+
+**Why:** Verification instructions become stale on the next refactor — they describe how to inspect the current code, not what the code must do. ChatGPT's second-round review of `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` flagged four such gaps in my first-round edits:
+
+1. §1.1 sequence ordering — I wrote "emitter sequence allocation is atomic per `agentExecutionEventService`" (an implication based on the existing primitive); the contract needed to be "both events MUST be emitted through the same `agentExecutionEventService` sequencing context" (a declarative MUST that survives a future refactor splitting the emit calls across tx boundaries).
+2. §1.3 dispatch idempotency — I wrote "dispatch MUST be called only on the winner branch" with verification instructions to confirm placement; the contract needed to enumerate forbidden placements ("MUST NOT occur before the decision-row write, outside the post-commit boundary, in the unique-violation catch path, or in a fire-and-forget side-task").
+3. §1.3 retry semantics — I wrote "does not re-decrement retry counters" (one direction only); the contract needed to forbid increment AND decrement AND reset, and enumerate the partial-state edge cases.
+4. §1.7 throttle time source — I made fake-clock usage required in tests but didn't pin the production code's time source; a future "perf optimization" using `performance.now()` would have silently broken every fake-clock test.
+
+**How to apply.** When applying spec review feedback, for every "verify X" or "rely on Y" phrase in the diff, ask: "What MUST hold for this to be safe?" — and write that as a MUST statement in the spec, with the failure modes explicitly forbidden. Verification instructions belong in the implementation checklist, not in the contract section. The contract is what survives refactors; the verification instruction is what loses.
+
+**File reference:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §§1.1, 1.2 (purity contract), 1.3 (idempotency + retry), 1.7 (time source), 1.8 (hook-presence) — second-round edits applied 2026-04-28.
