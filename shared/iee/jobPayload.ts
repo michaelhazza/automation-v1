@@ -81,12 +81,27 @@ export const BrowserTaskPayload = z.object({
 });
 export type BrowserTaskPayload = z.infer<typeof BrowserTaskPayload>;
 
+/**
+ * Optional quality-check command bundle the dev executor runs after every
+ * write_file / git_commit. Each command is opt-in — omit the field to skip
+ * that check. Results surface in the next Observation's `lastChecks`. See
+ * worker/src/dev/qualityChecks.ts and worker/src/config/devChecks.ts for
+ * defaults.
+ */
+export const DevTaskChecks = z.object({
+  lintCommand: z.string().min(1).max(500).optional(),
+  typecheckCommand: z.string().min(1).max(500).optional(),
+  testCommand: z.string().min(1).max(500).optional(),
+});
+export type DevTaskChecks = z.infer<typeof DevTaskChecks>;
+
 export const DevTaskPayload = z.object({
   type: z.literal('dev'),
   goal: z.string().min(1).max(2000),
   repoUrl: z.string().url().optional(),
   branch: z.string().max(200).optional(),
   commands: z.array(z.string().max(2000)).max(20).optional(),
+  checks: DevTaskChecks.optional(),
 });
 export type DevTaskPayload = z.infer<typeof DevTaskPayload>;
 

@@ -25,6 +25,7 @@ export async function registerDevHandler(boss: PgBoss, workerInstanceId: string)
             ieeRunId: run.id,
             organisationId: run.organisationId,
             initialCommands: payload.task.commands,
+            checks: payload.task.checks,
           });
         },
       });
