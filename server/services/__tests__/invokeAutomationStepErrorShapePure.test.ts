@@ -131,12 +131,13 @@ test('case 4: every status string written by production code is listed in KNOWN_
   // safe because nested objects inside AutomationStepError literals close with `},`
   // (comma, not semicolon).
   const errorBlockRe = /\bconst\s+\w+\s*:\s*AutomationStepError\s*=\s*\{([\s\S]*?)\};/g;
-  const statusRe = /\bstatus:\s*'([^']+)'/;
+  const statusRe = /\bstatus:\s*'([^']+)'/g;
   const capturedStatuses: string[] = [];
   for (const blockMatch of serviceText.matchAll(errorBlockRe)) {
     const blockContent = blockMatch[1];
-    const statusMatch = blockContent.match(statusRe);
-    if (statusMatch) capturedStatuses.push(statusMatch[1]);
+    for (const statusMatch of blockContent.matchAll(statusRe)) {
+      capturedStatuses.push(statusMatch[1]);
+    }
   }
   assert.ok(
     capturedStatuses.length > 0,
