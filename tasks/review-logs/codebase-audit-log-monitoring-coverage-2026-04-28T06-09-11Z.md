@@ -265,3 +265,248 @@ The prompt allows the agent to write "Hypothesis: insufficient evidence" — but
 | (3.6) | No `confidence: 'insufficient'` value | LOW |
 
 The CRITICAL one (G2) is mechanical and ~10 LOC. The MEDIUM ones add visible diagnostic value but are not launch blockers. The LOW ones are post-launch polish.
+
+---
+
+## 4. Action surface coverage matrix
+
+This section enumerates every action class the user mentioned ("anything that can execute, anything that can run, anything that is actioned") and grades whether its failure paths reach the System Monitor agent.
+
+Legend:
+- **✓** — covered: failure produces a `system_incidents` row (directly or through DLQ + DLQ subscription).
+- **partial** — some failure modes covered, others slip through.
+- **✗** — not covered: failures are `logger.error`-only, or land in pg-boss `failed`/DLQ with no DLQ subscription, or surface only as exceptions to the user.
+
+### 4.1 HTTP routes (all subdomains: org user, sub-account user, sysadmin)
+
+| Surface | Coverage | Mechanism | Notes |
+|---|---|---|---|
+| Routes wrapped in `asyncHandler` (5xx) | ✓ | `server/lib/asyncHandler.ts:43-62` calls `recordIncident({source: 'route'})` on every 5xx | Most routes use this |
+| Global error handler (5xx) | ✓ | `server/index.ts:411-432` calls `recordIncident({source: 'route'})` for any 5xx that escapes asyncHandler | Catch-all safety net; uses `__incidentRecorded` dedup flag |
+| Routes that bypass `asyncHandler` and write `res.status(500)` directly | partial | Logged via `logger.error`/`console.error` but no `recordIncident` unless they then `throw` (the global handler then catches it) | Audit each manual `res.status(500)` site |
+| **GHL webhook** (`server/routes/webhooks/ghlWebhook.ts:64-67`) | ✗ | DB lookup failure path returns `res.status(500)` directly without throwing — no incident emitted | **G7 — fix** |
+| **Slack webhook** (`server/routes/webhooks/slackWebhook.ts`) | partial | Wraps in `asyncHandler`; covered for 5xx but the explicit `res.status(401/400)` paths log and return — fine for user_fault | OK |
+| **Teamwork webhook** (`server/routes/webhooks/teamworkWebhook.ts`) | partial | Same as Slack — wrapped, but inspect for explicit non-throw 5xx paths | Audit |
+| **GitHub webhook** (`server/routes/githubWebhook.ts:80-125`) | ✗ | `try/catch` around handler with `logger.error('github_webhook.handler_error', …)` and **no `recordIncident`** — 401/400 paths exit before async work | **G7 — fix** |
+| **GHL OAuth callback** (`server/routes/ghl.ts:43`) | ✓ | Wrapped in `asyncHandler` — covered for 5xx | OK |
+| 4xx user_fault classification | ✓ | `classify(input)` in `incidentIngestorPure.ts:55-60` flips 4xx + validation/auth categories to `user_fault` so they don't pollute the system_fault stream | OK |
+| Routes producing 5xx but excluded from incident emission (any?) | TBD | None found in code search; if any exist they'd need to use a `silentFailure` flag (not currently a thing) | Confirmed none |
+
+**Verdict:** Routes are **mostly covered**. Action: fix G7 — non-asyncHandler-wrapped 5xx paths in webhook routes.
+
+### 4.2 Pg-boss jobs
+
+This is where the biggest gaps are. Three classes:
+
+#### 4.2.1 Class A — `JOB_CONFIG` queues with `deadLetter:` declared
+
+31 queues. `dlqMonitorService.ts:14-23` subscribes to **8** of them. The other **23 are unsubscribed**: jobs reach the DLQ but no incident is created.
+
+Subscribed (✓):
+```
+agent-scheduled-run, agent-org-scheduled-run, agent-handoff-run, agent-triggered-run,
+execution-run, workflow-resume, llm-aggregate-update, llm-monthly-invoices
+```
+
+NOT subscribed (✗):
+```
+llm-reconcile-reservations, payment-reconciliation, stale-run-cleanup,
+maintenance:cleanup-execution-files, maintenance:cleanup-budget-reservations,
+maintenance:memory-decay, maintenance:security-events-cleanup, maintenance:memory-dedup,
+clientpulse:propose-interventions, clientpulse:measure-outcomes,
+agent-run-cleanup, priority-feed-cleanup, regression-capture, regression-replay-tick,
+llm-clean-old-aggregates,
+iee-browser-task, iee-dev-task, iee-cleanup-orphans, iee-run-completed,
+skill-analyzer,
+workflow-run-tick, workflow-watchdog, workflow-agent-step, workflow-bulk-parent-check,
+connector-polling-sync
+```
+
+This is **G1** in the executive summary.
+
+#### 4.2.2 Class B — `JOB_CONFIG` queues with NO `deadLetter:` at all
+
+Failures stay in pg-boss `failed` state forever, invisible to `dlqMonitorService` even after fix:
+
+```
+slack-inbound, agent-briefing-update, memory-context-enrichment,
+page-integration, iee-cost-rollup-daily, connector-polling-tick
+```
+
+This is **G5** in the executive summary.
+
+#### 4.2.3 Class C — queues registered with raw `boss.work(...)` outside `JOB_CONFIG`
+
+These bypass `createWorker` (no centralised retry/timeout/error classification) and have neither retry config nor DLQ:
+
+```
+maintenance:fast-path-decisions-prune
+maintenance:rule-auto-deprecate
+maintenance:fast-path-recalibrate
+maintenance:llm-ledger-archive
+maintenance:llm-started-row-sweep
+maintenance:stale-analyzer-job-sweep
+maintenance:llm-inflight-history-cleanup
+maintenance:memory-entry-decay
+memory-hnsw-reindex
+memory-blocks-embedding-backfill
+maintenance:clarification-timeout-sweep
+maintenance:iee-main-app-reconciliation
+maintenance:memory-entry-quality-adjust
+maintenance:memory-block-synthesis
+maintenance:bundle-utilization
+maintenance:portfolio-briefing
+maintenance:portfolio-digest
+maintenance:protected-block-divergence
+system-monitor-self-check
+subscription-trial-check
+orchestrator-from-task
+```
+
+Plus three workflow engine queues that bypass `createWorker`:
+```
+workflow-run-tick, workflow-watchdog, workflow-agent-step
+```
+(though these *do* have entries in `JOB_CONFIG` — they're double-counted in Class A as well, since they have `deadLetter:` declared but the `boss.work` registration doesn't go through `createWorker`).
+
+This is **G4** in the executive summary.
+
+#### 4.2.4 Job summary
+
+The agent today sees: failures of 8 queues out of ~50+ active queues. ~25% coverage.
+
+### 4.3 Agent runs
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| Terminal `failed` / `timeout` / `loop_detected` | ✓ | `agentExecutionService.ts:1528-1538` calls `recordIncident({source: 'agent'})` |
+| Run completed=true but no side effects | ✓ | `silentAgentSuccess` synthetic check + `silentAgentSuccessPure` |
+| Run completed but ≥2 heuristic fires | ✓ | sweep handler clusters fires, opens incident, schedules triage |
+| Run never started (scheduled but no row) | partial | `noAgentRunsInWindow` synthetic check covers global silence; per-schedule silence not covered |
+| HITL approval timeout | ✗ | No synthetic check; rows sit `pending_review` indefinitely |
+
+### 4.4 Skill executions
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| `onFailure: 'fail_run'` and skill throws | ✓ | `skillExecutor.ts:347-359` calls `recordIncident({source: 'skill'})` |
+| `onFailure: 'retry'` and skill exhausts retries | ✗ | Only logs; no incident even after all retries fail |
+| `onFailure: 'skip'` / `'fallback'` and skill failed | ✗ | Result returned but no incident; persistent failure invisible |
+| Tool output schema mismatch | ✓ | `toolOutputSchemaMismatch` heuristic |
+| Tool succeeded but agent claimed failure | ✓ | `toolFailedButAgentClaimedSuccess`, `toolSuccessButFailureLanguage` heuristics |
+| Skill latency anomaly | ✓ | `skillLatencyAnomaly` heuristic (Phase 2.5) |
+
+This is **G6** in the executive summary.
+
+### 4.5 LLM router
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| All providers exhausted | ✓ | `llmRouter.ts:1096-1105` |
+| Single provider failure with successful fallback | partial | Logged, no incident (correct — fallback worked) |
+| Unexpected fallback chain length | ✓ | `llmFallbackUnexpected` heuristic (Phase 2.5) |
+| Cost-per-outcome regression | ✓ | `costPerOutcomeIncreasing` heuristic (Phase 2.5) |
+| `CLASSIFICATION_PARSE_FAILURE` / `RECONCILIATION_REQUIRED` | ✓ | High-severity inference path in `inferDefaultSeverity` |
+
+### 4.6 Connectors / integration adapters
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| Connector polling sync failure | ✓ | `connectorPollingService.ts:82, 298` calls `recordIncident({source: 'connector'})` with `connector:<type>:sync_failed` fingerprint |
+| Connector connection error | ✓ | Same module |
+| Connector empty response repeated | ✓ | `connectorEmptyResponseRepeated` heuristic |
+| Connector poll stale | ✓ | `connectorPollStale` synthetic check |
+| Connector error rate elevated | ✓ | `connectorErrorRateElevated` synthetic check |
+| **Adapter direct calls** (`server/adapters/{ghl,slack,stripe,teamwork}.ts`) | ✗ | Zero `recordIncident` calls in `server/adapters/`. Out-of-band token refresh, send-message, push-notification calls fail silently |
+| Webhook signature failure | partial | `logger.warn`; correctly *not* an incident (4xx, user_fault) |
+
+This is **G13** in the executive summary.
+
+### 4.7 IEE (Integrated Execution Environment)
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| `iee-browser-task` / `iee-dev-task` exhausts retries | ✗ | DLQ defined but not subscribed — see G1 |
+| `iee-cleanup-orphans` failure | ✗ | Same |
+| `iee-run-completed` reconnect failure | ✗ | Same |
+| `iee_runs` row stuck in non-terminal state | ✗ | No synthetic check (the `cleanup-orphans` job is the only safety net; if it fails, no signal) |
+| `iee-cost-rollup-daily` failure | ✗ | No DLQ; sits `failed` in pg-boss — see G5 |
+
+### 4.8 Workflows engine
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| `workflow-run-tick` exhausts retries | ✗ | DLQ defined but not subscribed — see G1; also bypasses `createWorker` — see G4 |
+| `workflow-watchdog` failure | ✗ | Same |
+| `workflow-agent-step` exhausts retries | ✗ | Same |
+| `workflow-bulk-parent-check` failure | ✗ | Same |
+| Workflow run stuck in non-terminal state past expected runtime | partial | Watchdog handles missed ticks; no synthetic check on "watchdog itself silent for >N min" |
+
+### 4.9 Skill analyzer (sysadmin-triggered, ~hours-long, expensive)
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| Job throws inside handler | ✗ | Logs `logger.error('[skillAnalyzer] …')` but no `recordIncident` |
+| Stale execution lock cleared | partial | `logger.warn` only |
+| Proposed agent soft-create fails | partial | `logger.warn` only |
+| Job exhausts retries → DLQ | ✗ | DLQ defined (`skill-analyzer__dlq`) but not subscribed — see G1 |
+| Job timed out at 4-hour cap | ✗ | Same |
+| Phantom backup cleanup fails | partial | `logger.warn` only |
+
+This is **G11**. A multi-hour expensive sysadmin job can fail silently. Critical for the operator workflow.
+
+### 4.10 Sysadmin admin operations
+
+| Surface | Coverage | Notes |
+|---|---|---|
+| `adminOpsService.ts` operations (route-mediated) | ✓ | Wrapped in `asyncHandler`; 5xx → incident |
+| `configBackupService.ts` (config backup/restore) | partial | 5xx covered by route wrapper; mid-operation partial failures not flagged |
+| `dataRetentionService.ts` | partial | Logger-only on partial failures |
+| `orgSubaccountMigrationJob.ts` | ✗ | Bypasses `recordIncident`; failure mode = log-only |
+| `regressionCaptureService.ts` failure | ✗ | DLQ defined but not subscribed — see G1 |
+| `subscriptionTrialCheck` cron | ✗ | Raw `boss.work` registration; no DLQ — see G4 |
+| OAuth integration token refresh | ✗ | Adapter-level — see G13 |
+| Bundle resolution failures | partial | Surface as `cached_context_budget_breach` HITL action when applicable; outright failures may slip |
+| Schedule dispatch failure (a schedule didn't fire) | ✗ | No synthetic check |
+| Memory decay / dedup / synthesis failures | ✗ | All bypass `JOB_CONFIG` — see G4 |
+
+This is **G15** in the executive summary.
+
+### 4.11 Brief / artefact / conversation operations
+
+| Failure mode | Coverage | Mechanism |
+|---|---|---|
+| Brief lifecycle conflict | partial | `briefConversationWriter` logs + counters; no incident even on persistent rate elevation |
+| Artefact validation rejection | partial | Counter only (`artefactsValidationRejectedTotal`); no incident threshold |
+| Brief artefact over-limit | partial | Counter only |
+| Brief fast-path classification failure | ✗ | Logger only |
+
+### 4.12 WebSocket / push channels
+
+| Failure mode | Coverage |
+|---|---|
+| `system_incident:updated` broadcast failure | partial — caught in `systemIncidentNotifyJob.ts`; logs warning. Spec accepts this as best-effort |
+| WebSocket auth failure | ✗ — not in scope of incident sink |
+| Push channel delivery (Phase 0.75 deferred) | n/a |
+
+### 4.13 Cumulative coverage
+
+| Layer | Coverage |
+|---|---|
+| HTTP routes (asyncHandler-wrapped) | ✓ |
+| HTTP routes (manual `res.status(500)`, esp. webhooks) | ✗ G7 |
+| pg-boss DLQ — JOB_CONFIG subset (8/31) | partial G1 |
+| pg-boss DLQ — JOB_CONFIG no-deadLetter (6 queues) | ✗ G5 |
+| pg-boss raw `boss.work` (no JOB_CONFIG, ~20 queues) | ✗ G4 |
+| Agent runs (terminal failure) | ✓ |
+| Agent runs (HITL timeout, schedule silence) | ✗ |
+| Skill executions (`fail_run` only) | partial G6 |
+| LLM router | ✓ |
+| Connector polling | ✓ |
+| Connector adapter direct calls | ✗ G13 |
+| IEE | ✗ — collapses into G1+G5+G4 |
+| Workflows engine | ✗ — collapses into G1+G4 |
+| Skill analyzer | ✗ G11 |
+| Sysadmin operations (most) | partial G15 |
+| Async incident ingestor (when enabled) | ✗ G3 |
+| Triage agent log evidence (`read_logs_for_correlation_id`) | ✗ G2 |
