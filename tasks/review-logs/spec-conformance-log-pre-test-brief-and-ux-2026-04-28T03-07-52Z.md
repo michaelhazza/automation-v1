@@ -147,4 +147,4 @@ The directional gaps split into three groups; the main session should triage eac
 
 After the main session addresses these, run `pr-reviewer` against the whole branch (no mechanical fixes were applied here, so the changed-code set is unchanged).
 
-**Commit at finish:** _filled by auto-commit step below._
+**Commit at finish:** `c5dd582776223b97067cf17269da382d2d9ae93c`
