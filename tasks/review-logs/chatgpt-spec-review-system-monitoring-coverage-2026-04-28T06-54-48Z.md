@@ -111,3 +111,76 @@ Defensive depth + intent documentation. ChatGPT's round-1 pass tightened four "i
 ### Round 1 status
 
 **COMPLETE.** All 7 items applied to the spec (5 auto, 2 user-approved with refinements) plus 1 integrity-check follow-up auto-applied. Ready to commit + push as a single round-1 update to PR #226.
+
+---
+
+## Round 2 — 2026-04-28T07-25-00Z
+
+### ChatGPT Feedback (raw)
+
+> Verdict: done, finalise the spec. No blockers.
+>
+> One minor observation (explicitly NOT a blocker, NOT needed now):
+>
+> The `createWorker` transaction rule is currently enforced via `grep -n "withOrgTx" <file>` which is human-executed. Long-term candidate for a lint rule or test-time AST check. Natural evolution — not needed now.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Convert `withOrgTx` invariant from grep-check to lint rule or AST test | technical | defer | defer (escalated, user-let-stand) | low | Escalated under defer carveout; ChatGPT explicitly framed as "natural evolution, not needed now" — routed to tasks/todo.md, no spec edit |
+
+### Applied (auto-applied technical + user-approved)
+
+- None. No spec edits this round. Single finding deferred to `tasks/todo.md § Spec Review deferred items / system-monitoring-coverage (2026-04-28)`.
+
+### Integrity check
+
+Skipped — no edits applied this round (per agent contract: integrity check runs over edits, not over no-ops).
+
+### Top themes
+
+Convergence verdict. ChatGPT's Round 2 is the canonical "spec is done" signal: no `apply` decisions, no structural concerns, one explicit deferral with the reviewer pre-classifying it as out-of-scope. Matches the prior convergence pattern (KNOWLEDGE.md 2026-04-23): when a strong-framing spec reaches Round 2 with zero implement decisions, the well is dry — that's the finalisation trigger, not a reason to keep iterating. The single deferred item is a lint/AST-rule upgrade for an invariant whose grep-based check is already correct for v1 scope.
+
+### Round 2 status
+
+**COMPLETE.** Zero spec edits. One item deferred to `tasks/todo.md`. Spec is finalised and ready for implementation.
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 6 applied | 0 rejected | 1 deferred (Round 2 item — escalated, user-let-stand)
+- User-decided:              2 applied (with refinements) | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to `tasks/todo.md § Spec Review deferred items / system-monitoring-coverage (2026-04-28)`:
+  - [auto] **Convert `withOrgTx` invariant from grep-check to lint rule or AST test** — Round 2 ChatGPT framing: "natural evolution, not needed now." Reconsider when adding a 4th `createWorker` conversion OR when a `withOrgTx` regression slips past grep in code review.
+- KNOWLEDGE.md updated: yes (3 entries — invariant + test pairing, spec-as-runbook (grep + decision table), self-consistency via file-inventory lock)
+- PR: #226 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/226
+
+### Implementation readiness checklist
+
+- [x] All inputs defined — `recordIncident(input, opts?: { forceSync?: boolean })` contract spelled out in §3.4; per-handler conversion inputs in §5.2/§5.3 with explicit grep-decision-table.
+- [x] All outputs defined — DLQ-derived incident shape (§3.2/§3.4), worker conversion outcomes (§5.2.1+), logger emission semantics (§4.2.2).
+- [x] Failure modes covered — DLQ misnaming throw (§3.2), forceSync invariant violation grep (§3.4), double-tx invariant grep (§5.2), logger burst-race singleton (§4.2.2).
+- [x] Ordering guarantees explicit — log buffer best-effort note (§4.2.2 + §8.1 ordering row).
+- [x] No unresolved forward references — both integrity-check passes in Round 1 cleared; Round 2 made no edits so no new references introduced.
+
+**Spec IS implementation-ready.** All five checklist items pass. No warnings to log.
+
+### Consistency check across rounds
+
+No contradictions. Round 1 applied 8 items (5 auto, 2 user-approved with refinements, 1 integrity-check follow-up). Round 2 applied 0 items, deferred 1. The Round 2 deferred item (`withOrgTx` lint/AST upgrade) is consistent with Round 1's user-approved Item 2 (grep + decision table for `withOrgTx`) — Round 2 explicitly preserves the Round 1 mechanism and proposes a future tightening, not a replacement.
+
+### KNOWLEDGE.md patterns extracted
+
+Three reusable patterns added in same finalisation commit:
+
+1. **2026-04-28 Pattern — Invariant + test pairing in spec authoring.** Every critical invariant in `2026-04-28-system-monitoring-coverage-spec.md` has a paired test or grep contract, not just prose. Generalises: a spec invariant without a verification artefact is a wish, not a contract.
+2. **2026-04-28 Pattern — Spec-as-runbook via `grep -n` + decision table.** Soft rules ("MUST not double-wrap transactions") become deterministic verification steps when expressed as `grep -n <pattern> <file>` plus a decision table that maps each grep outcome to the correct action. Removes interpretation from review-time enforcement.
+3. **2026-04-28 Pattern — Self-consistency via file-inventory lock.** When a spec edit changes the implementation surface (new options, new test files, new modified-files), the file inventory in §2 (or its equivalent) must be updated in the same edit. Drift between prose and inventory is a `file-inventory-drift` finding and auto-applies under the technical bucket.
+
+### Session closed
+
+PR #226 carries the finalised spec. Implementation can begin.
