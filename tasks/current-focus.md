@@ -1,6 +1,17 @@
+<!-- mission-control
+active_spec: docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md
+active_plan: tasks/builds/dev-mission-control/plan.md
+build_slug: dev-mission-control
+branch: claude/review-feature-workflow-c7Zij
+status: BUILDING
+last_updated: 2026-04-28
+-->
+
 # Current Focus
 
 This file is the sprint-level pointer for the active session. Update it whenever the current spec, branch, or active sprint changes. A stale pointer is worse than no pointer — it actively misleads future sessions. If no spec is in flight, set both fields to `none`.
+
+The HTML comment block at the top of this file is read by the Mission Control dashboard (`tools/mission-control/`). Keep the prose below it in sync with the block; if the two disagree, the prose is canonical and the block must be corrected. Status enum: `PLANNING` | `BUILDING` | `REVIEWING` | `MERGE_READY` | `MERGED` | `NONE`.
 
 For per-session progress (what was done this session, what's next), write to `tasks/builds/<slug>/progress.md` — not here.
 

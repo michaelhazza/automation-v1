@@ -26,6 +26,40 @@ When referencing the review log from another artifact (`tasks/todo.md` source-lo
 
 ---
 
+## Verdict header convention
+
+Every review log under `tasks/review-logs/` MUST include, within the first 30 lines, exactly one line matching the regex:
+
+```
+/^\*\*Verdict:\*\*\s+([A-Z_]+)\b/m
+```
+
+Format:
+
+```
+**Verdict:** <ENUM>
+```
+
+Trailing prose on the same line is allowed and ignored by the parser (e.g. `**Verdict:** CONFORMANT_AFTER_FIXES (1 mechanical gap closed; 4 directional items routed)`). The Mission Control dashboard at `tools/mission-control/` reads this line per log to surface the latest verdict per build.
+
+Per-agent enum (locked):
+
+| Agent | Allowed values |
+|---|---|
+| `spec-conformance` | `CONFORMANT` \| `CONFORMANT_AFTER_FIXES` \| `NON_CONFORMANT` |
+| `pr-reviewer` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
+| `dual-reviewer` | `APPROVED` \| `CHANGES_REQUESTED` |
+| `spec-reviewer` (final report) | `READY_FOR_BUILD` \| `NEEDS_REVISION` |
+| `audit-runner` | `PASS` \| `PASS_WITH_DEFERRED` \| `FAIL` |
+| `chatgpt-pr-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
+| `chatgpt-spec-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
+
+Mid-session ChatGPT logs (rounds in progress, no finalisation) MAY omit the Verdict line entirely. The dashboard treats missing-verdict logs as "review in progress."
+
+When adding a new review agent, extend this table AND add a Verdict line to its log template — the dashboard parser will not see a verdict that lives elsewhere in the log.
+
+---
+
 ## Caller contracts per agent
 
 ### `pr-reviewer`

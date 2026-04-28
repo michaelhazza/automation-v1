@@ -323,7 +323,15 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - If one side was auto and the other user, note that in the Resolution —
      a user decision overriding a prior auto-apply is useful context for
      tuning the triage heuristic later.
-2. Write the Final Summary block to the session log
+2. Write the Final Summary block to the session log AND insert a `**Verdict:**`
+   header line into the **Session Info** block at the top of the log so the
+   Mission Control dashboard can parse it. The line MUST match one of:
+   - `**Verdict:** APPROVED` — zero blocking issues remain; PR is merge-ready.
+   - `**Verdict:** CHANGES_REQUESTED` — at least one accepted high/critical
+     finding still pending implementation.
+   - `**Verdict:** NEEDS_DISCUSSION` — review surfaced an architectural or
+     scope question that needs the user's input before a verdict can be set.
+   Trailing prose is allowed (e.g. `**Verdict:** APPROVED (3 rounds, 4 implement / 7 reject / 3 defer)`).
 3. Pattern extraction:
    - Before appending to KNOWLEDGE.md: grep for similar existing entry.
      Similar = same finding_type OR same leading phrase (first ~5 words).

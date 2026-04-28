@@ -173,8 +173,10 @@ Per-agent enum (locked):
 Parser regex (used by `logParsers.ts`):
 
 ```
-/^\*\*Verdict:\*\*\s+([A-Z_]+)\s*$/m
+/^\*\*Verdict:\*\*\s+([A-Z_]+)\b/m
 ```
+
+The trailing `\b` (word boundary) lets the agent append a parenthetical explanation on the same line — e.g. `**Verdict:** CONFORMANT_AFTER_FIXES (1 mechanical gap closed)` — without breaking the parser. Only the enum value is captured.
 
 ### C3. `current-focus.md` machine block
 

@@ -334,7 +334,15 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - No unresolved forward references
    Log each failure as a warning. If 2 or more fail, also log:
    ⚠ Spec not implementation-ready — resolve checklist failures before build.
-3. Write the Final Summary block to the session log
+3. Write the Final Summary block to the session log AND insert a `**Verdict:**`
+   header line into the **Session Info** block at the top of the log so the
+   Mission Control dashboard can parse it. The line MUST match one of:
+   - `**Verdict:** APPROVED` — spec is implementation-ready; checklist clean.
+   - `**Verdict:** CHANGES_REQUESTED` — accepted spec edits remain pending or
+     2+ implementation-readiness checklist items failed.
+   - `**Verdict:** NEEDS_DISCUSSION` — review surfaced a directional question
+     that needs the user's input before a verdict can be set.
+   Trailing prose is allowed (e.g. `**Verdict:** APPROVED (2 rounds)`).
 4. Pattern extraction + structured index: same as PR agent —
    - Before appending to KNOWLEDGE.md: grep for similar existing entry;
      update instead of duplicating if found. Include (seen N times) on add/update.
