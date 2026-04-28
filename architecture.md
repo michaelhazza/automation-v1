@@ -3280,18 +3280,21 @@ Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missin
 ### Coverage surface
 
 - **Log buffer (G2):** `logger.emit` calls `appendLogLineSafe` (lazy-loaded from `server/services/systemMonitor/logBuffer.ts`), wiring every structured log line into the in-process ring buffer. The adapter is in `server/lib/logger.ts`; pure conversion logic in `server/lib/loggerBufferAdapterPure.ts`.
-- **DLQ subscriptions (G1, G5):** `dlqMonitorService.ts` derives 40 queue names dynamically via `deriveDlqQueueNames(JOB_CONFIG)` (up from 8 hard-coded). Any new queue in `JOB_CONFIG` with a `deadLetter` field is covered automatically.
-- **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `workflowEngineService.ts`; `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation.
+- **DLQ subscriptions (G1, G5):** `dlqMonitorService.ts` derives 40 queue names dynamically via `deriveDlqQueueNames(JOB_CONFIG)` (up from 8 hard-coded). Any new queue in `JOB_CONFIG` with a `deadLetter` field is covered automatically. The DLQ handler calls `recordIncident(..., { forceSync: true })` so DLQ signals bypass the throttle (G5) — pg-boss already gates delivery and the throttle would otherwise drop bursty same-fingerprint DLQ deliveries instead of incrementing `occurrenceCount`.
+- **Async-ingest worker (G3):** When `SYSTEM_INCIDENT_INGEST_MODE=async`, the ingest queue worker is registered in `server/index.ts` (`system-monitor-ingest`, retryLimit=3, expireInSeconds=60, deadLetter=`system-monitor-ingest__dlq`). On every boot the resolved mode is logged unconditionally as `incident_ingest_mode` (mode + asyncWorkerRegistered fields) so operators see the active path without grepping env config.
+- **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `workflowEngineService.ts`; `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry).
 - **Webhook 5xx emission (G7):** GHL webhook DB-lookup failure (`server/routes/webhooks/ghlWebhook.ts`) and GitHub webhook handler error (`server/routes/githubWebhook.ts`) both call `recordIncident` directly.
-- **Skill-analyzer terminal failure (G11):** The `skill-analyzer` pg-boss worker in `server/index.ts` wraps `processSkillAnalyzerJob` in a try/catch that calls `recordIncident` (fingerprint `skill_analyzer:terminal_failure`) before re-throwing, giving faster operator visibility ahead of the DLQ landing.
+- **Skill-analyzer terminal failure (G11):** A wrapper helper (`runSkillAnalyzerJobWithIncidentEmission` in `server/jobs/skillAnalyzerJobWithIncidentEmission.ts`) gates emission on `retryCount >= retryLimit` so only the FINAL retry attempt records an incident — earlier-attempt throws rethrow without emitting. The wrapper is invoked from the `skill-analyzer` pg-boss handler in `server/index.ts:499`. pg-boss retry exhaustion also lands in `skill-analyzer__dlq` (covered by G1's DLQ derivation); the wrapper gives faster visibility ahead of the DLQ landing.
 
 ### Integration points
+
+This table is the canonical map of every place in the codebase that calls `recordIncident`. Update it in the same commit when adding a new call site.
 
 | Caller | Source | Fingerprint |
 |--------|--------|-------------|
 | `asyncHandler.ts` | `route` | stack-derived |
 | Global error handler (`server/index.ts`) | `route` | stack-derived |
-| `dlqMonitorService.ts` — 40 queues derived from JOB_CONFIG | `job` | `job:<queue>:dlq` |
+| `dlqMonitorService.ts` — 40 queues derived from JOB_CONFIG (`forceSync: true` to bypass throttle) | `job` | `job:<queue>:dlq` |
 | `agentExecutionService.ts` — failed/timeout/loop_detected | `agent` | stack-derived |
 | `connectorPollingService.ts` — connection error | `connector` | `connector:<type>:connection_error` |
 | `connectorPollingService.ts` — sync failure | `connector` | `connector:<type>:sync_failed` |
@@ -3300,7 +3303,10 @@ Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missin
 | `systemMonitorSelfCheckJob.ts` — ingest pipeline degraded | `self` | `self:ingestor:ingest_pipeline_degraded` |
 | GHL webhook handler (`ghlWebhook.ts`) — DB-lookup failure | `route` | stack-derived |
 | GitHub webhook handler (`githubWebhook.ts`) — handler error | `route` | stack-derived |
-| Skill-analyzer worker (`server/index.ts`) — terminal failure | `job` | `skill_analyzer:terminal_failure` |
+| Skill-analyzer wrapper (`skillAnalyzerJobWithIncidentEmission.ts`) — terminal failure (only when `retryCount >= retryLimit`) | `job` | `skill_analyzer:terminal_failure` |
+| Synthetic checks tick (`syntheticChecksTickHandler.ts`) — per-check fired condition | `synthetic` | `synthetic:<checkId>:<resourceKind>:<resourceId>` |
+| Heuristic-fire sweep (`triage/sweepHandler.ts`) — clustered fires per 15-min bucket; auto-enqueues triage job when `wasInserted=true` and severity ≥ medium | `synthetic` | `sweep:<entityKind>:<entityId>:<bucketKey>` |
+| Manual test trigger (`systemIncidentService.createTestIncident`) — sysadmin "Trigger test incident" admin button | `route` | `test:manual:sysadmin:trigger` |
 
 ### Notification
 

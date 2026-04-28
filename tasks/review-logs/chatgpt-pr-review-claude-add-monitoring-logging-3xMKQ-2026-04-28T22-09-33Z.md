@@ -5,6 +5,7 @@
 - PR: #226 — https://github.com/michaelhazza/automation-v1/pull/226
 - Started: 2026-04-28T22-09-33Z
 - Mode: manual paste (user-provided feedback, not API)
+- **Verdict:** APPROVED (1 round, 1 implement / 3 reject (2 verified false positives + 1 documented intent) / 2 defer)
 
 ---
 
@@ -72,3 +73,21 @@
 - defer_due_to_scope (2 of 6 — useful improvements outside PR boundary)
 - documented_intent (1 of 6 — proposed change conflicts with explicit fail-fast design)
 - operability_observability (1 of 6 — accepted one-line log addition)
+
+---
+
+## Final Summary
+- Rounds: 1
+- Auto-accepted (technical): 1 implemented (`incident_ingest_mode` boot log) | 1 rejected (DLQ fail-fast intent) | 0 deferred
+- User-decided (escalated technical): 0 implemented | 2 rejected (verified false positives — duplicate-import hallucination + byte-identical "improvement") | 2 deferred (createWorker tripwire + integration-test skip helper)
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § PR Review deferred items / PR #226:
+  - [user] Add `createWorker`-only tripwire (CI grep against raw `boss.work(`) — useful forward-looking guard; two new direct `boss.work(...)` registrations in this PR are deliberate system-level exceptions
+  - [user] Centralise integration-test skip pattern (`shouldSkipIntegration()` helper) — 4 files use minor variants; centralising is polish, not a blocker
+- Architectural items surfaced to screen (user decisions): none — both defers are tooling/test-helper polish, neither involves architectural change
+- KNOWLEDGE.md updated: yes (1 entry — bumped existing "external-reviewer false positive" entry from 4 occurrences/2 PRs to 6 occurrences/3 PRs; added "improvement identical to existing code" variant)
+- architecture.md updated: yes — System Monitor § Coverage surface now includes G3 (async-ingest worker + new `incident_ingest_mode` boot log); System Monitor § Integration points table now includes synthetic checks, heuristic-fire sweep, and manual test trigger (previously undocumented call sites)
+- PR: #226 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/226
+
+### Pre-merge gate notes
+- 63 pre-existing typecheck errors in `server/services/systemMonitor/triage/*` and `writeHeuristicFire.ts` predate this review session (verified via stash-and-rerun: identical count before and after round 1). They reference schema columns that don't exist (`triageStatus`, `triageAttemptCount`, `lastTriageJobId`, `systemMonitorHeuristicFires`). These will block `npm run test:gates` and need to be addressed in a follow-up session before merge per CLAUDE.md gate-cadence rule.

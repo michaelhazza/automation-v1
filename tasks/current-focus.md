@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: main
-status: NONE
+active_spec: docs/superpowers/specs/2026-04-28-system-monitoring-coverage-spec.md
+active_plan: tasks/builds/system-monitoring-coverage/plan.md
+build_slug: system-monitoring-coverage
+branch: claude/add-monitoring-logging-3xMKQ
+status: MERGE_READY
 last_updated: 2026-04-28
 -->
 
@@ -22,7 +22,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** docs/superpowers/specs/2026-04-28-system-monitoring-coverage-spec.md
 **Active plan:** tasks/builds/system-monitoring-coverage/plan.md
 **Active build slug:** system-monitoring-coverage (branch `claude/add-monitoring-logging-3xMKQ`)
-**Status:** BUILD-COMPLETE — all 5 chunks implemented (17 commits), main merged in. Closes G1, G2, G3, G4-A, G4-B, G5, G7, G11. 264 unit tests passing. Awaiting PR + `npm run test:gates` pre-merge gate.
+**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance + pr-reviewer + dual-reviewer + chatgpt-pr-review (1 round, manual paste mode, all findings triaged). Cumulative chatgpt-review triage: 1 implement (`incident_ingest_mode` boot log) / 3 reject (1 documented intent + 2 verified false positives — duplicate-import hallucination + byte-identical "improvement") / 2 defer (createWorker tripwire + integration-test skip helper, both routed to `tasks/todo.md § PR Review deferred items / PR #226`). Architecture.md System Monitor § Coverage surface + Integration points table updated to include G3 + the three previously-undocumented call sites (synthetic checks, heuristic-fire sweep, manual test trigger). Closes G1, G2, G3, G4-A, G4-B, G5, G7, G11. 264 unit tests passing. Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Session log: `tasks/review-logs/chatgpt-pr-review-claude-add-monitoring-logging-3xMKQ-2026-04-28T22-09-33Z.md`. PR #226 — https://github.com/michaelhazza/automation-v1/pull/226. **Known pre-existing typecheck errors:** 63 errors in `server/services/systemMonitor/triage/*` and `writeHeuristicFire.ts` reference schema columns/exports that don't exist (`triageStatus`, `triageAttemptCount`, `lastTriageJobId`, `systemMonitorHeuristicFires`); pre-date this branch's review rounds and will need addressing before `npm run test:gates` passes.
 
 **Recently merged (on main):** pre-test-integration-harness (PR #227 — MERGED 2026-04-28), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
 **Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
