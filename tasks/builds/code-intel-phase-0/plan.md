@@ -105,6 +105,8 @@ If skipped-file count exceeds 5% of files in any one directory, the dev server's
 
 **Atomic shard writes — invariant:** consumers (agents, scripts, the human reading the digest) MUST never observe a partial JSON file. The temp-file + rename pattern guarantees this on every supported OS. If a watcher is `kill -9`'d mid-write, the original shard is intact; the new content is in `.tmp` and gets cleaned up on next start.
 
+**Watcher start failure — degrade, don't block.** If chokidar fails to initialize (`ENOSPC` from exhausted Linux inotify watches, `EPERM` from Windows permission issues, any other startup throw), the launcher logs the error to dev-server stdout (`[code-graph] watcher failed to start: <reason> — falling back to manual rebuild mode`) and continues. The cold-build artifacts from `predev` remain valid; in-session refresh is unavailable until either (a) the next `npm run dev` after the underlying issue is fixed, or (b) the user runs `npm run code-graph:rebuild` manually after edits. **The dev server is never blocked by a watcher start failure** — degrades to "no auto-refresh," not "broken."
+
 ### Lifecycle
 
 - `.gitignore` already covers `references/.code-graph-cache.json`, `references/import-graph/`, `references/project-map.md`, `references/.watcher.lock` (landed with this PR — lockfile entry to add alongside this commit).
@@ -120,6 +122,7 @@ Phase 0 ships no `PreToolUse` hook. Adoption is manual until usage justifies aut
 
 - **Agents:** when an architecture-shaped question comes up ("what calls X", "how do A and B relate", "where does the route for Y live"), include a one-line hint in the agent's prompt: "before grepping, check `references/project-map.md` and `references/import-graph/<dir>.json`". Specifically applies to the `Explore` subagent and the `architect` agent.
 - **Humans:** read `references/project-map.md` at the start of any session that touches a part of the codebase you haven't worked in recently.
+- **Both:** if the cache appears inconsistent with observed behaviour (a file you just edited isn't reflected, an import you can see in source isn't in the shard, a known function points at the wrong line), fall back to raw source immediately. The cache is an advisory hint layer, not source of truth — agents and humans always retain raw-source fallback. Inconsistency reports are also a useful signal for the trigger conditions in `tasks/code-intel-revisit.md` (manual usage friction → revisit Phase 1).
 
 This is deliberately friction-bearing: if the manual usage produces qualitative wins, Phase 1 (automation via hook + helper layer) becomes justifiable. If it doesn't, no automation is built and Phase 0 remains the floor.
 
