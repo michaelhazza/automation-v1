@@ -61,6 +61,19 @@ interface FileEntry {
 
 type Cache = Record<string, FileEntry>;
 
+/**
+ * Bump when the FileEntry shape (or any normalisation rule that affects its
+ * fields) changes. loadCache discards a cache file whose version doesn't
+ * match — a one-time rebuild is cheaper than silently mixing old and new
+ * entries until the user manually runs `npm run code-graph:rebuild`.
+ */
+const CACHE_VERSION = 1 as const;
+
+interface CacheFile {
+  version: number;
+  entries: Cache;
+}
+
 interface Shard {
   files: Record<string, Omit<FileEntry, 'sha256'>>;
 }
@@ -153,14 +166,20 @@ async function countLines(filePath: string): Promise<number> {
 async function loadCache(): Promise<Cache> {
   try {
     const raw = await fs.readFile(CACHE_PATH, 'utf8');
-    return JSON.parse(raw) as Cache;
+    const parsed = JSON.parse(raw) as Partial<CacheFile>;
+    if (parsed.version !== CACHE_VERSION) {
+      console.warn(`[code-graph] cache version mismatch (got ${parsed.version}, expected ${CACHE_VERSION}) — discarding and rebuilding`);
+      return {};
+    }
+    return parsed.entries ?? {};
   } catch {
     return {};
   }
 }
 
 async function saveCache(cache: Cache): Promise<void> {
-  await writeAtomic(CACHE_PATH, JSON.stringify(cache, null, 2));
+  const out: CacheFile = { version: CACHE_VERSION, entries: cache };
+  await writeAtomic(CACHE_PATH, JSON.stringify(out, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +639,14 @@ async function runWatcher(): Promise<void> {
     process.exit(0);
   }
 
+  // Truncate the watcher log if it has grown past 5 MB. The log is opened
+  // with O_APPEND in the parent's spawnWatcher; truncate-on-startup keeps it
+  // bounded across long-running dev sessions without a full rotation system.
+  try {
+    const stats = await fs.stat(WATCHER_LOG_PATH);
+    if (stats.size > 5 * 1024 * 1024) await fs.truncate(WATCHER_LOG_PATH, 0);
+  } catch {}
+
   // Write our PID so `--rebuild` can find and terminate us before dropping
   // the cache. Without this, a live watcher with stale in-memory state
   // would silently overwrite the freshly-rebuilt shards on its next event.
@@ -816,6 +843,11 @@ async function runWatcher(): Promise<void> {
         }
         delete memShards[dir][relPath];
         delete watcherCache[relPath];
+        // Drop the SourceFile from the ts-morph project too — without this,
+        // every deleted .ts file leaks a SourceFile instance for the lifetime
+        // of the watcher process, growing memory across long-running sessions.
+        const sf = projectFor(relPath).getSourceFile(absPath);
+        if (sf) projectFor(relPath).removeSourceFile(sf);
         affectedShards.add(dir);
         console.log(`[code-graph] unlink: removed ${relPath}`);
 
