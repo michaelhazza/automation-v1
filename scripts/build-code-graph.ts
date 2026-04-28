@@ -124,7 +124,7 @@ async function walkTs(dir: string): Promise<string[]> {
         // Skip node_modules and dist
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') continue;
         await recurse(full);
-      } else if (entry.isFile() && /\.(tsx?|tsx)$/.test(entry.name)) {
+      } else if (entry.isFile() && /\.tsx?$/.test(entry.name)) {
         results.push(full);
       }
     }
@@ -690,6 +690,13 @@ async function runWatcher(): Promise<void> {
     try {
       let sf = project.getSourceFile(absPath);
       if (sf) {
+        // refreshFromFileSystem only refreshes THIS source file. If a barrel
+        // export elsewhere changed and this file's `@/foo` alias now resolves
+        // to a different target, ts-morph's project-level resolution cache
+        // won't reflect it until that barrel file is itself reprocessed by
+        // the watcher. Bounded eventual-consistency window — same class as
+        // the rename gap (plan.md "Known eventual-consistency window"); the
+        // raw-source fallback in agent prompts is the mitigation.
         await sf.refreshFromFileSystem();
       } else {
         sf = project.addSourceFileAtPath(absPath);
@@ -974,22 +981,37 @@ async function runWatcher(): Promise<void> {
   watcher
     .on('add', (absPath) => {
       const relPath = toRepoRelPosix(absPath);
-      if (/\.(tsx?|tsx)$/.test(absPath) && !absPath.endsWith('.d.ts') && !absPath.endsWith('.generated.ts')) {
+      if (/\.tsx?$/.test(absPath) && !absPath.endsWith('.d.ts') && !absPath.endsWith('.generated.ts')) {
         scheduleProcess(relPath, 'add');
       }
     })
     .on('change', (absPath) => {
       const relPath = toRepoRelPosix(absPath);
-      if (/\.(tsx?|tsx)$/.test(absPath)) {
+      if (/\.tsx?$/.test(absPath)) {
         scheduleProcess(relPath, 'change');
       }
     })
     .on('unlink', (absPath) => {
       const relPath = toRepoRelPosix(absPath);
-      scheduleProcess(relPath, 'unlink');
+      // Mirror the add/change extension gate so deletions of .d.ts /
+      // .generated.ts files don't flip topology dirty for entries that
+      // were never in the shards. (N2 from pr-reviewer.)
+      if (/\.tsx?$/.test(absPath) && !absPath.endsWith('.d.ts') && !absPath.endsWith('.generated.ts')) {
+        scheduleProcess(relPath, 'unlink');
+      }
     })
     .on('error', (err) => {
       console.warn(`[code-graph] watcher error: ${err}`);
+      // Fatal fs-event-source errors (inotify exhaustion on Linux, EMFILE)
+      // leave a healthy-looking-but-stale watcher. The lockfile heartbeat
+      // keeps refreshing while file events stop arriving — exactly the
+      // silent staleness the spec calls out as "the most concerning" mode.
+      // Self-terminate so the next predev / code-graph:rebuild can recover.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOSPC' || code === 'EMFILE') {
+        console.warn(`[code-graph] watcher: fatal fs-event source error (${code}) — releasing lock and exiting`);
+        void cleanup();
+      }
     });
 
   console.log('[code-graph] watcher ready — monitoring server/, client/, shared/');
@@ -1056,10 +1078,27 @@ async function terminateExistingWatcher(): Promise<void> {
     try {
       process.kill(pid, 'SIGTERM');
       console.log(`[code-graph] --rebuild: sent SIGTERM to watcher (pid ${pid})`);
-      // Brief wait for graceful exit on POSIX; Windows kill is immediate.
-      await new Promise((resolve) => setTimeout(resolve, 300));
     } catch {
       // ESRCH — process already gone.
+      pid = null;
+    }
+  }
+
+  // Poll for actual exit before clearing artifacts. A fixed wait race-conditions
+  // with watcher operations that exceed the wait (topology rebuild iterates
+  // every watched file to recompute line counts — ~1500+ files at warm cache).
+  // process.kill(pid, 0) throws ESRCH when the process is gone; until then it
+  // returns true (or throws EPERM on permission issues, which we treat as
+  // "still alive" since we can't tell).
+  if (pid !== null) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ESRCH') break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
 

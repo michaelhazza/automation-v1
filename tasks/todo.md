@@ -1243,3 +1243,14 @@ The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NIC
 
 - [x] D2 — `code-graph:rebuild` does not release a held watcher lock
   - Resolved in-session in commit `36d97be9`. Watcher now writes its PID to `references/.watcher.pid` after lock acquisition. `--rebuild` reads the PID, sends SIGTERM, waits 300ms, then force-clears the lock and PID artifacts before dropping the cache. Validated end-to-end: rebuild with a live watcher prints "sent SIGTERM to watcher (pid X)", terminates the old, spawns a new one with a fresh PID; PowerShell process count confirms the singleton invariant.
+
+## Follow-ups surfaced during pr-reviewer pass — code-intel-phase-0 (2026-04-28)
+
+- [ ] Add executable test coverage for the watcher's load-bearing invariants (pr-reviewer S4)
+  - **Singleton-lock contention:** given an existing watcher process holding `references/.watcher.lock` (heartbeat refreshing every 2s), when a second `tsx scripts/build-code-graph.ts --watch-only` is launched, then the second process exits with code 0 within 2s without spawning a chokidar instance, AND only one watcher PID remains in the process table.
+  - **Topology-change discrimination:** given a warm cache where file F is at rank 21 in inbound-import count (NOT in top-20), when F's content changes such that its inbound count remains rank 21 (e.g. trivial whitespace edit elsewhere), then the corresponding shard's mtime is updated AND `references/project-map.md`'s mtime is unchanged.
+  - **No feedback loop:** given the watcher is running, when the watcher writes one of its own shard files, then no new processEvents pass is triggered. (Plan.md line 145 — load-bearing safety property; the cheapest test of the three.)
+  - Suggested location: a new `scripts/__tests__/build-code-graph-watcher.test.ts` invoked via `npm run test:unit`. Will need a small process-supervision harness that spawns the watcher subprocess, observes PIDs and file mtimes, and tears down cleanly between cases.
+
+- [ ] Watcher: ts-morph alias re-resolution closure-staleness (pr-reviewer S3)
+  - Editing a barrel-export file changes the resolved target of unrelated importers' `@/foo` aliases, but those importers' `imports[]` only re-extract on their next save. Same class as the rename eventual-consistency window — bounded and visible, not silent corruption. Acceptable for Phase 0; raw-source fallback in agent prompts is the mitigation. A code comment was added in commit `<this commit>` near `extractSingleFile`'s `refreshFromFileSystem` call. **Defer behavior fix to Phase 1** — the helper layer would be the right place to introduce reactive invalidation if usage data justifies it.
