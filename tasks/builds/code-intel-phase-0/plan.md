@@ -99,9 +99,7 @@ Within-list reordering at positions 21+ is *not* a topology change — would chu
 
 **Per-event cost (post-coalescing):** <100 ms typical for single-file saves. Atomic shard rewrite is the dominant cost. Bulk pass: 200 changed files complete in ~2 s on a warm cache.
 
-**Failure logging — visible, not silent.** Unparseable files (syntax error, malformed AST, ts-morph throw) are:
-1. Written to `references/import-graph/.skipped.txt` (one line per file, `<path>\t<reason>`).
-2. Logged via `console.warn` to the dev server's stdout — visible in the same terminal as the dev output, not buried in a separate log file. Format: `[code-graph] skipped <path>: <reason>`.
+**Failure logging.** Watcher logs are written to `references/.code-graph-watcher.log` (append mode, gitignored). Failed extracts additionally surface in `references/import-graph/.skipped.txt`. To tail the watcher log live: `tail -f references/.code-graph-watcher.log`. The watcher's stdio is deliberately routed to a log file rather than inherited from `predev`'s pipes — inheriting under `npm` keeps npm's pipe open across the detached watcher's lifetime and hangs cold-start indefinitely.
 
 If skipped-file count exceeds 5% of files in any one directory, the dev server's `predev` cold-build fails with a non-zero exit code (configuration error, not advisory territory). The watcher itself does not fail the dev server on per-event parse errors — those just log and continue.
 
@@ -134,6 +132,8 @@ This is deliberately friction-bearing: if the manual usage produces qualitative 
 
 ## Done criteria
 
+**Verification preconditions — clean environment.** Before running any cold-start verification, kill any running watcher process and delete `references/.watcher.lock` and `references/.watcher.lock.lock` if present. Otherwise the lock-contention exit path (the new spawn detects an existing lock holder and exits silently) masks spawn-time bugs in the watcher startup. The npm-pipe-hang defect that hid through commits 1–3 is the canonical case: the orphaned watcher held the lock, so every spawn during validation exited fast and freed npm's pipe — making the bug look fixed when it wasn't. Always validate from a clean environment.
+
 **Cold build:**
 - `npm run code-graph:rebuild` produces all three shards + the digest in under 30s on a cold cache, sub-second on a warm cache.
 - The three shards together cover ≥98% of `.ts`/`.tsx` files under `server/`, `client/`, `shared/`. **Skipped files are written to `references/import-graph/.skipped.txt` with a one-line reason per file** (parse error, syntax error, etc.). The build fails if any single directory's skip rate exceeds 5% — that's a signal the parser config is wrong, not "advisory artifact territory."
@@ -147,7 +147,7 @@ This is deliberately friction-bearing: if the manual usage produces qualitative 
 - **No feedback loop:** writing a shard file MUST NOT re-trigger the watcher. Verifiable: edit a source file once; confirm exactly one watcher pass runs (one log line per event class), not a continuous loop.
 - **Branch-switch performance:** `git checkout` between two branches with ~200 changed files completes the watcher batch pass in <5s. Verifiable: time the first save event after the checkout; should be <5s end-to-end, not 20+ s of serial per-file work.
 - **Topology-change discrimination:** editing a file whose change does NOT alter top-20 inbound-import membership produces shard updates but NO `project-map.md` rewrite. Verifiable: digest mtime unchanged after the edit.
-- **Skipped-file logging:** introduce a file with a deliberate syntax error; confirm it appears in `references/import-graph/.skipped.txt` AND `console.warn` fires to the dev server's stdout. Removing the syntax error causes both to clear on the next save.
+- **Skipped-file logging:** introduce a file with a deliberate syntax error; confirm it appears in `references/import-graph/.skipped.txt` AND a `[code-graph] skipped …` line is appended to `references/.code-graph-watcher.log`. Removing the syntax error causes the `.skipped.txt` entry to clear on the next save (the log file is append-only — historical entries persist).
 - **Singleton enforcement:** running `npm run dev` a second time on the same checkout while a watcher already runs does NOT spawn a second watcher. Verifiable: `ps` (or `Get-Process` on Windows) shows exactly one `chokidar` process; the second `predev` exits silently after detecting the live lock.
 - **Stale-lock recovery:** `kill -9` the watcher process, then `npm run dev` again. The new launcher detects the dead PID via `proper-lockfile`'s 10s stale check, releases the stale lock, and starts a new watcher.
 - **Atomic shard writes:** kill the watcher mid-edit cycle (`kill -9` while saving a file). Every shard file remains valid JSON — never partial. Verifiable with `jq . references/import-graph/*.json` after kill+restart.

@@ -38,6 +38,7 @@ const SHARD_DIR = path.join(ROOT, 'references', 'import-graph');
 const SKIPPED_PATH = path.join(SHARD_DIR, '.skipped.txt');
 const DIGEST_PATH = path.join(ROOT, 'references', 'project-map.md');
 const LOCK_PATH = path.join(ROOT, 'references', '.watcher.lock');
+const WATCHER_LOG_PATH = path.join(ROOT, 'references', '.code-graph-watcher.log');
 
 const CLIENT_TSCONFIG = path.join(ROOT, 'tsconfig.json');
 const SERVER_TSCONFIG = path.join(ROOT, 'server', 'tsconfig.json');
@@ -577,14 +578,27 @@ async function coldBuild(): Promise<void> {
 
 async function spawnWatcher(): Promise<void> {
   const { spawn } = await import('node:child_process');
+  const { openSync } = await import('node:fs');
+
+  // Route watcher stdio to a log file rather than inheriting the parent's
+  // pipes. Inheriting from a process spawned under `npm run …` keeps npm's
+  // pipe open across the detached watcher's lifetime — npm waits for the
+  // watcher's fds to close (forever) and never exits, hanging predev on
+  // every cold start. Routing to a log file fully detaches stdio so the
+  // parent can exit cleanly. The log file is searchable across sessions
+  // (more useful than terminal scrollback) and tail-able live.
+  await ensureDir(path.dirname(WATCHER_LOG_PATH));
+  const logFd = openSync(WATCHER_LOG_PATH, 'a');
+
   const scriptPath = fileURLToPath(import.meta.url);
   const child = spawn(
     process.execPath,
     ['--import', 'tsx/esm', scriptPath, '--watcher-subprocess'],
-    { detached: true, stdio: ['ignore', 'inherit', 'inherit'], cwd: ROOT },
+    { detached: true, stdio: ['ignore', logFd, logFd], cwd: ROOT },
   );
   child.unref();
-  console.log(`[code-graph] watcher spawned (pid ${child.pid})`);
+  const logRel = path.relative(ROOT, WATCHER_LOG_PATH).replace(/\\/g, '/');
+  console.log(`[code-graph] watcher started in background (pid ${child.pid}). Tail logs with: tail -f ${logRel}`);
 }
 
 // ---------------------------------------------------------------------------

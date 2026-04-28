@@ -16,6 +16,7 @@ tasks/users-backup.json
 
 # Code intelligence cache (Phase 0) — build output, regenerated on `npm run dev`
 references/.code-graph-cache.json
+references/.code-graph-watcher.log
 references/.watcher.lock
 references/.watcher.lock.lock
 references/import-graph/
