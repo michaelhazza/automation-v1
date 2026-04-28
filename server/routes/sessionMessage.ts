@@ -1,0 +1,224 @@
+// server/routes/sessionMessage.ts
+
+import { Router } from 'express';
+import { eq } from 'drizzle-orm';
+import { authenticate } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { db } from '../db/index.js';
+import { subaccounts } from '../db/schema/index.js';
+import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
+import { findEntitiesMatching, disambiguationQuestion, scoreCandidate } from '../services/scopeResolutionService.js';
+import { createBrief } from '../services/briefCreationService.js';
+import type { ScopeCandidate } from '../services/scopeResolutionService.js';
+import type { Request } from 'express';
+
+const router = Router();
+
+interface SessionContext {
+  activeOrganisationId: string | null;
+  activeSubaccountId: string | null;
+}
+
+type SessionMessageResponse =
+  | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
+  | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
+  | { type: 'brief_created'; briefId: string; conversationId: string; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
+  | { type: 'error'; message: string };
+
+router.post(
+  '/api/session/message',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      text?: string;
+      sessionContext?: SessionContext;
+      selectedCandidateId?: string;
+      selectedCandidateName?: string;
+      selectedCandidateType?: 'org' | 'subaccount';
+      pendingRemainder?: string | null;
+    };
+
+    const sessionContext: SessionContext = body.sessionContext ?? {
+      activeOrganisationId: null,
+      activeSubaccountId: null,
+    };
+
+    // ── Path A: user clicked a disambiguation button ──────────────────────
+    if (body.selectedCandidateId && body.selectedCandidateName && body.selectedCandidateType) {
+      const result = await resolveAndCreate({
+        candidateId: body.selectedCandidateId,
+        candidateName: body.selectedCandidateName,
+        candidateType: body.selectedCandidateType,
+        remainder: body.pendingRemainder ?? null,
+        req,
+      });
+      res.json(result);
+      return;
+    }
+
+    const text = body.text?.trim();
+    if (!text) {
+      res.status(400).json({ type: 'error', message: 'text is required' });
+      return;
+    }
+
+    // ── Path B: "change to X [, remainder]" command ───────────────────────
+    const command = parseContextSwitchCommand(text);
+    console.info('session.message', {
+      userId: req.user!.id,
+      commandDetected: !!command,
+      entityType: command?.entityType ?? null,
+      entityName: command?.entityName ?? null,
+    });
+    if (command) {
+      if (!command.entityName || command.entityName.length < 2) {
+        res.json({
+          type: 'error',
+          message: 'Please specify a valid organisation or subaccount name.',
+        });
+        return;
+      }
+
+      const candidates = await findEntitiesMatching({
+        hint: command.entityName,
+        entityType: command.entityType,
+        userRole: req.user!.role,
+        organisationId: req.orgId ?? req.user!.organisationId ?? null,
+      });
+
+      if (candidates.length === 0) {
+        res.json({
+          type: 'error',
+          message: `No matching organisation or subaccount found for "${command.entityName}".`,
+        } satisfies SessionMessageResponse);
+        return;
+      }
+
+      // Auto-resolve if only one candidate, or if the top-ranked candidate scores
+      // strictly higher than the second (decisive match — no need to show disambiguation UI).
+      // Uses the same scoreCandidate from the service so ranking and auto-resolve never drift.
+      const shouldAutoResolve =
+        candidates.length === 1 ||
+        (candidates.length > 1 &&
+          scoreCandidate(candidates[0]!, command.entityName) >
+          scoreCandidate(candidates[1]!, command.entityName));
+      console.info('session.message:resolved', {
+        candidatesCount: candidates.length,
+        autoResolved: shouldAutoResolve,
+        topCandidate: candidates[0] ? { id: candidates[0].id, type: candidates[0].type } : null,
+      });
+
+      if (shouldAutoResolve) {
+        const result = await resolveAndCreate({
+          candidateId: candidates[0]!.id,
+          candidateName: candidates[0]!.name,
+          candidateType: candidates[0]!.type,
+          remainder: command.remainder,
+          req,
+        });
+        res.json(result);
+        return;
+      }
+
+      res.json({
+        type: 'disambiguation',
+        candidates,
+        question: disambiguationQuestion(candidates),
+        remainder: command.remainder,
+      } satisfies SessionMessageResponse);
+      return;
+    }
+
+    // ── Path C: plain brief submission ────────────────────────────────────
+    const organisationId = sessionContext.activeOrganisationId ?? req.orgId!;
+    const subaccountId = sessionContext.activeSubaccountId ?? undefined;
+
+    const result = await createBrief({
+      organisationId,
+      subaccountId,
+      submittedByUserId: req.user!.id,
+      text,
+      source: 'global_ask_bar',
+      uiContext: {
+        surface: 'global_ask_bar',
+        currentOrgId: organisationId,
+        currentSubaccountId: subaccountId,
+        userPermissions: new Set<string>(),
+      },
+    });
+
+    res.status(201).json({
+      type: 'brief_created',
+      briefId: result.briefId,
+      conversationId: result.conversationId,
+      organisationId,
+      organisationName: null,
+      subaccountId: subaccountId ?? null,
+      subaccountName: null,
+    } satisfies SessionMessageResponse);
+  }),
+);
+
+async function resolveAndCreate(opts: {
+  candidateId: string;
+  candidateName: string;
+  candidateType: 'org' | 'subaccount';
+  remainder: string | null;
+  req: Request;
+}): Promise<SessionMessageResponse> {
+  const { candidateId, candidateName, candidateType, remainder, req } = opts;
+
+  let resolvedOrgId: string | null;
+  if (candidateType === 'org') {
+    resolvedOrgId = candidateId;
+  } else {
+    // Do NOT assume req.orgId — the selected subaccount may belong to a different org
+    const [sub] = await db
+      .select({ organisationId: subaccounts.organisationId })
+      .from(subaccounts)
+      .where(eq(subaccounts.id, candidateId))
+      .limit(1);
+    // Hard fail — falling back to the wrong org would be a multi-tenant data integrity violation
+    if (!sub?.organisationId) {
+      return { type: 'error', message: 'Invalid subaccount selection — organisation not found.' };
+    }
+    resolvedOrgId = sub.organisationId;
+  }
+  const resolvedSubaccountId = candidateType === 'subaccount' ? candidateId : null;
+
+  if (!remainder) {
+    return {
+      type: 'context_switch',
+      organisationId: resolvedOrgId,
+      organisationName: candidateType === 'org' ? candidateName : null,
+      subaccountId: resolvedSubaccountId,
+      subaccountName: candidateType === 'subaccount' ? candidateName : null,
+    };
+  }
+
+  const result = await createBrief({
+    organisationId: resolvedOrgId!,
+    subaccountId: resolvedSubaccountId ?? undefined,
+    submittedByUserId: req.user!.id,
+    text: remainder,
+    source: 'global_ask_bar',
+    uiContext: {
+      surface: 'global_ask_bar',
+      currentOrgId: resolvedOrgId!,
+      currentSubaccountId: resolvedSubaccountId ?? undefined,
+      userPermissions: new Set<string>(),
+    },
+  });
+
+  return {
+    type: 'brief_created',
+    briefId: result.briefId,
+    conversationId: result.conversationId,
+    organisationId: resolvedOrgId,
+    organisationName: candidateType === 'org' ? candidateName : null,
+    subaccountId: resolvedSubaccountId,
+    subaccountName: candidateType === 'subaccount' ? candidateName : null,
+  };
+}
+
+export default router;

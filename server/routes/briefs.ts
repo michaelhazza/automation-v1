@@ -8,8 +8,8 @@ import { handleConversationFollowUp } from '../services/briefConversationService
 import { decideBriefApproval } from '../services/briefApprovalService.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
-import { tasks } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { tasks, agentRuns } from '../db/schema/index.js';
+import { eq, and, inArray } from 'drizzle-orm';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
@@ -80,6 +80,33 @@ router.get(
     }
 
     res.json(meta);
+  }),
+);
+
+// GET /api/briefs/:briefId/active-run — runId of the current in-flight agent
+// run for this brief. BriefDetailPage polls this to wire the live graph panel.
+router.get(
+  '/api/briefs/:briefId/active-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const { briefId } = req.params;
+    const tx = getOrgScopedDb('briefs.active_run');
+
+    const [run] = await tx
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.taskId, briefId),
+          eq(agentRuns.organisationId, req.orgId!),
+          inArray(agentRuns.status, ['running', 'delegated', 'cancelling']),
+        ),
+      )
+      .orderBy(agentRuns.createdAt)
+      .limit(1);
+
+    res.json({ runId: run?.id ?? null });
   }),
 );
 

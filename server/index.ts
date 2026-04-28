@@ -152,6 +152,7 @@ import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
 import pulseRouter from './routes/pulse.js';
 // Universal Brief routes (Phase 2 + Phase 5)
 import briefsRouter from './routes/briefs.js';
+import sessionMessageRouter from './routes/sessionMessage.js';
 import briefConversationsRouter from './routes/conversations.js';
 import rulesRouter from './routes/rules.js';
 import { delegationOutcomesRouter } from './routes/delegationOutcomes.js';
@@ -354,6 +355,7 @@ app.use(ghlRouter);
 app.use(geoAuditsRouter);
 // Universal Brief routes (Phase 2 + Phase 5)
 app.use(briefsRouter);
+app.use(sessionMessageRouter);
 app.use(briefConversationsRouter);
 app.use('/api/rules', rulesRouter);
 app.use(crmQueryPlannerRouter);
