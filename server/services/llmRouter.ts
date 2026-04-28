@@ -752,6 +752,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let fallbackIndex = -1;
 
   // ── §1.1 LAEL-P1-1 pairing-completeness flags ────────────────────────────
+  // INVARIANT (locked): every emitted llm.requested is paired with exactly one
+  // llm.completed. Three independent emit sites uphold this — success path
+  // (§12c below), failure path (callStatus loop exit), and the finally-block
+  // fallback. The two flags + wrapping try/finally enforce it.
+  //
   // `laelRequestEmitted` is set to true after emitting `llm.requested` so the
   // finally block below can guarantee a matching `llm.completed` fires even if
   // an exception escapes between the two emission sites. `laelCompletedEmitted`
@@ -1574,6 +1579,20 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   }
 
   // ── 12c. §1.1 LAEL-P1-1 — payload row + llm.completed (success path) ────
+  //
+  // PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
+  // emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
+  // Failure cases collapse to the same observable state
+  // (`payloadInsertStatus: 'failed'`, `payloadRowId: null`):
+  //   (a) provider failure — the failure path emits llm.completed without
+  //       running this section (no provider response to persist; spec Gap D).
+  //   (b) success-path INSERT failure — the wrap-tx below rolls back any
+  //       partial INSERT and the catch handler emits llm.completed with
+  //       payloadInsertStatus='failed'.
+  //   (c) finally-block fallback — request emitted but completion did not
+  //       reach either path; emits with payloadInsertStatus='failed'.
+  // To distinguish (a)/(b)/(c) for debugging, look for the
+  // `lael_payload_insert_failed` logger.warn — only case (b) emits it.
   //
   // Ordering: AFTER the ledger upsert (§12), AFTER the registry removal (§12b),
   // BEFORE Langfuse / reservation commit. The payload insert is best-effort

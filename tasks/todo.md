@@ -1174,3 +1174,22 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
   - File: `server/services/clientPulseHighRiskService.ts:172–178`
   - Spec §1.5 step 2 named the field; spec-conformance accepted the omission as PASS-with-deviation. Add the field if a downstream alert filter ever wants to deduplicate or correlate the one-shot warning across instances.
 
+## Deferred from chatgpt-pr-review — pre-test-backend-hardening (2026-04-28)
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source**: ChatGPT final-review round 1
+
+- [ ] **Migration 0240 — phase the conversations unique-index swap before any production deploy with a non-trivially-sized `conversations` table**
+  - File: `migrations/0240_conversations_org_scoped_unique.sql`
+  - Issue: current migration is a single-tx `DROP INDEX` → `CREATE UNIQUE INDEX` on `conversations`. Single-tx semantics mean no committed window where uniqueness protection is absent, but the `CREATE` takes an `ACCESS EXCLUSIVE` lock on the table for its full duration. Risk is lock duration, not data corruption — fine on a small / pre-launch table, painful on a non-trivial one.
+  - Trigger: any production deploy that runs migrations against a `conversations` table large enough for the `CREATE UNIQUE INDEX` lock to become a perceptible outage (rule of thumb: tens of millions of rows, or any row count where index build crosses ~seconds).
+  - Action when triggered: split into a two-step migration — (a) `CREATE UNIQUE INDEX CONCURRENTLY` on a temp name with the new column tuple; (b) once green, drop the old index and rename the new one. Both steps must run outside a transaction (`CONCURRENTLY` requires it). Accepts an intermediate state where both indexes coexist; safe because uniqueness is satisfied by either.
+  - Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, single-tx wrapper closes the read-side window". Phased migration is overkill at current scale and adds rollout complexity. Revisit before any deploy that violates the trigger above.
+
+- [ ] **LAEL + approval-resume integration test harness — convert deferred `test.skip` stubs to real assertions**
+  - Files: `server/services/__tests__/llmRouterLaelIntegration.test.ts`, `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
+  - Issue: both files exist as `test.skip` stubs because no shared fake-webhook / fake-provider harness is in place. The §1.3 "double-approve fires exactly one webhook" call-count assertion (the invariant the spec specifically demanded over a status-only check) is currently uncovered.
+  - Action: build the shared fake-webhook receiver + fake-provider adapter as the next chunk after this PR merges. Convert the six skipped tests to real assertions exercising the real DB transaction boundaries.
+  - Decision (2026-04-28): kept as `test.skip` (not as `assert.ok(true)` stubs) so green CI does not imply lifecycle coverage. Harness work scoped as a follow-up chunk, not a blocker for this PR.
+
