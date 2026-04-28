@@ -199,11 +199,14 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   const layout = useMemo(() => layoutForest(roots), [roots]);
   const edges = useMemo(() => collectEdges(layout), [layout]);
 
+  // Shared layout order map — used by both heartbeatAgents and listAgents so
+  // we don't allocate two identical Maps from the same `layout` array.
+  const layoutOrderMap = useMemo(() => new Map(layout.map((l, i) => [l.node.id, i])), [layout]);
+
   // Heartbeat agents are derived from `agents` + `layout` so the schedule
   // list renders in the same order as the chart (depth-first: root, then each
   // column top-to-bottom, columns left-to-right).
   const heartbeatAgents = useMemo(() => {
-    const orderById = new Map(layout.map((l, i) => [l.node.id, i]));
     return agents
       .filter((a: any) => a.isActive)
       .map((a: any) => ({
@@ -216,14 +219,8 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
         heartbeatOffsetHours: a.heartbeatOffsetHours ?? 9,
         heartbeatOffsetMinutes: a.heartbeatOffsetMinutes ?? 0,
       }))
-      .sort((a, b) => (orderById.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (orderById.get(b.id) ?? Number.MAX_SAFE_INTEGER));
-  }, [agents, layout]);
-
-  const hierarchyOrderMap = useMemo(() => {
-    const m = new Map<string, number>();
-    layout.forEach((l, i) => m.set(l.node.id, i));
-    return m;
-  }, [layout]);
+      .sort((a, b) => (layoutOrderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (layoutOrderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+  }, [agents, layoutOrderMap]);
 
   const listAgents = useMemo(() => {
     const q = listFilter.toLowerCase();
@@ -235,7 +232,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
     return [...filtered].sort((a: any, b: any) => {
       let cmp = 0;
       switch (listSort.col) {
-        case 'hierarchy': cmp = (hierarchyOrderMap.get(a.id) ?? 999) - (hierarchyOrderMap.get(b.id) ?? 999); break;
+        case 'hierarchy': cmp = (layoutOrderMap.get(a.id) ?? 999) - (layoutOrderMap.get(b.id) ?? 999); break;
         case 'name': cmp = (a.agent.name ?? '').localeCompare(b.agent.name ?? ''); break;
         case 'title': cmp = (a.agentTitle ?? '').localeCompare(b.agentTitle ?? ''); break;
         case 'status': cmp = Number(b.isActive) - Number(a.isActive); break;
@@ -243,7 +240,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
       }
       return listSort.dir === 'asc' ? cmp : -cmp;
     });
-  }, [agents, listFilter, listSort, hierarchyOrderMap, liveAgentIds]);
+  }, [agents, listFilter, listSort, layoutOrderMap, liveAgentIds]);
 
   // Compute canvas bounds
   const bounds = useMemo(() => {
@@ -599,7 +596,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
                         style={{ background: isLive ? '#22c55e' : (STATUS_DOT[a.agent.status] ?? '#cbd5e1') }}
                       />
                     </td>
-                    <td className="text-[13px] text-slate-500">{parentAgent ? (parentAgent as any).agent.name : '—'}</td>
+                    <td className="text-[13px] text-slate-500">{parentAgent ? parentAgent.agent.name : '—'}</td>
                   </tr>
                 );
               })}
