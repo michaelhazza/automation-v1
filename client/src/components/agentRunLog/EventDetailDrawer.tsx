@@ -174,9 +174,15 @@ export default function EventDetailDrawer({ event, runId, onClose }: Props) {
                   </details>
                   <details className="text-xs">
                     <summary className="cursor-pointer">Response</summary>
-                    <pre className="bg-slate-50 rounded p-2 mt-1 overflow-x-auto whitespace-pre-wrap break-words">
-                      {JSON.stringify(payload.response, null, 2)}
-                    </pre>
+                    {payload.response === null ? (
+                      <div className="bg-slate-50 rounded p-2 mt-1 text-slate-500 italic">
+                        (no response — failure path; provider produced no usable output)
+                      </div>
+                    ) : (
+                      <pre className="bg-slate-50 rounded p-2 mt-1 overflow-x-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(payload.response, null, 2)}
+                      </pre>
+                    )}
                   </details>
                 </div>
               )}

@@ -75,15 +75,54 @@ export interface AutomationStepRetryPolicy extends StepRetryPolicy {
   overrideNonIdempotentGuard?: boolean;
 }
 
+/**
+ * Closed vocabulary of `AutomationStepError.status` values. Treated as stable
+ * namespaced identifiers, NOT free-form text. Any caller that constructs an
+ * `AutomationStepError` with a `status` value MUST pick from this list — bare
+ * strings are a regression class. New entries are added here AND to the JSDoc
+ * on the `status` field so the source of truth stays single.
+ *
+ * Tightening the field to a literal-union type on `AutomationStepError.status`
+ * is deferred to the first follow-up that consolidates consumer handling; for
+ * now the discipline is enforced by convention + a pure test that asserts
+ * every production status value is included in this tuple. Spec
+ * `2026-04-28-pre-test-integration-harness-spec.md` §1.6.
+ */
+export const KNOWN_AUTOMATION_STEP_ERROR_STATUSES = ['missing_connection'] as const;
+export type KnownAutomationStepErrorStatus =
+  (typeof KNOWN_AUTOMATION_STEP_ERROR_STATUSES)[number];
+
 /** Standardised error shape for every invoke_automation failure. §5.7. */
 export interface AutomationStepError {
   /** §5.7 error_code vocabulary. */
   code: string;
-  /** Error class — drives retryability and error-handler routing. */
-  type: 'validation' | 'execution' | 'timeout' | 'external' | 'unknown';
+  /**
+   * Error class — drives retryability and error-handler routing.
+   *
+   * `'configuration'` covers errors caused by missing/incomplete setup
+   * (missing connection, missing scope binding) — surfaced to operators so
+   * they fix configuration rather than retry.
+   */
+  type: 'validation' | 'execution' | 'timeout' | 'external' | 'unknown' | 'configuration';
   message: string;
   /** True only when retryable AND the non-idempotent guard allows it. */
   retryable: boolean;
+  /**
+   * Namespaced stable identifier for sub-classifying errors of a given `type`.
+   * Closed vocabulary — pick from `KNOWN_AUTOMATION_STEP_ERROR_STATUSES`. Never
+   * free text. The `context` shape per status is documented alongside the
+   * vocabulary tuple. Consumers MUST narrow on `status` before reading
+   * `context`.
+   *
+   * Current vocabulary: `'missing_connection'` ⇒
+   *   `context: { automationId: string; missingKeys: string[] }`.
+   */
+  status?: KnownAutomationStepErrorStatus;
+  /**
+   * Structured error context. Shape is determined by `status`. See
+   * `status` JSDoc for the per-status mapping.
+   */
+  context?: Record<string, unknown>;
 }
 
 /**

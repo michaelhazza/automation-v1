@@ -25,7 +25,17 @@ export interface BuildPayloadRowInput {
   systemPrompt: string;
   messages: unknown[];
   toolDefinitions: unknown[];
-  response: Record<string, unknown>;
+  /**
+   * Provider response. `null` only when there is no usable provider output to
+   * persist (provider rejected before stream open, network error before any
+   * bytes arrived, response un-parseable). A structurally-valid partial
+   * response (streaming interrupted mid-completion) MUST be passed through
+   * here as a non-null partial — adapters that build incrementally pass
+   * whatever they have at the failure boundary; adapters that build
+   * atomically pass null. Spec
+   * `2026-04-28-pre-test-integration-harness-spec.md` §1.5 Option A.
+   */
+  response: Record<string, unknown> | null;
   /** Per-tool policy map. Missing keys default to 'full'. */
   toolPolicies?: Record<string, PayloadPersistencePolicy>;
   maxBytes: number;
@@ -37,7 +47,11 @@ export interface BuildPayloadRowOutput {
   systemPrompt: string;
   messages: unknown[];
   toolDefinitions: unknown[];
-  response: Record<string, unknown>;
+  /**
+   * `null` propagates through from the input when no usable provider output
+   * was available; otherwise the redacted + truncation-applied response.
+   */
+  response: Record<string, unknown> | null;
   redactedFields: PayloadRedaction[];
   modifications: PayloadModification[];
   totalSizeBytes: number;
@@ -58,7 +72,7 @@ function computeTotalBytes(
   systemPrompt: string,
   messages: unknown[],
   toolDefinitions: unknown[],
-  response: Record<string, unknown>,
+  response: Record<string, unknown> | null,
 ): number {
   return (
     byteLengthOf(systemPrompt) +
@@ -202,7 +216,7 @@ interface FieldCandidate {
 
 function collectStringCandidates(
   messages: unknown[],
-  response: Record<string, unknown>,
+  response: Record<string, unknown> | null,
 ): FieldCandidate[] {
   const candidates: FieldCandidate[] = [];
 
@@ -247,9 +261,11 @@ function collectStringCandidates(
   walk(messages, 'messages', 'messages', () => {
     /* root array is never reassigned */
   });
-  walk(response, 'response', 'response', () => {
-    /* root object is never reassigned */
-  });
+  if (response !== null) {
+    walk(response, 'response', 'response', () => {
+      /* root object is never reassigned */
+    });
+  }
 
   return candidates;
 }
@@ -269,7 +285,7 @@ function truncateGreatestFirst(
   systemPrompt: string,
   messages: unknown[],
   toolDefinitions: unknown[],
-  response: Record<string, unknown>,
+  response: Record<string, unknown> | null,
   maxBytes: number,
   modifications: PayloadModification[],
 ): { systemPrompt: string; totalBytes: number } {
@@ -353,7 +369,13 @@ export function buildPayloadRow(input: BuildPayloadRowInput): BuildPayloadRowOut
   const redactedSystem = redactValue(input.systemPrompt, patterns);
   const redactedMessages = redactValue(input.messages, patterns);
   const redactedTools = redactValue(input.toolDefinitions, patterns);
-  const redactedResponse = redactValue(input.response, patterns);
+  // Skip redaction on a null response — there is nothing to scrub. Partial
+  // responses (non-null) are scrubbed identically to success-path responses
+  // so secret leakage cannot ride a streaming-failure side-channel.
+  const redactedResponse =
+    input.response === null
+      ? { value: null, redactions: [] as PayloadRedaction[] }
+      : redactValue(input.response, patterns);
 
   // Prefix each redaction path with the root-field name it came from so
   // all paths read uniformly against the persisted row shape.
@@ -379,7 +401,10 @@ export function buildPayloadRow(input: BuildPayloadRowInput): BuildPayloadRowOut
   // the caller's objects. JSON round-trip is fine — these are pure JSON.
   const messagesCopy = JSON.parse(JSON.stringify(redactedMessages.value)) as unknown[];
   const toolDefsCopy = JSON.parse(JSON.stringify(redactedTools.value)) as unknown[];
-  const responseCopy = JSON.parse(JSON.stringify(redactedResponse.value)) as Record<string, unknown>;
+  const responseCopy: Record<string, unknown> | null =
+    redactedResponse.value === null
+      ? null
+      : (JSON.parse(JSON.stringify(redactedResponse.value)) as Record<string, unknown>);
   let systemPromptCopy =
     typeof redactedSystem.value === 'string'
       ? redactedSystem.value

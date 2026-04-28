@@ -1249,3 +1249,126 @@ PR #215 round 3 #3 (system-monitor): when a reviewer surfaces a coordination con
 ### [2026-04-28] Correction — Validation procedures must explicitly defeat known masking conditions
 
 Phase 0 code-intel cache (branch `code-cache-upgrade`, commits 1–3 of `scripts/build-code-graph.ts`): I declared three commits "validated" using `npm run code-graph:rebuild` re-runs to confirm byte-identity and exercise the watcher edit cycle. Every validation run printed `[code-graph] watcher: lock held by another process — exiting` because an orphaned watcher from the previous session still held `references/.watcher.lock`. That lock-contention exit path was masking a real defect: when the spawn actually succeeds (no prior holder), the watcher's `stdio: 'inherit'` (in `spawnWatcher` at `scripts/build-code-graph.ts`) keeps npm's pipe open across its detached lifetime, and `npm run code-graph:rebuild` / `npm run dev`'s predev step hangs forever. The bug surfaces on the modal first-encounter case (fresh checkout, no prior watcher) — exactly the case the validation was supposed to cover. Fixed in commit 4 by routing watcher stdio to `references/.code-graph-watcher.log` (append mode) and adding a "Verification preconditions" step at the top of plan.md's Done criteria. **Rule:** when a verification step has a known masking condition (a fast-exit path that bypasses the code under test), the verification procedure must explicitly defeat that condition before running. For watcher-spawn validation: kill any running watcher process and delete `references/.watcher.lock` + `references/.watcher.lock.lock` before the cold-start command. **Detector:** if a "validates X" command can succeed in two different paths (X exercised vs. X bypassed), the validation harness must select for the X-exercised path; "looks fine" with the bypass path is not validation. **Rule applies beyond watchers:** any feature with conditional fast-exits (cached results, lock holders, idempotency keys, feature flags off) needs verification preconditions that force the slow path.
+
+
+### [2026-04-28] Pattern — Test harness register/restore: prior-state capture beats unique-key discipline
+
+When a test fixture mutates a global registry (provider adapter map, hook table, etc.), the natural rule is "tests must use distinct keys OR run sequentially". That rule is fragile — every new test file has to remember it, and parallel test runs can violate it silently. Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.2 round 1 review surfaced this as a "shared global registry = hidden coupling" red flag.
+
+**Pattern:** the registration function captures the prior state at the key (present-and-was-this-adapter vs. absent) and returns a `restore()` function that puts the registry back to **exactly** that prior state. `restore()` is idempotent; tests always call it in `finally` (NOT just on the happy path). Same-key sequential AND parallel test registrations stop interfering structurally — no key uniqueness convention required.
+
+**Implementation contract** (`server/services/providers/registry.ts`):
+```ts
+export function registerProviderAdapter(key, adapter): () => void {
+  const wasPresent = Object.prototype.hasOwnProperty.call(registry, key);
+  const priorAdapter = wasPresent ? registry[key] : undefined;
+  registry[key] = adapter;
+  let restored = false;
+  return function restore() {
+    if (restored) return;          // idempotent
+    restored = true;
+    if (wasPresent && priorAdapter !== undefined) registry[key] = priorAdapter;
+    else delete registry[key];     // exact prior state — absent, NOT bound-to-undefined
+  };
+}
+```
+
+**Key invariants:**
+- "Absent" and "bound-to-undefined" are different post-states. Use `Object.prototype.hasOwnProperty.call` + `delete` to honour the distinction.
+- The restore function carries a closure-captured `restored` boolean for idempotency — calling restore twice in succession is a no-op the second time.
+- Test self-test MUST include a parallel-execution variant (`Promise.all([taskA, taskB])` both registering at the same key, both restoring in `finally`). The sequential-only variant doesn't exercise the prior-state-capture contract; the parallel one does.
+
+**Where to apply:** any test fixture that mutates a global registry, hook table, env-shaped config, or process-local cache. Not just provider adapters — same pattern works for skill registries, route handlers, MCP server lookup tables, etc.
+
+### [2026-04-28] Pattern — Fake HTTP receiver: body-fully-read + lowercase-header-keys are load-bearing invariants
+
+The fake webhook receiver shipped in `server/services/__tests__/fixtures/fakeWebhookReceiver.ts` (spec §1.1) is a thin Node `http.createServer` wrapper that records every incoming request for direct assertion. Two non-obvious invariants emerged during ChatGPT round 2 review:
+
+1. **Body fully read BEFORE record-or-drop decision.** The harness calls `Buffer.concat` on `data` events and awaits the `end` event before pushing the call onto the recorded array. Recording mid-body (or destroying the socket mid-stream) would let a later `body` assertion silently pass against truncated input — a false-pass class that breaks every webhook test downstream.
+
+2. **Headers normalised to lowercase keys; multi-value headers joined with `, `.** Node's HTTP stack already lowercases incoming header keys, but the harness must NOT rely on that being preserved through any future transformation. Tests assert against `headers['x-signature']`, never `headers['X-Signature']`. Multi-value headers (Node represents these as `string[]`) get joined into a single string so the assertion shape is uniform.
+
+**Why these matter:** a webhook test that asserts on body content + signature is the canary for "did the production code actually post what we expected". A harness that under-records the body or carries inconsistent header casing turns "test passes" into "test silently lies". Both invariants are documented on the type itself + asserted by the harness's own self-test.
+
+**Bonus invariant:** `setDropConnection(true)` destroys the socket WITHOUT writing a response, but ONLY after the body has been fully read AND the call has been recorded. Tests can still assert "the request reached us with the complete body" even when the response was dropped — necessary for timeout-path tests where the production code's behaviour depends on whether the request was sent vs. just queued.
+
+**Where to apply:** any harness that captures inbound HTTP requests for test assertions. `parseBody` should fall through to raw `Buffer` on JSON-parse failure rather than masking malformed-body bugs as harness errors.
+
+### [2026-04-28] Pattern — Dual-layer assertions (HTTP + DB) defeat single-layer false-passes
+
+Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.4 Test 2 has a load-bearing rule: a "concurrent double-approve fires the webhook exactly once" test must assert at BOTH the HTTP layer (`receiver.callCount === 1`) AND the DB layer (single workflow_step_runs row with `attempt === 1` reaching `completed`). The two are NOT redundant — they protect different failure modes:
+
+- **HTTP-only assertion:** missed by a regression where dispatch fires twice but the receiver's idempotency layer swallows the second call. Production exactly-once semantics broken; test still passes.
+- **DB-only assertion:** missed by a regression where the dispatch attempt happens but the HTTP layer is misconfigured (e.g. wrong webhookPath, missing HMAC). Production never actually fires the webhook; test passes because the DB shows one dispatch row.
+- **Both:** the test fails on either failure mode, catching both classes.
+
+The same dual-layer pattern shows up symmetrically in the negative direction (Test 3 — rejected step fires no webhook): `callCount === 0` AND zero `attempt > 1` rows. A regression that triggers dispatch but fails before HTTP transmission would leave `callCount === 0` while still corrupting the DB-side state — only the dual assertion catches it.
+
+**Where to apply:** any "side effect happens exactly N times" invariant in integration tests — webhook dispatches, queue inserts, audit writes, side-channel notifications. The HTTP layer alone is insufficient when an idempotency layer exists; the DB layer alone is insufficient when the production code path can fail between "intent to dispatch" and "actual transmission". Always pair them.
+
+### [2026-04-28] Convention — Pure tests assert on TS-shape; integration tests assert on DB-shape; the two can diverge
+
+When extending a column to be nullable + a builder function to accept null, the pure test (`buildPayloadRow({ response: null }) → { response: null, ... }`) asserts the TS object shape. The integration test then asserts the DB row's `response IS NULL` (the column nullability is what makes this possible). The two are complementary, NOT redundant — the pure test pins the function's contract; the integration test pins the persistence pipeline's contract. A regression that strips null from the function output (e.g. converts to `{}`) would be caught by the pure test even before any DB is involved. A regression that fails to map TS null to SQL NULL during INSERT would slip through the pure test but be caught by the integration test.
+
+**Decision rule:** if a function's contract includes "accepts and returns null", the pure test asserts on `out.response === null`. If the column's nullability is part of the contract, an integration test (or a follow-up failure-path integration test) asserts on `response IS NULL` at the SQL level. The pure test's `null` is a TS object property; the integration test's `NULL` is a SQL atom — different things, both important.
+
+
+### [2026-04-28] Correction — Test harness register/restore needs STACK semantics, not closure-captured prior state
+
+**Supersedes the 2026-04-28 "Test harness register/restore: prior-state capture beats unique-key discipline" entry above.** The closure-captured prior-state pattern works only under strict LIFO restore order. Parallel tests where restores fire in non-LIFO order (entirely possible with `Promise.all` + microtask interleaving) produce wrong final state: the inner restore re-installs a stale prior because the outer restore already ran first.
+
+**Trace of the failure mode** (registry initially empty, key `k`, two parallel tasks both registering at `k`):
+1. Task A registers A → captures `{wasPresent: false}`, `registry[k] = A`.
+2. Task B registers B → captures `{wasPresent: true, prior: A}`, `registry[k] = B`.
+3. Task A finishes first: `restoreA()` deletes `registry[k]`. Correct so far.
+4. Task B finishes: `restoreB()` reads its captured `{wasPresent: true, prior: A}` and writes `registry[k] = A`. **Final state: bound to A even though A was supposed to be uninstalled.**
+
+**The fix** (`server/services/providers/registry.ts`): per-key registration STACK + a single `originalStates[key]` snapshot taken on the FIRST register. The restore function:
+- Removes its own entry from the stack by token (NOT by position — a parallel restore may have removed an entry deeper in the stack first).
+- If the stack is now empty, restores from the original snapshot and clears both maps.
+- If the stack is non-empty, re-installs the top of the stack as the currently-active adapter.
+
+**Invariants the stack pattern provides:**
+- Order-independent restore: any permutation of restores produces the original state at the end.
+- Idempotent: repeat-restore is a no-op via a closure-captured `restored` boolean.
+- Pre-existing state preserved: if the key was bound before any test registered, that binding is what the last restore re-installs.
+
+**The non-LIFO test case is what makes the bug visible.** A `Promise.all([taskA, taskB])` parallel test that happens to end LIFO (B restores first, then A) is INDISTINGUISHABLE from the broken implementation — the broken impl works by luck under that ordering. The detector test (`fakeProviderAdapter.test.ts` Case 12 / Case 13) explicitly registers A then B, restores A FIRST while B is still active, and asserts `registry[k] === b` afterward. That assertion fails under closure-capture, passes under stack semantics.
+
+**Where to apply:** any registry mutation pattern that supports nested or parallel test scoping. Provider adapters, hook tables, skill registries, MCP server lookup tables — wherever "save state, replace, restore" lives in test code.
+
+### [2026-04-28] Pattern — Co-located cleanup helper with scope-safety pre-flight + post-flight count match
+
+The integration tests in `server/services/__tests__/llmRouterLaelIntegration.test.ts` and `workflowEngineApprovalResumeDispatch.integration.test.ts` (spec §1.3 / §1.4) use a co-located `assertNoRowsForRunId` (and analogous `cleanupWorkflowScope`) cleanup helper. The pattern's three invariants:
+
+1. **Scope-safety pre-flight check.** Before issuing any `DELETE`, the helper SELECTs the rows it intends to delete and verifies every returned row's scoping column matches the supplied scoping value. If any row's scoping column doesn't match, the helper THROWS BEFORE issuing the DELETE — never silently widens the predicate. Defends against a copy-paste regression (e.g. accidentally dropping the `WHERE run_id = $1` clause) that would silently wipe unrelated test rows while making downstream tests "pass" against a corrupted DB.
+
+2. **Post-flight count match.** After the DELETE, the helper compares the DELETE's reported row-count against the SELECT's row-count. If DELETE > SELECT, throws — indicates a concurrent insert under the same scoping key while cleanup ran (itself a test-isolation regression worth surfacing).
+
+3. **Type union narrows to scopable tables only.** The helper's table parameter is a literal-union type containing ONLY tables keyed by the scoping value. Tables that aren't scoped that way (e.g. `cost_aggregates`, keyed by `(entityType, entityId, periodType, periodKey)` not `runId`) are EXCLUDED from the union. A silent no-op branch that accepts the table at compile time but does nothing at runtime breaks the invariant "the helper is the only place these queries are written" — exclude the table from the union and force callers to handle suite-level cleanup separately.
+
+**For non-runId-scoped ledger rows** (e.g. `sourceType: 'system'` calls write `llm_requests` rows with `runId: null`): use a per-test-invocation unique `featureTag` and a sibling `cleanupLedgerByFeatureTag` helper that scopes by `featureTag` instead of `runId`. Same scope-safety contract; different scoping column.
+
+### [2026-04-28] Pattern — Dual-layer assertion via `mock.method` spy at the boundary BEFORE the side-effect site
+
+Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.4 Test 2 demands a "concurrent double-approve fires the webhook exactly once" test with HTTP-layer + DB-layer assertions. The first attempt used `workflow_step_runs.attempt === 1` as the DB-side proxy — but `attempt` is set at seed time and never incremented on the supervised approval-resume path, so the assertion was a tautology that provided no protection beyond the existing status check.
+
+**The fix:** spy on the HMAC-signing call site (`webhookService.signOutboundRequest`) via `node:test`'s `mock.method`. The signing call happens between the engine's race-resolving UPDATE and the outbound `fetch` — a boundary distinct from the HTTP receiver count. A regression that signed-then-crashed-before-fetch (headers mutated after signing, fetch threw before transmission, request body builder failed) would produce `receiver.callCount === 0` while still indicating broken backend exactly-once semantics; the spy catches that class.
+
+**Pattern:**
+```ts
+const signSpy = mock.method(webhookService, 'signOutboundRequest');
+try {
+  // ... exercise the production code ...
+  const callsForThisStep = signSpy.mock.calls.filter(
+    (c) => c.arguments[0] === seed.stepRunId,
+  );
+  assert.equal(callsForThisStep.length, 1, '...');
+} finally {
+  signSpy.mock.restore();
+}
+```
+
+**Why filter by scoping value:** parallel-running tests against the same module pollute `signSpy.mock.calls` with each other's invocations. Scoping the assertion to the test's own `stepRunId` (or whatever scoping value the spied function takes) makes the assertion test-local. Same defence as the cleanup helper's scope-safety predicates.
+
+**Where to apply:** any "side effect happens exactly N times" invariant whose downstream observable (HTTP receiver, queue insert, audit row) could be racing or coalesced. Spy on a stable upstream boundary that fires exactly once per intended dispatch — the boundary count is structurally distinct from the downstream count, and both must agree.

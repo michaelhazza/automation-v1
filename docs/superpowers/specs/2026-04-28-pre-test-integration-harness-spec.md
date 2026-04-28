@@ -444,7 +444,7 @@ This spec is **single-session, single-PR, no concurrency** with other in-flight 
 - A failed `llmRouter.routeCall` where the provider returned **usage metadata but no assistant content** (content-policy refusal, tool-only completion that emitted no text, etc.) inserts exactly one row with `response` set to the (content-empty) `ProviderCallResult`, `tokens_in`/`tokens_out` populated from the provider's `usage` block (NOT zero), `cost_with_margin_cents` reflecting that usage, `status = 'failed'`. Token counts MUST reflect provider-reported usage even when assistant content is empty.
 - Partial responses MUST be persisted whenever they are structurally valid — the failure-path branch never discards parseable provider output.
 - The `llm.completed` event for that call has `payloadRowId` non-null and equal to the inserted row's id (in BOTH the null-response and partial-response cases).
-- Tx rollback (e.g. ledger-write fails after payload row insert succeeds) drops both rows together.
+- **Post-commit invariant (REVISED — replaces the original "tx rollback drops both rows together" criterion).** The payload-row INSERT runs inside its OWN `db.transaction` (NOT pulled into the ledger's tx), mirroring the success-path pattern at `server/services/llmRouter.ts` § success-path-payload-row. The rationale: pulling ledger + payload into a single tx changes cost-breaker ordering semantics (the breaker reads the committed ledger row to enforce per-run budgets) and is explicitly avoided in the success path. The replacement invariant is: `payloadInsertStatus === 'ok'` IFF an `agent_run_llm_payloads` row exists for this `llm_request_id`. A payload-tx failure rolls back any partial INSERT and the catch handler emits `llm.completed` with `payloadInsertStatus: 'failed'` and `payloadRowId: null` — the ledger row remains committed (post-commit visibility on the ledger is the canonical record). This is NOT tx-atomic across both rows; it IS observable-state-consistent. A reader querying both rows together can rely on "presence-or-absence-of-payload matches `payloadInsertStatus`" but NOT on "both rows committed in the same tx" — the latter would require restructuring cost-breaker ordering and is out of scope.
 - A future §1.3 failure-path test (not in this spec's scope, but should be addable in a follow-up) can assert both shapes: "row exists with null response" (no-output case) and "row exists with partial response" (interrupted-streaming case).
 - The predecessor spec's §1.1 acceptance criterion line is unchanged (it already says "the corresponding row" which Option A satisfies).
 
@@ -611,12 +611,12 @@ Per-item status table — single source of truth. Update after each commit.
 
 | Item | Status | Commit SHA | Decision (§1.5/§1.6 only) | Notes |
 |------|--------|------------|----------------------------|-------|
-| §1.1 fake-webhook receiver | pending | — | — | — |
-| §1.2 fake-provider adapter | pending | — | — | — |
-| §1.3 LAEL test conversion | pending | — | — | depends on §1.2, §1.5 |
-| §1.4 approval-resume test conversion | pending | — | — | depends on §1.1 |
-| §1.5 Gap D decision | pending | — | _to be recorded_ | default: Option A |
-| §1.6 Gap B decision | pending | — | _to be recorded_ | default: Option A |
+| §1.1 fake-webhook receiver | implemented | _pending_ | — | `server/services/__tests__/fixtures/fakeWebhookReceiver.ts` + self-test |
+| §1.2 fake-provider adapter | implemented | _pending_ | — | `server/services/__tests__/fixtures/fakeProviderAdapter.ts` + self-test; registry extended with `registerProviderAdapter(key, adapter) → restore()` |
+| §1.3 LAEL test conversion | implemented | _pending_ | — | three real assertions (happy-path / budget_blocked silence / non-agent-run silence); pre-test guard via `assertNoRowsForRunId` |
+| §1.4 approval-resume test conversion | implemented | _pending_ | — | three real assertions (approve / concurrent double-approve / reject); HTTP-layer + DB-layer dual assertions |
+| §1.5 Gap D decision | implemented | _pending_ | **Option A** | failure-path payload row inserted; `buildPayloadRow` accepts `response: null` (no usable output) or partial response; `agent_run_llm_payloads.response` made nullable via migration 0241 |
+| §1.6 Gap B decision | implemented | _pending_ | **Option A** | `AutomationStepError.type` widened to include `'configuration'`; optional `status` + `context` fields added; `KNOWN_AUTOMATION_STEP_ERROR_STATUSES` tuple as the closed vocabulary |
 
 **Backlog tickoff checklist** — when each item closes, mark the corresponding line in `tasks/todo.md`:
 

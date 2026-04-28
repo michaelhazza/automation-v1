@@ -8,11 +8,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
-**Active plan:** tasks/builds/pre-test-backend-hardening/plan.md
-**Active build slug:** pre-test-backend-hardening (branch `claude/pre-test-backend-hardening`)
-**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
-**Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
+**Active spec:** docs/superpowers/specs/2026-04-28-pre-test-integration-harness-spec.md
+**Active plan:** _none — spec is implementation-detailed; followed §1 items directly_
+**Active build slug:** pre-test-integration-harness (branch `claude/review-todo-items-S9JrI`)
+**Status:** **IMPLEMENTATION COMPLETE** — all six §1 items shipped. Decisions: §1.5 → Option A (failure-path payload row, partial-response semantics, usage-without-content edge case), §1.6 → Option A (`AutomationStepError.type` widened, optional `status` + `context`, `KNOWN_AUTOMATION_STEP_ERROR_STATUSES` vocabulary tuple). Migration 0241 makes `agent_run_llm_payloads.response` nullable. New harnesses under `server/services/__tests__/fixtures/`. Six skipped stubs converted to real assertions with HTTP-layer + DB-layer dual assertions. Typecheck clean (only pre-existing client-side errors). Pending: `pr-reviewer` (next), then user runs `npm run test:gates` pre-merge.
+**Predecessor specs (already merged):**
+  - `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` (PR #223)
+  - `docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md` (PR #222)
 **Last updated:** 2026-04-28
 
 ---

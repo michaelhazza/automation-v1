@@ -361,7 +361,17 @@ export interface AgentRunLlmPayload {
   systemPrompt: string;
   messages: unknown[];
   toolDefinitions: unknown[];
-  response: Record<string, unknown>;
+  /**
+   * Provider response payload. `null` only on the failure path when no usable
+   * provider output exists (provider rejected before stream open, network
+   * error before any bytes arrived, response un-parseable). Partial responses
+   * (streaming interrupted mid-completion, usage-without-content content-
+   * policy refusals) are persisted as a non-null structurally-valid value.
+   * Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.5 Option A;
+   * column made nullable by migration 0241. Consumers MUST narrow on null
+   * before reading nested fields.
+   */
+  response: Record<string, unknown> | null;
   redactedFields: PayloadRedaction[];
   modifications: PayloadModification[];
   totalSizeBytes: number;
