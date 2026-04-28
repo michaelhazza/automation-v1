@@ -490,7 +490,25 @@ async function start() {
       const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        await processSkillAnalyzerJob(jobId);
+        try {
+          await processSkillAnalyzerJob(jobId);
+        } catch (err) {
+          // Surface terminal failures to the System Monitor. pg-boss retry exhaustion
+          // also lands in skill-analyzer__dlq (covered by Phase 1's DLQ derivation),
+          // but emitting here too gives faster visibility for failures that happen
+          // on the FINAL retry attempt — without this wrap, the operator sees no
+          // signal until the DLQ row lands.
+          recordIncident({
+            source: 'job',
+            severity: 'high',
+            summary: `Skill analyzer terminal failure for job ${jobId}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+            errorCode: 'skill_analyzer_failed',
+            stack: err instanceof Error ? err.stack : undefined,
+            fingerprintOverride: 'skill_analyzer:terminal_failure',
+            errorDetail: { jobId },
+          });
+          throw err; // preserve pg-boss retry semantics
+        }
       });
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);
