@@ -1228,3 +1228,67 @@ commit 17: test: skill-analyzer incident emission integration tests (G11)
 - `pr-reviewer` returns PASS.
 
 ---
+
+## §7 Testing strategy
+
+This section consolidates the testing posture across all three phases and aligns with `docs/spec-context.md` (`runtime_tests: pure_function_only`, `frontend_tests: none_for_now`, `e2e_tests_of_own_app: none_for_now`).
+
+### §7.1 Test types and where each lives
+
+| Test type | Convention | Where in this spec |
+|---|---|---|
+| **Pure-helper test** | `*Pure.ts` + `*.test.ts` sibling, runnable via `npx tsx` | §4.2.3 (logger adapter), §4.5 (DLQ derivation) |
+| **Invariant test** | Iterates a known data structure, asserts a global property | §4.7 (every JOB_CONFIG entry has `deadLetter:`) |
+| **Integration test** | Uses real DB + pg-boss; gated by `NODE_ENV=integration`; lives in `__tests__/*.integration.test.ts` | §4.2.3 (logger end-to-end), §4.8 (DLQ round-trip), §6.3.1 (skill-analyzer dedup + emission) |
+| **Manual smoke** | Operator-driven; documented in §9 (V1–V7) | All phases |
+
+### §7.2 What is intentionally NOT tested
+
+Per `docs/spec-context.md`:
+
+- **Frontend tests** — none. `client/` is not touched by this spec.
+- **API contract tests** — none. The new behaviour is server-internal (worker registration, log buffering, DLQ subscription). No HTTP shape changes.
+- **E2E tests of own app** — none. The verification in §9 is manual smoke.
+- **Performance baselines** — deferred. Log-buffer write cost should be measured post-launch if it becomes a concern.
+- **Migration safety tests** — N/A. This spec introduces no migrations.
+
+If `pr-reviewer` flags any of the above as missing, treat as a `convention_rejection` per `docs/spec-context.md` line 71-77 (e.g. "do not add vitest / jest / playwright for own app").
+
+### §7.3 Pure-helper invariants this spec depends on
+
+The implementation passes if these invariants hold. Each is a one-line check:
+
+1. `buildLogLineForBuffer({ correlationId: 'x', timestamp: '2026-01-01T00:00:00Z', level: 'info', event: 'e', foo: 'bar' }).meta` equals `{ foo: 'bar' }`.
+2. `buildLogLineForBuffer({ correlationId: '' })` returns `null`.
+3. `deriveDlqQueueNames({ a: { deadLetter: 'a__dlq' }, b: {} })` returns `['a__dlq']`.
+4. `deriveDlqQueueNames({ a: { deadLetter: 'x' }, b: { deadLetter: 'x' } })` returns `['x']` (deduplicated).
+5. After `logger.info('test_event', { correlationId: 'cid' })` and one event-loop tick, `readLinesForCorrelationId('cid', 100).length >= 1`.
+6. After `logger.info('test_event', {})`, no buffer push happens.
+
+Each invariant is a single test case. Total: ~10 test cases for ~50 LOC of helper code.
+
+### §7.4 Integration test gating
+
+The integration tests in §4.8 (DLQ round-trip) and §6.3.1 (skill-analyzer) require:
+
+- Live PostgreSQL with `system_incidents` table created.
+- Live pg-boss instance.
+- `NODE_ENV=integration` env var set (or test runner gating).
+
+These are NOT run on every commit. They run:
+
+1. Once before the PR opens, on the implementer's local environment.
+2. As part of staging smoke (§9, V1–V7).
+3. Optionally in CI via `npm run test:integration` if such a target is added (currently absent — out of scope to add).
+
+Pure-helper tests + invariant tests run on every commit via `bash scripts/run-all-unit-tests.sh`.
+
+### §7.5 No `npm run test:gates` mid-iteration
+
+Per CLAUDE.md gate-cadence rule: `npm run test:gates` is ONLY run pre-merge ("we're done, prepare for merge"). Mid-iteration verification uses:
+
+- `npx tsc --noEmit` for typecheck
+- `bash scripts/run-all-unit-tests.sh` (or single-file `npx tsx`) for unit tests
+- Targeted integration test invocation only if the implementer wants belt-and-braces
+
+---
