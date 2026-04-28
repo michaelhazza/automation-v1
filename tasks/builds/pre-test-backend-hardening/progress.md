@@ -96,3 +96,33 @@ All deferred items written to `tasks/todo.md`. None are blocking for merge — t
 ### Branch state
 
 `claude/pre-test-backend-hardening` — 13 commits ahead of main. Ready for PR creation. `npm run test:gates` gating check to be run at merge time per CLAUDE.md gate-cadence rule.
+
+---
+
+## Post-review finalisation (2026-04-28)
+
+### pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`)
+
+Log: `tasks/review-logs/pr-review-log-pre-test-backend-hardening-2026-04-28T03-59-27Z.md`. Blocking B1 (`briefConversationService` upsert target out-of-sync with migration 0240) + S1 (LAEL payload INSERT/DELETE atomicity) + S2 (async-worker exclusion test) + S3 (stub tests as `test.skip`) + S5 (test fixture type) + N1 (decision-type drift) all fixed in-branch in `84c828ee`. S4 (approval-resume `newVersion` drift) routed to `tasks/todo.md` as non-blocking pre-existing follow-up.
+
+### chatgpt-pr-review (PASS — 2 rounds)
+
+Log: `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`.
+
+**Round 1** (commit `375b922a`): 11 findings → 2 apply (LAEL invariant + payload contract documentation, both `(locked)`-marked) / 7 reject (3 factually wrong false positives — duplicate signature, UUID double-validation, stub-test framing — pushed back with verifying reads; 1 YAGNI; 1 scope-creep; 1 architectural; 1 already-handled-elsewhere) / 2 defer (migration 0240 phasing routed to `tasks/todo.md` with accept-as-is decision and trigger condition; S4 already routed from pr-reviewer pass).
+
+**Round 2** (this commit): 2 findings → 2 apply (operational trigger-interpretation guidance for migration; `Rejected option:` line on migration todo to close the audit loop). Final verdict: PASS, no further blockers, ready to finalise.
+
+### KNOWLEDGE.md patterns extracted (2026-04-28)
+
+Three durable patterns appended to `KNOWLEDGE.md`:
+1. **Lock the contract you already have** — single canonical `INVARIANT (locked)` / `CONTRACT (locked)` block over implied-across-comments.
+2. **External-reviewer false-positive rate is non-zero** — verify each finding against codebase reality before applying (this round: 3/11 false positives, 27%).
+3. **Record the rejected option in deferred-decision todos** — closes the audit loop on "why not the alternative."
+
+### Merge readiness
+
+- All review gates passed: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved) → chatgpt-pr-review (PASS, 2 rounds).
+- 0 server-side typecheck errors. Client baseline errors unchanged.
+- All deferred items in `tasks/todo.md` with explicit trigger conditions.
+- Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule before PR merge.

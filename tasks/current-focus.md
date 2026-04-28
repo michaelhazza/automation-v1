@@ -10,7 +10,8 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Active spec:** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
 **Active plan:** tasks/builds/pre-test-backend-hardening/plan.md
-**Active build slug:** pre-test-backend-hardening (branch `claude/pre-test-backend-hardening`, cut from `origin/main` 2026-04-28; plan-gate produced, awaiting executor session on Sonnet)
+**Active build slug:** pre-test-backend-hardening (branch `claude/pre-test-backend-hardening`)
+**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
 **Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
 **Last updated:** 2026-04-28
 
