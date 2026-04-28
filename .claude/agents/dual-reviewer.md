@@ -135,7 +135,10 @@ Report contents:
 
 ---
 
-**Verdict:** `PR ready. All critical and important issues resolved.` — or a list of unresolved items with rejection reasoning.
+**Verdict:** APPROVED — or `**Verdict:** CHANGES_REQUESTED` if unresolved items remain. The enum value MUST be the first non-whitespace token after `**Verdict:**`; trailing prose is allowed (e.g. `**Verdict:** APPROVED (3 iterations, 2 minor fixes applied)`). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`.
+
+- `APPROVED` — every accepted Codex finding has been resolved in-branch; rejections are documented with rationale.
+- `CHANGES_REQUESTED` — at least one accepted finding remains unresolved at loop exit (cap reached, mid-loop blocker, etc.).
 ```
 
 After writing the file, return a short summary to the caller: the log path, the iteration count, and the verdict line. The caller reads the log path to locate the full report.

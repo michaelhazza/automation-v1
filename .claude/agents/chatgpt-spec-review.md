@@ -43,7 +43,7 @@ When the user says "run chatgpt-spec-review" (or equivalent):
 **First: check for an existing session log (resume detection)**
 Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1`
 
-- If a log exists for the current spec (spec slug appears in the filename): **skip steps 1–6 below**. Read the log, identify the last round number, and proceed directly to Per-Round Loop as round N+1. Print: "Resuming session from [log path] — on round N+1. Paste the next ChatGPT feedback."
+- If a log exists for the current spec (spec slug appears in the filename): **skip steps 1–8 below**. Read the log, identify the last round number, and print: "Resuming session from [log path] — last completed round was N. Say 'next round' to fire round N+1, or 'done' to finalise."
 - If no log exists: run the full On Start sequence below.
 
 1. Auto-detect the spec file:
@@ -68,30 +68,56 @@ Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1
    tasks/review-logs/chatgpt-spec-review-<spec-slug>-<YYYY-MM-DDThh-mm-ssZ>.md
    and write the Session Info header (see Log Format)
 
-6. Print the ready message followed by the full spec content:
+6. **Verify `OPENAI_API_KEY` is set.** If not, print:
 
-  Ready. Reviewing <spec-file-path>. PR #<N>: <url>
+   `error: OPENAI_API_KEY is not set. Add it to your shell or .env file before running this agent.`
 
-  Take the spec content below to ChatGPT. Paste their first response back
-  here with your usual phrase.
+   and stop. Do NOT fall back to the legacy copy/paste flow.
 
-  --- SPEC ---
-  <spec file content>
+7. **Run round 1 immediately** by invoking the ChatGPT review CLI on the spec file:
+
+   ```bash
+   npx tsx scripts/chatgpt-review.ts --mode spec --file <spec-file-path>
+   ```
+
+   Capture the stdout JSON — it conforms to the `ChatGPTReviewResult` contract at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md § C1`. The fields you will use:
+   - `findings[]` — pre-extracted, normalised, enum-locked. Use this directly for the per-round triage table.
+   - `verdict` — one of `APPROVED | CHANGES_REQUESTED | NEEDS_DISCUSSION`. Will be written into the log Session Info block at finalisation.
+   - `raw_response` — verbatim model output. Preserve in the round's "ChatGPT Feedback (raw)" log section.
+
+   If the CLI exits non-zero, print its stderr and stop.
+
+8. Print the ready message:
+
+   `Ready. Reviewing <spec-file-path>. PR #<N>: <url> — Round 1 in flight (calling OpenAI).`
 
 ---
 
 ## Per-Round Loop
 
-Trigger: User pastes raw ChatGPT response and says "what should we implement
-from this feedback, go ahead and do so" — or natural variants.
+Trigger: User says "next round", "another round", "go again", or equivalent —
+no paste required. Round 1 fires automatically on agent start (per On Start §7);
+subsequent rounds fire on user signal.
 
-If the pasted content is ambiguous (ChatGPT asked a clarifying question, the
-response is cut off, or there are no distinct findings): say so and ask the
-user to paste again. Do not guess.
+The agent re-reads the spec file (which may have been edited in earlier rounds)
+and re-invokes the CLI:
+
+```bash
+npx tsx scripts/chatgpt-review.ts --mode spec --file <spec-file-path>
+```
+
+If the CLI exits non-zero, print stderr and stop.
 
 For each round:
 
-1. Parse every distinct finding from the paste.
+1. Use the `findings[]` array from the CLI's JSON output directly — each entry is
+   already a normalised finding with `id`, `title`, `severity`, `category`,
+   `finding_type`, `rationale`, and `evidence`. Do NOT re-parse `raw_response`;
+   the CLI has already done that work.
+
+   Edge cases:
+   - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
+   - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
 
 2. Triage each finding into one of two buckets:
 
@@ -334,7 +360,15 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - No unresolved forward references
    Log each failure as a warning. If 2 or more fail, also log:
    ⚠ Spec not implementation-ready — resolve checklist failures before build.
-3. Write the Final Summary block to the session log
+3. Write the Final Summary block to the session log AND insert a `**Verdict:**`
+   header line into the **Session Info** block at the top of the log so the
+   Mission Control dashboard can parse it. The line MUST match one of:
+   - `**Verdict:** APPROVED` — spec is implementation-ready; checklist clean.
+   - `**Verdict:** CHANGES_REQUESTED` — accepted spec edits remain pending or
+     2+ implementation-readiness checklist items failed.
+   - `**Verdict:** NEEDS_DISCUSSION` — review surfaced a directional question
+     that needs the user's input before a verdict can be set.
+   Trailing prose is allowed (e.g. `**Verdict:** APPROVED (2 rounds)`).
 4. Pattern extraction + structured index: same as PR agent —
    - Before appending to KNOWLEDGE.md: grep for similar existing entry;
      update instead of duplicating if found. Include (seen N times) on add/update.

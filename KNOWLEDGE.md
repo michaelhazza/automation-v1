@@ -1246,6 +1246,50 @@ When deferring a decision with a tracked todo, record BOTH the chosen option AND
 
 PR #215 round 3 #3 (system-monitor): when a reviewer surfaces a coordination constraint between two deferred items, enriching the deferred entry with the constraint is documentation work — not a code change. Specifically: the deferred staleness-guard fix (round 2 #4) and the deferred rate-limit retry idempotency fix (round 1 #7b) both touch `triage_attempt_count` on incident rows. A naive implementation of the staleness guard (flip `'running' → 'failed'` after timeout) would double-charge a single never-completed attempt unless coordinated with 7b's `(incidentId, jobId)`-keyed idempotency. Documenting the constraint in `tasks/post-merge-system-monitor.md` under item 4 is mechanical, low blast radius, and prevents the post-launch implementer from building one fix on top of the other's not-yet-finished assumptions. **Rule:** defer-enrichment (markdown-only edit to a deferred-items file capturing newly-surfaced coordination constraints) is a valid technical auto-apply path under the chatgpt-pr-review triage. Treat it as `technical-implement`, no user gate, low severity. Do NOT route the *constraint itself* to the deferred file as a separate item — fold it into the existing entry it constrains. **Watch for:** any reviewer comment of the form "when X is implemented, ensure it does Y" where X is already deferred — that's a defer-enrichment, not a new item.
 
+### [2026-04-28] Dev-tool LLM CLIs bypass the production llmRouter on purpose
+
+`scripts/chatgpt-review.ts` calls `https://api.openai.com/v1/chat/completions` via raw `fetch` — it does NOT route through `server/services/providers/llmRouter.ts` or any of the provider adapters under `server/services/providers/`. This is intentional, not an oversight, and the spec at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md § A1` pins it.
+
+**Why it matters:** `llmRouter` is the financial chokepoint for application LLM calls. It carries org budget enforcement, llm_usage write paths, the resolver/registry chain, and the cost-attribution model that production agents rely on. Mixing developer-machine review-tool calls into that pipeline would pollute production cost dashboards, force the dev tool to fabricate a synthetic org context, and create a backdoor where a developer's local key counts against a tenant's budget.
+
+**The rule:** any dev-tool that calls an LLM provider gets its own env var (`OPENAI_API_KEY` directly), its own raw fetch, no imports from `server/services/providers/`. If cost tracking is ever needed for dev tools, build a separate dev-cost log — do NOT extend `llmUsageService` to cover both.
+
+**Detector for code review:** an `import` from `server/services/providers/` inside any file under `scripts/` or `tools/` is a smell. If you see one, ask "is this dev-tool code, and if so why is it routing through the production chokepoint?"
+
+---
+
+### [2026-04-28] `dataPartial` signal — distinguish "intentional null" from "fetch errored" in aggregator APIs
+
+When an API composes data from multiple sources (filesystem, third-party APIs, cache), a `null` field is ambiguous: it can mean "this thing genuinely doesn't exist" OR "the underlying fetch failed silently." The dashboard at `tools/mission-control/server/lib/inFlight.ts` solves this by:
+
+- Each external fetch returns `{ value: T, errored: boolean }` (e.g. `FetchResult<PRSummary | null>` from `github.ts`).
+- The cache stores the `errored` flag alongside the value so a cached error stays flagged.
+- The composer reads the flag and sets `dataPartial: boolean` on each composed item.
+- The wrapping response carries a top-level `isPartial: boolean` rollup.
+- The UI surfaces both signals (per-item amber pill + top-level banner) so the operator knows which cards to trust.
+
+**Why it matters:** silent degradation is a worse failure mode than visible failure. A card that renders "PR: clean, CI: passing, no review" with `dataPartial: true` tells the operator "trust these fields with reservations"; the same card without the signal silently lies.
+
+**The rule:** any aggregator that fetches from sources where errors are returned as null (instead of thrown) needs a per-source `errored` channel that propagates to the consumer. The signal MUST be plumbed through the cache too — caching an error without flagging it is the same silent-degradation bug, just delayed.
+
+**Detector:** an aggregator API where a single `null` field can mean either "no data" or "fetch failed" without a separate signal. Smell test: if a downstream consumer cannot tell the difference between "intentional absence" and "transient error", you have this bug.
+
+---
+
+### [2026-04-28] Verdict header convention — make agent outputs machine-readable so downstream tooling doesn't depend on prose parsing
+
+Every review-agent log under `tasks/review-logs/` now MUST include a single line matching `/^\*\*Verdict:\*\*\s+([A-Z_]+)\b/m` within the first 30 lines. Per-agent enums are locked in `tasks/review-logs/README.md § Verdict header convention`. Trailing prose on the same line is allowed (`**Verdict:** APPROVED (3 rounds, 4 implement / 7 reject)`); only the enum value is captured.
+
+**Why it matters:** agent outputs are written for humans (prose, narrative, context) but ALSO consumed by downstream tooling (the Mission Control dashboard scrapes verdicts to render "what's in flight"). Without a stable header, the consumer is forced into fragile prose parsing — "look for the word 'verdict' in the conclusion paragraph and try to figure out which sentiment came after." That works until it doesn't, then silently breaks.
+
+**The pattern:** a single header line at the top of every agent log, with a fixed enum per agent. Add new enum values via spec amendment, never silently. The trailing-prose tolerance via word boundary `\b` (not `\s*$`) is the load-bearing detail — it lets the agent say `**Verdict:** APPROVED (3 rounds)` without breaking the parser.
+
+**The general rule (beyond verdicts):** any agent or tool whose output is consumed by both humans AND downstream code needs a stable machine-readable section, not just prose. Header lines, JSON envelopes, fenced code blocks with stable tags — pick one and lock it. The bookkeeping cost of the convention is paid once; the cost of fragile prose parsing compounds every time the agent's output style drifts.
+
+**Detector:** any "agent emits markdown that another tool greps" pattern without a contract. If you see a regex against agent prose anywhere in production code paths, ask whether the agent should emit a stable header instead.
+
+---
+
 ### [2026-04-28] Correction — Validation procedures must explicitly defeat known masking conditions
 
 Phase 0 code-intel cache (branch `code-cache-upgrade`, commits 1–3 of `scripts/build-code-graph.ts`): I declared three commits "validated" using `npm run code-graph:rebuild` re-runs to confirm byte-identity and exercise the watcher edit cycle. Every validation run printed `[code-graph] watcher: lock held by another process — exiting` because an orphaned watcher from the previous session still held `references/.watcher.lock`. That lock-contention exit path was masking a real defect: when the spawn actually succeeds (no prior holder), the watcher's `stdio: 'inherit'` (in `spawnWatcher` at `scripts/build-code-graph.ts`) keeps npm's pipe open across its detached lifetime, and `npm run code-graph:rebuild` / `npm run dev`'s predev step hangs forever. The bug surfaces on the modal first-encounter case (fresh checkout, no prior watcher) — exactly the case the validation was supposed to cover. Fixed in commit 4 by routing watcher stdio to `references/.code-graph-watcher.log` (append mode) and adding a "Verification preconditions" step at the top of plan.md's Done criteria. **Rule:** when a verification step has a known masking condition (a fast-exit path that bypasses the code under test), the verification procedure must explicitly defeat that condition before running. For watcher-spawn validation: kill any running watcher process and delete `references/.watcher.lock` + `references/.watcher.lock.lock` before the cold-start command. **Detector:** if a "validates X" command can succeed in two different paths (X exercised vs. X bypassed), the validation harness must select for the X-exercised path; "looks fine" with the bypass path is not validation. **Rule applies beyond watchers:** any feature with conditional fast-exits (cached results, lock holders, idempotency keys, feature flags off) needs verification preconditions that force the slow path.

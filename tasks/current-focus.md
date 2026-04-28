@@ -1,6 +1,17 @@
+<!-- mission-control
+active_spec: docs/superpowers/specs/2026-04-28-pre-test-integration-harness-spec.md
+active_plan: none
+build_slug: pre-test-integration-harness
+branch: claude/review-todo-items-S9JrI
+status: REVIEWING
+last_updated: 2026-04-28
+-->
+
 # Current Focus
 
 This file is the sprint-level pointer for the active session. Update it whenever the current spec, branch, or active sprint changes. A stale pointer is worse than no pointer — it actively misleads future sessions. If no spec is in flight, set both fields to `none`.
+
+The HTML comment block at the top of this file is read by the Mission Control dashboard (`tools/mission-control/`). Keep the prose below it in sync with the block; if the two disagree, the prose is canonical and the block must be corrected. Status enum: `PLANNING` | `BUILDING` | `REVIEWING` | `MERGE_READY` | `MERGED` | `NONE`.
 
 For per-session progress (what was done this session, what's next), write to `tasks/builds/<slug>/progress.md` — not here.
 
@@ -11,10 +22,19 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** docs/superpowers/specs/2026-04-28-pre-test-integration-harness-spec.md
 **Active plan:** _none — spec is implementation-detailed; followed §1 items directly_
 **Active build slug:** pre-test-integration-harness (branch `claude/review-todo-items-S9JrI`)
-**Status:** **IMPLEMENTATION COMPLETE** — all six §1 items shipped. Decisions: §1.5 → Option A (failure-path payload row, partial-response semantics, usage-without-content edge case), §1.6 → Option A (`AutomationStepError.type` widened, optional `status` + `context`, `KNOWN_AUTOMATION_STEP_ERROR_STATUSES` vocabulary tuple). Migration 0241 makes `agent_run_llm_payloads.response` nullable. New harnesses under `server/services/__tests__/fixtures/`. Six skipped stubs converted to real assertions with HTTP-layer + DB-layer dual assertions. Typecheck clean (only pre-existing client-side errors). Pending: `pr-reviewer` (next), then user runs `npm run test:gates` pre-merge.
+**Status:** **REVIEWING** — implementation complete (PR #227). ChatGPT final-review in progress (3 rounds complete). All valid findings applied; verified false positives maintained as push-backs. Merged origin/main (PR #225 dev-mission-control). Pending: user runs `npm run test:gates` pre-merge.
 **Predecessor specs (already merged):**
+  - `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md` (PR #225 — MERGED 2026-04-28)
   - `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` (PR #223)
   - `docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md` (PR #222)
+
+**Previously active:** dev-mission-control (PR #225 — MERGED 2026-04-28): full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES, 1 mechanical fix, 4 directional items routed to `tasks/todo.md`) → pr-reviewer (APPROVED, no blocking; S1–S4 + N1/N3/N4 fixes auto-applied in `b5bec8b`) → chatgpt-review-auto round 2 (5 high-value fixes in `c0b27e3` — spec parity, current-focus mismatch detection, full raw_response on parse fail, three-state phase derivation, split GitHub cache TTLs) → chatgpt-review-auto round 3 (3 future-proofing fixes in `3ebb8ed` — `dataPartial`/`isPartial` signal, `pr.ci_updated_at`, read-only constraints locked into spec § A2). Final ChatGPT pass: explicit "ship". 68 unit tests passing. 16 commits on the branch.
+
+**Pair spec (concurrent, separate branch — superseded as active focus):** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
+**Pair plan:** tasks/builds/pre-test-backend-hardening/plan.md
+**Pair branch:** `claude/pre-test-backend-hardening`
+**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
+**Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
 **Last updated:** 2026-04-28
 
 ---
