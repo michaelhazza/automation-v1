@@ -2340,6 +2340,27 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
 
+    // ── User-triggered cancel observation ──────────────────────────────
+    // agentRunCancelService flips agent_runs.status to 'cancelling' when a
+    // user cancels an in-flight non-IEE run. This per-iteration PK read is
+    // the cheapest place to observe that — runs at most MAX_LOOP_ITERATIONS
+    // times per run and is dwarfed by the LLM call that follows. IEE-
+    // delegated runs are stopped via the worker's per-step ownership check
+    // (worker/src/persistence/runs.ts::assertWorkerOwnership), so this guard
+    // is for the in-process API path only.
+    {
+      const [cancelObserved] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      if (cancelObserved?.status === 'cancelling') {
+        finalStatus = 'cancelled';
+        emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
+        break outerLoop;
+      }
+    }
+
     // ── Heartbeat: update lastActivityAt for stale run detection ──────
     // Throttle to every 3rd iteration to avoid DB write pressure
     if (iteration % 3 === 0) {

@@ -247,7 +247,8 @@ export async function finaliseAgentRunFromIeeRun(
     // required on the parent.
     const parentAlreadyTerminal = parent.status !== 'delegated'
       && parent.status !== 'pending'
-      && parent.status !== 'running';
+      && parent.status !== 'running'
+      && parent.status !== 'cancelling';
 
     if (parentAlreadyTerminal && ieeRun.eventEmittedAt) {
       return;
@@ -342,7 +343,7 @@ export async function finaliseAgentRunFromIeeRun(
         })
         .where(and(
           eq(agentRuns.id, parent.id),
-          inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
+          inArray(agentRuns.status, ['pending', 'running', 'delegated', 'cancelling'] as const),
           // isNull(completedAt) is pre-existing defense-in-depth for the parent's
           // transitional gate. The write-once invariant for Phase B is guaranteed by
           // isNull(runResultStatus) alone; the completedAt guard can cause the update
