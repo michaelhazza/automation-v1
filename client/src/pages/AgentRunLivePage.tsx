@@ -142,6 +142,12 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
         if (p?.runId !== runId) return;
         setRunMeta((prev) => prev ? { ...prev, status: 'cancelling' } : prev);
       },
+      'agent:run:completed': (payload: unknown) => {
+        const p = payload as { finalStatus?: string } | null;
+        if (p?.finalStatus) {
+          setRunMeta((prev) => prev ? { ...prev, status: p.finalStatus! } : prev);
+        }
+      },
       'agent-run:execution-event': (payload: unknown) => {
         const event = payload as AgentExecutionEvent;
         if (!event || typeof event !== 'object' || !('sequenceNumber' in event)) return;

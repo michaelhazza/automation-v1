@@ -256,6 +256,20 @@ export async function finaliseAgentRunFromIeeRun(
 
     const terminalStatus = mapIeeStatusToAgentRunStatus(ieeRun.status, ieeRun.failureReason);
     resolvedStatus = terminalStatus;
+
+    // Reconciliation observability: if the parent was already in 'cancelling'
+    // but the IEE run resolved to something other than 'cancelled', the run
+    // completed before the worker observed the cancel request. Best-effort
+    // semantics are expected, but log it so operators can correlate user-
+    // reported "I cancelled but it completed" observations with server state.
+    if (parent.status === 'cancelling' && terminalStatus !== 'cancelled') {
+      logger.warn('agentRunFinalization.cancel_intent_divergence', {
+        ieeRunId: ieeRun.id,
+        agentRunId: parent.id,
+        parentStatusAtFinalization: parent.status,
+        finalStatus: terminalStatus,
+      });
+    }
     parentSubaccountId = parent.subaccountId ?? null;
     parentIsSubAgent = parent.isSubAgent ?? false;
     parentAgentId = parent.agentId ?? null;
@@ -430,10 +444,19 @@ export async function finaliseAgentRunFromIeeRun(
 }
 
 /**
- * Scan for "Class 2" orphans: agent_runs stuck in 'delegated' whose linked
- * iee_runs row is already terminal. Recovers cases where the event handler
- * crashed post-DB-write or the event was lost between worker emit and
- * main-app consume.
+ * Scan for stuck non-terminal runs whose linked iee_runs row is already
+ * terminal. Covers two cases:
+ *
+ * - 'delegated': event handler crashed post-DB-write or the event was lost
+ *   between worker emit and main-app consume.
+ * - 'cancelling': the pg-boss iee-run-completed event failed to publish
+ *   after cancelIeeRun wrote iee_runs.status='cancelled'. Without this
+ *   sweep, a 'cancelling' parent stays stuck indefinitely because the
+ *   standard delegated-orphan path only queries status='delegated'.
+ *
+ * Invariant: no run may remain in 'cancelling' beyond the reconciliation
+ * window (120s). Either the loop / worker observes the cancel and finalises,
+ * or this sweep recovers it.
  *
  * Grace window: 120 seconds. Rows younger than that may be legitimately
  * between the worker's terminal write and the main-app handler firing.
@@ -450,7 +473,7 @@ export async function reconcileStuckDelegatedRuns(): Promise<number> {
     .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
     .where(
       and(
-        eq(agentRuns.status, 'delegated'),
+        inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
         sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
         isNull(ieeRuns.deletedAt),
         sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,

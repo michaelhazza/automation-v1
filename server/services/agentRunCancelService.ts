@@ -73,6 +73,12 @@ export const agentRunCancelService = {
     // ── 3. Flip parent to 'cancelling' ───────────────────────────────────────
     // Gated WHERE excludes terminal states + cancelling so concurrent cancel
     // requests collapse to a single transition.
+    // Use RETURNING to get the post-UPDATE ieeRunId. Between the initial SELECT
+    // and this UPDATE, agentExecutionService may have transitioned the run to
+    // 'delegated' and written an ieeRunId — the stale pre-read value would be
+    // null, causing cancelIeeRun to be skipped and the worker to keep running.
+    // RETURNING reads the row at the moment the lock is held, so it captures any
+    // ieeRunId written by the delegation transition.
     const updated = await db
       .update(agentRuns)
       .set({ status: 'cancelling', updatedAt: new Date() })
@@ -80,7 +86,7 @@ export const agentRunCancelService = {
         eq(agentRuns.id, run.id),
         inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
       ))
-      .returning({ id: agentRuns.id });
+      .returning({ id: agentRuns.id, ieeRunId: agentRuns.ieeRunId });
 
     if (updated.length === 0) {
       // Race with finaliser — re-read to report the actual current state.
@@ -92,12 +98,14 @@ export const agentRunCancelService = {
       return { status: refreshed?.status ?? run.status, performedTransition: false };
     }
 
+    const freshIeeRunId = updated[0].ieeRunId;
+
     logger.info('agent_run.cancel_requested', {
       runId: run.id,
       organisationId,
       userId,
       previousStatus: run.status,
-      ieeRunId: run.ieeRunId ?? null,
+      ieeRunId: freshIeeRunId ?? null,
     });
 
     emitAgentRunUpdate(run.id, 'agent:run:cancelling', {
@@ -106,8 +114,8 @@ export const agentRunCancelService = {
     });
 
     // ── 4. IEE-delegated path: stop the worker via the iee_runs row ──────────
-    if (run.ieeRunId) {
-      await this.cancelIeeRun(run.ieeRunId);
+    if (freshIeeRunId) {
+      await this.cancelIeeRun(freshIeeRunId);
     }
 
     // ── 5. Non-IEE path: in-process loop polls agent_runs.status and exits ──
