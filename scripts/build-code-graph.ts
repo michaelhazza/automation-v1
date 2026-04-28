@@ -640,6 +640,29 @@ async function runWatcher(): Promise<void> {
     return relPath.startsWith('client/') ? watcherClientProject : watcherServerProject;
   }
 
+  /**
+   * Remove any existing line for `relPath` from .skipped.txt. Symmetric with
+   * the append-on-failure path: if a file was previously skipped due to a
+   * syntax error and the user fixes it, the next successful extract drops the
+   * stale entry. Called from the success branch of extractSingleFile.
+   */
+  async function pruneFromSkipped(relPath: string): Promise<void> {
+    let content: string;
+    try {
+      content = await fs.readFile(SKIPPED_PATH, 'utf8');
+    } catch {
+      return;
+    }
+    const lines = content.split('\n');
+    const filtered = lines.filter((line) => {
+      const tabIdx = line.indexOf('\t');
+      if (tabIdx === -1) return true;
+      return line.slice(0, tabIdx) !== relPath;
+    });
+    if (filtered.length === lines.length) return;
+    await writeAtomic(SKIPPED_PATH, filtered.join('\n'));
+  }
+
   async function extractSingleFile(absPath: string): Promise<{ imports: string[]; exports: string[] } | null> {
     const relPath = toRepoRelPosix(absPath);
     const project = projectFor(relPath);
@@ -668,6 +691,8 @@ async function runWatcher(): Promise<void> {
       try {
         for (const [name] of sf.getExportedDeclarations()) exports.push(name);
       } catch {}
+      // Successful extract — drop any stale .skipped.txt entry for this file.
+      await pruneFromSkipped(relPath);
       return { imports, exports };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
