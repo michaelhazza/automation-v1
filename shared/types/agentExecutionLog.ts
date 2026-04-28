@@ -195,6 +195,8 @@ export type AgentExecutionEventPayload =
       tokensOut: number;
       costWithMarginCents: number;
       durationMs: number;
+      payloadInsertStatus: 'ok' | 'failed';
+      payloadRowId: string | null;
     }
   | {
       eventType: 'handoff.decided';

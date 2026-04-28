@@ -751,6 +751,18 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let lastError: unknown = null;
   let fallbackIndex = -1;
 
+  // ── §1.1 LAEL-P1-1 pairing-completeness flags ────────────────────────────
+  // `laelRequestEmitted` is set to true after emitting `llm.requested` so the
+  // finally block below can guarantee a matching `llm.completed` fires even if
+  // an exception escapes between the two emission sites. `laelCompletedEmitted`
+  // is set to true at each normal `llm.completed` emit site so the finally
+  // block does not double-emit on the normal paths.
+  let laelRequestEmitted = false;
+  let laelCompletedEmitted = false;
+  // `terminalStatus` carries the final status value for the finally fallback.
+  // Initialised to null; set by the success/failure paths before they emit.
+  let terminalStatus: string | null = null;
+
   providerLoop:
   for (const provider of fallbackChain) {
     fallbackIndex++;
@@ -874,6 +886,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           },
           linkedEntity: { type: 'llm_request', id: provisionalLedgerRowId },
         });
+        laelRequestEmitted = true;
       }
 
       try {
@@ -1040,6 +1053,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       console.warn(`[llmRouter] Provider ${provider} exhausted — entering ${PROVIDER_COOLDOWN_MS}ms cooldown`);
     }
   }
+
+  // ── §1.1 LAEL-P1-1 pairing-completeness finally guard ──────────────────────
+  // Wraps the entire post-loop body so that if an exception escapes between
+  // `llm.requested` emission and the normal `llm.completed` emit sites, the
+  // finally block fires `llm.completed` as a fallback, ensuring every emitted
+  // `llm.requested` is paired with exactly one `llm.completed`. The normal
+  // paths set `laelCompletedEmitted = true` before emitting, so the finally
+  // block no-ops on the normal paths.
+  try {
 
   if (!providerResponse) {
     const e = lastError as { message?: string } | null | undefined;
@@ -1238,10 +1260,10 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // paths throw earlier and never reach here. The only failure statuses
     // that arrive here are post-dispatch errors (timeout, parse_failure,
     // provider_unavailable, etc.) for which emission is appropriate.
+    terminalStatus = callStatus;
     if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
-      // No payload row on failure — no provider response to persist. The
-      // llm.completed event carries payloadInsertStatus='failed' implicitly
-      // (payloadRowId is null) so observers can see the gap.
+      // No payload row on failure — no provider response to persist.
+      laelCompletedEmitted = true;
       tryEmitAgentEvent({
         runId:          ctx.runId!,
         organisationId: ctx.organisationId,
@@ -1256,6 +1278,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           tokensOut:           0,
           costWithMarginCents: 0,
           durationMs:          Date.now() - providerStart,
+          payloadInsertStatus: 'failed',
+          payloadRowId:        null,
         },
       });
     }
@@ -1565,6 +1589,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // require the ledger write to be inside a new transaction, which changes
   // ordering semantics for the cost breaker. Keeping them separate and
   // best-effort is the correct consistency model (spec §4.5).
+  terminalStatus = 'success';
   if (shouldEmitLaelLifecycle(ctx, 'success') && successLedgerRowId) {
     let payloadRowId: string | null = null;
     let payloadInsertStatus: 'ok' | 'failed' = 'failed';
@@ -1602,6 +1627,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       payloadInsertStatus = 'failed';
     }
 
+    laelCompletedEmitted = true;
     tryEmitAgentEvent({
       runId:          ctx.runId!,
       organisationId: ctx.organisationId,
@@ -1616,6 +1642,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         tokensOut:            providerResponse.tokensOut,
         costWithMarginCents:  costResult.costWithMarginCents,
         durationMs:           providerLatencyMs,
+        payloadInsertStatus,
+        payloadRowId,
       },
     });
 
@@ -1624,7 +1652,6 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId: ctx.runId, ledgerRowId: successLedgerRowId, payloadInsertStatus,
       });
     }
-    void payloadRowId; // surfaced in logs above; no further use on success path
   }
 
   // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
@@ -1669,6 +1696,42 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   };
 
   return providerResponse;
+
+  } finally {
+    // Pairing-completeness safety net (§1.1 LAEL-P1-1). Fires only when
+    // `llm.requested` was emitted but `llm.completed` was NOT emitted by
+    // either the success or failure path — i.e., an unexpected exception
+    // escaped between the two emission sites. Uses fallback values:
+    // payloadInsertStatus='failed', payloadRowId=null, tokensIn/Out=0,
+    // costWithMarginCents=0. provisionalLedgerRowId is the row that was
+    // created before the provider call, so it is always available here.
+    if (
+      laelRequestEmitted &&
+      !laelCompletedEmitted &&
+      ctx.runId &&
+      provisionalLedgerRowId &&
+      shouldEmitLaelLifecycle(ctx, terminalStatus ?? 'failed')
+    ) {
+      tryEmitAgentEvent({
+        runId:          ctx.runId,
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        sourceService:  'llmRouter',
+        payload: {
+          eventType:           'llm.completed',
+          critical:            true,
+          llmRequestId:        provisionalLedgerRowId,
+          status:              terminalStatus ?? 'failed',
+          tokensIn:            0,
+          tokensOut:           0,
+          costWithMarginCents: 0,
+          durationMs:          Date.now() - providerStart,
+          payloadInsertStatus: 'failed',
+          payloadRowId:        null,
+        },
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
