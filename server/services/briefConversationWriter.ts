@@ -8,6 +8,7 @@ import {
 } from './briefArtefactValidator.js';
 import { emitBriefArtefactNew, emitBriefArtefactUpdated, emitConversationUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
+import { getPostCommitStore } from '../lib/postCommitEmitter.js';
 
 export interface WriteMessageInput {
   conversationId: string;
@@ -199,21 +200,38 @@ export async function writeConversationMessage(
 
   const messageId = message!.id;
 
-  // Emit conversation-level event
-  emitConversationUpdate(input.conversationId, 'conversation-message:new', {
-    messageId,
-    role: input.role,
-    content: input.content,
-    artefactCount: acceptedArtefacts.length,
-  });
-
-  // Emit per-artefact Brief-room events. Use the stamped copies so WS
-  // consumers see the same `serverCreatedAt` that was just persisted.
-  for (const artefact of stampedArtefacts) {
-    if (artefact.parentArtefactId) {
-      emitBriefArtefactUpdated(input.briefId, { messageId, artefact });
-    } else {
-      emitBriefArtefactNew(input.briefId, { messageId, artefact });
+  // Defer websocket emits until after the HTTP response commits (res.finish).
+  // This prevents ghost-artefact events when the outer request tx rolls back.
+  // Job-worker callers (no bound store) emit inline via the absent-store branch.
+  const store = getPostCommitStore();
+  if (store) {
+    store.enqueue(() => emitConversationUpdate(input.conversationId, 'conversation-message:new', {
+      messageId,
+      role: input.role,
+      content: input.content,
+      artefactCount: acceptedArtefacts.length,
+    }));
+    for (const artefact of stampedArtefacts) {
+      if (artefact.parentArtefactId) {
+        store.enqueue(() => emitBriefArtefactUpdated(input.briefId, { messageId, artefact }));
+      } else {
+        store.enqueue(() => emitBriefArtefactNew(input.briefId, { messageId, artefact }));
+      }
+    }
+  } else {
+    logger.info('post_commit_emit_fallback', { reason: 'no_store' });
+    emitConversationUpdate(input.conversationId, 'conversation-message:new', {
+      messageId,
+      role: input.role,
+      content: input.content,
+      artefactCount: acceptedArtefacts.length,
+    });
+    for (const artefact of stampedArtefacts) {
+      if (artefact.parentArtefactId) {
+        emitBriefArtefactUpdated(input.briefId, { messageId, artefact });
+      } else {
+        emitBriefArtefactNew(input.briefId, { messageId, artefact });
+      }
     }
   }
 
