@@ -875,3 +875,133 @@ Reviewers: `pr-reviewer` is sufficient for Tier 1. `dual-reviewer` recommended o
 | Tier 3 | G12, G14, §3.3/§3.5/§3.6 | 1–2 days, post-launch |
 
 **Total to "every action is monitored, ready for testing":** Tier 1 alone — 1–1.5 days.
+
+---
+
+## 7. Pre-test readiness verdict + verification plan
+
+### 7.1 Verdict
+
+**Status: NOT READY** for the workflow described ("every action is tracked, monitored, and flagged for the System Monitor agent"). The agent is well-built; the producer surface has gaps that will cause silent failures during testing — exactly the failure mode the agent is supposed to expose.
+
+After **Tier 1** of §6 lands, status flips to **READY** for pre-production testing.
+
+After Tier 2, status is **READY** for production.
+
+### 7.2 Why "not ready" today (in one paragraph each)
+
+**Silent-failure surface is large.** ~75% of pg-boss queues either don't have a DLQ or have one no listener subscribes to. Job failures across the workflow engine, IEE, skill analyzer, every `maintenance:*` job, payment reconciliation, and connector polling sync land in `failed` / `*__dlq` rows in the pg-boss schema and are never converted into `system_incidents`. During testing this means: a real bug surfaces as "the job didn't run", with no incident, no triage, no Investigate-Fix prompt — the operator has to know to inspect pg-boss directly.
+
+**Triage agent reads stale evidence.** Every triage diagnosis the agent produces today silently omits process-local log lines. The agent's prompt explicitly tells it to cite `file:line` references and surface what it cannot see, but it cannot see what the logger emitted because nothing populates the buffer. The agent will write defensible diagnoses anyway — they'll just be missing the runtime context that would let a human follow up effectively.
+
+**Async ingest is a tripwire.** Setting `SYSTEM_INCIDENT_INGEST_MODE=async` (which someone *will* try in testing to validate the async path) silently loses every incident. No error, no warning — `boss.send` succeeds, the queue fills, no consumer drains. The incident sink looks healthy until you check the queue.
+
+### 7.3 Verification plan (post Tier 1)
+
+After landing the Tier 1 fixes, verify with these tests. Each is small enough to run as a one-shot.
+
+#### V1 — `read_logs_for_correlation_id` returns lines (G2)
+
+```
+1. Hit any authenticated route. Note the response's correlationId from the JSON body.
+2. Wait 1-2 seconds for log emission.
+3. From a Node REPL or a temporary sysadmin tool, call:
+     readLinesForCorrelationId('<id>', 100)
+   from server/services/systemMonitor/logBuffer.js.
+4. Assert lineCount > 0 and the lines contain the route handler's events.
+```
+
+#### V2 — DLQ coverage round trip (G1, G5)
+
+For each newly subscribed DLQ:
+```
+1. Enqueue a poison-pill job (payload that the handler will reject) with retryLimit=0.
+2. Confirm pg-boss moves it to <queue>__dlq.
+3. Within 30s, query system_incidents for the matching `job:<queue>:dlq` fingerprint.
+4. Assert one row exists with source='job', severity='high'.
+5. Trigger the same poison-pill 9 more times → assert occurrenceCount=10, no duplicate rows.
+```
+
+A scripted version of this: `scripts/verify-dlq-incident-roundtrip.sh` — recommended addition.
+
+#### V3 — Async ingest worker drains (G3)
+
+```
+1. Set SYSTEM_INCIDENT_INGEST_MODE=async. Restart the server.
+2. Trigger any 5xx route.
+3. Confirm the system-monitor-ingest queue size goes 0 → 1 → 0 within a few seconds.
+4. Confirm a system_incidents row was written.
+```
+
+#### V4 — Workflow engine failures surface (G4 subset)
+
+```
+1. Submit a workflow run with a step that intentionally throws on the first invocation.
+2. Confirm pg-boss retries the job per JOB_CONFIG.
+3. Confirm the failed job ends up in workflow-run-tick__dlq (or workflow-agent-step__dlq).
+4. Confirm a system_incidents row is created within 10s of the DLQ landing.
+```
+
+#### V5 — Webhook 5xx emits incident (G7)
+
+```
+1. Send a GHL webhook for a locationId that exists in canonical_accounts.
+2. Inject a DB error in the lookup (or use a fault-injection wrapper).
+3. Confirm a system_incidents row with source='route' (or 'webhook' if G9 landed) and a fingerprint covering the GHL handler path.
+```
+
+#### V6 — Skill analyzer terminal failure surfaces (G11)
+
+```
+1. Submit a skill-analyzer job with an org that has no candidates (forces an early-exit code path that may throw differently).
+2. Force the handler to throw via env-flag or test seam.
+3. Confirm a system_incidents row with fingerprintOverride='skill_analyzer:terminal_failure'.
+```
+
+#### V7 — Triage agent uses log evidence (G2 end-to-end)
+
+```
+1. Trigger an incident from a route that emits a few logger.info / logger.error lines with the same correlationId.
+2. Wait for the triage worker to pick up the incident (severity ≥ medium, default).
+3. Read system_incidents.agent_diagnosis.evidence — assert at least one entry references a log line from V1's buffer.
+```
+
+This is the canonical end-to-end test for the system: route fires → log lines accumulate → incident creates → triage reads logs → diagnosis cites evidence → operator pastes Investigate-Fix prompt → Claude Code session investigates.
+
+### 7.4 Smoke before "we're testing"
+
+Add to `tasks/builds/<next-slug>/staging-smoke-checklist.md`:
+
+```
+- [ ] V1 (log buffer round trip)
+- [ ] V2 (DLQ coverage — pick 3 representative queues)
+- [ ] V3 (async ingest, if SYSTEM_INCIDENT_INGEST_MODE will be flipped in test)
+- [ ] V4 (workflow engine failure surfaces)
+- [ ] V5 (webhook 5xx surfaces)
+- [ ] V6 (skill-analyzer terminal failure surfaces)
+- [ ] V7 (end-to-end: route → triage → diagnosis with log evidence)
+```
+
+### 7.5 What this audit DID NOT cover (intentional)
+
+- **Frontend monitoring/observability.** Client-side errors, Sentry/equivalent telemetry, error boundary coverage — out of scope for this audit. The user's framing was "things that execute on the server".
+- **Deployment / infrastructure monitoring.** Process death, OOM, host restart, disk full — these require an external monitoring layer (uptime monitor, health-check aggregator) outside the System Monitor agent. Phase 0/0.5 explicitly defers to such a layer.
+- **Security event monitoring.** `tool_call_security_events` table is an existing admin surface; not part of the incident sink. Should it be? Open question — recommend a follow-up audit specifically on whether security events should also flow through `recordIncident` for unified triage.
+- **Cost / budget monitoring.** Cost-anomaly heuristics exist (`costPerOutcomeIncreasing`); per-org budget breach is its own surface (`budgetService`). They produce signals but the failure paths there weren't the focus.
+- **Test-environment auto-incidents.** Running the test suite with the ingestor enabled creates real incidents. Recommend a `SYSTEM_INCIDENT_INGEST_ENABLED=false` env in `npm test` if not already set (or `is_test_incident` tag — already in schema).
+
+### 7.6 Recommended next step
+
+1. **User confirms** the audit's coverage matches their intent.
+2. **Spec the Tier 1 work** as a 1-pager (or extend `tasks/post-merge-system-monitor.md` with the items here marked Tier 1).
+3. **Run `architect`** for sequencing if landing on a new branch.
+4. **Implement Tier 1** in one branch / one PR.
+5. **Run `pr-reviewer` and `dual-reviewer`** before merging.
+6. **Run V1–V7** in staging.
+7. **Then begin testing** of the broader application.
+
+Tier 2 and Tier 3 can roll in across subsequent sprints without blocking pre-production testing.
+
+---
+
+**End of audit.**
