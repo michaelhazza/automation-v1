@@ -39,7 +39,13 @@ export const agentRunLlmPayloads = pgTable(
     systemPrompt: text('system_prompt').notNull(),
     messages: jsonb('messages').notNull().$type<unknown[]>(),
     toolDefinitions: jsonb('tool_definitions').notNull().$type<unknown[]>(),
-    response: jsonb('response').notNull().$type<Record<string, unknown>>(),
+    // Nullable as of migration 0241 — a failure-path payload row carrying
+    // `response IS NULL` records the failure without faking a provider
+    // result. Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.5
+    // Option A. Partial responses (streaming interrupted, usage-without-
+    // content) are persisted with a non-null value; null is reserved for
+    // "no usable provider output exists".
+    response: jsonb('response').$type<Record<string, unknown> | null>(),
 
     redactedFields: jsonb('redacted_fields').notNull().default([]).$type<unknown[]>(),
     modifications: jsonb('modifications').notNull().default([]).$type<unknown[]>(),

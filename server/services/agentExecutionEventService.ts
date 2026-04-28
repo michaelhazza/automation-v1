@@ -581,7 +581,10 @@ export async function getLlmPayload(
     systemPrompt: row.systemPrompt,
     messages: row.messages as unknown[],
     toolDefinitions: row.toolDefinitions as unknown[],
-    response: row.response as Record<string, unknown>,
+    // Schema column is nullable as of migration 0241 — failure-path rows
+    // record `response: null` when no usable provider output exists. The
+    // `AgentRunLlmPayload` type allows null; consumers narrow before access.
+    response: row.response as Record<string, unknown> | null,
     redactedFields: row.redactedFields as PayloadRedaction[],
     modifications: row.modifications as PayloadModification[],
     totalSizeBytes: row.totalSizeBytes,
