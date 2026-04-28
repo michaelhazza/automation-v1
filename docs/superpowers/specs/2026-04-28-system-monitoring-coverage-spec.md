@@ -183,9 +183,10 @@ This table is the **single source of truth** for what the spec touches. Any pros
 | `server/lib/__tests__/loggerBufferAdapterPure.test.ts` | 1 | Pure-helper test — covers (a) entries with valid correlationId, (b) entries with empty/missing correlationId, (c) meta-stripping of timestamp/level/event/correlationId from the meta object. |
 | `server/lib/__tests__/logger.integration.test.ts` | 1 | Integration test — calls `logger.info('test_event', { correlationId: 'cid-1', foo: 'bar' })` then asserts `readLinesForCorrelationId('cid-1', 100)` returns at least one line with `event === 'test_event'` and `meta.foo === 'bar'`. |
 | `server/services/dlqMonitorServicePure.ts` | 1 | Pure helper. Exports `deriveDlqQueueNames(config: typeof JOB_CONFIG): string[]` — iterates entries, returns the deduplicated `deadLetter` values. |
-| `server/services/__tests__/dlqMonitorServicePure.test.ts` | 1 | Pure-helper test — covers (a) all entries have `deadLetter`, (b) some entries lack `deadLetter`, (c) duplicate `deadLetter` values are deduplicated. |
+| `server/services/__tests__/dlqMonitorServicePure.test.ts` | 1 | Pure-helper test — covers (a) all entries have `deadLetter`, (b) some entries lack `deadLetter`, (c) duplicate `deadLetter` values are deduplicated, (d) an entry with `deadLetter !== '<queueName>__dlq'` causes `deriveDlqQueueNames` to throw with the queue name + expected DLQ name in the error message. |
 | `server/config/__tests__/jobConfigInvariant.test.ts` | 1 | Invariant test — asserts every `JOB_CONFIG` entry has a non-empty `deadLetter: string` matching `/^[a-z0-9:_-]+__dlq$/`. CI gate. |
 | `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts` | 1 | Integration test — picks one queue (`workflow-run-tick`), enqueues a poison-pill job with `retryLimit=0`, asserts within 30s that a `system_incidents` row exists with `fingerprint` matching `hashFingerprint('job:workflow-run-tick:dlq')`. |
+| `server/services/__tests__/dlqMonitorServiceForceSyncInvariant.test.ts` | 1 | Invariant test — mocks `recordIncident` and runs `dlqMonitorService.startDlqMonitor` against a fixture queue with `SYSTEM_INCIDENT_INGEST_MODE=async`. Asserts every captured `recordIncident` call receives `{ forceSync: true }` in the second argument. Pure unit test (no pg-boss, no DB) — the loop-hazard invariant from §3.4 is machine-verifiable. |
 | `server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts` | 3 | Integration test — invokes the wrapper from §6.2 with a forced throw, asserts (a) one `system_incidents` row with `fingerprintOverride: 'skill_analyzer:terminal_failure'`, (b) error is propagated to caller. |
 
 ### §2.2 Modified files
@@ -193,7 +194,8 @@ This table is the **single source of truth** for what the spec touches. Any pros
 | File | Phase | Change |
 |---|---|---|
 | [`server/lib/logger.ts`](../../server/lib/logger.ts) | 1 | Add a single call inside `emit(entry)` (line 34): `void appendLogLineSafe(entry)` where `appendLogLineSafe` lives in the same file and (a) calls `buildLogLineForBuffer(entry)` from `loggerBufferAdapterPure.ts`, (b) lazy-imports `appendLogLine` from `server/services/systemMonitor/logBuffer.ts`, (c) catches and swallows any error. |
-| [`server/services/dlqMonitorService.ts`](../../server/services/dlqMonitorService.ts) | 1 | Replace the hard-coded `DLQ_QUEUES` array (lines 14-23) with `import { deriveDlqQueueNames } from './dlqMonitorServicePure.js'; import { JOB_CONFIG } from '../config/jobConfig.js'; const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);`. No other change to the file. |
+| [`server/services/dlqMonitorService.ts`](../../server/services/dlqMonitorService.ts) | 1 | Two changes: (a) Replace the hard-coded `DLQ_QUEUES` array (lines 14-23) with `import { deriveDlqQueueNames } from './dlqMonitorServicePure.js'; import { JOB_CONFIG } from '../config/jobConfig.js'; const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);`. (b) Every `recordIncident(...)` call in this file MUST pass `{ forceSync: true }` as the second argument — see §3.4 loop-hazard invariant. |
+| [`server/services/incidentIngestor.ts`](../../server/services/incidentIngestor.ts) | 1 | Add a second parameter to `recordIncident`: `opts?: { forceSync?: boolean }`. When `opts.forceSync === true`, bypass the `SYSTEM_INCIDENT_INGEST_MODE` check and always take the inline (sync) path. When omitted or `false`, behaviour is unchanged. See §3.4 for the contract and rationale. |
 | [`server/config/jobConfig.ts`](../../server/config/jobConfig.ts) | 1 | Add `deadLetter:` to the 6 entries listed in G5: `slack-inbound`, `agent-briefing-update`, `memory-context-enrichment`, `page-integration`, `iee-cost-rollup-daily`, `connector-polling-tick`. Each gets `deadLetter: '<queue-name>__dlq'`. |
 | [`server/index.ts`](../../server/index.ts) | 1 | Add an async-mode worker registration after the existing `await registerSystemIncidentNotifyWorker(boss);` line (~455). Conditional on `process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async'`. Also add the `system-monitor-ingest` JOB_CONFIG entry — see contracts §3.3. |
 | [`server/index.ts`](../../server/index.ts) | 3 | Wrap the existing `processSkillAnalyzerJob(jobId)` call (line 478) with a try/catch that calls `recordIncident({source: 'job', errorCode: 'skill_analyzer_failed', fingerprintOverride: 'skill_analyzer:terminal_failure', summary, stack})` and re-throws. |
@@ -285,15 +287,30 @@ interface LogLine {
 ```ts
 export function deriveDlqQueueNames(config: typeof JOB_CONFIG): string[] {
   const dlqs = new Set<string>();
-  for (const entry of Object.values(config)) {
+  for (const [queueName, entry] of Object.entries(config)) {
     const dlq = (entry as { deadLetter?: string }).deadLetter;
-    if (typeof dlq === 'string' && dlq.length > 0) {
-      dlqs.add(dlq);
+    if (typeof dlq !== 'string' || dlq.length === 0) continue;
+
+    // Belt-and-braces runtime guard against silent misconfiguration. The
+    // jobConfigInvariant test (§4.7) catches this at CI time, but a future
+    // edit that bypasses CI (hotfix, branch-skipped suite, etc.) would
+    // otherwise see dlqMonitorService subscribe to an arbitrarily-named DLQ
+    // while pg-boss writes to `<queueName>__dlq` — silent coverage gap.
+    // Throwing at boot makes the misconfig fail-fast and visible.
+    const expected = `${queueName}__dlq`;
+    if (dlq !== expected) {
+      throw new Error(
+        `[deriveDlqQueueNames] JOB_CONFIG['${queueName}'].deadLetter must equal '${expected}', got '${dlq}'`,
+      );
     }
+
+    dlqs.add(dlq);
   }
   return Array.from(dlqs).sort();  // deterministic ordering for stable test snapshots
 }
 ```
+
+**Pure-helper test addendum:** the `dlqMonitorServicePure.test.ts` cases listed in §2.1 must include a case where an entry has `deadLetter: 'wrong-name'` and assert that `deriveDlqQueueNames` throws with a message containing the queue name and `__dlq`. Without this case, the runtime guard is unverified.
 
 **Consumer:** existing `startDlqMonitor` in `server/services/dlqMonitorService.ts`. It iterates `DLQ_QUEUES` and registers one `boss.work(...)` per entry.
 
@@ -396,7 +413,28 @@ if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
 - Retry exhaustion → job lands in `system-monitor-ingest__dlq`.
 - DLQ subscription (covered by G1) → records a `system_incidents` row with `source: 'job'` and `fingerprintOverride: 'job:system-monitor-ingest:dlq'`.
 
-**Loop hazard:** if the DLQ-emitted incident itself fails to ingest, would it loop? **No.** The DLQ subscription writes via the `dlqMonitorService` path, which calls `recordIncident` directly. In sync mode (default), this is a synchronous DB write. In async mode, this enqueues to `system-monitor-ingest`, which would loop — **but** the dedup partial unique index collapses identical fingerprints into occurrence-count increments, not new rows. So the worst case is a counter that ticks up, which is observable and not a runaway. To be belt-and-braces: the dlqMonitorService specifically uses the **sync** ingest path even when the rest of the app is in async mode (this is implicit today — `recordIncident` checks `SYSTEM_INCIDENT_INGEST_MODE` per-call, but the dlqMonitorService runs in the same process). **No code change needed**, but document this in code comment alongside the new `system-monitor-ingest` entry.
+**Loop hazard — explicit invariant (enforced in code, not implied):**
+
+```ts
+// INVARIANT: DLQ-originated incidents MUST call recordIncident with forceSync: true.
+// They must never enqueue into system-monitor-ingest.
+```
+
+The hazard exists because, in async mode, a `recordIncident` call from inside the `system-monitor-ingest__dlq` handler that re-enqueues to `system-monitor-ingest` is a self-sustaining loop. The dedup partial unique index would collapse identical fingerprints into occurrence-count increments rather than producing new rows, so the worst case is an ever-ticking counter — observable, not a runaway — but still latent garbage we want closed off.
+
+**Enforcement (code-level, not just doc):** `recordIncident` MUST accept a second-argument options bag:
+
+```ts
+recordIncident(input: IncidentInput, opts?: { forceSync?: boolean }): void
+```
+
+When `opts.forceSync === true`, `recordIncident` bypasses the `SYSTEM_INCIDENT_INGEST_MODE` check and always takes the inline (sync) path — equivalent to calling the `ingestInline` primitive directly. When the option is omitted or `false`, behaviour is unchanged: the function honours `SYSTEM_INCIDENT_INGEST_MODE`.
+
+**Required call-site:** `dlqMonitorService` MUST pass `{ forceSync: true }` on every `recordIncident` call it issues, regardless of `SYSTEM_INCIDENT_INGEST_MODE`. This guarantees DLQ-derived incidents never re-enter the async queue and closes the loop class entirely.
+
+**Verification:**
+- `grep -nE "recordIncident\\(" server/services/dlqMonitorService.ts` — every match must include `forceSync: true` in the options bag (visible on the same line or the next).
+- Unit test in `dlqMonitorServiceForceSyncInvariant.test.ts` (§2.1) asserts that the dlqMonitorService's `recordIncident` invocation receives `{ forceSync: true }` when the env var is `'async'` — the invariant must be machine-checked, not a comment.
 
 ### §3.5 Webhook-handler incident contract (G7)
 
@@ -553,12 +591,28 @@ function emit(entry: LogEntry): void {
   appendLogLineSafe(entry);
 }
 
-let _appendLogLineCache: ((line: import('../services/systemMonitor/logBuffer.js').LogLine) => void) | null = null;
-async function loadAppendLogLine() {
+type AppendLogLineFn = (line: import('../services/systemMonitor/logBuffer.js').LogLine) => void;
+let _appendLogLineCache: AppendLogLineFn | null = null;
+let _appendLogLineLoading: Promise<AppendLogLineFn> | null = null;
+
+async function loadAppendLogLine(): Promise<AppendLogLineFn> {
   if (_appendLogLineCache) return _appendLogLineCache;
-  const m = await import('../services/systemMonitor/logBuffer.js');
-  _appendLogLineCache = m.appendLogLine;
-  return _appendLogLineCache;
+  // Burst-race guard: if a load is already in flight, every concurrent caller
+  // awaits the same promise instead of triggering N parallel dynamic imports.
+  // Without this, the first burst of log calls during boot can each kick off
+  // their own `import(...)`, which is wasted work + nondeterministic ordering.
+  if (_appendLogLineLoading) return _appendLogLineLoading;
+
+  _appendLogLineLoading = import('../services/systemMonitor/logBuffer.js').then((m) => {
+    _appendLogLineCache = m.appendLogLine;
+    _appendLogLineLoading = null;
+    return _appendLogLineCache;
+  }).catch((err) => {
+    _appendLogLineLoading = null;
+    throw err;
+  });
+
+  return _appendLogLineLoading;
 }
 
 function appendLogLineSafe(entry: LogEntry): void {
@@ -580,7 +634,9 @@ function appendLogLineSafe(entry: LogEntry): void {
 
 **Why swallow errors?** The logger is called from every layer including hot paths. A failure to write to the buffer must NEVER propagate (would either crash the caller or alter control flow). The buffer is designed to be best-effort.
 
-**Why `void (async () => …)()`?** The caller (`logger.info` etc.) is synchronous. We don't want to make every log call await a promise, so we kick off the buffer write fire-and-forget. The `_appendLogLineCache` ensures we only resolve the import once.
+**Why `void (async () => …)()`?** The caller (`logger.info` etc.) is synchronous. We don't want to make every log call await a promise, so we kick off the buffer write fire-and-forget. The `_appendLogLineCache` + `_appendLogLineLoading` pair ensures the import resolves exactly once even when N concurrent first calls race during boot.
+
+**Ordering caveat (intentional):** because the buffer writes are fire-and-forget through a microtask queue, log lines may appear in the buffer in a slightly different order than the synchronous `console.{log,error,warn}` outputs. Ordering is best-effort and not guaranteed under async buffer writes. Triage callers (the agent's `read_logs_for_correlation_id` skill) treat the buffer as a per-correlation-ID set of evidence, not a strictly ordered timeline. Do not "fix" this with a blocking `await` in `emit` — the cost would land on every log call across the codebase.
 
 #### §4.2.3 Tests for G2
 
@@ -827,6 +883,30 @@ This spec therefore takes a focused subset: the workflow engine (4 queues) and I
 | 3503 | `workflow-agent-step` | `await pgboss.work(AGENT_STEP_QUEUE, { teamSize: 4, teamConcurrency: 1 }, …)` |
 
 **Verify at implementation time:** `workflow-bulk-parent-check` — the audit log lists this as a queue with `deadLetter:` declared. Search `workflowEngineService.ts` for its registration and convert if present.
+
+**INVARIANT — handler transaction ownership (applies to every conversion in §5.2 and §5.3):**
+
+A handler passed to `createWorker` MUST NOT open its own org-scoped transaction.
+
+`createWorker`'s default org-resolver opens a Drizzle transaction with `app.organisation_id` set before invoking the handler. A handler that ALSO calls `withOrgTx` (or any equivalent org-scoped tx primitive) inside its body would nest two transactions for the same org context — at best wasted overhead, at worst silent partial writes if one tx commits and the other rolls back, or wrong-org scoping if the inner tx resolves the org from a different source than the outer.
+
+**Per-handler verification step (perform before converting each queue):**
+
+```bash
+grep -n "withOrgTx" server/services/workflowEngineService.ts
+grep -n "withOrgTx" server/services/ieeExecutionService.ts
+grep -n "withOrgTx" server/jobs/ieeRunCompletedHandler.ts
+```
+
+For each handler being converted, locate its body and check whether `withOrgTx` is present:
+
+| Handler contains `withOrgTx`? | Required action |
+|---|---|
+| No | Convert as documented in §5.2.1 / §5.2.2 / §5.2.3. Default resolver is safe. |
+| Yes — and the org context comes from `job.data.organisationId` | Remove the inner `withOrgTx` call and let `createWorker`'s default resolver own the transaction. |
+| Yes — and the inner `withOrgTx` resolves org from a different source (e.g. a DB row lookup) | Set `resolveOrgContext: () => null` on the `createWorker` config and keep the handler's existing `withOrgTx` wrapping. Do NOT use the default resolver — it would open an unnecessary outer tx. |
+
+This rule is the verification gate for every conversion sub-section below. If a conversion sub-section's pattern conflicts with what this grep reveals at implementation time, the grep result wins — adjust the conversion to match the table above and document the deviation in the commit message.
 
 #### §5.2.1 Conversion pattern for `workflow-run-tick` and `workflow-bulk-parent-check`
 
@@ -1105,6 +1185,8 @@ await boss.work('skill-analyzer', async (job) => {
 
 **Why both the wrap AND the DLQ subscription?** The wrap fires on EVERY throw, including pg-boss retries. The DLQ subscription only fires on retry exhaustion. With dedup via `fingerprintOverride: 'skill_analyzer:terminal_failure'`, repeated retries collapse into one `system_incidents` row with `occurrenceCount` ticking up. Operators get faster signal (within seconds of first failure) instead of having to wait for retries to exhaust.
 
+**Two distinct fingerprints — intentional, not duplication.** The wrap emits `skill_analyzer:terminal_failure` (early failure signal); the DLQ subscriber emits `job:skill-analyzer:dlq` (terminal exhaustion signal). These represent fundamentally different operator events — "skill analyzer is starting to fail" vs "skill analyzer has given up after exhausting retries" — and are intentionally separate fingerprints. Future cleanup passes that propose collapsing them into a single fingerprint should be rejected: doing so erases the distinction between transient and terminal modes that the agent uses to triage. The same intentional-duplication note also applies in §3.6 and §8.6 — see those sections for the dedup-interaction breakdown.
+
 **Why preserve pg-boss retry by re-throwing?** `processSkillAnalyzerJob` is designed to be crash-resumable (per `JOB_CONFIG['skill-analyzer']` comment about `Stage 5 reads existing skill_analyzer_results rows and skips already-paid LLM calls`). Swallowing the error would mark the pg-boss job as completed even though it failed, breaking that crash-resume contract.
 
 #### §6.2.1 Phase 2 dependency note
@@ -1118,6 +1200,8 @@ If Phase 2's IEE work also moves the skill-analyzer registration (audit log show
 #### §6.3.1 G11 integration test
 
 `server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts`:
+
+**Test scope (be honest about what this validates).** This test exercises the *emission semantics* of the wrap — fingerprint shape, dedup behaviour, error re-throw — by calling `recordIncident` directly inside a try/catch that mirrors the wrapper's body. It does NOT exercise pg-boss delivery, retry exhaustion, or the wrapper's literal placement inside `boss.work(...)` in `server/index.ts`. Wrapper-location regressions (e.g. someone moves the try/catch outside the handler) are caught by the §6.6 grep verification, not by this test. End-to-end pg-boss → DLQ flow is covered manually by V6 in §9.2.
 
 ```ts
 import test from 'node:test';
@@ -1306,6 +1390,7 @@ Per `docs/spec-authoring-checklist.md` Section 10, every new write path or exter
 | **Retry classification** | `safe` — the buffer is in-memory + LRU-evicted. Repeated writes only push out older entries. |
 | **Concurrency guard** | Process-local; no inter-process race. Single-threaded V8 means concurrent calls serialise at the JS layer. |
 | **Failure mode** | The lazy import or the `appendLogLine` call may throw. Errors are swallowed by `appendLogLineSafe`. The log entry still goes to console (the primary log surface). The buffer is best-effort. |
+| **Ordering guarantee** | None. Buffer pushes happen on the microtask queue while console writes happen synchronously, so per-correlation-ID line order in the buffer may differ slightly from console order. Triage callers treat the buffer as a set of evidence for a correlation ID, not a strictly-ordered timeline. Do not "fix" with a blocking await — see §4.2.2 ordering caveat. |
 | **Loop hazard** | None. The buffer never calls back into the logger. |
 
 ### §8.2 `JOB_CONFIG` lookup (G1)
