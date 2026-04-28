@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "code-graph:rebuild": "tsx scripts/build-code-graph.ts --rebuild",
     "code-graph:watch": "tsx scripts/build-code-graph.ts --watch-only",
+    "code-graph:health": "tsx scripts/code-graph-health-check.ts",
     "dev:server": "node --watch --watch-path=server --watch-path=shared --import tsx/esm server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:server && npm run build:client",
