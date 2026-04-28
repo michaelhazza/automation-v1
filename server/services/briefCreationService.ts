@@ -1,8 +1,11 @@
 import { db } from '../db/index.js';
 import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, desc, lt, or } from 'drizzle-orm';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
+import type { CursorPosition } from './briefArtefactCursorPure.js';
+import { computeNextCursor } from './briefArtefactPaginationPure.js';
+import { logger } from '../lib/logger.js';
 import { findOrCreateBriefConversation } from './briefConversationService.js';
 import { logFastPathDecision } from './fastPathDecisionLogger.js';
 import { handleBriefMessage } from './briefMessageHandlerPure.js';
@@ -114,6 +117,74 @@ export async function getBriefMeta(
 }
 
 export async function getBriefArtefacts(
+  briefId: string,
+  organisationId: string,
+  opts?: { limit?: number; cursor?: CursorPosition | null },
+): Promise<{ items: BriefChatArtefact[]; nextCursor: string | null }> {
+  const requestedLimit = opts?.limit ?? 50;
+  const clampedLimit = Math.max(1, Math.min(requestedLimit, 200));
+  if (requestedLimit !== clampedLimit) {
+    logger.info('brief_artefacts.limit_clamped', { briefId, requested: requestedLimit, applied: clampedLimit });
+  }
+  const cursor = opts?.cursor ?? null;
+
+  const [conv] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(
+      eq(conversations.scopeType, 'brief'),
+      eq(conversations.scopeId, briefId),
+      eq(conversations.organisationId, organisationId),
+    ))
+    .limit(1);
+
+  if (!conv) return { items: [], nextCursor: null };
+
+  const cursorCondition = cursor
+    ? or(
+        lt(conversationMessages.createdAt, new Date(cursor.ts)),
+        and(
+          eq(conversationMessages.createdAt, new Date(cursor.ts)),
+          lt(conversationMessages.id, cursor.msgId),
+        ),
+      )
+    : undefined;
+
+  const rows = await db
+    .select({
+      id: conversationMessages.id,
+      createdAt: conversationMessages.createdAt,
+      artefacts: conversationMessages.artefacts,
+    })
+    .from(conversationMessages)
+    .where(and(
+      eq(conversationMessages.conversationId, conv.id),
+      cursorCondition,
+    ))
+    .orderBy(
+      desc(conversationMessages.createdAt),
+      desc(conversationMessages.id),
+    )
+    .limit(clampedLimit + 1);
+
+  const { items: pageRows, nextCursor } = computeNextCursor(rows, clampedLimit);
+
+  // Reverse to ASC (oldest-first within page) for chat-timeline display.
+  // The DESC query selected the correct page boundary; reversal ensures each
+  // page response is in chronological order so the client can prepend older
+  // pages to the front of the array without disrupting display order.
+  const reversedRows = [...pageRows].reverse();
+
+  const items: BriefChatArtefact[] = [];
+  for (const row of reversedRows) {
+    if (Array.isArray(row.artefacts)) {
+      items.push(...(row.artefacts as BriefChatArtefact[]));
+    }
+  }
+  return { items, nextCursor };
+}
+
+export async function getAllBriefArtefacts(
   briefId: string,
   organisationId: string,
 ): Promise<BriefChatArtefact[]> {

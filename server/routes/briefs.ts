@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { createBrief, getBriefArtefacts, getBriefMeta } from '../services/briefCreationService.js';
+import { decodeCursor } from '../services/briefArtefactCursorPure.js';
 import { handleConversationFollowUp } from '../services/briefConversationService.js';
 import { decideBriefApproval } from '../services/briefApprovalService.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
@@ -71,16 +72,21 @@ router.get(
   }),
 );
 
-// GET /api/briefs/:briefId/artefacts — list artefacts for a Brief
+// GET /api/briefs/:briefId/artefacts — paginated artefact list for a Brief
 router.get(
   '/api/briefs/:briefId/artefacts',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
   asyncHandler(async (req, res) => {
     const { briefId } = req.params;
+    const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : 50;
+    const cursor = typeof req.query.cursor === 'string'
+      ? decodeCursor(req.query.cursor)  // null on malformed → treated as first page
+      : null;
 
-    const artefacts = await getBriefArtefacts(briefId, req.orgId!);
-    res.json(artefacts);
+    const result = await getBriefArtefacts(briefId, req.orgId!, { limit, cursor });
+    res.json(result);
   }),
 );
 

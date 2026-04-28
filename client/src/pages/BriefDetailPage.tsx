@@ -113,6 +113,8 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
   const [brief, setBrief] = useState<BriefMeta | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [artefacts, setArtefacts] = useState<BriefChatArtefact[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [chainState, setChainState] = useState<ArtefactChainState>({ artefacts: [] });
   const [reply, setReply] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -124,12 +126,13 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
     try {
       const [briefRes, artefactsRes] = await Promise.all([
         api.get<BriefMeta>(`/api/briefs/${briefId}`),
-        api.get<BriefChatArtefact[]>(`/api/briefs/${briefId}/artefacts`),
+        api.get<{ items: BriefChatArtefact[]; nextCursor: string | null }>(`/api/briefs/${briefId}/artefacts?limit=50`),
       ]);
 
       setBrief(briefRes.data);
 
-      const fetchedArtefacts = artefactsRes.data ?? [];
+      const fetchedArtefacts = artefactsRes.data.items ?? [];
+      setNextCursor(artefactsRes.data.nextCursor ?? null);
       setArtefacts(fetchedArtefacts);
       setChainState({ artefacts: fetchedArtefacts });
 
@@ -228,6 +231,25 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
   const handleApprove = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'approve'); };
   const handleReject = (artefactId: string): void => { void handleApprovalDecision(artefactId, 'reject'); };
 
+  const handleLoadOlder = async (): Promise<void> => {
+    if (!briefId || !nextCursor || isLoadingOlder) return;
+    setIsLoadingOlder(true);
+    try {
+      const res = await api.get<{ items: BriefChatArtefact[]; nextCursor: string | null }>(
+        `/api/briefs/${briefId}/artefacts?limit=50&cursor=${encodeURIComponent(nextCursor)}`,
+      );
+      const olderItems = res.data.items ?? [];
+      setNextCursor(res.data.nextCursor ?? null);
+      setArtefacts((prev) => {
+        const next = [...olderItems, ...prev];
+        setChainState({ artefacts: next });
+        return next;
+      });
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading…</div>;
   }
@@ -258,6 +280,17 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
 
         {artefacts.length > 0 && (
           <div className="space-y-3">
+            {nextCursor !== null && (
+              <div className="text-center py-2">
+                <button
+                  onClick={() => { void handleLoadOlder(); }}
+                  disabled={isLoadingOlder}
+                  className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40"
+                >
+                  {isLoadingOlder ? 'Loading…' : 'Load older artefacts'}
+                </button>
+              </div>
+            )}
             {artefacts.map((a: BriefChatArtefact) => (
               <ArtefactItem
                 key={a.artefactId}
