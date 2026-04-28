@@ -1229,3 +1229,21 @@ The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NIC
 - [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
   - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
   - Pre-existing. Process-local cache that captures the first-seen org's agent row id and reuses it for the lifetime of the process. Production has a fixed system-ops org so this is fine today; future dual-org / test-env scenarios could collide. Cheap fix: switch to `Map<organisationId, agentId>`.
+
+---
+
+## Deferred from spec-conformance review — code-intel-phase-0 (2026-04-28)
+
+**Captured:** 2026-04-28T04:04:26Z
+**Source log:** `tasks/review-logs/spec-conformance-log-code-intel-phase-0-2026-04-28T04-04-26Z.md`
+**Spec:** `tasks/builds/code-intel-phase-0/plan.md`
+
+- [ ] D1 — Watcher start failure logged to log file rather than dev-server stdout
+  - Spec section: "Watcher start failure — degrade, don't block" (plan.md line 112)
+  - Gap: spec says the launcher logs the chokidar-init failure to dev-server stdout, but the implementation logs from inside the detached watcher subprocess whose stdio is routed to `references/.code-graph-watcher.log` (correct per the npm-pipe-hang fix in commit `eff3cd2f`). Functional intent (degrade, don't block dev server) is satisfied; the literal stdout-destination wording is not.
+  - Suggested approach: edit the spec paragraph on watcher start failure to reflect the log-file destination, AND add a single-line stdout marker from the parent process at spawn time (`[code-graph] watcher started — failures and per-event logs in references/.code-graph-watcher.log`) so users know where to look. The current implementation already prints `[code-graph] watcher started in background (pid X). Tail logs with: …` (line 601), so most of the UX is already there — the spec just needs to acknowledge it.
+
+- [ ] D2 — `code-graph:rebuild` does not release a held watcher lock
+  - Spec section: "Manual rebuild" (plan.md line 119)
+  - Gap: spec says rebuild "drops cache, **releases any held lock**, re-walks". Implementation drops the cache and re-walks, but does not release a held lock. If a previous watcher is alive, the new spawn exits silently (line 619); the previous watcher retains stale in-memory `memShards` and `watcherCache` and on its next event writes back state that doesn't match the freshly-rebuilt artifacts.
+  - Suggested approach: in rebuild mode, read the PID stored in the lock-file metadata (proper-lockfile stores PID), send SIGTERM, wait for the lock to release with a short timeout fallback to force-unlink, then proceed. The 10s heartbeat timeout makes the SIGKILL fallback safe — even if SIGTERM is missed, the lock self-releases within 10s and the new spawn picks it up. Alternative: spec-edit to relax the wording and document that rebuild requires the user to kill any old watcher first.
