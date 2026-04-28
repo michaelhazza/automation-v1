@@ -74,6 +74,19 @@ const ESCALATE_QUERIES_PER_MONTH = 10; // from code-intel-revisit.md
 // within this many turns in the same session.
 const ADJACENCY_TURNS = 20;
 
+// Correction patterns are regex-based and can produce false positives even
+// after the user-role + cache-adjacency filters. A single hit is too weak to
+// drive RED + KILL — require ≥2 adjacent hits before RED. Single-hit signals
+// downgrade to YELLOW + TUNE.
+const CORRECTION_RED_THRESHOLD = 2;
+
+// Zero-adoption-with-arch-queries is a YELLOW (not RED) signal in Phase 0:
+// the PreToolUse hook is parked, so the system does not enforce cache usage.
+// Treating zero adoption as RED would produce false KILL recommendations on
+// a system that is functioning correctly but underutilised. Gate on
+// meaningful architecture-query volume so we don't fire on quiet weeks.
+const ZERO_ADOPTION_MEANINGFUL_QUERIES = 10;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -652,28 +665,37 @@ function computeVerdict(d: CollectedData): Verdict {
   let status: Status = 'GREEN';
   let recommendation: Recommendation = 'KEEP';
 
-  // RED conditions (any one fires) ------------------------------------------
+  // RED conditions ----------------------------------------------------------
   const hasOperationalFailure =
     !d.operational.shardOk ||
     d.coverage.anyDirOverSkipFail ||
     (d.operational.errorPatternCounts['ENOSPC'] ?? 0) > 0 ||
     (d.operational.errorPatternCounts['EMFILE'] ?? 0) > 0;
 
-  const hasCacheLinkedWrongAnswer = d.correctness.adjacentToCache > 0;
+  // Graduated correction-signal response (review feedback):
+  //   ≥CORRECTION_RED_THRESHOLD adjacent corrections → RED + KILL
+  //   1 .. CORRECTION_RED_THRESHOLD-1               → YELLOW + TUNE
+  //   0                                              → no concern
+  const hasCacheLinkedRed = d.correctness.adjacentToCache >= CORRECTION_RED_THRESHOLD;
+  const hasCacheLinkedYellow =
+    d.correctness.adjacentToCache > 0 &&
+    d.correctness.adjacentToCache < CORRECTION_RED_THRESHOLD;
 
-  const zeroAdoptionAfterWindow =
+  // Phase 0 does not enforce cache usage (PreToolUse hook is parked pending
+  // Phase 1 trigger). Zero adoption is a tunability concern, not a
+  // correctness failure — surface as YELLOW + TUNE, gated on meaningful
+  // architecture-query volume so quiet weeks don't trip the signal.
+  const zeroAdoptionMeaningful =
     d.transcriptsAvailable &&
     d.transcriptCount > 0 &&
     d.adoption.references === 0 &&
-    d.queryVolume.archQueries > 0; // there WERE arch questions but cache was never consulted
+    d.queryVolume.archQueries >= ZERO_ADOPTION_MEANINGFUL_QUERIES;
 
-  if (hasCacheLinkedWrongAnswer) {
+  if (hasCacheLinkedRed) {
     status = 'RED';
-    reasons.push(`Wrong-answer pattern detected adjacent to ${d.correctness.adjacentToCache} cache reference(s)`);
-  }
-  if (zeroAdoptionAfterWindow) {
-    status = 'RED';
-    reasons.push(`Zero cache references in ${WINDOW_DAYS} days despite ${d.queryVolume.archQueries} architecture-shaped queries`);
+    reasons.push(
+      `${d.correctness.adjacentToCache} wrong-answer patterns adjacent to cache references (≥${CORRECTION_RED_THRESHOLD} threshold)`,
+    );
   }
   if (hasOperationalFailure) {
     status = 'RED';
@@ -697,6 +719,16 @@ function computeVerdict(d: CollectedData): Verdict {
     if (d.adoption.references > 0 && d.adoption.references < 3 && d.queryVolume.archQueries >= 5) {
       yellowReasons.push(`Marginal adoption: ${d.adoption.references} cache references against ${d.queryVolume.archQueries} architecture queries`);
     }
+    if (hasCacheLinkedYellow) {
+      yellowReasons.push(
+        `${d.correctness.adjacentToCache} correction pattern adjacent to a cache reference — below RED threshold (≥${CORRECTION_RED_THRESHOLD}); monitor for repeat hits`,
+      );
+    }
+    if (zeroAdoptionMeaningful) {
+      yellowReasons.push(
+        `Zero cache references in ${WINDOW_DAYS} days despite ${d.queryVolume.archQueries} architecture-shaped queries — Phase 0 does not enforce cache usage, so this is an adoption gap, not a correctness failure`,
+      );
+    }
     if (yellowReasons.length > 0) {
       status = 'YELLOW';
       reasons.push(...yellowReasons);
@@ -706,18 +738,27 @@ function computeVerdict(d: CollectedData): Verdict {
   if (status === 'GREEN') reasons.push('No concerns detected.');
 
   // Recommendation ----------------------------------------------------------
-  // KILL: cache-linked wrong answers, OR genuine zero-use after the window with arch queries present.
-  // ESCALATE: prorated arch-query rate >= ESCALATE_QUERIES_PER_MONTH AND adoption healthy.
-  // TUNE: operational issues but cache otherwise functional.
-  // KEEP: everything else.
-  if (hasCacheLinkedWrongAnswer || zeroAdoptionAfterWindow) {
+  // KILL:     ≥CORRECTION_RED_THRESHOLD cache-linked corrections (genuine
+  //           wrong-answer pattern, not a single false positive).
+  // TUNE:     operational issues, single-hit correction signal,
+  //           zero-adoption-with-meaningful-volume (tune prompts/usage),
+  //           or YELLOW operational triggers.
+  // ESCALATE: prorated arch-query rate ≥ ESCALATE_QUERIES_PER_MONTH AND
+  //           adoption healthy — volume justifies Phase 1 review.
+  // KEEP:     everything else.
+  if (hasCacheLinkedRed) {
     recommendation = 'KILL';
-  } else if (hasOperationalFailure || (status === 'YELLOW' && (
-    d.coverage.belowThreshold ||
-    (d.operational.cacheStaleByMin ?? 0) > STALE_CACHE_MIN ||
-    d.operational.watcherRunning === false ||
-    !d.operational.watcherLogExists
-  ))) {
+  } else if (
+    hasOperationalFailure ||
+    hasCacheLinkedYellow ||
+    zeroAdoptionMeaningful ||
+    (status === 'YELLOW' && (
+      d.coverage.belowThreshold ||
+      (d.operational.cacheStaleByMin ?? 0) > STALE_CACHE_MIN ||
+      d.operational.watcherRunning === false ||
+      !d.operational.watcherLogExists
+    ))
+  ) {
     recommendation = 'TUNE';
   } else if (d.queryVolume.proratedPerMonth >= ESCALATE_QUERIES_PER_MONTH && d.adoption.references > 0) {
     recommendation = 'ESCALATE';
@@ -920,8 +961,10 @@ function fallbackReport(data: CollectedData, verdict: Verdict, synthesisError: s
   lines.push('## 2. Is it giving correct answers?');
   if (c.adjacentToCache === 0) {
     lines.push(`No correction patterns were found adjacent to a cache reference. ${c.flags} unrelated correction patterns elsewhere in transcripts (filtered out as noise).`);
+  } else if (c.adjacentToCache < CORRECTION_RED_THRESHOLD) {
+    lines.push(`${c.adjacentToCache} correction pattern adjacent to a cache reference — below RED threshold (≥${CORRECTION_RED_THRESHOLD}); monitor for repeat hits. Sample: ${(c.adjacentSnippets[0]?.context ?? '').slice(0, 140)}`);
   } else {
-    lines.push(`${c.adjacentToCache} correction pattern(s) followed a cache reference within ${ADJACENCY_TURNS} turns. Sample: ${(c.adjacentSnippets[0]?.context ?? '').slice(0, 140)}`);
+    lines.push(`${c.adjacentToCache} correction patterns followed a cache reference within ${ADJACENCY_TURNS} turns (≥${CORRECTION_RED_THRESHOLD} threshold). Sample: ${(c.adjacentSnippets[0]?.context ?? '').slice(0, 140)}`);
   }
   lines.push('');
   lines.push('## 3. Is the watcher healthy?');
