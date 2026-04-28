@@ -453,6 +453,21 @@ async function start() {
     const boss = await getPgBoss();
     await startDlqMonitor(boss);
     await registerSystemIncidentNotifyWorker(boss);
+    // Async-ingest worker — only registers when SYSTEM_INCIDENT_INGEST_MODE=async.
+    // Sync mode (the default) writes incidents inline in the calling process and
+    // has no consumer for this queue. Registering the worker unconditionally would
+    // cause the queue to drain even in sync mode, which is harmless but confusing.
+    if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+      const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+      await boss.work(
+        'system-monitor-ingest',
+        { teamSize: 4, teamConcurrency: 1 },
+        async (job: { id: string; data: unknown }) => {
+          await handleSystemMonitorIngest(job.data as Parameters<typeof handleSystemMonitorIngest>[0]);
+        }
+      );
+      logger.info('async_incident_ingest_worker_registered');
+    }
   }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
