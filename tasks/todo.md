@@ -1205,30 +1205,26 @@ The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly
 **Source log:** `tasks/review-logs/spec-conformance-log-pre-test-backend-hardening-2026-04-28T03-19-37Z.md`
 **Spec:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md`
 
-- [ ] **REQ §1.1 Gap D — failure-path `agent_run_llm_payloads` row not inserted**
+- [x] **REQ §1.1 Gap D — failure-path `agent_run_llm_payloads` row not inserted** *(resolved 2026-04-28 via `pre-test-integration-harness` spec §1.5 Option A)*
   - Spec section: §1.1 Acceptance criteria ("A failed-mid-flight agent-run LLM call (provider error) produces llm.requested → llm.completed (with terminalStatus: 'failed' in the payload) and the corresponding agent_run_llm_payloads row.")
-  - Gap: implementation only inserts the payload row on the success path; the failure path emits `llm.completed` with `payloadInsertStatus: 'failed'` and `payloadRowId: null` and writes no row (`server/services/llmRouter.ts:1265` "No payload row on failure — no provider response to persist.").
-  - Suggested approach: persist a partial row on failure carrying the system prompt + messages + tool definitions, with a null/error response field; OR explicitly amend the spec to make the failure-path row optional. Decide before relying on `agent_run_llm_payloads` for failed-call observability.
+  - Resolution: failure-path branch in `server/services/llmRouter.ts` now builds + inserts the `agent_run_llm_payloads` row inside its own `db.transaction`, mirroring the success path. `buildPayloadRow` accepts `response: Record<string, unknown> | null` — null only when no usable provider output exists; partial responses are persisted whenever structurally valid (per spec §1.5 partial-response semantics). Migration 0241 makes the column nullable. `llm.completed` event now carries `payloadInsertStatus: 'ok'` + the inserted `payloadRowId` on the failure path.
 
 - [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE**
   - Spec section: §1.1 Acceptance criteria ("the catch handler MUST treat that row as failed (set payloadInsertStatus: 'failed', payloadRowId: null) AND a follow-up DELETE on the contested key MUST run inside the same tx so the post-commit invariant holds")
   - Gap: catch at `server/services/llmRouter.ts:1619-1628` sets the marker but never issues a follow-up DELETE. Implementation comment at lines 1586-1591 explicitly argues the payload insert must NOT be in a shared tx with the ledger write ("changes ordering semantics for the cost breaker") — directly contradicts the spec MUST.
   - Suggested approach: either restructure so the payload insert + (on failure) DELETE run in a sibling tx that doesn't interleave with the cost-breaker logic, OR amend the spec to relax the post-commit invariant to "no-row-or-row, never partial" without the DELETE requirement. The current state silently accepts ambiguous post-commit visibility under driver retry conditions.
 
-- [ ] **REQ §1.1 Gap F — `llmRouterLaelIntegration.test.ts` is a stub**
+- [x] **REQ §1.1 Gap F — `llmRouterLaelIntegration.test.ts` is a stub** *(resolved 2026-04-28 via `pre-test-integration-harness` spec §1.3)*
   - Spec section: §1.1 Tests + Definition of Done ("one integration test added and green")
-  - Gap: all three test cases in `server/services/__tests__/llmRouterLaelIntegration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. They pass trivially without exercising the emission + payload-insert code path.
-  - Suggested approach: implement against the existing test-DB harness already used by `pgboss-zod-hardening` integration tests. Cover: happy-path emission ordering, budget_blocked silence, non-agent-run silence. Until then, §1.1's structural invariants rely on manual smoke + 40-case pure-predicate test only.
+  - Resolution: three real-assertion tests now exercise the LAEL emission path against a real test DB using the new fake provider adapter (`server/services/__tests__/fixtures/fakeProviderAdapter.ts`) registered via `registerProviderAdapter` (provider registry test API). Tests cover happy-path emission ordering with sequence + atomicity invariants, `budget_blocked` silence, and non-agent-run silence. Pre-test cleanup via `assertNoRowsForRunId` makes a poisoned prior run recoverable.
 
-- [ ] **REQ §1.2 Gap B — AutomationStepError shape divergence on missing-connection**
+- [x] **REQ §1.2 Gap B — AutomationStepError shape divergence on missing-connection** *(resolved 2026-04-28 via `pre-test-integration-harness` spec §1.6 Option A)*
   - Spec section: §1.2 Approach step 2 (literal example shape with `type: 'configuration'`, `status: 'missing_connection'`, `context: { automationId, missingKeys }`)
-  - Gap: existing `AutomationStepError` interface (`server/lib/workflow/types.ts:79`) does not have `'configuration'` in its `type` literal union and lacks `status`/`context` fields. Implementation pragmatically uses `type: 'execution'`, sets `status: 'missing_connection'` only on the event payload (not on the error itself), and inlines `missing.join(', ')` into the error message instead of populating a structured `context.missingKeys`.
-  - Suggested approach: either extend `AutomationStepError` to add `'configuration'` to its `type` union and add optional `status` + `context` fields (then update all error-handler call sites to handle the richer shape) OR amend the spec example to match the existing type system. Today's behaviour satisfies the user-facing acceptance criterion via the message text but does not satisfy structured-context consumers.
+  - Resolution: `AutomationStepError.type` widened to include `'configuration'`. Optional `status` + `context` fields added. `KNOWN_AUTOMATION_STEP_ERROR_STATUSES = ['missing_connection'] as const` co-located with the type definition is the closed vocabulary; status field stays typed `string` for now (literal-union tightening deferred). `invokeAutomationStepService.ts` `automation_missing_connection` path produces the structured shape (`type: 'configuration'`, `status: 'missing_connection'`, `context: { automationId, missingKeys }`). Pure test (`invokeAutomationStepErrorShapePure.test.ts`) round-trips the shape and asserts vocabulary discipline.
 
-- [ ] **REQ §1.3 Gap C — `workflowEngineApprovalResumeDispatch.integration.test.ts` is a stub**
+- [x] **REQ §1.3 Gap C — `workflowEngineApprovalResumeDispatch.integration.test.ts` is a stub** *(resolved 2026-04-28 via `pre-test-integration-harness` spec §1.4)*
   - Spec section: §1.3 Tests + Definition of Done ("integration test added and green") and Acceptance ("a double-approve … results in exactly one webhook dispatch, asserted by direct call-count on the test webhook receiver — NOT inferred from terminal status alone")
-  - Gap: all three test cases in `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. Spec explicitly demands call-count assertion, not terminal-status assertion.
-  - Suggested approach: build a fake-webhook-receiver harness (similar to nock) that increments a counter and exposes it for assertion. Wire through a test DB that supports the `awaiting_approval → running` UPDATE race the implementation relies on at `workflowEngineService.ts:1752-1759`. Progress.md acknowledges manual smoke as "the gating acceptance check" — that is not what the spec asks for.
+  - Resolution: three real-assertion tests using the new fake webhook receiver (`server/services/__tests__/fixtures/fakeWebhookReceiver.ts`). Test 2 specifically asserts `receiver.callCount === 1` AND a paired DB-side uniqueness check (`workflow_step_runs.attempt === 1` with single `completed` terminal state). HMAC verification fails loudly if the signature header is missing. Test 3 (rejected) asserts negative-dispatch on both layers (HTTP `callCount === 0` + DB `attempt === 1` with `failed` status, no dispatch row).
 
 - [ ] **REQ §1.7 Gap A — async-worker path transitively calls `checkThrottle`**
   - Spec section: §1.7 step 1 ("Async-worker exclusion contract (MUST hold): the async-worker ingestion path MUST NOT call checkThrottle.")
@@ -1282,11 +1278,9 @@ The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly
   - Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, single-tx wrapper closes the read-side window". Phased migration is overkill at current scale and adds rollout complexity. Revisit before any deploy that violates the trigger above.
   - Rejected option (2026-04-28): `CREATE UNIQUE INDEX CONCURRENTLY` with phased rollout. Rejected for this PR because (a) `CONCURRENTLY` cannot run inside a transaction (would force splitting into two migration files), (b) introduces an intermediate state where both indexes coexist, (c) adds rollout complexity disproportionate to current `conversations` table size and pre-launch posture. Becomes the correct option once the trigger condition above is met — operational interpretation: when a non-concurrent index build under production write load becomes observable in write-latency tail (rule of thumb ~100–300ms), not when row count crosses a specific threshold.
 
-- [ ] **LAEL + approval-resume integration test harness — convert deferred `test.skip` stubs to real assertions**
+- [x] **LAEL + approval-resume integration test harness — convert deferred `test.skip` stubs to real assertions** *(resolved 2026-04-28 via `pre-test-integration-harness` spec)*
   - Files: `server/services/__tests__/llmRouterLaelIntegration.test.ts`, `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
-  - Issue: both files exist as `test.skip` stubs because no shared fake-webhook / fake-provider harness is in place. The §1.3 "double-approve fires exactly one webhook" call-count assertion (the invariant the spec specifically demanded over a status-only check) is currently uncovered.
-  - Action: build the shared fake-webhook receiver + fake-provider adapter as the next chunk after this PR merges. Convert the six skipped tests to real assertions exercising the real DB transaction boundaries.
-  - Decision (2026-04-28): kept as `test.skip` (not as `assert.ok(true)` stubs) so green CI does not imply lifecycle coverage. Harness work scoped as a follow-up chunk, not a blocker for this PR.
+  - Resolution: harness shipped — `fakeWebhookReceiver.ts` + `fakeProviderAdapter.ts` both under `server/services/__tests__/fixtures/` with self-tests covering body-fully-read invariant, header normalisation, `setDropConnection`, latency-on-error, restore-in-finally idempotency, and same-key parallel non-interference. Provider registry extended with `registerProviderAdapter(key, adapter) → restore()` (prior-state capture + idempotent restore). Six skipped stubs converted to real assertions exercising real DB transaction boundaries; HTTP-layer + DB-layer dual assertions throughout.
 
 - [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
   - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.
@@ -1340,3 +1334,122 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
 - [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
   - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
   - Defer to Phase 1 once shape stabilises — premature split risks churn if Phase 1 reshuffles boundaries again.
+
+## Deferred from spec-conformance review — dev-mission-control (2026-04-28)
+
+**Captured:** 2026-04-28T06:32:35Z
+**Source log:** `tasks/review-logs/spec-conformance-log-dev-mission-control-2026-04-28T06-29-40Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md`
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — root `package.json` scripts `review:chatgpt-pr`, `review:chatgpt-spec`, `mission-control:dev` are not wired
+  - Spec section: § 5 Modified files
+  - Gap: Spec explicitly names three scripts to add to root `package.json`. Implementation deliberately deferred per the user (HITL approval avoidance); current invocations call the CLI directly via `npx tsx scripts/chatgpt-review.ts` and `cd tools/mission-control && npm run dev`. The spec's § 10 Deferred items list does NOT formally cover this deferral, so the spec and implementation drift here.
+  - Suggested approach: either (a) add the three scripts in a follow-up commit with bodies that match the agent-definition invocations (`review:chatgpt-pr` → `git diff main...HEAD | tsx scripts/chatgpt-review.ts --mode pr`; `review:chatgpt-spec` → `tsx scripts/chatgpt-review.ts --mode spec --file`; `mission-control:dev` → `cd tools/mission-control && npm run dev`), or (b) update the spec § 10 to formally defer the script wiring with stated rationale.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `/api/github/prs` endpoint not implemented
+  - Spec section: § 5 Modified files (server/index.ts row), § 7 Execution model
+  - Gap: Spec § 5 lists `/api/github/prs` as one of the four endpoints the Express server exposes. Implementation has `/api/health`, `/api/in-flight`, `/api/builds`, `/api/current-focus`, `/api/review-logs` — no `/api/github/prs`. The PR + CI fetch logic exists in `server/lib/github.ts` and is consumed inside `composeInFlight`; `/api/in-flight` returns the PR data inline, so the dashboard works without a separate endpoint.
+  - Suggested approach: either (a) add a thin GET route `/api/github/prs?branch=<branch>` that calls `fetchPRForBranch` and returns the `PRSummary` (or an array, if rethought to list-many), or (b) update spec § 5 to remove the standalone endpoint and document that PR data flows via `/api/in-flight`. Option (b) matches the as-built read-only single-feed posture better.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `tasks/current-focus.md` machine block disagrees with prose body
+  - Spec section: § C3 (`Source-of-truth precedence: if the two disagree, the prose is canonical and the block is corrected`)
+  - Gap: The new machine block at the top of `tasks/current-focus.md` names `dev-mission-control` / status `BUILDING`, but the prose below names `pre-test-backend-hardening` / status `MERGE-READY`. By spec rule the prose wins and the block must be corrected. This is a content-state mismatch (the prose has not been updated to reflect that the dev-mission-control branch is the active sprint, OR the block was set prematurely).
+  - Suggested approach: human triage. Either (a) update the prose to reflect dev-mission-control as the active sprint, or (b) revert the block's `active_spec` / `active_plan` / `build_slug` / `branch` / `status` to mirror the pre-test-backend-hardening prose. Cannot be auto-resolved — requires knowing which is the truthful current sprint state.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `scripts/chatgpt-review.ts` was implemented as two files (`chatgpt-review.ts` + `chatgpt-reviewPure.ts`); spec named only one
+  - Spec section: § 5 Files to change (New files)
+  - Gap: Spec § 5 lists a single new file `scripts/chatgpt-review.ts`. Implementation split into `scripts/chatgpt-review.ts` (CLI entry) and `scripts/chatgpt-reviewPure.ts` (pure helpers). The split is sound — it keeps fetch / fs side effects out of the unit-tested pure code. Test file is at `scripts/__tests__/chatgpt-reviewPure.test.ts` rather than the spec-named `scripts/__tests__/chatgpt-review.test.ts`.
+  - Suggested approach: low priority — the spec's intent (CLI + tsx unit tests for pure helpers) is met. Update spec § 5 in a follow-up to document the two-file shape, OR leave as a benign as-built improvement. Not blocking.
+
+## Deferred from chatgpt-review-auto final pass — dev-mission-control (2026-04-28)
+
+**Captured:** 2026-04-28T13:30:00Z
+**Source:** ChatGPT round-3 final review (commits `c0b27e3` and `3ebb8ed` close the in-scope items; this section captures the explicitly-deferred future-proofing items).
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] CI grep test for spec invariants — guard against silent spec drift
+  - Trigger: any future commit that edits `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md` or the agent definitions in `.claude/agents/chatgpt-*-review.md`, `pr-reviewer.md`, `dual-reviewer.md`, `spec-reviewer.md`.
+  - Suggested approach: add a small bash gate (model on `scripts/verify-rls-coverage.sh`) that greps the spec and the relevant agent definitions for the load-bearing invariant strings — `**Verdict:**`, `dataPartial`, `isPartial`, `ci_updated_at`, `mismatch`, `read-only`, `no manual override`. Fails CI if any string is removed without a corresponding spec update. ChatGPT reviewer's framing: "this is how you keep the spec from drifting."
+  - Decision (2026-04-28): deferred per the reviewer's own guidance ("Not required now, but this is how you keep the spec from drifting"). Implement when the dashboard or CLI is touched in a meaningful way without an accompanying spec edit — that's the trigger that proves the gate is needed.
+  - Rejected option (2026-04-28): inlining a JS/TS check inside the test runner. Rejected because the existing pattern in `scripts/verify-*.sh` is a portable bash gate; staying with the same idiom keeps the CI surface uniform.
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] Filesystem-error vs ENOENT differentiation for review/progress reads — extend `dataPartial` coverage
+  - Currently only GitHub fetch errors flip `dataPartial`. Filesystem reads (`readIfExists` in `tools/mission-control/server/lib/inFlight.ts`) silently treat all errors as "no data" — ENOENT (intentional null) and EACCES/EIO (real error) are indistinguishable to the consumer.
+  - Trigger: any reported case of "the dashboard says no review but I know there is one" or "Mission Control silently dropped my progress.md."
+  - Suggested approach: change `readIfExists` to return `{ exists: boolean; content: string | null; errored: boolean }` and have the composer flip `dataPartial: true` on `errored`. Mirrors the github.ts FetchResult pattern.
+  - Decision (2026-04-28): deferred. Negligible risk in single-developer dev contexts where filesystem permissions are stable; revisit only if a real case surfaces.
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] Wire `inFlight.test.ts` and `github.test.ts` into the dashboard's `npm test` script
+  - Currently `tools/mission-control/package.json`'s `test` script only runs `logParsers.test.ts`; the other two tsx test files must be invoked directly.
+  - Trigger: any time the user is comfortable approving the (HITL-protected) `package.json` edit. One-line change to chain the three test files via `&&`.
+  - Suggested approach: change the `test` script to `tsx server/__tests__/logParsers.test.ts && tsx server/__tests__/inFlight.test.ts && tsx server/__tests__/github.test.ts` (or migrate to a small test-runner that globs `__tests__/*.test.ts`).
+  - Decision (2026-04-28): deferred to keep the round-3 commit free of HITL approvals. Tests are runnable via `npx tsx` directly; this is convenience-only.
+
+## Follow-ups surfaced during ChatGPT PR final-review — code-graph-health-check (2026-04-28, from main via PR #224)
+
+Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health check command`). Reviewer verdict: **Approve with minor changes**. The two must-fix items (zero-adoption RED softening, correction-RED ≥2 threshold) are implemented in the same PR; the items below are reviewer-acknowledged "safe to defer" or "nice to have."
+
+- [ ] Performance scaling for transcript scanning at scale (ChatGPT R2 — health-check)
+  - Current behaviour: every health-check pass streams every `.jsonl` transcript whose mtime falls in the 14-day window across every matched project directory. Wall-clock today ≈ 14–17s on ≈30 transcripts; reviewer flagged this will degrade as Claude usage grows (large teams, long-lived repos).
+  - Suggested mitigations (pick one when the wall-clock budget tightens): (a) cap files per run (e.g. last N transcripts per dir, sorted by mtime); (b) short-circuit once any per-signal threshold is reached (e.g. once we've seen ≥10 cache references in section 1, stop scanning further files for that signal); (c) cache scan results per-transcript in a small SQLite or JSON sidecar keyed by file path + mtime, so re-scans are incremental.
+  - Defer until wall-clock approaches the 30s budget. Not blocking.
+
+- [ ] Walker alignment: log rawCoverage alongside clamped value (ChatGPT R2 — health-check)
+  - Current behaviour: `collectCoverage()` clamps `coveragePct` at 100 because the script's local file walker and `build-code-graph.ts`'s walker have a one-file divergence on edge cases. Reviewer agreed this is cosmetic-fine for now but flagged that two systems defining "truth" differently is a smell that will confuse future debugging.
+  - Suggested fix: surface both values in the collected JSON (`coverageRaw` + `coveragePct`) so the deterministic-data dump shows the divergence; the LLM prompt continues to use only the clamped value. Long-term: align the two walkers (pick one as canonical).
+  - Defer; not blocking.
+
+- [ ] Threshold versioning (ChatGPT R2 — health-check)
+  - Current behaviour: heuristic thresholds (`COVERAGE_GREEN_PCT`, `SKIP_RATE_FAIL_PCT`, `ESCALATE_QUERIES_PER_MONTH`, `STALE_CACHE_MIN`, `LOG_SIZE_FLAG_BYTES`, `ZERO_ADOPTION_MEANINGFUL_QUERIES`, `CORRECTION_RED_THRESHOLD`) are top-of-file constants. Reviewer flagged risk of silent drift between spec values in `tasks/code-intel-revisit.md` / `tasks/builds/code-intel-phase-0/plan.md` and what the script enforces.
+  - Suggested fix: centralise thresholds in a single `THRESHOLDS` config object; emit a `thresholdsVersion` field in the deterministic-data JSON for auditability; cross-reference each threshold to its spec source via inline comment. Optional: load from a checked-in config file so spec edits propagate without code changes.
+  - Defer; not blocking.
+
+- [ ] Trend awareness across dated reports (ChatGPT R2 — health-check)
+  - Current behaviour: each run writes `references/.code-graph-health-YYYY-MM-DD.md` independently. Reviewer noted the structure already supports trend analysis (adoption rising/falling, errors increasing) — natural next step.
+  - Suggested fix: on each run, read the most recent prior dated file, diff key metrics (adoption, archQueries, coverage, watcher-error count), and surface deltas in section 1 prose ("up from 60 last week" / "watcher errors trending up: 3 → 12 → 27").
+  - Defer; not blocking. Implement once 3+ dated reports accumulate.
+
+- [x] Watcher health: "lock without PID" should explicitly trigger YELLOW (ChatGPT R2 — health-check)
+  - Resolved alongside the ChatGPT R3 P1/P2 fixes. `computeVerdict()` now classifies `watcherRunning === null` as YELLOW with reason "Watcher lock present but PID unknown — ambiguous state, investigate", and the TUNE recommendation triggers on this state too. Pulled in early because the script is now functioning as a decision engine — silent ambiguous states are the same defect class as P1's cross-project contamination.
+
+- [ ] Richer adoption signal: per-session breakdown (ChatGPT R2 — health-check)
+  - Current behaviour: section 1 reports total references and unique sessions. Reviewer suggested adding "references per session" and "sessions with usage / total sessions" for adoption-quality signal.
+  - Suggested fix: `totalSessionsInWindow` is already collected in `QueryVolumeSignals` — expose it in the LLM prompt's data block plus a derived `sessionsWithUsage / totalSessions` ratio. Section 1 prose can then say "5 of 30 sessions consulted the cache" rather than just "5 sessions."
+  - Defer; not blocking. Nice-to-have for narrative depth.
+
+- [ ] LLM prompt verbosity reduction (ChatGPT R2 — health-check)
+  - Current behaviour: ~750-token prompt, runtime cost negligible.
+  - Suggested fix: if/when token cost matters, trim repeated explanations and condense the section 4 bucket guidance to a single sentence.
+  - Defer; not blocking. Cosmetic.
+
+## ChatGPT PR final-review — round 3 (P1 + P2 applied) — code-graph-health-check (2026-04-28)
+
+Reviewer's framing: the script has crossed from "utility" to "decision engine," which raises the bar — silently misleading data and rule contradictions are now critical, not refinements.
+
+- [x] **P1 — Cross-project transcript contamination** (resolved)
+  - `resolveProjectDirs()` previously fell back to scanning every directory under `~/.claude/projects` when no exact / sibling match was found. That silently mixed adoption / correction / volume signals from unrelated codebases, producing a misleading "this repo's cache is healthy" report when the truth was "this repo has no transcripts." Resolved: the fallback block is removed; the function returns `[]` on no match, and the downstream `transcriptsAvailable === false` path correctly surfaces "no session data found." Code comment in the function explains the deliberate non-fallback.
+
+- [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
+  - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
+
+## ChatGPT PR final-review — round 4 (deferred refinements) — code-graph-health-check (2026-04-28)
+
+Reviewer's final pass said "merge it" and flagged two optional notes explicitly framed as "not now" / "next evolution." Logged here so they aren't lost; both are post-merge work, not blockers.
+
+- [ ] Ratio floor on `healthyAdoption` (ChatGPT R4 — health-check)
+  - Current behaviour: `healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` in `computeVerdict()`. The `references >= 3` floor encodes a minimum quality, but is decoupled from query volume — so 3 references against 100+ archQueries (a 3% consult rate) still counts as "healthy." Reviewer flagged this as "slightly optimistic, not wrong."
+  - Suggested fix: add a ratio floor — `references / archQueries >= 0.1` — alongside the absolute threshold. Pick the floor's exact value once we have more dated reports to calibrate against.
+  - Defer; reviewer explicitly said "later, not now." Implement only if the existing rule fires ESCALATE on a low-ratio scenario in real data.
+
+- [ ] Booleans → weighted-score verdict architecture (ChatGPT R4 — health-check)
+  - Current behaviour: rule-based thresholds + boolean gates compose the verdict in `computeVerdict()`. Works correctly for Phase 0's signal set.
+  - Suggested fix: convert each signal class (adoption / correctness / operational) to a numeric score, compute the verdict from a weighted score composition. Reviewer's framing: this matters once trend analysis lands or weak signals start combining — neither is true today.
+  - Defer; reviewer explicitly said "where this naturally evolves" and "not something to implement now." Revisit if/when the trend-awareness item (round 2) lands, since that's the natural co-arrival point.
+
+## ChatGPT PR final-review — round 1 (deferred refinements) — pre-test-integration-harness (2026-04-28)
+
+Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items were either already correct or reduced to a comment update; the items below are the explicitly-deferred refinements the reviewer flagged as "strongly recommended" or "optional improvement," not blockers.
+
+- [ ] Null-response invariant for downstream consumers of `agent_run_llm_payloads.response` (ChatGPT R1 — pre-test-integration-harness)
+  - Current behaviour: schema, writer, event service, and shared types correctly model `response` as nullable on the failure path. Nothing centrally enforces "consumers must null-check before nested-field access" — a consumer writing `payload.response.content` will crash at runtime if the row originated from a failure-path insert.
+  - Suggested fix: add an invariant comment block at the canonical entry point (e.g. `server/routes/agentExecutionLog.ts` or the schema file) stating "All consumers MUST null-check response before accessing nested fields." Optional but stronger: add a typed assertion helper, e.g. `function assertResponsePresent(r: unknown): asserts r is Record<string, unknown>` so consumers can narrow once and reuse the narrowed reference.
+  - Defer; not blocking. Implement when the next consumer is added or when a `response.X` access shows up in a code-review diff — that's the natural inflection point where the helper earns its keep. Type-level nullability on the field already gives compile-time safety today; the helper is a developer-ergonomics layer on top.

@@ -90,6 +90,32 @@ Wrap your complete review in a single fenced markdown block tagged `pr-review-lo
 
 Why: the caller is instructed to extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md` BEFORE fixing any issues, so the review trail persists on disk — same pattern as `review-logs/spec-review-log-*`. This feeds future pattern mining across many reviews.
 
+### Verdict line format (mandatory)
+
+The Verdict line MUST appear within the first 30 lines of the persisted log and MUST match:
+
+```
+**Verdict:** APPROVED
+```
+
+or
+
+```
+**Verdict:** CHANGES_REQUESTED
+```
+
+or
+
+```
+**Verdict:** NEEDS_DISCUSSION
+```
+
+Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUESTED (3 blocking, 2 strong)`). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Do not deviate from the enum — non-conforming verdicts render as "unknown" in the dashboard.
+
+- `APPROVED` — zero Blocking issues; Strong recommendations may exist but are not gating.
+- `CHANGES_REQUESTED` — at least one Blocking issue.
+- `NEEDS_DISCUSSION` — review surfaced a question that needs the user's input before a verdict can be assigned (e.g. an architectural concern with multiple viable resolutions).
+
 ---
 
 ## Rules

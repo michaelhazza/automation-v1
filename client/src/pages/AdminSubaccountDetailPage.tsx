@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import AgentRunCancelButton from '../components/AgentRunCancelButton';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 import { toast } from 'sonner';
 
@@ -668,6 +669,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
     budget_exceeded: 'bg-orange-100 text-orange-700',
     loop_detected: 'bg-purple-100 text-purple-700',
     pending: 'bg-slate-100 text-slate-600',
+    cancelling: 'bg-slate-200 text-slate-700',
     cancelled: 'bg-slate-100 text-slate-500',
   };
 
@@ -779,6 +781,14 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                               {r.durationMs && ` · ${Math.round(r.durationMs / 1000)}s`}
                             </span>
                             <span className="text-[11px] text-slate-400 shrink-0">{new Date(r.createdAt).toLocaleString()}</span>
+                            <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+                              <AgentRunCancelButton
+                                runId={r.id}
+                                status={r.status}
+                                variant="inline"
+                                onCancelled={() => loadRunHistory(l.agentId)}
+                              />
+                            </span>
                           </div>
                         ))}
                       </div>

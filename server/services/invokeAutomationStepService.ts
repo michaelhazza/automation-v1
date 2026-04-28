@@ -175,9 +175,14 @@ export async function invokeAutomationStep(
       if (!resolution.ok) {
         const error: AutomationStepError = {
           code: 'automation_missing_connection',
-          type: 'execution',
+          type: 'configuration',
           message: `Automation '${automation.id}' is missing required connections: ${resolution.missing.join(', ')}`,
           retryable: false,
+          status: 'missing_connection',
+          context: {
+            automationId: automation.id,
+            missingKeys: resolution.missing,
+          },
         };
         createEvent('workflow.step.automation.completed', {
           ...baseEventPayload, status: 'missing_connection', retryAttempt: 1, latencyMs: 0, error,

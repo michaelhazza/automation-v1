@@ -20,6 +20,10 @@ export const AGENT_RUN_STATUS = {
   // been handed off to a delegated execution backend (IEE worker today,
   // OpenClaw in future). Non-terminal. Detail lives on the backend row.
   DELEGATED: 'delegated',
+  // User-requested cancel has been observed; the run loop / IEE worker
+  // will exit at the next safe checkpoint and finalise as 'cancelled'.
+  // Non-terminal — exists only briefly.
+  CANCELLING: 'cancelling',
   COMPLETED: 'completed',
   FAILED: 'failed',
   TIMEOUT: 'timeout',
@@ -37,6 +41,7 @@ export const IN_FLIGHT_RUN_STATUSES: readonly AgentRunStatus[] = [
   AGENT_RUN_STATUS.PENDING,
   AGENT_RUN_STATUS.RUNNING,
   AGENT_RUN_STATUS.DELEGATED,
+  AGENT_RUN_STATUS.CANCELLING,
 ];
 
 export const AWAITING_RUN_STATUSES: readonly AgentRunStatus[] = [
