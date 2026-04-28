@@ -97,7 +97,7 @@ export function PendingHero({
           ref={approveButtonRef}
           onClick={handleApprove}
           disabled={isDisabled}
-          className="rounded px-3 py-1.5 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+          className="btn btn-sm btn-success disabled:opacity-50"
         >
           Approve
         </button>
@@ -105,7 +105,7 @@ export function PendingHero({
           <button
             onClick={() => setShowRejectInput(true)}
             disabled={isDisabled}
-            className="rounded px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            className="btn btn-sm btn-secondary disabled:opacity-50"
           >
             Reject
           </button>
@@ -123,13 +123,13 @@ export function PendingHero({
           <button
             onClick={handleSubmitReject}
             disabled={rejectComment.trim() === '' || isSubmitting}
-            className="mt-1 rounded px-3 py-1.5 bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700 disabled:opacity-50"
+            className="mt-1 btn btn-sm btn-danger disabled:opacity-50"
           >
             Submit rejection
           </button>
           <button
             onClick={() => { setShowRejectInput(false); setRejectComment(''); }}
-            className="mt-1 ml-2 text-[12px] text-slate-500 hover:underline"
+            className="mt-1 ml-2 btn btn-xs btn-ghost"
           >
             Cancel
           </button>

@@ -22,7 +22,7 @@ export function ActionBar({ item, laneId, onApprove, onReject, pending }: Action
   if (item.kind === 'failed_run') {
     return (
       <div className="mt-3 flex items-center gap-2">
-        <button className="btn btn-xs bg-slate-600 text-white hover:bg-slate-700">
+        <button className="btn btn-xs btn-secondary">
           View run
         </button>
         <button className="btn btn-xs btn-ghost">
@@ -54,7 +54,7 @@ export function ActionBar({ item, laneId, onApprove, onReject, pending }: Action
       <button
         onClick={() => onReject(item)}
         disabled={pending}
-        className="btn btn-xs text-red-600 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Reject
       </button>
