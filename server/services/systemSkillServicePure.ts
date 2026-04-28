@@ -49,7 +49,7 @@ export function parseSkillFile(slug: string, raw: string): ParsedSystemSkillSeed
   // Strip UTF-8 BOM and normalize CRLF → LF before any regex matching. Without
   // the BOM strip the leading `^---` anchor in the frontmatter regex misses,
   // and the file silently parses as null (skipped by the backfill).
-  const normalised = raw.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalised = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
   // Split frontmatter
   const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
