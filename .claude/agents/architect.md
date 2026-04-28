@@ -54,6 +54,8 @@ Load these in order in Step 2:
 
 Do not skip context loading. Architecture decisions made without understanding the existing patterns create inconsistency.
 
+For architecture-shaped questions (what calls X, what depends on Y, where does the route for Z live), check `references/project-map.md` and the relevant `references/import-graph/<dir>.json` before grepping. If the cache appears inconsistent with what you see in source, trust source.
+
 ---
 
 ## When You Are Invoked
