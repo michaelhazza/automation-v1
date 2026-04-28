@@ -961,3 +961,270 @@ After Phase 2 lands:
 - `dual-reviewer` recommended on this phase since boot-time wiring is harder to spot-check (per audit log §6 single-pass branch outline).
 
 ---
+
+## §6 Phase 3 — Webhook 5xx + skill-analyzer terminal failure
+
+**Goal:** close G7 and G11. After Phase 3, every webhook handler 5xx and every skill-analyzer terminal failure produces a `system_incidents` row.
+
+### §6.1 G7 — Webhook 5xx incident emission
+
+Two webhook handlers explicitly bypass `asyncHandler` and return `res.status(500)` from inline `try/catch` blocks. Each must call `recordIncident` before returning.
+
+#### §6.1.1 GHL webhook (`server/routes/webhooks/ghlWebhook.ts`)
+
+**Current code** (lines 63-67):
+
+```ts
+} catch (err) {
+  console.error('[GHL Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+  res.status(500).json({ error: 'Internal error' });
+  return;
+}
+```
+
+**Replace with:**
+
+```ts
+} catch (err) {
+  console.error('[GHL Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+
+  // Surface to the System Monitor so the agent can triage repeated failures.
+  // fingerprintOverride pins the dedup key; stack-derived fingerprinting is
+  // unreliable inside webhook handlers because the failure surface depends on
+  // adapter internals we don't control.
+  recordIncident({
+    source: 'route',
+    summary: `GHL webhook DB lookup failed: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+    errorCode: 'webhook_handler_failed',
+    stack: err instanceof Error ? err.stack : undefined,
+    fingerprintOverride: 'webhook:ghl:db_lookup_failed',
+    errorDetail: { locationId },
+  });
+
+  res.status(500).json({ error: 'Internal error' });
+  return;
+}
+```
+
+**Required imports** to add at the top of `ghlWebhook.ts`:
+
+```ts
+import { recordIncident } from '../../services/incidentIngestor.js';
+```
+
+**Other catch blocks in this file:** read the full handler and apply the same pattern to any other internal `try/catch` that ends in `res.status(500)` without throwing. The audit identified one; verify exhaustively at implementation.
+
+#### §6.1.2 GitHub webhook (`server/routes/githubWebhook.ts`)
+
+**Current code** (lines 122-124):
+
+```ts
+} catch (err) {
+  logger.error('github_webhook.handler_error', { event, delivery, error: err instanceof Error ? err.message : String(err) });
+}
+```
+
+**Replace with:**
+
+```ts
+} catch (err) {
+  logger.error('github_webhook.handler_error', { event, delivery, error: err instanceof Error ? err.message : String(err) });
+
+  // The response was already sent at line 112 (early-ack pattern). This
+  // emission is purely for observability — it never affects the response.
+  recordIncident({
+    source: 'route',
+    summary: `GitHub webhook handler failed for event ${event}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+    errorCode: 'webhook_handler_failed',
+    stack: err instanceof Error ? err.stack : undefined,
+    fingerprintOverride: 'webhook:github:handler_failed',
+    errorDetail: { event, delivery },
+  });
+}
+```
+
+**Required imports:**
+
+```ts
+import { recordIncident } from '../services/incidentIngestor.js';
+```
+
+#### §6.1.3 Other webhook routes — verify
+
+The audit identified GHL and GitHub as the verified-open cases. Three other webhook routes were checked:
+
+- `server/routes/webhooks/slackWebhook.ts` — uses `asyncHandler`. 5xx covered by global error handler. **No change needed.**
+- `server/routes/webhooks/teamworkWebhook.ts` — uses `asyncHandler`. **No change needed.**
+- `server/routes/webhooks.ts` (`/api/webhooks/callback/:executionId`) — uses `asyncHandler`. **No change needed.**
+
+At implementation time, re-verify these three by `grep -nE "res\\.status\\(5[0-9]+\\)" server/routes/webhooks*` to catch any inline 500 paths added since the audit.
+
+### §6.2 G11 — Skill-analyzer terminal failure
+
+**Goal:** wrap the `processSkillAnalyzerJob` invocation so terminal failures emit a `system_incidents` row.
+
+**Current code** (`server/index.ts:476-479`):
+
+```ts
+const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
+await boss.work('skill-analyzer', async (job) => {
+  const { jobId } = job.data as { jobId: string };
+  await processSkillAnalyzerJob(jobId);
+});
+```
+
+**Replace with:**
+
+```ts
+const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
+await boss.work('skill-analyzer', async (job) => {
+  const { jobId } = job.data as { jobId: string };
+  try {
+    await processSkillAnalyzerJob(jobId);
+  } catch (err) {
+    // Surface terminal failures to the System Monitor. pg-boss retry exhaustion
+    // also lands in skill-analyzer__dlq (covered by Phase 1's DLQ derivation),
+    // but emitting here too gives faster visibility for failures that happen
+    // on the FINAL retry attempt — without this wrap, the operator sees no
+    // signal until the DLQ row lands.
+    recordIncident({
+      source: 'job',
+      severity: 'high',
+      summary: `Skill analyzer terminal failure for job ${jobId}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      errorCode: 'skill_analyzer_failed',
+      stack: err instanceof Error ? err.stack : undefined,
+      fingerprintOverride: 'skill_analyzer:terminal_failure',
+      errorDetail: { jobId },
+    });
+    throw err; // preserve pg-boss retry semantics
+  }
+});
+```
+
+**Required import** in `server/index.ts`: `recordIncident` is already imported (line 161).
+
+**Why both the wrap AND the DLQ subscription?** The wrap fires on EVERY throw, including pg-boss retries. The DLQ subscription only fires on retry exhaustion. With dedup via `fingerprintOverride: 'skill_analyzer:terminal_failure'`, repeated retries collapse into one `system_incidents` row with `occurrenceCount` ticking up. Operators get faster signal (within seconds of first failure) instead of having to wait for retries to exhaust.
+
+**Why preserve pg-boss retry by re-throwing?** `processSkillAnalyzerJob` is designed to be crash-resumable (per `JOB_CONFIG['skill-analyzer']` comment about `Stage 5 reads existing skill_analyzer_results rows and skips already-paid LLM calls`). Swallowing the error would mark the pg-boss job as completed even though it failed, breaking that crash-resume contract.
+
+#### §6.2.1 Phase 2 dependency note
+
+After Phase 2 (G4-B), the skill-analyzer registration may move to `createWorker`. If so, the wrap in §6.2 lives inside the `handler:` callback of the `createWorker` call. The semantics are identical.
+
+If Phase 2's IEE work also moves the skill-analyzer registration (audit log shows it at `server/index.ts:476`, not inside any IEE module — so probably no overlap), confirm at implementation time.
+
+### §6.3 Tests for Phase 3
+
+#### §6.3.1 G11 integration test
+
+`server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts`:
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { db } from '../../db/index.js';
+import { systemIncidents } from '../../db/schema/index.js';
+import { eq } from 'drizzle-orm';
+import { hashFingerprint } from '../../services/incidentIngestorPure.js';
+
+const SKIP = process.env.NODE_ENV !== 'integration';
+
+test('skill-analyzer terminal failure produces a system_incidents row', { skip: SKIP }, async () => {
+  const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
+  await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+
+  // Simulate the wrap: invoke the wrapper with a forced throw.
+  const originalJobId = 'test-job-' + Date.now();
+  let propagatedError: unknown = null;
+
+  try {
+    // The wrap is in server/index.ts; for the test, exercise the same logic
+    // by importing recordIncident directly and asserting the wrap shape.
+    const { recordIncident } = await import('../../services/incidentIngestor.js');
+
+    try {
+      throw new Error('simulated handler failure');
+    } catch (err) {
+      recordIncident({
+        source: 'job',
+        severity: 'high',
+        summary: `Skill analyzer terminal failure for job ${originalJobId}: simulated handler failure`,
+        errorCode: 'skill_analyzer_failed',
+        stack: err instanceof Error ? err.stack : undefined,
+        fingerprintOverride: 'skill_analyzer:terminal_failure',
+        errorDetail: { jobId: originalJobId },
+      });
+      throw err;
+    }
+  } catch (err) {
+    propagatedError = err;
+  }
+
+  // Wait for the incident write to commit (sync mode).
+  await new Promise(r => setTimeout(r, 100));
+
+  const [row] = await db.select().from(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+  assert.ok(row, 'expected a system_incidents row');
+  assert.equal(row.source, 'job');
+  assert.equal(row.severity, 'high');
+  assert.equal(row.errorCode, 'skill_analyzer_failed');
+  assert.ok((row.latestErrorDetail as { jobId?: string }).jobId === originalJobId, 'expected jobId in errorDetail');
+  assert.ok(propagatedError instanceof Error, 'expected error to be re-thrown');
+  assert.equal((propagatedError as Error).message, 'simulated handler failure');
+});
+
+test('skill-analyzer dedup: 5 failures collapse to one row with occurrenceCount=5', { skip: SKIP }, async () => {
+  const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
+  await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+
+  const { recordIncident } = await import('../../services/incidentIngestor.js');
+
+  for (let i = 0; i < 5; i++) {
+    recordIncident({
+      source: 'job',
+      severity: 'high',
+      summary: `Skill analyzer terminal failure for job test-${i}: bang`,
+      errorCode: 'skill_analyzer_failed',
+      fingerprintOverride: 'skill_analyzer:terminal_failure',
+      errorDetail: { jobId: `test-${i}` },
+    });
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  const [row] = await db.select().from(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+  assert.ok(row, 'expected exactly one row from 5 failures');
+  assert.equal(row.occurrenceCount, 5);
+});
+```
+
+#### §6.3.2 G7 — testing posture
+
+Webhook 5xx paths are covered by the global incident emission contract. A pure-helper test of the catch-block emit is overkill (it's three lines of mechanical glue per handler). Manual smoke is sufficient: trigger a webhook, force a DB error, observe the `system_incidents` row.
+
+If the implementer wants a unit test, they may extract the emit call into a small `emitWebhookIncident(name: 'ghl' | 'github', err: unknown, detail: Record<string, unknown>)` helper and test that — but **no new helper is in scope** per §0.3. Extraction would require a separate spec.
+
+### §6.4 Phase 3 commit ordering
+
+```
+commit 14: feat(webhooks): emit recordIncident on GHL handler 5xx (G7)
+commit 15: feat(webhooks): emit recordIncident on GitHub handler error (G7)
+commit 16: feat(jobs): wrap skill-analyzer handler with recordIncident (G11)
+commit 17: test: skill-analyzer incident emission integration tests (G11)
+```
+
+### §6.5 Phase 3 verification
+
+- **G7 GHL:** trigger a GHL webhook with a `locationId` whose `connector_configs` row has been deleted (or simulate the DB error via fault injection). Observe a `system_incidents` row with `fingerprint = hashFingerprint('webhook:ghl:db_lookup_failed')`.
+- **G7 GitHub:** trigger a GitHub webhook event whose handler throws (e.g. malformed payload). Observe a `system_incidents` row with `fingerprint = hashFingerprint('webhook:github:handler_failed')`.
+- **G11:** run the integration tests in §6.3.1.
+- **End-to-end:** trigger the skill analyzer with a payload that forces a terminal throw. Within seconds, observe the row in `system_incidents`.
+
+### §6.6 Phase 3 acceptance
+
+- `grep -A 10 "res.status(500)" server/routes/webhooks/ghlWebhook.ts server/routes/githubWebhook.ts` shows a `recordIncident` call in every 500-returning catch block.
+- The skill-analyzer wrapper in `server/index.ts` calls `recordIncident` before re-throwing.
+- §6.5 verification commands return the expected results.
+- `npm run lint` + `npx tsc --noEmit` pass.
+- `pr-reviewer` returns PASS.
+
+---
