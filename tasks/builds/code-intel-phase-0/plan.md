@@ -45,7 +45,7 @@ ts-morph based. Walks `server/`, `client/`, `shared/`. For each `.ts`/`.tsx` fil
 Emits two artifacts:
 
 1. **`references/import-graph/{server,client,shared}.json`** — sharded per top-level directory. Each shard is a `{ files: { [path]: { imports: string[]; exports: string[]; importedBy: string[] } } }` map. Per-directory sharding so an Explore subagent can load only the slice it needs (~1–3 MB per shard rather than a 5–10 MB monolith).
-2. **`references/project-map.md`** — human-readable digest, ~50–100 lines. Sections (in order): top 20 files by inbound-import count; service entry points by directory; files with zero inbound imports (dead-code candidates); per-directory file count + line count totals. Markdown tables, no prose.
+2. **`references/project-map.md`** — human-readable digest, ~50–100 lines. Sections (in order): top 20 files by inbound-import count (tie-break: ascending lexicographic path — output must be deterministic so re-runs don't churn the diff); service entry points by directory; files with zero inbound imports (dead-code candidates); per-directory file count + line count totals. Markdown tables, no prose.
 
 ### Caching
 
@@ -55,10 +55,10 @@ Emits two artifacts:
 
 ### Lifecycle
 
-- `.gitignore` adds: `references/.code-graph-cache.json`, `references/import-graph/`, `references/project-map.md`.
-- Regen on `npm run dev` startup. Sub-second incremental in the typical case (small diff).
-- Manual: `npm run code-graph:rebuild` for full force-rebuild from cold cache.
-- First session in any checkout pays a few seconds of cold-build cost. Acceptable.
+- `.gitignore` already covers `references/.code-graph-cache.json`, `references/import-graph/`, `references/project-map.md` (landed with this PR).
+- **Regen mechanism: `predev` script in `package.json`.** `"predev": "tsx scripts/build-code-graph.ts"`. The dev server is blocked until generation completes — sub-second on the warm SHA256 cache, a few seconds cold. Deterministic: agents and humans never see a `references/project-map.md not found` race because the file is guaranteed to exist by the time the dev server is up. Picked over fire-and-forget (race) and parallel (race) — both leave the agent-side logic responsible for "is the file there yet?", which the advisory-hint framing was supposed to remove.
+- Manual: `npm run code-graph:rebuild` for full force-rebuild from cold cache (drops `references/.code-graph-cache.json` and re-walks).
+- First session in any checkout pays a few seconds of cold-build cost on `npm run dev`. Acceptable.
 
 ## Manual usage pattern
 
@@ -72,21 +72,29 @@ This is deliberately friction-bearing: if the manual usage produces qualitative 
 ## Done criteria
 
 - `npm run code-graph:rebuild` produces all three shards + the digest in under 30s on a cold cache, sub-second on a warm cache.
-- The three shards together cover ≥98% of `.ts`/`.tsx` files under `server/`, `client/`, `shared/`. The 2% margin allows for parse failures (circular type imports, etc.) — log them, don't fail the build.
-- `references/project-map.md` is ≤100 lines and renders cleanly in GitHub markdown preview.
+- The three shards together cover ≥98% of `.ts`/`.tsx` files under `server/`, `client/`, `shared/`. **Skipped files are written to `references/import-graph/.skipped.txt` with a one-line reason per file** (parse error, syntax error, etc.). The build fails if any single directory's skip rate exceeds 5% — that's a signal the parser config is wrong, not "advisory artifact territory."
+- `references/project-map.md` is ≤100 lines and renders cleanly in GitHub markdown preview. Re-running the generator on an unchanged tree produces a byte-identical file (deterministic ordering verified).
 - Dead-file pruning verified by deleting a known file, regenerating, and confirming it's gone from the shards.
-- `architecture.md` carries the new "Deterministic vs Interpretive Knowledge" section (separate commit; principle, not implementation).
-- Every prompt template that currently dispatches `Explore` for architecture questions includes the manual-usage hint (one-line addition; no new agent definitions).
+- `architecture.md` carries the new "Deterministic vs Interpretive Knowledge" section (already landed with this PR).
+- Manual-usage hint added in two specific places — both verifiable via `grep -l "references/project-map.md"`:
+  - `.claude/agents/architect.md` — one line in the workflow: "before grepping for structural questions, consult `references/project-map.md` and the relevant `references/import-graph/<dir>.json` shard."
+  - `CLAUDE.md` § "Local Dev Agent Fleet" — one line directing main sessions to the same artifacts before dispatching `Explore` for architecture questions.
+
+## Decisions locked in this spec
+
+The following were live questions during synthesis but are now decided — the architect should not re-open them:
+
+- **ts-morph configuration:** file-by-file walk for Phase 0. Faster, simpler, captures imports/exports correctly. Cross-file type resolution is not needed for the artifact shape Phase 0 ships. Re-evaluate only if Phase 1 lands and needs richer data.
+- **Regen mechanism:** `predev` script in `package.json` (see Lifecycle section).
+- **Failure handling for un-parseable files:** log + skip + write to `.skipped.txt`. Build fails only if per-directory skip rate >5% (see Done criteria).
 
 ## Open questions for the architect
 
-These remain for the architect to decide:
+Three genuinely-open decisions remain:
 
-1. **ts-morph configuration** — full project compile vs file-by-file walk. Trade: full compile is slower cold but gives correct cross-file type resolution; file-by-file is faster but may miss re-exports. Default lean: file-by-file for v0, escalate only if data shows it matters.
-2. **Path normalisation** — relative-from-repo-root vs absolute vs original-as-imported. Consistency across shards matters more than which form.
-3. **Generator placement** — `scripts/build-code-graph.ts` (top-level) vs `server/scripts/...` vs a new `tools/` directory. Use existing convention if one applies.
-4. **`npm run dev` integration mechanism** — pre-script in `package.json`, separate `concurrently` task, or a generator-on-import hook. Pick the simplest.
-5. **Failure handling for un-parseable files** — log + skip vs log + halt. Lean: log + skip, the artifact is advisory.
+1. **Path normalisation** — relative-from-repo-root vs absolute vs original-as-imported. Consistency across shards matters more than which form. Pick one and document it in the generator's header comment.
+2. **Generator placement** — `scripts/build-code-graph.ts` (top-level) vs `server/scripts/...` vs a new `tools/` directory. Use existing convention if one applies — check whether `scripts/` is the established home for cross-cutting build tooling.
+3. **`predev` invocation form** — direct `tsx scripts/build-code-graph.ts` vs a wrapper `npm run code-graph` that `predev` then calls. Trade: wrapper gives one canonical entry point for both `predev` and manual `npm run code-graph:rebuild`; direct call is one less indirection. Lean: wrapper, for symmetry with the other `npm run *` entries in `package.json`.
 
 ## Reference: parked Phase 1
 

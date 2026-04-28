@@ -9,3 +9,12 @@ shared/iee/*.js
 .claude/*.lock
 tasks/codex-iter*.txt
 .vs/
+
+# DB backup dumps — never commit (contain real user records, password hashes, org IDs)
+backups/
+tasks/users-backup.json
+
+# Code intelligence cache (Phase 0) — build output, regenerated on `npm run dev`
+references/.code-graph-cache.json
+references/import-graph/
+references/project-map.md

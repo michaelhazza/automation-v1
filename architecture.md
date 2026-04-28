@@ -1593,7 +1593,7 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Deterministic vs Interpretive Knowledge
 
-Agent-consumed knowledge falls into two classes. Treating them the same is the root cause of repeated token spend on questions whose answers do not change between sessions.
+Agent-consumed knowledge falls into two classes. Treating them the same wastes tokens on questions whose answers don't change between sessions.
 
 - **Deterministic facts** — extractable from source, stable across sessions, cheap to recompute. Examples: import graph, exports per file, route registrations, skill registry entries, RLS-protected table list, agent capability matrix, schema/API surface. **These should be cached, not re-derived by agents.**
 - **Interpretive reasoning** — requires synthesis, judgement, or context. Examples: why a design decision was made, trade-off analysis, debugging from logs, evaluating PR diffs. **These pay LLM tokens. Pay them for the work that actually needs them.**

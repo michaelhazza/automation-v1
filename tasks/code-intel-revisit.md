@@ -16,20 +16,19 @@ This file captures (a) the audit findings, (b) the parked Phase 1 design, and (c
 
 Source: `~/.claude/projects/c--files-Claude-automation-v1/*.jsonl` — 28 session transcripts spanning 2026-04-02 to 2026-04-28.
 
-- **18** `Explore` subagent invocations across **9** sessions.
-- Of those 18, classified by whether a deterministic AST cache would meaningfully help:
+- **18** `Explore` subagent invocations across **9** sessions. Excluding the 1 synthetic invocation from today's Graphify trial = **17 real invocations**.
+- Of the 17 real invocations, classified by whether a deterministic AST cache would meaningfully help:
 
 | Type | Count | Cache helps? |
 |---|---|---|
 | Read specific named files ("read these three files and report") | 5 | No |
 | UI / page structure exploration (mixed) | 4 | Partial |
-| Architecture-mapping (route resolution, "how do A and B relate") | 5 | **Yes** |
+| Architecture-mapping (route resolution, "how do A and B relate") | **5** | **Yes** |
 | Diagnostic / log-driven investigation | 2 | No |
 | Git history / DB-state inventory | 2 | No |
 | External (URL fetch via Explore) | 1 | No |
-| Synthetic (Graphify trial, today) | 1 (4 questions) | Excluded — synthetic |
 
-- **Real architecture-query rate:** ~5 in 26 days, or ~5–6/month.
+- **Real architecture-query rate:** 5 in 26 days = ~5–6/month.
 - **Per-query token cost:** typically 20–30 K (file reads + greps + reasoning).
 - **Best-case savings if Phase 1 cleared its 30% gate:** ~75–150 K tokens/month. Real, but small, and post prompt-caching the marginal saving is smaller still.
 
@@ -42,7 +41,8 @@ Revisit when **any** of the following is true. Either trigger a one-day re-audit
 1. **Quantitative threshold.** Architecture-query volume crosses **≥10/month for two consecutive months**. Re-run the audit by grepping `~/.claude/projects/<project>/*.jsonl` for `subagent_type":"Explore"` and classifying.
 2. **Qualitative pattern.** Repeated "what calls X" / "how does Y connect to Z" questions surfacing in three or more sessions in a single fortnight.
 3. **Multi-agent demand.** A second agent type (beyond `Explore`) starts dispatching subagents for structural questions — e.g. the `architect` agent burning tokens on dependency-tracing during spec authoring, or the `pr-reviewer` re-deriving import graphs to assess change blast radius.
-4. **Time-based fallback.** **2026-06-23** (8 weeks). If none of the above have fired by then, run the audit anyway. Either the volume signal has emerged organically or it hasn't — don't let the question drift.
+4. **Manual usage friction.** Reading `references/project-map.md` + the import-graph shards starts feeling repetitive — same lookup performed multiple times across sessions because the manual hint isn't enough. Subjective signal, but a real one; if Michael notices himself doing the same lookup three times in a week, that's the trigger.
+5. **Time-based fallback.** **2026-06-23** (8 weeks from 2026-04-28). If none of the above have fired by then, run the audit anyway. Either the volume signal has emerged organically or it hasn't — don't let the question drift.
 
 ## Parked Phase 1 design (do not implement until a trigger fires)
 
@@ -84,5 +84,5 @@ Phase 0 is the version actually being built now. It captures the durable wins (p
 
 ## Owner / next review
 
-- **Trigger watcher:** the dev (manual). Re-run the `~/.claude/projects/*.jsonl` audit on the time-based trigger date or when a qualitative pattern is noticed.
+- **Trigger watcher:** **Michael** (manual). Re-run the `~/.claude/projects/*.jsonl` audit on the time-based trigger date or when a qualitative pattern is noticed. The date below is checked into a markdown file only — not into a calendar or recurring-task system. If you want hard-enforcement of the time-based fallback, add a calendar entry separately.
 - **Next mandatory check date:** **2026-06-23**.
