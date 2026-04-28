@@ -453,3 +453,349 @@ For the System Monitor pipeline, the source-of-truth ordering is unchanged by th
 If the four diverge, `system_incidents` wins as the operator-visible truth. The triage agent always reads `system_incidents` first.
 
 ---
+
+## §4 Phase 1 — Log buffer + DLQ subscription + async-ingest worker
+
+**Goal:** close G2, G1, G5, G3 in one commit group. After Phase 1, every queue with a declared `deadLetter:` has a DLQ subscriber, every logger emission with a correlation ID is buffered for the agent, and async ingest mode is functional.
+
+### §4.1 Order of operations (within Phase 1)
+
+The four items are dependency-ordered:
+
+1. **G2 (log buffer)** — independent. Lands first; no other change depends on it.
+2. **G5 (`deadLetter:` additions to JOB_CONFIG)** — must land before G1 because G1's derivation reads from `JOB_CONFIG`. Landing G1 first means the derived list omits the 6 newly-added queues until G5 lands.
+3. **G3 — `system-monitor-ingest` config entry** — must land in the same JOB_CONFIG edit as G5 because they touch the same file and are reviewed together.
+4. **G1 (derive DLQ_QUEUES from JOB_CONFIG)** — depends on G5+G3.
+5. **G3 — boot-time worker registration** — depends on G1 (to ensure the new `system-monitor-ingest__dlq` is also subscribed).
+
+**Recommended commit ordering:**
+
+```
+commit 1: feat(monitor): add buildLogLineForBuffer pure helper + tests (G2)
+commit 2: feat(monitor): wire appendLogLine from logger.emit (G2)
+commit 3: feat(jobs): add deadLetter to 6 missing JOB_CONFIG entries (G5)
+commit 4: feat(jobs): add system-monitor-ingest entry to JOB_CONFIG (G3)
+commit 5: feat(monitor): derive DLQ_QUEUES from JOB_CONFIG (G1)
+commit 6: feat(monitor): register system-monitor-ingest async worker on boot (G3)
+commit 7: test: jobConfigInvariant (G1+G5)
+commit 8: test: dlqMonitorRoundTrip integration (G1)
+```
+
+### §4.2 G2 — Log buffer producer wiring
+
+#### §4.2.1 New pure helper
+
+Create `server/lib/loggerBufferAdapterPure.ts`:
+
+```ts
+import type { LogLine } from '../services/systemMonitor/logBuffer.js';
+
+interface LogEntryShape {
+  timestamp?: string;
+  level?: string;
+  event?: string;
+  correlationId?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Returns a LogLine ready for appendLogLine, or null if the entry has no
+ * usable correlationId. Pure — no DB, no async, no logger import.
+ */
+export function buildLogLineForBuffer(entry: LogEntryShape): LogLine | null {
+  const cid = entry.correlationId;
+  if (typeof cid !== 'string' || cid.length === 0) return null;
+
+  const meta: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (key === 'timestamp' || key === 'level' || key === 'event' || key === 'correlationId') {
+      continue;
+    }
+    meta[key] = value;
+  }
+
+  let ts: Date;
+  try {
+    ts = entry.timestamp ? new Date(entry.timestamp) : new Date();
+    if (isNaN(ts.getTime())) ts = new Date();
+  } catch {
+    ts = new Date();
+  }
+
+  return {
+    ts,
+    level: typeof entry.level === 'string' ? entry.level : 'info',
+    event: typeof entry.event === 'string' ? entry.event : 'unknown_event',
+    correlationId: cid,
+    meta,
+  };
+}
+```
+
+#### §4.2.2 Logger integration
+
+Modify `server/lib/logger.ts` (existing `emit` function):
+
+```ts
+function emit(entry: LogEntry): void {
+  const output = JSON.stringify(entry);
+  if (entry.level === 'error') {
+    console.error(output);
+  } else if (entry.level === 'warn') {
+    console.warn(output);
+  } else {
+    console.log(output);
+  }
+
+  // Feed the System Monitor's log buffer for correlation-ID-scoped retrieval.
+  // Lazy import keeps the logger module free of systemMonitor deps.
+  // Errors are swallowed — the buffer is a best-effort observability surface.
+  appendLogLineSafe(entry);
+}
+
+let _appendLogLineCache: ((line: import('../services/systemMonitor/logBuffer.js').LogLine) => void) | null = null;
+async function loadAppendLogLine() {
+  if (_appendLogLineCache) return _appendLogLineCache;
+  const m = await import('../services/systemMonitor/logBuffer.js');
+  _appendLogLineCache = m.appendLogLine;
+  return _appendLogLineCache;
+}
+
+function appendLogLineSafe(entry: LogEntry): void {
+  void (async () => {
+    try {
+      const { buildLogLineForBuffer } = await import('./loggerBufferAdapterPure.js');
+      const line = buildLogLineForBuffer(entry);
+      if (line === null) return;
+      const fn = await loadAppendLogLine();
+      fn(line);
+    } catch {
+      // Never let buffer-write failures surface to the logger caller.
+    }
+  })();
+}
+```
+
+**Why lazy import?** Avoids a static dep cycle: `logger` is imported by hundreds of files; `logBuffer.ts` is imported by the systemMonitor skill module which (transitively) may someday import logger. Lazy + cached resolves both the eager-init cost and the cycle risk.
+
+**Why swallow errors?** The logger is called from every layer including hot paths. A failure to write to the buffer must NEVER propagate (would either crash the caller or alter control flow). The buffer is designed to be best-effort.
+
+**Why `void (async () => …)()`?** The caller (`logger.info` etc.) is synchronous. We don't want to make every log call await a promise, so we kick off the buffer write fire-and-forget. The `_appendLogLineCache` ensures we only resolve the import once.
+
+#### §4.2.3 Tests for G2
+
+**Pure-helper tests** (`server/lib/__tests__/loggerBufferAdapterPure.test.ts`):
+
+1. Returns `null` when `correlationId` is missing.
+2. Returns `null` when `correlationId` is an empty string.
+3. Returns `null` when `correlationId` is non-string (number, undefined, object).
+4. Returns a valid `LogLine` when `correlationId` is a non-empty string.
+5. Strips `timestamp`, `level`, `event`, `correlationId` from `meta`.
+6. Preserves all other keys in `meta`.
+7. Falls back to `new Date()` when `timestamp` is missing or invalid.
+
+**Integration test** (`server/lib/__tests__/logger.integration.test.ts`):
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { logger } from '../logger.js';
+import { readLinesForCorrelationId, _resetBufferForTest } from '../../services/systemMonitor/logBuffer.js';
+
+test('logger.info with correlationId populates the log buffer', async () => {
+  _resetBufferForTest();
+  logger.info('test_event_42', { correlationId: 'cid-42', foo: 'bar' });
+  // Lazy import resolves on next tick
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+
+  const lines = readLinesForCorrelationId('cid-42', 100);
+  assert.ok(lines.length >= 1, 'expected at least one buffered line');
+  const line = lines.find(l => l.event === 'test_event_42');
+  assert.ok(line, 'expected line with matching event name');
+  assert.equal(line.correlationId, 'cid-42');
+  assert.equal((line.meta as { foo?: string }).foo, 'bar');
+});
+
+test('logger.info without correlationId does NOT populate the buffer', async () => {
+  _resetBufferForTest();
+  logger.info('test_event_no_cid', { foo: 'baz' });
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Look across all correlation IDs we've seen — none should match
+  const allKeys = ['', 'undefined', 'null'];
+  for (const k of allKeys) {
+    const lines = readLinesForCorrelationId(k, 100);
+    assert.equal(lines.length, 0, `expected no lines for key '${k}'`);
+  }
+});
+```
+
+The `setImmediate × 2` is required because the lazy import is two microtasks deep (import → call). If this proves flaky, fall back to `await new Promise(r => setTimeout(r, 50))`.
+
+### §4.3 G5 — Add `deadLetter:` to 6 JOB_CONFIG entries
+
+Edit `server/config/jobConfig.ts`. For each entry below, add `deadLetter: '<queue>__dlq'` as the last property before the closing brace.
+
+| Queue | Current entry line | Add |
+|---|---|---|
+| `slack-inbound` | ~211 | `deadLetter: 'slack-inbound__dlq',` |
+| `agent-briefing-update` | ~258 | `deadLetter: 'agent-briefing-update__dlq',` |
+| `memory-context-enrichment` | ~267 | `deadLetter: 'memory-context-enrichment__dlq',` |
+| `page-integration` | ~276 | `deadLetter: 'page-integration__dlq',` |
+| `iee-cost-rollup-daily` | ~315 | `deadLetter: 'iee-cost-rollup-daily__dlq',` |
+| `connector-polling-tick` | ~415 | `deadLetter: 'connector-polling-tick__dlq',` |
+
+**Risk:** None. pg-boss creates the DLQ on first failure. No existing job lifecycle is affected.
+
+**Verification:** `npx tsc --noEmit` passes (the type system already permits `deadLetter` on every entry — it's a `Partial<{ deadLetter: string }>` extension).
+
+### §4.4 G3 — Add `system-monitor-ingest` to JOB_CONFIG
+
+Add the entry inside §3.3's contract verbatim. Place it next to `system-monitor-notify` if that has a JOB_CONFIG entry; otherwise after `system-monitor-self-check`. (Verify at implementation time.)
+
+### §4.5 G1 — Derive `DLQ_QUEUES` from `JOB_CONFIG`
+
+Create `server/services/dlqMonitorServicePure.ts` per §3.2's contract.
+
+Modify `server/services/dlqMonitorService.ts`:
+
+**Before:**
+```ts
+const DLQ_QUEUES = [
+  'agent-scheduled-run__dlq',
+  'agent-org-scheduled-run__dlq',
+  // ... 6 more
+];
+```
+
+**After:**
+```ts
+import { JOB_CONFIG } from '../config/jobConfig.js';
+import { deriveDlqQueueNames } from './dlqMonitorServicePure.js';
+
+const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);
+```
+
+The rest of `startDlqMonitor` is unchanged — it iterates `DLQ_QUEUES` and registers `boss.work` for each.
+
+### §4.6 G3 — Boot-time async-ingest worker registration
+
+In `server/index.ts`, immediately after `await registerSystemIncidentNotifyWorker(boss);` (line ~455):
+
+```ts
+// Async-ingest worker — only registers when SYSTEM_INCIDENT_INGEST_MODE=async.
+// Sync mode (the default) writes incidents inline in the calling process and
+// has no consumer for this queue. Registering the worker unconditionally would
+// cause the queue to drain even in sync mode, which is harmless but confusing.
+if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+  const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+  await boss.work(
+    'system-monitor-ingest',
+    { teamSize: 4, teamConcurrency: 1 },
+    async (job: { id: string; data: unknown }) => {
+      await handleSystemMonitorIngest(job.data as Parameters<typeof handleSystemMonitorIngest>[0]);
+    }
+  );
+  logger.info('async_incident_ingest_worker_registered');
+}
+```
+
+The eager import (no lazy) is fine here because the boot path is only run once and the import cost is amortised across the server lifetime.
+
+### §4.7 G1+G5 — Invariant test
+
+Create `server/config/__tests__/jobConfigInvariant.test.ts`:
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JOB_CONFIG } from '../jobConfig.js';
+
+test('every JOB_CONFIG entry declares a deadLetter queue', () => {
+  const missing: string[] = [];
+  for (const [name, entry] of Object.entries(JOB_CONFIG)) {
+    const dlq = (entry as { deadLetter?: string }).deadLetter;
+    if (typeof dlq !== 'string' || dlq.length === 0) {
+      missing.push(name);
+    }
+  }
+  assert.deepEqual(missing, [],
+    `Queues without deadLetter — every entry MUST declare one to be visible to dlqMonitorService:\n${missing.join('\n')}`);
+});
+
+test('every deadLetter follows the <queue>__dlq convention', () => {
+  const violations: Array<{ queue: string; deadLetter: string }> = [];
+  for (const [name, entry] of Object.entries(JOB_CONFIG)) {
+    const dlq = (entry as { deadLetter?: string }).deadLetter;
+    if (typeof dlq !== 'string') continue;
+    const expected = `${name}__dlq`;
+    if (dlq !== expected) {
+      violations.push({ queue: name, deadLetter: dlq });
+    }
+  }
+  assert.deepEqual(violations, [],
+    `Queues with deadLetter that doesn't match <queue>__dlq:\n${violations.map(v => `${v.queue} → ${v.deadLetter}`).join('\n')}`);
+});
+```
+
+This is the CI-gating invariant that prevents future regressions of G5.
+
+### §4.8 G1 — DLQ round-trip integration test
+
+Create `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts`. The shape mirrors the existing `incidentIngestorThrottle.integration.test.ts`:
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { db } from '../../db/index.js';
+import { systemIncidents } from '../../db/schema/index.js';
+import { eq, sql } from 'drizzle-orm';
+import { hashFingerprint } from '../incidentIngestorPure.js';
+
+// This test depends on a live DB + pg-boss. Skip in CI without those.
+const SKIP = process.env.NODE_ENV !== 'integration';
+
+test('DLQ round-trip: poison job → __dlq → system_incidents row', { skip: SKIP }, async () => {
+  // Setup: pick a queue we expect to have a subscriber post-G1.
+  const queue = 'workflow-run-tick';
+  const dlq = `${queue}__dlq`;
+  const fingerprint = hashFingerprint(`job:${queue}:dlq`);
+
+  // Cleanup any existing rows for this fingerprint.
+  await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+
+  // ... enqueue a poison job, force it to DLQ ...
+  // (full implementation requires pg-boss test seam; document here for the implementer)
+
+  // Assertion: within 30s, exactly one system_incidents row exists with our fingerprint.
+  let row;
+  for (let i = 0; i < 30; i++) {
+    [row] = await db.select().from(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
+    if (row) break;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+
+  assert.ok(row, 'expected a system_incidents row within 30s');
+  assert.equal(row.source, 'job');
+  assert.equal(row.severity, 'high');
+  assert.equal(row.errorCode, 'job_dlq');
+  assert.equal(row.occurrenceCount, 1);
+});
+```
+
+**Why one queue, not all 40?** Confidence: if one round-trip works, all do (the DLQ subscriber is a single function `dlqMonitorService.startDlqMonitor` iterating an array). Cost: each round-trip needs a pg-boss seam and ~30s wall clock. One representative test catches regressions of the wiring without inflating CI time.
+
+### §4.9 Phase 1 acceptance
+
+Phase 1 lands successfully when:
+
+- All four G items (G2, G5, G3, G1) ship in commits 1–8 of §4.1.
+- `npm run lint` passes.
+- `npx tsc --noEmit` passes.
+- `bash scripts/run-all-unit-tests.sh` passes (includes the new pure-helper + invariant tests).
+- The integration tests in §4.2.3 and §4.8 run green when invoked with a live DB.
+- `pr-reviewer` returns PASS or has its findings addressed.
+
+---
