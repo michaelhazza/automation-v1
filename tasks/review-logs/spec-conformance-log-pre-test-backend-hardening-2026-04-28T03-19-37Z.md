@@ -8,6 +8,7 @@
 **Scope:** programme-level (all 8 spec items §1.1–§1.8)
 **Changed-code set:** 22 production files (excluding plan.md / progress.md / current-focus.md)
 **Run at:** 2026-04-28T03:19:37Z
+**Commit at finish:** `7cc588a3`
 
 ---
 
