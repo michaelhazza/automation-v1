@@ -435,6 +435,16 @@ export const JOB_CONFIG = {
     deadLetter: 'connector-polling-sync__dlq',
     idempotencyStrategy: 'singleton-key' as const,
   },
+
+  // ── System monitoring (G3: system-monitor-ingest queue) ─────────
+  'system-monitor-ingest': {
+    retryLimit: 3,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'system-monitor-ingest__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
