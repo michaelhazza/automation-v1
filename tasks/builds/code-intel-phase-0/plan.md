@@ -31,6 +31,8 @@ These are locked from three rounds of synthesis. Out of scope, period:
 
 If any of these come up during implementation, that's a signal to stop and revisit — not absorb into Phase 0.
 
+**Note on the watcher vs Phase 1 deferral:** the chokidar watcher described below is in scope for Phase 0 and does NOT pull Phase 1 forward. The PreToolUse hook (deferred) is *agent-side automation* — it intercepts agent tool calls and injects hints. The watcher is *server-side dev infrastructure* — it keeps the cache fresh during a session. Different layers, different concerns. Phase 0 cannot ship a usable cache without the watcher; Phase 1 is what makes the cache *automatically consulted* by agents.
+
 ## What this IS (build surface)
 
 One generator script and two output artifacts. That's it.
@@ -51,14 +53,33 @@ Emits two artifacts:
 
 `references/.code-graph-cache.json` — per-file SHA256 keyed map of `{ sha256: extractionResult }`. Generator skips files whose hash matches the cache, re-extracts only changed files.
 
-**Dead-file pruning:** every regen, walk the cache and drop entries whose `path` no longer exists on disk. Without this, deleted files accumulate in the import-graph shards and mislead future readers.
+**Dead-file pruning:** every regen (cold or watcher-triggered), walk the cache and drop entries whose `path` no longer exists on disk. Without this, deleted files accumulate in the import-graph shards and mislead future readers.
+
+### Watcher: in-session staleness protection
+
+Cold-build at `predev` is necessary but not sufficient. A typical dev session runs for hours; without an in-session refresh, the cache goes stale within minutes of the first file change. **Agents reading a stale cache get confidently wrong answers — the most concerning failure mode**, exactly the one the Graphify trial taught us to engineer away from. The advisory-hint framing (agents fall through to raw source on miss) does not protect against staleness — a stale cache "hits" with wrong data, no fall-through triggers.
+
+**Mechanism:** `predev` launches a `chokidar` file watcher as a detached background process. The watcher monitors `server/`, `client/`, `shared/` for `add` / `change` / `unlink` events on `.ts` / `.tsx` files. On each event:
+
+- **`add` / `change`:** SHA256 the file, compare to cache. If unchanged (mtime touched, content identical), skip. Otherwise re-extract via `ts-morph` (`Project.addSourceFileAtPath` + `getImportDeclarations` + `getExportSymbols`). Atomically rewrite the affected shard (write to `.tmp`, `rename` — OS-level atomic on POSIX and NTFS). Update `references/.code-graph-cache.json`. Re-emit `references/project-map.md` only if topology changed (a top-20 entry moved, a new file appeared with high inbound count, a previously zero-inbound file gained imports, etc.).
+- **`unlink`:** remove from cache and shard. Same dead-file pruning as cold-build.
+
+Per-event cost: <100 ms typical. Re-extracting one file is sub-50ms; the atomic shard rewrite is the dominant cost. Debounce events at 150 ms to coalesce rapid saves (e.g. find-and-replace across multiple files).
+
+**Concurrency: lockfile-based singleton.** Multiple dev sessions on the same repo (a second `npm run dev`, an alternate config, a Claude Code session running its own `dev`) MUST NOT both run watchers — they'd race on shard writes. The watcher's first action is to acquire `references/.watcher.lock` (PID file via `proper-lockfile` or equivalent — handles Windows/POSIX differences). If a live process holds the lock, the new launcher exits silently and lets the existing watcher serve all sessions. Stale locks (PID dead) are released and reclaimed automatically. **One watcher per repo, regardless of session count.**
+
+**Lifecycle binding.** The watcher is launched detached by `predev` but registers `SIGTERM` / `SIGINT` handlers tied to the parent dev server's lifetime. When the dev server dies, the watcher dies and releases the lock. Crashed watchers leave a stale lock; the next session's lock-acquire detects-via-PID-liveness and reclaims it. No manual cleanup required.
+
+**Atomic shard writes — invariant:** consumers (agents, scripts, the human reading the digest) MUST never observe a partial JSON file. The temp-file + rename pattern guarantees this on every supported OS. If a watcher is `kill -9`'d mid-write, the original shard is intact; the new content is in `.tmp` and gets cleaned up on next start.
 
 ### Lifecycle
 
-- `.gitignore` already covers `references/.code-graph-cache.json`, `references/import-graph/`, `references/project-map.md` (landed with this PR).
-- **Regen mechanism: `predev` script in `package.json`.** `"predev": "tsx scripts/build-code-graph.ts"`. The dev server is blocked until generation completes — sub-second on the warm SHA256 cache, a few seconds cold. Deterministic: agents and humans never see a `references/project-map.md not found` race because the file is guaranteed to exist by the time the dev server is up. Picked over fire-and-forget (race) and parallel (race) — both leave the agent-side logic responsible for "is the file there yet?", which the advisory-hint framing was supposed to remove.
-- Manual: `npm run code-graph:rebuild` for full force-rebuild from cold cache (drops `references/.code-graph-cache.json` and re-walks).
-- First session in any checkout pays a few seconds of cold-build cost on `npm run dev`. Acceptable.
+- `.gitignore` already covers `references/.code-graph-cache.json`, `references/import-graph/`, `references/project-map.md`, `references/.watcher.lock` (landed with this PR — lockfile entry to add alongside this commit).
+- **Cold build: `predev` script in `package.json`.** `"predev": "tsx scripts/build-code-graph.ts"`. The dev server is blocked until generation completes — sub-second on the warm SHA256 cache, a few seconds cold. Deterministic: agents and humans never see a `references/project-map.md not found` race because the file is guaranteed to exist by the time the dev server is up.
+- **In-session refresh: `chokidar` watcher launched detached by `predev`** (see Watcher section). Sub-100ms per file event, atomic shard writes, single watcher per repo via lockfile, dies with the parent dev server.
+- **Manual rebuild:** `npm run code-graph:rebuild` for cold-rebuild from scratch (drops `references/.code-graph-cache.json`, releases any held lock, re-walks the tree). Useful after a `git pull` brings in a large diff or after a branch switch.
+- **Watch-only mode:** `npm run code-graph:watch` for sessions where `npm run dev` isn't running (e.g. doing code-review without launching the server). Same singleton lock; coexists cleanly with a parallel `npm run dev` (whichever started first owns the lock).
+- First session in any checkout pays a few seconds of cold-build cost. Subsequent in-session edits are sub-100ms via the watcher. Multi-session usage on the same checkout shares one watcher.
 
 ## Manual usage pattern
 
@@ -71,21 +92,35 @@ This is deliberately friction-bearing: if the manual usage produces qualitative 
 
 ## Done criteria
 
+**Cold build:**
 - `npm run code-graph:rebuild` produces all three shards + the digest in under 30s on a cold cache, sub-second on a warm cache.
 - The three shards together cover ≥98% of `.ts`/`.tsx` files under `server/`, `client/`, `shared/`. **Skipped files are written to `references/import-graph/.skipped.txt` with a one-line reason per file** (parse error, syntax error, etc.). The build fails if any single directory's skip rate exceeds 5% — that's a signal the parser config is wrong, not "advisory artifact territory."
 - `references/project-map.md` is ≤100 lines and renders cleanly in GitHub markdown preview. Re-running the generator on an unchanged tree produces a byte-identical file (deterministic ordering verified).
 - Dead-file pruning verified by deleting a known file, regenerating, and confirming it's gone from the shards.
+
+**Watcher (in-session staleness protection):**
+- Editing any `.ts`/`.tsx` file under `server/`, `client/`, `shared/` mid-session results in the corresponding shard being updated within 200ms. Verifiable: tail the shard's mtime + content while editing a known import.
+- Adding a new file mid-session: appears in the shard within 200ms. Deleting a file mid-session: gone from the shard within 200ms.
+- **Singleton enforcement:** running `npm run dev` a second time on the same checkout while a watcher already runs does NOT spawn a second watcher. Verifiable: `ps` (or `Get-Process` on Windows) shows exactly one `chokidar` process; the second `predev` exits silently after detecting the live lock.
+- **Stale-lock recovery:** `kill -9` the watcher process, then `npm run dev` again. The new launcher detects the dead PID, releases the stale lock, and starts a new watcher.
+- **Atomic shard writes:** kill the watcher mid-edit cycle (`kill -9` while saving a file). Every shard file remains valid JSON — never partial. Verifiable with `jq . references/import-graph/*.json` after kill+restart.
+- **Lifecycle binding:** killing the dev server (`Ctrl+C`) terminates the watcher within 2s and releases the lock.
+
+**Integration surface:**
 - `architecture.md` carries the new "Deterministic vs Interpretive Knowledge" section (already landed with this PR).
 - Manual-usage hint added in two specific places — both verifiable via `grep -l "references/project-map.md"`:
   - `.claude/agents/architect.md` — one line in the workflow: "before grepping for structural questions, consult `references/project-map.md` and the relevant `references/import-graph/<dir>.json` shard."
   - `CLAUDE.md` § "Local Dev Agent Fleet" — one line directing main sessions to the same artifacts before dispatching `Explore` for architecture questions.
+
+**Build cost expectation:** ~1 to 1.5 days for v1 (cold-build + ts-morph extractor + chokidar watcher + lockfile-singleton + atomic-write helper + tests for the watcher invariants). Was "half a day" pre-watcher; the staleness fix is the bulk of the added work and is non-negotiable — without it, the cache is worse than no cache.
 
 ## Decisions locked in this spec
 
 The following were live questions during synthesis but are now decided — the architect should not re-open them:
 
 - **ts-morph configuration:** file-by-file walk for Phase 0. Faster, simpler, captures imports/exports correctly. Cross-file type resolution is not needed for the artifact shape Phase 0 ships. Re-evaluate only if Phase 1 lands and needs richer data.
-- **Regen mechanism:** `predev` script in `package.json` (see Lifecycle section).
+- **Cold-build trigger:** `predev` script in `package.json` (see Lifecycle section).
+- **In-session refresh:** `chokidar` watcher launched detached by `predev`, lifecycle-bound to the dev server, singleton-enforced via `proper-lockfile` PID lock at `references/.watcher.lock`. Atomic shard writes via temp-file + rename. **Picked over the alternatives — startup-only regen (proven stale within minutes), lazy-on-read (read-side latency, complex coordination), git-hook-only (misses uncommitted changes mid-session), editor-save-hook (editor-coupled, leaves CLI workflows uncovered).**
 - **Failure handling for un-parseable files:** log + skip + write to `.skipped.txt`. Build fails only if per-directory skip rate >5% (see Done criteria).
 
 ## Open questions for the architect
