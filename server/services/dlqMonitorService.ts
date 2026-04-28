@@ -9,13 +9,22 @@
 import type PgBoss from 'pg-boss';
 import { logger } from '../lib/logger.js';
 import { safeSerialize } from '../lib/jobErrors.js';
-import { recordIncident } from './incidentIngestor.js';
+import { recordIncident as defaultRecordIncident, type IncidentInput } from './incidentIngestor.js';
 import { JOB_CONFIG } from '../config/jobConfig.js';
 import { deriveDlqQueueNames } from './dlqMonitorServicePure.js';
 
 const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);
 
-export async function startDlqMonitor(boss: PgBoss): Promise<void> {
+export interface DlqMonitorDependencies {
+  recordIncident?: (input: IncidentInput, opts?: { forceSync?: boolean }) => Promise<void>;
+}
+
+export async function startDlqMonitor(
+  boss: PgBoss,
+  deps: DlqMonitorDependencies = {},
+): Promise<void> {
+  const recordIncident = deps.recordIncident ?? defaultRecordIncident;
+
   for (const dlqName of DLQ_QUEUES) {
     const sourceQueue = dlqName.replace('__dlq', '');
     await (boss as any).work(
@@ -31,7 +40,7 @@ export async function startDlqMonitor(boss: PgBoss): Promise<void> {
           subaccountId: payload.subaccountId,
           payload: safeSerialize(payload),
         });
-        recordIncident({
+        await recordIncident({
           source: 'job',
           summary: `Job reached DLQ: ${sourceQueue}`,
           errorCode: 'job_dlq',
