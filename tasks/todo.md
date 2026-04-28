@@ -1246,11 +1246,35 @@ The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NIC
 
 ## Follow-ups surfaced during pr-reviewer pass — code-intel-phase-0 (2026-04-28)
 
-- [ ] Add executable test coverage for the watcher's load-bearing invariants (pr-reviewer S4)
-  - **Singleton-lock contention:** given an existing watcher process holding `references/.watcher.lock` (heartbeat refreshing every 2s), when a second `tsx scripts/build-code-graph.ts --watch-only` is launched, then the second process exits with code 0 within 2s without spawning a chokidar instance, AND only one watcher PID remains in the process table.
-  - **Topology-change discrimination:** given a warm cache where file F is at rank 21 in inbound-import count (NOT in top-20), when F's content changes such that its inbound count remains rank 21 (e.g. trivial whitespace edit elsewhere), then the corresponding shard's mtime is updated AND `references/project-map.md`'s mtime is unchanged.
-  - **No feedback loop:** given the watcher is running, when the watcher writes one of its own shard files, then no new processEvents pass is triggered. (Plan.md line 145 — load-bearing safety property; the cheapest test of the three.)
-  - Suggested location: a new `scripts/__tests__/build-code-graph-watcher.test.ts` invoked via `npm run test:unit`. Will need a small process-supervision harness that spawns the watcher subprocess, observes PIDs and file mtimes, and tears down cleanly between cases.
+- [x] Add executable test coverage for the watcher's load-bearing invariants (pr-reviewer S4)
+  - **Singleton-lock contention:** ✅ Implemented in `scripts/__tests__/build-code-graph-watcher.test.ts`. Spawns watcher A, waits for the PID file to be written (lock acquired pre-tsmorph), spawns watcher B, asserts B exits code 0 within 15s with the "lock held by another process" log, and verifies the PID file still points to A. Verified passing locally on 2026-04-28.
+  - **Topology-change discrimination:** Deferred — see ChatGPT R1 follow-ups below. The reviewer agreed this is the third-priority of the three and not strictly load-bearing for merge.
+  - **No feedback loop:** ✅ Implemented in the same test file. Waits for "watcher ready" (chokidar live), writes a `.ts` probe file under `references/import-graph/`, waits 1.5s, asserts no `[code-graph] add|change|unlink` log line referencing `references/` or the probe path appears. Verified passing locally on 2026-04-28.
 
 - [ ] Watcher: ts-morph alias re-resolution closure-staleness (pr-reviewer S3)
   - Editing a barrel-export file changes the resolved target of unrelated importers' `@/foo` aliases, but those importers' `imports[]` only re-extract on their next save. Same class as the rename eventual-consistency window — bounded and visible, not silent corruption. Acceptable for Phase 0; raw-source fallback in agent prompts is the mitigation. A code comment was added in commit `<this commit>` near `extractSingleFile`'s `refreshFromFileSystem` call. **Defer behavior fix to Phase 1** — the helper layer would be the right place to introduce reactive invalidation if usage data justifies it.
+
+## Follow-ups surfaced during ChatGPT final-review — code-intel-phase-0 (2026-04-28, round 1)
+
+Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdict: PASS with minor follow-ups. The "must-do" item — minimal invariant tests for singleton-lock and no-feedback-loop — is being implemented in this PR; the items below are accepted-but-deferred per the reviewer's "nice to have, can follow post-merge" framing.
+
+- [ ] Watcher race hardening: cache/shard write generation marker (ChatGPT R1)
+  - Edge case the reviewer named: old watcher ignores SIGTERM (or is mid-syscall), `--rebuild` force-clears the lock after the 2s wait, new watcher acquires; old watcher then completes a flushShards / saveCache write before the OS reaps it, momentarily corrupting the freshly-rebuilt artifacts. Probability low (requires the old watcher to be unresponsive AND mid-write at the exact 2s mark) but the failure is silent until next cold build.
+  - Suggested approaches (pick one in Phase 1):
+    1. Stamp each shard JSON and the cache file with a `watcherPid` field on write; on read, the parent process's `--rebuild` ignores any artifact whose `watcherPid` matches a process that's now gone. Cheap, correct under the failure mode, no extra IPC.
+    2. The watcher polls `references/.watcher.pid` every flush and exits if the PID file no longer matches its own pid. Cuts the failure window to the poll interval; requires care to avoid races on the `--rebuild` unlink step.
+  - Not blocking merge per reviewer; add to Phase 1 hardening if telemetry shows shard corruption complaints.
+
+- [ ] Reseed restore script: wrap user-restore in a transaction (ChatGPT R1)
+  - File: `scripts/_reseed_restore_users.ts`
+  - Gap: restore inserts users (and any joined rows) outside of an explicit transaction. If interrupted mid-restore (Ctrl-C, machine sleep, DB blip), partial state is left in the DB and a re-run may collide on unique constraints or leave orphan FKs.
+  - Suggested approach: wrap the entire restore body in `db.transaction(async (tx) => { ... })`. Verify all DML inside uses `tx`, not the global `db`. No behavior change on the success path; on failure the DB is unchanged so re-run is idempotent.
+
+- [ ] Reseed drop-create script: env guard against running outside development (ChatGPT R1)
+  - File: `scripts/_reseed_drop_create.ts`
+  - Gap: script drops and recreates the DB unconditionally. Production safety relies entirely on operator vigilance.
+  - Suggested approach: at the top of `main()`, fail-fast if `process.env.NODE_ENV !== 'development'` (or `process.env.DATABASE_URL` matches a known production host). Throw with a clear message explaining the guard.
+
+- [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
+  - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
+  - Defer to Phase 1 once shape stabilises — premature split risks churn if Phase 1 reshuffles boundaries again.
