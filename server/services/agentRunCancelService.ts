@@ -24,7 +24,7 @@
  *    finalises.
  */
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
@@ -87,7 +87,7 @@ export const agentRunCancelService = {
       const [refreshed] = await db
         .select({ status: agentRuns.status })
         .from(agentRuns)
-        .where(eq(agentRuns.id, run.id))
+        .where(and(eq(agentRuns.id, run.id), eq(agentRuns.organisationId, organisationId)))
         .limit(1);
       return { status: refreshed?.status ?? run.status, performedTransition: false };
     }
@@ -139,6 +139,7 @@ export const agentRunCancelService = {
       .where(and(
         eq(ieeRuns.id, ieeRunId),
         inArray(ieeRuns.status, ['pending', 'running'] as const),
+        isNull(ieeRuns.deletedAt),
       ))
       .returning({ id: ieeRuns.id });
 

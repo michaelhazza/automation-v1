@@ -65,10 +65,11 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
         });
         lastCommandOutput = result.stdout + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
         lastCommandExitCode = result.exitCode;
+        // Stop on the first non-zero exit — subsequent commands (e.g. build
+        // steps after a failed `npm install`) won't work either.
+        if (result.exitCode !== 0) break;
       } catch (err) {
-        // Bootstrap failures are surfaced via the next observation rather
-        // than aborting executor construction. The agent decides what to
-        // do with the failure (retry, change strategy, fail).
+        // Denylist hits and timeouts land here — same stop logic.
         const msg = err instanceof Error ? err.message : String(err);
         lastCommandOutput = `initialCommand '${command.slice(0, 200)}' failed: ${msg}`;
         lastCommandExitCode = -1;
@@ -77,8 +78,6 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
           command: command.slice(0, 500),
           error: msg.slice(0, 500),
         });
-        // Stop on the first failure — typical case is `npm install`
-        // failing, after which subsequent commands won't work either.
         break;
       }
     }

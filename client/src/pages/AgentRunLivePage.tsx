@@ -137,6 +137,11 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
     'agent-run',
     runId ?? null,
     {
+      'agent:run:cancelling': (payload: unknown) => {
+        const p = payload as { runId?: string } | null;
+        if (p?.runId !== runId) return;
+        setRunMeta((prev) => prev ? { ...prev, status: 'cancelling' } : prev);
+      },
       'agent-run:execution-event': (payload: unknown) => {
         const event = payload as AgentExecutionEvent;
         if (!event || typeof event !== 'object' || !('sequenceNumber' in event)) return;

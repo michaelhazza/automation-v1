@@ -60,7 +60,8 @@ the results in the next Observation under "lastChecks". Each entry is
 { exitCode, passed, output }. A missing key means that check is not
 configured for this run — treat it as no signal, not an error. Do NOT call
 "done" while any configured check has passed=false; fix the underlying
-problem first, or call "failed" with a clear reason if you cannot.
+problem first. If you cannot resolve a failing check after two attempts, call
+"failed" with the check name and the last 200 characters of its output as the reason.
 
 SELECTOR HINTS (browser actions)
 Prefer Playwright text/role selectors:

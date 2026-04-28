@@ -60,12 +60,14 @@ export async function runQualityChecks(
   const { workspaceDir, config, ctx } = input;
   const result: NonNullable<Observation['lastChecks']> = {};
 
-  if (config.lintCommand) {
-    result.lint = await runOne(config.lintCommand, workspaceDir, ctx);
-  }
-  if (config.typecheckCommand) {
-    result.typecheck = await runOne(config.typecheckCommand, workspaceDir, ctx);
-  }
+  // lint and typecheck are independent — run them in parallel to halve latency.
+  const [lintResult, typecheckResult] = await Promise.all([
+    config.lintCommand ? runOne(config.lintCommand, workspaceDir, ctx) : Promise.resolve(undefined),
+    config.typecheckCommand ? runOne(config.typecheckCommand, workspaceDir, ctx) : Promise.resolve(undefined),
+  ]);
+  if (lintResult) result.lint = lintResult;
+  if (typecheckResult) result.typecheck = typecheckResult;
+
   if (config.testCommand) {
     result.test = await runOne(config.testCommand, workspaceDir, ctx);
   }
