@@ -3485,13 +3485,15 @@ export const WorkflowEngineService = {
       },
     });
 
-    await pgboss.work(
-      WATCHDOG_QUEUE,
-      { teamSize: 1, teamConcurrency: 1 },
-      async () => {
+    await createWorker<Record<string, never>>({
+      queue: WATCHDOG_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      resolveOrgContext: () => null,  // cross-org sweep, no single tenant
+      handler: async () => {
         await this.watchdogSweep();
-      }
-    );
+      },
+    });
 
     // Workflow-agent-step worker — runs the actual agent for prompt /
     // agent_call step types. Dynamic-imported to avoid pulling
