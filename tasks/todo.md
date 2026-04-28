@@ -1104,3 +1104,26 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
 - **REQ #13 — `action: 'new'` emit on review item creation.** RESOLVED. Emit added inside `reviewService.createReviewItem` (`server/services/reviewService.ts:60-67`). Single call site closes all 6 caller paths.
 - **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** RESOLVED. Single emit added per bulk request in `server/routes/reviewItems.ts` bulk-approve (after `reviewService.bulkApprove`) and bulk-reject (after `reviewService.bulkReject`). `subaccountId: null` per spec contract (string | null) — bulk batches may span subaccounts and the payload field is informational only (§4.3 payload-not-trusted rule).
 
+
+---
+
+## Deferred from plan review — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28
+**Source:** Pre-build plan review for `tasks/builds/pre-test-brief-and-ux/plan.md`
+
+- [ ] **PLAN-REVIEW-P4 — Error banner state type.** `DashboardErrorBanner` uses `Record<string, boolean>` per spec. Upgrade to `Record<string, 'ok' | 'failed'>` for richer observability (persistent-failure visibility, partial-retry tracking). Not scope creep today per §0.3 — spec names the boolean type explicitly.
+  - **Severity:** low (nice-to-have observability improvement)
+  - **Blocked on:** follow-up spec that updates §1.4 S3 type definition
+
+- [ ] **PLAN-REVIEW-P5 — DR2 runtime branching guard.** Add a dev-mode runtime assertion in `routes/conversations.ts` that throws if both the brief branch and the noop branch execute (or if neither executes). Current enforcement is via code-grep per spec acceptance criteria — a runtime guard would catch regressions earlier.
+  - **Severity:** low (defensive engineering)
+  - **Blocked on:** follow-up spec that names the guard explicitly (out of §0.3 scope for this spec)
+
+- [ ] **PLAN-REVIEW-P7 — Middleware ordering enforcement.** Tag `req.__txMounted = true` in the org-tx middleware; add an assertion in `postCommitEmitterMiddleware` that the tag is present on arrival. Current enforcement is manual PR-time inspection. The tag catches mount-order regressions without new infrastructure.
+  - **Severity:** low (defensive engineering, fragile if manually enforced)
+  - **Blocked on:** org-tx middleware being named in a follow-up spec (out of §0.3 scope for this spec)
+
+- [ ] **PLAN-REVIEW-P8 — Log prefix standardisation.** Unify structured log event names: `brief.*`, `conversation.*`, `post_commit.*` instead of the mixed `post_commit_emit_*` / `conversations_route.*` / `brief_artefacts.*` naming. Pays off in observability tooling (log aggregation, alerting). Requires a spec update before changing.
+  - **Severity:** cosmetic / low (no behaviour impact, audit-trail impact)
+  - **Blocked on:** follow-up spec that updates §1.1–§1.2 log definitions

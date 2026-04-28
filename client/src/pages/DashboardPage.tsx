@@ -10,6 +10,7 @@ import { QueueHealthSummary } from '../components/dashboard/QueueHealthSummary';
 import { FreshnessIndicator } from '../components/dashboard/FreshnessIndicator';
 import { OperationalMetricsPlaceholder } from '../components/dashboard/OperationalMetricsPlaceholder';
 import UnifiedActivityFeed from '../components/UnifiedActivityFeed';
+import { DashboardErrorBanner } from '../components/DashboardErrorBanner';
 import { resolvePulseDetailUrl } from '../lib/resolvePulseDetailUrl';
 import {
   trackPendingCardOpened,
@@ -17,6 +18,13 @@ import {
   trackPendingCardRejected,
 } from '../lib/telemetry';
 import type { PulseItem, PulseAttentionResponse } from '../hooks/usePulseAttention';
+
+type DashboardErrorMap = {
+  agents: boolean;
+  activity: boolean;
+  pulseAttention: boolean;
+  clientHealth: boolean;
+};
 
 interface Agent { id: string; name: string; status: string; }
 interface ActivityStats {
@@ -40,6 +48,9 @@ export default function DashboardPage({ user }: { user: User }) {
   const [attention, setAttention]         = useState<PulseAttentionResponse | null>(null);
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [loading, setLoading]             = useState(true);
+  const [errors, setErrors]               = useState<DashboardErrorMap>({
+    agents: false, activity: false, pulseAttention: false, clientHealth: false,
+  });
   const navigate = useNavigate();
 
   // ── Per-group timestamp refs (latest-data-wins) ──────────────────────────
@@ -173,10 +184,54 @@ export default function DashboardPage({ user }: { user: User }) {
     setQueueRefreshToken(t => t + 1);
   }
 
-  function refetchAll() {
-    void refetchApprovals();
-    void refetchActivity();
-    void refetchClientHealth();
+  async function refetchAll() {
+    const cycleErrors: DashboardErrorMap = {
+      agents: false, activity: false, pulseAttention: false, clientHealth: false,
+    };
+
+    const [agentsRes, statsRes, attentionRes, healthRes] = await Promise.all([
+      api.get<Agent[]>('/api/agents').catch((err) => {
+        console.error('[Dashboard] agents fetch failed', err);
+        cycleErrors.agents = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<ActivityStats>>('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => {
+        console.error('[Dashboard] activity fetch failed', err);
+        cycleErrors.activity = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<PulseAttentionResponse>>('/api/pulse/attention').catch((err) => {
+        console.error('[Dashboard] pulseAttention fetch failed', err);
+        cycleErrors.pulseAttention = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<HealthSummary | null>>('/api/clientpulse/health-summary').catch((err) => {
+        console.error('[Dashboard] clientHealth fetch failed', err);
+        cycleErrors.clientHealth = true;
+        return null;
+      }),
+    ]);
+
+    setErrors(cycleErrors);
+
+    if (agentsRes) setAgents(agentsRes.data);
+    if (statsRes) {
+      applyIfNewer(activityTs, statsRes.data.serverTimestamp ?? '', () => {
+        setStats(statsRes.data.data);
+        setActivityRefreshToken(t => t + 1);
+      });
+    }
+    if (attentionRes) {
+      applyIfNewer(approvalsTs, attentionRes.data.serverTimestamp ?? '', () => {
+        setAttention(attentionRes.data.data);
+      });
+    }
+    if (healthRes) {
+      applyIfNewer(clientHealthTs, healthRes.data.serverTimestamp ?? '', () => {
+        setHealthSummary(healthRes.data.data);
+      });
+    }
+    markFresh(new Date());
     if (user.role === 'system_admin') refetchQueue();
   }
 
@@ -215,7 +270,7 @@ export default function DashboardPage({ user }: { user: User }) {
     if (wasConnected === false && connected === true) {
       if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
       reconnectDebounce.current = setTimeout(() => {
-        refetchAll();
+        void refetchAll();
       }, RECONNECT_DEBOUNCE_MS);
     }
 
@@ -228,29 +283,7 @@ export default function DashboardPage({ user }: { user: User }) {
   }, [connected]);
 
   useEffect(() => {
-    Promise.all([
-      api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
-      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: { data: null, serverTimestamp: '' } }; }),
-      api.get('/api/pulse/attention').catch((err) => { console.error('[Dashboard] Failed to fetch pulse attention:', err); return { data: { data: null, serverTimestamp: '' } }; }),
-      api.get('/api/clientpulse/health-summary').catch(() => { return { data: { data: null, serverTimestamp: '' } }; }),
-    ]).then(([a, s, p, h]) => {
-      setAgents(a.data);
-      // Route initial-load setters through applyIfNewer so a socket-driven
-      // refetch that resolved during the load window cannot be silently
-      // overwritten by an older initial-load response (latest-data-wins,
-      // spec §6.2). Empty-string timestamps from the catch-fallbacks are
-      // treated as not-newer and discarded by applyIfNewer's strict `>`.
-      applyIfNewer(activityTs, s.data.serverTimestamp ?? '', () => {
-        setStats(s.data.data);
-      });
-      applyIfNewer(approvalsTs, p.data.serverTimestamp ?? '', () => {
-        setAttention(p.data.data);
-      });
-      applyIfNewer(clientHealthTs, h.data.serverTimestamp ?? '', () => {
-        setHealthSummary(h.data.data);
-      });
-      markFresh(new Date());
-    }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
+    void refetchAll().finally(() => setLoading(false));
   }, []);
 
   const hour = new Date().getHours();
@@ -290,6 +323,8 @@ export default function DashboardPage({ user }: { user: User }) {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
+      <DashboardErrorBanner errors={errors} onRetry={() => { void refetchAll(); }} />
+
       {/* Greeting */}
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
