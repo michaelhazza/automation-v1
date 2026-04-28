@@ -184,6 +184,12 @@ export const reviewService = {
         }).where(eq(actions.id, updated.actionId));
       }
 
+      // Test seam: allow integration tests to inject a pause so concurrent
+      // callers can enter the race window before this transaction commits.
+      if (__testHooks.delayBetweenClaimAndCommit) {
+        await __testHooks.delayBetweenClaimAndCommit();
+      }
+
       return { kind: 'updated' as const, row: updated };
     });
 
@@ -358,6 +364,12 @@ export const reviewService = {
         rejectionComment,
         updatedAt: new Date(),
       }).where(eq(actions.id, updated.actionId));
+
+      // Test seam: allow integration tests to inject a pause so concurrent
+      // callers can enter the race window before this transaction commits.
+      if (__testHooks.delayBetweenClaimAndCommit) {
+        await __testHooks.delayBetweenClaimAndCommit();
+      }
 
       return { kind: 'updated' as const, row: updated };
     });
@@ -541,3 +553,11 @@ export const reviewService = {
     return { ...item, action };
   },
 };
+
+// ── Test seam ──────────────────────────────────────────────────────────────
+// Allows integration tests to inject a pause between the claim UPDATE and the
+// transaction COMMIT so the race window is opened deterministically. Production
+// behaviour is unchanged when this hook is unset (production-safety contract).
+export const __testHooks: {
+  delayBetweenClaimAndCommit?: () => Promise<void>;
+} = {};

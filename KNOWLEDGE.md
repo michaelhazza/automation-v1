@@ -1098,3 +1098,134 @@ When applying review feedback to a spec, contracts that the implementation must 
 **How to apply.** When applying spec review feedback, for every "verify X" or "rely on Y" phrase in the diff, ask: "What MUST hold for this to be safe?" — and write that as a MUST statement in the spec, with the failure modes explicitly forbidden. Verification instructions belong in the implementation checklist, not in the contract section. The contract is what survives refactors; the verification instruction is what loses.
 
 **File reference:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §§1.1, 1.2 (purity contract), 1.3 (idempotency + retry), 1.7 (time source), 1.8 (hook-presence) — second-round edits applied 2026-04-28.
+
+---
+
+### [2026-04-28] Ledger-canonical / payload-best-effort consistency contract (§1.1 LAEL)
+
+When an event record (the "ledger") and a companion content-payload record exist in the same transaction, the consistency model MUST be explicit: one is canonical and must succeed; the other is best-effort and must NOT roll back the canonical record on failure.
+
+**Implementation pattern (from `server/services/llmRouter.ts`):**
+1. The canonical ledger write is in the main transaction tx.
+2. The payload insert is inside a `try { ... } catch (err) { logger.warn('...'); payloadInsertStatus = 'failed'; }` block still inside the same tx — the catch swallows the insert failure so the outer tx commits regardless.
+3. A defensive `DELETE WHERE pk = rowId` runs inside the same catch, before the outer tx commits, to ensure no partial row is visible post-commit. Without this, the post-commit invariant `payloadInsertStatus === 'failed' ↔ no row exists` could be violated by a partial insert that committed partially.
+4. The canonical event (e.g. `llm.completed`) carries `payloadInsertStatus: 'ok' | 'failed'` so downstream consumers can distinguish "payload genuinely absent" from "payload write failed silently" without querying the payload table.
+
+**Why:** If the payload insert failure is allowed to roll back the ledger write, the system loses a permanent record of the LLM call — the ledger is the single source of truth for billing, audit, and retry. The payload is a debugging aid, not a contract.
+
+**How to apply:** Any time a "main record + companion content row" pattern is introduced, ask: (a) which is canonical? (b) does a companion failure silently discard the canonical record? (c) is the failure mode observable on the canonical event?
+
+---
+
+### [2026-04-28] Post-commit winner-branch rule for dispatch on approval-resume (§1.3)
+
+When an approval decision produces a side-effect (webhook dispatch, downstream job, state transition), that side-effect MUST be placed strictly after the decision-row commit AND only on the winner code path.
+
+**Structural enforcement (from `server/services/workflowRunService.ts` + `workflowEngineService.ts`):**
+- The winner is determined by an atomic `UPDATE ... WHERE status = 'awaiting_approval' RETURNING *` (compare-and-swap on row status). If no row returns, the caller is the loser and returns without dispatching.
+- Dispatch (`resumeInvokeAutomationStep`) is called by the caller that got a row back — i.e., strictly post-commit on the winner branch.
+- Concurrent callers that hit the no-return path return immediately with `alreadyResumed: true` and DO NOT dispatch.
+
+**The rule in one sentence:** Dispatch MUST NOT occur before the guard write, outside its post-commit boundary, in the conflict-loser branch, or in a fire-and-forget side-task that races the guard write.
+
+**Why:** Placing dispatch before the write creates a window where two concurrent callers can both dispatch before either commits; placing it in the loser branch causes double-dispatch on races; placing it in a fire-and-forget side-task breaks the post-commit guarantee.
+
+**Tracing tag:** The approval-resume dispatch path emits `dispatch_source: 'approval_resume'` on the tracing event so operators can distinguish initial dispatch from resume dispatch in logs/timeline.
+
+---
+
+### [2026-04-28] `__testHooks` seam promotion rule for deterministic race testing (§1.8)
+
+When a service has a race window between a "claim" write and its commit that must be tested deterministically, the `__testHooks` seam pattern provides a controlled injection point without coupling tests to wall-clock timing.
+
+**Pattern (from `server/services/reviewService.ts`):**
+```ts
+// At the bottom of the service file (development/test seam only)
+export const __testHooks: {
+  delayBetweenClaimAndCommit?: () => Promise<void>;
+} = {};
+```
+Inside the transaction, after the claim UPDATE and before commit:
+```ts
+if (__testHooks.delayBetweenClaimAndCommit) {
+  await __testHooks.delayBetweenClaimAndCommit();
+}
+```
+
+**Usage rule — hook-presence contract (MUST hold):** Any test that promotes to this pattern MUST assert the hook is available at test-setup time — `assert.ok(__testHooks !== undefined && 'delayBetweenClaimAndCommit' in __testHooks)` — and bail before any test body runs if missing. This prevents the test from silently regressing to non-deterministic `Promise.all` if the hook is removed in a refactor.
+
+**When to promote:** Try natural `Promise.all` first. If any CI run shows the loser branch not surfacing the expected `idempotent_race` discriminant (i.e., both calls returning `proceed`), promote immediately. Do not accumulate CI runs "to be sure" — the first sign of non-determinism is the trigger.
+
+**Prior art:** `server/lib/ruleAutoDeprecateJob.ts:86` — the canonical reference for this pattern in this codebase.
+
+---
+
+### [2026-04-28] Lock the contract you already have — single canonical block over implied-across-comments
+
+When an invariant is enforced by multiple distributed code sites (e.g. three independent emit sites + a finally fallback all upholding "exactly one X for every Y"), do NOT rely on per-site comments to convey the contract. Add ONE canonical block at the entry point that names the invariant, lists the enforcement sites, and states the failure-state collapse rules.
+
+**Pattern (from `server/services/llmRouter.ts` round-1 ChatGPT-review fix):**
+
+At the top of the function, beside the flag declarations:
+```
+// INVARIANT (locked): every emitted llm.requested is paired with exactly
+// one llm.completed. Three independent emit sites uphold this — success
+// path (§12c below), failure path (callStatus loop exit), and the
+// finally-block fallback. The two flags + wrapping try/finally enforce it.
+```
+
+At the section header where a contract has multiple failure-state collapse cases:
+```
+// PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
+// emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
+// Failure cases collapse to the same observable state … (a)/(b)/(c)
+// To distinguish them in debugging, look for the `lael_payload_insert_failed`
+// logger.warn — only case (b) emits it.
+```
+
+**Why it matters:** Future contributors otherwise have to read every emit site to verify the invariant holds. With a canonical block, one read confirms the contract; per-site comments become reinforcement, not the primary record. `(locked)` is the load-bearing word — signals to future readers "do not silently change this without renegotiating the contract."
+
+**How to apply:**
+1. When a code review surfaces "this invariant is implied across multiple comments," that's the trigger.
+2. The canonical block belongs at the highest scope where all enforcement sites are visible — function header, module top, or section anchor.
+3. List the enforcement sites by name (line numbers age out fast) and the collapse rules (which observable states are indistinguishable, and the breadcrumb that disambiguates them).
+4. Mark with `INVARIANT (locked):` or `CONTRACT (locked):` so a future text-search retrieves it.
+
+---
+
+### [2026-04-28] External-reviewer false-positive rate is non-zero — verify before applying
+
+ChatGPT / external review feedback contains a measurable false-positive rate. On `pre-test-backend-hardening` round 1, 3 of 11 findings (27%) were factually incorrect on a literal codebase read — the reviewer described the code as it WOULD have looked at an earlier point, not as it is.
+
+**False positives observed:**
+- "Stub tests give false sense of safety" — the stubs were already `test.skip(...)` not `assert.ok(true)`; the recommended fix was already in place.
+- "Duplicate `ingestInline` declaration" — a single multi-line function signature was misread as two declarations.
+- "`requireString` then `requireUuid` double-validates" — the two helpers were never stacked on the same field.
+
+**The rule:** Before applying ANY external-review finding, open the cited file and verify the claim. The receiving-code-review skill's "verify before implementing" loop is not paranoia — it has a measurable backstop against shipped-because-the-reviewer-said-so churn.
+
+**How to apply:**
+1. For each finding: open the file at the cited line, read enough surrounding context to confirm the claim is current.
+2. If the finding describes "this looks like X" — verify X is actually present, not "X-like."
+3. If the finding describes a ratio or count (e.g. "12 console.* calls") — confirm whether they are NEW in the current branch's diff or pre-existing.
+4. False positives get pushed back with the verifying read in the response, not silently dropped.
+
+**What this does NOT mean:** External review is not low-value. The same round 1 produced 2 high-leverage findings (lock the LAEL contract, lock the pairing invariant) that the author of the code did NOT spot. The verify-before-applying loop is what separates the value from the noise.
+
+---
+
+### [2026-04-28] Record the rejected option in deferred-decision todos, not just the accepted one
+
+When deferring a decision with a tracked todo, record BOTH the chosen option AND the rejected option's rationale on the same entry. Future-you reading the todo at trigger-time should not have to re-derive "why didn't we just do the safer thing now."
+
+**Pattern (from `tasks/todo.md` migration-0240 deferred entry):**
+```
+- Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, …".
+- Rejected option (2026-04-28): `CREATE UNIQUE INDEX CONCURRENTLY` with phased rollout.
+  Rejected for this PR because (a) `CONCURRENTLY` cannot run inside a transaction, (b) …
+  Becomes the correct option once the trigger condition above is met.
+```
+
+**Why:** A todo that says only "we accepted X" forces future-you to re-research "why not Y?" at trigger-time. A todo that says "we rejected Y for reasons (a)(b)(c)" tells future-you whether Y is now the right call (the reasons may have evaporated) or still wrong (the reasons still hold). Closes the audit loop.
+
+**How to apply:** Any deferred-decision todo where there was a credible alternative — operational migration, security/perf trade-off, "wrap this in a transaction vs not" — gets a `Rejected option (date):` line beside the `Decision (date):` line. The trigger condition for revisiting goes on the decision line; the criteria that flip the rejected option become the canonical option goes on the rejected line.
