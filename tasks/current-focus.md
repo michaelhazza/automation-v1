@@ -3,7 +3,7 @@ active_spec: docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md
 active_plan: tasks/builds/dev-mission-control/plan.md
 build_slug: dev-mission-control
 branch: claude/review-feature-workflow-c7Zij
-status: BUILDING
+status: MERGE_READY
 last_updated: 2026-04-28
 -->
 
@@ -19,9 +19,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
-**Active plan:** tasks/builds/pre-test-backend-hardening/plan.md
-**Active build slug:** pre-test-backend-hardening (branch `claude/pre-test-backend-hardening`)
+**Active spec:** docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md
+**Active plan:** _none_ (spec → direct build, no plan slug)
+**Active build slug:** dev-mission-control (branch `claude/review-feature-workflow-c7Zij`)
+**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES, 1 mechanical fix, 4 directional items routed to `tasks/todo.md`) → pr-reviewer (APPROVED, no blocking; S1–S4 + N1/N3/N4 fixes auto-applied in `b5bec8b`) → chatgpt-review-auto round 2 (5 high-value fixes in `c0b27e3` — spec parity, current-focus mismatch detection, full raw_response on parse fail, three-state phase derivation, split GitHub cache TTLs) → chatgpt-review-auto round 3 (3 future-proofing fixes in `3ebb8ed` — `dataPartial`/`isPartial` signal, `pr.ci_updated_at`, read-only constraints locked into spec § A2). Final ChatGPT pass: explicit "ship". 68 unit tests passing. 16 commits on the branch.
+
+**Pair spec (concurrent, separate branch — superseded as active focus):** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
+**Pair plan:** tasks/builds/pre-test-backend-hardening/plan.md
+**Pair branch:** `claude/pre-test-backend-hardening`
 **Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
 **Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
 **Last updated:** 2026-04-28

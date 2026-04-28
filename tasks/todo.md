@@ -1357,3 +1357,26 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
   - Spec section: § 5 Files to change (New files)
   - Gap: Spec § 5 lists a single new file `scripts/chatgpt-review.ts`. Implementation split into `scripts/chatgpt-review.ts` (CLI entry) and `scripts/chatgpt-reviewPure.ts` (pure helpers). The split is sound — it keeps fetch / fs side effects out of the unit-tested pure code. Test file is at `scripts/__tests__/chatgpt-reviewPure.test.ts` rather than the spec-named `scripts/__tests__/chatgpt-review.test.ts`.
   - Suggested approach: low priority — the spec's intent (CLI + tsx unit tests for pure helpers) is met. Update spec § 5 in a follow-up to document the two-file shape, OR leave as a benign as-built improvement. Not blocking.
+
+## Deferred from chatgpt-review-auto final pass — dev-mission-control (2026-04-28)
+
+**Captured:** 2026-04-28T13:30:00Z
+**Source:** ChatGPT round-3 final review (commits `c0b27e3` and `3ebb8ed` close the in-scope items; this section captures the explicitly-deferred future-proofing items).
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] CI grep test for spec invariants — guard against silent spec drift
+  - Trigger: any future commit that edits `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md` or the agent definitions in `.claude/agents/chatgpt-*-review.md`, `pr-reviewer.md`, `dual-reviewer.md`, `spec-reviewer.md`.
+  - Suggested approach: add a small bash gate (model on `scripts/verify-rls-coverage.sh`) that greps the spec and the relevant agent definitions for the load-bearing invariant strings — `**Verdict:**`, `dataPartial`, `isPartial`, `ci_updated_at`, `mismatch`, `read-only`, `no manual override`. Fails CI if any string is removed without a corresponding spec update. ChatGPT reviewer's framing: "this is how you keep the spec from drifting."
+  - Decision (2026-04-28): deferred per the reviewer's own guidance ("Not required now, but this is how you keep the spec from drifting"). Implement when the dashboard or CLI is touched in a meaningful way without an accompanying spec edit — that's the trigger that proves the gate is needed.
+  - Rejected option (2026-04-28): inlining a JS/TS check inside the test runner. Rejected because the existing pattern in `scripts/verify-*.sh` is a portable bash gate; staying with the same idiom keeps the CI surface uniform.
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] Filesystem-error vs ENOENT differentiation for review/progress reads — extend `dataPartial` coverage
+  - Currently only GitHub fetch errors flip `dataPartial`. Filesystem reads (`readIfExists` in `tools/mission-control/server/lib/inFlight.ts`) silently treat all errors as "no data" — ENOENT (intentional null) and EACCES/EIO (real error) are indistinguishable to the consumer.
+  - Trigger: any reported case of "the dashboard says no review but I know there is one" or "Mission Control silently dropped my progress.md."
+  - Suggested approach: change `readIfExists` to return `{ exists: boolean; content: string | null; errored: boolean }` and have the composer flip `dataPartial: true` on `errored`. Mirrors the github.ts FetchResult pattern.
+  - Decision (2026-04-28): deferred. Negligible risk in single-developer dev contexts where filesystem permissions are stable; revisit only if a real case surfaces.
+
+- [ ] [origin:chatgpt-review-auto:dev-mission-control:2026-04-28T13-30-00Z] [status:open] Wire `inFlight.test.ts` and `github.test.ts` into the dashboard's `npm test` script
+  - Currently `tools/mission-control/package.json`'s `test` script only runs `logParsers.test.ts`; the other two tsx test files must be invoked directly.
+  - Trigger: any time the user is comfortable approving the (HITL-protected) `package.json` edit. One-line change to chain the three test files via `&&`.
+  - Suggested approach: change the `test` script to `tsx server/__tests__/logParsers.test.ts && tsx server/__tests__/inFlight.test.ts && tsx server/__tests__/github.test.ts` (or migrate to a small test-runner that globs `__tests__/*.test.ts`).
+  - Decision (2026-04-28): deferred to keep the round-3 commit free of HITL approvals. Tests are runnable via `npx tsx` directly; this is convenience-only.

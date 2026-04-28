@@ -72,21 +72,23 @@ The dashboard expects the target project to follow the same `tasks/builds/` + `t
 | Endpoint | Returns |
 |---|---|
 | `GET /api/health` | `{ ok, repoRoot, githubRepo, hasGithubToken }` |
-| `GET /api/in-flight` | `{ items: InFlightItem[] }` — the dashboard's primary feed |
+| `GET /api/in-flight` | `{ items: InFlightItem[], isPartial: boolean }` — the dashboard's primary feed. `isPartial` is true when at least one item's `dataPartial` is true (one or more underlying GitHub fetches errored). |
 | `GET /api/builds` | `{ slugs: string[] }` |
-| `GET /api/current-focus` | `{ block, fallback, exists }` |
+| `GET /api/current-focus` | `{ block, fallback, exists, mismatch }` — `mismatch` is `{ block, prose }` when the machine block disagrees with the prose body's `**Active build slug:**` (spec § C3 keeps prose canonical), otherwise `null`. |
 | `GET /api/review-logs` | `{ logs: ReviewLogMeta[] }` (sorted newest first) |
 
-The `InFlightItem` contract is pinned in the spec at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md` § C4.
+The `InFlightItem` contract (including `dataPartial: boolean`, `pr.ci_updated_at: string \| null`, and the three-state phase resolution) is pinned in the spec at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md` § C4.
 
 ## Tests
 
 ```bash
 cd tools/mission-control
-npm test
+npm test                                                          # logParsers (22 tests)
+npx tsx server/__tests__/inFlight.test.ts                         # phase derivation (11 tests)
+npx tsx server/__tests__/github.test.ts                           # CI status + ts helpers (12 tests)
 ```
 
-Runs the tsx unit tests for the pure log parsers (19 tests covering filename shapes, verdict extraction, current-focus block parsing, progress.md counting, latest-log selection). The Express server, GitHub fetch, and React UI are not unit-tested — manual verification via `npm run dev` is the expected pre-merge check, per the spec § 9 testing posture.
+Total **45 dashboard tests** (plus 23 for the chatgpt-review CLI under `scripts/__tests__/`). The Express server, GitHub fetch, and React UI are not unit-tested — manual verification via `npm run dev` is the expected pre-merge check, per the spec § 9 testing posture.
 
 ## What it deliberately doesn't do
 
@@ -94,3 +96,13 @@ Runs the tsx unit tests for the pure log parsers (19 tests covering filename sha
 - **No KPIs / charts / aggregations.** One screen, one purpose: see what's in flight. Per `docs/frontend-design-principles.md`.
 - **No persistence.** Reads files and GitHub on every request; no DB.
 - **No auth.** Binds to `127.0.0.1` only and assumes local-machine trust. If that ever changes, add auth before exposing.
+- **No mutation of findings.** No manual override, no editing in the UI, no "acknowledge and hide". The dashboard is a deterministic projection of what the underlying logs and APIs say. Spec § A2 locks this constraint — change it via a new spec, not a quick edit.
+
+## Partial-data signal
+
+When a GitHub fetch errors (rate-limit, network blip, auth failure), the affected `InFlightItem` carries `dataPartial: true` and the response carries `isPartial: true`. The UI shows:
+
+- A top-level amber banner explaining that some data is incomplete.
+- A small amber "partial" pill on each affected card.
+
+This avoids the "false confidence" failure mode where a silent fetch error makes a card render "all clear" when it's actually missing data. Errors auto-clear on the next successful poll (5s error-cache TTL vs 60s/120s success).
