@@ -1555,3 +1555,85 @@ This is the canonical end-to-end test for the entire System Monitor pipeline.
 - [ ] `dual-reviewer` (if user-triggered for Phase 2) returns PASS or findings addressed.
 
 ---
+
+## §10 Deferred items + open questions
+
+### §10.1 Deferred items (Tier 2 — before production rollout)
+
+These items are NOT in this spec but should land before production. Each gets its own follow-up spec.
+
+- **G4 — full `createWorker` conversion of remaining `maintenance:*` queues.** ~14 raw `boss.work` registrations in `server/services/queueService.ts` that are out of scope for this spec. Phase 2 of this spec only covers workflow engine + IEE. Reason for deferral: would dwarf this spec's surface; touches a single ~1100-line file. Follow-up: `2026-04-DD-monitoring-coverage-maintenance-queues-spec.md` (post-merge).
+- **G6 — `skillExecutor` retry-exhaustion incident path.** Touches retry-count plumbing in `skillExecutor.ts`. Skill executions with `onFailure: 'retry'` / `'skip'` / `'fallback'` currently log but never produce incidents on persistent failure. Reason for deferral: requires retry-count threading; bigger surface than the rest of this spec. Follow-up spec or extend `system-monitoring-agent-fixes` Tier 2.
+- **G9 — add `'webhook'` to `SystemIncidentSource` enum.** Requires a migration. Webhook 5xx incidents in this spec land as `source: 'route'` with `fingerprintOverride: 'webhook:*:*'` so they're disambiguable. Reason for deferral: avoids a migration in this spec. Follow-up: combine with G15 in a single migration if both end up needing one.
+- **G13 — adapter-level `recordIncident` calls.** Per-adapter audit needed across `server/adapters/{ghl,slack,stripe,teamwork}.ts`. Reason for deferral: needs care to avoid emitting on every transient call failure; should pair with a per-adapter retry contract review.
+- **G15 — sysadmin-op partial-failure incident emission.** Point audit needed across `orgSubaccountMigrationJob`, `configBackupService`, `dataRetentionService`, `scheduledTaskService`. Reason for deferral: low-frequency operations; testing-pass priority is lower than the higher-frequency surfaces this spec covers.
+
+### §10.2 Deferred items (Tier 3 — post-launch polish)
+
+These are not blockers for testing or production rollout.
+
+- **G10 — new agent read skills.** Add `read_agent_definition`, `read_recent_incidents`, `read_pgboss_queue_state`, `read_org_subaccount_summary`. Each ~50 LOC following existing pattern. Improves diagnosis depth.
+- **G12 — new synthetic checks.** HITL approval timeout, workflow stuck non-terminal, scheduled-task dispatch silence, skill silence, brief artefact rejection rate. Each 30–50 LOC. Adds silent-failure detection.
+- **G14 — Redis-backed `processLocalFailureCounter`.** Multi-instance deploy concern. Currently process-local; documented limitation. Phase 0.75 hardening item.
+- **Cross-incident clustering exposed to triage agent.** Currently the agent can't ask "is this part of a cluster of N similar incidents in the last hour?". Requires a new read skill.
+- **Per-triage byte cap on agent reads.** Token-budget defence in depth. Trigger-model token budget already covers worst case.
+- **`confidence: 'insufficient'` value on agent diagnoses.** Cosmetic — `'low'` + the word "insufficient" in hypothesis text covers it today.
+- **Phase 0.75 — push channels.** Email/Slack on critical incidents. Already deferred per `phase-A-1-2-spec.md` Q1.
+- **Phase 3 — auto-remediation.** Already deferred per spec.
+
+### §10.3 Open questions
+
+#### OQ1 — Should `dlqMonitorService` use `createWorker`?
+
+The current `startDlqMonitor` uses raw `boss.work(...)` (audit log §4.2.4 Class C). It DOES emit `recordIncident`, so it's not a coverage gap — but it bypasses `createWorker`'s retry/timeout/error-classification. Decision pending: convert in this spec, defer to follow-up, or document as intentional?
+
+**Recommendation:** defer. The DLQ subscription handler is a thin function (~10 LOC); the `createWorker` benefits (retry, timeout) are less relevant for a job that just records an incident. Document as intentional in a code comment.
+
+#### OQ2 — Should `JOB_CONFIG[*].deadLetter` follow a typed convention?
+
+Today `deadLetter` is `string | undefined`. Phase 1's invariant test asserts it's always present. Should the type system force this?
+
+**Recommendation:** convert `JOB_CONFIG` entries to a Drizzle-style branded type or a TS satisfies clause that enforces `deadLetter: string`. Out of scope for this spec; routed to a follow-up.
+
+#### OQ3 — When does `system-monitor-ingest` queue's DLQ subscriber fire, and how should the meta-incident be styled?
+
+If async ingest fails 3 times and lands in `system-monitor-ingest__dlq`, the DLQ subscriber records an incident with `fingerprintOverride: 'job:system-monitor-ingest:dlq'`. This is a "the incident pipeline is broken" signal — should it have higher severity than the default `'high'`?
+
+**Recommendation:** keep at `'high'`. Critical-severity is reserved for production-down events, and a degraded-but-functioning ingest pipeline (sync mode is still working in parallel) doesn't qualify. Self-check job (`systemMonitorSelfCheckJob.ts`) already handles the more severe "ingest is fully degraded" case.
+
+#### OQ4 — Should the logger `appendLogLine` lazy-import path be eager once buffer module is verified safe?
+
+The lazy import is a defensive choice. If the buffer module proves stable, an eager import shaves a microtask off every log call.
+
+**Recommendation:** start lazy; convert to eager in a follow-up after Phase 1 lands and the buffer's import safety is verified. Not blocking.
+
+#### OQ5 — Cross-instance log buffer (Redis-backed)?
+
+Multi-instance deploys mean log lines from instance A aren't visible to instance B. The triage agent could be running on B and asking for a correlation ID whose lines are on A.
+
+**Recommendation:** out of scope. Pre-production we run a single instance. Ties to G14 — same multi-instance hardening pass.
+
+### §10.4 Stuff this spec is intentionally silent about
+
+- Frontend changes (none).
+- Migration sequencing (none in this spec).
+- Cron schedules (no changes).
+- pg-boss version pinning (no changes).
+- LLM model selection for the triage agent (no changes).
+- The triage agent's prompt or Investigate-Fix Protocol (no changes).
+- The admin UI surface (no changes).
+- Permission system (no changes — all routes touched are sysadmin-gated already).
+- `architecture.md` updates beyond the System Monitor section.
+
+### §10.5 Tracking
+
+- **Audit log:** `tasks/review-logs/codebase-audit-log-monitoring-coverage-2026-04-28T06-09-11Z.md`
+- **Build slug:** `tasks/builds/system-monitoring-coverage/`
+- **Progress doc:** `tasks/builds/system-monitoring-coverage/progress.md`
+- **Branch:** `claude/add-monitoring-logging-3xMKQ`
+- **Predecessor follow-up backlog:** `tasks/post-merge-system-monitor.md` (entries Tier 2+ remain there)
+- **Current focus pointer:** update `tasks/current-focus.md` to point at this spec when implementation begins.
+
+---
+
+**End of spec.**
