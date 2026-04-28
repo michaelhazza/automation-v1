@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md
-active_plan: tasks/builds/dev-mission-control/plan.md
-build_slug: dev-mission-control
-branch: claude/review-feature-workflow-c7Zij
-status: MERGE_READY
+active_spec: none
+active_plan: none
+build_slug: none
+branch: main
+status: NONE
 last_updated: 2026-04-28
 -->
 
@@ -19,10 +19,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md
-**Active plan:** _none_ (spec → direct build, no plan slug)
-**Active build slug:** dev-mission-control (branch `claude/review-feature-workflow-c7Zij`)
-**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES, 1 mechanical fix, 4 directional items routed to `tasks/todo.md`) → pr-reviewer (APPROVED, no blocking; S1–S4 + N1/N3/N4 fixes auto-applied in `b5bec8b`) → chatgpt-review-auto round 2 (5 high-value fixes in `c0b27e3` — spec parity, current-focus mismatch detection, full raw_response on parse fail, three-state phase derivation, split GitHub cache TTLs) → chatgpt-review-auto round 3 (3 future-proofing fixes in `3ebb8ed` — `dataPartial`/`isPartial` signal, `pr.ci_updated_at`, read-only constraints locked into spec § A2). Final ChatGPT pass: explicit "ship". 68 unit tests passing. 16 commits on the branch.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Status:** **NONE** — no spec in flight.
+
+**Recently merged:** pre-test-integration-harness (PR #227 — MERGED 2026-04-28 at `342402cd`). Fake provider adapter + webhook receiver harnesses, LAEL/approval-resume integration tests, AutomationStepError shape tests. Full review pipeline: spec-conformance → pr-reviewer → chatgpt final-review (4 rounds). 3 KNOWLEDGE.md patterns extracted.
+**Previously merged:** dev-mission-control (PR #225 — MERGED 2026-04-28), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
+
+**Previously active:** dev-mission-control (PR #225 — MERGED 2026-04-28): full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES, 1 mechanical fix, 4 directional items routed to `tasks/todo.md`) → pr-reviewer (APPROVED, no blocking; S1–S4 + N1/N3/N4 fixes auto-applied in `b5bec8b`) → chatgpt-review-auto round 2 (5 high-value fixes in `c0b27e3` — spec parity, current-focus mismatch detection, full raw_response on parse fail, three-state phase derivation, split GitHub cache TTLs) → chatgpt-review-auto round 3 (3 future-proofing fixes in `3ebb8ed` — `dataPartial`/`isPartial` signal, `pr.ci_updated_at`, read-only constraints locked into spec § A2). Final ChatGPT pass: explicit "ship". 68 unit tests passing. 16 commits on the branch.
 
 **Pair spec (concurrent, separate branch — superseded as active focus):** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
 **Pair plan:** tasks/builds/pre-test-backend-hardening/plan.md

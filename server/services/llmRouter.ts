@@ -1258,16 +1258,113 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // ── §1.1 LAEL-P1-1 — payload row + llm.completed (failure path) ─────
     //
     // Emitted AFTER the ledger row is written and AFTER the registry
-    // cleanup above, BEFORE rethrowing. On the failure path there is no
-    // provider response, so tokensIn/Out and costWithMarginCents are 0.
+    // cleanup above, BEFORE rethrowing.
+    //
+    // FAILURE-PATH PAYLOAD ROW (spec
+    // 2026-04-28-pre-test-integration-harness-spec.md §1.5 Option A):
+    // We persist a row in agent_run_llm_payloads even on failure. The shape:
+    //   - `response: null` — no usable provider output (provider rejected
+    //     before stream open, network error before any bytes, response
+    //     un-parseable). Token counts are 0, cost is 0.
+    //   - `response: <partial ProviderResponse>` — provider produced a
+    //     structurally-valid partial result (e.g. streaming interrupted
+    //     mid-completion, or usage-without-content content-policy refusal).
+    //     Token counts and cost reflect the partial usage as reported by
+    //     the adapter — never zeroed out when usage is reported, even if
+    //     assistant content is empty.
+    //
     // `shouldEmitLaelLifecycle` returns false for pre-dispatch terminals
     // (budget_blocked / rate_limited / provider_not_configured) — those
     // paths throw earlier and never reach here. The only failure statuses
     // that arrive here are post-dispatch errors (timeout, parse_failure,
     // provider_unavailable, etc.) for which emission is appropriate.
+    //
+    // Insert runs inside its own db.transaction so a thrown insert error
+    // rolls back any partial commit; the ledger row is intentionally NOT
+    // pulled into this tx (already committed). Failure to insert is
+    // best-effort — the post-commit invariant holds via the wrap-tx +
+    // payloadInsertStatus='failed' fallback in the catch handler.
     terminalStatus = callStatus;
     if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
-      // No payload row on failure — no provider response to persist.
+      const partialResponse: Record<string, unknown> | null =
+        providerResponse !== null
+          ? (providerResponse as unknown as Record<string, unknown>)
+          : null;
+
+      // Token counts + cost on the failure path. When the adapter surfaced a
+      // partial response WITH usage, we honour the provider-reported numbers —
+      // a content-policy refusal that consumes 4k input tokens is still a 4k-
+      // token charge and must not silently record zero cost. When there is no
+      // usable response, all three collapse to 0.
+      let failureTokensIn = 0;
+      let failureTokensOut = 0;
+      let failureCostCents = 0;
+      if (providerResponse !== null) {
+        failureTokensIn = providerResponse.tokensIn ?? 0;
+        failureTokensOut = providerResponse.tokensOut ?? 0;
+        if (failureTokensIn > 0 || failureTokensOut > 0) {
+          try {
+            const failureCostResult = await pricingService.calculateCost(
+              actualProvider,
+              actualModel,
+              failureTokensIn,
+              failureTokensOut,
+              ctx.organisationId,
+              providerResponse.cachedPromptTokens ?? 0,
+              ctx.sourceType,
+            );
+            failureCostCents = failureCostResult.costWithMarginCents;
+          } catch (costErr) {
+            // Cost calculation failure on the failure path must not mask the
+            // primary error; log and fall through with cost=0.
+            logger.warn('lael_failure_path_cost_calc_failed', {
+              runId: ctx.runId,
+              ledgerRowId,
+              error: costErr instanceof Error ? costErr.message : String(costErr),
+            });
+          }
+        }
+      }
+
+      let payloadRowId: string | null = null;
+      let payloadInsertStatus: 'ok' | 'failed' = 'failed';
+      try {
+        const systemPromptStr =
+          typeof params.system === 'string'
+            ? params.system
+            : params.system
+              ? `${params.system.stablePrefix}\n${params.system.dynamicSuffix}`
+              : '';
+        const payloadRow = buildPayloadRow({
+          systemPrompt:    systemPromptStr,
+          messages:        params.messages,
+          toolDefinitions: params.tools ?? [],
+          response:        partialResponse,
+          maxBytes:        64 * 1024,
+        });
+        payloadRowId = await db.transaction(async (tx) => {
+          const [inserted] = await tx.insert(agentRunLlmPayloads).values({
+            llmRequestId:   ledgerRowId,
+            runId:          ctx.runId!,
+            organisationId: ctx.organisationId,
+            subaccountId:   ctx.subaccountId ?? null,
+            ...payloadRow,
+          }).returning({ id: agentRunLlmPayloads.llmRequestId });
+          return inserted?.id ?? null;
+        });
+        payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
+      } catch (insertErr) {
+        // Best-effort: the ledger row is canonical. Wrapping tx rolled back
+        // any partial INSERT, so the post-commit invariant holds without a
+        // defensive DELETE.
+        logger.warn('lael_failure_path_payload_insert_failed', {
+          runId: ctx.runId, ledgerRowId,
+          error: insertErr instanceof Error ? insertErr.message : String(insertErr),
+        });
+        payloadInsertStatus = 'failed';
+        payloadRowId = null;
+      }
+
       laelCompletedEmitted = true;
       tryEmitAgentEvent({
         runId:          ctx.runId!,
@@ -1279,12 +1376,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           critical:            true,
           llmRequestId:        ledgerRowId,
           status:              callStatus,
-          tokensIn:            0,
-          tokensOut:           0,
-          costWithMarginCents: 0,
+          tokensIn:            failureTokensIn,
+          tokensOut:           failureTokensOut,
+          costWithMarginCents: failureCostCents,
           durationMs:          Date.now() - providerStart,
-          payloadInsertStatus: 'failed',
-          payloadRowId:        null,
+          payloadInsertStatus,
+          payloadRowId,
         },
       });
     }
@@ -1582,17 +1679,25 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   //
   // PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
   // emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
-  // Failure cases collapse to the same observable state
-  // (`payloadInsertStatus: 'failed'`, `payloadRowId: null`):
-  //   (a) provider failure — the failure path emits llm.completed without
-  //       running this section (no provider response to persist; spec Gap D).
-  //   (b) success-path INSERT failure — the wrap-tx below rolls back any
-  //       partial INSERT and the catch handler emits llm.completed with
-  //       payloadInsertStatus='failed'.
+  //
+  // Three sites emit llm.completed; all observe the contract:
+  //   (a) success path (this section) — payload row attempted with the full
+  //       provider response. payloadInsertStatus reflects insert outcome:
+  //       'ok' on success, 'failed' if the wrap-tx catches an INSERT error.
+  //   (b) failure path (separate block above, ~lines 1329-1366) — payload
+  //       row is ALWAYS attempted on provider failure (best-effort). The
+  //       persisted `response` may be null (provider returned nothing usable)
+  //       or partial (provider surfaced usage-only / refusal data). The
+  //       payloadInsertStatus reflects the insert outcome independently — a
+  //       successful insert under provider failure produces 'ok' + a real
+  //       rowId, NOT 'failed'.
   //   (c) finally-block fallback — request emitted but completion did not
-  //       reach either path; emits with payloadInsertStatus='failed'.
-  // To distinguish (a)/(b)/(c) for debugging, look for the
-  // `lael_payload_insert_failed` logger.warn — only case (b) emits it.
+  //       reach (a) or (b); emits with payloadInsertStatus='failed' and no
+  //       insert is attempted.
+  //
+  // Disjoint warn signatures distinguish the sites for debugging:
+  //   `lael_payload_insert_failed`              → (a) catch handler only
+  //   `lael_failure_path_payload_insert_failed` → (b) catch handler only
   //
   // Ordering: AFTER the ledger upsert (§12), AFTER the registry removal (§12b),
   // BEFORE Langfuse / reservation commit. The payload insert is best-effort
