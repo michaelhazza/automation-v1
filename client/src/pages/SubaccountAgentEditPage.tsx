@@ -271,7 +271,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveSkills}
               disabled={saving === 'skills'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'skills' ? 'Saving…' : 'Save Skills'}
             </button>
@@ -300,7 +300,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveInstructions}
               disabled={saving === 'instructions'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'instructions' ? 'Saving…' : 'Save Instructions'}
             </button>
@@ -363,7 +363,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveBudget}
               disabled={saving === 'budget'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'budget' ? 'Saving…' : 'Save Budget'}
             </button>
@@ -463,7 +463,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveScheduling}
               disabled={saving === 'scheduling'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'scheduling' ? 'Saving…' : 'Save Scheduling'}
             </button>
@@ -630,8 +630,8 @@ function BeliefsTab({ subaccountId, linkId }: { subaccountId: string; linkId: st
             </div>
             <div className="text-[12px] text-slate-500">Saving sets source to "User Override" with confidence 1.0</div>
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setEditBelief(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg">Cancel</button>
-              <button type="button" onClick={handleEdit} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save Override</button>
+              <button type="button" onClick={() => setEditBelief(null)} className="btn btn-sm btn-secondary">Cancel</button>
+              <button type="button" onClick={handleEdit} className="btn btn-sm btn-primary">Save Override</button>
             </div>
           </div>
         </Modal>

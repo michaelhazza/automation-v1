@@ -146,7 +146,7 @@ export default function ClientPulseSettingsPage({ user: _user }: { user: User })
         <button
           type="button"
           onClick={() => openConfigAssistant("I'd like help with the ClientPulse configuration settings.")}
-          className="shrink-0 px-3 py-1.5 rounded text-[13px] font-medium border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          className="shrink-0 btn btn-sm btn-secondary"
         >
           Configuration Assistant
         </button>
@@ -285,7 +285,7 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
               setJsonText(JSON.stringify(effectiveValue ?? null, null, 2));
               setEditing((v) => !v);
             }}
-            className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300"
+            className="btn btn-xs btn-secondary"
           >
             {editing ? 'Cancel' : 'Edit'}
           </button>
@@ -293,7 +293,7 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
             type="button"
             onClick={askAssistant}
             title="Open the Configuration Assistant seeded with this block's context"
-            className="px-2 py-0.5 rounded text-[11px] font-medium bg-violet-50 border border-indigo-200 text-indigo-700 hover:bg-violet-100"
+            className="btn btn-xs btn-ghost text-indigo-700 hover:bg-violet-100"
           >
             Ask the assistant →
           </button>
@@ -386,7 +386,7 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
                 type="button"
                 disabled={saving}
                 onClick={save}
-                className="px-3 py-1 rounded-md text-[12px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                className="btn btn-xs btn-primary disabled:opacity-50"
               >
                 {saving ? 'Saving…' : 'Save'}
               </button>
@@ -416,7 +416,7 @@ function InterventionTemplatesEditorWithFallback({ templates, onSave }: Interven
       <div>
         <div className="mb-2 flex justify-between items-center">
           <div className="text-[11px] text-slate-500">Advanced JSON editor — typed editor is the default surface.</div>
-          <button onClick={() => setUseJson(false)} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300">Use typed editor</button>
+          <button onClick={() => setUseJson(false)} className="btn btn-xs btn-secondary">Use typed editor</button>
         </div>
         <textarea
           value={jsonText}
@@ -434,7 +434,7 @@ function InterventionTemplatesEditorWithFallback({ templates, onSave }: Interven
                 toast.error('Invalid JSON — fix syntax before saving.');
               }
             }}
-            className="px-3 py-1.5 rounded-md text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+            className="btn btn-xs btn-primary"
           >
             Save JSON
           </button>
@@ -446,7 +446,7 @@ function InterventionTemplatesEditorWithFallback({ templates, onSave }: Interven
   return (
     <div>
       <div className="mb-2 flex justify-end">
-        <button onClick={() => { setJsonText(JSON.stringify(templates, null, 2)); setUseJson(true); }} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300">Use JSON editor</button>
+        <button onClick={() => { setJsonText(JSON.stringify(templates, null, 2)); setUseJson(true); }} className="btn btn-xs btn-secondary">Use JSON editor</button>
       </div>
       <InterventionTemplatesEditor templates={templates} onSave={onSave} />
     </div>
