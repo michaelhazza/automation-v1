@@ -139,18 +139,22 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
    });
    ```
    Guard the call with `if (ctx.sourceType === 'agent_run' && ctx.runId)` — non-agent calls (Slack, Whisper, system maintenance) MUST NOT emit.
-3. **Payload row insert (terminal tx).** Inside the existing terminal-write transaction (success / failure / `budget_blocked` / etc.), call `buildPayloadRow({ systemPrompt, messages, toolDefinitions, response, toolPolicies, maxBytes })` and insert into `agent_run_llm_payloads` with `run_id = ctx.runId`. The migration-0192 FK is denormalised, so a tx rollback drops both the ledger row and the payload row together.
-4. **`llm.completed` emission.** In the same `finally` block that writes the terminal ledger row, call `tryEmitAgentEvent` with `eventType: 'llm.completed'`, `tier: 'critical'`, payload `{ ledgerRowId, terminalStatus, latencyMs, costCents, tokensIn, tokensOut, payloadRowId }`. Same guard as step 2.
+3. **Payload row insert (terminal tx).** Inside the existing terminal-write transaction (success / failure / `budget_blocked` / etc.), call `buildPayloadRow({ systemPrompt, messages, toolDefinitions, response, toolPolicies, maxBytes })` and insert into `agent_run_llm_payloads` with `run_id = ctx.runId`. The migration-0192 FK is denormalised, so if the ledger-write tx rolls back for any reason, the payload row goes with it.
+
+   **Consistency model — payload is best-effort, ledger is canonical.** Per the Risk note below, payload-insert failure is caught and does NOT roll back the ledger tx (a missing ledger row over a missing payload row would be the worse failure mode). To keep observability honest, the `llm.completed` event MUST carry an explicit `payloadInsertStatus: 'ok' | 'failed'` field. Downstream consumers (LAEL UI, debugging tools) rely on this marker to distinguish "payload genuinely absent" from "ledger row exists, payload write failed silently". This is the contract — there is no other state.
+4. **`llm.completed` emission.** In the same `finally` block that writes the terminal ledger row, call `tryEmitAgentEvent` with `eventType: 'llm.completed'`, `tier: 'critical'`, payload `{ ledgerRowId, terminalStatus, latencyMs, costCents, tokensIn, tokensOut, payloadRowId, payloadInsertStatus }`. `payloadInsertStatus` is `'ok'` when the payload-row insert succeeded and `'failed'` when the catch in step 3 fired. Same guard as step 2.
 5. **Pre-dispatch terminal states.** When the terminal status is one of `'budget_blocked' | 'rate_limited' | 'provider_not_configured'`, the adapter was never called. **Skip both `llm.requested` and `llm.completed` emission AND the payload row insert** — there is nothing to record. The ledger row still writes (existing behaviour); only the LAEL emission and payload insert are skipped.
 6. **Pure gating predicate.** Extract a pure function `shouldEmitLaelLifecycle(ctx, terminalStatus): boolean` into `llmRouter.ts` (or a sibling `*Pure.ts` if the file's pure-test discipline requires it). Returns `true` iff `ctx.sourceType === 'agent_run' && ctx.runId && terminalStatus !== 'budget_blocked' && terminalStatus !== 'rate_limited' && terminalStatus !== 'provider_not_configured'`. Unit-test exhaustively (matrix of source-type × runId-present × terminalStatus).
 
 **Acceptance criteria.**
-- A successful agent-run LLM call produces, in order: `prompt.assembled` → `llm.requested` → `llm.completed` → (next iteration / `run.completed`) — verifiable by querying `agent_execution_events WHERE run_id = $1 ORDER BY sequence_number`.
+- A successful agent-run LLM call produces, in order: `prompt.assembled` → `llm.requested` → `llm.completed` → (next iteration / `run.completed`) — verifiable by querying `agent_execution_events WHERE run_id = $1 ORDER BY sequence_number`. **Ordering invariant (MUST hold):** `llm.requested.sequence_number < llm.completed.sequence_number` for every `(run_id, ledgerRowId)` pair. Both events MUST be emitted through the same `agentExecutionEventService` sequencing context for the request — i.e., the same run-scoped sequence allocator — so monotonic ordering holds even under concurrent activity on the same run. Crossing sequencing contexts (e.g. emitting `llm.requested` before entering the terminal-tx scope and `llm.completed` after re-entering) is forbidden because it can produce non-monotonic interleaving with other events on the same run.
+- **Pairing-completeness invariant (MUST hold):** for every emitted `llm.requested` event, exactly one corresponding `llm.completed` event MUST be emitted for the same `(run_id, ledgerRowId)` pair. An `llm.requested` without a matching `llm.completed` represents an "in-flight forever" orphan in the LAEL timeline and is a contract violation — the terminal-tx `finally` block is the structural mechanism that guarantees this (every emit of `llm.requested` is paired with a guaranteed-to-run finally that emits `llm.completed`). If a future change splits the emit calls across functions, the `finally` guarantee MUST be preserved.
+- **Uniqueness invariant (MUST hold):** `llm.completed` MUST NOT be emitted more than once for the same `(run_id, ledgerRowId)` pair. This protects against retry loops, double-finalisation bugs, and any future refactor that accidentally re-enters the terminal-tx scope. If multiple emit attempts occur, the second and subsequent attempts MUST be idempotent no-ops at the emit boundary.
 - A failed-mid-flight agent-run LLM call (provider error) produces `llm.requested` → `llm.completed` (with `terminalStatus: 'failed'` in the payload) and the corresponding `agent_run_llm_payloads` row.
 - A `budget_blocked` agent-run LLM call produces NEITHER `llm.requested` NOR `llm.completed`, and NO `agent_run_llm_payloads` row. The ledger row still records `budget_blocked`.
 - A non-agent-run LLM call (Slack, Whisper) emits NO LAEL events and writes NO payload row, regardless of terminal status.
 - `agent_run_llm_payloads.run_id` is non-null for every payload row inserted by this code path.
-- Tx rollback (e.g. ledger insert fails after payload row inserted) drops both rows — verified by manual smoke (force a contrived rollback in a test environment).
+- **Ledger / payload consistency contract.** Ledger row is canonical; payload row is best-effort. When the payload insert fails, `llm.completed.payloadInsertStatus === 'failed'` AND `payloadRowId === null` AND **no `agent_run_llm_payloads` row is visible post-commit for that `(run_id, ledgerRowId)` pair** — the catch path MUST guarantee the row is not partially inserted. If the underlying driver creates ambiguity (e.g. a retried INSERT that may or may not have committed before the connection error), the catch handler MUST treat that row as failed (set `payloadInsertStatus: 'failed'`, `payloadRowId: null`) AND a follow-up DELETE on the contested key MUST run inside the same tx so the post-commit invariant holds. When the insert succeeds, `payloadInsertStatus === 'ok'`, `payloadRowId` is set, and exactly one row is visible. There is no third state. If the entire ledger tx rolls back (e.g. ledger insert itself fails), both rows go together via the migration-0192 FK — verified by manual smoke (force a contrived ledger-side rollback in a test environment).
 
 **Tests.**
 - `server/services/__tests__/llmRouterPayloadEmissionPure.test.ts` — exhaustive matrix on `shouldEmitLaelLifecycle(ctx, terminalStatus)` covering 4 source types × 2 runId states × 5 terminal statuses = 40 cases. Pure-function discipline.
@@ -158,7 +162,7 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
 
 **Dependencies.** Migration 0192 (already shipped) provides `agent_run_llm_payloads.run_id`. No new dependencies.
 
-**Risk.** Medium. The terminal-tx integration is the highest-risk surface: a bug in payload insertion that throws inside the tx will roll back the ledger row, which currently never happens. Mitigation: payload insertion is wrapped in a `try { … } catch (err) { logger.warn('lael_payload_insert_failed', …); }` so insert failure logs and continues; the tx still commits the ledger row. **This is a documented exception to the "rollback together" guarantee** — accept it because dropping a ledger row over a missing payload row would be worse. Document this exception inline at the catch site.
+**Risk.** Medium. The terminal-tx integration is the highest-risk surface: a bug in payload insertion that throws inside the tx will roll back the ledger row, which currently never happens. Mitigation: payload insertion is wrapped in a `try { … } catch (err) { logger.warn('lael_payload_insert_failed', { runId, ledgerRowId, error }); payloadInsertStatus = 'failed'; }` so insert failure logs and continues; the tx still commits the ledger row, and the `llm.completed` event carries `payloadInsertStatus: 'failed'` and `payloadRowId: null`. **This is the explicit consistency contract** (see Approach step 3) — ledger is canonical, payload is best-effort, the marker on the ledger event tells downstream consumers exactly what state the payload is in. Document this contract inline at the catch site so future readers don't try to "fix" the swallowed exception.
 
 **Definition of Done.** All acceptance criteria pass; pure tests added and green; one integration test added and green; manual smoke for tx-rollback case completed and noted in `tasks/builds/<slug>/progress.md`; `tasks/todo.md § Live Agent Execution Log — deferred items § LAEL-P1-1` ticked off.
 
@@ -183,6 +187,10 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
      | { ok: false; missing: string[] };
    ```
    `automation.requiredConnections` is `string[]` (or `null`). `mappings` is `Array<{ connectionKey: string; connectionId: string }>`. The function returns `ok: true` with a `resolved` map iff every required key has a non-empty `connectionId` in `mappings`; otherwise `ok: false` with the missing keys.
+
+   **Purity contract (MUST hold):** the helper MUST be deterministic and side-effect-free — no I/O, no module-level state writes, no reliance on closures over mutable state. Identical inputs MUST produce identical outputs. This makes the helper safe for request-scoped memoisation (the forward-look in the Risk note) without introducing correctness hazards.
+
+**Output-ordering contract (MUST hold):** when `ok: false`, the `missing` array MUST be returned in deterministic order — preserve the order in which keys appear in `automation.requiredConnections`. This guarantees stable error messages (`"missing required connections: ghl, slack"` vs `"missing required connections: slack, ghl"` for the same input would confuse log-analysis tools, downstream alerting, and humans reading test failures), and lets test assertions use exact-string comparisons without sorting.
 2. **Call site.** In `invokeAutomationStepService` immediately after the automation row is loaded and before `assertSingleWebhook` (line ~188), call `automationConnectionMappingService.listMappings(automation.organisationId, step.subaccountId)`, pass the result through `resolveRequiredConnections`, and on `ok: false`:
    ```ts
    const error: AutomationStepError = {
@@ -217,6 +225,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
 **Dependencies.** `automationConnectionMappingService.listMappings` is already exported (audit-remediation work in PR #196); no upstream blocker.
 
 **Risk.** Low. The added DB round-trip is a single indexed lookup per dispatch; the short-circuit on empty `requiredConnections` keeps the existing happy path unchanged for automations without declared connections.
+
+**Performance forward-look.** The `listMappings(...)` call is expected to be O(1) on an indexed `(organisation_id, subaccount_id)` lookup at typical dispatch volumes. If post-testing load profiling shows this becomes a hot-path bottleneck, the correct fix is request-scoped memoisation (NOT a global cache, which would cross tenant boundaries and conflict with the org-scoped DB primitives). Out of scope for this spec — log to `tasks/todo.md` if the bottleneck materialises during the testing pass.
 
 **Definition of Done.** All acceptance criteria pass; pure tests added and green; the dispatcher's `automation_missing_connection` path verified manually against a contrived automation row in dev DB; `tasks/todo.md § REQ W1-44` ticked off.
 
@@ -256,15 +266,29 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
      await completeStepRun({ runId, stepRunId, outputJson: stepRun.outputJson ?? {} });
    }
    ```
-3. **`fromApprovalResume: true` flag.** Pass through to `dispatchInvokeAutomationInternal` so the dispatcher knows it's a re-entry and (a) does not re-decrement retry counters that the supervised pause already preserved, (b) emits a tracing event tagged `dispatch_source: 'approval_resume'` so timeline observers can distinguish first-attempt dispatches from approval-resume dispatches.
-4. **Idempotency.** If `decideApproval` is called twice for the same step (concurrent approvals via two browser tabs, or a UI retry), the second call MUST return the existing decision result without re-firing the webhook. The existing `decideApproval` idempotency guard (decision audit row uniqueness) already handles this; verify the flow does not regress by including a test in §1.8 (cross-spec — S6 covers reviewService; this verifies the workflow approval idempotency separately if not already covered).
+3. **`fromApprovalResume: true` flag — retry continuation contract.** Pass through to `dispatchInvokeAutomationInternal` so the dispatcher knows it's a re-entry and emits a tracing event tagged `dispatch_source: 'approval_resume'`. **Retry-state invariant (MUST hold):** `fromApprovalResume === true` MUST preserve the original attempt's retry state without incrementing it, decrementing it, or resetting it. The dispatcher MUST treat the approval-resume call as a continuation of the original attempt (the one that produced the supervised pause), not a new attempt. Concretely:
+   - If the original attempt had `retryAttempt: 1` when it paused for supervision, the resume dispatch starts at `retryAttempt: 1` (not `0`, not `2`).
+   - If the original attempt never recorded a retry counter (e.g. first dispatch paused before any retry logic ran), the resume dispatch starts the counter at `1` for the current attempt — same as a first dispatch would.
+   - If partial retry state exists (e.g. retry counter incremented but the dispatcher exited before completing the supervised-pause write), the resume MUST reuse the persisted counter value — DO NOT re-derive from the supervised-pause record.
+   This rule prevents the resume path from silently inheriting stale retry budget OR resetting it (both fail differently: stale budget retries forever, reset budget retries fresh).
+4. **Idempotency — MUST invariant, not verification instruction.** **A `stepRun` MUST NOT dispatch more than once for the same approval decision, regardless of how many times `decideApproval` is invoked concurrently.** The existing decision-audit-row uniqueness constraint is the gate. **Contract (MUST hold):** dispatch (`dispatchInvokeAutomationInternal`) MUST occur strictly **after** the decision row commit AND only on the code path that successfully wrote the unique decision row (the "winner" branch). Dispatch MUST NOT occur:
+   - Before the decision row write,
+   - Outside the post-commit boundary of the winning code path,
+   - In the unique-violation catch path,
+   - In a fire-and-forget side-task that races the commit.
+   Concurrent callers that hit the unique-violation branch return the cached decision result and DO NOT re-enter dispatch. If a future refactor moves the dispatch call earlier, outside the guarded path, or into a parallel side-effect, that refactor violates this contract — the contract is the spec, not the current call-site placement.
+   Verification (during implementation):
+   - Read the existing `decideApproval` flow and confirm the dispatch call sits inside the post-commit "winner" branch.
+   - If the current structure does not enforce this (e.g. decision is written and dispatch is called in a pattern that could race), restructure so dispatch is called from the same code path that owns the committed decision — no new state, just call-site placement.
+   - Include a dedicated test: a `decideApproval('approve')` race against a supervised `invoke_automation` step asserts exactly one webhook fires (call-count assertion, not just terminal-status assertion).
 5. **Re-read + invalidation guard.** The existing pattern from PR #211 (R3-2 `assertValidTransition`) wraps terminal writes. The new `dispatchInvokeAutomationInternal` re-entry sits inside the existing tick-loop dispatch path which already calls `assertValidTransition` at its terminal write boundaries — no new guard needed. Verify this assumption holds by tracing one happy path through the dispatcher manually before shipping.
+6. **Failure-handling symmetry (MUST hold).** Approval-resume dispatch failures — synchronous errors before retry logic, transient errors during retry, terminal failures, and `automation_missing_connection` from §1.2 — MUST follow the same retry, terminal-state, and error-classification rules as initial dispatch. No special-case error handling is introduced for the resume path. If initial dispatch handles a particular error class with N retries followed by terminal `failed`, the resume path does the same. If initial dispatch surfaces `automation_missing_connection` as a configuration error, the resume path surfaces it identically. The only resume-specific behaviour is the `dispatch_source: 'approval_resume'` tracing tag and the retry-state continuation rule from step 3 — every other failure-surface decision MUST be inherited from the initial-dispatch path verbatim.
 
 **Acceptance criteria.**
 - A `Workflow run` with a supervised `invoke_automation` step that is approved fires the webhook (verifiable by an outbound HTTP request to the configured automation endpoint or by a test-mode capture).
 - The same step's terminal status reflects the dispatch outcome — `completed` on webhook 2xx, `failed` on webhook timeout, `missing_connection` if the new §1.2 guard fires, etc. NOT `completed` with empty `outputJson` purely from the approval.
 - A `reject` decision on the same step type completes with no webhook fired and the step terminal status is `rejected` (existing behaviour preserved).
-- A double-approve via two tabs results in exactly one webhook dispatch (idempotency preserved).
+- A double-approve via two tabs (or `Promise.all([decideApproval(id, 'approve'), decideApproval(id, 'approve')])` against a real DB) results in exactly **one** webhook dispatch, asserted by direct call-count on the test webhook receiver — NOT inferred from terminal status alone. Both `decideApproval` calls return `success: true`; the loser's response indicates the cached decision (existing pattern).
 - Approval of an `agent_call` / `prompt` / `action_call` step continues to complete with the supervised-output payload — no regression in the other three step types.
 - The tracing timeline shows `dispatch_source: 'approval_resume'` on the second dispatch event.
 
@@ -346,6 +370,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
 **Dependencies.** None; this is a self-contained schema fix.
 
 **Risk.** Very low. Index swap is online-safe in PostgreSQL on a small table. `conversations` is bounded by user activity volume; rebuild time is negligible.
+
+**Concurrency window.** The `DROP INDEX … CREATE UNIQUE INDEX …` pair is NOT wrapped in `CONCURRENTLY` (the migration framework runs each migration inside an implicit transaction, which `CONCURRENTLY` is incompatible with). This leaves a brief window between the drop and the create where uniqueness is unenforced. **Acceptable for this spec because:** (a) framing is pre-production with `live_users: no`, (b) `conversations` write volume is bounded by test activity at this stage, (c) the new index is strictly more permissive than the old one for existing rows so no data violates either constraint during the window, (d) the migration's implicit tx makes the window's duration negligible at the current table size and write volume. If post-production this migration ever needs to run again on a high-write table, switch to a `CONCURRENTLY`-capable migration runner — out of scope here.
 
 **Definition of Done.** Migration applies cleanly; Drizzle schema regenerates with no diff; `tasks/todo.md § N3` ticked off.
 
@@ -442,6 +468,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
 
 **Risk.** Very low. Tightens an under-validated input boundary; no callers should be sending malformed UUIDs in production code.
 
+**Consistency forward-look.** `requireUuid` is intentionally introduced inside `briefArtefactValidatorPure.ts` only — other ID fields in the codebase still go through `requireString` per the audit triage. If the testing pass surfaces malformed UUIDs reaching other validation boundaries (e.g. `runId`, `subaccountId`, `automationId` arriving from external clients with bad shape), promote `requireUuid` to a shared validation helper in the next pass. Out of scope here per §0.3 — single named primitive, single named call site.
+
 **Definition of Done.** Tests pass; `tasks/todo.md § N1` ticked off.
 
 ---
@@ -459,6 +487,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
 
 **Approach.**
 1. **Identify the canonical entry point.** `incidentIngestor.ts` exposes `ingestInline(input)` (and possibly an async-worker variant). Wire the throttle into `ingestInline` only — the async-worker path enqueues onto pg-boss which has its own backpressure, and double-throttling there is wasted work.
+
+   **Async-worker exclusion contract (MUST hold):** the async-worker ingestion path MUST NOT call `checkThrottle`. Adding a second throttling layer there would (a) double-count fingerprints across the two paths producing inconsistent drop behaviour, (b) interact non-deterministically with pg-boss's own backpressure, and (c) make `getThrottledCount()` unreliable as a signal. A future "let's add defence in depth" refactor that wires the throttle into the async-worker path violates this contract — pg-boss is the throttle for that path, and there is no defence-in-depth case here, only conflicting throttle layers.
 2. **Call site.** At the top of `ingestInline`, after fingerprint computation but before the DB upsert (or however early the fingerprint is available — read the file and place the call as the first DB-bypassing branch):
    ```ts
    if (checkThrottle(fingerprint)) {
@@ -468,6 +498,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
    ```
 3. **Return-shape extension.** The current `ingestInline` return shape needs a `'throttled'` status discriminant. Match the existing discriminated-union style in the file (the spec previously documented `idempotent_race`, `suppressed`, etc. as similar success-not-failure outcomes per the "suppression is success" pattern from PR #218). DO NOT return `success: false` for a throttled call — that would trigger retries from callers.
 4. **No new throttle config.** The 1-second window is hard-coded inside `incidentIngestorThrottle.ts` per its existing implementation. Do not add config knobs in this spec — if testing shows the window is wrong, surface a follow-up.
+
+   **Time-source contract (MUST hold):** `incidentIngestorThrottle` MUST derive the current time exclusively from `Date.now()` — a single, mockable source. It MUST NOT read `performance.now()`, cache timestamps across calls, use a monotonic-clock primitive, or introduce any alternative time source. This is what makes test-time clock mocking authoritative; a future "performance optimization" that switches to `performance.now()` or a cached `process.hrtime()` would silently break every fake-clock test that depends on this contract. Pin the time source in code with a single `Date.now()` call site at the top of the throttle check.
 5. **Counter visibility.** `incidentIngestorThrottle.ts` already exposes `getThrottledCount()`. No new counter wiring required; the existing badge / metrics endpoint can read it when surfaced.
 
 **Acceptance criteria.**
@@ -482,6 +514,7 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
   1. **Burst dedup:** 1000 sequential `ingestInline(sameFingerprint)` calls with mocked DB upsert; assert 1 DB call, 999 throttled returns.
   2. **Cross-fingerprint independence:** 100 calls each for fingerprints A and B; assert 200 DB calls total.
   3. **Throttle window expiry:** call once, advance fake clock past 1 second, call again; assert 2 DB calls.
+- **Test-time determinism — required, not optional.** All three cases MUST control time deterministically. Real-time `setTimeout` / `Date.now()` produces flaky CI runs and false negatives. Use `node:test`'s `mock.timers` (or the codebase's existing fake-clock harness if one is already in use — check `derivedDataMissingLog.test.ts` and sibling integration tests for the convention). The throttle's 1-second window is read from the underlying `Date.now()`; mocking it at the test boundary is sufficient. **Do NOT** rely on actual elapsed wall-clock time — flake during a 3-run CI cycle is a hard failure, not a re-run candidate.
 - The throttle module's existing unit tests (`incidentIngestorThrottle.test.ts`) cover the underlying `checkThrottle` semantics; this integration test verifies the WIRING into the ingestor.
 
 **Dependencies.** None.
@@ -509,7 +542,9 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bri
    - **Concurrent double-reject:** same shape with `reject(itemId)`; assert one `proceed` + one `idempotent_race` + one audit row.
    - **Concurrent approve+reject:** fire one `approve` and one `reject` in parallel on a `pending` item; assert one wins (status reflects the winner), the other returns `409 ITEM_CONFLICT` (this is the existing "approve-after-rejected / reject-after-approved" branch — different from `idempotent_race`).
 3. **Use existing test utilities.** `server/services/__tests__/` already has integration-test patterns (e.g. `incidentIngestorThrottle.integration.test.ts` planned in §1.7, `derivedDataMissingLog.test.ts`). Match those conventions: `node:test` + `node:assert`, no new harness.
-4. **Concurrency primitive.** `Promise.all([approve(id), approve(id)])` against a real DB exercises the actual claim+verify race. If the test proves flaky on slow CI, a fallback is the existing `__testHooks` seam pattern from `ruleAutoDeprecateJob.ts:86` — inject a synchronous pause between claim and commit so the test deterministically exposes the race window. **Prefer the natural concurrency approach first**; only introduce the test hook if flakiness materialises.
+4. **Concurrency primitive — determinism is required.** `Promise.all([approve(id), approve(id)])` against a real DB exercises the actual claim+verify race, but is non-deterministic on its own — interleaving depends on connection-pool scheduling and CI load. **Rule:** if the natural `Promise.all` approach fails to surface the race deterministically across 3 consecutive CI runs (or shows any flake at all on first commit), promote to the existing `__testHooks` seam pattern from `ruleAutoDeprecateJob.ts:86` — inject a synchronous pause between claim and commit so the test deterministically exposes the race window. The `__testHooks` fallback is NOT optional fail-soft polish; it's the documented escape hatch when natural concurrency is non-deterministic. Try natural first (it's simpler); switch on first sign of flake — do not "wait and see" across a series of CI runs.
+
+   **Hook-presence contract (MUST hold):** once a test promotes to the `__testHooks` path, the test MUST fail loudly if the hook is unavailable at runtime (e.g. someone deleted the hook export from `reviewService`). DO NOT silently fall back to natural-concurrency `Promise.all` — that would let the test pass while losing determinism. Concretely: assert the hook export is defined at test-setup time (`assert.ok(reviewService.__testHooks?.delayBetweenClaimAndCommit, 'reviewService.__testHooks.delayBetweenClaimAndCommit is required for this test')`), and bail before any test body runs if it's missing. Same rule for any future test that promotes to a `__testHooks` seam.
 
 **Acceptance criteria.**
 - Test file exists, compiles, and all three cases pass.
@@ -533,8 +568,8 @@ The eight items are largely independent but a recommended order minimises rework
 
 1. **§1.4 N3** (migration) — apply first. Cheapest, lowest risk, isolates the schema change from any later branch-state churn.
 2. **§1.5 S2 + §1.6 N1 + §1.7 #5** (small fixes) — bundle into one commit each or one PR. All under 30 min effort.
-3. **§1.2 REQ W1-44** (pre-dispatch connection resolution) — surgical addition to `invokeAutomationStepService`. Lands the new pure helper + its tests.
-4. **§1.3 Codex iter 2 #4** (supervised dispatch) — depends on §1.2 only insofar as it gives the approval-resume path the new `automation_missing_connection` behaviour for free. If §1.2 hasn't shipped, §1.3 still works correctly; the missing-connection check just doesn't fire on the resume path until §1.2 lands.
+3. **§1.2 REQ W1-44** (pre-dispatch connection resolution) — surgical addition to `invokeAutomationStepService`. Lands the new pure helper + its tests. **MUST land before §1.3.**
+4. **§1.3 Codex iter 2 #4** (supervised dispatch) — **MUST follow §1.2.** The approval-resume path re-enters the same dispatch helper that §1.2 hardens; landing §1.3 first means the resume path lacks the `automation_missing_connection` guard during testing, which produces misleading symptoms (webhook fires against an automation with missing connections, fails downstream with a confusing error) and forces double-debugging the same surface twice. Order is: land §1.2, verify the missing-connection check fires on first dispatch, THEN land §1.3 and verify the same check fires on the approval-resume path.
 5. **§1.1 LAEL-P1-1** (LLM emission + payload writer) — biggest item; ship last so the test infrastructure for the carved-out integration test is in place after the smaller items have proven the pattern.
 6. **§1.8 S6** (idempotent race tests) — pure test addition; can run in parallel with any of the above. Recommended last so the test suite has the most-recent service behaviour to assert against.
 
@@ -577,6 +612,7 @@ The spec is complete when ALL of the following hold:
 4. The PR description summarises which items shipped and links to the relevant `tasks/todo.md` lines.
 5. `tasks/builds/<slug>/progress.md` carries the final session-end summary.
 6. `KNOWLEDGE.md` is updated with any non-obvious patterns surfaced by §1.1, §1.3, or §1.8 (the three architectural / integration-test items).
+7. **No new warnings or error logs introduced on happy-path execution.** This is a pre-test hardening spec — its purpose is to make the testing-pass signal louder, not noisier. After implementation, run a representative happy-path scenario for each touched surface (one successful agent run for §1.1, one successful `invoke_automation` dispatch for §1.2, one approve-and-dispatch flow for §1.3, one `clientpulse` request with `PULSE_CURSOR_SECRET` set for §1.5, etc.) and confirm the server logs contain zero new `warn` or `error` entries that did not exist before this branch. Any new warning that fires on a happy path means a code path is doing something it shouldn't — fix the root cause, do not silence the log.
 
 ---
 
