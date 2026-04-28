@@ -262,7 +262,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
             {!isTerminal && (
               <button
                 onClick={() => setShowCancelConfirm(true)}
-                className="px-3 py-1.5 text-sm rounded border border-slate-300 hover:bg-slate-50"
+                className="btn btn-secondary btn-sm"
               >
                 Cancel run
               </button>
@@ -354,7 +354,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
                           <button
                             onClick={() => submitInput(sr.id, sr.version)}
                             disabled={actionSubmitting}
-                            className="px-3 py-1 text-xs rounded bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+                            className="btn btn-primary btn-xs"
                           >
                             {actionSubmitting ? 'Submitting…' : 'Submit'}
                           </button>
@@ -363,7 +363,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
                               setActionStepId(null);
                               setActionError(null);
                             }}
-                            className="px-3 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50"
+                            className="btn btn-secondary btn-xs"
                           >
                             Cancel
                           </button>
@@ -398,7 +398,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
                           decideApproval(sr.id, sr.version, 'approved');
                         }}
                         disabled={actionSubmitting}
-                        className="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                        className="btn btn-success btn-xs"
                       >
                         Approve
                       </button>
@@ -408,7 +408,7 @@ export default function WorkflowRunDetailPage(_props: { user: User }) {
                           decideApproval(sr.id, sr.version, 'rejected');
                         }}
                         disabled={actionSubmitting}
-                        className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                        className="btn btn-danger btn-xs"
                       >
                         Reject
                       </button>

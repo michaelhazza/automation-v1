@@ -503,7 +503,7 @@ function ResultRow({
               onClick={() => setAction('approved')}
               disabled={hasBlockingWarning}
               title={hasBlockingWarning ? 'Fix critical merge warnings before approving' : undefined}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="btn btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Approve
             </button>
@@ -675,7 +675,7 @@ function ResultSection({
         <div className="ml-auto flex items-center gap-2">
           {(classification === 'IMPROVEMENT' || classification === 'DISTINCT' || classification === 'PARTIAL_OVERLAP') && (
             <button
-              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              className="btn btn-secondary btn-xs"
               onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'approved'); }}
             >
               Approve all
@@ -683,7 +683,7 @@ function ResultSection({
           )}
           {classification === 'DUPLICATE' && (
             <button
-              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              className="btn btn-secondary btn-xs"
               onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'rejected'); }}
             >
               Reject all
@@ -700,14 +700,14 @@ function ResultSection({
             </button>
           )}
           <button
-            className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+            className="btn btn-secondary btn-xs"
             onClick={(e) => { e.stopPropagation(); setRowExpandVersion((v) => v + 1); if (!open) setOpen(true); }}
             title="Expand all rows in this section"
           >
             Expand all
           </button>
           <button
-            className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+            className="btn btn-secondary btn-xs"
             onClick={(e) => { e.stopPropagation(); setRowCollapseVersion((v) => v + 1); }}
             title="Collapse all rows in this section"
           >
@@ -892,7 +892,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
         </div>
         <button
           onClick={onContinue}
-          className="shrink-0 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
+          className="btn btn-primary shrink-0"
         >
           Continue to Execute →{approvedCount > 0 && ` (${approvedCount})`}
         </button>
@@ -1075,7 +1075,7 @@ function ProposedAgentBanner({
                   type="button"
                   disabled={pendingIndex === agent.proposedAgentIndex}
                   onClick={() => handle(agent.proposedAgentIndex, 'confirm')}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Confirm
                 </button>
