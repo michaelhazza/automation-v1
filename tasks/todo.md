@@ -1127,3 +1127,56 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
 - [ ] **PLAN-REVIEW-P8 — Log prefix standardisation.** Unify structured log event names: `brief.*`, `conversation.*`, `post_commit.*` instead of the mixed `post_commit_emit_*` / `conversations_route.*` / `brief_artefacts.*` naming. Pays off in observability tooling (log aggregation, alerting). Requires a spec update before changing.
   - **Severity:** cosmetic / low (no behaviour impact, audit-trail impact)
   - **Blocked on:** follow-up spec that updates §1.1–§1.2 log definitions
+
+## Deferred from spec-conformance review — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28T03:07:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-brief-and-ux-2026-04-28T03-07-52Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md`
+
+The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly. The gaps below are about test-scope, manual-smoke recording, and PR-prep workflow checkpoints — none mechanical, all requiring human judgment.
+
+- [ ] REQ S3-8 — DashboardPage + ClientPulseDashboardPage manual smoke unrecorded
+  - Spec section: §1.4 DoD ("manual smoke recorded")
+  - Gap: `tasks/builds/pre-test-brief-and-ux/progress.md` § Manual smoke test results lists §1.4 as "_pending_"
+  - Suggested approach: stop API → reload → confirm banner names failed source → restart API → click Retry → confirm banner clears. Repeat per page. Paste outcome into the smoke table.
+
+- [ ] REQ N7-11 — BriefDetailPage manual smoke for >50-artefact Brief unrecorded
+  - Spec section: §1.3 DoD ("client smoke test recorded")
+  - Gap: `progress.md` § Manual smoke test results lists §1.3 as "_pending_"
+  - Suggested approach: open a Brief with > 50 artefacts in dev; verify initial 50; click "Load older"; verify next 50 prepend. Paste outcome.
+
+- [ ] REQ S8-10 — Integration test scope materially smaller than spec
+  - Spec section: §1.2 Tests ("Carved-out integration test... simulates a request lifecycle: middleware → writer enqueues → res.finish fires → assert emit invoked. Then a second case: middleware → writer enqueues → res.statusCode = 500 → res.finish fires → assert emit NOT invoked.")
+  - Gap: `briefConversationWriterPostCommit.integration.test.ts` exercises raw `createPostCommitStore` + `flushAll`/`reset`; never invokes the actual middleware nor `briefConversationWriter`. The store-contract piece is already unit-tested in `postCommitEmitter.test.ts`; the middleware+writer composition is currently unverified by automated tests.
+  - Suggested approach: either (a) wire a minimal Express app in the test that mounts `postCommitEmitterMiddleware`, calls a route that invokes `writeConversationMessage`, and asserts the emit fires after `res.finish` (and is dropped on `res.statusCode=500`), or (b) document the deferral in `progress.md` with a rationale that manual smoke + the existing unit tests give equivalent confidence.
+
+- [ ] REQ S8-11 — §1.2 500-rollback manual smoke unrecorded
+  - Spec section: §1.2 DoD ("manual smoke for the 500-rollback case completed and noted in progress.md")
+  - Gap: `progress.md` does not show §1.2 manual smoke results
+  - Suggested approach: trigger a contrived 500 in a route after `writeConversationMessage` runs; confirm in browser dev tools that NO websocket event arrives. Trigger happy-path; confirm event arrives. Paste outcome.
+
+- [ ] REQ S8-12 — KNOWLEDGE.md entry for the post-commit emit pattern missing
+  - Spec section: §4 Definition of Done item 6 ("KNOWLEDGE.md is updated with the post-commit emit pattern from §1.2 (it generalises beyond Brief artefacts and is the most reusable pattern surfaced by this spec)")
+  - Gap: KNOWLEDGE.md has no entry capturing the pattern
+  - Suggested approach: add a short ~2026-04-28 entry summarising (a) the failure mode (tx-rollback-then-emit produces ghost events), (b) the deferral primitive (AsyncLocalStorage-backed store, flush on `res.finish` 2xx/3xx, reset on 4xx/5xx + close, closed-state immediate-emit fallback), (c) the generalisation (any subsystem that emits via websocket inside a request-scoped tx benefits from the same pattern). Cite `server/lib/postCommitEmitter.ts` as the canonical source.
+
+- [ ] REQ DR2-8 — Integration test punts LLM classify + orchestrator enqueue assertions to manual smoke
+  - Spec section: §1.1 Tests ("Carved-out integration test... exercises the route end-to-end against a fake LLM provider, asserts user message is written once, fast-path classification fires, and orchestrator-routing job is enqueued for a `needs_orchestrator` decision")
+  - Gap: `conversationsRouteFollowUp.integration.test.ts` covers only (i) noop-path one-row write, (ii) DB-row→predicate dispatch, (iii) writer no-built-in-dedupe. The fake-LLM + orchestrator-enqueue assertions are punted to manual smoke per the test header.
+  - Suggested approach: either (a) wire a fake LLM provider stub (mock `classifyChatIntent` to return `{ route: 'needs_orchestrator', ... }`) and assert orchestrator-routing job appears in pg-boss, or (b) accept the punt and document it as a deliberate carve-out in `progress.md` with rationale ("hot-path carve-out: full DR2 chain requires live LLM + pg-boss; manual smoke + per-component unit + DB-row dispatch tests cover the failure modes the spec was protecting against").
+
+- [ ] REQ DR2-10 — DR2 manual dev-DB smoke unrecorded
+  - Spec section: §1.1 DoD ("route's brief-followup path verified manually against the dev DB — post a follow-up, confirm orchestrator job enqueues, observe the structured log line")
+  - Gap: `progress.md` shows DR2 smoke as not yet recorded
+  - Suggested approach: post a follow-up to a Brief-scoped conversation in dev; observe the `conversations_route.brief_followup_dispatched` log line; confirm an orchestrator-routing job appears in pg-boss. Paste outcome.
+
+- [ ] REQ X-1 — `tasks/todo.md` spec-named tickoffs (DR2 / S8 / N7 / S3) all still unchecked
+  - Spec section: §4 DoD item 2 + §5 Backlog tickoff checklist
+  - Gap: lines 359 (S8), 366 (N7), 374-375 (DR2), 770 (S3) in `tasks/todo.md` still `[ ]`. Spec lists these as the canonical "closed" markers.
+  - Suggested approach: tick each entry with a one-line resolution note pointing at the commit SHA or PR number. Conventionally done at PR open.
+
+- [ ] REQ X-2 + X-3 — progress.md final summary missing; spec §5 Tracking table SHAs missing
+  - Spec section: §4 DoD item 5 + §5 Tracking
+  - Gap: `progress.md` only has a setup section (no per-task results). Spec §5 Tracking table still shows all four items as `pending` with `—` SHAs.
+  - Suggested approach: at PR-prep time, append a session-end summary to `progress.md` and populate the spec §5 Tracking table with the four feature commits (`6ef1ea79` S3 / `04613015` N7 / `60a68d07` S8 / `4d64df6d` DR2).
