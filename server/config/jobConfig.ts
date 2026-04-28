@@ -212,6 +212,7 @@ export const JOB_CONFIG = {
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'slack-inbound__dlq',
     idempotencyStrategy: 'payload-key' as const,
   },
   // Sprint 2 P1.2 — capture a regression_cases row when a human rejects
@@ -260,6 +261,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'agent-briefing-update__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per run completion
   },
 
@@ -269,6 +271,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'memory-context-enrichment__dlq',
     idempotencyStrategy: 'singleton-key' as const, // dedup per conversation
   },
 
@@ -278,6 +281,7 @@ export const JOB_CONFIG = {
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'page-integration__dlq',
     idempotencyStrategy: 'payload-key' as const, // pageId + action
   },
 
@@ -317,6 +321,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'iee-cost-rollup-daily__dlq',
     idempotencyStrategy: 'one-shot' as const, // daily cron
   },
   // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
@@ -417,6 +422,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: false,
     expireInSeconds: 55,
+    deadLetter: 'connector-polling-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const,
   },
   // Per-connection sync job: acquires a lease, runs the adapter, records
