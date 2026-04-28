@@ -355,7 +355,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
           <div className="relative" ref={providerMenuRef}>
             <button
               onClick={() => setShowProviderMenu(v => !v)}
-              className="text-sm px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+              className="btn btn-sm btn-primary"
             >
               + Add Connection
             </button>
@@ -426,7 +426,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
           </div>
           <button
             onClick={openAddWebLogin}
-            className="text-sm px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+            className="btn btn-sm btn-primary"
           >
             + Add Login
           </button>
@@ -505,11 +505,11 @@ export default function CredentialsTab({ subaccountId }: Props) {
             />
           )}
           <div className="flex justify-end gap-2">
-            <button onClick={() => setSlackConfigConn(null)} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+            <button onClick={() => setSlackConfigConn(null)} className="btn btn-sm btn-ghost">Cancel</button>
             <button
               onClick={saveSlackChannel}
               disabled={savingChannel}
-              className="px-3 py-1.5 text-sm bg-slate-800 text-white rounded-md hover:bg-slate-700 disabled:opacity-50"
+              className="btn btn-sm btn-primary"
             >
               {savingChannel ? 'Saving…' : 'Save'}
             </button>
@@ -558,7 +558,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setTestModal(null)}
-                className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800"
+                className="btn btn-sm btn-ghost"
               >
                 Cancel
               </button>
@@ -622,11 +622,11 @@ export default function CredentialsTab({ subaccountId }: Props) {
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setWebLoginModal(null)} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button onClick={() => setWebLoginModal(null)} className="btn btn-sm btn-ghost">Cancel</button>
               <button
                 onClick={saveWebLogin}
                 disabled={webLoginSaving || !webLoginForm.loginUrl || !webLoginForm.username || (!webLoginModal.conn && !webLoginForm.password)}
-                className="px-3 py-1.5 text-sm bg-slate-800 text-white rounded-md hover:bg-slate-700 disabled:opacity-50"
+                className="btn btn-sm btn-primary"
               >
                 {webLoginSaving ? 'Saving…' : 'Save'}
               </button>
