@@ -26,3 +26,4 @@ references/.watcher.lock.lock
 references/.watcher.pid
 references/import-graph/
 references/project-map.md
+references/.code-graph-health-*.md
