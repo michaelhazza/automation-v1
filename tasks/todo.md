@@ -1453,3 +1453,36 @@ Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items we
   - Current behaviour: schema, writer, event service, and shared types correctly model `response` as nullable on the failure path. Nothing centrally enforces "consumers must null-check before nested-field access" — a consumer writing `payload.response.content` will crash at runtime if the row originated from a failure-path insert.
   - Suggested fix: add an invariant comment block at the canonical entry point (e.g. `server/routes/agentExecutionLog.ts` or the schema file) stating "All consumers MUST null-check response before accessing nested fields." Optional but stronger: add a typed assertion helper, e.g. `function assertResponsePresent(r: unknown): asserts r is Record<string, unknown>` so consumers can narrow once and reuse the narrowed reference.
   - Defer; not blocking. Implement when the next consumer is added or when a `response.X` access shows up in a code-review diff — that's the natural inflection point where the helper earns its keep. Type-level nullability on the field already gives compile-time safety today; the helper is a developer-ergonomics layer on top.
+
+---
+
+## Deferred findings — system-monitoring-coverage build (2026-04-28)
+
+### Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts
+
+`server/routes/webhooks/slackWebhook.ts` and `server/routes/webhooks/teamworkWebhook.ts`
+have inline `res.status(500)` paths that do not call `recordIncident`.
+These were out-of-scope for the system-monitoring-coverage build (spec §6.1.3 locked
+scope to GHL + GitHub only).
+
+Follow-up: apply the same `recordIncident` pattern to each inline 500 path in
+these files. Use `fingerprintOverride: 'webhook:slack:handler_failed'` and
+`fingerprintOverride: 'webhook:teamwork:handler_failed'` respectively.
+
+### workflow-bulk-parent-check JOB_CONFIG entry has no worker registration
+
+`workflow-bulk-parent-check` exists in `server/config/jobConfig.ts` with a
+`deadLetter` queue, so `dlqMonitorService` (via `deriveDlqQueueNames`) now
+subscribes to `workflow-bulk-parent-check__dlq` — but no producer or worker
+exists anywhere in the repository (`grep -rn "workflow-bulk-parent-check"
+server` returns only the JOB_CONFIG row).
+
+Origin: pr-reviewer SR-5. Spec §3.1 line 125 lists this queue's `createWorker`
+match as expected, but spec §5.2 line 885 hedges with "if present". The plan's
+preflight (Task 3.1 step 1) explicitly authorised omission when the queue isn't
+found.
+
+Follow-up: either find the missing worker registration site (audit log
+mentioned "Sprint 4 P3.1 bulk parent completion check"), or remove the
+`workflow-bulk-parent-check` entry from JOB_CONFIG if it's aspirational. Until
+then the DLQ subscription is harmless but noisy.
