@@ -78,6 +78,34 @@ await test('records the fully-read body (no truncation)', async () => {
   }
 });
 
+// ─── Case 2b: malformed JSON under application/json falls back to raw buffer
+await test('malformed JSON body with application/json content-type is recorded as raw bytes (no harness mask)', async () => {
+  const receiver = await startFakeWebhookReceiver();
+  try {
+    // Deliberately malformed JSON. The harness must NOT throw or skip
+    // recording — a producer-side bug shipping bad JSON is exactly what an
+    // integration test wants to assert on, and masking that as a parse
+    // failure here would hide the bug.
+    const malformed = '{"hello": "world", n: 42';
+    const res = await fetch(`${receiver.url}/bad`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: malformed,
+    });
+    assert.equal(res.status, 200, 'receiver still responds even when JSON is malformed');
+    assert.equal(receiver.callCount, 1);
+    const recorded = receiver.calls[0].body;
+    assert.ok(Buffer.isBuffer(recorded), 'malformed JSON falls back to raw Buffer');
+    assert.equal(
+      (recorded as Buffer).toString('utf8'),
+      malformed,
+      'recorded raw bytes match the deliberately-malformed payload exactly',
+    );
+  } finally {
+    await receiver.close();
+  }
+});
+
 // ─── Case 3: setStatusCode causes subsequent responses to use that status ───
 await test('setStatusCode(500) makes the next response 500', async () => {
   const receiver = await startFakeWebhookReceiver();

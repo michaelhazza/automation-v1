@@ -17,10 +17,10 @@
 
 import { strict as assert } from 'node:assert';
 import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
-import {
-  registerProviderAdapter,
-  getProviderAdapter,
-} from '../../../providers/registry.js';
+// NOTE: registry is NOT imported here. It is imported lazily (see below, between
+// Case 6 and Case 7) so that Cases 1–6 — which test only the adapter itself —
+// can run in environments without the production env vars that registry.ts
+// transitively requires (registry → anthropicAdapter → env.ts → envSchema.parse).
 
 let passed = 0;
 let failed = 0;
@@ -116,6 +116,30 @@ await test('setError + setLatencyMs delays the rejection AND records on entry', 
   assert.equal(adapter.callCount, 1);
 });
 
+// ─── Case 5b: setResponse + setLatencyMs — latency applies on success path ─
+await test('setResponse + setLatencyMs delays the override response AND records on entry', async () => {
+  const adapter = createFakeProviderAdapter();
+  adapter.setResponse({
+    content: 'overridden-with-latency',
+    stopReason: 'end_turn',
+    tokensIn: 7,
+    tokensOut: 3,
+    providerRequestId: 'override-latency',
+  });
+  adapter.setLatencyMs(60);
+  const start = Date.now();
+  const out = await adapter.call({ model: 'fake-model', messages: [] });
+  const elapsed = Date.now() - start;
+  // Both overrides land: the override is what resolves, AND the latency is
+  // applied before the resolve. Symmetric with Case 5 (error + latency) —
+  // a future regression that special-cased the success path could break
+  // this without breaking either single-knob test.
+  assert.equal(out.content, 'overridden-with-latency');
+  assert.equal(out.tokensIn, 7);
+  assert.ok(elapsed >= 55, `latency must apply on the override-resolve path; got ${elapsed}ms`);
+  assert.equal(adapter.callCount, 1);
+});
+
 // ─── Case 6: reset() clears calls and overrides ─────────────────────────────
 await test('reset() clears calls + cancels pending error/latency/response overrides', async () => {
   const adapter = createFakeProviderAdapter();
@@ -136,6 +160,14 @@ await test('reset() clears calls + cancels pending error/latency/response overri
   assert.equal(out.content, 'fake response', 'response override cleared by reset');
   assert.ok(elapsed < 100, 'latency override cleared by reset');
 });
+
+// ─── Registry-dependent tests (Cases 7–13) ────────────────────────────────────
+// Import the registry NOW rather than at module load. This guarantees Cases 1–6
+// above always run (they test only the adapter — no env deps). If the environment
+// lacks the required vars (DATABASE_URL etc.) the import below throws and only
+// the registry suite fails, not the core suite.
+const { registerProviderAdapter, getProviderAdapter } =
+  await import('../../../providers/registry.js');
 
 // ─── Case 7: register + restore preserves prior state ───────────────────────
 await test('register + restore restores the EXACT prior state at the key', async () => {

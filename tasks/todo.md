@@ -1386,3 +1386,12 @@ Reviewer's final pass said "merge it" and flagged two optional notes explicitly 
   - Current behaviour: rule-based thresholds + boolean gates compose the verdict in `computeVerdict()`. Works correctly for Phase 0's signal set.
   - Suggested fix: convert each signal class (adoption / correctness / operational) to a numeric score, compute the verdict from a weighted score composition. Reviewer's framing: this matters once trend analysis lands or weak signals start combining — neither is true today.
   - Defer; reviewer explicitly said "where this naturally evolves" and "not something to implement now." Revisit if/when the trend-awareness item (round 2) lands, since that's the natural co-arrival point.
+
+## ChatGPT PR final-review — round 1 (deferred refinements) — pre-test-integration-harness (2026-04-28)
+
+Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items were either already correct or reduced to a comment update; the items below are the explicitly-deferred refinements the reviewer flagged as "strongly recommended" or "optional improvement," not blockers.
+
+- [ ] Null-response invariant for downstream consumers of `agent_run_llm_payloads.response` (ChatGPT R1 — pre-test-integration-harness)
+  - Current behaviour: schema, writer, event service, and shared types correctly model `response` as nullable on the failure path. Nothing centrally enforces "consumers must null-check before nested-field access" — a consumer writing `payload.response.content` will crash at runtime if the row originated from a failure-path insert.
+  - Suggested fix: add an invariant comment block at the canonical entry point (e.g. `server/routes/agentExecutionLog.ts` or the schema file) stating "All consumers MUST null-check response before accessing nested fields." Optional but stronger: add a typed assertion helper, e.g. `function assertResponsePresent(r: unknown): asserts r is Record<string, unknown>` so consumers can narrow once and reuse the narrowed reference.
+  - Defer; not blocking. Implement when the next consumer is added or when a `response.X` access shows up in a code-review diff — that's the natural inflection point where the helper earns its keep. Type-level nullability on the field already gives compile-time safety today; the helper is a developer-ergonomics layer on top.

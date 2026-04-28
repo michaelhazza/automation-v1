@@ -1679,17 +1679,25 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   //
   // PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
   // emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
-  // Failure cases collapse to the same observable state
-  // (`payloadInsertStatus: 'failed'`, `payloadRowId: null`):
-  //   (a) provider failure — the failure path emits llm.completed without
-  //       running this section (no provider response to persist; spec Gap D).
-  //   (b) success-path INSERT failure — the wrap-tx below rolls back any
-  //       partial INSERT and the catch handler emits llm.completed with
-  //       payloadInsertStatus='failed'.
+  //
+  // Three sites emit llm.completed; all observe the contract:
+  //   (a) success path (this section) — payload row attempted with the full
+  //       provider response. payloadInsertStatus reflects insert outcome:
+  //       'ok' on success, 'failed' if the wrap-tx catches an INSERT error.
+  //   (b) failure path (separate block above, ~lines 1329-1366) — payload
+  //       row is ALWAYS attempted on provider failure (best-effort). The
+  //       persisted `response` may be null (provider returned nothing usable)
+  //       or partial (provider surfaced usage-only / refusal data). The
+  //       payloadInsertStatus reflects the insert outcome independently — a
+  //       successful insert under provider failure produces 'ok' + a real
+  //       rowId, NOT 'failed'.
   //   (c) finally-block fallback — request emitted but completion did not
-  //       reach either path; emits with payloadInsertStatus='failed'.
-  // To distinguish (a)/(b)/(c) for debugging, look for the
-  // `lael_payload_insert_failed` logger.warn — only case (b) emits it.
+  //       reach (a) or (b); emits with payloadInsertStatus='failed' and no
+  //       insert is attempted.
+  //
+  // Disjoint warn signatures distinguish the sites for debugging:
+  //   `lael_payload_insert_failed`              → (a) catch handler only
+  //   `lael_failure_path_payload_insert_failed` → (b) catch handler only
   //
   // Ordering: AFTER the ledger upsert (§12), AFTER the registry removal (§12b),
   // BEFORE Langfuse / reservation commit. The payload insert is best-effort

@@ -123,12 +123,21 @@ test('case 4: every status string written by production code is listed in KNOWN_
     resolve(here, '../invokeAutomationStepService.ts'),
     'utf8',
   );
-  // Extract `status: '<value>'` literals from AutomationStepError construction
-  // sites. The regex is intentionally narrow — `status:` followed by a
-  // single-quoted string. Multi-line / template-string status values would
-  // fall through (and the production service has none today).
-  const matches = [...serviceText.matchAll(/\bstatus:\s*'([^']+)'/g)];
-  const capturedStatuses = matches.map((m) => m[1]);
+  // Two-step extraction: first isolate `const VAR: AutomationStepError = { ... };`
+  // blocks, then scan each block for `status: '...'`. This avoids over-capture of
+  // unrelated `status:` values in the same file (e.g. function-return shapes like
+  // `{ status: 'ok' }`, `{ status: 'error' }`) that would generate false failures.
+  // The outer regex relies on `};` being the FIRST `};` after the opening `{` —
+  // safe because nested objects inside AutomationStepError literals close with `},`
+  // (comma, not semicolon).
+  const errorBlockRe = /\bconst\s+\w+\s*:\s*AutomationStepError\s*=\s*\{([\s\S]*?)\};/g;
+  const statusRe = /\bstatus:\s*'([^']+)'/;
+  const capturedStatuses: string[] = [];
+  for (const blockMatch of serviceText.matchAll(errorBlockRe)) {
+    const blockContent = blockMatch[1];
+    const statusMatch = blockContent.match(statusRe);
+    if (statusMatch) capturedStatuses.push(statusMatch[1]);
+  }
   assert.ok(
     capturedStatuses.length > 0,
     'expected at least one status: \'...\' construction in the service file (regex drifted?)',
