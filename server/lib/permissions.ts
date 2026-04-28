@@ -296,6 +296,13 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.ORG_OBSERVABILITY_VIEW,
     description: 'View delegation outcomes and observability data',
     groupName: 'org.observability' },
+  // org.billing + subaccount.billing (IEE — Integrated Execution Environment; rev 6 §11.5.3)
+  { key: ORG_PERMISSIONS.IEE_USAGE_VIEW,
+    description: 'View IEE usage and billing data at the org level',
+    groupName: 'org.billing' },
+  { key: SUBACCOUNT_PERMISSIONS.IEE_USAGE_VIEW,
+    description: 'View IEE usage and billing data for this subaccount',
+    groupName: 'subaccount.billing' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
