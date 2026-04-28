@@ -488,14 +488,18 @@ async function start() {
     try {
       const boss = await getPgBoss();
       const { runSkillAnalyzerJobWithIncidentEmission } = await import('./jobs/skillAnalyzerJobWithIncidentEmission.js');
+      const { getRetryCount } = await import('./lib/jobErrors.js');
       // Surface terminal failures to the System Monitor. pg-boss retry exhaustion
       // also lands in skill-analyzer__dlq (covered by Phase 1's DLQ derivation),
       // but emitting here too gives faster visibility for failures that happen
       // on the FINAL retry attempt — without this wrap, the operator sees no
       // signal until the DLQ row lands.
+      // The wrapper only emits an incident when retryCount >= retryLimit
+      // (terminal attempt). Earlier-attempt throws rethrow without emitting.
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        await runSkillAnalyzerJobWithIncidentEmission(jobId);
+        const retryCount = getRetryCount(job as { retrycount?: number } & Record<string, unknown>);
+        await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
       });
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);

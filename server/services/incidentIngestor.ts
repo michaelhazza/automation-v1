@@ -17,6 +17,7 @@ import { systemIncidents, systemIncidentSuppressions } from '../db/schema/index.
 import { logger } from '../lib/logger.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { env } from '../lib/env.js';
+import { getJobConfig } from '../config/jobConfig.js';
 import {
   type IncidentInput,
   classify,
@@ -102,7 +103,15 @@ export async function recordIncident(
       // pg-boss provides backpressure for the async path. Adding throttle in the async-worker
       // violates spec §1.7 (2026-04-28 pre-test backend hardening). Throttle is process-local;
       // cross-instance deduplication is not guaranteed.
-      if (checkThrottle(fingerprint)) {
+      //
+      // forceSync: true callers ALSO bypass the throttle. The only forceSync caller is
+      // `dlqMonitorService`, which records pre-rate-limited DLQ events — pg-boss has
+      // already gated delivery, the events are signal not spam, and the throttle would
+      // otherwise drop bursty same-fingerprint DLQ deliveries within the 1s window
+      // instead of routing them through ingestInline's UPSERT (which increments
+      // occurrenceCount). Throttle bypass keeps occurrenceCount accurate for the
+      // very signal this monitor is meant to surface.
+      if (opts?.forceSync !== true && checkThrottle(fingerprint)) {
         logger.debug('incident_ingest_throttled', { fingerprint });
         return;
       }
@@ -120,10 +129,18 @@ export async function recordIncident(
 
 async function enqueueIngest(input: IncidentInput): Promise<void> {
   const boss = await getPgBoss();
-  await boss.send('system-monitor-ingest', {
-    input,
-    correlationId: input.correlationId ?? null,
-  });
+  // Pass JOB_CONFIG so retryLimit / retryDelay / expireInSeconds / deadLetter
+  // (system-monitor-ingest__dlq) are actually applied. Without this, pg-boss
+  // uses its defaults and the new G3 JOB_CONFIG entry is dead config —
+  // async-mode failures would never route to the DLQ as designed.
+  await boss.send(
+    'system-monitor-ingest',
+    {
+      input,
+      correlationId: input.correlationId ?? null,
+    },
+    getJobConfig('system-monitor-ingest'),
+  );
 }
 
 /** Shared code path for sync mode and the async worker. */
