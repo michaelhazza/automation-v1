@@ -2,36 +2,18 @@
  * resolveRequiredConnectionsPure.test.ts — §1.2 REQ W1-44 pure helper tests.
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/resolveRequiredConnectionsPure.test.ts
+ *   npx tsx --test server/services/__tests__/resolveRequiredConnectionsPure.test.ts
  */
 
+import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { resolveRequiredConnections } from '../resolveRequiredConnectionsPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 const SUB = 'sub-001';
 const MAPPINGS = [
   { connectionKey: 'ghl', connectionId: 'conn-ghl' },
   { connectionKey: 'slack', connectionId: 'conn-slack' },
 ];
-
-console.log('');
-console.log('resolveRequiredConnectionsPure — §1.2 REQ W1-44');
-console.log('');
 
 // ── 1. null requiredConnections ───────────────────────────────────────────────
 
@@ -153,10 +135,24 @@ test('all required present with extra unrelated keys → ok: true, resolved only
   assert.deepEqual(result, { ok: true, resolved: { ghl: 'conn-ghl', slack: 'conn-slack' } });
 });
 
-// ── Summary ───────────────────────────────────────────────────────────────────
+// ── 8. input-permutation determinism (§8.21) ──────────────────────────────────
 
-console.log('');
-console.log(`  ${passed} passed, ${failed} failed`);
-console.log('');
-
-if (failed > 0) process.exit(1);
+test('mappings input order does not affect resolved output', () => {
+  const auto = { requiredConnections: ['ghl', 'slack', 'stripe'] };
+  const base = [
+    { connectionKey: 'ghl',    connectionId: 'conn-ghl'    },
+    { connectionKey: 'slack',  connectionId: 'conn-slack'  },
+    { connectionKey: 'stripe', connectionId: 'conn-stripe' },
+  ];
+  const permutations = [
+    [base[0], base[1], base[2]],
+    [base[1], base[2], base[0]],
+    [base[2], base[0], base[1]],
+  ];
+  const expected = { ghl: 'conn-ghl', slack: 'conn-slack', stripe: 'conn-stripe' };
+  for (const mappings of permutations) {
+    const r = resolveRequiredConnections({ automation: auto, subaccountId: 'sub-1', mappings });
+    assert.ok(r.ok);
+    if (r.ok) assert.deepStrictEqual(r.resolved, expected);
+  }
+});
