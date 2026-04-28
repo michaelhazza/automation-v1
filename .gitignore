@@ -10,6 +10,10 @@ shared/iee/*.js
 tasks/codex-iter*.txt
 .vs/
 
+# Mission Control dashboard (tools/mission-control/) — local-only build output
+tools/mission-control/dist/
+tools/mission-control/node_modules/
+
 # DB backup dumps — never commit (contain real user records, password hashes, org IDs)
 backups/
 tasks/users-backup.json
