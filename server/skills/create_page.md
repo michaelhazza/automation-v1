@@ -3,7 +3,6 @@ name: Create Page
 description: Create a new page in a page project. The page starts as a draft.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

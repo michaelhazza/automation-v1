@@ -32,11 +32,10 @@
  * Sprint 2 commit.
  */
 
-import { sql, eq } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { toolCallSecurityEvents, agents, systemAgents } from '../../db/schema/index.js';
+import { toolCallSecurityEvents } from '../../db/schema/index.js';
 import { getActionDefinition } from '../../config/actionRegistry.js';
-import { isManagerAllowlisted } from './managerGuardPure.js';
 import {
   actionService,
   buildActionIdempotencyKey,
@@ -274,56 +273,7 @@ export const proposeActionMiddleware: PreToolMiddleware = {
       return decision;
     }
 
-    // ── 5. Manager-role guard (v7.1) ─────────────────────────────────────
-    // Runs for known tools only (definition exists). After scope validation
-    // so scope errors report correctly; before proposeAction so the audit
-    // row never records a manager-blocked action as 'allow'.
-    if (definition) {
-      const agentId = ctx.request.agentId;
-      // Resolve agentRole and perManagerDeclaredSlugs from the org-level agents
-      // table (agentRole) and its linked system_agents row (defaultSystemSkillSlugs).
-      // One small row read per tool call — no caching in this chunk.
-      const [agentRow] = await db
-        .select({
-          agentRole: agents.agentRole,
-          systemAgentId: agents.systemAgentId,
-        })
-        .from(agents)
-        .where(eq(agents.id, agentId))
-        .limit(1);
-
-      const agentRole = agentRow?.agentRole ?? null;
-      let perManagerDeclaredSlugs: string[] = [];
-
-      if (agentRow?.systemAgentId) {
-        const [sysRow] = await db
-          .select({ defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs })
-          .from(systemAgents)
-          .where(eq(systemAgents.id, agentRow.systemAgentId))
-          .limit(1);
-        perManagerDeclaredSlugs = sysRow?.defaultSystemSkillSlugs ?? [];
-      }
-
-      const guardResult = isManagerAllowlisted(definition, agentRole, perManagerDeclaredSlugs, toolCall.name);
-
-      if (!guardResult.allowed) {
-        await writeSecurityEvent({
-          organisationId,
-          subaccountId,
-          agentRunId: runId,
-          toolCallId: toolCall.id,
-          toolSlug: toolCall.name,
-          decision: 'deny',
-          reason: guardResult.reason,
-          argsHash,
-        });
-        const decision: PreToolDecision = { action: 'block', reason: guardResult.reason };
-        ctx.preToolDecisions.set(toolCall.id, decision);
-        return decision;
-      }
-    }
-
-    // ── 6. proposeAction with deterministic idempotency key ──────────────
+    // ── 5. proposeAction with deterministic idempotency key ──────────────
     const idempotencyKey = buildActionIdempotencyKey({
       runId,
       toolCallId: toolCall.id,

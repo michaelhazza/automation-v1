@@ -3,7 +3,6 @@ name: Config Activate Agent
 description: Set an agent's status to active or inactive.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

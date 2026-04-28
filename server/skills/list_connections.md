@@ -3,7 +3,6 @@ name: List Connections
 description: Return the active integration connections for the caller's org or a specific subaccount. Never returns secrets.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

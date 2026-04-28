@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { User } from '../lib/auth';
 import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
@@ -62,7 +61,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
       api.get('/api/my-subscription').catch((e) => { console.warn('my-subscription failed', e); return null; }),
       api.get('/api/onboarding/status').catch((e) => { console.warn('onboarding/status failed', e); return null; }),
     ]).then(([healthRes, riskRes, reportRes, subRes, onboardingRes]) => {
-      if (healthRes?.data) setHealth(healthRes.data);
+      if (healthRes?.data?.data) setHealth(healthRes.data.data);
       if (riskRes?.data?.clients) setHighRisk(riskRes.data.clients);
       if (reportRes?.data) setLatestReport(reportRes.data);
       if (subRes?.data) setSubscription(subRes.data);
@@ -75,7 +74,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
     if (!data || typeof data !== 'object') return;
     const update = data as Partial<HealthSummary>;
     setHealth((prev) => prev ? { ...prev, ...update } : prev);
-    toast.success('Dashboard updated with latest data');
   }, []));
 
   if (loading) return <DashboardSkeleton />;

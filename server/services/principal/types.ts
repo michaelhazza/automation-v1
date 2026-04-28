@@ -27,13 +27,4 @@ export interface DelegatedPrincipal {
   teamIds: string[];
 }
 
-export interface SystemPrincipal {
-  type: 'system';
-  id: string;
-  organisationId: string;
-  subaccountId: null;
-  teamIds: string[];
-  isSystemPrincipal: true;
-}
-
-export type PrincipalContext = UserPrincipal | ServicePrincipal | DelegatedPrincipal | SystemPrincipal;
+export type PrincipalContext = UserPrincipal | ServicePrincipal | DelegatedPrincipal;

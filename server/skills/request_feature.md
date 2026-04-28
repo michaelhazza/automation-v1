@@ -3,7 +3,6 @@ name: Request Feature
 description: File a structured feature request against the platform. Writes a durable feature_requests row and fires best-effort Slack/email notifications and a Synthetos-internal task for HITL triage.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

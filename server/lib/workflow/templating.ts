@@ -52,7 +52,7 @@ function hasOwn(obj: object, key: string | symbol): boolean {
 }
 const ALLOWED_PREFIXES = ['run.input', 'run.subaccount', 'run.org', 'steps'] as const;
 const BLOCKED_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
-const SUBACCOUNT_FIELDS = new Set(['id', 'name', 'timezone', 'slug', 'organisationId']);
+const SUBACCOUNT_FIELDS = new Set(['id', 'name', 'timezone', 'slug']);
 const ORG_FIELDS = new Set(['id', 'name']);
 
 export class TemplatingError extends Error {

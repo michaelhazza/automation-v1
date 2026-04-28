@@ -1497,6 +1497,25 @@ Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one
 
 **Backstop polling:** Components that use WebSocket rooms also run a `setInterval` backstop — 15s when connected, 5s when disconnected — to cover reconnect windows. The backstop is a safety net, not the primary update path.
 
+### Home dashboard live reactivity (PR #218 / spec: `docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md`)
+
+Live updates to the home dashboard use a coalescing + last-write-wins pattern instead of trusting socket payloads for UI state. Events are notifications only; the REST endpoint is the source of truth.
+
+**Topic family.** `dashboard.approval.changed`, `dashboard.activity.updated`, `dashboard.client.health.changed`, `dashboard.queue.changed`. Emitted from `server/services/reportService.ts`, `server/routes/reviewItems.ts`, `server/services/reviewService.ts`, plus agent-run and workflow-run terminal-state hooks. The legacy `dashboard:update` topic is retained for `ClientPulseDashboardPage` parity but is not used by the home dashboard.
+
+**Client primitives** (`client/src/pages/DashboardPage.tsx`):
+- **`applyIfNewer(currentTs, incomingTs, apply)`** — strict-greater-than guard on per-group `serverTimestamp`. Out-of-order responses drop silently.
+- **Per-group inflight + pending coalescing** — if a refetch is in flight when an event arrives, set `pending = true` instead of firing a second request. The in-flight finalizer re-fires once if `pending` was set. Replaces the earlier drop-on-inflight pattern (which left stale UI state when the inflight response was older than the suppressed event).
+- **`markFresh(ts)`** — single freshness clock fed by every successful `applyIfNewer` apply; consumed by `FreshnessIndicator` for the "last updated · Ns ago" line.
+- **`EVENT_TO_GROUP`** — `as const` keyed map from socket event name to refetch function. The keyed-access call sites (`useSocket('dashboard.approval.changed', () => EVENT_TO_GROUP['dashboard.approval.changed']())`) make rename/removal a TypeScript error — drift guardrail per spec §4.2.
+
+**Server invariants:**
+- **Server-side timestamp generation** — `serverTimestamp` on the REST response is set inside the same handler that produces the payload; clients never generate timestamps. This anchors the "latest data wins" comparison to a monotonic source.
+- **`expectedTimestamp` atomicity** — for the activity group, the two REST calls (`/api/activity` and `/api/agent-activity/stats`) return independent timestamps; the client combines them with `min(...)` (not `max`) so the group only advances when BOTH halves are at least that fresh. Splitting these or switching to `max` re-opens the atomicity gap.
+- **Suppression is success** — single-writer event emitters that lose a coordination race must return `success: true, suppressed: true` rather than `success: false`. Returning failure here triggers retries, false incident signals, and broken metrics. Pattern enforced in `writeDiagnosis` (system-monitoring agent) and should be applied consistently to any new single-writer emitter.
+
+**Reconnect handling:** `RECONNECT_DEBOUNCE_MS = 500` debounce on the `false → true` socket-connection transition (NOT `null → true` initial mount), then a single `refetchAll()`. Initial mount uses the standard fetch path; only true reconnects trigger the bulk refetch.
+
 ---
 
 ## Regression Capture & Trajectory Testing
@@ -3059,8 +3078,6 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
 | Add a new permission key | `server/lib/permissions.ts` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
-| Add/modify a System Monitor heuristic (Phase 2+) | `server/services/systemMonitor/heuristics/` (pure module per category folder) + `index.ts` (HEURISTICS array) + co-located test. Heuristics MUST be pure (no DB writes — `verify-heuristic-purity.sh` gate). New event types go to `shared/types/systemIncidentEvent.ts` + `server/db/schema/systemIncidentEvents.ts` (`verify-event-type-registry.sh` gate). Baselining: `server/services/systemMonitor/baselines/sourceTableQueries.ts`. Triage orchestration: `server/services/systemMonitor/triage/sweepHandler.ts` (sweep) + `triageHandler.ts` (incident-driven). |
-| Modify the system_monitor agent prompt | `server/services/systemMonitor/triage/agentSystemPrompt.ts` (`SYSTEM_MONITOR_PROMPT` constant) — single source of truth, imported at runtime by `triageHandler.ts` and seeded into `system_agents.master_prompt` by `scripts/seed.ts` Phase 4. Re-run `npm run seed` to propagate to the DB. Validate changes via `validateInvestigatePrompt` in `promptValidation.ts`. |
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
@@ -3274,91 +3291,4 @@ The counter is process-local — multi-instance deployments under-count globally
 
 ### Admin UI
 
-`/system/incidents` — `SystemIncidentsPage.tsx` with sortable/filterable table, inline detail drawer (ack/resolve/suppress/escalate), WebSocket-updated nav badge. Phase 2 additions: `DiagnosisAnnotation`, `InvestigatePromptBlock`, `FeedbackWidget` (in `client/src/components/system-incidents/`), `DiagnosisFilterPill` filter.
-
----
-
-## System Monitor Active Layer (Phase A + Phase 1 + Phase 2)
-
-The active layer runs above the Phase 0/0.5 ingestor — it autonomously diagnoses incidents, produces investigation prompts, and feeds back into the heuristic registry via operator feedback.
-
-### Foundations (Phase A)
-
-**System principal.** `withSystemPrincipal(fn)` in `server/services/principal/systemPrincipal.ts` wraps jobs that run as the system monitor. Inside, `getCurrentPrincipal()` returns `{ type: 'system' }`. `assertSystemAdminContext(ctx, opts)` admits both `principal.type === 'system'` AND human sysadmins (via `actorRole`); never add `'system'` to tenant RLS predicates — cross-tenant reads go through `withAdminConnectionGuarded`.
-
-**Idempotency + throttle.** `recordIncident` applies two gates before the DB write: (1) per-fingerprint LRU dedup (`IDEMPOTENCY_WINDOW_MS`, default 5 min, `IDEMPOTENCY_CACHE_SIZE` 500), (2) per-fingerprint throttle (`THROTTLE_WINDOW_MS`, default 60s). Both live in `incidentIngestor.ts`. The outbox-pattern enqueue of `system-monitor-triage` (post-commit best-effort, `singletonKey: 'triage:${incidentId}'`) prevents double-triage from sweep + incident-driven races.
-
-**Schema additions.** Migration `0233_phase_a_foundations.sql`:
-- `system_monitor_baselines` — `(entity_kind, entity_id, metric_name, window_start, window_end)` unique; stores p50/p95/p99/mean/stddev/min/max/sample_count per metric.
-- `system_monitor_heuristic_fires` — audit row per heuristic evaluation outcome (fired / suppressed / insufficient_data / errored).
-- `system_incidents` additions: `investigate_prompt`, `agent_diagnosis` (jsonb), `agent_diagnosis_run_id` (FK agent_runs), `triage_attempt_count`, `last_triage_attempt_at`, `prompt_was_useful` (boolean), `prompt_feedback_text`.
-
-### Phase 1 — Synthetic Checks
-
-8 day-one checks in `server/services/systemMonitor/synthetic/checks.ts` + tick handler in `server/jobs/systemMonitorSyntheticChecksJob.ts` (every minute). Each check returns `{ fired: boolean; severity?; summary?; fingerprintOverride? }`. The tick handler calls `recordIncident` for every firing check. pg-boss queue: `system-monitor-synthetic-checks`, `teamSize: 1`.
-
-Baselining: `server/services/systemMonitor/baselines/refreshJob.ts` queries `aggregateAgentRuns` (and stubs for connectors/skills/llm_router) in `sourceTableQueries.ts`. pg-boss queue: `system-monitor-baseline-refresh`, `teamSize: 1`.
-
-### Phase 2 — Heuristic Sweep + Triage Agent
-
-**Heuristic registry.** 23 modules in `server/services/systemMonitor/heuristics/`. Each implements `Heuristic` from `types.ts`: `{ id, category, phase, severity, confidence, expectedFpRate, requiresBaseline?, suppressions?, firesPerEntityPerHour, evaluate(ctx, candidate), describe(evidence) }`. `evaluate` is PURE (no DB writes — `verify-heuristic-purity.sh` gate). CI gate `verify-event-type-registry.sh` ensures every `eventType: 'literal'` is in `shared/types/systemIncidentEvent.ts`.
-
-| Phase | Category | Count |
-|-------|----------|-------|
-| 2.0 | agent_quality (9), skill_execution (3), infrastructure (2) | 14 |
-| 2.5 | infrastructure (5), systemic (4) | 9 |
-
-Phase filter: `SYSTEM_MONITOR_HEURISTIC_PHASES` env var (default `2.0,2.5`). `getEligibleHeuristics()` filters `HEURISTICS` array.
-
-**Sweep (two-pass, every 15 min).** `runSweep()` in `sweepHandler.ts`:
-- Pass 1: `loadCandidates(now)` via `withAdminConnectionGuarded` (cross-tenant) → evaluate all eligible heuristics → `writeHeuristicFire` per outcome.
-- Pass 2: `clusterFires` by `(entityKind, entityId)` → `selectTopForTriage` (top-50 by maxConfidence, 200 KB payload cap) → `recordIncident` per cluster (auto-enqueues triage via outbox). `bucket15min` key for dedup.
-
-pg-boss queue: `system-monitor-sweep`, `teamSize: 1`, cron `*/15 * * * *`.
-
-**Triage handler (incident-driven).** `runTriage(incidentId)` in `triageHandler.ts`:
-1. Load incident → `checkAdmit` (`triageAdmitPure.ts`) — gates: kill switch, severity ≥ medium, not self-check, attempt count < `TRIAGE_ATTEMPT_CAP` (5).
-2. `checkRateLimit` (`rateLimit.ts`) — per-fingerprint: `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT` (default 2) per `SYSTEM_MONITOR_TRIAGE_RATE_LIMIT_WINDOW_HOURS` (default 24h). Window resets on expiry. `maybeAutoEscalate` fires for high/critical incidents after window expiry.
-3. `resolveSystemOpsContext()` + `resolveSystemMonitorAgentId(orgId)` — resolves the `system_monitor` agent row in the System Ops org.
-4. Create `agent_runs` row (`runSource: 'system'`, `principalType: 'service'`, `principalId: 'system_monitor'`).
-5. Increment `triage_attempt_count`.
-6. `runToolLoop` — lightweight LLM loop via `routeCall({ sourceType: 'system', featureTag: 'system-monitor-triage' })`. Uses 11 skill definitions as provider tools; dispatched via `SKILL_HANDLERS`.
-
-pg-boss queue: `system-monitor-triage`, `teamSize: 4` (concurrent per incident, deduped by singletonKey).
-
-**System monitor skills.** 11 pure tool modules in `server/services/systemMonitor/skills/`:
-
-| Skill | Purpose |
-|-------|---------|
-| `readIncident` | Fetch incident row |
-| `readIncidentEvents` | Fetch event log |
-| `readAgentRun` | Fetch agent run + messages |
-| `readSkillExecution` | Fetch skill execution (Phase 2.5 stub) |
-| `readJobRun` | Fetch job run |
-| `readConnectorPoll` | Fetch connector poll |
-| `readSystemLogs` | Fetch structured logs for correlation |
-| `queryBaselines` | Read baseline stats for an entity |
-| `writeNote` | Append an `agent_note` event |
-| `writeDiagnosis` | Write `agent_diagnosis` + `investigate_prompt` with validation |
-| `writeEvent` | Write arbitrary system incident event |
-
-**Prompt validation.** `validateInvestigatePrompt(text)` in `promptValidation.ts`: 200–6,000 chars, 9 required headings in order, 3 forbidden patterns (`git push`, `merge to main`, `auto-deploy`). Returned from `write_diagnosis` as `{ success: false, error: 'PROMPT_VALIDATION_FAILED', retryable: true }` → agent retries up to 2×.
-
-**Investigate-Fix Protocol.** `/docs/investigate-fix-protocol.md` cross-reference. The triage agent generates a prompt per §9.7 template stored in `agentSystemPrompt.ts` and seeded into `system_agents.master_prompt` by `scripts/seed.ts` Phase 4 (single source of truth — also imported at runtime by `triageHandler.ts`).
-
-### pg-boss Queue Inventory (System Monitor)
-
-| Queue | Schedule | concurrency | Handler |
-|-------|----------|-------------|---------|
-| `system-monitor-self-check` | `*/5 * * * *` | 1 | `systemMonitorSelfCheckJob.ts` |
-| `system-monitor-synthetic-checks` | `* * * * *` | 1 | `systemMonitorSyntheticChecksJob.ts` |
-| `system-monitor-baseline-refresh` | `*/15 * * * *` | 1 | `systemMonitorBaselineRefreshJob.ts` |
-| `system-monitor-sweep` | `*/15 * * * *` | 1 | `systemMonitorSweepJob.ts` |
-| `system-monitor-triage` | none (outbox enqueue) | 4 | `systemMonitorTriageJob.ts` |
-
-### Kill-switch Hierarchy
-
-1. `SYSTEM_INCIDENT_INGEST_ENABLED=false` — disables all ingest (no incidents written at all).
-2. `SYSTEM_MONITOR_ENABLED=false` — disables triage enqueue + heuristic sweep tick; ingest and notification still work.
-3. `SYSTEM_MONITOR_HEURISTIC_PHASES` — filter which heuristic phases run (e.g. `2.0` only).
-4. `SYSTEM_MONITOR_AUTO_ESCALATE_AFTER_RATE_LIMIT=false` — disables auto-escalation past rate limit.
+`/system/incidents` — `SystemIncidentsPage.tsx` with sortable/filterable table, inline detail drawer (ack/resolve/suppress/escalate), WebSocket-updated nav badge.

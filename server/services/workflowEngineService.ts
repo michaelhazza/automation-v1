@@ -64,7 +64,7 @@ import {
   DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
-import { emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
@@ -763,6 +763,11 @@ export const WorkflowEngineService = {
         await emitWorkflowEvent(runId, run.subaccountId, 'Workflow:run:status', {
           status: 'cancelled',
         });
+        emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+          source: 'workflow_run',
+          runId,
+          status: 'cancelled',
+        });
       }
       return;
     }
@@ -877,6 +882,14 @@ export const WorkflowEngineService = {
           completedSteps: completedSteps.length,
           totalSteps: def.steps.length,
         }, { suppressWebSocket: shouldSuppressWebSocket(run.runMode) });
+
+        if (['completed', 'completed_with_errors'].includes(finalStatus)) {
+          emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+            source: 'workflow_run',
+            runId,
+            status: finalStatus,
+          });
+        }
 
         // Sprint 4 P3.1: if this is a bulk child, re-tick the parent
         if (run.parentRunId) {
@@ -2717,6 +2730,11 @@ export const WorkflowEngineService = {
         startedAt: run.startedAt,
         completedAt: failedAt,
       });
+      emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+        source: 'workflow_run',
+        runId: run.id,
+        status: 'failed',
+      });
       return;
     }
 
@@ -3143,6 +3161,11 @@ export const WorkflowEngineService = {
             startedAt: run.startedAt,
             completedAt: failedAt,
           });
+          emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+            source: 'workflow_run',
+            runId: run.id,
+            status: 'failed',
+          });
           return;
         }
         const outputHash = hashValue(stepOutput);
@@ -3303,6 +3326,11 @@ export const WorkflowEngineService = {
         runStatus: 'failed',
         startedAt: run.startedAt,
         completedAt: failedAt,
+      });
+      emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+        source: 'workflow_run',
+        runId: run.id,
+        status: 'failed',
       });
       return;
     }

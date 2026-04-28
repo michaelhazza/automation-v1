@@ -3,7 +3,6 @@ name: GEO Schema Analysis
 description: Evaluates JSON-LD structured data coverage and correctness for AI search engine consumption — Organisation, Article, FAQ, HowTo, Product schemas.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

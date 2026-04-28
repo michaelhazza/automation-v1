@@ -119,6 +119,7 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'read_revenue',
   'read_expenses',
   'analyse_financials',
+  'update_financial_record',
   'generate_competitor_brief',
   'synthesise_voc',
   'draft_content',
@@ -224,21 +225,6 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'crm.query',
   'ask_clarifying_questions',
   'challenge_assumptions',
-  // System Agents v7.1 — hierarchy + admin-ops + SDR + retention/success
-  'list_my_subordinates',
-  'generate_invoice',
-  'send_invoice',
-  'reconcile_transactions',
-  'chase_overdue',
-  'process_bill',
-  'track_subscriptions',
-  'prepare_month_end',
-  'discover_prospects',
-  'draft_outbound',
-  'score_lead',
-  'book_meeting',
-  'score_nps_csat',
-  'prepare_renewal_brief',
 ];
 
 // ---------------------------------------------------------------------------
@@ -274,11 +260,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 179 keys', () => {
+test('SKILL_HANDLERS has exactly 166 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 179) {
+  if (count !== 166) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 179. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 166. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

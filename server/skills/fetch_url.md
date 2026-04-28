@@ -3,7 +3,6 @@ name: Fetch URL
 description: Make an HTTP request to a URL and return the response body.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

@@ -2,7 +2,7 @@
 name: CRM/Pipeline Agent
 title: CRM/Pipeline Agent
 slug: crm-pipeline-agent
-reportsTo: head-of-commercial
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.3
 maxTokens: 4096

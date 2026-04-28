@@ -2,7 +2,7 @@
 name: Email Outreach Agent
 title: Email Outreach Agent
 slug: email-outreach-agent
-reportsTo: head-of-growth
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.4
 maxTokens: 4096

@@ -3,7 +3,6 @@ name: Config Set Link Skills
 description: Set the skill slugs on a subaccount agent link.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

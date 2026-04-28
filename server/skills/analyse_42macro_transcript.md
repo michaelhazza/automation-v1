@@ -27,7 +27,6 @@ UPSTREAM RECIPE — how to acquire and convert the source before calling this sk
   4. publish via send_to_slack / send_email / add_deliverable as instructed.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

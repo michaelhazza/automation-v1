@@ -3,7 +3,6 @@ name: Config Remove Data Source
 description: Remove a data source from an agent, link, or task.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters
