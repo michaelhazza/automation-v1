@@ -788,3 +788,90 @@ See §3.4 for the candidate list. Each is ~30–50 LOC. Suggested priority order
 **Fix shape:** Point audit per file. Each is a wrap-and-emit edit, ~5 LOC.
 
 **Risk:** Low. These operations are low-frequency, so incident emission won't churn the agent.
+
+---
+
+## 6. Recommended actions, ranked
+
+This is the implementation plan if all gaps were addressed. Items are grouped by **launch tier** — Tier 1 must land before testing begins; Tier 2 should land before production; Tier 3 is post-launch polish.
+
+### Tier 1 — must land before pre-production testing begins (~1-1.5 days of focused work)
+
+These items either currently lose data, currently produce false negatives, or currently strand the agent without evidence. They are mechanical and low-risk.
+
+| Order | Item | Effort | Risk | Dependencies |
+|---|---|---|---|---|
+| 1 | **G2** — wire `appendLogLine` from logger | XS (10 LOC) | Low | None |
+| 2 | **G1** — derive `DLQ_QUEUES` from `JOB_CONFIG.deadLetter` values | XS (5 LOC) | None | None |
+| 3 | **G5** — add `deadLetter:` to the 6 missing `JOB_CONFIG` entries | XS (6 lines) | None | G1 |
+| 4 | **G3** — register `system-monitor-ingest` worker on boot when `SYSTEM_INCIDENT_INGEST_MODE=async` + add to `JOB_CONFIG` | S (15 LOC) | None | G1 |
+| 5 | **G4 — workflow engine subset** — convert `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step`, `workflow-bulk-parent-check` to `createWorker` | M (~80 LOC, 4 sites) | Medium | None |
+| 6 | **G4 — IEE subset** — confirm `iee-browser-task`, `iee-dev-task`, `iee-cleanup-orphans`, `iee-run-completed` are wired through `createWorker` (verify in `ieeExecutionService.ts` and `jobs/ieeRunCompletedHandler.ts`) | S | Low | None |
+| 7 | **G7** — webhook 5xx paths emit `recordIncident` (GHL, GitHub, plus any teamwork manual 500 paths) | S (~30 LOC) | Low | G9 (can land independently as `source: 'route'` for now) |
+| 8 | **G11** — wrap skill-analyzer top-level handler with `recordIncident` | XS (15 LOC) | None | None |
+
+**Why these, not the others, for Tier 1:** these eight items together close the largest visibility holes without requiring any agent-side change. After Tier 1, every queue's failures, every webhook's 5xx, every async-mode incident, and every triage's log evidence reach the agent. The action surface goes from ~25% covered to >85% covered.
+
+**Single-branch landing strategy:** all 8 items can land on one branch (`add-monitoring-coverage` or similar). Order in the table is the safe order — earlier items have no deps on later items. Dual-reviewer worth running on the G4 / G5 changes since they touch boot-time wiring.
+
+### Tier 2 — before production rollout (~1 day)
+
+These improve diagnostic depth and close the remaining surface gaps.
+
+| Order | Item | Effort | Risk |
+|---|---|---|---|
+| 9 | **G4 — full conversion** — convert remaining ~17 `maintenance:*` raw `boss.work` registrations to `createWorker` + add `JOB_CONFIG` entries | L (~250 LOC across queueService.ts) | Medium |
+| 10 | **G6** — `skillExecutor` retry-exhaustion incident path | M (~50 LOC + retry-count plumbing) | Medium (potential churn — pair with suppression rules) |
+| 11 | **G9** — add `'webhook'` value to `SystemIncidentSource` enum | XS | None |
+| 12 | **G13** — adapter-level `recordIncident` calls in `server/adapters/{ghl,slack,stripe,teamwork}.ts` | M (~30 LOC × 4 adapters = ~120 LOC) | Low |
+| 13 | **G15** — point audit of remaining sysadmin operations: `orgSubaccountMigrationJob`, `configBackupService`, `dataRetentionService`, `scheduledTaskService` partial-failure paths | M (~5 LOC × ~10 sites) | Low |
+| 14 | **G10** — add four read skills: `read_agent_definition`, `read_recent_incidents`, `read_pgboss_queue_state`, `read_org_subaccount_summary` | M (~50 LOC × 4 = ~200 LOC) | Low |
+
+### Tier 3 — post-launch polish
+
+| Item | Effort | Why deferred |
+|---|---|---|
+| **G12** — five new synthetic checks (HITL timeout, workflow stuck, scheduled-task silence, skill silence, brief artefact rejection) | M (~30-50 LOC × 5) | Tier 1+2 close the error-path gaps; Tier 3 starts adding silent-failure detection. Worth doing once we have production telemetry to tune thresholds. |
+| **G14** — Redis-backed `processLocalFailureCounter` | M | Multi-instance deploy item; not relevant pre-production. |
+| §3.3 — read skill exposing cross-incident clustering | S | Useful but the agent can already infer some clustering from fingerprint reuse. |
+| §3.5 — per-triage byte cap on agent reads | S | Token budgets at the trigger-model layer cover the worst case. |
+| §3.6 — `confidence: 'insufficient'` value | XS | Cosmetic — `'low'` + the word "insufficient" in hypothesis text covers it today. |
+| Phase 0.75 — push channels (email/Slack on critical incidents) | L | Already deferred per spec Q1. |
+| Phase 3 — auto-remediation | XL | Already deferred per spec. |
+
+### Single-pass branch outline
+
+If you want to run this as one branch with one PR (per the user's "all in place before testing" framing):
+
+```
+Branch: add-monitoring-coverage
+
+Commits:
+  1. feat(monitor): wire appendLogLine from logger to logBuffer (G2)
+  2. feat(monitor): derive DLQ_QUEUES from JOB_CONFIG.deadLetter (G1)
+  3. feat(monitor): add deadLetter to slack-inbound, agent-briefing-update,
+     memory-context-enrichment, page-integration, iee-cost-rollup-daily,
+     connector-polling-tick (G5)
+  4. feat(monitor): register system-monitor-ingest async worker on boot (G3)
+  5. refactor(workflows): route workflow engine workers through createWorker (G4 subset)
+  6. fix(routes): emit recordIncident on 5xx webhook paths (G7)
+  7. fix(monitor): emit recordIncident on skill-analyzer terminal failure (G11)
+  8. test: integration tests for new DLQ subscriptions (one per category)
+  9. docs(architecture): update System Monitor section with new coverage list
+```
+
+Pre-test verification: `npm run typecheck` + `npm run lint` + a targeted unit-test pass + an e2e smoke that triggers each new incident path manually.
+
+Pre-merge: `npm run test:gates` (per CLAUDE.md gate-cadence rule).
+
+Reviewers: `pr-reviewer` is sufficient for Tier 1. `dual-reviewer` recommended on G4 since boot-time wiring is harder to spot-check.
+
+### Effort summary
+
+| Tier | Items | Effort estimate |
+|---|---|---|
+| Tier 1 | G2, G1, G5, G3, G4 (subset), G7, G11 | 1–1.5 days |
+| Tier 2 | G4 (full), G6, G9, G13, G15, G10 | 1 day |
+| Tier 3 | G12, G14, §3.3/§3.5/§3.6 | 1–2 days, post-launch |
+
+**Total to "every action is monitored, ready for testing":** Tier 1 alone — 1–1.5 days.
