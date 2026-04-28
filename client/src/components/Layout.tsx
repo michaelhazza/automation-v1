@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import CommandPalette from './CommandPalette';
-import { GlobalAskBar } from './global-ask-bar/GlobalAskBar';
+import GlobalAskBar from './global-ask-bar/GlobalAskBar';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
@@ -886,7 +886,7 @@ export default function Layout({ user, children }: LayoutProps) {
           </div>
           {/* Global Ask Bar — always visible when org context exists */}
           {hasOrgContext && (
-            <GlobalAskBar currentSubaccountId={activeClientId ?? undefined} />
+            <GlobalAskBar />
           )}
           {/* Cmd+K trigger */}
           <button
