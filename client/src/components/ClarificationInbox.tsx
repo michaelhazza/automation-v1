@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
-import { useSocket } from '../hooks/useSocket';
+import { useSocketRoom } from '../hooks/useSocket';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,8 +50,6 @@ export default function ClarificationInbox({ subaccountId }: ClarificationInboxP
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  const socket = useSocket();
-
   const loadPending = async () => {
     try {
       const res = await api.get<{ items: ClarificationItem[] }>(
@@ -73,26 +71,12 @@ export default function ClarificationInbox({ subaccountId }: ClarificationInboxP
   }, [subaccountId]);
 
   // WebSocket subscriptions — refresh on any clarification lifecycle event
-  useEffect(() => {
-    if (!socket) return;
-
-    const room = `subaccount:${subaccountId}`;
-    socket.emit('subscribe', { room });
-
-    const refresh = () => loadPending();
-
-    socket.on('clarification:pending', refresh);
-    socket.on('clarification:resolved', refresh);
-    socket.on('clarification:expired', refresh);
-
-    return () => {
-      socket.emit('unsubscribe', { room });
-      socket.off('clarification:pending', refresh);
-      socket.off('clarification:resolved', refresh);
-      socket.off('clarification:expired', refresh);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, subaccountId]);
+  // On reconnect, re-fetch baseline state via REST to catch any missed events
+  useSocketRoom('subaccount', subaccountId, {
+    'clarification:pending': () => loadPending(),
+    'clarification:resolved': () => loadPending(),
+    'clarification:expired': () => loadPending(),
+  }, loadPending);
 
   // ──────────────────────────────────────────────────────────────────────────
 
