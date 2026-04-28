@@ -2,7 +2,7 @@
 name: QA Agent
 title: Quality Assurance Analyst
 slug: qa
-reportsTo: head-of-product-engineering
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.3
 maxTokens: 8192

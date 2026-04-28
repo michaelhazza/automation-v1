@@ -3,7 +3,6 @@ name: GEO Platform Optimizer
 description: Platform-specific readiness scores and recommendations for each major AI search engine — Google AI Overviews, ChatGPT, Perplexity, Gemini, Bing Copilot.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

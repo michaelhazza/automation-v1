@@ -224,7 +224,10 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
       if (q) params.q = q;
       if (from) params.from = from;
       if (to) params.to = to;
-      const { data } = await api.get(getEndpoint(), { params });
+      const res = await api.get(getEndpoint(), { params });
+      const data = scope === 'org'
+        ? res.data.data
+        : res.data;
       setPermissionDenied(false);
       setItems(data.items);
       setTotal(data.total);

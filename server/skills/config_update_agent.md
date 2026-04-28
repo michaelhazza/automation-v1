@@ -3,7 +3,6 @@ name: Config Update Agent
 description: Update an existing org agent's prompt, model, skills, or description.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

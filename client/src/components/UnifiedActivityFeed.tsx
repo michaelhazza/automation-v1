@@ -25,7 +25,7 @@ type NormalisedStatus =
   | 'failed'
   | 'cancelled';
 
-interface ActivityItem {
+export interface ActivityItem {
   id: string;
   type: ActivityType;
   status: NormalisedStatus;
@@ -50,6 +50,8 @@ interface ActivityItem {
 export interface UnifiedActivityFeedProps {
   orgId: string;
   limit?: number;
+  refreshToken?: number;
+  expectedTimestamp?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,12 +224,41 @@ function relativeTime(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Merge helpers
+// ---------------------------------------------------------------------------
+
+export function mergeActivityItems<T extends { id: string; updatedAt: string }>(
+  existing: T[],
+  incoming: T[],
+): T[] {
+  const byId = new Map(existing.map(item => [item.id, item]));
+  const newIds: string[] = [];
+
+  for (const item of incoming) {
+    const current = byId.get(item.id);
+    if (!current) {
+      newIds.push(item.id);
+      byId.set(item.id, item);
+    } else if (item.updatedAt > current.updatedAt) {
+      byId.set(item.id, item);
+    }
+    // equal or older: skip
+  }
+
+  const prepended = incoming.filter(i => newIds.includes(i.id));
+  const updated   = existing.map(item => byId.get(item.id)!);
+  return [...prepended, ...updated];
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 export default function UnifiedActivityFeed({
   orgId: _orgId,
   limit = 20,
+  refreshToken,
+  expectedTimestamp,
 }: UnifiedActivityFeedProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -242,13 +273,13 @@ export default function UnifiedActivityFeed({
     async function fetchActivity() {
       try {
         setLoading(true);
-        const { data } = await api.get<{ items: ActivityItem[]; total: number }>(
+        const res = await api.get<{ data: { items: ActivityItem[]; total: number }; serverTimestamp: string }>(
           '/api/activity',
           { params: { limit, sort: 'newest' } },
         );
         if (cancelled) return;
 
-        const fetched: ActivityItem[] = data.items ?? [];
+        const fetched: ActivityItem[] = res.data.data.items ?? [];
         setItems(fetched);
 
         // Lock column visibility once — never re-evaluate on subsequent loads (§4.2)
@@ -283,6 +314,32 @@ export default function UnifiedActivityFeed({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [limit]);
+
+  // Re-fetch and merge when DashboardPage signals an activity update.
+  // Skipped when refreshToken is 0 (initial value) or undefined.
+  useEffect(() => {
+    if (!refreshToken) return;
+    let cancelled = false;
+
+    async function fetchAndMerge() {
+      try {
+        const res = await api.get<{ data: { items: ActivityItem[]; total: number }; serverTimestamp: string }>(
+          '/api/activity',
+          { params: { limit, sort: 'newest' } },
+        );
+        if (cancelled) return;
+        if (expectedTimestamp && res.data.serverTimestamp < expectedTimestamp) return; // stale
+        const incoming: ActivityItem[] = res.data.data.items ?? [];
+        setItems(prev => mergeActivityItems(prev, incoming));
+      } catch {
+        // silent — existing items remain
+      }
+    }
+
+    void fetchAndMerge();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken]);
 
   // Determine table columns: Activity / Executed by / Status / Duration / When
   // Duration column is gated by colVis

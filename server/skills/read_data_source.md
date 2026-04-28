@@ -3,7 +3,6 @@ name: Read Data Source
 description: List and read context data sources (agent-wide, subaccount-scoped, scheduled-task-scoped, or task-instance attachments) attached to the current run.
 isActive: true
 visibility: none
-reusable: true
 ---
 
 ## Parameters

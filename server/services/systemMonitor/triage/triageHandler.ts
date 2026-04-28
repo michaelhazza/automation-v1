@@ -32,6 +32,18 @@ import { checkAdmit } from './triageAdmitPure.js';
 import { checkRateLimit, maybeAutoEscalate } from './rateLimit.js';
 export { checkAdmit, type AdmitVerdict } from './triageAdmitPure.js';
 
+// ── Test seam — production-safe (undefined by default) ────────────────────────
+// Allows integration tests to exercise the increment and idempotency predicate
+// without seeding a full system-ops org/agent context or a real LLM.
+export const __testHooks: {
+  // When set, skips resolveSystemOpsContext, resolveSystemMonitorAgentId, and the
+  // agentRuns INSERT. Uses stub values for organisationId and agentId instead.
+  stubSystemOpsContext?: { organisationId: string; agentId: string };
+  // When true, throws after the idempotent UPDATE fires (1-row case only), freezing
+  // the row at triage_status='running' so tests can assert that DB state.
+  throwAfterIncrement?: boolean;
+} = {};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Tunable via SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS (spec §9.10 / §12.2). Resolved
@@ -174,9 +186,15 @@ async function runToolLoop(
 export interface TriageResult {
   status: 'skipped' | 'failed' | 'completed';
   reason?: string;
+  // §11.0 suppression flag: true when the terminal-flip UPDATE returned 0 rows
+  // because the row was already in a terminal state (staleness sweep / another
+  // writer won the race). Suppression is a benign race outcome, not an error —
+  // status still reflects what this writer attempted, but suppressed=true tells
+  // observers the underlying transition was claimed elsewhere.
+  suppressed?: boolean;
 }
 
-export async function runTriage(incidentId: string): Promise<TriageResult> {
+export async function runTriage(incidentId: string, jobId: string): Promise<TriageResult> {
   // 1. Load incident
   const [incident] = await db
     .select({
@@ -242,39 +260,72 @@ export async function runTriage(incidentId: string): Promise<TriageResult> {
     return { status: 'skipped', reason: 'auto_escalated' };
   }
 
-  // 3. Resolve system ops context + system_monitor agent
-  const { organisationId } = await resolveSystemOpsContext();
-  const agentId = await resolveSystemMonitorAgentId(organisationId);
-
-  // 4. Create agent_runs row for audit trail
-  const runId = crypto.randomUUID();
-  await db.insert(agentRuns).values({
-    id: runId,
-    organisationId,
-    agentId,
-    runType: 'triggered',
-    runSource: 'system',
-    executionScope: 'subaccount',
-    principalType: 'service',
-    principalId: 'system_monitor',
-    status: 'running',
-    runMetadata: { incidentId },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
-
-  // 5. Increment triage attempt counter and flip triage_status → 'running' before the run.
-  // The UI reads triage_status directly to render the in-flight banner, replacing
-  // the previous 5-minute time-window inference (which misrepresented crashed jobs).
-  await db
+  // 3. Idempotent increment: predicated UPDATE on last_triage_job_id IS DISTINCT FROM $jobId.
+  // Returns 1 row if this is a new attempt; 0 rows if this jobId already claimed the attempt
+  // (pg-boss internal retry). §11.0: single-writer invariant — only proceed to the LLM tool
+  // loop if this UPDATE wins the race.
+  //
+  // §8.10 race-claim ordering: the atomic state-claim runs BEFORE any side effect
+  // (agent_runs INSERT, system-ops resolution). A duplicate-job retry must not leave
+  // an orphan agent_runs row stuck at status='running' — moved here from after step 4.
+  const now = new Date();
+  const incrementResult = await db
     .update(systemIncidents)
     .set({
       triageAttemptCount: sql`${systemIncidents.triageAttemptCount} + 1`,
-      lastTriageAttemptAt: new Date(),
+      lastTriageAttemptAt: now,
       triageStatus: 'running',
-      updatedAt: new Date(),
+      lastTriageJobId: jobId,
+      updatedAt: now,
     })
-    .where(eq(systemIncidents.id, incidentId));
+    .where(
+      sql`${systemIncidents.id} = ${incidentId}::uuid
+        AND (${systemIncidents.lastTriageJobId} IS DISTINCT FROM ${jobId})`,
+    )
+    .returning({ triageAttemptCount: systemIncidents.triageAttemptCount });
+
+  if (incrementResult.length === 0) {
+    // Duplicate job — another invocation for this (incidentId, jobId) already claimed this attempt.
+    // Do NOT enter the LLM tool loop; the previous invocation owns it.
+    logger.info('triage.idempotent_skip', { incidentId, jobId, reason: 'duplicate_job' });
+    return { status: 'skipped', reason: 'duplicate_job' };
+  }
+
+  // Test seam: freeze at triage_status='running' so integration tests can assert
+  // the increment fired without the terminal flip overwriting the state.
+  if (__testHooks.throwAfterIncrement && process.env.NODE_ENV === 'test') {
+    throw new Error('__testHooks.throwAfterIncrement: frozen after increment for test assertion');
+  }
+
+  // 4-5. Resolve system ops context + create agent_runs row.
+  // Runs only after the idempotent claim succeeded — guarantees no orphan agent_runs row
+  // on duplicate-job retries. When __testHooks.stubSystemOpsContext is set, skip DB
+  // resolution and the agentRuns INSERT so tests can run without seeding a full
+  // org/agent context.
+  let organisationId: string;
+  let agentId: string;
+  const runId = crypto.randomUUID();
+
+  if (__testHooks.stubSystemOpsContext && process.env.NODE_ENV === 'test') {
+    ({ organisationId, agentId } = __testHooks.stubSystemOpsContext);
+  } else {
+    ({ organisationId } = await resolveSystemOpsContext());
+    agentId = await resolveSystemMonitorAgentId(organisationId);
+    await db.insert(agentRuns).values({
+      id: runId,
+      organisationId,
+      agentId,
+      runType: 'triggered',
+      runSource: 'system',
+      executionScope: 'subaccount',
+      principalType: 'service',
+      principalId: 'system_monitor',
+      status: 'running',
+      runMetadata: { incidentId },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
 
   // 6. Run the LLM tool loop
   let loopResult: { success: boolean; terminatedReason?: string };
@@ -296,33 +347,64 @@ export async function runTriage(incidentId: string): Promise<TriageResult> {
     .where(eq(agentRuns.id, runId));
 
   // 8. Flip triage_status to its terminal value + emit outcome event.
+  // §11.0 single-writer terminal-event invariant: include WHERE triage_status='running'
+  // and gate event emission on the UPDATE returning 1 row. If 0 rows returned, the
+  // staleness sweep (or another writer) already claimed the transition — suppress event.
   if (loopResult.success) {
-    await db
+    const completedResult = await db
       .update(systemIncidents)
       .set({ triageStatus: 'completed', updatedAt: new Date() })
-      .where(eq(systemIncidents.id, incidentId));
-    // The write_diagnosis skill emits agent_diagnosis_added inside the loop.
-    // Log completion for observability; the DB event is the agent's responsibility.
-    logger.info('triage_completed', { incidentId, runId });
-    return { status: 'completed' };
+      .where(
+        sql`${systemIncidents.id} = ${incidentId}::uuid
+          AND ${systemIncidents.triageStatus} = 'running'`,
+      )
+      .returning({ id: systemIncidents.id });
+    if (completedResult.length === 1) {
+      // The write_diagnosis skill emits agent_diagnosis_added inside the loop.
+      // Log completion for observability; the DB event is the agent's responsibility.
+      logger.info('triage_completed', { incidentId, runId });
+      return { status: 'completed' };
+    }
+    logger.warn('triage.terminal_event_suppressed', {
+      incidentId, runId, attempted: 'completed', reason: 'row_already_terminal',
+    });
+    return { status: 'completed', suppressed: true };
   } else {
-    await db
-      .update(systemIncidents)
-      .set({ triageStatus: 'failed', updatedAt: new Date() })
-      .where(eq(systemIncidents.id, incidentId));
-    await db.insert(systemIncidentEvents).values({
-      incidentId,
-      eventType: 'agent_triage_failed',
-      actorKind: 'agent',
-      actorAgentRunId: runId,
-      payload: { reason: loopResult.terminatedReason ?? 'agent_run_failed' },
-      occurredAt: new Date(),
+    // §11.0 + §11.3: status flip and event INSERT are atomic — operators never see
+    // a 'failed' row without an agent_triage_failed event.
+    const terminalNow = new Date();
+    const failedResult = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(systemIncidents)
+        .set({ triageStatus: 'failed', updatedAt: terminalNow })
+        .where(
+          sql`${systemIncidents.id} = ${incidentId}::uuid
+            AND ${systemIncidents.triageStatus} = 'running'`,
+        )
+        .returning({ id: systemIncidents.id });
+      if (rows.length === 1) {
+        await tx.insert(systemIncidentEvents).values({
+          incidentId,
+          eventType: 'agent_triage_failed',
+          actorKind: 'agent',
+          actorAgentRunId: runId,
+          payload: { reason: loopResult.terminatedReason ?? 'agent_run_failed' },
+          occurredAt: terminalNow,
+        });
+      }
+      return rows;
     });
-    logger.error('triage_failed', {
-      incidentId,
-      runId,
-      reason: loopResult.terminatedReason,
+    if (failedResult.length === 1) {
+      logger.error('triage_failed', {
+        incidentId,
+        runId,
+        reason: loopResult.terminatedReason,
+      });
+      return { status: 'failed', reason: loopResult.terminatedReason };
+    }
+    logger.warn('triage.terminal_event_suppressed', {
+      incidentId, runId, attempted: 'failed', reason: 'row_already_terminal',
     });
-    return { status: 'failed', reason: loopResult.terminatedReason };
+    return { status: 'failed', reason: loopResult.terminatedReason, suppressed: true };
   }
 }

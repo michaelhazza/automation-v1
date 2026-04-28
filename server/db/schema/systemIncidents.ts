@@ -6,16 +6,11 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { tasks } from './tasks';
-import { agentRuns } from './agentRuns';
 
 export type SystemIncidentSource = 'route' | 'job' | 'agent' | 'connector' | 'skill' | 'llm' | 'synthetic' | 'self';
 export type SystemIncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type SystemIncidentClassification = 'user_fault' | 'system_fault' | 'persistent_defect';
 export type SystemIncidentStatus = 'open' | 'investigating' | 'remediating' | 'resolved' | 'suppressed' | 'escalated';
-// Triage + diagnosis status — explicit lifecycle signals consumed by the UI in
-// place of inferred booleans. See migration 0237 for the column contract.
-export type SystemIncidentTriageStatus = 'pending' | 'running' | 'failed' | 'completed';
-export type SystemIncidentDiagnosisStatus = 'none' | 'valid' | 'partial' | 'invalid';
 
 export const systemIncidents = pgTable(
   'system_incidents',
@@ -70,22 +65,6 @@ export const systemIncidents = pgTable(
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-
-    // Agent triage — Phase A+2 additions (migration 0233)
-    investigatePrompt: text('investigate_prompt'),
-    agentDiagnosis: jsonb('agent_diagnosis'),
-    agentDiagnosisRunId: uuid('agent_diagnosis_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
-    promptWasUseful: boolean('prompt_was_useful'),
-    promptFeedbackText: text('prompt_feedback_text'),
-    triageAttemptCount: integer('triage_attempt_count').notNull().default(0),
-    lastTriageAttemptAt: timestamp('last_triage_attempt_at', { withTimezone: true }),
-    sweepEvidenceRunIds: uuid('sweep_evidence_run_ids').array().notNull().default(sql`'{}'`),
-
-    // Explicit triage + diagnosis lifecycle (migration 0237). The UI reads these
-    // directly instead of inferring state from agentDiagnosis/investigatePrompt
-    // null-checks or 5-minute time windows on lastTriageAttemptAt.
-    triageStatus: text('triage_status').notNull().default('pending').$type<SystemIncidentTriageStatus>(),
-    diagnosisStatus: text('diagnosis_status').notNull().default('none').$type<SystemIncidentDiagnosisStatus>(),
   },
   (table) => ({
     // One active incident per fingerprint. Resolved/suppressed rows do not block

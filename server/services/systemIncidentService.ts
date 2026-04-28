@@ -1,6 +1,6 @@
 // System Incident Service — CRUD + lifecycle actions for system_incidents.
 // All mutating methods write a system_incident_events row inside the same tx.
-import { eq, and, or, inArray, isNull, isNotNull, sql, desc, asc, count } from 'drizzle-orm';
+import { eq, and, or, inArray, isNull, sql, desc, asc, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { taskService } from './taskService.js';
 import { resolveSystemOpsContext } from './systemOperationsOrgResolver.js';
@@ -8,7 +8,6 @@ import {
   systemIncidents,
   systemIncidentEvents,
   systemIncidentSuppressions,
-  systemMonitorHeuristicFires,
 } from '../db/schema/index.js';
 import type { SystemIncident, SystemIncidentStatus, SystemIncidentSeverity, SystemIncidentSource, SystemIncidentClassification } from '../db/schema/systemIncidents.js';
 import type { SystemIncidentEvent } from '../db/schema/systemIncidentEvents.js';
@@ -18,8 +17,6 @@ import {
   computeEscalationVerdict,
   resolutionEventPayload,
 } from './systemIncidentServicePure.js';
-import { assertSystemAdminContext } from './principal/assertSystemAdminContext.js';
-import { getCurrentPrincipal } from './principal/systemPrincipal.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +34,6 @@ export interface IncidentListFilters {
   sort?: 'last_seen_desc' | 'first_seen_desc' | 'occurrence_count_desc' | 'severity_desc';
   limit?: number;
   offset?: number;
-  diagnosis?: 'all' | 'diagnosed' | 'awaiting' | 'not-triaged';
 }
 
 // ---------------------------------------------------------------------------
@@ -89,29 +85,6 @@ export const systemIncidentService = {
     if (!filters.includeTestIncidents) {
       conditions.push(eq(systemIncidents.isTestIncident, false) as unknown as ReturnType<typeof eq>);
     }
-    if (filters.diagnosis === 'diagnosed') {
-      conditions.push(isNotNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
-    } else if (filters.diagnosis === 'awaiting') {
-      // agent_diagnosis IS NULL AND eligible for auto-triage (not low severity, not self-check) AND attempt count < cap
-      conditions.push(isNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
-      conditions.push(
-        and(
-          sql`${systemIncidents.severity} != 'low'`,
-          sql`${systemIncidents.source} != 'self'`,
-          sql`${systemIncidents.triageAttemptCount} < 5`,
-        ) as unknown as ReturnType<typeof eq>,
-      );
-    } else if (filters.diagnosis === 'not-triaged') {
-      // agent_diagnosis IS NULL AND not eligible (low severity OR self-check OR rate-limited at cap)
-      conditions.push(isNull(systemIncidents.agentDiagnosis) as unknown as ReturnType<typeof eq>);
-      conditions.push(
-        or(
-          sql`${systemIncidents.severity} = 'low'`,
-          sql`${systemIncidents.source} = 'self'`,
-          sql`${systemIncidents.triageAttemptCount} >= 5`,
-        ) as unknown as ReturnType<typeof eq>,
-      );
-    }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -145,68 +118,7 @@ export const systemIncidentService = {
     return { incident, events };
   },
 
-  async recordPromptFeedback(
-    id: string,
-    input: { wasSuccessful: 'yes' | 'no' | 'partial'; text?: string },
-    userId: string,
-    actorRole?: string,
-  ): Promise<void> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
-
-    const [incident] = await db.select({
-      id: systemIncidents.id,
-      agentDiagnosis: systemIncidents.agentDiagnosis,
-      promptWasUseful: systemIncidents.promptWasUseful,
-      resolvedAt: systemIncidents.resolvedAt,
-      linkedPrUrl: systemIncidents.linkedPrUrl,
-      agentDiagnosisRunId: systemIncidents.agentDiagnosisRunId,
-    }).from(systemIncidents).where(eq(systemIncidents.id, id)).limit(1);
-
-    if (!incident) throw { statusCode: 404, message: 'Incident not found' };
-    if (incident.agentDiagnosis === null) throw { statusCode: 422, message: 'Incident has no agent diagnosis to provide feedback on' };
-    if (incident.promptWasUseful !== null) throw { statusCode: 409, message: 'Feedback already recorded for this incident' };
-
-    const now = new Date();
-    const promptWasUseful = input.wasSuccessful !== 'no';
-
-    await db.transaction(async (tx) => {
-      // Spec §11.2: heuristic_fires joins this feedback to the heuristics that
-      // fired on this incident. Read inside the tx so the snapshot lands at the
-      // same logical timestamp as the event row (small payload — negligible cost).
-      const heuristicRows = await tx
-        .select({ heuristicId: systemMonitorHeuristicFires.heuristicId })
-        .from(systemMonitorHeuristicFires)
-        .where(eq(systemMonitorHeuristicFires.producedIncidentId, id));
-      const heuristicFires = heuristicRows.map((r) => r.heuristicId);
-
-      await tx.update(systemIncidents).set({
-        promptWasUseful,
-        promptFeedbackText: input.text ?? null,
-        updatedAt: now,
-      }).where(eq(systemIncidents.id, id));
-
-      await tx.insert(systemIncidentEvents).values({
-        incidentId: id,
-        eventType: 'investigate_prompt_outcome',
-        actorKind: 'user',
-        actorUserId: userId,
-        payload: {
-          wasSuccessful: input.wasSuccessful,
-          promptWasUseful,
-          partial: input.wasSuccessful === 'partial',
-          text: input.text ?? null,
-          linkedPrUrl: incident.linkedPrUrl ?? null,
-          resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
-          diagnosisRunId: incident.agentDiagnosisRunId ?? null,
-          heuristicFires,
-        },
-        occurredAt: now,
-      });
-    });
-  },
-
-  async acknowledgeIncident(id: string, userId: string, actorRole?: string): Promise<SystemIncident> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async acknowledgeIncident(id: string, userId: string): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -231,8 +143,7 @@ export const systemIncidentService = {
     });
   },
 
-  async resolveIncident(id: string, userId: string, note?: string, linkedPrUrl?: string, actorRole?: string): Promise<SystemIncident> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async resolveIncident(id: string, userId: string, note?: string, linkedPrUrl?: string): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -288,8 +199,7 @@ export const systemIncidentService = {
     });
   },
 
-  async suppressIncident(id: string, userId: string, reason: string, duration: SuppressionDuration, actorRole?: string): Promise<SystemIncident> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async suppressIncident(id: string, userId: string, reason: string, duration: SuppressionDuration): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
       if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -335,8 +245,7 @@ export const systemIncidentService = {
     });
   },
 
-  async escalateIncidentToAgent(id: string, userId: string, actorRole?: string): Promise<{ incident: SystemIncident; taskId: string }> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async escalateIncidentToAgent(id: string, userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
     const { incident } = await this.getIncident(id);
 
     const now = new Date();
@@ -430,8 +339,7 @@ export const systemIncidentService = {
       .orderBy(desc(systemIncidentSuppressions.createdAt));
   },
 
-  async removeSuppression(id: string, userId: string, actorRole?: string): Promise<void> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async removeSuppression(id: string, userId: string): Promise<void> {
     const [suppression] = await db
       .select()
       .from(systemIncidentSuppressions)
@@ -474,8 +382,7 @@ export const systemIncidentService = {
   },
 
   // Test incident trigger (admin page test button, §8.9)
-  async createTestIncident(userId: string, triggerNotifications = false, actorRole?: string): Promise<SystemIncident> {
-    assertSystemAdminContext({ principal: getCurrentPrincipal() }, { actorRole });
+  async createTestIncident(userId: string, triggerNotifications = false): Promise<SystemIncident> {
     const { recordIncident } = await import('./incidentIngestor.js');
     const { hashFingerprint } = await import('./incidentIngestorPure.js');
     const timestamp = Date.now();

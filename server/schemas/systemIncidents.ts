@@ -29,15 +29,7 @@ export const listIncidentsQuery = z.object({
   sort: z.enum(['last_seen_desc', 'first_seen_desc', 'occurrence_count_desc', 'severity_desc']).optional(),
   limit: z.string().optional(),
   offset: z.string().optional(),
-  diagnosis: z.enum(['all', 'diagnosed', 'awaiting', 'not-triaged']).optional(),
 });
-
-// POST /api/system/incidents/:id/feedback
-export const recordPromptFeedbackBody = z.object({
-  wasSuccessful: z.enum(['yes', 'no', 'partial']),
-  text: z.string().max(2000).optional(),
-});
-export type RecordPromptFeedbackInput = z.infer<typeof recordPromptFeedbackBody>;
 
 // POST /api/system/incidents/test-trigger
 export const testTriggerBody = z.object({

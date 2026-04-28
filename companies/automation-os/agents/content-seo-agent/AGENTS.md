@@ -2,7 +2,7 @@
 name: Content/SEO Agent
 title: Content/SEO Agent
 slug: content-seo-agent
-reportsTo: head-of-growth
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.5
 maxTokens: 8192

@@ -52,19 +52,6 @@ let queueWorkerReady = false;
 const EXECUTION_QUEUE_NAME = 'execution-run';
 const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
 
-// Parses an env-var integer for a cron `*/N` minute step. Falls back to the default
-// when the value is missing, non-numeric, or outside the [1, 59] step range cron supports.
-// Logs a warning when the env was provided but rejected, so misconfiguration is loud.
-function clampMinutesEnv(raw: string | undefined, defaultMinutes: number, envName: string): number {
-  if (raw === undefined) return defaultMinutes;
-  const parsed = parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 59) {
-    logger.warn('queue_invalid_interval_env', { envName, raw, defaultMinutes });
-    return defaultMinutes;
-  }
-  return parsed;
-}
-
 // ---------------------------------------------------------------------------
 // Advisory lock helpers — prevent duplicate maintenance runs across
 // horizontally-scaled instances when using the in-memory queue backend.
@@ -608,18 +595,6 @@ export const queueService = {
           throw err;
         }
       });
-      // System Agents v7.1 — skill_idempotency_keys nightly retention sweep (5:30am UTC).
-      await (boss as any).work('maintenance:skill-idempotency-keys-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
-        try {
-          const { runSkillIdempotencyKeysCleanup } = await import('../jobs/skillIdempotencyKeysCleanupJob.js');
-          await withTimeout(runSkillIdempotencyKeysCleanup().then(() => undefined), 570_000);
-        } catch (err) {
-          if (isTimeoutError(err)) {
-            logger.error('job_timeout', { queue: 'maintenance:skill-idempotency-keys-cleanup', jobId: job.id });
-          }
-          throw err;
-        }
-      });
       // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
       await (boss as any).work('maintenance:fast-path-decisions-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1100,7 +1075,6 @@ export const queueService = {
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
-      await boss.schedule('maintenance:skill-idempotency-keys-cleanup', '30 5 * * *', {}); // 5:30am daily — after priority-feed-cleanup (5am)
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
       // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
@@ -1128,64 +1102,6 @@ export const queueService = {
           await runSystemMonitorSelfCheck();
         } catch (err) {
           logger.error('job_error', { queue: 'system-monitor-self-check', error: String(err) });
-        }
-      });
-
-      // System Monitor — synthetic checks (every minute; spec §8.4)
-      await boss.schedule('system-monitor-synthetic-checks', '* * * * *', {});
-      await (boss as any).work('system-monitor-synthetic-checks', { teamSize: 1, teamConcurrency: 1 }, async () => {
-        try {
-          const { handleSyntheticChecksTick } = await import('../jobs/systemMonitorSyntheticChecksJob.js');
-          await handleSyntheticChecksTick();
-        } catch (err) {
-          logger.error('job_error', { queue: 'system-monitor-synthetic-checks', error: String(err) });
-        }
-      });
-
-      // System Monitor — baseline refresh.
-      // Default 15 min, configurable via SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES (spec §7.3).
-      const baselineRefreshMinutes = clampMinutesEnv(
-        process.env.SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES,
-        15,
-        'SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES',
-      );
-      await boss.schedule('system-monitor-baseline-refresh', `*/${baselineRefreshMinutes} * * * *`, {});
-      await (boss as any).work('system-monitor-baseline-refresh', { teamSize: 1, teamConcurrency: 1 }, async () => {
-        try {
-          const { handleBaselineRefresh } = await import('../jobs/systemMonitorBaselineRefreshJob.js');
-          await handleBaselineRefresh();
-        } catch (err) {
-          logger.error('job_error', { queue: 'system-monitor-baseline-refresh', error: String(err) });
-        }
-      });
-
-      // System Monitor — sweep (two-pass heuristic evaluation).
-      // Default 5 min, configurable via SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES (spec §9.3 / §9.10).
-      // The 15-min sweep window (§9.10) intentionally overlaps adjacent ticks by 10 min at the default cadence.
-      const sweepIntervalMinutes = clampMinutesEnv(
-        process.env.SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES,
-        5,
-        'SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES',
-      );
-      await boss.schedule('system-monitor-sweep', `*/${sweepIntervalMinutes} * * * *`, {});
-      await (boss as any).work('system-monitor-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: { data?: Record<string, unknown> }) => {
-        try {
-          const { handleSystemMonitorSweep } = await import('../jobs/systemMonitorSweepJob.js');
-          await handleSystemMonitorSweep(job);
-        } catch (err) {
-          logger.error('job_error', { queue: 'system-monitor-sweep', error: String(err) });
-          throw err; // re-throw so pg-boss marks the job failed and retries
-        }
-      });
-
-      // System Monitor — triage (no schedule; enqueued by incidentIngestor + sweep handler)
-      await (boss as any).work('system-monitor-triage', { teamSize: 4, teamConcurrency: 4 }, async (job: { data: { incidentId: string } }) => {
-        try {
-          const { handleSystemMonitorTriage } = await import('../jobs/systemMonitorTriageJob.js');
-          await handleSystemMonitorTriage(job);
-        } catch (err) {
-          logger.error('job_error', { queue: 'system-monitor-triage', error: String(err) });
-          throw err; // re-throw so pg-boss marks the job failed and retries
         }
       });
 

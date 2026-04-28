@@ -70,7 +70,7 @@ router.get(
     const subaccountId = typeof req.query.subaccountId === 'string' ? req.query.subaccountId : undefined;
     const scope: ActivityScope = { type: 'org', orgId: organisationId, subaccountId };
     const result = await listActivityItems(filters, scope);
-    res.json(result);
+    res.json({ data: result, serverTimestamp: new Date().toISOString() });
   }),
 );
 

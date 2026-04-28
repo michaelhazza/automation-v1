@@ -326,6 +326,11 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #218 — create-views (2026-04-28 — ChatGPT review round 1)
+
+- [ ] [user] **Spec ambiguity — "RLS protected tables list" in `docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md`** — ChatGPT flagged the phrase as unclear. Not a runtime issue; the spec is finalised and merged-into-history for this PR. Resolve as part of a future spec-hygiene sweep (clarify which exact tables the spec considered "RLS protected" and whether the phrase was meant as a constraint or context). Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-create-views-2026-04-27T23-05-35Z.md`. PR #218 — https://github.com/michaelhazza/automation-v1/pull/218.
+- [ ] [user] **Codify "Suppression is success" pattern under single-writer invariants — codebase-wide enforcement** — ChatGPT explicitly framed this as forward-looking standardisation across the codebase, not a change for PR #218 (reinforced again in round 2's "what I'd do next, optional, not blocking"). Single-writer event emitters that lose a coordination race must return `success: true, suppressed: true` rather than `success: false`; returning failure triggers retries, false incident signals, and broken metrics. The architecture.md one-liner at § "Home dashboard live reactivity" already names the pattern, and the system-monitoring `writeDiagnosis` enforces it. Follow-up work: (a) extract a reusable utility (e.g. `suppressedSuccess(reason)` returning `{ success: true, suppressed: true, reason }`) so single-writer emitters call one helper instead of hand-rolling the shape, (b) add a lightweight lint or grep-based guard that flags `success: false` returns in files matching the single-writer emitter pattern (or, conversely, requires `suppressed: true` whenever the emitter detects a coordination loser), (c) sweep existing single-writer emitters for the anti-pattern, (d) consider promoting to a `DEVELOPMENT_GUIDELINES.md §8` rule, (e) KNOWLEDGE.md pattern entry captured at session finalize. The lint/grep guard is what turns this from "well understood" into "impossible to violate quietly". Source: ChatGPT PR review rounds 1 & 2; session log `tasks/review-logs/chatgpt-pr-review-create-views-2026-04-27T23-05-35Z.md`. PR #218 — https://github.com/michaelhazza/automation-v1/pull/218.
+
 ### PR #182 — claude/build-paperclip-hierarchy-ymgPW (2026-04-23 — ChatGPT review rounds 2 & 3)
 
 - [ ] [user] **Split `agent_runs` into `agent_runs_core` / `agent_runs_context` / `agent_runs_delegation`** — ChatGPT reviewer flagged that `agent_runs` is now a high-width, high-churn table (cached-context fields + delegation telemetry + execution metadata), approaching TS inference limits. We hit it once during the merge (`handoffSourceRunId` self-reference made the whole table `any`) and fixed it surgically by dropping the Drizzle-side `.references()` clause. Reviewer explicitly said "not now, but soon." Triggers for revisiting: (a) a second TS-inference wall we can't fix by dropping one FK declaration, (b) `agent_runs` column count crosses ~40, (c) we introduce a new subsystem that wants to add a fourth column group. The split itself is a weeks-of-work refactor — migration sequence, view-compatibility shim, audit of ≈40+ consumers that read across column groups, query-planner overhead on hot paths. Don't trigger pre-emptively. Source: ChatGPT review round 2 (2026-04-23); session log `tasks/review-logs/chatgpt-pr-review-claude-build-paperclip-hierarchy-ymgPW-2026-04-23T23-33-00Z.md`.
@@ -351,14 +356,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **S3 — strengthen rule-conflict parser tests.** `ruleConflictDetectorServicePure.parseConflictReportPure` drops malformed items silently via `continue`; production could let users save conflicting rules if the LLM returns malformed conflict objects. Add tests for: (a) existingRuleId not in candidatePool → dropped; (b) invalid `kind` → dropped; (c) confidence out of [0,1] → dropped.
 - [ ] **S4 — remove or re-label `cheap_answer` canned replies.** `briefSimpleReplyGeneratorPure` emits `source: 'canonical'` artefacts with hardcoded placeholder rows ("See revenue data"). Users see properly-sourced-looking results that are actually stubs. Either (a) add `'canned' | 'stub'` to `BriefResultSource` and re-label, or (b) remove the cheap_answer route from the tier-1 classifier until real data resolvers land. Option (b) is simpler.
 - [ ] **S6 — add trajectory tests for Phase 4 orchestrator gates.** The clarify/challenge gates are wired via masterPrompt text only (migration 0196). No runtime test pins "clarifyingEnabled=false → no `ask_clarifying_questions` tool call" or "estimatedCostCents > 20 AND sparringEnabled → `challengeOutput` on ApprovalCard". Prompt-only wiring regresses easily; a fixture under `tests/trajectories/` would catch drift.
-- [ ] **S8 — move conversation-message websocket emits to a post-commit boundary.** `briefConversationWriter.writeConversationMessage` emits websocket events inline after the insert. If the outer request tx rolls back after the insert but before response, clients see an "artefact appeared" event for a row that was never persisted. Options: defer emits until `res.finish`, or adopt a tx-outbox pattern.
+- [x] **S8 — move conversation-message websocket emits to a post-commit boundary.** `briefConversationWriter.writeConversationMessage` emits websocket events inline after the insert. If the outer request tx rolls back after the insert but before response, clients see an "artefact appeared" event for a row that was never persisted. Options: defer emits until `res.finish`, or adopt a tx-outbox pattern. **DONE** commit `60a68d07`
 - [ ] **N1 — validate `artefactId` UUID shape in `briefArtefactValidatorPure.validateBase`.** Currently `requireString` accepts `""`. Add a UUID regex.
 - [ ] **N2 — add prominent comment at `getBriefArtefacts` noting the backstop is a no-op until Phase 6.4 resolvers land** (`briefArtefactBackstop.ts` sets `idScopeCheck` and `scopedTotals` to `undefined`).
 - [ ] **N3 — make `conversations_unique_scope` index org-scoped.** Change to `(organisation_id, scope_type, scope_id)` so the uniqueness invariant also holds formally across orgs (UUID collision is improbable but the index semantically belongs org-scoped). Needs a new migration that drops + recreates the index.
 - [ ] **N4 — document the `scopeType` ↔ parent-table mapping** on `conversations.scope_id` in the Drizzle schema so future readers know which scope maps to `subaccount_agents.id` vs `agents.id` vs `tasks.id` vs `agent_runs.id`.
 - [ ] **N5 — inject clock into `ruleTeachabilityClassifierPure`.** Replace inline `new Date()` with a `now: Date` parameter to match the pure-module convention.
 - [ ] **N6 — inject `artefactIdProvider: () => string` into `briefSimpleReplyGeneratorPure`.** Currently uses `crypto.randomUUID()` inline; injection makes tests deterministic.
-- [ ] **N7 — paginate `GET /api/briefs/:briefId/artefacts`.** Currently pulls all artefacts and flattens client-side; a long-running Brief conversation could accumulate hundreds. Add `limit`/`cursor` query params before marketing demos.
+- [x] **N7 — paginate `GET /api/briefs/:briefId/artefacts`.** Currently pulls all artefacts and flattens client-side; a long-running Brief conversation could accumulate hundreds. Add `limit`/`cursor` query params before marketing demos. **DONE** commit `04613015`
 
 ## Deferred from dual-reviewer review — Universal Brief
 
@@ -367,7 +372,7 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 **Source log**: [tasks/review-logs/dual-review-log-universal-brief-2026-04-22T08-02-50Z.md](./review-logs/dual-review-log-universal-brief-2026-04-22T08-02-50Z.md)
 
 - [ ] **DR1 — add `POST /api/rules/draft-candidates` route to wire `ApprovalSuggestionPanel` to `ruleCandidateDrafter.draftCandidates`.** The client panel posts to `/api/rules/draft-candidates` with `{ artefactId, wasApproved }` but no route exists, so every click on “Yes, suggest a rule” 404s and the panel silently dismisses. Wiring requires non-trivial server logic: scan `conversation_messages.artefacts` JSONB for the `artefactId`, verify kind === 'approval', load the parent brief for `briefContext`, look up existing related rules, then call `draftCandidates(...)`. Non-blocking because the rest of the Universal Brief flow works; only the approval→rule teach-loop is dark. Defer to the same follow-up pass as S3 (rule-conflict parser tests). Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
-- [ ] **DR2 — re-invoke fast-path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).** `POST /api/conversations/:conversationId/messages` and `POST /api/briefs/:briefId/messages` currently only write the user turn into `conversation_messages` and return. Per spec §7.11 ("Re-invokes the fast path + Orchestrator if the message looks like a follow-up intent rather than a passive 'thanks'"), follow-up turns should run `classifyChatIntent` on the new text and — for `needs_orchestrator` / `needs_clarification` — re-enqueue `orchestratorFromTaskJob`. Without this, chat surfaces become one-way after the initial response: the user can send questions but the system never agent-runs on them. Architectural scope — needs design for non-Brief scopes (`task`, `agent_run`) that don't currently enqueue orchestration, idempotency for passive acks, and whether simple_reply/cheap_answer can produce new inline artefacts on follow-ups. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
+- [x] **DR2 — re-invoke fast-path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).** **DONE** commit `4d64df6d` `POST /api/conversations/:conversationId/messages` and `POST /api/briefs/:briefId/messages` currently only write the user turn into `conversation_messages` and return. Per spec §7.11 ("Re-invokes the fast path + Orchestrator if the message looks like a follow-up intent rather than a passive 'thanks'"), follow-up turns should run `classifyChatIntent` on the new text and — for `needs_orchestrator` / `needs_clarification` — re-enqueue `orchestratorFromTaskJob`. Without this, chat surfaces become one-way after the initial response: the user can send questions but the system never agent-runs on them. Architectural scope — needs design for non-Brief scopes (`task`, `agent_run`) that don't currently enqueue orchestration, idempotency for passive acks, and whether simple_reply/cheap_answer can produce new inline artefacts on follow-ups. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
 - [ ] **DR3 — wire approve/reject actions on `BriefApprovalCard` artefacts.** `BriefDetailPage.tsx` renders `<ApprovalCard />` without `onApprove`/`onReject` — the buttons render but clicks are silent no-ops. No server-side dispatch route exists either (grep for `/api/briefs/.*/approve` returns nothing). Blocks the entire write path: high-risk actions can be proposed by the Orchestrator but never approved through the primary detail surface. Architectural — needs: (1) new server route(s) to accept an approval decision and dispatch via `actionRegistry` / enqueue an orchestrator run, (2) execution record linkage so `executionId` + `executionStatus` on the artefact update, (3) client handlers that call the new route and refresh state. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
 
 ---
@@ -762,7 +767,7 @@ Strong Recommendations and Non-Blocking observations from PR review. Blocking fi
   - File: `server/services/clientPulseHighRiskService.ts` lines 162-169
   - Fix: one-shot process-level warning (module-init check + cached flag) or startup assertion in production
 
-- [ ] S3 — DashboardPage + ClientPulseDashboardPage error states are silent
+- [x] S3 — DashboardPage + ClientPulseDashboardPage error states are silent **DONE** commit `6ef1ea79`
   - Files: `client/src/pages/DashboardPage.tsx` lines 34-46; `client/src/pages/ClientPulseDashboardPage.tsx` lines 57-71
   - Every fetch swallows errors with console.error and returns null; user sees zero-state identical to real empty. Track hasError per source; surface inline retry banner
 
@@ -1067,164 +1072,212 @@ User reply: `all as recommended` — both items deferred per agent recommendatio
   - **Files affected:** `workflowEngineService` (~5 remaining status-write sites), `agentExecutionService` (terminal write in agentic loop), `briefApprovalService.decideApproval`, `workflowRunService` (run-level terminal aggregation), plus `shared/stateMachineGuards.ts` (extend with intermediate transition tables).
   - **Suggested next-spec framing:** enumerate every status-write site by kind, define the canonical transition tables (allowed `from → to` per status family), specify how the guard composes with the existing static-grep gate (grep-as-coverage, runtime-as-enforcement), and decide whether to promote intermediate-transition violations from warn-log to throw once telemetry confirms zero false-positives.
 
----
+- [ ] **HOME-DASHBOARD-REACTIVITY-TASK14** — Wire `dashboard.queue.changed` emitter to job queue mutation path (best-effort, deferred from home dashboard reactivity spec §5.5).
+  - **Captured:** 2026-04-27
+  - **Severity:** low (QueueHealthSummary still refreshes on WebSocket reconnect; maximum staleness bounded by reconnect cycle)
+  - **Scope:** find pg-boss enqueue/complete sites; add `emitToSysadmin('dashboard.queue.changed', 'system', { pendingDelta: 0 })` — payload ignored by client, used as invalidation signal only.
+  - **Files to investigate:** `server/services/jobQueueHealthService.ts`, pg-boss wrapper if any.
 
-## Deferred from spec-conformance review — system-agents-v7-1-migration (2026-04-27)
-
-**Captured:** 2026-04-27T07:41:47Z
-**Source log:** `tasks/review-logs/spec-conformance-log-system-agents-v7-1-migration-2026-04-27T07-41-47Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md`
-
-- [ ] REQ-43 — `enrich_contact` `provider` parameter enum diverges from spec
-  - Spec section: §7.5.1
-  - Gap: spec specifies `provider: z.enum(['default', 'hunter']).optional()`; implementation uses `z.enum(['hunter', 'apollo', 'clearbit']).optional()`. Provider option set differs from spec.
-  - Suggested approach: decide whether the richer enum (`hunter | apollo | clearbit`) is the intended evolution and update the spec, or narrow the enum to match the spec's `default | hunter` shape — pre-prod, framing assumption permits either direction; pick once and align.
-- [ ] REQ-44 — `enrich_contact` handler does not route to Hunter on `provider: 'hunter'`
-  - Spec section: §7.5.1, §8.3
-  - Gap: spec says "Handler in `SKILL_HANDLERS` reads `input.provider`. When `'hunter'`, routes to the new `hunterProvider.ts`"; the current handler in `server/services/skillExecutor.ts:1021` is a stub that ignores `input.provider`.
-  - Suggested approach: extend the existing `enrich_contact` handler to dispatch on `input.provider`. When `'hunter'`, call `hunterProvider.domainSearch` / `hunterProvider.emailFinder` (already implemented). Otherwise fall through to the existing stub. Provider stub already fail-soft on missing env, so the wrapper's `read` path absorbs it correctly.
-- [ ] REQ-45 — `managerAllowlistMember: true` missing on `write_workspace` and `update_task`
-  - Spec section: §8.3 (Universal-bundle skills)
-  - Gap: spec lists 10 universal-bundle skills to mark `managerAllowlistMember: true` (incl. `write_workspace`, `update_task`); implementation marks 9. The two outliers have no `ACTION_REGISTRY` entry at all (pre-existing "pre-registry foundational skill" carveout per `verify-agent-skill-contracts.ts`).
-  - Suggested approach: spec assumes `write_workspace` and `update_task` exist as registry entries; the codebase treats them as pre-registry foundational skills that bypass the registry contract. Either (a) add registry entries for both with `managerAllowlistMember: true` (and accept the broader implications — `idempotencyStrategy`, `parameterSchema`, etc.), or (b) update the spec to acknowledge the pre-registry pattern and exempt these two skills.
-- [ ] REQ-49 — `SideEffectBeforeClaimError` class not implemented as a named class
-  - Spec section: §16A.1
-  - Gap: spec defines `export class SideEffectBeforeClaimError extends Error { readonly name = 'SideEffectBeforeClaimError' as const; ... }`; implementation throws a generic `Error` from `assertHandlerInvokedWithClaim`. Behavioural contract preserved (assertion throws in test mode); the class-name distinction is only observable in `instanceof` checks.
-  - Suggested approach: introduce the named class in `skillIdempotencyKeysPure.ts`, throw it from `assertHandlerInvokedWithClaim`, and update tests to assert `instanceof SideEffectBeforeClaimError`. Low blast radius — the test assertion currently uses `err instanceof Error` so adoption can be staged.
-- [ ] REQ-56 — `executeListMySubordinates` lives in `skillExecutor.ts` instead of `configSkillHandlersPure.ts`
-  - Spec section: §4.11a, §9.2
-  - Gap: spec says "append `executeListMySubordinates` (reuses existing `computeDescendantIds`) " in `server/tools/config/configSkillHandlersPure.ts`; implementation places it in `server/services/skillExecutor.ts:468` and uses `resolveSubordinates` instead of `computeDescendantIds`. Functionally equivalent, but file location and helper choice both diverge.
-  - Suggested approach: relocate the handler to `configSkillHandlersPure.ts` and refactor to consume `computeDescendantIds`. Alternatively update the spec to reflect the chosen location if the design has settled.
-- [ ] REQ-58 (now MECHANICAL — fixed in this run) — Cleanup-job logging tags `skill_idempotency_keys.cleanup.batch` + `.complete` were missing → fixed.
-- [ ] REQ-68 — `skill.blocked` log emit rate-limiting (1/min per (skill, subaccount)) missing
-  - Spec section: §18.1, AC #33
-  - Gap: spec mandates the wrapper rate-limits `skill.blocked` emits to ≤1/min per `(skill, subaccount)` with a suppression-summary line at minute close; current implementation emits unconditionally. AC #33 manual test would fail.
-  - Suggested approach: add a per-(skill, subaccount) emit-throttle (small Map keyed on `${slug}:${subaccountId}` → last-emit-ms + suppressed-count) alongside the wrapper in `server/services/skillExecutor.ts`. Mirror the in-memory LRU pattern used by `googlePlacesProvider.ts` / `hunterProvider.ts`. Emit a `skill.blocked.suppressed` summary with the suppressed count at the next minute boundary.
-- [ ] REQ-69 — `in_flight_reclaim_disabled` log emit rate-limiting missing
-  - Spec section: §18.1, §16A.8 step 5
-  - Gap: spec says the wrapper logs `skill.warn` with `reason: 'in_flight_reclaim_disabled'` rate-limited to 1/min per `(skill, subaccount)`; current implementation emits on every replay over the timeout.
-  - Suggested approach: same primitive as REQ-68; share the throttle Map across both signal classes if convenient.
-- [ ] REQ-83 — `architecture.md § "Key files per domain"` row for `companies/automation-os/agents/<slug>/AGENTS.md` not added
-  - Spec section: §4.16
-  - Gap: spec mandates a documentation row mapping the system-agent-definition entry point. Index drift now: a developer adding a new agent has no anchor in the architecture doc.
-  - Suggested approach: append a row to the table in `architecture.md` line ~3026 (Task | Start here): "Define a new system agent | `companies/automation-os/agents/<slug>/AGENTS.md` (frontmatter follows the existing pattern; seed loads via `companyParser.toSystemAgentRows`) + `scripts/seed.ts` (Phase 2 system-agent upserts) + `scripts/regenerate-company-manifest.ts` (manifest regenerator)".
-- [ ] REQ-84 — `skill_idempotency_keys` row not added to architecture.md's RLS-protected enumeration
-  - Spec section: §4.16
-  - Gap: spec mandates inclusion in the architecture-doc RLS-protected list. `architecture.md` has no central RLS-protected list per se — the canonical list lives in `server/config/rlsProtectedTables.ts` (which DOES include the entry, REQ-7 PASS). The "list" reference in the spec is ambiguous.
-  - Suggested approach: clarify which list the spec means. Two options: (a) append a sentence to the RLS section in `architecture.md` naming `skill_idempotency_keys` as one of the protected tables; (b) update the spec to remove the reference (the manifest in `rlsProtectedTables.ts` is already the source of truth). Option (b) is cleaner if the team prefers code-as-source-of-truth.
-- [ ] REQ-85 — `tasks/current-focus.md` not updated to point at this spec / branch
-  - Spec section: §4.16
-  - Gap: current-focus.md still describes the previous sprint (LAEL-P1-1, DR1/DR3, etc.); no pointer to v7.1 migration.
-  - Suggested approach: update current-focus.md's active-spec section to point at `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md` and branch `claude/audit-system-agents-46kTN`. If the v7.1 work is about to merge, the post-merge update goes under "Recently shipped to `main`".
-- [ ] REQ-86 — `docs/capabilities.md` not updated with the 7 new agents
-  - Spec section: §4.16
-  - Gap: spec mandates appending the 7 new agents (head-of-product-engineering, head-of-growth, head-of-client-services, head-of-commercial, admin-ops-agent, retention-success-agent, sdr-agent) to the customer-facing roster in vendor-neutral, marketing-ready terms.
-  - Suggested approach: write each agent's customer-facing one-liner per the editorial rules in `docs/capabilities.md § Editorial Rules` (no LLM provider names, vendor-neutral, marketing-ready). Anchor on the existing roster section in `docs/capabilities.md` and add seven entries in alphabetical order.
-
-## Deferred from pr-reviewer review — system-agents-v7-1-migration (2026-04-27)
-
-The system-agents v7.1 PR review identified 8 MUST-FIX, 10 SHOULD-FIX, and 7 NICE-TO-HAVE findings. M1–M7 + S2/S7/S8/S9 were resolved in commit batch immediately following the review (M8 verified as already correct: `system_agents_slug_idx` was the actual original index name, dropped correctly by 0233). The items below are the remaining SHOULD-FIX/NICE-TO-HAVE plus one directional spec contradiction.
-
-- [ ] DIRECTIONAL — `head-of-growth` declares `read_campaigns` and `read_analytics` but both have `directExternalSideEffect: true`
-  - Source: spec §10.1.2 vs §9.4 + §8.2 line 797
-  - Gap: spec §10.1.2 puts these on head-of-growth's per-manager declared bundle, but the manager guard's second check (`directExternalSideEffect: true`) blocks them, and §8.2 line 797 explicitly says external-API reads should not run from a manager. The implementation is consistent with §9.4/§8.2 (rejects them) but contradicts §10.1.2.
-  - Suggested approach: pick one — (a) remove `read_campaigns`/`read_analytics` from `head-of-growth/AGENTS.md` so the manager delegates via `spawn_sub_agents` to `ads-management-agent`/`social-media-agent` (consistent with the spec's "managers orchestrate" stance); or (b) carve out a per-manager-declared exemption in the second guard check too. Option (a) is more consistent with the broader §6 architecture.
-- [ ] S1 — Manager-guard performs 2 DB roundtrips per tool call with no caching
-  - Source: pr-reviewer
-  - Gap: every tool invocation by every agent runs `agents` → `systemAgents` SELECTs in `proposeAction.ts:286-305`. Spec §9.4 referenced `resolveAgentRole(...)` cache; not implemented.
-  - Suggested approach: cache `(agentRole, defaultSystemSkillSlugs)` keyed on `agentId` for the duration of the run on the middleware context or a per-runId LRU.
-- [ ] S3 — `request_hash` uses 64-bit truncated digest (`hashActionArgs.slice(0,16)`); idempotency key uses full 256-bit
-  - Source: pr-reviewer
-  - Gap: 64-bit truncation has ~2^32 collision probability. Mixed precision is implicit; collisions could mask "different request, same key" cases.
-  - Suggested approach: introduce a separate `computeRequestHashForIdempotency` that returns the full SHA-256 digest, and use it in `executeWithActionAudit`. Leave the legacy `hashActionArgs` for actions-table use. Document the divergence.
-- [ ] S4 — `googlePlacesProvider` and `hunterProvider` caches are unbounded and process-wide
-  - Source: pr-reviewer
-  - Gap: `Map<string, ...>` grows monotonically; `JSON.stringify(input)` is order-dependent so semantically identical inputs miss the cache; tenants share cache pressure.
-  - Suggested approach: use the project's LRU primitive keyed on `canonicaliseForHash(input)` with a 500-entry cap.
-- [ ] S5 — Domain handlers (`adminOpsService`, `sdrService`, `retentionSuccessService`) accept `_context: unknown`
-  - Source: pr-reviewer
-  - Gap: handlers cannot type-safely reach `context.organisationId`/`context.subaccountId` if a future change needs them; TS can't enforce correct usage at the call sites.
-  - Suggested approach: import `SkillExecutionContext` (or extract to a shared types file) and type the second parameter accordingly.
-- [ ] S6 — `verify-agent-skill-contracts.ts` skill list parser is regex-based and brittle
-  - Source: pr-reviewer
-  - Gap: regex `/^skills:\s*\n((?:[ \t]+-[ \t]+\S+\n?)*)/m` stops on any irregularity; a typo silently truncates the list and hides skill references from the gate.
-  - Suggested approach: use the same YAML parser the seed uses (`gray-matter` / `yaml.parse`).
-- [ ] S10 — `skillIdempotencyKeysCleanupJob` can exceed `MAX_ROWS_PER_RUN` ceiling on a batch boundary
-  - Source: pr-reviewer
-  - Gap: loop terminates when `totalDeleted >= MAX_ROWS_PER_RUN` is checked, but a batch-of-1000 can push past the cap because the check runs *before* the increment. Cap is 10,000 but actual could hit 10,999.
-  - Suggested approach: add `if (totalDeleted >= MAX_ROWS_PER_RUN) break;` after the increment.
-- [ ] N1 — `send_invoice.md` skill description says "Returns not_configured" but runtime returns `{ status: 'blocked', reason: 'provider_not_configured' }`
-  - Source: pr-reviewer
-  - Gap: write skills return `'blocked'`, not `'not_configured'` (which is for `'read'` skills). Audit all 14 new skill `.md` files for this drift.
-  - Suggested approach: sweep `server/skills/*.md` for the 14 new skills; correct the documented contract.
-- [ ] N2 — Hierarchy depth-guard error wording confuses hops and depth
-  - Source: pr-reviewer; `scripts/seed.ts:599-600`
-  - Gap: cosmetic — message says "depth > 3" but the guard fires at hops ≥ 2 (4 nodes). Clarify the wording.
-- [ ] N3 — `proposeAction.ts` middleware error handling uses `console.error` instead of structured logger
-  - Source: pr-reviewer; `proposeAction.ts:92, 400`
-  - Gap: drift from other middleware files; bypasses log levels and structured tagging.
-  - Suggested approach: import `server/lib/logger.ts` and use it consistently.
-- [ ] N4 — `googlePlacesProvider.searchPlaces` types `data.results` items inline
-  - Source: pr-reviewer
-  - Gap: 30-line inline type would read better as a named interface alongside `PlaceSummary`.
-- [ ] N5 — `_down/0233_system_agents_v7_1.sql` rollback comment lacks a Spec: reference
-  - Source: pr-reviewer
-- [ ] N6 — `proposeAction.ts` top-of-file docstring lists 5 responsibilities but the v7.1 manager-role guard adds a sixth
-  - Source: pr-reviewer
-- [ ] N7 — `skillIdempotencyKeysPure.test.ts:61-68` `same key values in different input key order → same hash` is a tautology
-  - Source: pr-reviewer
-  - Gap: `hashKeyShape` builds a NEW object from `keyShape` order before canonicalising, so the test passes regardless of canonicaliseForHash's behaviour. The actual canonicalisation property is tested separately at line 115.
-  - Suggested approach: either remove the redundant test or strengthen it by computing the SHA against a hand-canonicalised string.
+- [ ] **CHATGPT-PR211-R4-RUN-DEBUGGER-VIEW** — Operability surface for run / approval / state-machine debugging. Reviewer round-4 post-merge non-blocking suggestion.
+  - **Captured:** 2026-04-27 (chatgpt-pr-review round 4 — final verdict)
+  - **Severity:** medium (operability bottleneck — system is now correct but non-trivial to reason about).
+  - **Scope:** new product surface (admin / engineer-facing UI) + read-only query layer over existing event / status / artefact tables. NOT a new primitive — composes existing data.
+  - **Surface (per round-4 reviewer):** unified timeline view per `agent_run` / `workflow_run` showing:
+    1. **State transitions over time** — every `state_transition` log line (R3-2 `describeTransition` output) plotted on a timeline; distinguishes `guarded:true` (asserted) from `guarded:false` (logged-only).
+    2. **Artefact chain evolution** — for `brief` runs, the lifecycle pointer graph (`parentArtefactId` → `artefactId`) animated forward through time; chainTips / superseded / current visible at each step.
+    3. **Decision points** — every `proposeAction` audit + `decideApproval` outcome, with the artefact context that drove the decision.
+    4. **Guard violations** — any `InvalidTransitionError` thrown / logged by `assertValidTransition`; any `cached_context.write_missing_scope` warning emitted by `logCachedContextWrite`.
+  - **Why this is the next bottleneck:** rounds 2–3 of the chatgpt-pr-review iteration shipped layered defence (assert + WHERE-guard + log) and pointer-based lifecycle resolution. The system is now resistant to common failure modes — but when something DOES go wrong, the operator's only entry point is grepping logs across multiple services. A unified debugger view collapses that diagnostic loop. Reviewer R2-7 / R3-7 / R4-3 all converge on this as "the next bottleneck is operability, not correctness".
+  - **Files affected:** new admin route under `client/src/pages/admin/` (or extend an existing `RunDetailPage`); new `server/routes/admin/runDebugger.ts` query layer aggregating from `agent_run_events`, `workflow_run_events`, `conversation_messages.artefacts`, application logs (state_transition / cached_context.write).
+  - **Rationale for defer to Phase 2:** post-merge work — the PR #211 surface is correctness hardening; the debugger view is an observability product feature. Reviewer explicitly said "do NOT add more invariants" / "you're done for this phase". Worth a dedicated spec that decides log-source (structured DB events vs application log scrape), retention window, admin-only vs engineer-only access, and whether the view is real-time (WS) or post-hoc.
+  - **Suggested next-spec framing:** start with a 2-day spike that prototypes the artefact-chain timeline only (lowest risk, highest reuse — same view feeds brief debugging, run debugging, approval-flow debugging). Confirm the data layer can answer the four query shapes above without a new schema. Then decide whether to extend or replace the existing `client/src/pages/admin/RunsPage` / `RunDetailPage`.
 
 ---
 
-## Deferred from spec-conformance review — system-monitoring-agent (2026-04-27)
+## Deferred from spec-conformance review — home-dashboard-reactivity (2026-04-27)
 
-**Captured:** 2026-04-27T06:52:33Z
-**Source log:** `tasks/review-logs/spec-conformance-log-system-monitoring-agent-2026-04-27T06-52-33Z.md`
-**Spec:** `tasks/builds/system-monitoring-agent/phase-A-1-2-spec.md`
-**Resolved:** 2026-04-27 — all six directional gaps addressed in the same session as the spec-conformance fixes; see triageHandler.ts, sweepHandler.ts, sweepCoverageDegraded.ts, sweepTickHistory.ts, queueService.ts, systemIncidentService.ts, and migration 0236.
+**Captured:** 2026-04-27T21:02:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-home-dashboard-reactivity-2026-04-27T20-57-33Z.md`
+**Spec:** `tasks/builds/home-dashboard-reactivity/spec.md` (paired plan: `docs/superpowers/plans/2026-04-27-home-dashboard-reactivity.md`)
 
-- [x] REQ 2.4 — Sweep cron interval is hard-coded `*/15 * * * *` (every 15 min), spec §9.3 mandates default 5 minutes
-  - Spec section: §9.3 Sweep job — "**Tick:** every 5 minutes via pg-boss schedule. Configurable via `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES`."
-  - Gap: `server/services/queueService.ts:1131` schedules `system-monitor-sweep` with cron `*/15 * * * *`. Spec default is 5; window is 15. The spec relies on the 5-min interval / 15-min window combination for "rolling 15 minutes... overlaps adjacent ticks by 10 minutes intentionally" (§9.3). At the current 15-min interval, no window overlap occurs and a degraded run completing at a tick boundary could be missed.
-  - Suggested approach: make the sweep schedule honour `SYSTEM_MONITOR_SWEEP_INTERVAL_MINUTES` (env var defaults to 5) — either by using pg-boss's dynamic-schedule API or by having the registration code build the cron string from the env var. Confirm cost impact (3× more sweep ticks at default) and decide whether the runtime cap on `loadCandidates` (200 candidate hard ceiling) is sufficient backstop. Consider the same treatment for `SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS` and `SYSTEM_MONITOR_BASELINE_REFRESH_INTERVAL_MINUTES` if they suffer the same hardcoded-cron pattern.
+Both items closed in this PR (2026-04-28) per user direction. Resolution:
+- **REQ #13 — `action: 'new'` emit on review item creation.** RESOLVED. Emit added inside `reviewService.createReviewItem` (`server/services/reviewService.ts:60-67`). Single call site closes all 6 caller paths.
+- **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** RESOLVED. Single emit added per bulk request in `server/routes/reviewItems.ts` bulk-approve (after `reviewService.bulkApprove`) and bulk-reject (after `reviewService.bulkReject`). `subaccountId: null` per spec contract (string | null) — bulk batches may span subaccounts and the payload field is informational only (§4.3 payload-not-trusted rule).
 
-- [x] REQ 2.15 + 2.16 — `rateLimit.ts` module is defined but never wired into the triage flow
-  - Spec section: §9.9 Rate limiting — "Max **2 triage attempts per fingerprint per 24-hour rolling window**. ... Configurable via `SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT`."
-  - Gap: `server/services/systemMonitor/triage/rateLimit.ts` exports `checkRateLimit` (env-driven, default 2) and `maybeAutoEscalate` (calls existing manual-escalate path on window expiry for high/critical). Neither is imported or invoked anywhere in the codebase. The active triage path uses `triageAdmitPure.ts:7` which hard-codes `TRIAGE_ATTEMPT_CAP = 5` and does not honor the spec's env var. Effect: rate limit is 5, not 2; auto-escalation past the window is dead code; smoke step 8 in `staging-smoke-checklist.md` (which expects 3rd attempt blocked) will not pass against staging defaults.
-  - Suggested approach: wire `checkRateLimit` into `triageHandler.runTriage` immediately after `checkAdmit` returns admitted (or fold the rate-limit check into the admit verdict). On rate-limited verdict, write `agent_triage_skipped` event with `reason='rate_limited'` and call `maybeAutoEscalate` for high/critical incidents. Remove the `TRIAGE_ATTEMPT_CAP = 5` constant from `triageAdmitPure.ts` (or keep as a hard ceiling separate from the rate limit). Add an integration test that asserts: third attempt within window → blocked + `agent_triage_skipped` event + `triage_attempt_count` = 2.
 
-- [x] REQ F.2 — `investigate_prompt_outcome` event metadata is missing four required fields
-  - Spec section: §11.2 Event type `investigate_prompt_outcome`
-  - Gap: `server/services/systemIncidentService.ts:175-187` writes the event with metadata `{ wasSuccessful, promptWasUseful, partial, text }`. Spec §11.2 requires additional metadata: `linked_pr_url` (from incident's `linkedPrUrl` column), `resolved_at` (timestamp of the resolve), `diagnosis_run_id` (from `agent_diagnosis_run_id`), `heuristic_fires` (array of heuristic IDs that fired on this incident — joinable from `system_monitor_heuristic_fires` via `produced_incident_id`).
-  - Suggested approach: in `recordPromptFeedback`, after loading the incident, also fetch `resolvedAt`, `linkedPrUrl`, `agentDiagnosisRunId`, and the list of `heuristic_id` values from `system_monitor_heuristic_fires` where `produced_incident_id = id`. Add them to the event payload. Decide whether the heuristic-fires lookup should happen in the same transaction (consistency vs latency trade-off) — likely yes since the data is small.
+---
 
-- [x] REQ 1.2 — `sweep-coverage-degraded` synthetic check is a stub
-  - Spec section: §8.2 row 8 — "fires when ... rolling-window sweep coverage rate drops below `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95)"
-  - Gap: `server/services/systemMonitor/synthetic/sweepCoverageDegraded.ts` returns `{ fired: false }` unconditionally. Per progress.md "stub returning fired:false (activates Slice C)", but Slice C did not activate it. Spec §12.5 names this signal as load-bearing for the "monitor-the-monitor" health invariant.
-  - Suggested approach: implement per spec §8.2 + §12.5. Read the `sweep_completed` log/event series for the last `SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS` ticks (default 6 = 30 min). Compute coverage rate per tick (`metadata.candidates_evaluated / source-table active-entity count for the window`). If rolling average < `SYSTEM_MONITOR_COVERAGE_THRESHOLD` (default 0.95), fire with offending tick stats in metadata. Note: requires a queryable source for sweep ticks — either persist `sweep_completed` events (currently logger-only — see writeDiagnosis path), persist `system_monitor_sweep_ticks` rows, or query pg-boss completed-job history.
+## Deferred from plan review — pre-test-brief-and-ux (2026-04-28)
 
-- [x] REQ E.1 (subset) — Hardcoded skill-execution iteration cap and other constants in triage handler
-  - Spec section: §9.10 env-var inventory; §9.7 length cap mention
-  - Gap: `triageHandler.ts` hardcodes `TRIAGE_MAX_ITERATIONS = 10` and `TRIAGE_MAX_TOKENS = 8_096` without env-var fallbacks. `selectTopForTriage.ts` has been fixed to honor env vars (mechanical fix in this run), but the iteration / token caps remain hardcoded. Spec §12.4 names "5-minute soft timeout" but no env var; likely fine as documented constants. Lower priority than other items.
-  - Suggested approach: lift `TRIAGE_MAX_ITERATIONS` to an env var (`SYSTEM_MONITOR_TRIAGE_MAX_ITERATIONS`) so noisy production scenarios can be tuned without redeploy. Document the choice in §12.2 inventory.
+**Captured:** 2026-04-28
+**Source:** Pre-build plan review for `tasks/builds/pre-test-brief-and-ux/plan.md`
 
-- [x] REQ E.2 — `write_event` skill DB-stored definition narrower than runtime ALLOWED_TYPES
-  - Spec section: §9.4 + §12.1 (event registry)
-  - Gap: `migrations/0234_system_monitor_skills.sql:57` registers `write_event` with `enum: ["diagnosis", "note", "escalation_blocked"]` in the JSON definition. The runtime handler at `server/services/systemMonitor/skills/writeEvent.ts:10-22` accepts a much wider set including `agent_diagnosis_added`, `prompt_generated`, `agent_triage_skipped`, etc. The agent reads its tool definitions from the DB (via the system-managed agent infrastructure), so the LLM will only know about the narrow enum and may fail to call `write_event` with `agent_diagnosis_added` (which §9.7 system prompt instructs it to do).
-  - Suggested approach: ship a corrective migration (`migrations/<NNNN>_system_monitor_write_event_enum_widen.sql`) that updates the `system_skills.definition` JSON for `write_event` with the full ALLOWED_TYPES list. Migrations are append-only — do not edit 0234. Verify the agent's tool registration path actually reads from `system_skills.definition` (not from the TypeScript module).
+- [ ] **PLAN-REVIEW-P4 — Error banner state type.** `DashboardErrorBanner` uses `Record<string, boolean>` per spec. Upgrade to `Record<string, 'ok' | 'failed'>` for richer observability (persistent-failure visibility, partial-retry tracking). Not scope creep today per §0.3 — spec names the boolean type explicitly.
+  - **Severity:** low (nice-to-have observability improvement)
+  - **Blocked on:** follow-up spec that updates §1.4 S3 type definition
 
-## Follow-ups surfaced during pr-reviewer pass — system-monitoring-agent (2026-04-27)
+- [ ] **PLAN-REVIEW-P5 — DR2 runtime branching guard.** Add a dev-mode runtime assertion in `routes/conversations.ts` that throws if both the brief branch and the noop branch execute (or if neither executes). Current enforcement is via code-grep per spec acceptance criteria — a runtime guard would catch regressions earlier.
+  - **Severity:** low (defensive engineering)
+  - **Blocked on:** follow-up spec that names the guard explicitly (out of §0.3 scope for this spec)
 
-- [ ] Rate-limit scope is per-incident, not per-fingerprint as spec §9.9 requires
-  - Spec §9.9: "A new incident on an existing fingerprint (recurrence after resolution) inherits the fingerprint's recent triage history."
-  - Gap: `system_incidents.triage_attempt_count` is a per-row column. A fingerprint that recurs (new incident row after resolve) starts at `triage_attempt_count = 0`, so the rate limit does not actually carry across recurrences. Pre-existing — not introduced by the spec-conformance directional fixes. The new `checkRateLimit` wiring in `triageHandler.ts` reads this per-row counter.
-  - Suggested approach: aggregate triage attempts via a fingerprint-keyed query at admit time (`SELECT SUM(triage_attempt_count) WHERE fingerprint = ? AND last_triage_attempt_at >= NOW() - WINDOW`), or denormalise onto a small `system_monitor_fingerprint_state` table indexed by fingerprint. Decide whether `lastTriageAttemptAt` aggregation needs the same treatment.
+- [ ] **PLAN-REVIEW-P7 — Middleware ordering enforcement.** Tag `req.__txMounted = true` in the org-tx middleware; add an assertion in `postCommitEmitterMiddleware` that the tag is present on arrival. Current enforcement is manual PR-time inspection. The tag catches mount-order regressions without new infrastructure.
+  - **Severity:** low (defensive engineering, fragile if manually enforced)
+  - **Blocked on:** org-tx middleware being named in a follow-up spec (out of §0.3 scope for this spec)
 
-- [ ] Persist sweep tick history to DB (multi-instance correctness for `sweep-coverage-degraded`)
-  - Captured by pr-reviewer (S2) on the directional fixes. The current ring buffer in `server/services/systemMonitor/synthetic/sweepTickHistory.ts` is process-local. Acceptable for staging (single instance) and explicitly listed as one of three valid options in the original spec-conformance log. For production multi-instance deploys, promote to a `system_monitor_sweep_ticks` table keyed by `bucket_key UNIQUE` with `(candidates_evaluated, limit_reached, load_failed, completed_at)` and a 7-day retention sweep.
-  - Roughly 12 inserts/hour at default cadence — negligible cost. Update `sweepCoverageDegraded` to read from the table instead of the in-memory buffer.
+- [ ] **PLAN-REVIEW-P8 — Log prefix standardisation.** Unify structured log event names: `brief.*`, `conversation.*`, `post_commit.*` instead of the mixed `post_commit_emit_*` / `conversations_route.*` / `brief_artefacts.*` naming. Pays off in observability tooling (log aggregation, alerting). Requires a spec update before changing.
+  - **Severity:** cosmetic / low (no behaviour impact, audit-trail impact)
+  - **Blocked on:** follow-up spec that updates §1.1–§1.2 log definitions
+
+## Deferred from spec-conformance review — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28T03:07:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-brief-and-ux-2026-04-28T03-07-52Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md`
+
+The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly. The gaps below are about test-scope, manual-smoke recording, and PR-prep workflow checkpoints — none mechanical, all requiring human judgment.
+
+- [ ] REQ S3-8 — DashboardPage + ClientPulseDashboardPage manual smoke unrecorded
+  - Spec section: §1.4 DoD ("manual smoke recorded")
+  - Gap: `tasks/builds/pre-test-brief-and-ux/progress.md` § Manual smoke test results lists §1.4 as "_pending_"
+  - Suggested approach: stop API → reload → confirm banner names failed source → restart API → click Retry → confirm banner clears. Repeat per page. Paste outcome into the smoke table.
+
+- [ ] REQ N7-11 — BriefDetailPage manual smoke for >50-artefact Brief unrecorded
+  - Spec section: §1.3 DoD ("client smoke test recorded")
+  - Gap: `progress.md` § Manual smoke test results lists §1.3 as "_pending_"
+  - Suggested approach: open a Brief with > 50 artefacts in dev; verify initial 50; click "Load older"; verify next 50 prepend. Paste outcome.
+
+- [ ] REQ S8-10 — Integration test scope materially smaller than spec
+  - Spec section: §1.2 Tests ("Carved-out integration test... simulates a request lifecycle: middleware → writer enqueues → res.finish fires → assert emit invoked. Then a second case: middleware → writer enqueues → res.statusCode = 500 → res.finish fires → assert emit NOT invoked.")
+  - Gap: `briefConversationWriterPostCommit.integration.test.ts` exercises raw `createPostCommitStore` + `flushAll`/`reset`; never invokes the actual middleware nor `briefConversationWriter`. The store-contract piece is already unit-tested in `postCommitEmitter.test.ts`; the middleware+writer composition is currently unverified by automated tests.
+  - Suggested approach: either (a) wire a minimal Express app in the test that mounts `postCommitEmitterMiddleware`, calls a route that invokes `writeConversationMessage`, and asserts the emit fires after `res.finish` (and is dropped on `res.statusCode=500`), or (b) document the deferral in `progress.md` with a rationale that manual smoke + the existing unit tests give equivalent confidence.
+
+- [ ] REQ S8-11 — §1.2 500-rollback manual smoke unrecorded
+  - Spec section: §1.2 DoD ("manual smoke for the 500-rollback case completed and noted in progress.md")
+  - Gap: `progress.md` does not show §1.2 manual smoke results
+  - Suggested approach: trigger a contrived 500 in a route after `writeConversationMessage` runs; confirm in browser dev tools that NO websocket event arrives. Trigger happy-path; confirm event arrives. Paste outcome.
+
+- [ ] REQ S8-12 — KNOWLEDGE.md entry for the post-commit emit pattern missing
+  - Spec section: §4 Definition of Done item 6 ("KNOWLEDGE.md is updated with the post-commit emit pattern from §1.2 (it generalises beyond Brief artefacts and is the most reusable pattern surfaced by this spec)")
+  - Gap: KNOWLEDGE.md has no entry capturing the pattern
+  - Suggested approach: add a short ~2026-04-28 entry summarising (a) the failure mode (tx-rollback-then-emit produces ghost events), (b) the deferral primitive (AsyncLocalStorage-backed store, flush on `res.finish` 2xx/3xx, reset on 4xx/5xx + close, closed-state immediate-emit fallback), (c) the generalisation (any subsystem that emits via websocket inside a request-scoped tx benefits from the same pattern). Cite `server/lib/postCommitEmitter.ts` as the canonical source.
+
+- [ ] REQ DR2-8 — Integration test punts LLM classify + orchestrator enqueue assertions to manual smoke
+  - Spec section: §1.1 Tests ("Carved-out integration test... exercises the route end-to-end against a fake LLM provider, asserts user message is written once, fast-path classification fires, and orchestrator-routing job is enqueued for a `needs_orchestrator` decision")
+  - Gap: `conversationsRouteFollowUp.integration.test.ts` covers only (i) noop-path one-row write, (ii) DB-row→predicate dispatch, (iii) writer no-built-in-dedupe. The fake-LLM + orchestrator-enqueue assertions are punted to manual smoke per the test header.
+  - Suggested approach: either (a) wire a fake LLM provider stub (mock `classifyChatIntent` to return `{ route: 'needs_orchestrator', ... }`) and assert orchestrator-routing job appears in pg-boss, or (b) accept the punt and document it as a deliberate carve-out in `progress.md` with rationale ("hot-path carve-out: full DR2 chain requires live LLM + pg-boss; manual smoke + per-component unit + DB-row dispatch tests cover the failure modes the spec was protecting against").
+
+- [ ] REQ DR2-10 — DR2 manual dev-DB smoke unrecorded
+  - Spec section: §1.1 DoD ("route's brief-followup path verified manually against the dev DB — post a follow-up, confirm orchestrator job enqueues, observe the structured log line")
+  - Gap: `progress.md` shows DR2 smoke as not yet recorded
+  - Suggested approach: post a follow-up to a Brief-scoped conversation in dev; observe the `conversations_route.brief_followup_dispatched` log line; confirm an orchestrator-routing job appears in pg-boss. Paste outcome.
+
+- [ ] REQ X-1 — `tasks/todo.md` spec-named tickoffs (DR2 / S8 / N7 / S3) all still unchecked
+  - Spec section: §4 DoD item 2 + §5 Backlog tickoff checklist
+  - Gap: lines 359 (S8), 366 (N7), 374-375 (DR2), 770 (S3) in `tasks/todo.md` still `[ ]`. Spec lists these as the canonical "closed" markers.
+  - Suggested approach: tick each entry with a one-line resolution note pointing at the commit SHA or PR number. Conventionally done at PR open.
+
+- [ ] REQ X-2 + X-3 — progress.md final summary missing; spec §5 Tracking table SHAs missing
+  - Spec section: §4 DoD item 5 + §5 Tracking
+  - Gap: `progress.md` only has a setup section (no per-task results). Spec §5 Tracking table still shows all four items as `pending` with `—` SHAs.
+  - Suggested approach: at PR-prep time, append a session-end summary to `progress.md` and populate the spec §5 Tracking table with the four feature commits (`6ef1ea79` S3 / `04613015` N7 / `60a68d07` S8 / `4d64df6d` DR2).
+
+## Deferred from pr-reviewer — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28
+**Source:** pr-reviewer APPROVE WITH STRONG RECOMMENDATIONS
+
+- [ ] **PR-S2 — writeConversationMessage dedupe: spec §0.5 claim vs. reality.** Spec §0.5 says DR2's "no duplicate user messages on retry" depends on `writeConversationMessage` dedupe. Integration test 4 (conversationsRouteFollowUp) proves the function has NO built-in dedupe — a second call produces a second row. Current protection is route-level (branch-before-write, exactly one call per request). For network-level retry safety, one of: (a) add idempotency key on `(conversationId, content, senderUserId)` within a short window per CLAUDE.md §8.11, (b) add HTTP-level idempotency key header at the route, or (c) amend spec §0.5 to say "route-level, not DB-level". Not blocking today (the route is correct); label as a future hardening item.
+
+- [x] **PR-N3 — two DB reads for same conversation in brief-followup path.** *(resolved 2026-04-28 in `da1c4f72` via R-4)* — added optional `prefetchedConv` parameter to `handleConversationFollowUp`; route caller now passes its already-resolved conv to skip the duplicate select. The `briefs.ts` caller (where `briefId` comes from URL params, not a pre-fetched conv) intentionally does not pass `prefetchedConv` and continues to re-select.
+
+## Deferred from spec-conformance review — pre-test-backend-hardening (2026-04-28)
+
+**Captured:** 2026-04-28T03:19:37Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-backend-hardening-2026-04-28T03-19-37Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md`
+
+- [ ] **REQ §1.1 Gap D — failure-path `agent_run_llm_payloads` row not inserted**
+  - Spec section: §1.1 Acceptance criteria ("A failed-mid-flight agent-run LLM call (provider error) produces llm.requested → llm.completed (with terminalStatus: 'failed' in the payload) and the corresponding agent_run_llm_payloads row.")
+  - Gap: implementation only inserts the payload row on the success path; the failure path emits `llm.completed` with `payloadInsertStatus: 'failed'` and `payloadRowId: null` and writes no row (`server/services/llmRouter.ts:1265` "No payload row on failure — no provider response to persist.").
+  - Suggested approach: persist a partial row on failure carrying the system prompt + messages + tool definitions, with a null/error response field; OR explicitly amend the spec to make the failure-path row optional. Decide before relying on `agent_run_llm_payloads` for failed-call observability.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE**
+  - Spec section: §1.1 Acceptance criteria ("the catch handler MUST treat that row as failed (set payloadInsertStatus: 'failed', payloadRowId: null) AND a follow-up DELETE on the contested key MUST run inside the same tx so the post-commit invariant holds")
+  - Gap: catch at `server/services/llmRouter.ts:1619-1628` sets the marker but never issues a follow-up DELETE. Implementation comment at lines 1586-1591 explicitly argues the payload insert must NOT be in a shared tx with the ledger write ("changes ordering semantics for the cost breaker") — directly contradicts the spec MUST.
+  - Suggested approach: either restructure so the payload insert + (on failure) DELETE run in a sibling tx that doesn't interleave with the cost-breaker logic, OR amend the spec to relax the post-commit invariant to "no-row-or-row, never partial" without the DELETE requirement. The current state silently accepts ambiguous post-commit visibility under driver retry conditions.
+
+- [ ] **REQ §1.1 Gap F — `llmRouterLaelIntegration.test.ts` is a stub**
+  - Spec section: §1.1 Tests + Definition of Done ("one integration test added and green")
+  - Gap: all three test cases in `server/services/__tests__/llmRouterLaelIntegration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. They pass trivially without exercising the emission + payload-insert code path.
+  - Suggested approach: implement against the existing test-DB harness already used by `pgboss-zod-hardening` integration tests. Cover: happy-path emission ordering, budget_blocked silence, non-agent-run silence. Until then, §1.1's structural invariants rely on manual smoke + 40-case pure-predicate test only.
+
+- [ ] **REQ §1.2 Gap B — AutomationStepError shape divergence on missing-connection**
+  - Spec section: §1.2 Approach step 2 (literal example shape with `type: 'configuration'`, `status: 'missing_connection'`, `context: { automationId, missingKeys }`)
+  - Gap: existing `AutomationStepError` interface (`server/lib/workflow/types.ts:79`) does not have `'configuration'` in its `type` literal union and lacks `status`/`context` fields. Implementation pragmatically uses `type: 'execution'`, sets `status: 'missing_connection'` only on the event payload (not on the error itself), and inlines `missing.join(', ')` into the error message instead of populating a structured `context.missingKeys`.
+  - Suggested approach: either extend `AutomationStepError` to add `'configuration'` to its `type` union and add optional `status` + `context` fields (then update all error-handler call sites to handle the richer shape) OR amend the spec example to match the existing type system. Today's behaviour satisfies the user-facing acceptance criterion via the message text but does not satisfy structured-context consumers.
+
+- [ ] **REQ §1.3 Gap C — `workflowEngineApprovalResumeDispatch.integration.test.ts` is a stub**
+  - Spec section: §1.3 Tests + Definition of Done ("integration test added and green") and Acceptance ("a double-approve … results in exactly one webhook dispatch, asserted by direct call-count on the test webhook receiver — NOT inferred from terminal status alone")
+  - Gap: all three test cases in `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. Spec explicitly demands call-count assertion, not terminal-status assertion.
+  - Suggested approach: build a fake-webhook-receiver harness (similar to nock) that increments a counter and exposes it for assertion. Wire through a test DB that supports the `awaiting_approval → running` UPDATE race the implementation relies on at `workflowEngineService.ts:1752-1759`. Progress.md acknowledges manual smoke as "the gating acceptance check" — that is not what the spec asks for.
+
+- [ ] **REQ §1.7 Gap A — async-worker path transitively calls `checkThrottle`**
+  - Spec section: §1.7 step 1 ("Async-worker exclusion contract (MUST hold): the async-worker ingestion path MUST NOT call checkThrottle.")
+  - Gap: `incidentIngestorAsyncWorker.ts:15` calls `ingestInline(payload.input)`. The branch wired `checkThrottle` into `ingestInline`. Therefore the async-worker path now transitively calls `checkThrottle`. The spec's MUST is structurally violated by the implementation choice.
+  - Suggested approach: choose one of (a) split the body of `ingestInline` so the worker calls a `_ingestInlineSkippingThrottle` variant — but that introduces a new primitive in violation of §0.3 (b) collapse the contract: amend the spec to drop the async-worker-exclusion MUST since `recordIncident` routes EITHER through async OR through sync (line 90: `if (isAsyncMode())`), so there's no double-throttle in any single request lifecycle anyway, OR (c) move the throttle check up into `recordIncident` and gate it on `isAsyncMode() === false`. Option (b) reflects what the implementer actually achieved (single throttle point, no double-throttle); option (c) is the closest mechanical fix to the spec's intent.
+  - **Update 2026-04-28:** Resolved in commit `7ebac102` via Option (c) — throttle moved to `recordIncident`'s sync branch; `ingestInline` is now throttle-free. Async-worker exclusion test added in commit fixing pr-reviewer S2.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE** *(superseded)*
+  - **Update 2026-04-28:** Initially "fixed" by adding a defensive DELETE in commit `7ebac102`, but pr-reviewer S1 flagged residual non-atomicity (DELETE could itself throw, leaving payload row visible with `payloadInsertStatus: 'failed'` event). Resolved by wrapping the INSERT in a `db.transaction` so any thrown error inside auto-rolls-back — eliminating the defensive DELETE entirely. The post-commit invariant now holds structurally.
+
+## Deferred from pr-reviewer review — pre-test-backend-hardening
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source log**: `tasks/review-logs/pr-review-log-pre-test-backend-hardening-2026-04-28T03-59-27Z.md`
+
+- [ ] **S4 — `decideApproval` returns inflated `newVersion` for the loser of an approve/approve race**
+  - File: `server/services/workflowRunService.ts:583`
+  - Issue: both winner and loser of a concurrent `decideApproval('approved')` race receive `newVersion: stepRun.version + 1`, but the actual post-commit DB version is `stepRun.version + 2` (one bump for `awaiting_approval → running`, one for `running → completed`). The loser gets a stale client cache key indistinguishable from the winner's response.
+  - Pre-existing behaviour, but spec §1.3 made the invocation pattern more concurrent. Worth a follow-up to either fetch the actual post-commit version after dispatch, or document `newVersion` as a "best-effort hint" in the API contract.
+
+- [x] **N1 — Decision-type drift in `resolveApprovalDispatchActionPure` not surfaced in helper signature** *(resolved 2026-04-28)*
+  - File: `server/services/resolveApprovalDispatchActionPure.ts`
+  - Resolution: added `export type ApprovalDecision = 'approved' | 'rejected' | 'edited'` to the helper file (now the canonical source of truth for the runtime decision shape). Updated the helper signature and the production caller `workflowRunService.decideApproval` to import the type rather than re-declaring the inline union. Drift between spec wording (`'approve' | 'reject'`) and codebase reality is now surfaced in one place. Route-layer request-validation types and DB column types intentionally retain their inline unions — they're separate concerns (HTTP body shape, persisted enum) from the runtime dispatch decision.
+
+- [ ] **N3 — Promote `requireUuid` to a shared validation helper when other boundaries hit malformed UUIDs**
+  - File: `server/services/briefArtefactValidatorPure.ts:83`
+  - Trigger: testing pass surfaces malformed UUIDs reaching other validation boundaries (`runId`, `subaccountId`, `automationId` from external clients with bad shape).
+  - Action when triggered: grep for `requireString` calls on `*Id` fields across `server/services/*ValidatorPure.ts` and promote `requireUuid` to a shared helper (likely `server/lib/validation/requireUuid.ts` or extend an existing pure-validator module).
+
+- [ ] **N4 — `__testHooks` discriminant-name regex test is fragile**
+  - File: `server/services/__tests__/reviewServiceIdempotency.test.ts:445–459`
+  - Issue: test reads `reviewService.ts` source via `readFileSync` and counts string-literal occurrences of `'idempotent_race'`. A future refactor that constants-extracts the literal (e.g. `const KIND_IDEMPOTENT_RACE = 'idempotent_race'`) preserves behaviour but reduces the count below 2, failing the test.
+  - Fix: assert on return-value shape instead of source-text layout — trigger a race and assert `result.wasIdempotent === true && getKindFromAuditTrail() === 'idempotent_race'`.
+
+- [ ] **N2 follow-up — Consider adding `firstObservedAt` to `clientpulse_cursor_secret_fallback` log entry**
+  - File: `server/services/clientPulseHighRiskService.ts:172–178`
+  - Spec §1.5 step 2 named the field; spec-conformance accepted the omission as PASS-with-deviation. Add the field if a downstream alert filter ever wants to deduplicate or correlate the one-shot warning across instances.
+
+## Deferred from chatgpt-pr-review — pre-test-backend-hardening (2026-04-28)
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source**: ChatGPT final-review round 1
+
+- [ ] **Migration 0240 — phase the conversations unique-index swap before any production deploy with a non-trivially-sized `conversations` table**
+  - File: `migrations/0240_conversations_org_scoped_unique.sql`
+  - Issue: current migration is a single-tx `DROP INDEX` → `CREATE UNIQUE INDEX` on `conversations`. Single-tx semantics mean no committed window where uniqueness protection is absent, but the `CREATE` takes an `ACCESS EXCLUSIVE` lock on the table for its full duration. Risk is lock duration, not data corruption — fine on a small / pre-launch table, painful on a non-trivial one.
+  - Trigger: any production deploy that runs migrations against a `conversations` table large enough for the `CREATE UNIQUE INDEX` lock to become a perceptible outage (rule of thumb: tens of millions of rows, or any row count where index build crosses ~seconds).
+  - Action when triggered: split into a two-step migration — (a) `CREATE UNIQUE INDEX CONCURRENTLY` on a temp name with the new column tuple; (b) once green, drop the old index and rename the new one. Both steps must run outside a transaction (`CONCURRENTLY` requires it). Accepts an intermediate state where both indexes coexist; safe because uniqueness is satisfied by either.
+  - Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, single-tx wrapper closes the read-side window". Phased migration is overkill at current scale and adds rollout complexity. Revisit before any deploy that violates the trigger above.
+  - Rejected option (2026-04-28): `CREATE UNIQUE INDEX CONCURRENTLY` with phased rollout. Rejected for this PR because (a) `CONCURRENTLY` cannot run inside a transaction (would force splitting into two migration files), (b) introduces an intermediate state where both indexes coexist, (c) adds rollout complexity disproportionate to current `conversations` table size and pre-launch posture. Becomes the correct option once the trigger condition above is met — operational interpretation: when a non-concurrent index build under production write load becomes observable in write-latency tail (rule of thumb ~100–300ms), not when row count crosses a specific threshold.
+
+- [ ] **LAEL + approval-resume integration test harness — convert deferred `test.skip` stubs to real assertions**
+  - Files: `server/services/__tests__/llmRouterLaelIntegration.test.ts`, `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
+  - Issue: both files exist as `test.skip` stubs because no shared fake-webhook / fake-provider harness is in place. The §1.3 "double-approve fires exactly one webhook" call-count assertion (the invariant the spec specifically demanded over a status-only check) is currently uncovered.
+  - Action: build the shared fake-webhook receiver + fake-provider adapter as the next chunk after this PR merges. Convert the six skipped tests to real assertions exercising the real DB transaction boundaries.
+  - Decision (2026-04-28): kept as `test.skip` (not as `assert.ok(true)` stubs) so green CI does not imply lifecycle coverage. Harness work scoped as a follow-up chunk, not a blocker for this PR.
 
 - [ ] `cachedSystemMonitorAgentId` cache key is global, not per-org
   - File: `server/services/systemMonitor/triage/triageHandler.ts` lines 64–82.

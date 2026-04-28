@@ -2,7 +2,7 @@
 name: Social Media Agent
 title: Social Media Agent
 slug: social-media-agent
-reportsTo: head-of-growth
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.5
 maxTokens: 4096

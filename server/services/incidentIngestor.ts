@@ -27,7 +27,6 @@ import {
   shouldNotify,
 } from './incidentIngestorPure.js';
 import { checkThrottle } from './incidentIngestorThrottle.js';
-import { checkAndRecord } from './incidentIngestorIdempotency.js';
 import type { SystemIncidentSeverity } from '../db/schema/systemIncidents.js';
 
 export type { IncidentInput };
@@ -88,33 +87,19 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
   if (!isIngestEnabled()) return;
 
   try {
-    // Validate override here so throttle + idempotency operate on the same fingerprint as the DB write.
-    if (input.fingerprintOverride && !validateFingerprintOverride(input.fingerprintOverride)) {
-      logger.warn('incident_fingerprint_override_rejected', {
-        override: input.fingerprintOverride,
-        source: input.source,
-      });
-      input = { ...input, fingerprintOverride: undefined };
-    }
-
-    const fingerprint = computeFingerprint(input);
-
-    if (checkThrottle(fingerprint)) {
-      logger.debug('incident_throttled', { fingerprint, source: input.source });
-      return;
-    }
-
-    if (input.idempotencyKey) {
-      const idempKey = `${fingerprint}:${input.idempotencyKey}`;
-      if (checkAndRecord(idempKey)) {
-        logger.debug('incident_idempotent_skip', { fingerprint, source: input.source });
-        return;
-      }
-    }
-
     if (isAsyncMode()) {
       await enqueueIngest(input);
     } else {
+      const fingerprint = computeFingerprint(input);
+      // Throttle is applied in the sync branch of recordIncident before calling ingestInline.
+      // The async-worker calls ingestInline directly and intentionally bypasses the throttle —
+      // pg-boss provides backpressure for the async path. Adding throttle in the async-worker
+      // violates spec §1.7 (2026-04-28 pre-test backend hardening). Throttle is process-local;
+      // cross-instance deduplication is not guaranteed.
+      if (checkThrottle(fingerprint)) {
+        logger.debug('incident_ingest_throttled', { fingerprint });
+        return;
+      }
       await ingestInline(input);
     }
   } catch (err) {
@@ -136,7 +121,9 @@ async function enqueueIngest(input: IncidentInput): Promise<void> {
 }
 
 /** Shared code path for sync mode and the async worker. */
-export async function ingestInline(input: IncidentInput): Promise<void> {
+export async function ingestInline(
+  input: IncidentInput
+): Promise<void> {
   // Validate fingerprintOverride before doing anything else
   if (input.fingerprintOverride && !validateFingerprintOverride(input.fingerprintOverride)) {
     logger.warn('incident_fingerprint_override_rejected', {
@@ -148,6 +135,7 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
   }
 
   const fingerprint = computeFingerprint(input);
+
   const classification = classify(input);
 
   // 1. Suppression check
@@ -208,7 +196,6 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
   const notifyMilestones = process.env.SYSTEM_INCIDENT_NOTIFY_MILESTONES;
 
   let notifyPayload: { incidentId: string; fingerprint: string; severity: SystemIncidentSeverity; occurrenceCount: number; correlationId: string | null } | null = null;
-  let triageIncidentId: string | null = null;
 
   await db.transaction(async (tx) => {
     // Raw SQL upsert using partial unique index — Drizzle's onConflictDoUpdate
@@ -302,20 +289,6 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
         correlationId: input.correlationId ?? null,
       };
     }
-
-    // Capture triage candidate — enqueued post-commit (same rationale as notify).
-    // Gate: new incident only (wasInserted), severity ≥ medium, not a self-check.
-    const isSelfCheckFlag = (input.errorDetail as Record<string, unknown> | null | undefined)?.isSelfCheck === true ||
-      (input.errorDetail as Record<string, unknown> | null | undefined)?.isMonitorSelfStuck === true;
-    if (
-      wasInserted &&
-      (currentSeverity === 'medium' || currentSeverity === 'high' || currentSeverity === 'critical') &&
-      input.source !== 'self' &&
-      !isSelfCheckFlag &&
-      process.env.SYSTEM_MONITOR_ENABLED !== 'false'
-    ) {
-      triageIncidentId = incidentId;
-    }
   });
 
   // 5. Enqueue notify job after the transaction has committed.
@@ -338,24 +311,6 @@ export async function ingestInline(input: IncidentInput): Promise<void> {
         incidentId: capturedPayload.incidentId,
         fingerprint: capturedPayload.fingerprint,
         severity: capturedPayload.severity,
-      });
-    }
-  }
-
-  // 6. Enqueue triage job post-commit (outbox pattern — best-effort; see §9.2).
-  // A phantom enqueue (triage job with no matching incident) is safe: the handler
-  // reads the incident first and emits agent_triage_skipped on 404.
-  // singletonKey prevents duplicate in-flight jobs for the same incident.
-  if (triageIncidentId) {
-    try {
-      const boss = await getPgBoss();
-      await boss.send('system-monitor-triage', { incidentId: triageIncidentId }, {
-        singletonKey: `triage:${triageIncidentId}`,
-      });
-    } catch (err) {
-      logger.error('incident_triage_enqueue_failed', {
-        error: err instanceof Error ? err.message : String(err),
-        incidentId: triageIncidentId,
       });
     }
   }

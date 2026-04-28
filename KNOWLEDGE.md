@@ -931,27 +931,318 @@ Round 1 of this session's review added §5.5 protocol-version stamping rule: "ev
 
 Confirmed for a second time on the same spec: across Rounds 5 + 6 + finalisation cleanup (19 total decisions), every single finding triaged `technical` and was auto-applied / auto-rejected without a user gate. Zero user-facing escalations across both the original 4-round loop AND the resumed 2-round loop. **Stronger form of the 2026-04-26 pattern:** a spec that intentionally defers UI to a separate architect spec (per the system-monitoring-agent §10 "UI surface" reference back to existing `SystemIncidentsPage` extension only — no new pages, no new copy strings, no new workflow steps) survives ChatGPT's review pressure across multiple sessions without producing any user-visible findings. The triage discipline produces zero false escalations because the user-visible surface is structurally empty. **Implication:** when authoring an internal-contract spec for a system that has a user-visible surface, the cheapest path to autonomous review is to extract the user surface into a separate spec (or defer to architect) so the contract spec can be reviewed under pure technical-triage. Bundling internal contract + user copy + workflow ordering into one spec forces every round to wait on user decisions for the UI-string findings.
 
-### [2026-04-27] Gotcha — Idempotency `scope` declarations must match what storage actually enforces
+### [2026-04-27] Pattern — Three-layer defence-in-depth for status writes (WHERE-guard / log-bridge / hard-assert)
 
-`server/config/actionRegistry.ts` had 4 entries (`config_create_agent`, `config_update_agent`, `config_activate_agent`, `config_create_subaccount`) declaring `idempotency.scope: 'org'`, but `skill_idempotency_keys.subaccount_id` is `NOT NULL` and the wrapper at `skillExecutor.ts:2157-2159` throws when `context.subaccountId` is missing. Result: any call site that respected the `'org'` declaration and supplied no subaccount would crash before execution, while every call site that did supply a subaccount used the column anyway — so the declaration was decorative metadata, not enforcement. **Rule:** for any `idempotency.scope` field, grep the storage layer (DDL + insert path) and the wrapper guard. If the column is `NOT NULL` and the wrapper throws on missing context, the only valid scope is the one that matches that context. Org-level idempotency requires either nullable subaccount_id + a partial-unique index covering the null case, or a separate `org_idempotency_keys` table; until either lands, declaring `'org'` is a runtime trap. **Detector:** add a registry consistency check that asserts every `scope: 'org'` declaration has a corresponding org-level keying primitive in storage; lint-fail if not.
+When migrating status-write boundaries from a single guard layer (state-based `WHERE inArray(status, [...non-terminal])`) to a stronger guarantee (runtime `assertValidTransition`), do not flip every site at once. Use three layers concurrently and migrate sites between them over time:
 
-### [2026-04-27] Gotcha — Idempotency-hit early returns must terminalise the freshly-proposed action row
+1. **Pre-existing WHERE-clause guard** — already in place at every site; gives 0-row no-op on contract violation but is silent.
+2. **Observability bridge** — `describeTransition({ ..., guarded: false })` log line emitted immediately before the UPDATE. Lets log queries quantify the unguarded-by-assert surface area while keeping migration incremental.
+3. **Hard assert** — `assertValidTransition(...)` throws `InvalidTransitionError` on terminal→non-terminal, terminal→terminal, or unknown-status target. Adopted at high-blast-radius sites first.
 
-`executeWithActionAudit` (server/services/skillExecutor.ts) proposes an `actions` row at line 2061 *before* checking `skill_idempotency_keys` for cross-run idempotency. On every replay early-return path — `idempotency_collision`, cached `completed`, `in_flight` (reclaim disabled / lost / within window), `previous_failure` — the wrapper returned cached payload without ever closing the freshly-proposed row. Replays accumulated dangling `approved` rows that never reached a terminal state, leaving the audit trail silently incomplete. **Rule:** any wrapper that proposes a state-machine row before performing a "do we even run?" gate must close that row to a terminal status on every gate-fail early return — `markCompleted` for cached-success replays (mirroring the cached payload), `markBlocked('concurrent_execute')` for in-flight branches, `markFailed(<code>)` for collisions or previous failures. **Implementation gotcha:** `transitionState()` rejects approved → completed because `LEGAL_TRANSITIONS` assumes the row passed through `executing`; use direct `markCompleted` / `markFailed` / `markBlocked` writes (precedent: handler-exception path in the same wrapper). **Detector:** every early `return` in a wrapper that has a preceding `proposeAction` call should be followed by reasoning about row closure; add a code-review check or `verify-action-row-terminalised.sh` gate that flags `return` statements between `propose` and a terminal write.
+The bridge layer is the load-bearing piece. Without it, a partial migration looks identical (in logs) to a fully-migrated codebase, so operators cannot tell when the migration is complete or surface unconverted sites for review. Adopt the log line at the same time you start adopting the assert.
 
-### [2026-04-27] Gotcha — Hash-input drift: parse Zod once, hash AND execute the same value
+**Applied to:** PR #211 R3-2 — `shared/stateMachineGuards.ts` exports both `assertValidTransition` (hard) and `describeTransition` (log). 5 sites adopted the assert (`workflowEngineService.ts`, `agentRunFinalizationService.ts`); 2 high-volume terminal-write sites in `agentExecutionService.ts` adopted the log with `guarded: false` and stayed on the WHERE guard pending the F6 follow-up spec. Operators query `event=state_transition guarded=false` to see remaining migration surface.
 
-`executeWithActionAudit` parsed user input with `parameterSchema.safeParse` into `parsedInput` (Zod `default()` materialised, transforms applied), hashed `parsedInput`, then called `executor()` with no arguments — handlers used closure-captured raw `input`. For any skill with Zod defaults or transforms (e.g. `config_link_agent.isActive` defaults `true`, `read_campaigns.include_ad_groups` defaults `false`), the value used to compute the cross-run idempotency hash drifted from the value the handler executed against. Replays of the same call hashed under one shape but ran under another, breaking the cross-run guarantee silently — never throws, just stops being idempotent for default-bearing keys. **Rule:** when a wrapper parses input through a schema *and* derives a key/hash from the parsed shape, the executor MUST receive the parsed shape too. Treat this as a single contract: signature `(processedInput: T) => Promise<R>`, never `() => Promise<R>` with the raw input captured in closure. **Detector:** any schema-validating wrapper whose hash function reads `parsed*` and whose executor reads `input`/`raw` is a guaranteed drift bug. Prefer threading the parsed value through every layer (`runWithProcessors(_, parsedInput, _, (processed) => executor(processed))`) over post-hoc patches.
+**When NOT to use this pattern.** If the new assert can be adopted everywhere in one PR (small surface, clear sites), skip the bridge layer — three-layer transition only earns its complexity when migration is incremental.
 
-### [2026-04-27] Pattern — ChatGPT default-to-additions on strong-architecture PRs surfaces as already-implemented findings
+### [2026-04-27] Decision — Risk-class split for cached-context isolation rollout (read-leak vs write-leak)
 
-PR #215 (system-monitor directional fixes, 3 review rounds): all 3 round-1 auto-rejects were "this is already in the diff" — the canonical incident fingerprint partial unique index (migration 0224), the baseline epoching `entity_change_marker` column (spec §7.6), and the event-type registry CI gate (`scripts/verify-event-type-registry.sh`). ChatGPT recommended adding all three as if they did not exist, despite each being plainly visible in the PR file list or referenced spec. Mirrors the spec-review default-to-additions pattern from 2026-04-26 (PR #196 finalisation, 67% reject ratio in round 6) but at the code-review level. **Rule:** when a reviewer recommends adding an invariant that a partial unique index, a database CHECK constraint, or a CI gate script already enforces, the rejection rationale is "show the existing mechanism" — cite the migration number, the column name, the gate script path. Do not re-litigate the architectural invariant; the file already encodes it. (Related but distinct from `2026-04-25 Gotcha — Partial unique index predicate must match the upsert WHERE clause exactly` — that entry is about getting the predicate right; this entry is about reviewers not seeing the predicate exists at all.) (seen 2 times in this PR)
+Read leakage (one tenant queries data scoped to another) is **exposure** — bounded blast radius, contained per query. Write leakage (insert/update lands on the wrong tenant) is **corruption** — durable damage that compounds across reads. Cached-context isolation has both surfaces; rolling them out together obscures the urgency gap.
 
-### [2026-04-27] Pattern — Round-N+1 reviewer pressure tests round-N design splits
+**Pattern.** Split the rollout by risk class:
+- **Write side first, log-only:** ship `logCachedContextWrite({ table, operation, organisationId, subaccountId, hasSubaccountId })` at every write boundary. Cheap, surfaces the higher-blast-radius surface in observability before it becomes an incident. Promote log → hard assert under a follow-up spec when the explicit `{ orgScoped: true }` discriminator is defined.
+- **Read side later, mechanical:** the F2a follow-up — shared `assertSubaccountScopedRead(query, subaccountId)` helper + grep/CI gate. Lower urgency because exposure is bounded per query.
 
-PR #215 round 3 (system-monitor): both user-rejects defended round-2 design choices. Round 2 split the diagnosis-status banner into two severity tones — `invalid` red-imperative ("operator should investigate manually"), `partial` amber-advisory ("operator review recommended"). Round 3 proposed "tighten the partial copy" — collapsing the round-2 split. Round 2 also established rate-limit-precedence-over-failed in the `triageAttemptCount > 0` branch (rate-limit is a structural-stop state; once an incident is rate-limited it cannot be retried regardless of last-attempt outcome). Round 3 proposed reordering to surface `failed` first — undoing the round-2 precedence. **Rule:** when a reviewer proposes a copy or precedence change on a UI surface that was deliberately structured in the previous round, the round-N rationale IS the round-N+1 reject rationale — surface the round-N design intent verbatim, don't re-derive from scratch. The reviewer is not aware of cross-round design intent; the agent is, and should defend it. **Watch for:** copy-tightening, severity-bumping, precedence-reordering, default-flipping on surfaces touched in the immediately prior round. These are the recurring round-N+1 attack vectors against round-N decisions.
+Splitting also makes the spec-author's job tractable — each half can carry its own decision (failure mode, discriminator design, gate type) without entangling the other.
 
-### [2026-04-27] Pattern — Defer-enrichment is a valid technical auto-apply path
+**Applied to:** PR #211 R2-2 — original F2 finding split into F2a (read, deferred) and F2b (write, partial-shipped). `server/lib/cachedContextWriteScope.ts` is the F2b log helper; full assert promotion routed to `tasks/todo.md § CHATGPT-PR211-F2b`.
+
+**Reusable test.** When a reviewer flags a single mechanical-enforcement gap that has both a read side and a write side, ask: would each side need a different failure mode (log vs throw) or a different discriminator? If yes, split the rollout. If no, ship them together.
+
+### [2026-04-27] Pattern — Bypass annotations bind to function name, not file
+
+When introducing a doc-rule that requires an annotation at every caller of an allow-listed primitive (RLS-bypass functions, admin-DB scopes, raw-SQL escape hatches), the annotation MUST cite the immediately-following function name verbatim, not just the file or table. Form:
+
+```
+// @rls-allowlist-bypass: <table_name> <function_name> [ref: <invariant-or-spec-§>]
+async function fooJob() { ... }
+```
+
+**Why.** Files accumulate functions over time. Without name binding, an allow-listed file silently grows new bypass call sites because the file itself is "covered" by the annotation. Binding the annotation to a specific function name closes that gap — if a developer renames the function, moves it, or copy-pastes the bypass into a sibling function, reviewers can grep for `@rls-allowlist-bypass` and spot orphaned annotations whose third token no longer matches the next declaration.
+
+**Why no CI gate.** A new gate is a new primitive (`DEVELOPMENT_GUIDELINES § 8.4` — prefer existing primitives). At current call volume, grep is sufficient: `grep -nE "@rls-allowlist-bypass" server/` lists every annotated caller, and reviewers spot-check whether the line below each annotation declares a function whose name matches the third token. The gate becomes worth its cost only when allow-list size × code churn makes the manual grep error-prone.
+
+**Applied to:** PR #211 R3-5 — `scripts/rls-not-applicable-allowlist.txt` format-rules header. The allow-list itself is currently empty by design (every tenant table is registered); the rule fires when the first real entry is added.
+
+**Anti-pattern.** Annotating the file (`// rls-bypass file: foo.ts`) without naming the function — silent drift as the file grows.
+
+### [2026-04-27] Pattern — Stable-tiebreaker sort for distributed event reconciliation
+
+When a client merges optimistic local writes with WebSocket-streamed events into a single ordered list, sort by `(serverTimestamp, immutableId)` — never by `serverTimestamp` alone. ISO timestamps with second precision can collide across multi-server fan-out; without a tiebreaker, the merged list oscillates as new events arrive, causing list re-rendering, scroll jumps, and visible flicker.
+
+**Comparator shape:**
+
+```ts
+items.sort((a, b) => {
+  if (a.serverCreatedAt !== b.serverCreatedAt) {
+    return a.serverCreatedAt < b.serverCreatedAt ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : 1;  // tiebreak by immutable, unique ID
+});
+```
+
+The tiebreaker must be immutable (artefact ID, message ID, decision ID — not a derived field that can change between renders) and unique (collision-free by construction).
+
+**Applied to:** PR #211 R3-1 — `client/src/pages/BriefDetailPage.tsx` `mergeArtefactById` sorts by `serverCreatedAt` primary + `artefactId` secondary. Server stamps `serverCreatedAt` at write time; client re-sorts only on stamped incomings (legacy optimistic inserts without timestamps fall through to replace-or-append).
+
+**When this matters.** Any UI surface that merges live data from multiple sources where ordering visibly affects UX — chat threads, run timelines, audit logs, notification streams. Less critical for tables sorted by paginated cursor (cursor stability is a different problem).
+
+### [2026-04-27] Pattern — Pre-merge sanity check pass: 4 read-only confirmations after a multi-round review iteration
+
+After a multi-round ChatGPT/Codex review iteration concludes with "you're done" verdict, run 4 read-only confirmation checks targeted at the riskiest invariants the iteration introduced. Cost: ~30 seconds × 4. Value: catches any regression introduced during the review rounds themselves at zero implementation cost.
+
+**Check shapes:**
+
+1. **No silent bypass** — the new infra adds a guard or assertion. Confirm no path skips both the new infra AND the pre-existing fallback (e.g. WHERE-clause guard). Grep for the assert call sites; verify each is wired or replaced by a logged-and-WHERE-protected variant.
+2. **No dead instrumentation** — new logging / observability hooks are imported and called from at least one real, callable production path. Grep the import; trace the call chain to a route handler / job entry / scheduled tick.
+3. **No wrong-position assumption** — if the iteration introduced new sorting or ordering, confirm no existing code assumes "last item in array = latest" (or first = oldest). Grep for `[length - 1]`, `.at(-1)`, `.pop()` on the affected types.
+4. **No theoretical-only enforcement** — if the iteration introduced an annotation rule, doc-rule, or convention, confirm it has at least one real call site. If not, document explicitly that it's empty-by-design (see "Empty-allowlist-by-design is correct" below).
+
+**When to skip.** Trivial PRs (single-file fix, no new infra). When the reviewer's "you're done" comes after only one round of substantive feedback (no iteration to regress against).
+
+**Applied to:** PR #211 Round 4 — all 4 checks run; 3 pass; check 4 N/A by design (empty allowlist). Recorded in `tasks/review-logs/chatgpt-pr-review-impl-pre-launch-hardening-2026-04-26T23-59-09Z.md § Round 4 § Sanity check results`.
+
+### [2026-04-27] Convention — Empty-by-design allow-lists / registries are correct, not a flaw
+
+When a doc-rule introduces a registry (allow-list, exception-list, opt-out catalog) and the registry is empty at the time the rule lands, that is the **expected** state — not a flaw to fix by adding placeholder entries. The rule fires when the first real entry is added; until then, the rule is intentionally theoretical.
+
+**Why.** The rule's value is preventing future "just add it to the list" reflexes by codifying the entry format upfront. Adding a fake entry to "validate the rule" mechanically would dilute the registry (placeholder vs real entries get confused over time) and contradict the rule's purpose.
+
+**Detection.** When a reviewer flags "rule is theoretical / not exercised", confirm the registry is empty by design (file header should say so) before treating the finding as a gap. If the file header doesn't document the empty-by-design state, that's the actual fix — annotate the file, not the rule.
+
+**Applied to:** PR #211 Round 4 sanity-check 4 — `scripts/rls-not-applicable-allowlist.txt` is empty; file header explicitly states "Currently empty — every tenant table on `main` is registered in `rlsProtectedTables.ts`. Add new entries below as needed." Reviewer's "rule is theoretical" finding correctly closed as N/A-by-design.
+
+### [2026-04-27] Pattern — Reviewer follow-up may overturn round-1 defer when cost-curve evidence emerges
+
+When a reviewer iteration produces a Round 1 finding that is reasonable to defer, do NOT treat the defer as locked. If the reviewer's Round 2 follow-up cites cost-curve reasoning ("cheap now, very expensive later") on the same finding, that is the strongest signal to overturn the round-1 defer in the same session.
+
+**Why this works.** Round 1 defers are usually decided on scope/architectural grounds ("new primitive, multiple call sites, escalate"). Round 2 follow-ups have access to the round-1 decision and can refute it specifically — when the refutation is cost-curve evidence (not a re-litigation of scope), it carries more weight than the original scope concern. Acting in the same session preserves the iteration's coherence; deferring further would create an open thread the next session has to re-discover.
+
+**How to apply.**
+1. When a round-1 finding is deferred on scope grounds, leave a marker (`tasks/todo.md` entry with rationale).
+2. If the reviewer's next round cites the deferred finding with cost-curve reasoning, escalate to user with the round-2 quote.
+3. User-directed implement overturns the round-1 defer; capture the overturn in the log so future review sessions can read the trail.
+4. Apply the minimum coverage scope per the reviewer's round-2 advice — not the full original scope — to keep the overturn cheap.
+
+**Applied to:** PR #211 R2-6 (`assertValidTransition`) — Round 1 deferred F6 on architectural-scope grounds (multiple call sites, new primitive). Round 2 ChatGPT marked it "the most important decision in this round" / "cheap now, very expensive later". User explicitly directed implement — minimal coverage shipped (terminal-write boundaries only, 5 sites), remaining coverage routed to `CHATGPT-PR211-F6 (FOLLOW-UP)`.
+
+**Anti-pattern.** Honouring the round-1 defer mechanically when round-2 cost-curve evidence has emerged. The defer was a routing decision, not a contract.
+
+### [2026-04-28] Pattern — "Suppression is success" under single-writer invariants
+
+A single-writer event emitter (one process / one row / one path is authoritative for a given fact at a given time) sometimes loses a coordination race — another writer got there first, or a stamped-newer payload made this write redundant. The losing path must NOT return `success: false`. It must return `success: true, suppressed: true` (with a `reason` if useful).
+
+**Why.** `success: false` is "this thing didn't happen and is broken." Suppression is "this thing didn't happen because it didn't need to — the invariant is intact." Returning failure on a coordination loser triggers four downstream regressions:
+
+1. **Retry storms.** Caller retries on `success: false`; every retry re-loses the coordination race and amplifies the storm.
+2. **False incident signals.** Alerting fires on the failure rate; oncall sees an "outage" that is the system working as designed.
+3. **Broken metrics.** "Write success rate" drops; the chart is meaningless because half the failures are healthy suppressions.
+4. **Alert fatigue.** Operators learn to ignore the alert. The next time it fires for a real reason, they ignore it too.
+
+**Pattern shape.**
+
+```ts
+// Coordination loser path:
+if (existingTimestamp >= incomingTimestamp) {
+  return { success: true, suppressed: true, reason: 'stale_payload' };
+}
+
+// Or:
+if (alreadyClaimedBy(otherWriter)) {
+  return { success: true, suppressed: true, reason: 'lost_claim' };
+}
+```
+
+The shape `{ success: true, suppressed: true, reason }` lets callers distinguish "wrote new state" from "no-op'd safely" without treating the latter as failure. Metrics that care about throughput should bucket suppressed separately; metrics that care about correctness should treat suppressed as success.
+
+**Where it applies.** Any single-writer emitter that can lose a coordination race:
+- Diagnosis writers (system-monitoring `writeDiagnosis` — already enforces this; PR #218).
+- Status-transition writers under last-write-wins ordering (terminal status reached via a different path).
+- Cache populators where a fresher value already landed.
+- Idempotent webhook receivers where the same event-id was processed by a sibling pod.
+- Notification dedup paths where the same digest was sent N seconds ago.
+
+**Where it does NOT apply.** Multi-writer or non-coordinated paths where `success: false` genuinely means "broken": database connection lost, malformed payload, permission denied, downstream API 5xx. The pattern is specifically for the class where "another writer beat me" is a healthy outcome.
+
+**Architectural anchor.** `architecture.md § Home dashboard live reactivity` (line 1515) — names the pattern at the point where it's first enforced. Any new single-writer emitter should cite that anchor or extend it.
+
+**Applied to:** PR #218 — `writeDiagnosis` in the system-monitoring agent emits `{ success: true, suppressed: true }` on coordination losers; the home-dashboard reactivity client treats suppressed-success identically to fresh-success for metric and freshness purposes (no retry, no error toast). Forward-looking codebase-wide enforcement (reusable utility + lint/grep guard) routed to `tasks/todo.md § PR Review deferred items / PR #218`.
+
+**Detection heuristic.** When reviewing a single-writer emitter, grep the diff for `success: false` returns. Each hit must be either: (a) a genuine failure mode (DB / network / permission / malformed input), or (b) a coordination loser that should be flipped to `success: true, suppressed: true`. The grep pattern + a follow-up lint guard are the path from "well understood" to "impossible to violate quietly".
+
+**ChatGPT review framing.** Both PR #218 review rounds reinforced this — Round 1 flagged the pattern as forward-looking standardisation; Round 2's optional follow-up explicitly named "codify suppression = success as a reusable utility or invariant check + add a lightweight lint or grep-based guard to prevent regressions" as the highest-leverage next step. The review rounds form the canonical citation for why the pattern matters at the codebase level, not just the system-monitoring level.
+
+---
+
+### [2026-04-28] Correction — Spec contracts MUST be declarative invariants, not verification instructions
+
+When applying review feedback to a spec, contracts that the implementation must hold MUST be written declaratively ("X MUST hold") with the failure mode explicitly forbidden, not as advisory verification steps ("verify X holds" or "the existing guard handles this").
+
+**Why:** Verification instructions become stale on the next refactor — they describe how to inspect the current code, not what the code must do. ChatGPT's second-round review of `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` flagged four such gaps in my first-round edits:
+
+1. §1.1 sequence ordering — I wrote "emitter sequence allocation is atomic per `agentExecutionEventService`" (an implication based on the existing primitive); the contract needed to be "both events MUST be emitted through the same `agentExecutionEventService` sequencing context" (a declarative MUST that survives a future refactor splitting the emit calls across tx boundaries).
+2. §1.3 dispatch idempotency — I wrote "dispatch MUST be called only on the winner branch" with verification instructions to confirm placement; the contract needed to enumerate forbidden placements ("MUST NOT occur before the decision-row write, outside the post-commit boundary, in the unique-violation catch path, or in a fire-and-forget side-task").
+3. §1.3 retry semantics — I wrote "does not re-decrement retry counters" (one direction only); the contract needed to forbid increment AND decrement AND reset, and enumerate the partial-state edge cases.
+4. §1.7 throttle time source — I made fake-clock usage required in tests but didn't pin the production code's time source; a future "perf optimization" using `performance.now()` would have silently broken every fake-clock test.
+
+**How to apply.** When applying spec review feedback, for every "verify X" or "rely on Y" phrase in the diff, ask: "What MUST hold for this to be safe?" — and write that as a MUST statement in the spec, with the failure modes explicitly forbidden. Verification instructions belong in the implementation checklist, not in the contract section. The contract is what survives refactors; the verification instruction is what loses.
+
+**File reference:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §§1.1, 1.2 (purity contract), 1.3 (idempotency + retry), 1.7 (time source), 1.8 (hook-presence) — second-round edits applied 2026-04-28.
+
+---
+
+### [2026-04-28] Pattern — Post-commit websocket emit primitive via AsyncLocalStorage
+
+`server/lib/postCommitEmitter.ts` implements request-scoped emit deferral using `node:async_hooks` `AsyncLocalStorage<PostCommitStore>`. Emits enqueued during a request are flushed on `res.finish` (2xx/3xx) or dropped on 4xx/5xx and premature disconnect (`res.close`). The middleware (`server/middleware/postCommitEmitter.ts`) MUST be mounted AFTER auth/org-tx middleware (`subdomainResolution` block) so the ALS store is inherited by all async children including `withOrgTx` callbacks — this ensures emits deferred inside a transaction actually fire after the transaction commits.
+
+**Three states:** open (enqueue appends), closed (enqueue fires immediately — closed-state fallback for post-`res.finish` async continuations), absent (no store bound — job workers emit inline, logged as `post_commit_emit_fallback { reason: 'no_store' }`). Closed-state fallback is critical: without it, an async continuation that runs after `res.finish` silently drops its emits.
+
+**Three structured log events:** `post_commit_emit_flushed { requestId, emitCount }` (gated on `emitCount > 0`), `post_commit_emit_dropped { requestId, droppedCount, statusCode? }` (gated on `droppedCount > 0`), `post_commit_emit_fallback { reason: 'no_store' | 'closed_store' }`. Both quantitative logs gate on a non-zero count to keep log volume tractable — without the gate every successful 2xx/3xx response that did not enqueue any work would emit `flushed { emitCount: 0 }`.
+
+**Scope:** currently wired only in `briefConversationWriter.writeConversationMessage`. Any other service that emits websocket events inline after a DB write should migrate to the same pattern to close the ghost-emit failure mode.
+
+---
+
+### [2026-04-28] Ledger-canonical / payload-best-effort consistency contract (§1.1 LAEL)
+
+When an event record (the "ledger") and a companion content-payload record exist in the same transaction, the consistency model MUST be explicit: one is canonical and must succeed; the other is best-effort and must NOT roll back the canonical record on failure.
+
+**Implementation pattern (from `server/services/llmRouter.ts`):**
+1. The canonical ledger write is in the main transaction tx.
+2. The payload insert is inside a `try { ... } catch (err) { logger.warn('...'); payloadInsertStatus = 'failed'; }` block still inside the same tx — the catch swallows the insert failure so the outer tx commits regardless.
+3. A defensive `DELETE WHERE pk = rowId` runs inside the same catch, before the outer tx commits, to ensure no partial row is visible post-commit. Without this, the post-commit invariant `payloadInsertStatus === 'failed' ↔ no row exists` could be violated by a partial insert that committed partially.
+4. The canonical event (e.g. `llm.completed`) carries `payloadInsertStatus: 'ok' | 'failed'` so downstream consumers can distinguish "payload genuinely absent" from "payload write failed silently" without querying the payload table.
+
+**Why:** If the payload insert failure is allowed to roll back the ledger write, the system loses a permanent record of the LLM call — the ledger is the single source of truth for billing, audit, and retry. The payload is a debugging aid, not a contract.
+
+**How to apply:** Any time a "main record + companion content row" pattern is introduced, ask: (a) which is canonical? (b) does a companion failure silently discard the canonical record? (c) is the failure mode observable on the canonical event?
+
+---
+
+### [2026-04-28] Post-commit winner-branch rule for dispatch on approval-resume (§1.3)
+
+When an approval decision produces a side-effect (webhook dispatch, downstream job, state transition), that side-effect MUST be placed strictly after the decision-row commit AND only on the winner code path.
+
+**Structural enforcement (from `server/services/workflowRunService.ts` + `workflowEngineService.ts`):**
+- The winner is determined by an atomic `UPDATE ... WHERE status = 'awaiting_approval' RETURNING *` (compare-and-swap on row status). If no row returns, the caller is the loser and returns without dispatching.
+- Dispatch (`resumeInvokeAutomationStep`) is called by the caller that got a row back — i.e., strictly post-commit on the winner branch.
+- Concurrent callers that hit the no-return path return immediately with `alreadyResumed: true` and DO NOT dispatch.
+
+**The rule in one sentence:** Dispatch MUST NOT occur before the guard write, outside its post-commit boundary, in the conflict-loser branch, or in a fire-and-forget side-task that races the guard write.
+
+**Why:** Placing dispatch before the write creates a window where two concurrent callers can both dispatch before either commits; placing it in the loser branch causes double-dispatch on races; placing it in a fire-and-forget side-task breaks the post-commit guarantee.
+
+**Tracing tag:** The approval-resume dispatch path emits `dispatch_source: 'approval_resume'` on the tracing event so operators can distinguish initial dispatch from resume dispatch in logs/timeline.
+
+---
+
+### [2026-04-28] `__testHooks` seam promotion rule for deterministic race testing (§1.8)
+
+When a service has a race window between a "claim" write and its commit that must be tested deterministically, the `__testHooks` seam pattern provides a controlled injection point without coupling tests to wall-clock timing.
+
+**Pattern (from `server/services/reviewService.ts`):**
+```ts
+// At the bottom of the service file (development/test seam only)
+export const __testHooks: {
+  delayBetweenClaimAndCommit?: () => Promise<void>;
+} = {};
+```
+Inside the transaction, after the claim UPDATE and before commit:
+```ts
+if (__testHooks.delayBetweenClaimAndCommit) {
+  await __testHooks.delayBetweenClaimAndCommit();
+}
+```
+
+**Usage rule — hook-presence contract (MUST hold):** Any test that promotes to this pattern MUST assert the hook is available at test-setup time — `assert.ok(__testHooks !== undefined && 'delayBetweenClaimAndCommit' in __testHooks)` — and bail before any test body runs if missing. This prevents the test from silently regressing to non-deterministic `Promise.all` if the hook is removed in a refactor.
+
+**When to promote:** Try natural `Promise.all` first. If any CI run shows the loser branch not surfacing the expected `idempotent_race` discriminant (i.e., both calls returning `proceed`), promote immediately. Do not accumulate CI runs "to be sure" — the first sign of non-determinism is the trigger.
+
+**Prior art:** `server/lib/ruleAutoDeprecateJob.ts:86` — the canonical reference for this pattern in this codebase.
+
+---
+
+### [2026-04-28] Lock the contract you already have — single canonical block over implied-across-comments
+
+When an invariant is enforced by multiple distributed code sites (e.g. three independent emit sites + a finally fallback all upholding "exactly one X for every Y"), do NOT rely on per-site comments to convey the contract. Add ONE canonical block at the entry point that names the invariant, lists the enforcement sites, and states the failure-state collapse rules.
+
+**Pattern (from `server/services/llmRouter.ts` round-1 ChatGPT-review fix):**
+
+At the top of the function, beside the flag declarations:
+```
+// INVARIANT (locked): every emitted llm.requested is paired with exactly
+// one llm.completed. Three independent emit sites uphold this — success
+// path (§12c below), failure path (callStatus loop exit), and the
+// finally-block fallback. The two flags + wrapping try/finally enforce it.
+```
+
+At the section header where a contract has multiple failure-state collapse cases:
+```
+// PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
+// emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
+// Failure cases collapse to the same observable state … (a)/(b)/(c)
+// To distinguish them in debugging, look for the `lael_payload_insert_failed`
+// logger.warn — only case (b) emits it.
+```
+
+**Why it matters:** Future contributors otherwise have to read every emit site to verify the invariant holds. With a canonical block, one read confirms the contract; per-site comments become reinforcement, not the primary record. `(locked)` is the load-bearing word — signals to future readers "do not silently change this without renegotiating the contract."
+
+**How to apply:**
+1. When a code review surfaces "this invariant is implied across multiple comments," that's the trigger.
+2. The canonical block belongs at the highest scope where all enforcement sites are visible — function header, module top, or section anchor.
+3. List the enforcement sites by name (line numbers age out fast) and the collapse rules (which observable states are indistinguishable, and the breadcrumb that disambiguates them).
+4. Mark with `INVARIANT (locked):` or `CONTRACT (locked):` so a future text-search retrieves it.
+
+---
+
+### [2026-04-28] External-reviewer false-positive rate is non-zero — verify before applying
+
+ChatGPT / external review feedback contains a measurable false-positive rate. On `pre-test-backend-hardening` round 1, 3 of 11 findings (27%) were factually incorrect on a literal codebase read — the reviewer described the code as it WOULD have looked at an earlier point, not as it is.
+
+**False positives observed:**
+- "Stub tests give false sense of safety" — the stubs were already `test.skip(...)` not `assert.ok(true)`; the recommended fix was already in place.
+- "Duplicate `ingestInline` declaration" — a single multi-line function signature was misread as two declarations.
+- "`requireString` then `requireUuid` double-validates" — the two helpers were never stacked on the same field.
+
+**The rule:** Before applying ANY external-review finding, open the cited file and verify the claim. The receiving-code-review skill's "verify before implementing" loop is not paranoia — it has a measurable backstop against shipped-because-the-reviewer-said-so churn.
+
+**How to apply:**
+1. For each finding: open the file at the cited line, read enough surrounding context to confirm the claim is current.
+2. If the finding describes "this looks like X" — verify X is actually present, not "X-like."
+3. If the finding describes a ratio or count (e.g. "12 console.* calls") — confirm whether they are NEW in the current branch's diff or pre-existing.
+4. False positives get pushed back with the verifying read in the response, not silently dropped.
+
+**What this does NOT mean:** External review is not low-value. The same round 1 produced 2 high-leverage findings (lock the LAEL contract, lock the pairing invariant) that the author of the code did NOT spot. The verify-before-applying loop is what separates the value from the noise.
+
+---
+
+### [2026-04-28] Record the rejected option in deferred-decision todos, not just the accepted one
+
+When deferring a decision with a tracked todo, record BOTH the chosen option AND the rejected option's rationale on the same entry. Future-you reading the todo at trigger-time should not have to re-derive "why didn't we just do the safer thing now."
+
+**Pattern (from `tasks/todo.md` migration-0240 deferred entry):**
+```
+- Decision (2026-04-28): accepted as-is for this PR per "table is small, pre-launch, …".
+- Rejected option (2026-04-28): `CREATE UNIQUE INDEX CONCURRENTLY` with phased rollout.
+  Rejected for this PR because (a) `CONCURRENTLY` cannot run inside a transaction, (b) …
+  Becomes the correct option once the trigger condition above is met.
+```
+
+**Why:** A todo that says only "we accepted X" forces future-you to re-research "why not Y?" at trigger-time. A todo that says "we rejected Y for reasons (a)(b)(c)" tells future-you whether Y is now the right call (the reasons may have evaporated) or still wrong (the reasons still hold). Closes the audit loop.
+
+**How to apply:** Any deferred-decision todo where there was a credible alternative — operational migration, security/perf trade-off, "wrap this in a transaction vs not" — gets a `Rejected option (date):` line beside the `Decision (date):` line. The trigger condition for revisiting goes on the decision line; the criteria that flip the rejected option become the canonical option goes on the rejected line.
+
+---
 
 PR #215 round 3 #3 (system-monitor): when a reviewer surfaces a coordination constraint between two deferred items, enriching the deferred entry with the constraint is documentation work — not a code change. Specifically: the deferred staleness-guard fix (round 2 #4) and the deferred rate-limit retry idempotency fix (round 1 #7b) both touch `triage_attempt_count` on incident rows. A naive implementation of the staleness guard (flip `'running' → 'failed'` after timeout) would double-charge a single never-completed attempt unless coordinated with 7b's `(incidentId, jobId)`-keyed idempotency. Documenting the constraint in `tasks/post-merge-system-monitor.md` under item 4 is mechanical, low blast radius, and prevents the post-launch implementer from building one fix on top of the other's not-yet-finished assumptions. **Rule:** defer-enrichment (markdown-only edit to a deferred-items file capturing newly-surfaced coordination constraints) is a valid technical auto-apply path under the chatgpt-pr-review triage. Treat it as `technical-implement`, no user gate, low severity. Do NOT route the *constraint itself* to the deferred file as a separate item — fold it into the existing entry it constrains. **Watch for:** any reviewer comment of the form "when X is implemented, ensure it does Y" where X is already deferred — that's a defer-enrichment, not a new item.
 

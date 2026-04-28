@@ -4,7 +4,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import type { Conversation, ConversationMessage } from '../db/schema/conversations.js';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import { handleBriefMessage, type DispatchRoute } from './briefMessageHandlerPure.js';
-import { writeConversationMessage } from './briefConversationWriter.js';
+import { writeConversationMessage, type WriteMessageResult } from './briefConversationWriter.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export interface ConversationWithMessages {
@@ -65,7 +65,7 @@ export async function findOrCreateBriefConversation(input: {
       status: 'open',
       metadata: {},
     })
-    .onConflictDoNothing({ target: [conversations.scopeType, conversations.scopeId] })
+    .onConflictDoNothing({ target: [conversations.organisationId, conversations.scopeType, conversations.scopeId] })
     .returning();
   if (created) return created;
 
@@ -114,22 +114,32 @@ export async function handleConversationFollowUp(input: {
   text: string;
   uiContext: BriefUiContext;
   senderUserId?: string;
-}): Promise<{ route: DispatchRoute; fastPathDecision: FastPathDecision }> {
+  // Caller may pass an already-fetched (org-scoped) conversation row to skip
+  // the re-select. Validation still runs — must match `briefId` and have
+  // scopeType='brief'.
+  prefetchedConv?: { scopeType: string | null; scopeId: string };
+}): Promise<{ message: WriteMessageResult; route: DispatchRoute; fastPathDecision: FastPathDecision }> {
   // Verify the conversation actually belongs to this brief. Without this
   // check, a stale tab or malformed payload that posts {conversationId: B}
   // to a route bound to {briefId: A} would write the user message to
   // conversation B while orchestration runs against brief A — splitting
   // intent across two threads. The cross-check is org-scoped via the request
   // tx so it fails closed for cross-tenant attempts as well.
-  const tx = getOrgScopedDb('briefConversationService.handleConversationFollowUp');
-  const [conv] = await tx
-    .select({ scopeType: conversations.scopeType, scopeId: conversations.scopeId })
-    .from(conversations)
-    .where(and(
-      eq(conversations.id, input.conversationId),
-      eq(conversations.organisationId, input.organisationId),
-    ))
-    .limit(1);
+  let conv: { scopeType: string | null; scopeId: string } | undefined;
+  if (input.prefetchedConv) {
+    conv = input.prefetchedConv;
+  } else {
+    const tx = getOrgScopedDb('briefConversationService.handleConversationFollowUp');
+    const [row] = await tx
+      .select({ scopeType: conversations.scopeType, scopeId: conversations.scopeId })
+      .from(conversations)
+      .where(and(
+        eq(conversations.id, input.conversationId),
+        eq(conversations.organisationId, input.organisationId),
+      ))
+      .limit(1);
+    conv = row;
+  }
 
   if (!conv || conv.scopeType !== 'brief' || conv.scopeId !== input.briefId) {
     throw Object.assign(
@@ -138,7 +148,7 @@ export async function handleConversationFollowUp(input: {
     );
   }
 
-  await writeConversationMessage({
+  const message = await writeConversationMessage({
     conversationId: input.conversationId,
     briefId: input.briefId,
     organisationId: input.organisationId,
@@ -148,7 +158,7 @@ export async function handleConversationFollowUp(input: {
     senderUserId: input.senderUserId,
   });
 
-  return handleBriefMessage({
+  const { route, fastPathDecision } = await handleBriefMessage({
     conversationId: input.conversationId,
     briefId: input.briefId,
     organisationId: input.organisationId,
@@ -157,4 +167,6 @@ export async function handleConversationFollowUp(input: {
     uiContext: input.uiContext,
     isFollowUp: true,
   });
+
+  return { message, route, fastPathDecision };
 }

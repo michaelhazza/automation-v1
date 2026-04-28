@@ -3,7 +3,6 @@ name: Audit GEO
 description: Composite GEO (Generative Engine Optimisation) audit — orchestrates sub-skills to evaluate AI search visibility and produces a 0-100 GEO Score with per-dimension breakdown.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

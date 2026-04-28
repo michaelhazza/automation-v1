@@ -3,7 +3,6 @@ name: Request Clarification
 description: Route a real-time question to a named human (subaccount manager, agency owner, or client contact) via WebSocket and optionally pause the current step until they reply or the timeout fires.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

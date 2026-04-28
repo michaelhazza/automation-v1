@@ -342,6 +342,7 @@ Single-screen operational command centre that replaces the legacy inbox, dashboa
 
 - **Three-lane classifier** — Actions are deterministically sorted into Client-facing, Major, and Internal lanes based on impact: irreversibility, cross-subaccount scope, per-action cost, and per-run cost
 - **Major-lane safeguards** — High-cost or irreversible actions require explicit acknowledgment before approval, with configurable cost thresholds per organisation
+- **Live home dashboard** — Approvals, activity, client-health, and queue tiles refresh in place as events occur, with a "last updated" freshness indicator on every group. Operators see new state without manual refresh, and ordering is preserved under bursts so the dashboard never drifts behind reality.
 - **Attention tab** — Live feed of pending review items, failed runs, health findings, and tasks needing decisions, with optimistic UI updates and real-time WebSocket push
 - **History tab** — Full activity timeline with column-header sort, type/status/severity filters, search, and date-range filtering — delegates to the unified activity service
 - **Bulk approve** — Select and approve multiple items at once; Major-lane items are automatically held back with a split response showing what was approved vs. blocked
@@ -389,17 +390,6 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 - **10 active detectors:** inactive agents, empty skill allowlists, missing schedules, broken connections, stale connectors (ingestion overdue or recent errors), missing engines, unsynced system agents, multiple active leads per sub-account (impossible post-migration but flagged instantly if ever introduced), sub-accounts with no active lead, and agents holding delegation skills with no team to delegate to
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
-
-### Active System Monitoring + Auto-Triage
-
-The platform continuously watches every agent run, job, skill execution, and integration in the background and automatically diagnoses production incidents before operators even open the dashboard.
-
-- **Continuous heuristic sweep** — A 15-minute background sweep evaluates 23 heuristics across completed agent runs, flagging quality issues (empty output, output truncation, repeated tool calls, abnormal token usage), infrastructure signals (latency creep, retry spikes, auth failures), and systemic trends (success-rate degradation, output entropy collapse, cost-per-outcome growth). Heuristics are calibrated against per-agent baselines so the platform only fires when behaviour departs from the agent's own historical norms.
-- **Automated incident diagnosis** — When a production incident is created — either by the sweep or by a platform error — a built-in diagnostic agent analyses the incident, reads the relevant agent runs, skill logs, and job history, and produces a structured investigation prompt the operator can paste directly into a development environment to investigate root cause.
-- **Synthetic health checks** — Eight real-time checks run every minute to detect silent platform failures: queue stalls, stalled job workers, connectors with no recent successful syncs, unusually low agent run counts, and an internal monitor-the-monitor check that fires when the monitoring pipeline itself degrades.
-- **Operator feedback loop** — After resolving an incident the agent diagnosed, operators rate whether the investigation prompt was useful. Structured feedback (yes / partially / no) is stored per incident and feeds calibration of future diagnostic quality.
-- **Rate limiting and auto-escalation** — The diagnostic agent runs at most twice per 24-hour window per incident. High-priority incidents that hit the rate limit are automatically escalated to the system operations team via the existing escalation path.
-- **Kill-switch hierarchy** — Monitoring can be disabled at four granularity levels: full ingest off, triage off (heuristics and sweep continue), individual heuristic phases off, or auto-escalation off — without touching the incident pipeline that other features depend on.
 
 ### Activity & Analytics
 

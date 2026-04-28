@@ -131,6 +131,7 @@ import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import crmQueryPlannerRouter from './routes/crmQueryPlanner.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
+import { postCommitEmitterMiddleware } from './middleware/postCommitEmitter.js';
 // Memory & Briefings Phase 1 — delivery channels route (S22)
 import deliveryChannelsRouter from './routes/deliveryChannels.js';
 // Memory & Briefings Phase 2 — clarifications route (S8)
@@ -240,6 +241,11 @@ app.use(correlationMiddleware);
 
 // Subdomain resolution — must run before page serving routes
 app.use(subdomainResolution);
+
+// Post-commit websocket emit store — MUST be mounted AFTER org-tx middleware
+// (auth/org-tx is per-route; ALS binding is inherited by all async children
+// so enqueues inside withOrgTx flush after tx commits, not before).
+app.use(postCommitEmitterMiddleware);
 
 // Routes
 app.use(healthRouter);

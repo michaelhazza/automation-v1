@@ -62,9 +62,6 @@ export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
   'request_approval',
   'spawn_sub_agents',
 
-  // Hierarchy introspection — manager delegation primitive
-  'list_my_subordinates',
-
   // Cascading context data sources (runtime-loaded, not user-facing)
   'read_data_source',
 

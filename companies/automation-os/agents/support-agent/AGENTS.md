@@ -2,7 +2,7 @@
 name: Support Agent
 title: Support Agent
 slug: support-agent
-reportsTo: head-of-client-services
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.3
 maxTokens: 4096

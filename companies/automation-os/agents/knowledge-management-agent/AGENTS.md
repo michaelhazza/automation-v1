@@ -2,7 +2,7 @@
 name: Knowledge Management Agent
 title: Knowledge Management Agent
 slug: knowledge-management-agent
-reportsTo: head-of-product-engineering
+reportsTo: orchestrator
 model: claude-sonnet-4-6
 temperature: 0.2
 maxTokens: 6144

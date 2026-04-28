@@ -7,8 +7,9 @@
 import { db } from '../db/index.js';
 import { automations } from '../db/schema/automations.js';
 import { automationEngines } from '../db/schema/automationEngines.js';
-import { automationConnectionMappings } from '../db/schema/automationConnectionMappings.js';
-import { eq, and, isNull, or, inArray } from 'drizzle-orm';
+import { eq, and, isNull, or } from 'drizzle-orm';
+import { automationConnectionMappingService } from './automationConnectionMappingService.js';
+import { resolveRequiredConnections } from './resolveRequiredConnectionsPure.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { logger } from '../lib/logger.js';
 import { createEvent } from '../lib/tracing.js';
@@ -146,32 +147,36 @@ export async function invokeAutomationStep(
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
-  // Required-connection check (§5.8) — only when run is subaccount-scoped
+  // §1.2 REQ W1-44: pre-dispatch connection resolution — verify every required
+  // connection slot is mapped for the calling subaccount BEFORE firing the webhook.
+  // Only evaluated when the run is subaccount-scoped (org-level runs have no subaccount
+  // connection mappings to check).
+  // listMappings is called per-dispatch. This is intentionally non-cached — if this
+  // becomes hot, introduce caching via a separate spec.
   if (run.subaccountId) {
     const requiredKeys = (automation.requiredConnections ?? [])
       .filter((c) => c.required)
       .map((c) => c.key);
 
     if (requiredKeys.length > 0) {
-      const mappings = await db
-        .select({ connectionKey: automationConnectionMappings.connectionKey })
-        .from(automationConnectionMappings)
-        .where(
-          and(
-            eq(automationConnectionMappings.processId, automation.id),
-            eq(automationConnectionMappings.subaccountId, run.subaccountId),
-            inArray(automationConnectionMappings.connectionKey, requiredKeys),
-          ),
-        );
-
-      const foundKeys = new Set(mappings.map((m) => m.connectionKey));
-      const missingKeys = requiredKeys.filter((k) => !foundKeys.has(k));
-
-      if (missingKeys.length > 0) {
+      const rawMappings = await automationConnectionMappingService.listMappings(
+        run.organisationId,
+        run.subaccountId,
+        automation.id,
+      );
+      const resolution = resolveRequiredConnections({
+        automation: { requiredConnections: requiredKeys },
+        subaccountId: run.subaccountId,
+        mappings: rawMappings.map((m) => ({
+          connectionKey: m.connectionKey,
+          connectionId: m.connectionId,
+        })),
+      });
+      if (!resolution.ok) {
         const error: AutomationStepError = {
           code: 'automation_missing_connection',
           type: 'execution',
-          message: `Automation '${step.automationId}' requires connections that are not configured: ${missingKeys.join(', ')}.`,
+          message: `Automation '${automation.id}' is missing required connections: ${resolution.missing.join(', ')}`,
           retryable: false,
         };
         createEvent('workflow.step.automation.completed', {

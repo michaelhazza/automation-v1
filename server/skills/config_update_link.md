@@ -3,7 +3,6 @@ name: Config Update Link
 description: Update a subaccount agent link with any combination of override fields.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters

@@ -3,7 +3,6 @@ name: GEO Crawler Access Check
 description: Checks robots.txt and HTTP headers for 14+ AI crawlers to determine whether AI search engines can access and index site content.
 isActive: true
 visibility: basic
-reusable: true
 ---
 
 ## Parameters
