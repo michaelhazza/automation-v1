@@ -1423,3 +1423,55 @@ try {
 ### [2026-04-28] Correction — Recommendation gates must align semantically with the action they trigger
 
 Same script (`computeVerdict()` in `scripts/code-graph-health-check.ts`): the `ESCALATE` recommendation was originally gated on `proratedPerMonth >= ESCALATE_QUERIES_PER_MONTH && d.adoption.references > 0`. ESCALATE means "volume justifies Phase 1 automation review." But `references > 0` is a near-vacuous gate — 60 architecture queries with 1 cache reference still fired ESCALATE, even though that's the inverse of the right action (TUNE adoption first, automation later). Reviewer (P2) pointed out the contradiction with the function's own comment ("AND adoption healthy"). Fixed by introducing `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gating ESCALATE on it. The threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up. **Rule:** for every recommendation, the gate condition has to actually satisfy the recommendation's *meaning*, not just its lexical preconditions. Cross-check: read the comment that justifies the recommendation; if the gate doesn't enforce what the comment says, the gate is wrong. **Detector:** in any rule-based decision engine, look for branches whose guard is much weaker than the action's stated precondition (e.g. "X > 0" guarding "X is healthy"). Those guards are bugs in waiting.
+
+### [2026-04-28] Pattern — Programmatic scan to resolve reviewer disputes about duplicates or missing changes
+
+When an external reviewer insists a bug exists (or a fix wasn't applied) after you've already pushed back with a manual read, use a programmatic scan rather than re-reading the source. A 5-line Node.js or bash script produces objective, citable evidence in under a second.
+
+**Template for "does any block contain both X and Y?":**
+```js
+const fs = require('fs');
+const text = fs.readFileSync('path/to/file.ts', 'utf8');
+const re = /blockStartPattern[\s\S]*?blockEndPattern/g;
+let m, dups = 0;
+while ((m = re.exec(text)) !== null) {
+  const block = m[0];
+  if (/fieldA/.test(block) && /fieldB/.test(block)) { dups++; console.log('Found at byte', m.index); }
+}
+console.log('Total duplicate blocks:', dups);
+```
+**Template for "is this pattern present or absent?":**
+```bash
+grep -c "pattern" file.ts  # 0 = absent, >0 = present
+```
+Applied in this PR to settle 3 consecutive rounds of disputed findings (LAEL duplicate fields, status regex not applied, agentRunPayloadWriter type duplication) — all three proved false against current code.
+
+**Rule:** "The reviewer says it exists" is a claim to verify, not a fact to accept. Programmatic verification is evidence; re-reading by eye is not.
+
+### [2026-04-28] Pattern — `.match()` vs `.matchAll()` for regex extraction inside a scan loop
+
+`.match(re)` returns only the FIRST match regardless of the `g` flag when called on a string. `.matchAll(re)` requires the `g` flag and returns an iterator over ALL matches. When extracting values from a block of text inside a loop (e.g. scanning each `AutomationStepError` literal block for `status:` values), always use `matchAll` so the scan is exhaustive. Today's blocks may have one match; future blocks may have more — `match()` silently discards all but the first.
+
+**Applied in:** `invokeAutomationStepErrorShapePure.test.ts` Case 4 regex upgrade.
+
+### [2026-04-28] Pattern — Lazy ESM registry import for test files that have env-free and env-dependent sections
+
+When a test file mixes tests that don't need production env vars with tests that do (because the tested code imports a module that calls `envSchema.parse(process.env)` at load time), split the import boundary inline using a deferred `await import()`:
+
+```ts
+// Tests 1-6: adapter-only, no env deps — run unconditionally.
+await test('case 1', ...);
+// ...
+await test('case 6', ...);
+
+// Deferred import: only executed when the test runner reaches this point.
+// Fails fast here rather than before test 1 if env vars are missing.
+const { registerProviderAdapter, getProviderAdapter } = await import('./registry.js');
+
+// Tests 7-13: registry-dependent, require env vars.
+await test('case 7', ...);
+```
+
+This preserves the "standalone runnable" promise for env-free tests and gives a clean failure point (after test 6, before test 7) when env vars are absent — rather than crashing before any test runs.
+
+**Applied in:** `fakeProviderAdapter.test.ts` between Case 6 and Case 7.
