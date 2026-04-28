@@ -121,10 +121,10 @@ export async function getBriefArtefacts(
   organisationId: string,
   opts?: { limit?: number; cursor?: CursorPosition | null },
 ): Promise<{ items: BriefChatArtefact[]; nextCursor: string | null }> {
-  const requestedLimit = opts?.limit ?? 50;
+  const requestedLimit = Math.trunc(opts?.limit ?? 50);
   const clampedLimit = Math.max(1, Math.min(requestedLimit, 200));
   if (requestedLimit !== clampedLimit) {
-    logger.info('brief_artefacts.limit_clamped', { briefId, requested: requestedLimit, applied: clampedLimit });
+    logger.info('brief_artefacts.limit_clamped', { briefId, requested: opts?.limit, applied: clampedLimit });
   }
   const cursor = opts?.cursor ?? null;
 
@@ -159,6 +159,7 @@ export async function getBriefArtefacts(
     .from(conversationMessages)
     .where(and(
       eq(conversationMessages.conversationId, conv.id),
+      eq(conversationMessages.organisationId, organisationId),
       cursorCondition,
     ))
     .orderBy(
@@ -203,7 +204,10 @@ export async function getAllBriefArtefacts(
   const messages = await db
     .select({ artefacts: conversationMessages.artefacts })
     .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, conv.id))
+    .where(and(
+      eq(conversationMessages.conversationId, conv.id),
+      eq(conversationMessages.organisationId, organisationId),
+    ))
     .orderBy(asc(conversationMessages.createdAt));
 
   const all: BriefChatArtefact[] = [];

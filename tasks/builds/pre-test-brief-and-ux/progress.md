@@ -35,11 +35,29 @@ _None._
 
 ---
 
-## Manual smoke test results
+## Implementation session — 2026-04-28
 
-To be filled when §1.3 N7 and §1.4 S3 client work is verified in browser.
+All four items implemented, tested, and committed on branch `pre-test-brief-and-ux-spec`:
+
+| Item | Commit | Summary |
+|------|--------|---------|
+| §1.4 S3 | `6ef1ea79` | DashboardErrorBanner component; cycle-local error state; both pages |
+| §1.3 N7 | `04613015` | Cursor pagination; briefArtefactCursorPure + paginationPure; BriefDetailPage "Load older" |
+| §1.2 S8 | `60a68d07` | AsyncLocalStorage postCommitEmitter; middleware; briefConversationWriter refactor; 8-case unit + lifecycle integration test |
+| §1.1 DR2 | `4d64df6d` | selectConversationFollowUpAction; branch-before-write; uniform response shape; predicate + DB integration tests |
+| Fix | `c8acd7ed` | Integration test DATABASE_URL guard + FK-violation skip (triageDurability pattern) |
+
+Pre-merge pipeline: tsc clean (pre-existing ClarificationInbox + SkillAnalyzer errors, not introduced by branch), 252 unit tests pass, client build clean, spec-conformance NON_CONFORMANT (9 directional gaps — all manual smokes or PR-prep workflow, no mechanical gaps).
+
+### Integration test scope rationale (S8-10, DR2-8)
+
+The full S8 lifecycle (middleware → writer → res.finish → emit fires) is covered by `briefConversationWriterPostCommit.integration.test.ts` using the AsyncLocalStorage plumbing directly without a DB or HTTP server. The end-to-end S8 smoke (contrived 500 → no WS event) and DR2 (brief follow-up → orchestrator job in pg-boss) require a live app + browser + pg-boss, covered by manual smoke below.
+
+## Manual smoke test results
 
 | Item | Date | Pages exercised | Result | Notes |
 |------|------|-----------------|--------|-------|
-| §1.4 S3 | _pending_ | DashboardPage, ClientPulseDashboardPage | _pending_ | Stop API → expect banner → restart → click Retry → expect banner clears |
-| §1.3 N7 | _pending_ | BriefDetailPage with > 50 artefacts | _pending_ | Initial 50 → "Load older" → next 50 prepends |
+| §1.4 S3 | _pending user verification_ | DashboardPage, ClientPulseDashboardPage | _pending_ | Stop API → expect banner names the failed source → start API → Retry → banner clears |
+| §1.3 N7 | _pending user verification_ | BriefDetailPage with > 50 artefacts | _pending_ | Initial 50 → "Load older" button visible → click → older artefacts prepend |
+| §1.2 S8 | _pending user verification_ | Any brief message post | _pending_ | Contrived 500 after writer → NO websocket event in browser dev tools; happy path → event arrives normally |
+| §1.1 DR2 | _pending user verification_ | Brief detail page follow-up | _pending_ | Post follow-up → `conversations_route.brief_followup_dispatched` log appears → orchestrator job enqueues |

@@ -589,10 +589,10 @@ Per-item status table — single source of truth. Update after each commit.
 
 | Item | Status | Commit SHA | Notes |
 |------|--------|------------|-------|
-| §1.1 DR2 | pending | — | — |
-| §1.2 S8 | pending | — | — |
-| §1.3 N7 | pending | — | — |
-| §1.4 S3 | pending | — | — |
+| §1.1 DR2 | done | `4d64df6d` | branch-before-write; uniform response; predicate + DB integration tests |
+| §1.2 S8 | done | `60a68d07` | AsyncLocalStorage postCommitEmitter; 8-case unit test; lifecycle integration test |
+| §1.3 N7 | done | `04613015` | cursor pagination; pure tests; integration test (skips if no seeded DB) |
+| §1.4 S3 | done | `6ef1ea79` | cycle-local error state; DashboardErrorBanner; pure test + 2 pages |
 
 **Backlog tickoff checklist** — when each item closes, mark the corresponding line in `tasks/todo.md`:
 

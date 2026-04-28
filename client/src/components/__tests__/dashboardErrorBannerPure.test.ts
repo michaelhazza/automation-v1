@@ -44,4 +44,16 @@ import { failedSourceNames } from '../dashboardErrorBannerPure.js';
   assert.deepStrictEqual(result, ['unknownSource'], 'unknown key falls back to key name');
 }
 
+// Permutation test (§8.21): key-iteration order must not affect the SET of names returned
+{
+  const resultAB = failedSourceNames({ summary: true, prioritised: true });
+  const resultBA = failedSourceNames({ prioritised: true, summary: true });
+  // Both must contain exactly the same names (order may differ between JS engines; compare as sets)
+  assert.deepStrictEqual(
+    new Set(resultAB),
+    new Set(resultBA),
+    'insertion order must not change the set of failed source names',
+  );
+}
+
 console.log('dashboardErrorBannerPure: all assertions passed');

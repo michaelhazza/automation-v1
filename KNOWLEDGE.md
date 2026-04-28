@@ -1098,3 +1098,15 @@ When applying review feedback to a spec, contracts that the implementation must 
 **How to apply.** When applying spec review feedback, for every "verify X" or "rely on Y" phrase in the diff, ask: "What MUST hold for this to be safe?" — and write that as a MUST statement in the spec, with the failure modes explicitly forbidden. Verification instructions belong in the implementation checklist, not in the contract section. The contract is what survives refactors; the verification instruction is what loses.
 
 **File reference:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §§1.1, 1.2 (purity contract), 1.3 (idempotency + retry), 1.7 (time source), 1.8 (hook-presence) — second-round edits applied 2026-04-28.
+
+---
+
+### [2026-04-28] Pattern — Post-commit websocket emit primitive via AsyncLocalStorage
+
+`server/lib/postCommitEmitter.ts` implements request-scoped emit deferral using `node:async_hooks` `AsyncLocalStorage<PostCommitStore>`. Emits enqueued during a request are flushed on `res.finish` (2xx/3xx) or dropped on 4xx/5xx and premature disconnect (`res.close`). The middleware (`server/middleware/postCommitEmitter.ts`) MUST be mounted AFTER auth/org-tx middleware (`subdomainResolution` block) so the ALS store is inherited by all async children including `withOrgTx` callbacks — this ensures emits deferred inside a transaction actually fire after the transaction commits.
+
+**Three states:** open (enqueue appends), closed (enqueue fires immediately — closed-state fallback for post-`res.finish` async continuations), absent (no store bound — job workers emit inline, logged as `post_commit_emit_fallback { reason: 'no_store' }`). Closed-state fallback is critical: without it, an async continuation that runs after `res.finish` silently drops its emits.
+
+**Three structured log events:** `post_commit_emit_flushed { requestId, emitCount }`, `post_commit_emit_dropped { requestId, droppedCount, statusCode? }`, `post_commit_emit_fallback { reason: 'no_store' | 'closed_store' }`.
+
+**Scope:** currently wired only in `briefConversationWriter.writeConversationMessage`. Any other service that emits websocket events inline after a DB write should migrate to the same pattern to close the ghost-emit failure mode.
