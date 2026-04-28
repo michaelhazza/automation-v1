@@ -232,3 +232,224 @@ The following items appear in supporting prose (audit log, this spec's §10) but
 No new environment variables introduced.
 
 ---
+
+## §3 Contracts
+
+Every data shape that crosses a service boundary or is consumed by a parser is pinned here with a worked example. No prose-only descriptions of payload shapes.
+
+### §3.1 `LogLine` (consumed by `appendLogLine`, produced by the new logger adapter)
+
+**Type:** TypeScript interface, defined at `server/services/systemMonitor/logBuffer.ts:8-14`. **Not changed by this spec.**
+
+```ts
+interface LogLine {
+  ts: Date;
+  level: string;       // 'debug' | 'info' | 'warn' | 'error'
+  event: string;
+  correlationId: string;
+  meta: Record<string, unknown>;
+}
+```
+
+**Example instance** (produced by the new logger adapter for `logger.info('agent_run_started', { correlationId: 'cid-7a8b', runId: 'run-42', orgId: 'org-1' })`):
+
+```ts
+{
+  ts: new Date('2026-04-28T12:34:56.789Z'),
+  level: 'info',
+  event: 'agent_run_started',
+  correlationId: 'cid-7a8b',
+  meta: { runId: 'run-42', orgId: 'org-1' },
+}
+```
+
+**Nullability rules:**
+- `correlationId` is non-empty string. If `entry.correlationId` is missing, empty, or non-string, the adapter returns `null` and no buffer push happens.
+- `meta` excludes the four top-level fields the entry already promotes (`timestamp`, `level`, `event`, `correlationId`). All other keys flow into `meta`.
+- `ts` is constructed from `new Date(entry.timestamp)`. If `entry.timestamp` is absent, the adapter falls back to `new Date()` at call time.
+
+**Producer:** new `buildLogLineForBuffer` in `server/lib/loggerBufferAdapterPure.ts`.
+**Consumer:** existing `appendLogLine` in `server/services/systemMonitor/logBuffer.ts`.
+**Eviction policy** (unchanged): `MAX_LINES = 1000`, `MAX_BYTES = 500_000`. Oldest evicted on overflow.
+
+**Source-of-truth precedence:** the buffer is process-local and ephemeral. It is NOT a system of record. If the logger emits a line and the buffer is at capacity, the oldest line is evicted silently — **this is intended behaviour** and the agent's diagnosis must tolerate truncation. The triage agent's prompt already handles this ("Surface what you cannot see").
+
+### §3.2 `DLQ_QUEUES` derivation
+
+**Type:** `string[]` (deduplicated, non-empty values only).
+
+**Producer:** new `deriveDlqQueueNames(config: typeof JOB_CONFIG): string[]` in `server/services/dlqMonitorServicePure.ts`.
+
+**Implementation contract** (pseudocode — actual implementation is one expression):
+
+```ts
+export function deriveDlqQueueNames(config: typeof JOB_CONFIG): string[] {
+  const dlqs = new Set<string>();
+  for (const entry of Object.values(config)) {
+    const dlq = (entry as { deadLetter?: string }).deadLetter;
+    if (typeof dlq === 'string' && dlq.length > 0) {
+      dlqs.add(dlq);
+    }
+  }
+  return Array.from(dlqs).sort();  // deterministic ordering for stable test snapshots
+}
+```
+
+**Consumer:** existing `startDlqMonitor` in `server/services/dlqMonitorService.ts`. It iterates `DLQ_QUEUES` and registers one `boss.work(...)` per entry.
+
+**Example output** (after Phase 1 lands, with G5's `deadLetter:` additions):
+
+```js
+[
+  'agent-briefing-update__dlq',
+  'agent-handoff-run__dlq',
+  'agent-org-scheduled-run__dlq',
+  'agent-run-cleanup__dlq',
+  'agent-scheduled-run__dlq',
+  'agent-triggered-run__dlq',
+  'clientpulse:measure-outcomes__dlq',
+  'clientpulse:propose-interventions__dlq',
+  'connector-polling-sync__dlq',
+  'connector-polling-tick__dlq',          // added by G5
+  'execution-run__dlq',
+  'iee-browser-task__dlq',
+  'iee-cleanup-orphans__dlq',
+  'iee-cost-rollup-daily__dlq',          // added by G5
+  'iee-dev-task__dlq',
+  'iee-run-completed__dlq',
+  'llm-aggregate-update__dlq',
+  'llm-clean-old-aggregates__dlq',
+  'llm-monthly-invoices__dlq',
+  'llm-reconcile-reservations__dlq',
+  'maintenance:cleanup-budget-reservations__dlq',
+  'maintenance:cleanup-execution-files__dlq',
+  'maintenance:memory-decay__dlq',
+  'maintenance:memory-dedup__dlq',
+  'maintenance:security-events-cleanup__dlq',
+  'memory-context-enrichment__dlq',      // added by G5
+  'page-integration__dlq',                // added by G5
+  'payment-reconciliation__dlq',
+  'priority-feed-cleanup__dlq',
+  'regression-capture__dlq',
+  'regression-replay-tick__dlq',
+  'skill-analyzer__dlq',
+  'slack-inbound__dlq',                   // added by G5
+  'stale-run-cleanup__dlq',
+  'system-monitor-ingest__dlq',           // new in G3
+  'workflow-agent-step__dlq',
+  'workflow-bulk-parent-check__dlq',
+  'workflow-resume__dlq',
+  'workflow-run-tick__dlq',
+  'workflow-watchdog__dlq',
+]
+```
+
+That's 40 DLQ subscriptions — up from 8 today.
+
+### §3.3 `system-monitor-ingest` JOB_CONFIG entry (new in G3)
+
+**Type:** entry inside `JOB_CONFIG` const, matches the existing entry shape.
+
+```ts
+'system-monitor-ingest': {
+  retryLimit: 3,
+  retryDelay: 10,
+  retryBackoff: true,
+  expireInSeconds: 60,
+  deadLetter: 'system-monitor-ingest__dlq',
+  idempotencyStrategy: 'fifo' as const,  // each ingest is an independent unit
+},
+```
+
+**Rationale for each value:**
+- `retryLimit: 3` — async-mode ingest is at-least-once; a transient DB blip should not lose the incident. Higher than the default to match the criticality of the data.
+- `retryDelay: 10` — `system_incidents` upsert + occurrence-event insert is a single tx; a 10s backoff handles brief contention.
+- `retryBackoff: true` — exponential up to a few minutes. Matches `agent-scheduled-run`.
+- `expireInSeconds: 60` — the inline ingest path completes in <1s under normal load. A 60s cap is conservative.
+- `deadLetter: 'system-monitor-ingest__dlq'` — covered by G1's derivation.
+- `idempotencyStrategy: 'fifo'` — each `boss.send('system-monitor-ingest', { input })` is a distinct write. The handler's `ingestInline` is idempotent by virtue of the partial unique index on `system_incidents.fingerprint` (existing — see audit log §2.1) — duplicate deliveries safely upsert into the same row.
+
+**Producer:** new entry in `server/config/jobConfig.ts`.
+**Consumer:** the conditional `boss.work('system-monitor-ingest', ...)` registration in `server/index.ts` (Phase 1).
+
+### §3.4 Async-ingest worker registration contract
+
+**Wiring:**
+
+```ts
+if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+  await boss.work(
+    'system-monitor-ingest',
+    { teamSize: 4, teamConcurrency: 1 },
+    async (job: { id: string; data: SystemMonitorIngestPayload }) => {
+      const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+      await handleSystemMonitorIngest(job.data);
+    }
+  );
+}
+```
+
+**Why not `createWorker`?** The handler must NOT open an org-scoped tx — `ingestInline` writes to `system_incidents`, which BYPASSES RLS by design (see `server/db/schema/systemIncidents.ts:1` "BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer"). Using `createWorker` with default org-resolver would either (a) require an org context in every payload (incidents can be system-scoped with no org) or (b) need the explicit `resolveOrgContext: () => null` opt-out. Either way, `boss.work` directly is simpler and matches the existing pattern in `dlqMonitorService.ts`.
+
+**Failure semantics:**
+- Handler throws → pg-boss retries per JOB_CONFIG (3× with backoff).
+- Retry exhaustion → job lands in `system-monitor-ingest__dlq`.
+- DLQ subscription (covered by G1) → records a `system_incidents` row with `source: 'job'` and `fingerprintOverride: 'job:system-monitor-ingest:dlq'`.
+
+**Loop hazard:** if the DLQ-emitted incident itself fails to ingest, would it loop? **No.** The DLQ subscription writes via the `dlqMonitorService` path, which calls `recordIncident` directly. In sync mode (default), this is a synchronous DB write. In async mode, this enqueues to `system-monitor-ingest`, which would loop — **but** the dedup partial unique index collapses identical fingerprints into occurrence-count increments, not new rows. So the worst case is a counter that ticks up, which is observable and not a runaway. To be belt-and-braces: the dlqMonitorService specifically uses the **sync** ingest path even when the rest of the app is in async mode (this is implicit today — `recordIncident` checks `SYSTEM_INCIDENT_INGEST_MODE` per-call, but the dlqMonitorService runs in the same process). **No code change needed**, but document this in code comment alongside the new `system-monitor-ingest` entry.
+
+### §3.5 Webhook-handler incident contract (G7)
+
+**Shape:** existing `IncidentInput` type (`server/services/incidentIngestorPure.ts:11-34`). No new fields.
+
+**Example call** (from inside `ghlWebhook.ts` catch block):
+
+```ts
+recordIncident({
+  source: 'route',
+  summary: `GHL webhook DB lookup failed: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+  errorCode: 'webhook_handler_failed',
+  stack: err instanceof Error ? err.stack : undefined,
+  fingerprintOverride: 'webhook:ghl:db_lookup_failed',
+  errorDetail: { locationId },
+});
+```
+
+**Why `fingerprintOverride`?** Webhook handlers are called by external services with payloads we don't control. The stack trace's "meaningful frame" varies by Node version + minor refactors. An override pins the fingerprint to a stable identifier (`webhook:ghl:db_lookup_failed`) so all GHL DB-lookup failures dedup into one incident regardless of stack churn.
+
+**Why `source: 'route'` and not `'webhook'`?** G9 (adding `'webhook'` to the source enum) is deferred. For now, `'route'` is the closest existing value. The fingerprint prefix `webhook:*` makes the source disambiguable at query time even without the dedicated enum.
+
+### §3.6 Skill-analyzer terminal-failure incident contract (G11)
+
+**Shape:** existing `IncidentInput`. No new fields.
+
+**Example call** (from `server/index.ts` skill-analyzer wrapper):
+
+```ts
+recordIncident({
+  source: 'job',
+  severity: 'high',
+  summary: `Skill analyzer terminal failure: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+  errorCode: 'skill_analyzer_failed',
+  stack: err instanceof Error ? err.stack : undefined,
+  fingerprintOverride: 'skill_analyzer:terminal_failure',
+  errorDetail: { jobId },
+});
+```
+
+**Severity rationale:** skill-analyzer runs are sysadmin-triggered, multi-hour, and expensive. A terminal failure represents a wasted multi-thousand-token LLM run for the operator. `'high'` matches `inferDefaultSeverity({ source: 'job' })` so this is just being explicit, not over-promoting.
+
+**Dedup behaviour:** the override collapses every skill-analyzer terminal failure into one incident regardless of which job ID failed. The `errorDetail.jobId` field captures the specific job for the operator. If multiple distinct failure modes need separate incidents, the override can be extended later (e.g. `skill_analyzer:llm_provider_unavailable`) — out of scope for this spec.
+
+### §3.7 Source-of-truth precedence (cross-cutting)
+
+For the System Monitor pipeline, the source-of-truth ordering is unchanged by this spec:
+
+1. **`system_incidents` row** — system of record for "is there an open issue with this fingerprint right now?"
+2. **`system_incident_events`** — append-only audit log; reconstructs the lifecycle.
+3. **`logBuffer` (process-local)** — ephemeral evidence for triage; never authoritative.
+4. **pg-boss `failed` / `*__dlq` queues** — operational artefacts; should always have a corresponding incident row (post G1).
+
+If the four diverge, `system_incidents` wins as the operator-visible truth. The triage agent always reads `system_incidents` first.
+
+---
