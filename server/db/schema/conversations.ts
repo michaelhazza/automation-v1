@@ -24,7 +24,7 @@ export const conversations = pgTable('conversations', {
   orgIdx: index('conversations_org_idx').on(table.organisationId),
   subaccountIdx: index('conversations_subaccount_idx').on(table.subaccountId),
   scopeIdx: index('conversations_scope_idx').on(table.scopeType, table.scopeId),
-  uniqueScopePerEntity: uniqueIndex('conversations_unique_scope').on(table.scopeType, table.scopeId),
+  uniqueScopePerEntity: uniqueIndex('conversations_unique_scope').on(table.organisationId, table.scopeType, table.scopeId),
 }));
 
 export const conversationMessages = pgTable('conversation_messages', {
