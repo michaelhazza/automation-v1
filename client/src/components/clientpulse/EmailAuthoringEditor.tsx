@@ -106,7 +106,7 @@ export default function EmailAuthoringEditor({ subaccountId, onCancel, onSubmit 
         <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] font-mono focus:outline-none focus:border-indigo-400" />
         <div className="flex gap-1 flex-wrap mt-1.5">
           {MERGE_PALETTE.map((tok) => (
-            <button key={tok} type="button" onClick={() => setBody((b) => b + tok)} className="px-2 py-0.5 text-[10.5px] rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono">{tok}</button>
+            <button key={tok} type="button" onClick={() => setBody((b) => b + tok)} className="btn btn-xs btn-ghost font-mono">{tok}</button>
           ))}
         </div>
       </div>
@@ -125,11 +125,11 @@ export default function EmailAuthoringEditor({ subaccountId, onCancel, onSubmit 
         <textarea value={rationale} onChange={(e) => setRationale(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-indigo-400" />
       </div>
       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-        <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-[12px] font-semibold text-slate-600 hover:bg-slate-100">Back</button>
+        <button onClick={onCancel} className="btn btn-sm btn-ghost">Back</button>
         <button
           disabled={!canSubmit}
           onClick={() => onSubmit({ from: from.trim(), toContactId: toContactId.trim(), subject: subject.trim(), body: body.trim() }, rationale.trim())}
-          className="px-4 py-1.5 rounded-md text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-300"
+          className="btn btn-sm btn-primary disabled:bg-slate-300"
         >
           Queue for review
         </button>
