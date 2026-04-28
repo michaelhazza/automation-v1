@@ -109,7 +109,7 @@ function DetailBody({ detail }: { detail: CallDetail }) {
       <div className="pt-3 border-t border-slate-200">
         <button
           onClick={() => copyTicket(detail)}
-          className="px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded hover:bg-slate-800"
+          className="btn btn-primary btn-sm"
         >
           Copy as support ticket
         </button>

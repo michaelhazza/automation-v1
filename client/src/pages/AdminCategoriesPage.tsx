@@ -70,7 +70,7 @@ export default function AdminCategoriesPage({ user: _user, embedded }: { user: U
         ) : <div />}
         <button
           onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + Add category
         </button>
@@ -95,8 +95,8 @@ export default function AdminCategoriesPage({ user: _user, embedded }: { user: U
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleSave} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Save</button>
-            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={handleSave} className="btn btn-primary">Save</button>
+            <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -124,8 +124,8 @@ export default function AdminCategoriesPage({ user: _user, embedded }: { user: U
             </div>
             {cat.description && <div className="text-[13px] text-slate-500 mb-3">{cat.description}</div>}
             <div className="flex gap-2">
-              <button onClick={() => handleEdit(cat)} className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors">Edit</button>
-              <button onClick={() => setDeleteId(cat.id)} className="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Delete</button>
+              <button onClick={() => handleEdit(cat)} className="btn btn-xs btn-secondary">Edit</button>
+              <button onClick={() => setDeleteId(cat.id)} className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50">Delete</button>
             </div>
           </div>
         ))}

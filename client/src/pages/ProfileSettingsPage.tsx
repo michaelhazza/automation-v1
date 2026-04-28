@@ -108,7 +108,7 @@ export default function ProfileSettingsPage({ user }: { user: User }) {
 
         <button
           type="submit"
-          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           Save changes
         </button>

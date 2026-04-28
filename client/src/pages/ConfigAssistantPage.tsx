@@ -486,7 +486,7 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
             <div className="px-3.5 pt-3.5 pb-2.5 border-b border-slate-100 shrink-0">
               <button
                 onClick={handleNewConversation}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-semibold border-0 cursor-pointer transition-colors"
+                className="w-full btn btn-sm btn-primary"
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -631,7 +631,7 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
               <button
                 onClick={() => handleSend()}
                 disabled={sending || !input.trim() || !activeConvId}
-                className={`flex items-center justify-center w-9 h-9 rounded-xl border-0 shrink-0 transition-colors ${sending || !input.trim() ? 'bg-indigo-200 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                className={`btn-icon btn-primary shrink-0 ${sending || !input.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {sending ? (
                   <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />

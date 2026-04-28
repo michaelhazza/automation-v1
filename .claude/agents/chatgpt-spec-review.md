@@ -1,6 +1,6 @@
 ---
 name: chatgpt-spec-review
-description: Coordinates ChatGPT spec review sessions. Run in a dedicated new Claude Code session. Auto-detects the spec file from branch changes, creates a PR if needed, always prints the PR URL, then accepts raw ChatGPT feedback round-by-round. For every finding the agent produces a RECOMMENDATION (apply / reject / defer) + rationale AND triages it as `technical` or `user-facing`. Technical findings auto-execute per the agent's recommendation. Only user-facing findings (changes to product surface, visible copy/behaviour, workflow, feature policy) are presented to the user for approval. All decisions — auto-applied or user-approved — are logged in the session log and commit history so the user can audit after the fact. Finalises with KNOWLEDGE.md pattern extraction.
+description: Coordinates ChatGPT spec review sessions. Run in a dedicated new Claude Code session. Supports two modes: manual (user copies spec into ChatGPT UI and pastes response back — no API cost) and automated (calls OpenAI API via OPENAI_API_KEY). Auto-detects the spec file from branch changes, creates a PR if needed, always prints the PR URL, then processes ChatGPT feedback round-by-round. For every finding the agent produces a RECOMMENDATION (apply / reject / defer) + rationale AND triages it as `technical` or `user-facing`. Technical findings auto-execute per the agent's recommendation. Only user-facing findings (changes to product surface, visible copy/behaviour, workflow, feature policy) are presented to the user for approval. All decisions — auto-applied or user-approved — are logged in the session log and commit history so the user can audit after the fact. Finalises with KNOWLEDGE.md pattern extraction.
 tools: Read, Glob, Grep, Bash, Edit, Write
 model: opus
 ---
@@ -29,6 +29,22 @@ Every finding is triaged into one of the two buckets. Every triage decision,
 every recommendation, every user decision, and every action is logged so the
 user can audit after the fact.
 
+## Configuration
+
+**MODE** — set per invocation, not per session.
+- `manual` — you copy the spec into the ChatGPT UI and paste the response back. No API key required.
+- `automated` — the agent calls the OpenAI API via `scripts/chatgpt-review.ts`. Requires `OPENAI_API_KEY`.
+
+**HUMAN_IN_LOOP: yes** — default for automated sessions only. Has no effect in manual mode (the user is already in the loop by definition).
+
+When `yes` (automated only): after each API call, print the full `raw_response` and wait for the user to type **"yes"** before triage. Lets the user compare API output against the ChatGPT UI for split-testing.
+
+When `no` (automated only): skip the raw-response display and proceed directly to triage.
+
+To toggle mid-session: say **"set human in loop off"** or **"set human in loop on"**. (Automated mode only.) Takes effect on the next round.
+
+---
+
 ## Before doing anything else, read:
 1. `CLAUDE.md` — project conventions and the "Before you write a spec" section
 2. `docs/spec-context.md` — framing ground truth for all specs in this project
@@ -40,10 +56,19 @@ user can audit after the fact.
 
 When the user says "run chatgpt-spec-review" (or equivalent):
 
-**First: check for an existing session log (resume detection)**
+**First: determine MODE from the invocation.**
+
+- If the invocation contains "manual" → MODE = manual
+- If the invocation contains "automated" → MODE = automated
+- If neither → ask: "Manual (you copy the spec into ChatGPT UI and paste the response back — no API cost) or automated (calls OpenAI API, requires OPENAI_API_KEY)? Reply: manual or automated." Wait for reply before proceeding.
+
+MODE is recorded in the session log Session Info block and restored on resume.
+
+**Next: check for an existing session log (resume detection)**
 Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1`
 
 - If a log exists for the current spec (spec slug appears in the filename): **skip steps 1–8 below**. Read the log, identify the last round number, and print: "Resuming session from [log path] — last completed round was N. Say 'next round' to fire round N+1, or 'done' to finalise."
+  - If resuming: read the `Mode:` field from the log's Session Info block to restore MODE. If the MODE from the invocation differs from the log's MODE, warn: "Session was started in [log-mode] mode; current invocation specifies [invocation-mode]. Using [log-mode] to match the existing session."
 - If no log exists: run the full On Start sequence below.
 
 1. Auto-detect the spec file:
@@ -60,21 +85,39 @@ Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1
 
 2. Read the detected spec file in full
 
-3. Run `gh pr view --json number,url,title 2>/dev/null` to check for a PR
-   - If no PR: run `gh pr create --fill` to create one
-4. Always print the PR URL — whether just created or already existing
+3. Run `gh pr view --json number,url,title 2>/dev/null` to check for a PR.
+
+   **Important:** The PR is a persistence mechanism for per-round edits only — it
+   has no effect on what gets sent to OpenAI (that is always just the spec file
+   content). Unrelated working-tree changes on the current branch do NOT affect
+   the review and should NOT block you. The auto-commit step (Step 6) stages only
+   `<spec file>` and `tasks/review-logs/<log>` — never the full working tree.
+
+   - If a PR already exists: use it.
+   - If no PR exists AND the spec file has already been committed to this branch:
+     run `gh pr create --fill` to create one.
+   - If no PR exists AND the spec file is NOT yet committed (e.g. the user
+     supplied the path explicitly and the file is new/untracked): commit just
+     the spec file first — `git add <spec-file-path> && git commit -m "docs: add <spec-slug> implementation plan"` — then run `gh pr create --fill`.
+   - **Never block on unrelated uncommitted working-tree changes.** Only committed
+     changes end up in the PR diff; the agent's own auto-commits stage specific
+     files only.
+
+4. Always print the PR URL — whether just created or already existing.
 
 5. Create the session log at
    tasks/review-logs/chatgpt-spec-review-<spec-slug>-<YYYY-MM-DDThh-mm-ssZ>.md
    and write the Session Info header (see Log Format)
 
-6. **Verify `OPENAI_API_KEY` is set.** If not, print:
+6. [AUTOMATED] **Verify `OPENAI_API_KEY` is set.** If not, print:
 
    `error: OPENAI_API_KEY is not set. Add it to your shell or .env file before running this agent.`
 
-   and stop. Do NOT fall back to the legacy copy/paste flow.
+   and stop.
 
-7. **Run round 1 immediately** by invoking the ChatGPT review CLI on the spec file:
+   [MANUAL] Skip this step.
+
+7. [AUTOMATED] **Run round 1 immediately** by invoking the ChatGPT review CLI on the spec file:
 
    ```bash
    npx tsx scripts/chatgpt-review.ts --mode spec --file <spec-file-path>
@@ -87,20 +130,47 @@ Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1
 
    If the CLI exits non-zero, print its stderr and stop.
 
-8. Print the ready message:
+7. [MANUAL] **Prepare Round 1 for the user to paste into ChatGPT:**
 
-   `Ready. Reviewing <spec-file-path>. PR #<N>: <url> — Round 1 in flight (calling OpenAI).`
+   a. Read the spec file content in full.
+   b. Print the following block so the user can copy-paste it into ChatGPT:
+
+   ```
+   --- Copy into ChatGPT ---
+   Review this specification document for completeness, clarity, and implementation readiness.
+   List your findings as numbered items, each with:
+   - Title
+   - Severity: critical / high / medium / low
+   - Category: bug / improvement / style / architecture
+   - Brief explanation
+
+   Focus on: missing contracts, ambiguous requirements, missing edge cases, internal inconsistencies, and unresolved forward references.
+   End with an overall verdict: APPROVED, CHANGES_REQUESTED, or NEEDS_DISCUSSION.
+
+   [spec file content here]
+   --- End ---
+   ```
+
+   c. Print: `Paste the ChatGPT response here to begin Round 1.`
+   d. Wait for the user to paste the response.
+   e. Treat the pasted text as `raw_response`. Extract `findings[]` by parsing the numbered list in the response:
+      - For each item: assign `id` (F1, F2, …), `title`, `severity` (from text), `category` (from text), `finding_type` (infer from enum: null_check / idempotency / naming / architecture / error_handling / test_coverage / security / performance / scope / other), `rationale` (the explanation), `evidence` (section/heading reference if present, else empty).
+      - Infer `verdict` from the overall tone or explicit verdict line.
+
+8. [AUTOMATED] Print the ready message:
+
+   `Ready. Reviewing <spec-file-path>. PR #<N>: <url> — Round 1 results received.`
+   If HUMAN_IN_LOOP is `yes`, add: `Raw response will be shown before triage begins — type yes to proceed.`
+
+8. [MANUAL] Print: `Ready. Reviewing <spec-file-path>. PR #<N>: <url> — Round 1 response received. Proceeding to triage.`
 
 ---
 
 ## Per-Round Loop
 
-Trigger: User says "next round", "another round", "go again", or equivalent —
-no paste required. Round 1 fires automatically on agent start (per On Start §7);
-subsequent rounds fire on user signal.
+**[AUTOMATED]** Trigger: user says "next round", "another round", "go again", or equivalent — no paste required. Round 1 fires automatically on agent start; subsequent rounds fire on user signal.
 
-The agent re-reads the spec file (which may have been edited in earlier rounds)
-and re-invokes the CLI:
+The agent re-reads the spec file (which may have been edited in earlier rounds) and re-invokes the CLI:
 
 ```bash
 npx tsx scripts/chatgpt-review.ts --mode spec --file <spec-file-path>
@@ -108,7 +178,42 @@ npx tsx scripts/chatgpt-review.ts --mode spec --file <spec-file-path>
 
 If the CLI exits non-zero, print stderr and stop.
 
+**[MANUAL]** Trigger: user pastes a ChatGPT response as their next message. Round 1 fires after the initial paste (per On Start §7-manual above); subsequent rounds begin after each round summary when the agent prints the updated spec and waits.
+
+At the start of each manual round (rounds 2+):
+a. Re-read the spec file (which may have been edited in earlier rounds).
+b. Print:
+   ```
+   --- Copy into ChatGPT for Round <N> ---
+   The spec has been updated since the last round. Please review it again, focusing on remaining issues and any new ones introduced by the latest changes.
+
+   [updated spec content here]
+   --- End ---
+   ```
+c. Print: `Paste the ChatGPT response here to continue.`
+d. Wait for paste. Extract findings from the pasted text as described in On Start §7-manual.
+
 For each round:
+
+0. **Raw-response checkpoint (automated mode, HUMAN_IN_LOOP = `yes` only — skip entirely in manual mode):**
+
+   Print the full `raw_response` field from the CLI output verbatim:
+
+   ```
+   --- ChatGPT Raw Response (Round <N>) ---
+   <raw_response verbatim>
+   --- End of Raw Response ---
+   ```
+
+   Then print:
+   > Compare this against your ChatGPT UI session if running a split-test.
+   > Type **yes** to proceed with triage, or **no** to reject all findings this round.
+
+   Wait for user input before continuing:
+   - **"yes"** → proceed to step 1
+   - **"no"** → log all findings as `user-rejected (raw-response skipped)` in the Decisions table; skip to the round summary (step 7). Do not apply anything this round.
+
+   If HUMAN_IN_LOOP is `no`, skip this step entirely and proceed to step 1.
 
 1. Use the `findings[]` array from the CLI's JSON output directly — each entry is
    already a normalised finding with `id`, `title`, `severity`, `category`,
@@ -294,8 +399,9 @@ For each round:
   <only the edited sections, with their headings for context>
 
 **After printing the round summary: WAIT. Do not finalize.**
-Every round ends with this line:
-  "Paste the next round of ChatGPT feedback when ready, or say 'done' to finalise."
+Every round ends with the mode-appropriate line:
+  [Automated] "Say 'next round' to fetch another automated review, or 'done' to finalise."
+  [Manual] "Updated spec printed above — paste it into ChatGPT, then paste the response here. Or say 'done' to finalise."
 
 Finalization ONLY triggers when the user explicitly says "done", "finished",
 "we're done", "that's it", or equivalent. Never auto-finalize after a round,
@@ -425,11 +531,6 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
 
 8. Print: "Spec review complete. PR #<N>: <url>. Auto-accepted: <A_apply>/<A_rej>/<A_def>. User-decided: <U_apply>/<U_rej>/<U_def>. Hand off to architect or invoke writing-plans when ready to implement."
 
-## Future Hook
-
-This agent may be extended to call an external review API directly. Loop is
-stateless — automated caller wraps only the trigger step.
-
 ---
 
 ## Log Format
@@ -442,6 +543,7 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   - Spec: <file path>
   - Branch: <branch name>
   - PR: #<number> — <url>
+  - Mode: manual | automated
   - Started: <ISO 8601 UTC>
 
   ---

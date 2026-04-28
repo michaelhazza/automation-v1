@@ -50,10 +50,6 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
   // which row is blocking.
   const [blockingReasons, setBlockingReasons] = useState<BlockingReason[] | null>(null);
   const [blockingResultId, setBlockingResultId] = useState<string | null>(null);
-  const [restoring, setRestoring] = useState(false);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
-  const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
-  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
   const approved = results.filter((r) => r.actionTaken === 'approved');
   const rejected = results.filter((r) => r.actionTaken === 'rejected' || r.actionTaken === 'skipped');

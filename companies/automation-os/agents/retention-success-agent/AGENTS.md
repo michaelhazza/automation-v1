@@ -1,6 +1,6 @@
 ---
 name: Retention/Success Agent
-title: Proactive retention, churn-risk scoring, NPS/CSAT, renewal prep, client reporting
+title: Retention Manager
 slug: retention-success-agent
 role: worker
 reportsTo: head-of-client-services

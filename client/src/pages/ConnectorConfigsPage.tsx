@@ -92,7 +92,7 @@ export default function ConnectorConfigsPage() {
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold"
+          className="btn btn-sm btn-primary"
         >
           + Add Connector
         </button>
@@ -124,8 +124,8 @@ export default function ConnectorConfigsPage() {
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[13px] text-slate-600 cursor-pointer">Cancel</button>
-            <button onClick={handleCreate} disabled={creating} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold">{creating ? 'Creating...' : 'Create'}</button>
+            <button onClick={() => setShowCreate(false)} className="btn btn-sm btn-secondary">Cancel</button>
+            <button onClick={handleCreate} disabled={creating} className="btn btn-sm btn-primary">{creating ? 'Creating...' : 'Create'}</button>
           </div>
         </div>
       )}
@@ -154,7 +154,7 @@ export default function ConnectorConfigsPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => handleSync(connector.id)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[12px] text-slate-600 cursor-pointer">Sync</button>
+                <button onClick={() => handleSync(connector.id)} className="btn btn-xs btn-ghost">Sync</button>
                 <button onClick={() => setDeleteId(connector.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
               </div>
             </div>

@@ -8,7 +8,7 @@
  * Spec: docs/memory-and-briefings-spec.md §5.4 (S8)
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
 import { useSocketRoom } from '../hooks/useSocket';
 
@@ -50,32 +50,28 @@ export default function ClarificationInbox({ subaccountId }: ClarificationInboxP
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  const loadPending = async () => {
+  const loadPending = useCallback(async () => {
     try {
       const res = await api.get<{ items: ClarificationItem[] }>(
         `/api/subaccounts/${subaccountId}/clarifications/pending`,
       );
       setItems(res.data.items ?? []);
       setError(null);
-    } catch (err) {
+    } catch {
       setError('Failed to load clarifications.');
     } finally {
       setLoading(false);
     }
-  };
-
-  // Initial load
-  useEffect(() => {
-    loadPending();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
+
+  useEffect(() => { void loadPending(); }, [loadPending]);
 
   // WebSocket subscriptions — refresh on any clarification lifecycle event
   // On reconnect, re-fetch baseline state via REST to catch any missed events
   useSocketRoom('subaccount', subaccountId, {
-    'clarification:pending': () => loadPending(),
-    'clarification:resolved': () => loadPending(),
-    'clarification:expired': () => loadPending(),
+    'clarification:pending': () => void loadPending(),
+    'clarification:resolved': () => void loadPending(),
+    'clarification:expired': () => void loadPending(),
   }, loadPending);
 
   // ──────────────────────────────────────────────────────────────────────────

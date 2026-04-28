@@ -364,7 +364,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
           <h2 className="text-sm font-semibold text-slate-700">Workflow Studio</h2>
           <button
             onClick={createSession}
-            className="mt-2 w-full px-3 py-1.5 text-sm rounded bg-slate-900 text-white hover:bg-slate-800"
+            className="btn btn-primary btn-sm mt-2 w-full"
           >
             + New session
           </button>
@@ -461,7 +461,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
             <div className="relative ml-auto" ref={stepPickerRef}>
               <button
                 onClick={() => setStepPickerOpen((o) => !o)}
-                className="px-2 py-1 text-xs rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1"
+                className="btn btn-secondary btn-xs flex items-center gap-1"
               >
                 Add step ▾
               </button>
@@ -528,7 +528,7 @@ export default function WorkflowStudioPage(_props: { user: User }) {
             <button
               onClick={saveAndOpenPr}
               disabled={busy || !activeSessionId}
-              className="px-3 py-1.5 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="btn btn-success btn-sm"
               title={!activeSessionId ? 'Create or select a session first' : ''}
             >
               Save & Open PR

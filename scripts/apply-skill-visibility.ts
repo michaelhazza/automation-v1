@@ -38,7 +38,8 @@ interface FrontmatterState {
  */
 function parseFile(raw: string): FrontmatterState | null {
   const eol: '\r\n' | '\n' = raw.includes('\r\n') ? '\r\n' : '\n';
-  const normalised = raw.replace(/\r\n/g, '\n');
+  // Strip UTF-8 BOM so the leading `^---` anchor matches files saved with BOM.
+  const normalised = raw.replace(/^﻿/, '').replace(/\r\n/g, '\n');
 
   const match = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;

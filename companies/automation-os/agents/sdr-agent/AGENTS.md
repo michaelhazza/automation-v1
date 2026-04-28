@@ -1,6 +1,6 @@
 ---
 name: SDR Agent
-title: Outbound prospecting, lead qualification, meeting booking
+title: Sales Dev Rep
 slug: sdr-agent
 role: worker
 reportsTo: head-of-commercial

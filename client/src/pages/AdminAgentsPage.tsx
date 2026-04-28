@@ -99,7 +99,7 @@ function OrgHierarchyRow({ node, depth, onNavigate }: { node: TreeNode; depth: n
         <td className="px-4 py-2.5">
           <button
             onClick={() => onNavigate(node.id)}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+            className="btn btn-xs btn-secondary"
           >
             Edit
           </button>
@@ -269,7 +269,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
           </button>
           <button
             onClick={() => navigate('/admin/agents/new')}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="btn btn-primary"
           >
             + New Agent
           </button>
@@ -305,7 +305,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
                   <button
                     onClick={() => handleInstall(agent.id)}
                     disabled={installingId === agent.id}
-                    className={`px-3 py-1.5 text-[12px] font-medium rounded-md border-0 transition-colors shrink-0 ${installingId === agent.id ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
+                    className="btn btn-sm btn-primary shrink-0"
                   >
                     {installingId === agent.id ? 'Installing…' : 'Install'}
                   </button>
@@ -316,7 +316,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
           <div className="mt-4 flex justify-end">
             <button
               onClick={() => { setShowInstallModal(false); setInstallError(''); setInstallSuccess(''); }}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              className="btn btn-secondary"
             >
               Close
             </button>

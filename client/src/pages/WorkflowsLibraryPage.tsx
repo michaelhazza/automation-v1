@@ -173,7 +173,7 @@ export default function WorkflowsLibraryPage(_props: { user: User }) {
               <div className="col-span-1 flex justify-end">
                 <button
                   onClick={() => setStartTarget({ kind: t.kind, slug: 'slug' in t ? t.slug : undefined, id: t.id, name: t.name })}
-                  className="px-3 py-1.5 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md"
+                  className="btn btn-primary btn-sm"
                 >
                   Run
                 </button>
@@ -223,14 +223,14 @@ export default function WorkflowsLibraryPage(_props: { user: User }) {
                   type="button"
                   onClick={() => setStartTarget(null)}
                   disabled={starting}
-                  className="px-4 py-2 text-sm rounded border border-slate-200 hover:bg-slate-50"
+                  className="btn btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={starting || !selectedSubaccountId}
-                  className="px-4 py-2 text-sm rounded bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+                  className="btn btn-primary"
                 >
                   {starting ? 'Starting…' : 'Start run'}
                 </button>

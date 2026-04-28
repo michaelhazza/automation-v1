@@ -1528,3 +1528,7 @@ When a service does SELECT → UPDATE and a concurrent path can write a column b
 **Divergence case:** if the IEE worker completes before observing the cancel, the parent can transition `cancelling → completed` (not `cancelled`). This is logged as `agentRunFinalization.cancel_intent_divergence` and is expected best-effort behaviour, not a bug.
 
 **Do not add `'cancelling'` to terminal checks.** It is in `IN_FLIGHT_RUN_STATUSES`. The cancel button hides on `isTerminalRunStatus || status === 'cancelling'` — that guard is UI-only and does not make `cancelling` semantically terminal.
+
+### [2026-04-29] Correction — Persistent context switcher already exists in the UI
+
+The leftmost sidebar already implements a persistent org/subaccount context switcher (visible in the layout screenshot). Do not recommend building this as if it were missing. When discussing scope/routing architecture, treat the active org/subaccount in the sidebar as the resolved session context that the ask bar and New Brief modal should read from — it is already the source of truth for "where the user is."

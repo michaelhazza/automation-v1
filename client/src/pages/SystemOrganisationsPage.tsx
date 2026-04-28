@@ -262,7 +262,7 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
           </Link>
           <button
             onClick={() => { setShowCreateForm(true); setCreateError(''); }}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            className="btn btn-primary"
           >
             + Create organisation
           </button>
@@ -297,8 +297,8 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             </div>
           )}
           <div className="flex gap-3">
-            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Create</button>
-            <button onClick={() => setShowCreateForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Cancel</button>
+            <button onClick={handleCreate} className="btn btn-primary">Create</button>
+            <button onClick={() => setShowCreateForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -335,8 +335,8 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleEditSave} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Save changes</button>
-            <button onClick={() => setEditOrg(null)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Cancel</button>
+            <button onClick={handleEditSave} className="btn btn-primary">Save changes</button>
+            <button onClick={() => setEditOrg(null)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -401,13 +401,13 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                 <button
                   onClick={handleResetPassword}
                   disabled={resetPasswordValue.length < 8}
-                  className={`px-4 py-1.5 text-white border-0 rounded-lg text-[13px] font-medium transition-colors ${resetPasswordValue.length < 8 ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'}`}
+                  className="btn btn-sm btn-primary"
                 >
                   Reset password
                 </button>
                 <button
                   onClick={() => { setResetPasswordUserId(null); setResetPasswordValue(''); }}
-                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
+                  className="btn btn-sm btn-secondary"
                 >
                   Cancel
                 </button>
@@ -439,10 +439,10 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={handleInviteUser} className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Send invitation</button>
+                <button onClick={handleInviteUser} className="btn btn-sm btn-primary">Send invitation</button>
                 <button
                   onClick={() => { setShowInviteForm(false); setInviteForm({ email: '', role: 'user', firstName: '', lastName: '' }); }}
-                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
+                  className="btn btn-sm btn-secondary"
                 >
                   Cancel
                 </button>
@@ -452,7 +452,7 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             <div className="flex justify-end mb-3">
               <button
                 onClick={() => { setShowInviteForm(true); setUsersError(''); setUsersSuccess(''); }}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
+                className="btn btn-sm btn-primary"
               >
                 + Invite user
               </button>
@@ -514,13 +514,13 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => { setResetPasswordUserId(u.id); setResetPasswordValue(''); setUsersError(''); setUsersSuccess(''); }}
-                            className="px-2 py-0.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
+                            className="btn btn-xs btn-ghost text-sky-700 hover:bg-sky-50"
                           >
                             Reset pw
                           </button>
                           <button
                             onClick={() => setRemoveUserId(u.id)}
-                            className="px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
+                            className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                           >
                             Remove
                           </button>
@@ -573,19 +573,19 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                   <div className="flex gap-2">
                     <button
                       onClick={() => openUsersDialog(org)}
-                      className="px-2.5 py-1 bg-green-50 hover:bg-green-100 text-green-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+                      className="btn btn-xs btn-ghost text-green-700 hover:bg-green-50"
                     >
                       Users
                     </button>
                     <button
                       onClick={() => openEditDialog(org)}
-                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+                      className="btn btn-xs btn-ghost text-blue-700 hover:bg-blue-50"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => setDeleteId(org.id)}
-                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
+                      className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                     >
                       Delete
                     </button>

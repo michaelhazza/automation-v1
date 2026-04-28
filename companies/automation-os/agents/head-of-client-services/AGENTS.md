@@ -1,6 +1,6 @@
 ---
 name: Head of Client Services
-title: CCO — Coordinates client onboarding, support, and retention
+title: CCO
 slug: head-of-client-services
 role: manager
 reportsTo: orchestrator

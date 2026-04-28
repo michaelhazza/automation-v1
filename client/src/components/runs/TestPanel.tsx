@@ -261,7 +261,7 @@ export default function TestPanel({
             onClick={handleRun}
             disabled={running || hasUnsavedChanges}
             title={hasUnsavedChanges ? 'Save your changes first' : undefined}
-            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-[13px] font-semibold rounded-lg transition-colors"
+            className="btn btn-primary btn-sm w-full disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
           >
             {running ? 'Running…' : 'Run test'}
           </button>
@@ -292,7 +292,7 @@ export default function TestPanel({
                 <button
                   onClick={handleCancel}
                   disabled={cancelRequested}
-                  className="px-3 py-1.5 border border-red-200 text-red-600 text-[12px] font-medium rounded-lg bg-white hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {cancelRequested ? 'Cancelling…' : 'Cancel run'}
                 </button>
@@ -314,7 +314,7 @@ export default function TestPanel({
               <button
                 onClick={handleSaveFixture}
                 disabled={saving || !saveLabel.trim()}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-[12px] font-semibold rounded-lg transition-colors"
+                className="btn btn-primary btn-xs disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {saving ? '…' : 'Save'}
               </button>

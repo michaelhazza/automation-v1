@@ -168,15 +168,15 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-[16px] font-semibold text-slate-800 m-0">Compiled Memory</h2>
             <div className="flex gap-2">
-              <button onClick={handleRegenerate} disabled={regenerating} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 border border-slate-200 rounded-lg text-[13px] text-slate-600 cursor-pointer transition-colors">
+              <button onClick={handleRegenerate} disabled={regenerating} className="btn btn-sm btn-secondary disabled:opacity-50">
                 {regenerating ? 'Regenerating...' : 'Regenerate'}
               </button>
               {!editingSummary ? (
-                <button onClick={() => { setEditingSummary(true); setSummaryDraft(memory?.summary ?? ''); }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Edit</button>
+                <button onClick={() => { setEditingSummary(true); setSummaryDraft(memory?.summary ?? ''); }} className="btn btn-sm btn-primary">Edit</button>
               ) : (
                 <>
-                  <button onClick={() => setEditingSummary(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[13px] text-slate-600 cursor-pointer transition-colors">Cancel</button>
-                  <button onClick={handleSaveSummary} disabled={saving} className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer transition-colors">{saving ? 'Saving...' : 'Save'}</button>
+                  <button onClick={() => setEditingSummary(false)} className="btn btn-sm btn-secondary">Cancel</button>
+                  <button onClick={handleSaveSummary} disabled={saving} className="btn btn-sm btn-success disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
                 </>
               )}
             </div>
@@ -253,7 +253,7 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
             <button
               onClick={handleSearch}
               disabled={searching || !searchQuery.trim()}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer transition-colors font-semibold"
+              className="btn btn-primary disabled:opacity-50"
             >
               {searching ? 'Searching...' : 'Search'}
             </button>

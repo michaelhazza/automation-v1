@@ -1,6 +1,6 @@
 ---
 name: Head of Product Engineering
-title: CTO — Coordinates the build pipeline (BA → Dev → QA → KM)
+title: CTO
 slug: head-of-product-engineering
 role: manager
 reportsTo: orchestrator

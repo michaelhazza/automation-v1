@@ -331,7 +331,7 @@ export default function AutomationExecutionPage({ user: _user }: { user: User })
           <button
             onClick={handleSubmit}
             disabled={submitting || hasInvalidFiles}
-            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white text-[14px] font-semibold rounded-xl transition-colors"
+            className="btn btn-primary disabled:opacity-50"
           >
             {submitting ? (
               <>
@@ -441,7 +441,7 @@ export default function AutomationExecutionPage({ user: _user }: { user: User })
                       <div className="text-[13.5px] font-semibold text-slate-800 truncate">{f.fileName}</div>
                       {f.fileSizeBytes != null && <div className="text-[12px] text-slate-400 mt-0.5">{formatBytes(f.fileSizeBytes)}</div>}
                     </div>
-                    <button onClick={() => handleDownload(f.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-medium transition-colors">
+                    <button onClick={() => handleDownload(f.id)} className="btn btn-sm btn-primary">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
                       </svg>
@@ -453,7 +453,7 @@ export default function AutomationExecutionPage({ user: _user }: { user: User })
             </div>
           )}
 
-          <button onClick={handleReset} className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">
+          <button onClick={handleReset} className="btn btn-sm btn-secondary">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-3.51" />
             </svg>

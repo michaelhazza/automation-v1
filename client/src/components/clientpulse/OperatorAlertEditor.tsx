@@ -51,8 +51,8 @@ export default function OperatorAlertEditor({ onCancel, onSubmit }: Props) {
           <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Severity</label>
           <div className="flex gap-2">
             {(['info', 'warn', 'urgent'] as const).map((s) => (
-              <button key={s} onClick={() => setSeverity(s)} className={`px-3 py-1.5 rounded-md text-[12px] font-semibold border ${
-                severity === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
+              <button key={s} onClick={() => setSeverity(s)} className={`btn btn-sm ${
+                severity === s ? 'btn-primary' : 'btn-secondary'
               }`}>{s}</button>
             ))}
           </div>
@@ -80,7 +80,7 @@ export default function OperatorAlertEditor({ onCancel, onSubmit }: Props) {
         <textarea value={rationale} onChange={(e) => setRationale(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-md border border-slate-200 text-[13px]" />
       </div>
       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-        <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-[12px] font-semibold text-slate-600 hover:bg-slate-100">Back</button>
+        <button onClick={onCancel} className="btn btn-sm btn-ghost">Back</button>
         <button
           disabled={!canSubmit}
           onClick={() => onSubmit(
@@ -93,7 +93,7 @@ export default function OperatorAlertEditor({ onCancel, onSubmit }: Props) {
             },
             rationale.trim(),
           )}
-          className="px-4 py-1.5 rounded-md text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-300"
+          className="btn btn-sm btn-primary disabled:bg-slate-300"
         >
           Queue for review
         </button>

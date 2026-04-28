@@ -104,7 +104,7 @@ export default defineWorkflow({
       actionSlug: 'config_weekly_digest_gather',
       actionInputs: {
         subaccountId: '{{ run.subaccount.id }}',
-        organisationId: '{{ run.subaccount.organisationId }}',
+        organisationId: '{{ run.org.id }}',
         windowDays: '7',
       },
       outputSchema: z.object({
@@ -183,7 +183,7 @@ export default defineWorkflow({
       actionSlug: 'config_deliver_workflow_output',
       actionInputs: {
         subaccountId: '{{ run.subaccount.id }}',
-        organisationId: '{{ run.subaccount.organisationId }}',
+        organisationId: '{{ run.org.id }}',
         artefactTitle: '{{ steps.draft.output.title }}',
         artefactContent: '{{ steps.draft.output.summaryMarkdown }}',
         deliveryChannels: '{{ run.input.deliveryChannels }}',
