@@ -59,6 +59,8 @@ Emits two artifacts:
 
 **Dead-file pruning:** every regen (cold or watcher-triggered), walk the cache and drop entries whose `path` no longer exists on disk. Without this, deleted files accumulate in the import-graph shards and mislead future readers.
 
+**Manual cache reset.** The cache file is a build artifact — safe to delete `references/.code-graph-cache.json` to force a clean rebuild on the next `npm run dev`. Equivalent to `npm run code-graph:rebuild` but does not require the dev server to be down.
+
 ### Watcher: in-session staleness protection
 
 Cold-build at `predev` is necessary but not sufficient. A typical dev session runs for hours; without an in-session refresh, the cache goes stale within minutes of the first file change. **Agents reading a stale cache get confidently wrong answers — the most concerning failure mode**, exactly the one the Graphify trial taught us to engineer away from. The advisory-hint framing (agents fall through to raw source on miss) does not protect against staleness — a stale cache "hits" with wrong data, no fall-through triggers.
