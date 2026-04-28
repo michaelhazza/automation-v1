@@ -10,7 +10,10 @@ import {
   handleConversationFollowUp,
 } from '../services/briefConversationService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
-import { selectConversationFollowUpAction } from '../services/conversationsRoutePure.js';
+import {
+  selectConversationFollowUpAction,
+  buildConversationFollowUpResponseExtras,
+} from '../services/conversationsRoutePure.js';
 import { logger } from '../lib/logger.js';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
@@ -120,6 +123,7 @@ router.post(
         text: content.trim(),
         uiContext,
         senderUserId: req.user!.id,
+        prefetchedConv: { scopeType: conv.scopeType, scopeId: conv.scopeId },
       });
 
       logger.info('conversations_route.brief_followup_dispatched', {
@@ -129,7 +133,10 @@ router.post(
         fastPathDecisionKind: result.fastPathDecision.route,
       });
 
-      res.status(201).json({ ...result.message, route: result.route, fastPathDecision: result.fastPathDecision });
+      res.status(201).json({
+        ...result.message,
+        ...buildConversationFollowUpResponseExtras({ route: result.route, fastPathDecision: result.fastPathDecision }),
+      });
       return;
     }
 
@@ -143,7 +150,7 @@ router.post(
       senderUserId: req.user!.id,
     });
 
-    res.status(201).json({ ...message, route: null, fastPathDecision: null });
+    res.status(201).json({ ...message, ...buildConversationFollowUpResponseExtras(null) });
   }),
 );
 

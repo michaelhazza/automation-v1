@@ -30,7 +30,9 @@ export function createPostCommitStore(requestId?: string): PostCommitStore {
       if (closed) return;
       const emits = queue.splice(0);
       closed = true;
-      logger.info('post_commit_emit_flushed', { requestId, emitCount: emits.length });
+      if (emits.length > 0) {
+        logger.info('post_commit_emit_flushed', { requestId, emitCount: emits.length });
+      }
       for (const fn of emits) {
         try {
           fn();
