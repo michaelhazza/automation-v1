@@ -113,7 +113,7 @@ export default function AdminSkillEditPage({ user: _user }: { user: User }) {
           )}
         </div>
         {!isBuiltIn && (
-          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary disabled:bg-slate-400">
             {saving ? 'Saving...' : isNew ? 'Create Skill' : 'Save Changes'}
           </button>
         )}
@@ -166,8 +166,8 @@ export default function AdminSkillEditPage({ user: _user }: { user: User }) {
 
       {!isBuiltIn && (
         <div className="flex justify-end gap-3 mt-2">
-          <button onClick={() => navigate('/admin/skills')} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors">Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={() => navigate('/admin/skills')} className="btn btn-ghost">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary disabled:bg-slate-400">
             {saving ? 'Saving...' : isNew ? 'Create Skill' : 'Save Changes'}
           </button>
         </div>

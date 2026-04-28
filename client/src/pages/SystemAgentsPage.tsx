@@ -171,19 +171,19 @@ export default function SystemAgentsPage({ user }: { user: User }) {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
-            className={`px-4 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium whitespace-nowrap transition-colors ${importing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'}`}
+            className={`btn btn-secondary whitespace-nowrap ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
             {importing ? 'Importing…' : '↑ Import CSV'}
           </button>
           <button
             onClick={handleExport}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
+            className="btn btn-secondary whitespace-nowrap"
           >
             ↓ Export CSV
           </button>
           <button
             onClick={() => navigate('/system/agents/new')}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
+            className="btn btn-primary whitespace-nowrap"
           >
             + New System Agent
           </button>
@@ -236,7 +236,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
             <div className="text-[14px] text-slate-500 mb-6">Create your first system agent to get started.</div>
             <button
               onClick={() => navigate('/system/agents/new')}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              className="btn btn-primary"
             >
               + New System Agent
             </button>
@@ -282,14 +282,14 @@ export default function SystemAgentsPage({ user }: { user: User }) {
                       <div className="flex gap-2 items-center flex-wrap">
                         <Link
                           to={`/system/agents/${agent.id}`}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[12px] font-medium no-underline transition-colors"
+                          className="btn btn-xs btn-secondary no-underline"
                         >
                           Edit
                         </Link>
                         {!agent.isPublished && (
                           <button
                             onClick={() => handlePublish(agent.id)}
-                            className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-800 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+                            className="btn btn-xs btn-success"
                           >
                             Publish
                           </button>
@@ -297,14 +297,14 @@ export default function SystemAgentsPage({ user }: { user: User }) {
                         {agent.isPublished && (
                           <button
                             onClick={() => handleUnpublish(agent.id)}
-                            className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-800 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+                            className="btn btn-xs btn-ghost text-orange-800 hover:bg-orange-50"
                           >
                             Unpublish
                           </button>
                         )}
                         <button
                           onClick={() => setDeleteId(agent.id)}
-                          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+                          className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50"
                         >
                           Delete
                         </button>

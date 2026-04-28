@@ -130,13 +130,13 @@ export default function AdminAutomationsPage({ user: _user }: { user: User }) {
         <div className="flex gap-2">
           <button
             onClick={openLinkSystem}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-sm font-medium rounded-lg transition-colors"
+            className="btn btn-secondary"
           >
             Link System Workflow
           </button>
           <button
             onClick={() => { setShowForm(true); setError(''); }}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="btn btn-primary"
           >
             + Create workflow
           </button>
@@ -171,11 +171,11 @@ export default function AdminAutomationsPage({ user: _user }: { user: User }) {
             <button
               onClick={handleLinkSystem}
               disabled={!selectedSystemId || linkLoading}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {linkLoading ? 'Linking...' : 'Link Workflow'}
             </button>
-            <button onClick={() => setShowLinkSystem(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={() => setShowLinkSystem(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -220,8 +220,8 @@ export default function AdminAutomationsPage({ user: _user }: { user: User }) {
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
-            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={handleCreate} className="btn btn-primary">Create</button>
+            <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -274,22 +274,22 @@ export default function AdminAutomationsPage({ user: _user }: { user: User }) {
                       {!process.isSystemManaged && (
                         <Link
                           to={`/admin/automations/${process.id}`}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
+                          className="btn btn-xs btn-secondary no-underline"
                         >
                           Edit
                         </Link>
                       )}
                       {process.status !== 'active' && (
-                        <button onClick={() => handleActivate(process.id)} className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-xs font-medium transition-colors">
+                        <button onClick={() => handleActivate(process.id)} className="btn btn-xs btn-success">
                           Activate
                         </button>
                       )}
                       {process.status === 'active' && (
-                        <button onClick={() => handleDeactivate(process.id)} className="px-2.5 py-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-md text-xs font-medium transition-colors">
+                        <button onClick={() => handleDeactivate(process.id)} className="btn btn-xs btn-ghost text-yellow-700 hover:bg-yellow-50">
                           Deactivate
                         </button>
                       )}
-                      <button onClick={() => setDeleteId(process.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">
+                      <button onClick={() => setDeleteId(process.id)} className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50">
                         Delete
                       </button>
                     </div>

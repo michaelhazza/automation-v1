@@ -347,7 +347,7 @@ export default function ActivityPage({ user }: { user: User }) {
           {(activeFilterCount > 0 || sortCol) && (
             <button
               onClick={clearAll}
-              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
+              className="btn btn-sm btn-ghost"
             >
               Clear all
             </button>
@@ -400,7 +400,7 @@ export default function ActivityPage({ user }: { user: User }) {
           <div className="flex gap-2 items-end">
             <button
               onClick={load}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13.5px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -410,7 +410,7 @@ export default function ActivityPage({ user }: { user: User }) {
             {hasFilters && (
               <button
                 onClick={clearAll}
-                className="px-4 py-2 text-slate-600 hover:text-slate-800 text-[13px] font-medium rounded-lg hover:bg-slate-100 transition-colors"
+                className="btn btn-ghost"
               >
                 Clear
               </button>
@@ -437,7 +437,7 @@ export default function ActivityPage({ user }: { user: User }) {
               {hasFilters ? 'Try adjusting your filters.' : 'Activity from agents and workflows will appear here.'}
             </p>
             {hasFilters && (
-              <button onClick={clearAll} className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+              <button onClick={clearAll} className="btn btn-secondary">
                 Clear filters
               </button>
             )}
