@@ -4,7 +4,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import type { Conversation, ConversationMessage } from '../db/schema/conversations.js';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import { handleBriefMessage, type DispatchRoute } from './briefMessageHandlerPure.js';
-import { writeConversationMessage } from './briefConversationWriter.js';
+import { writeConversationMessage, type WriteMessageResult } from './briefConversationWriter.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export interface ConversationWithMessages {
@@ -114,7 +114,7 @@ export async function handleConversationFollowUp(input: {
   text: string;
   uiContext: BriefUiContext;
   senderUserId?: string;
-}): Promise<{ route: DispatchRoute; fastPathDecision: FastPathDecision }> {
+}): Promise<{ message: WriteMessageResult; route: DispatchRoute; fastPathDecision: FastPathDecision }> {
   // Verify the conversation actually belongs to this brief. Without this
   // check, a stale tab or malformed payload that posts {conversationId: B}
   // to a route bound to {briefId: A} would write the user message to
@@ -138,7 +138,7 @@ export async function handleConversationFollowUp(input: {
     );
   }
 
-  await writeConversationMessage({
+  const message = await writeConversationMessage({
     conversationId: input.conversationId,
     briefId: input.briefId,
     organisationId: input.organisationId,
@@ -148,7 +148,7 @@ export async function handleConversationFollowUp(input: {
     senderUserId: input.senderUserId,
   });
 
-  return handleBriefMessage({
+  const { route, fastPathDecision } = await handleBriefMessage({
     conversationId: input.conversationId,
     briefId: input.briefId,
     organisationId: input.organisationId,
@@ -157,4 +157,6 @@ export async function handleConversationFollowUp(input: {
     uiContext: input.uiContext,
     isFollowUp: true,
   });
+
+  return { message, route, fastPathDecision };
 }
