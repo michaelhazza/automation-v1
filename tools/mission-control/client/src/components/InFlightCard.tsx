@@ -100,8 +100,15 @@ export function InFlightCard({ item }: { item: InFlightItem }) {
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-4 text-xs">
-        {item.pr && <CiBadge status={item.pr.ci_status} />}
+      <div className="mt-3 flex items-center gap-4 text-xs flex-wrap">
+        {item.pr && (
+          <span className="inline-flex items-center gap-2">
+            <CiBadge status={item.pr.ci_status} />
+            {item.pr.ci_updated_at && (
+              <span className="text-slate-600">{timeAgo(item.pr.ci_updated_at)}</span>
+            )}
+          </span>
+        )}
         {item.latest_review ? (
           <span className="text-slate-400">
             <span className="text-slate-500">{item.latest_review.kind}:</span>{' '}
@@ -112,6 +119,12 @@ export function InFlightCard({ item }: { item: InFlightItem }) {
           </span>
         ) : (
           <span className="text-slate-500 text-xs">no reviews yet</span>
+        )}
+        {item.dataPartial && (
+          <span className="inline-flex items-center gap-1 text-amber-400" title="One or more underlying fetches errored; this card may be missing data.">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+            partial
+          </span>
         )}
       </div>
 

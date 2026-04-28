@@ -38,7 +38,8 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/in-flight', async (_req, res) => {
   try {
     const items = await composeInFlight(config);
-    res.json({ items });
+    const isPartial = items.some((i) => i.dataPartial);
+    res.json({ items, isPartial });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }

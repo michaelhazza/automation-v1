@@ -6,6 +6,7 @@ const POLL_INTERVAL_MS = 30_000;
 
 export function App() {
   const [items, setItems] = useState<InFlightItem[] | null>(null);
+  const [isPartial, setIsPartial] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
@@ -14,10 +15,11 @@ export function App() {
     let cancelled = false;
     async function load() {
       try {
-        const [h, i] = await Promise.all([fetchHealth(), fetchInFlight()]);
+        const [h, response] = await Promise.all([fetchHealth(), fetchInFlight()]);
         if (cancelled) return;
         setHealth(h);
-        setItems(i);
+        setItems(response.items);
+        setIsPartial(response.isPartial);
         setError(null);
         setLastFetched(new Date());
       } catch (err) {
@@ -66,6 +68,12 @@ export function App() {
         {error && (
           <div className="mb-4 rounded border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
             <strong>error:</strong> {error}
+          </div>
+        )}
+
+        {isPartial && !error && (
+          <div className="mb-4 rounded border border-amber-900 bg-amber-950/30 px-4 py-2 text-xs text-amber-300">
+            Some data is incomplete (one or more GitHub fetches errored). The dashboard is still usable but the affected cards are flagged.
           </div>
         )}
 

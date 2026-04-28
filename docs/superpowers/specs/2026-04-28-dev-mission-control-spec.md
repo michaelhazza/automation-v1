@@ -58,6 +58,13 @@ See §10 Deferred items for the full list and rationale.
 
 The dashboard surfaces state that already exists (review log files, build progress files, `current-focus.md`, GitHub API) — it never writes. No "trigger review", no "merge PR", no "deploy". Any future write capability is a separate spec with its own auth model.
 
+**Locked constraints (no exceptions without a new spec):**
+- No manual override of findings — what the CLI/agent emits is what the dashboard renders.
+- No editing of findings, verdicts, or progress in the UI.
+- No "acknowledge and hide" — drift, partial data, and stale state are surfaced, never dismissed silently.
+
+These keep the system deterministic: the dashboard is a pure projection of the underlying log/file/API state, and the underlying state is the only place edits happen.
+
 ### A3. The dashboard is portable
 
 `tools/mission-control/` is self-contained: own `package.json`, own `tsconfig.json`, own `vite.config.ts`. All paths configurable via env vars (`MISSION_CONTROL_REPO_ROOT`, `MISSION_CONTROL_GITHUB_REPO`, `GITHUB_TOKEN`, `MISSION_CONTROL_PORT`). One directory copy + `npm install` to drop into another project.
@@ -210,7 +217,8 @@ Producer: `tools/mission-control/server/lib/inFlight.ts`. Consumer: dashboard UI
     "number": 207,
     "url": "https://github.com/michaelhazza/automation-v1/pull/207",
     "state": "open",
-    "ci_status": "passing"
+    "ci_status": "passing",
+    "ci_updated_at": "2026-04-28T12:34:56Z"
   },
   "latest_review": {
     "kind": "spec-conformance",
@@ -222,17 +230,20 @@ Producer: `tools/mission-control/server/lib/inFlight.ts`. Consumer: dashboard UI
     "last_updated": "2026-04-28",
     "completed_chunks": 2,
     "total_chunks": 5
-  }
+  },
+  "dataPartial": false
 }
 ```
 
 Nullability:
-- `pr` is `null` if no PR exists for the branch.
+- `pr` is `null` if no PR exists for the branch (intentional null) or the GitHub fetch errored (in which case `dataPartial` is `true`).
 - `latest_review` is `null` if no review logs exist for the build slug.
 - `progress` is `null` if no `progress.md` exists for the build slug.
-- `phase` is always present. Resolution order: machine block status → derived from latest review verdict → `BUILDING` default.
+- `pr.ci_updated_at` is `null` when no checks exist or when only a status with no `completed_at` is reported; otherwise the latest non-null `completed_at` across check-runs.
+- `phase` is always present. Resolution order: machine block status (when this is the active focus build) → derived from latest review verdict (known green-family → `MERGE_READY`; known change-requested → `REVIEWING`; **unknown verdict string** → `REVIEWING`) → `BUILDING` default (only when there's no review at all).
+- `dataPartial` is always present. `true` when at least one underlying fetch hit an error path (GitHub network blip, rate limit, etc.). The wrapping `/api/in-flight` response also carries a top-level `isPartial` boolean summarising across items.
 
-`ci_status` ∈ {`passing`, `failing`, `pending`, `unknown`}. `unknown` covers the no-PR or no-checks case.
+`ci_status` ∈ {`passing`, `failing`, `pending`, `unknown`}. `unknown` covers the no-checks-configured case.
 
 ## 7. Execution model
 

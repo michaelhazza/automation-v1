@@ -20,6 +20,11 @@ import {
 import { fetchPRForBranch, type CiStatus } from './github.js';
 import type { Config } from './config.js';
 
+export interface InFlightResponse {
+  items: InFlightItem[];
+  isPartial: boolean;
+}
+
 export interface InFlightItem {
   build_slug: string;
   branch: string | null;
@@ -29,6 +34,7 @@ export interface InFlightItem {
     url: string;
     state: 'open' | 'closed' | 'merged';
     ci_status: CiStatus;
+    ci_updated_at: string | null;
   } | null;
   latest_review: {
     kind: ReviewKind;
@@ -41,6 +47,10 @@ export interface InFlightItem {
     completed_chunks: number | null;
     total_chunks: number | null;
   } | null;
+  // True when at least one underlying fetch hit an error path (GitHub network
+  // blip, rate limit, or filesystem IO error). Distinguishes "all clear" from
+  // "all clear with caveats" — addresses the silent-degradation failure mode.
+  dataPartial: boolean;
 }
 
 /**
@@ -178,8 +188,11 @@ export async function composeInFlight(config: Config): Promise<InFlightItem[]> {
         : derivePhaseFromVerdict(latest_review?.verdict ?? null);
 
     let pr: InFlightItem['pr'] = null;
+    let prErrored = false;
     if (branch && config.githubRepo) {
-      pr = await fetchPRForBranch(config.githubRepo, branch, config.githubToken);
+      const result = await fetchPRForBranch(config.githubRepo, branch, config.githubToken);
+      pr = result.value;
+      prErrored = result.errored;
     }
 
     items.push({
@@ -195,6 +208,7 @@ export async function composeInFlight(config: Config): Promise<InFlightItem[]> {
             total_chunks: progress.total_chunks,
           }
         : null,
+      dataPartial: prErrored,
     });
   }
 

@@ -24,27 +24,40 @@ export interface PRSummary {
   url: string;
   state: 'open' | 'closed' | 'merged';
   ci_status: CiStatus;
+  ci_updated_at: string | null;
+}
+
+/**
+ * Wrapper around a fetch result that distinguishes "intentional null" (no PR
+ * exists, no checks configured) from "error" (network blip, rate limit, etc.).
+ * The composer uses `errored` to set `dataPartial` on InFlightItem so the UI
+ * can show a "data incomplete" indicator instead of falsely rendering "all clear."
+ */
+export interface FetchResult<T> {
+  value: T;
+  errored: boolean;
 }
 
 interface CacheEntry<T> {
   value: T;
   expires: number;
+  errored: boolean;
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
-function cacheGet<T>(key: string): T | undefined {
+function cacheGet<T>(key: string): { value: T; errored: boolean } | undefined {
   const entry = cache.get(key);
   if (!entry) return undefined;
   if (entry.expires < Date.now()) {
     cache.delete(key);
     return undefined;
   }
-  return entry.value as T;
+  return { value: entry.value as T, errored: entry.errored };
 }
 
-function cacheSet<T>(key: string, value: T, ttlMs: number): void {
-  cache.set(key, { value, expires: Date.now() + ttlMs });
+function cacheSet<T>(key: string, value: T, ttlMs: number, errored = false): void {
+  cache.set(key, { value, expires: Date.now() + ttlMs, errored });
 }
 
 function authHeaders(token: string | null): Record<string, string> {
@@ -64,20 +77,23 @@ export async function fetchPRForBranch(
   repo: string,
   branch: string,
   token: string | null,
-): Promise<PRSummary | null> {
+): Promise<FetchResult<PRSummary | null>> {
   const cacheKey = `pr:${repo}:${branch}`;
   const cached = cacheGet<PRSummary | null>(cacheKey);
   if (cached !== undefined) return cached;
 
   try {
     const [owner, name] = repo.split('/');
-    if (!owner || !name) return null;
+    if (!owner || !name) {
+      cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS, true);
+      return { value: null, errored: true };
+    }
     const headRef = `${owner}:${branch}`;
     const url = `${GITHUB_API}/repos/${repo}/pulls?state=all&head=${encodeURIComponent(headRef)}&sort=created&direction=desc&per_page=1`;
     const res = await fetch(url, { headers: authHeaders(token) });
     if (!res.ok) {
-      cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS);
-      return null;
+      cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS, true);
+      return { value: null, errored: true };
     }
     const list = (await res.json()) as Array<{
       number: number;
@@ -88,7 +104,7 @@ export async function fetchPRForBranch(
     if (!Array.isArray(list) || list.length === 0) {
       // Real "no PR" state, not an error — cache for the full PR TTL.
       cacheSet(cacheKey, null, CACHE_TTL_PR_MS);
-      return null;
+      return { value: null, errored: false };
     }
     const top = list[0];
     const state: PRSummary['state'] =
@@ -98,53 +114,85 @@ export async function fetchPRForBranch(
       number: top.number,
       url: top.html_url,
       state,
-      ci_status: ci,
+      ci_status: ci.value,
+      ci_updated_at: ci.updatedAt,
     };
-    cacheSet(cacheKey, summary, CACHE_TTL_PR_MS);
-    return summary;
+    // PR fetch errored when its CI sub-fetch errored, even if the outer fetch succeeded.
+    cacheSet(cacheKey, summary, CACHE_TTL_PR_MS, ci.errored);
+    return { value: summary, errored: ci.errored };
   } catch {
-    cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS);
-    return null;
+    cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS, true);
+    return { value: null, errored: true };
   }
+}
+
+interface CiResult {
+  value: CiStatus;
+  updatedAt: string | null;
+  errored: boolean;
 }
 
 /**
  * Fetch the latest commit's combined check-run status for a branch.
- * Returns 'unknown' if the branch isn't found, the API errors, or no checks exist.
+ * Returns `{ value: 'unknown', updatedAt: null, errored: true }` on API error;
+ * `{ value: 'unknown', updatedAt: null, errored: false }` for "no checks configured";
+ * otherwise derives the status and `updatedAt` from the most recent check-run.
  */
 export async function fetchCiStatusForBranch(
   repo: string,
   branch: string,
   token: string | null,
-): Promise<CiStatus> {
+): Promise<CiResult> {
   const cacheKey = `ci:${repo}:${branch}`;
-  const cached = cacheGet<CiStatus>(cacheKey);
-  if (cached !== undefined) return cached;
+  const cached = cacheGet<CiResult>(cacheKey);
+  if (cached !== undefined) return cached.value;
 
   try {
     const url = `${GITHUB_API}/repos/${repo}/commits/${encodeURIComponent(branch)}/check-runs`;
     const res = await fetch(url, { headers: authHeaders(token) });
     if (!res.ok) {
-      cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_ERROR_MS);
-      return 'unknown';
+      const result: CiResult = { value: 'unknown', updatedAt: null, errored: true };
+      cacheSet(cacheKey, result, CACHE_TTL_ERROR_MS, true);
+      return result;
     }
     const body = (await res.json()) as {
-      check_runs?: Array<{ status: string; conclusion: string | null }>;
+      check_runs?: Array<{ status: string; conclusion: string | null; completed_at?: string | null }>;
     };
     const runs = body.check_runs ?? [];
     if (runs.length === 0) {
       // Empty list is a real "no checks configured" state, not an error —
       // cache for the full CI TTL so we don't hammer GitHub for nothing.
-      cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_CI_MS);
-      return 'unknown';
+      const result: CiResult = { value: 'unknown', updatedAt: null, errored: false };
+      cacheSet(cacheKey, result, CACHE_TTL_CI_MS);
+      return result;
     }
     const status = deriveCiStatus(runs);
-    cacheSet(cacheKey, status, CACHE_TTL_CI_MS);
-    return status;
+    const updatedAt = pickLatestCompletedAt(runs);
+    const result: CiResult = { value: status, updatedAt, errored: false };
+    cacheSet(cacheKey, result, CACHE_TTL_CI_MS);
+    return result;
   } catch {
-    cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_ERROR_MS);
-    return 'unknown';
+    const result: CiResult = { value: 'unknown', updatedAt: null, errored: true };
+    cacheSet(cacheKey, result, CACHE_TTL_ERROR_MS, true);
+    return result;
   }
+}
+
+/**
+ * Pure helper — picks the latest non-null `completed_at` across check-runs.
+ * Exported for testing.
+ */
+export function pickLatestCompletedAt(
+  runs: Array<{ completed_at?: string | null }>,
+): string | null {
+  let latest: string | null = null;
+  for (const r of runs) {
+    const ts = r.completed_at;
+    if (typeof ts === 'string' && (latest === null || ts > latest)) {
+      latest = ts;
+    }
+  }
+  return latest;
 }
 
 /**

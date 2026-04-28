@@ -25,6 +25,7 @@ export interface InFlightItem {
     url: string;
     state: 'open' | 'closed' | 'merged';
     ci_status: CiStatus;
+    ci_updated_at: string | null;
   } | null;
   latest_review: {
     kind: string;
@@ -37,6 +38,7 @@ export interface InFlightItem {
     completed_chunks: number | null;
     total_chunks: number | null;
   } | null;
+  dataPartial: boolean;
 }
 
 export interface HealthResponse {
@@ -46,11 +48,15 @@ export interface HealthResponse {
   hasGithubToken: boolean;
 }
 
-export async function fetchInFlight(): Promise<InFlightItem[]> {
+export interface InFlightResponse {
+  items: InFlightItem[];
+  isPartial: boolean;
+}
+
+export async function fetchInFlight(): Promise<InFlightResponse> {
   const res = await fetch('/api/in-flight');
   if (!res.ok) throw new Error(`/api/in-flight ${res.status}`);
-  const body = (await res.json()) as { items: InFlightItem[] };
-  return body.items;
+  return (await res.json()) as InFlightResponse;
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
