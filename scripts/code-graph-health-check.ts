@@ -194,7 +194,13 @@ function encodeProjectDir(p: string): string {
  * Excludes worktree dirs, which contain isolated work that should not be
  * counted toward this checkout's adoption signal.
  *
- * Returns an empty array if the projects root isn't found.
+ * Returns an empty array if no matching project dir is found. We deliberately
+ * do NOT fall back to scanning every directory under ~/.claude/projects —
+ * cross-project contamination silently mixes adoption / correction / volume
+ * signals from unrelated codebases, producing a misleading report ("this
+ * repo's cache is healthy") when the truth is "this repo has no transcripts
+ * at all". The downstream `transcriptsAvailable === false` path correctly
+ * surfaces "no session data found" instead.
  */
 async function resolveProjectDirs(cwd: string): Promise<string[]> {
   const projectsRoot = path.join(os.homedir(), '.claude', 'projects');
@@ -205,7 +211,8 @@ async function resolveProjectDirs(cwd: string): Promise<string[]> {
   const matches: string[] = [];
   if (existsSync(exact)) matches.push(exact);
 
-  // Sibling collision dirs: same prefix + numeric / ordinal suffix.
+  // Sibling collision dirs: same prefix + numeric / ordinal suffix
+  // (Claude Code's naming for parallel sessions on the same checkout).
   const allDirs = await fs.readdir(projectsRoot, { withFileTypes: true });
   for (const dirent of allDirs) {
     if (!dirent.isDirectory()) continue;
@@ -215,16 +222,6 @@ async function resolveProjectDirs(cwd: string): Promise<string[]> {
     // Suffix shape: -2nd, -3rd, -4th, …, or -2, -3 (defensive).
     const tail = dirent.name.slice(encoded.length);
     if (/^-(\d+(?:st|nd|rd|th)?)$/.test(tail)) {
-      matches.push(path.join(projectsRoot, dirent.name));
-    }
-  }
-
-  // Fallback: if no exact or sibling match, take all non-worktree dirs so the
-  // health check still produces a signal in unfamiliar checkouts.
-  if (matches.length === 0) {
-    for (const dirent of allDirs) {
-      if (!dirent.isDirectory()) continue;
-      if (dirent.name.includes('--claude-worktrees-')) continue;
       matches.push(path.join(projectsRoot, dirent.name));
     }
   }
@@ -691,6 +688,16 @@ function computeVerdict(d: CollectedData): Verdict {
     d.adoption.references === 0 &&
     d.queryVolume.archQueries >= ZERO_ADOPTION_MEANINGFUL_QUERIES;
 
+  // ESCALATE means "volume justifies Phase 1 automation review". That is the
+  // wrong action when the cache is barely being consulted — there, the right
+  // action is TUNE (improve adoption first). Gate ESCALATE on adoption being
+  // genuinely healthy, not just non-zero. Threshold of 3 references mirrors
+  // the existing "marginal adoption" YELLOW boundary above.
+  const healthyAdoption =
+    d.adoption.references >= 3 &&
+    !hasCacheLinkedYellow &&
+    !zeroAdoptionMeaningful;
+
   if (hasCacheLinkedRed) {
     status = 'RED';
     reasons.push(
@@ -713,7 +720,14 @@ function computeVerdict(d: CollectedData): Verdict {
     if (d.coverage.belowThreshold) yellowReasons.push(`Shard coverage at ${d.coverage.coveragePct}% (target ≥${COVERAGE_GREEN_PCT}%)`);
     if ((d.operational.cacheStaleByMin ?? 0) > STALE_CACHE_MIN) yellowReasons.push(`Cache is ${d.operational.cacheStaleByMin} min behind newest source file`);
     if (d.operational.watcherLogLargeFlag) yellowReasons.push(`Watcher log >${LOG_SIZE_FLAG_BYTES / 1024 / 1024}MB (${(d.operational.watcherLogSize / 1024 / 1024).toFixed(1)}MB)`);
-    if (d.operational.watcherRunning === false) yellowReasons.push('Watcher process is not running');
+    if (d.operational.watcherRunning === false) {
+      yellowReasons.push('Watcher process is not running');
+    } else if (d.operational.watcherRunning === null) {
+      // Lock present but PID file missing or unreadable — can't confirm a
+      // live watcher. Decision-engine invariant: every state must classify;
+      // ambiguity counts as concern, not pass-through.
+      yellowReasons.push('Watcher lock present but PID unknown — ambiguous state, investigate');
+    }
     const totalErrors = Object.values(d.operational.errorPatternCounts).reduce((a, b) => a + b, 0);
     if (totalErrors > 20) yellowReasons.push(`${totalErrors} error/failure lines in last 1000 watcher log entries`);
     if (d.adoption.references > 0 && d.adoption.references < 3 && d.queryVolume.archQueries >= 5) {
@@ -756,11 +770,12 @@ function computeVerdict(d: CollectedData): Verdict {
       d.coverage.belowThreshold ||
       (d.operational.cacheStaleByMin ?? 0) > STALE_CACHE_MIN ||
       d.operational.watcherRunning === false ||
+      d.operational.watcherRunning === null ||
       !d.operational.watcherLogExists
     ))
   ) {
     recommendation = 'TUNE';
-  } else if (d.queryVolume.proratedPerMonth >= ESCALATE_QUERIES_PER_MONTH && d.adoption.references > 0) {
+  } else if (d.queryVolume.proratedPerMonth >= ESCALATE_QUERIES_PER_MONTH && healthyAdoption) {
     recommendation = 'ESCALATE';
     // Anchor reason for the LLM. Without this, an ESCALATE recommendation on
     // an otherwise-GREEN status leaves the LLM with only "No concerns

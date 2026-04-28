@@ -1356,10 +1356,8 @@ Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health
   - Suggested fix: on each run, read the most recent prior dated file, diff key metrics (adoption, archQueries, coverage, watcher-error count), and surface deltas in section 1 prose ("up from 60 last week" / "watcher errors trending up: 3 → 12 → 27").
   - Defer; not blocking. Implement once 3+ dated reports accumulate.
 
-- [ ] Watcher health: "lock without PID" should explicitly trigger YELLOW (ChatGPT R2 — health-check)
-  - Current behaviour: when `references/.watcher.lock` exists but `references/.watcher.pid` is absent or unreadable, `out.watcherRunning` is set to `null` and the YELLOW logic only fires on `=== false`. The ambiguous state is invisible in the verdict.
-  - Suggested fix: change the YELLOW branch to also fire when `watcherRunning === null && existsSync(WATCHER_LOCK_PATH)`, with reason "Watcher lock present but PID unknown — ambiguous state, investigate." One-line change in `computeVerdict()`.
-  - Defer; not blocking. Easy win whenever this script is next touched.
+- [x] Watcher health: "lock without PID" should explicitly trigger YELLOW (ChatGPT R2 — health-check)
+  - Resolved alongside the ChatGPT R3 P1/P2 fixes. `computeVerdict()` now classifies `watcherRunning === null` as YELLOW with reason "Watcher lock present but PID unknown — ambiguous state, investigate", and the TUNE recommendation triggers on this state too. Pulled in early because the script is now functioning as a decision engine — silent ambiguous states are the same defect class as P1's cross-project contamination.
 
 - [ ] Richer adoption signal: per-session breakdown (ChatGPT R2 — health-check)
   - Current behaviour: section 1 reports total references and unique sessions. Reviewer suggested adding "references per session" and "sessions with usage / total sessions" for adoption-quality signal.
@@ -1370,3 +1368,13 @@ Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health
   - Current behaviour: ~750-token prompt, runtime cost negligible.
   - Suggested fix: if/when token cost matters, trim repeated explanations and condense the section 4 bucket guidance to a single sentence.
   - Defer; not blocking. Cosmetic.
+
+## ChatGPT PR final-review — round 3 (P1 + P2 applied) — code-graph-health-check (2026-04-28)
+
+Reviewer's framing: the script has crossed from "utility" to "decision engine," which raises the bar — silently misleading data and rule contradictions are now critical, not refinements.
+
+- [x] **P1 — Cross-project transcript contamination** (resolved)
+  - `resolveProjectDirs()` previously fell back to scanning every directory under `~/.claude/projects` when no exact / sibling match was found. That silently mixed adoption / correction / volume signals from unrelated codebases, producing a misleading "this repo's cache is healthy" report when the truth was "this repo has no transcripts." Resolved: the fallback block is removed; the function returns `[]` on no match, and the downstream `transcriptsAvailable === false` path correctly surfaces "no session data found." Code comment in the function explains the deliberate non-fallback.
+
+- [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
+  - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
