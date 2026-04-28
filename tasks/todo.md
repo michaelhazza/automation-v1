@@ -1378,3 +1378,17 @@ Reviewer's framing: the script has crossed from "utility" to "decision engine," 
 
 - [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
   - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
+
+## ChatGPT PR final-review — round 4 (deferred refinements) — code-graph-health-check (2026-04-28)
+
+Reviewer's final pass said "merge it" and flagged two optional notes explicitly framed as "not now" / "next evolution." Logged here so they aren't lost; both are post-merge work, not blockers.
+
+- [ ] Ratio floor on `healthyAdoption` (ChatGPT R4 — health-check)
+  - Current behaviour: `healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` in `computeVerdict()`. The `references >= 3` floor encodes a minimum quality, but is decoupled from query volume — so 3 references against 100+ archQueries (a 3% consult rate) still counts as "healthy." Reviewer flagged this as "slightly optimistic, not wrong."
+  - Suggested fix: add a ratio floor — `references / archQueries >= 0.1` — alongside the absolute threshold. Pick the floor's exact value once we have more dated reports to calibrate against.
+  - Defer; reviewer explicitly said "later, not now." Implement only if the existing rule fires ESCALATE on a low-ratio scenario in real data.
+
+- [ ] Booleans → weighted-score verdict architecture (ChatGPT R4 — health-check)
+  - Current behaviour: rule-based thresholds + boolean gates compose the verdict in `computeVerdict()`. Works correctly for Phase 0's signal set.
+  - Suggested fix: convert each signal class (adoption / correctness / operational) to a numeric score, compute the verdict from a weighted score composition. Reviewer's framing: this matters once trend analysis lands or weak signals start combining — neither is true today.
+  - Defer; reviewer explicitly said "where this naturally evolves" and "not something to implement now." Revisit if/when the trend-awareness item (round 2) lands, since that's the natural co-arrival point.
