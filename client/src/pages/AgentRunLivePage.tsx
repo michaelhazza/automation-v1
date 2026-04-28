@@ -8,6 +8,7 @@ import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import Timeline from '../components/agentRunLog/Timeline';
 import EventDetailDrawer from '../components/agentRunLog/EventDetailDrawer';
+import AgentRunCancelButton from '../components/AgentRunCancelButton';
 import { formatDuration } from '../lib/formatDuration';
 import type {
   AgentExecutionEvent,
@@ -51,6 +52,7 @@ const STATUS_BADGE: Record<string, string> = {
   completed: 'bg-emerald-100 text-emerald-700',
   failed: 'bg-red-100 text-red-700',
   running: 'bg-blue-100 text-blue-700',
+  cancelling: 'bg-slate-200 text-slate-700',
   cancelled: 'bg-slate-100 text-slate-600',
 };
 
@@ -201,12 +203,24 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center mb-4">
         <h1 className="text-lg font-semibold text-slate-900">Live execution log</h1>
-        <Link
-          to={`/admin/runs/${runId}`}
-          className="ml-auto text-sm text-indigo-600 hover:underline"
-        >
-          View run trace →
-        </Link>
+        <div className="ml-auto flex items-center gap-3">
+          {runId && runMeta && (
+            <AgentRunCancelButton
+              runId={runId}
+              status={runMeta.status}
+              onCancelled={() => {
+                // Optimistic — websocket / next snapshot will reconcile.
+                setRunMeta((prev) => prev ? { ...prev, status: 'cancelling' } : prev);
+              }}
+            />
+          )}
+          <Link
+            to={`/admin/runs/${runId}`}
+            className="text-sm text-indigo-600 hover:underline"
+          >
+            View run trace →
+          </Link>
+        </div>
       </div>
       {runMeta ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-[12px] text-slate-600">
