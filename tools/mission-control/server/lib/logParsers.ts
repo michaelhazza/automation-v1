@@ -145,6 +145,19 @@ export function parseVerdictFromLog(content: string): string | null {
  *   last_updated: 2026-04-28
  *   -->
  */
+/**
+ * Scrape the prose body of `current-focus.md` for `**Active build slug:** <slug>`.
+ * Used to detect drift between the machine block (read by the dashboard) and the
+ * prose (canonical per spec § C3). Returns null when no such line exists.
+ */
+export function extractActiveBuildSlugFromProse(content: string): string | null {
+  // Strip the leading <!-- mission-control --> block so we don't accidentally
+  // match the block's `build_slug:` field.
+  const proseOnly = content.replace(/<!--\s*mission-control\s*\n[\s\S]*?\n\s*-->/, '');
+  const m = proseOnly.match(/\*\*Active build slug:\*\*\s+([A-Za-z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
 export function parseCurrentFocusBlock(content: string): CurrentFocusBlock | null {
   const blockMatch = content.match(/<!--\s*mission-control\s*\n([\s\S]*?)\n\s*-->/);
   if (!blockMatch) return null;

@@ -80,7 +80,7 @@ The CLI is stateless: input is diff/spec, output is `ChatGPTReviewResult` JSON o
 | `tools/mission-control/vite.config.ts` | Client bundler config; proxies `/api` to local server |
 | `tools/mission-control/.env.example` | Documented env vars |
 | `tools/mission-control/README.md` | Usage + portability notes |
-| `tools/mission-control/server/index.ts` | Express server, exposes `/api/in-flight`, `/api/builds`, `/api/review-logs`, `/api/github/prs` |
+| `tools/mission-control/server/index.ts` | Express server, exposes `/api/health`, `/api/in-flight`, `/api/builds`, `/api/current-focus`, `/api/review-logs`. PR + CI status flow through `/api/in-flight` (per § C4); no standalone `/api/github/*` endpoints. |
 | `tools/mission-control/server/lib/config.ts` | Env-driven config, defaults |
 | `tools/mission-control/server/lib/logParsers.ts` | Pure parsers: review-log filename → metadata; verdict header → enum; build progress.md → status |
 | `tools/mission-control/server/lib/github.ts` | GitHub REST client (PRs by branch, latest CI run status) |
@@ -277,6 +277,7 @@ The OpenAI fetch and the GitHub API fetch are boundary calls and not unit-tested
 - **Goal "portable"** ↔ **Implementation:** `tools/mission-control/` is self-contained; all paths via env vars; README documents the copy-paste-into-other-project flow. Match.
 - **Goal "dev CLI bypasses llmRouter"** ↔ **Implementation:** `scripts/chatgpt-review.ts` makes raw fetch with no imports from `server/services/providers/`. Match. Verified by pr-reviewer.
 - **Goal "logging is parseable"** ↔ **Implementation:** verdict header regex is fixed in C2, applied to all review-agent definitions in Phase 1. Match.
+- **Endpoint surface** — original draft listed `/api/github/prs` as a standalone endpoint; the as-built design routes PR + CI through the composed `/api/in-flight` feed instead. Cleaner, single source of truth, no second consumer ever needed for a thin proxy. Spec § 5 row updated; no `/api/github/*` endpoints exist.
 
 ## 12. Maintenance notes
 

@@ -46,8 +46,13 @@ export interface InFlightItem {
 /**
  * Derive a phase from the latest review log's verdict — used when the build is
  * not the active focus and therefore has no machine-block status of its own.
- * Maps the green-family verdicts to MERGE_READY and the change-requested family
- * to REVIEWING; falls back to BUILDING when there's no verdict.
+ *
+ * Three-state default behaviour (round-2 review #4):
+ * - No verdict at all (`null`)        → BUILDING (no review yet)
+ * - Known green-family verdict        → MERGE_READY
+ * - Known change-requested verdict    → REVIEWING
+ * - Unknown verdict string            → REVIEWING (a review exists; we just
+ *   don't know what it says — closer to "review in progress" than "still building")
  */
 export function derivePhaseFromVerdict(verdict: string | null): Phase {
   if (!verdict) return 'BUILDING';
@@ -66,7 +71,7 @@ export function derivePhaseFromVerdict(verdict: string | null): Phase {
     case 'FAIL':
       return 'REVIEWING';
     default:
-      return 'BUILDING';
+      return 'REVIEWING';
   }
 }
 

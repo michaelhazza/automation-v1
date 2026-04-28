@@ -8,9 +8,12 @@
  * 60-req/hour limit). Pass GITHUB_TOKEN for higher limits.
  */
 
-const CACHE_TTL_MS = 60_000;
-// S4: errors get a much shorter TTL so a transient 502 doesn't stick for the
-// full success window. Next 30s poll cycle retries.
+// Round-2 review #5: split TTLs by endpoint volatility. CI flips on every push;
+// PR state (number / url / open|closed|merged) changes far less often.
+const CACHE_TTL_PR_MS = 120_000;
+const CACHE_TTL_CI_MS = 30_000;
+// Errors get a much shorter TTL so a transient 502 doesn't stick for the full
+// success window. Next 30s poll cycle retries.
 const CACHE_TTL_ERROR_MS = 5_000;
 const GITHUB_API = 'https://api.github.com';
 
@@ -40,7 +43,7 @@ function cacheGet<T>(key: string): T | undefined {
   return entry.value as T;
 }
 
-function cacheSet<T>(key: string, value: T, ttlMs: number = CACHE_TTL_MS): void {
+function cacheSet<T>(key: string, value: T, ttlMs: number): void {
   cache.set(key, { value, expires: Date.now() + ttlMs });
 }
 
@@ -83,7 +86,8 @@ export async function fetchPRForBranch(
       merged_at: string | null;
     }>;
     if (!Array.isArray(list) || list.length === 0) {
-      cacheSet(cacheKey, null);
+      // Real "no PR" state, not an error — cache for the full PR TTL.
+      cacheSet(cacheKey, null, CACHE_TTL_PR_MS);
       return null;
     }
     const top = list[0];
@@ -96,7 +100,7 @@ export async function fetchPRForBranch(
       state,
       ci_status: ci,
     };
-    cacheSet(cacheKey, summary);
+    cacheSet(cacheKey, summary, CACHE_TTL_PR_MS);
     return summary;
   } catch {
     cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS);
@@ -130,12 +134,12 @@ export async function fetchCiStatusForBranch(
     const runs = body.check_runs ?? [];
     if (runs.length === 0) {
       // Empty list is a real "no checks configured" state, not an error —
-      // cache for the full TTL so we don't hammer GitHub for nothing.
-      cacheSet(cacheKey, 'unknown' as CiStatus);
+      // cache for the full CI TTL so we don't hammer GitHub for nothing.
+      cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_CI_MS);
       return 'unknown';
     }
     const status = deriveCiStatus(runs);
-    cacheSet(cacheKey, status);
+    cacheSet(cacheKey, status, CACHE_TTL_CI_MS);
     return status;
   } catch {
     cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_ERROR_MS);

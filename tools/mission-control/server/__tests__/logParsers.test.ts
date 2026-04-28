@@ -7,6 +7,7 @@
 
 import {
   convertFilenameTimestampToIso,
+  extractActiveBuildSlugFromProse,
   parseCurrentFocusBlock,
   parseProgressMd,
   parseReviewLogFilename,
@@ -182,6 +183,41 @@ test('parseProgressMd returns null counts when no checkboxes', () => {
   eq(result.completed_chunks, null, 'completed');
   eq(result.total_chunks, null, 'total');
   eq(result.last_updated, '2026-04-28', 'last_updated');
+});
+
+// --- extractActiveBuildSlugFromProse ---
+
+test('extractActiveBuildSlugFromProse pulls slug from prose body', () => {
+  const md = `# Current Focus
+
+Some prose...
+
+**Active build slug:** my-build-slug-foo
+
+More prose.`;
+  eq(extractActiveBuildSlugFromProse(md), 'my-build-slug-foo', 'slug');
+});
+
+test('extractActiveBuildSlugFromProse ignores the machine block build_slug', () => {
+  const md = `<!-- mission-control
+build_slug: block-slug
+-->
+
+# Current Focus
+
+**Active build slug:** prose-slug`;
+  eq(extractActiveBuildSlugFromProse(md), 'prose-slug', 'slug');
+});
+
+test('extractActiveBuildSlugFromProse returns null when no prose marker', () => {
+  const md = `<!-- mission-control
+build_slug: block-only
+-->
+
+# Current Focus
+
+Just prose with no slug marker.`;
+  eq(extractActiveBuildSlugFromProse(md), null, 'no prose slug');
 });
 
 // --- pickLatestLogForSlug ---

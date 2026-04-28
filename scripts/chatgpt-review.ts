@@ -211,9 +211,13 @@ async function main(): Promise<void> {
   try {
     parsedJson = JSON.parse(stripJsonFence(rawContent));
   } catch (err) {
+    // Round-2 review: dump the FULL raw_response to stderr (no truncation) so
+    // a malformed model reply is debuggable. The thrown error stays short for
+    // the agent's per-round log; the full payload goes to stderr where the
+    // operator can capture it (`2> debug.log` if needed).
+    process.stderr.write(`--- raw response (full) ---\n${rawContent}\n--- end raw response ---\n`);
     throw new Error(
-      `failed to parse model output as JSON: ${err instanceof Error ? err.message : String(err)}\n` +
-        `--- raw response ---\n${rawContent.slice(0, 1000)}`,
+      `failed to parse model output as JSON: ${err instanceof Error ? err.message : String(err)} (full response written to stderr)`,
     );
   }
 

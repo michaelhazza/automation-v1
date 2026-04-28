@@ -17,6 +17,7 @@ import { readFile } from 'node:fs/promises';
 import { loadConfig } from './lib/config.js';
 import { composeInFlight, listBuildSlugs, readActiveBuildSlug } from './lib/inFlight.js';
 import {
+  extractActiveBuildSlugFromProse,
   parseCurrentFocusBlock,
   parseReviewLogFilename,
 } from './lib/logParsers.js';
@@ -58,12 +59,19 @@ app.get('/api/current-focus', async (_req, res) => {
     try {
       content = await readFile(config.currentFocusPath, 'utf-8');
     } catch {
-      res.json({ block: null, exists: false });
+      res.json({ block: null, exists: false, mismatch: null });
       return;
     }
     const block = parseCurrentFocusBlock(content);
     const fallback = await readActiveBuildSlug(config);
-    res.json({ block, fallback, exists: true });
+    // Spec § C3: prose is canonical when block ≠ prose. Surface the drift to
+    // the consumer rather than silently rendering whichever the parser saw first.
+    const proseSlug = extractActiveBuildSlugFromProse(content);
+    const mismatch =
+      block && proseSlug && proseSlug !== block.build_slug
+        ? { block: block.build_slug, prose: proseSlug }
+        : null;
+    res.json({ block, fallback, exists: true, mismatch });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
