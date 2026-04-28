@@ -18,10 +18,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Project, SyntaxKind } from 'ts-morph';
+import { Project } from 'ts-morph';
 import lockfile from 'proper-lockfile';
 import chokidar, { type FSWatcher } from 'chokidar';
 
@@ -111,7 +111,7 @@ async function writeAtomic(filePath: string, content: string): Promise<void> {
 async function walkTs(dir: string): Promise<string[]> {
   const results: string[] = [];
   async function recurse(current: string): Promise<void> {
-    let entries: Awaited<ReturnType<typeof fs.readdir>>;
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(current, { withFileTypes: true });
     } catch {
