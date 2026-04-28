@@ -5,23 +5,58 @@
  * for every DLQ job — ensuring DLQ handlers always write incidents inline
  * regardless of SYSTEM_INCIDENT_INGEST_MODE.
  *
- * NOTE: mock.module (both top-level and t.mock.module) is not available under
- * tsx v4.x even on Node 22.14.0 — tsx's ESM loader intercepts the module
- * resolution path before Node's test runner can hook it. This test is therefore
- * skipped; the forceSync invariant is covered structurally by reading the source
- * (dlqMonitorService.ts:42 always passes { forceSync: true }) and end-to-end by
- * the dlqMonitorRoundTrip integration test (G1).
+ * Uses dependency injection (startDlqMonitor accepts an optional deps.recordIncident)
+ * instead of mock.module, which is not available under tsx v4.x.
  *
- * If tsx ever adds mock.module support, replace the skip condition with `false`
- * and uncomment the mock setup and assertions below.
+ * Uses dynamic imports to set stub env vars before module load (env.ts validates
+ * at parse time and requires DATABASE_URL / JWT_SECRET / EMAIL_FROM).
  */
 
-import { test } from 'node:test';
+// Set required env stubs BEFORE any module that imports env.ts is loaded.
+process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://stub:stub@localhost/stub';
+process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'stub-secret-at-least-32-chars-long!!';
+process.env.EMAIL_FROM = process.env.EMAIL_FROM ?? 'stub@example.com';
+process.env.NODE_ENV = 'test';
+// Disable actual ingest so no DB writes occur if recordIncident leaks through.
+process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'false';
+
+import test from 'node:test';
 import assert from 'node:assert/strict';
 
-test('dlqMonitorService passes forceSync: true to recordIncident (mock.module unavailable under tsx — see file comment)', { skip: 'mock.module not available under tsx v4.x; covered by source inspection and dlqMonitorRoundTrip integration test' }, async () => {
-  // Would use mock.module to intercept incidentIngestor.recordIncident and
-  // confirm opts === { forceSync: true } on every DLQ handler invocation.
-  // See dlqMonitorService.ts:42 for the static confirmation.
-  assert.ok(true);
+test('dlqMonitorService passes forceSync: true to recordIncident', async () => {
+  const { startDlqMonitor } = await import('../dlqMonitorService.js');
+  type IncidentInput = Awaited<ReturnType<typeof import('../incidentIngestor.js')['recordIncident']>> extends void
+    ? Parameters<typeof import('../incidentIngestor.js')['recordIncident']>[0]
+    : never;
+
+  const captured: Array<{ input: unknown; opts: unknown }> = [];
+
+  const handlers = new Map<string, (job: unknown) => Promise<void>>();
+  const fakeBoss = {
+    work: async (name: string, _opts: unknown, handler: (job: unknown) => Promise<void>) => {
+      handlers.set(name, handler);
+      return name;
+    },
+  };
+
+  await startDlqMonitor(
+    fakeBoss as unknown as Parameters<typeof startDlqMonitor>[0],
+    {
+      recordIncident: async (input, opts) => {
+        captured.push({ input, opts });
+      },
+    },
+  );
+
+  // Invoke one captured handler with a fake DLQ job.
+  const [firstHandler] = handlers.values();
+  assert.ok(firstHandler, 'expected at least one DLQ handler registered');
+
+  await firstHandler({
+    id: 'job-1',
+    data: { organisationId: 'org-1', subaccountId: 'sub-1' },
+  });
+
+  assert.equal(captured.length, 1, 'expected exactly one recordIncident call');
+  assert.deepEqual(captured[0].opts, { forceSync: true });
 });

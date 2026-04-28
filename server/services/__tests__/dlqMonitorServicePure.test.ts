@@ -18,20 +18,12 @@ test('skips entries without deadLetter', () => {
   assert.deepEqual(deriveDlqQueueNames(config), ['a__dlq']);
 });
 
-test('deduplicates identical deadLetter values', () => {
-  // Build config programmatically so the Set dedup path is exercised —
-  // the convention checker requires key === dlq-prefix, so we inject the
-  // same entry under the same key via a Map-style construct.
-  const base = {
-    'shared': { deadLetter: 'shared__dlq' },
-  };
-  // Force two references to the same entry in the iterable to test dedup.
-  const config = Object.fromEntries([
-    ...Object.entries(base),
-    ...Object.entries(base),
-  ]) as unknown as Parameters<typeof deriveDlqQueueNames>[0];
-  assert.deepEqual(deriveDlqQueueNames(config), ['shared__dlq']);
-});
+// Dedup is unreachable under the convention check (every entry's deadLetter
+// must equal `<key>__dlq`, so two distinct keys cannot legally share a value).
+// Object.fromEntries also collapses duplicate keys at construction time, so a
+// test fixture cannot produce two entries with the same key. The Set in
+// deriveDlqQueueNames is defense-in-depth; an explicit test would require
+// bypassing the convention check, which would itself be a bug.
 
 test('throws when deadLetter does not match <queue>__dlq', () => {
   const config = {
