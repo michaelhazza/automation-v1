@@ -86,3 +86,4 @@ Phase 0 is the version actually being built now. It captures the durable wins (p
 
 - **Trigger watcher:** **Michael** (manual). Re-run the `~/.claude/projects/*.jsonl` audit on the time-based trigger date or when a qualitative pattern is noticed. The date below is checked into a markdown file only — not into a calendar or recurring-task system. If you want hard-enforcement of the time-based fallback, add a calendar entry separately.
 - **Next mandatory check date:** **2026-06-23**.
+- **On-demand health check:** `npm run code-graph:health` produces a one-page deterministic report covering adoption, correctness, watcher health, and recommendation (KEEP / TUNE / ESCALATE / KILL). The recommendation surfaces ESCALATE automatically when prorated arch-query volume crosses the Phase 1 threshold AND adoption is healthy — use this between ad-hoc audits, not as a replacement for the full audit on the mandatory check date.

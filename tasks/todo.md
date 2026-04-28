@@ -1331,3 +1331,64 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
 - [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
   - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
   - Defer to Phase 1 once shape stabilises — premature split risks churn if Phase 1 reshuffles boundaries again.
+
+## Follow-ups surfaced during ChatGPT PR final-review — code-graph-health-check (2026-04-28)
+
+Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health check command`). Reviewer verdict: **Approve with minor changes**. The two must-fix items (zero-adoption RED softening, correction-RED ≥2 threshold) are implemented in the same PR; the items below are reviewer-acknowledged "safe to defer" or "nice to have."
+
+- [ ] Performance scaling for transcript scanning at scale (ChatGPT R2 — health-check)
+  - Current behaviour: every health-check pass streams every `.jsonl` transcript whose mtime falls in the 14-day window across every matched project directory. Wall-clock today ≈ 14–17s on ≈30 transcripts; reviewer flagged this will degrade as Claude usage grows (large teams, long-lived repos).
+  - Suggested mitigations (pick one when the wall-clock budget tightens): (a) cap files per run (e.g. last N transcripts per dir, sorted by mtime); (b) short-circuit once any per-signal threshold is reached (e.g. once we've seen ≥10 cache references in section 1, stop scanning further files for that signal); (c) cache scan results per-transcript in a small SQLite or JSON sidecar keyed by file path + mtime, so re-scans are incremental.
+  - Defer until wall-clock approaches the 30s budget. Not blocking.
+
+- [ ] Walker alignment: log rawCoverage alongside clamped value (ChatGPT R2 — health-check)
+  - Current behaviour: `collectCoverage()` clamps `coveragePct` at 100 because the script's local file walker and `build-code-graph.ts`'s walker have a one-file divergence on edge cases. Reviewer agreed this is cosmetic-fine for now but flagged that two systems defining "truth" differently is a smell that will confuse future debugging.
+  - Suggested fix: surface both values in the collected JSON (`coverageRaw` + `coveragePct`) so the deterministic-data dump shows the divergence; the LLM prompt continues to use only the clamped value. Long-term: align the two walkers (pick one as canonical).
+  - Defer; not blocking.
+
+- [ ] Threshold versioning (ChatGPT R2 — health-check)
+  - Current behaviour: heuristic thresholds (`COVERAGE_GREEN_PCT`, `SKIP_RATE_FAIL_PCT`, `ESCALATE_QUERIES_PER_MONTH`, `STALE_CACHE_MIN`, `LOG_SIZE_FLAG_BYTES`, `ZERO_ADOPTION_MEANINGFUL_QUERIES`, `CORRECTION_RED_THRESHOLD`) are top-of-file constants. Reviewer flagged risk of silent drift between spec values in `tasks/code-intel-revisit.md` / `tasks/builds/code-intel-phase-0/plan.md` and what the script enforces.
+  - Suggested fix: centralise thresholds in a single `THRESHOLDS` config object; emit a `thresholdsVersion` field in the deterministic-data JSON for auditability; cross-reference each threshold to its spec source via inline comment. Optional: load from a checked-in config file so spec edits propagate without code changes.
+  - Defer; not blocking.
+
+- [ ] Trend awareness across dated reports (ChatGPT R2 — health-check)
+  - Current behaviour: each run writes `references/.code-graph-health-YYYY-MM-DD.md` independently. Reviewer noted the structure already supports trend analysis (adoption rising/falling, errors increasing) — natural next step.
+  - Suggested fix: on each run, read the most recent prior dated file, diff key metrics (adoption, archQueries, coverage, watcher-error count), and surface deltas in section 1 prose ("up from 60 last week" / "watcher errors trending up: 3 → 12 → 27").
+  - Defer; not blocking. Implement once 3+ dated reports accumulate.
+
+- [x] Watcher health: "lock without PID" should explicitly trigger YELLOW (ChatGPT R2 — health-check)
+  - Resolved alongside the ChatGPT R3 P1/P2 fixes. `computeVerdict()` now classifies `watcherRunning === null` as YELLOW with reason "Watcher lock present but PID unknown — ambiguous state, investigate", and the TUNE recommendation triggers on this state too. Pulled in early because the script is now functioning as a decision engine — silent ambiguous states are the same defect class as P1's cross-project contamination.
+
+- [ ] Richer adoption signal: per-session breakdown (ChatGPT R2 — health-check)
+  - Current behaviour: section 1 reports total references and unique sessions. Reviewer suggested adding "references per session" and "sessions with usage / total sessions" for adoption-quality signal.
+  - Suggested fix: `totalSessionsInWindow` is already collected in `QueryVolumeSignals` — expose it in the LLM prompt's data block plus a derived `sessionsWithUsage / totalSessions` ratio. Section 1 prose can then say "5 of 30 sessions consulted the cache" rather than just "5 sessions."
+  - Defer; not blocking. Nice-to-have for narrative depth.
+
+- [ ] LLM prompt verbosity reduction (ChatGPT R2 — health-check)
+  - Current behaviour: ~750-token prompt, runtime cost negligible.
+  - Suggested fix: if/when token cost matters, trim repeated explanations and condense the section 4 bucket guidance to a single sentence.
+  - Defer; not blocking. Cosmetic.
+
+## ChatGPT PR final-review — round 3 (P1 + P2 applied) — code-graph-health-check (2026-04-28)
+
+Reviewer's framing: the script has crossed from "utility" to "decision engine," which raises the bar — silently misleading data and rule contradictions are now critical, not refinements.
+
+- [x] **P1 — Cross-project transcript contamination** (resolved)
+  - `resolveProjectDirs()` previously fell back to scanning every directory under `~/.claude/projects` when no exact / sibling match was found. That silently mixed adoption / correction / volume signals from unrelated codebases, producing a misleading "this repo's cache is healthy" report when the truth was "this repo has no transcripts." Resolved: the fallback block is removed; the function returns `[]` on no match, and the downstream `transcriptsAvailable === false` path correctly surfaces "no session data found." Code comment in the function explains the deliberate non-fallback.
+
+- [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
+  - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
+
+## ChatGPT PR final-review — round 4 (deferred refinements) — code-graph-health-check (2026-04-28)
+
+Reviewer's final pass said "merge it" and flagged two optional notes explicitly framed as "not now" / "next evolution." Logged here so they aren't lost; both are post-merge work, not blockers.
+
+- [ ] Ratio floor on `healthyAdoption` (ChatGPT R4 — health-check)
+  - Current behaviour: `healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` in `computeVerdict()`. The `references >= 3` floor encodes a minimum quality, but is decoupled from query volume — so 3 references against 100+ archQueries (a 3% consult rate) still counts as "healthy." Reviewer flagged this as "slightly optimistic, not wrong."
+  - Suggested fix: add a ratio floor — `references / archQueries >= 0.1` — alongside the absolute threshold. Pick the floor's exact value once we have more dated reports to calibrate against.
+  - Defer; reviewer explicitly said "later, not now." Implement only if the existing rule fires ESCALATE on a low-ratio scenario in real data.
+
+- [ ] Booleans → weighted-score verdict architecture (ChatGPT R4 — health-check)
+  - Current behaviour: rule-based thresholds + boolean gates compose the verdict in `computeVerdict()`. Works correctly for Phase 0's signal set.
+  - Suggested fix: convert each signal class (adoption / correctness / operational) to a numeric score, compute the verdict from a weighted score composition. Reviewer's framing: this matters once trend analysis lands or weak signals start combining — neither is true today.
+  - Defer; reviewer explicitly said "where this naturally evolves" and "not something to implement now." Revisit if/when the trend-awareness item (round 2) lands, since that's the natural co-arrival point.
