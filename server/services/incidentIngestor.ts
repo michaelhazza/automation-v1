@@ -83,11 +83,17 @@ function isAsyncMode(): boolean {
 }
 
 /** The single public API — fire-and-forget, never throws. */
-export async function recordIncident(input: IncidentInput): Promise<void> {
+export async function recordIncident(
+  input: IncidentInput,
+  opts?: { forceSync?: boolean },
+): Promise<void> {
   if (!isIngestEnabled()) return;
 
   try {
-    if (isAsyncMode()) {
+    // forceSync overrides SYSTEM_INCIDENT_INGEST_MODE — used by
+    // dlqMonitorService to close the §3.4 loop-hazard invariant. See spec.
+    const useAsync = opts?.forceSync === true ? false : isAsyncMode();
+    if (useAsync) {
       await enqueueIngest(input);
     } else {
       const fingerprint = computeFingerprint(input);

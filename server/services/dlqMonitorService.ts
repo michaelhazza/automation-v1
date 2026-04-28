@@ -10,17 +10,10 @@ import type PgBoss from 'pg-boss';
 import { logger } from '../lib/logger.js';
 import { safeSerialize } from '../lib/jobErrors.js';
 import { recordIncident } from './incidentIngestor.js';
+import { JOB_CONFIG } from '../config/jobConfig.js';
+import { deriveDlqQueueNames } from './dlqMonitorServicePure.js';
 
-const DLQ_QUEUES = [
-  'agent-scheduled-run__dlq',
-  'agent-org-scheduled-run__dlq',
-  'agent-handoff-run__dlq',
-  'agent-triggered-run__dlq',
-  'execution-run__dlq',
-  'workflow-resume__dlq',
-  'llm-aggregate-update__dlq',
-  'llm-monthly-invoices__dlq',
-];
+const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);
 
 export async function startDlqMonitor(boss: PgBoss): Promise<void> {
   for (const dlqName of DLQ_QUEUES) {
@@ -46,7 +39,7 @@ export async function startDlqMonitor(boss: PgBoss): Promise<void> {
           subaccountId: typeof payload.subaccountId === 'string' ? payload.subaccountId : null,
           fingerprintOverride: `job:${sourceQueue}:dlq`,
           errorDetail: { jobId: job.id },
-        });
+        }, { forceSync: true });
       },
     );
   }
