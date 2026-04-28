@@ -35,6 +35,10 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
   let stepNumber = 0;
   let lastCommandOutput: string | undefined;
   let lastCommandExitCode: number | undefined;
+  // Populated by Task 6 (`runQualityChecks` after every write_file /
+  // git_commit). Held here so it persists across the next `observe()` call
+  // without leaking through every action result.
+  let lastChecks: Observation['lastChecks'] | undefined;
 
   return {
     mode: 'dev',
@@ -46,6 +50,7 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
         files,
         lastCommandOutput: lastCommandOutput ? truncateMiddle(lastCommandOutput, 4000) : undefined,
         lastCommandExitCode,
+        lastChecks,
       });
     },
 
