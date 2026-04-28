@@ -78,3 +78,114 @@ Eleven additional gaps are catalogued below (§5). All are mechanically fixable.
 ### Bottom line
 
 The agent is the right shape. The gap is **producer-side coverage**: too many code paths can fail without producing a row in `system_incidents`. Close G1–G8 and the agent will see every action class. G9–G15 are quality improvements that can land post-launch.
+
+---
+
+## 2. System Monitor agent — inventory of what it has today
+
+This section is the "definition of done" baseline. Anything not in this list is either missing (G-numbered above) or out of scope for Phase 0–2.5.
+
+### 2.1 Schema (3 tables, all bypass RLS, sysadmin-gated at route layer)
+
+| Table | Rows | Purpose |
+|---|---|---|
+| `system_incidents` | one per active fingerprint (partial unique index on `fingerprint WHERE status IN ('open','investigating','remediating','escalated')`) | The flagged-for-review surface. Carries severity, status, source, `agent_diagnosis`, `investigate_prompt`, `triage_status`, `triage_attempt_count`, `last_triage_job_id`. |
+| `system_incident_events` | append-only audit log | 14+ event types: `occurrence`, `acknowledged`, `resolved`, `escalated`, `escalation_blocked`, `agent_diagnosis_added`, `agent_triage_timed_out`, etc. |
+| `system_incident_suppressions` | named mute rules | Carries `suppressedCount`/`lastSuppressedAt` feedback counters so suppressed traffic is still measurable. |
+| `system_monitor_baselines` | one per `(entity_kind, entity_id, metric_name)` | Rolling-window p50/p95/p99/mean/stddev/min/max. Refreshed every 15 min. Read via `BaselineReader`. |
+| `system_monitor_heuristic_fires` | append-only | Every heuristic fire (clustered later for triage). |
+
+Migration sequence visible in the repo: `0233_phase_a_foundations.sql`, `0239_system_incidents_last_triage_job_id.sql`, `0216_agent_runs_delegation_telemetry.sql`. All schema decisions match the spec.
+
+### 2.2 Source enum (what kinds of failures the agent expects)
+
+`SystemIncidentSource = 'route' | 'job' | 'agent' | 'connector' | 'skill' | 'llm' | 'synthetic' | 'self'` (`server/db/schema/systemIncidents.ts:10`).
+
+Each value has a default severity inference path in `inferDefaultSeverity` (`incidentIngestorPure.ts:66-86`). Notable: `route` 4xx defaults to `low`, 5xx to `medium`; `job` defaults to `high`; `self` defaults to `high`; `connector` defaults to `low`. (Severity escalates monotonically per fingerprint lifecycle via `maxSeverity`.)
+
+### 2.3 Heuristic registry (23 heuristics, code-as-config)
+
+Registered in `server/services/systemMonitor/heuristics/index.ts`. Phase-gated via `SYSTEM_MONITOR_HEURISTIC_PHASES` env var; default both 2.0 and 2.5 active.
+
+| Category | Phase 2.0 (day-one) | Phase 2.5 |
+|---|---|---|
+| **Agent quality (9)** | `emptyOutputBaselineAware`, `maxTurnsHit`, `toolSuccessButFailureLanguage`, `runtimeAnomaly`, `tokenAnomaly`, `repeatedSkillInvocation`, `finalMessageNotAssistant`, `outputTruncation`, `identicalOutputDifferentInputs` | — |
+| **Skill execution (3)** | `toolOutputSchemaMismatch`, `skillLatencyAnomaly`, `toolFailedButAgentClaimedSuccess` | — |
+| **Infrastructure (7)** | `jobCompletedNoSideEffect`, `connectorEmptyResponseRepeated` | `cacheHitRateDegradation`, `latencyCreep`, `retryRateIncrease`, `authRefreshSpike`, `llmFallbackUnexpected` |
+| **Systemic (4)** | — | `successRateDegradationTrend`, `outputEntropyCollapse`, `toolSelectionDrift`, `costPerOutcomeIncreasing` |
+
+Each heuristic carries `{id, severity, confidence, expectedFpRate, suppressionRules, baselineRequirements}`.
+
+### 2.4 Synthetic checks (10 checks; presence-of-event ≠ heuristics, which check absence of expected events)
+
+Listed in `server/services/systemMonitor/synthetic/index.ts`:
+
+`agentRunSuccessRateLow`, `connectorErrorRateElevated`, `connectorPollStale`, `dlqNotDrained`, `heartbeatSelf`, `incidentSilence`, `noAgentRunsInWindow`, `pgBossQueueStalled`, `silentAgentSuccess`, `sweepCoverageDegraded`.
+
+Run on a 60s tick via `syntheticChecksTickHandler.ts` (queue: `system-monitor-synthetic-checks`). Failures inside one check are isolated — the tick continues even if one check throws.
+
+### 2.5 Triage agent — read skills (9)
+
+In `server/services/systemMonitor/skills/`:
+
+| Skill | What it reads |
+|---|---|
+| `read_incident` | One incident row + recent events |
+| `read_agent_run` | One `agent_runs` row + messages + skill executions |
+| `read_recent_runs_for_agent` | Last N runs for an agent (cohort comparison) |
+| `read_skill_execution` | One `skill_executions` row |
+| `read_baseline` | Rolling window p50/p95 etc. for an `(entity_kind, entity_id, metric)` |
+| `read_heuristic_fires` | Recent fires by `(entity_kind, entity_id)` |
+| `read_connector_state` | Last poll, lease, error count for a connector |
+| `read_dlq_recent` | Recent DLQ entries for a queue |
+| `read_logs_for_correlation_id` | **NON-FUNCTIONAL — see G2.** Process-local rolling buffer; reads from `logBuffer.ts` which has no producer. |
+
+### 2.6 Triage agent — write skills (2, narrowly scoped)
+
+| Skill | Effect |
+|---|---|
+| `write_diagnosis` | Updates the incident row's `agent_diagnosis` JSON + `investigate_prompt` text. Predicated on `triage_status='running'` (post-fix) so terminal-transition races are detected. |
+| `write_event` | Appends an `agent_diagnosis_added` row to `system_incident_events`. |
+
+The agent has **no other write access**. Auto-remediation is explicitly out of scope (Phase 3 deferred — see `phase-A-1-2-spec.md` Q12).
+
+### 2.7 Triage agent — system prompt + Investigate-Fix Protocol
+
+`server/services/systemMonitor/triage/agentSystemPrompt.ts` is the single source of truth for the prompt. Seeded into `system_agents.master_prompt` for the `system_monitor` row. Imports same module at runtime (no drift between seeded value and live prompt).
+
+The prompt enforces:
+- Diagnose only — no remediation
+- Honest uncertainty (low/medium/high confidence + alternative hypothesis)
+- Cite evidence (row id, file:line, baseline reading, heuristic fire id)
+- Surface what cannot be seen (thin evidence is a valid output)
+- Two artefacts per triage: structured diagnosis JSON + paste-ready Investigate-Fix prompt
+- Token budget: 400–800 target, 1,500 hard cap
+
+The prompt embeds the full Investigate-Fix Protocol structure (Protocol, Incident, Problem statement, Evidence, Hypothesis, Investigation steps, Scope, Expected output, Approval gate). All required sections are listed. Forbidden constructs are explicit (no auto-fix instructions, no commit/push/deploy without approval).
+
+### 2.8 Job queues the agent owns
+
+| Queue | Purpose | Cadence |
+|---|---|---|
+| `system-monitor-ingest` | Async-mode incident ingest (consumed by `incidentIngestorAsyncWorker` — **see G3, worker not registered**) | Per-incident enqueue |
+| `system-monitor-notify` | WebSocket broadcast on incident open/update | Per-incident enqueue |
+| `system-monitor-triage` | Run the agent against one incident | Per-incident, severity ≥ medium, after dedup |
+| `system-monitor-sweep` | Run heuristic registry over last 15 min of activity | Every 5 min |
+| `system-monitor-synthetic-checks` | Run all synthetic checks | Every 60 s |
+| `system-monitor-baseline-refresh` | Refresh baseline materialisation | Every 15 min |
+| `system-monitor-self-check` | Detect ingest-pipeline degradation (process-local) | Every 5 min |
+
+### 2.9 Admin UI
+
+`/system/incidents` (`SystemIncidentsPage.tsx`):
+- Sortable/filterable incident table
+- Inline detail drawer with ack / resolve / suppress / escalate
+- WebSocket-updated nav badge (`system_incident:updated` event)
+- Diagnosis filter pill: `all / diagnosed / awaiting / not-triaged / failed-triage` (post Tier-1 fix)
+- Test-incident flag hides synthetic / dev incidents from default list
+
+This is the surface the operator copies the Investigate-Fix prompt from when invoking the protocol.
+
+### 2.10 What this all adds up to
+
+The agent has the full pipeline from "fingerprint dedup → heuristic fire / synthetic fire / direct ingest → triage → diagnosis → paste-ready prompt → operator". The structural surface is complete. **The only structural item missing is the log buffer producer (G2).** Everything else flagged in this audit is producer-side: code paths that should emit `recordIncident(...)` but don't.
