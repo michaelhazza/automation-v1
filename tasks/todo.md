@@ -1104,3 +1104,40 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
 - **REQ #13 — `action: 'new'` emit on review item creation.** RESOLVED. Emit added inside `reviewService.createReviewItem` (`server/services/reviewService.ts:60-67`). Single call site closes all 6 caller paths.
 - **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** RESOLVED. Single emit added per bulk request in `server/routes/reviewItems.ts` bulk-approve (after `reviewService.bulkApprove`) and bulk-reject (after `reviewService.bulkReject`). `subaccountId: null` per spec contract (string | null) — bulk batches may span subaccounts and the payload field is informational only (§4.3 payload-not-trusted rule).
 
+
+## Deferred from spec-conformance review — pre-test-backend-hardening (2026-04-28)
+
+**Captured:** 2026-04-28T03:19:37Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-backend-hardening-2026-04-28T03-19-37Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md`
+
+- [ ] **REQ §1.1 Gap D — failure-path `agent_run_llm_payloads` row not inserted**
+  - Spec section: §1.1 Acceptance criteria ("A failed-mid-flight agent-run LLM call (provider error) produces llm.requested → llm.completed (with terminalStatus: 'failed' in the payload) and the corresponding agent_run_llm_payloads row.")
+  - Gap: implementation only inserts the payload row on the success path; the failure path emits `llm.completed` with `payloadInsertStatus: 'failed'` and `payloadRowId: null` and writes no row (`server/services/llmRouter.ts:1265` "No payload row on failure — no provider response to persist.").
+  - Suggested approach: persist a partial row on failure carrying the system prompt + messages + tool definitions, with a null/error response field; OR explicitly amend the spec to make the failure-path row optional. Decide before relying on `agent_run_llm_payloads` for failed-call observability.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE**
+  - Spec section: §1.1 Acceptance criteria ("the catch handler MUST treat that row as failed (set payloadInsertStatus: 'failed', payloadRowId: null) AND a follow-up DELETE on the contested key MUST run inside the same tx so the post-commit invariant holds")
+  - Gap: catch at `server/services/llmRouter.ts:1619-1628` sets the marker but never issues a follow-up DELETE. Implementation comment at lines 1586-1591 explicitly argues the payload insert must NOT be in a shared tx with the ledger write ("changes ordering semantics for the cost breaker") — directly contradicts the spec MUST.
+  - Suggested approach: either restructure so the payload insert + (on failure) DELETE run in a sibling tx that doesn't interleave with the cost-breaker logic, OR amend the spec to relax the post-commit invariant to "no-row-or-row, never partial" without the DELETE requirement. The current state silently accepts ambiguous post-commit visibility under driver retry conditions.
+
+- [ ] **REQ §1.1 Gap F — `llmRouterLaelIntegration.test.ts` is a stub**
+  - Spec section: §1.1 Tests + Definition of Done ("one integration test added and green")
+  - Gap: all three test cases in `server/services/__tests__/llmRouterLaelIntegration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. They pass trivially without exercising the emission + payload-insert code path.
+  - Suggested approach: implement against the existing test-DB harness already used by `pgboss-zod-hardening` integration tests. Cover: happy-path emission ordering, budget_blocked silence, non-agent-run silence. Until then, §1.1's structural invariants rely on manual smoke + 40-case pure-predicate test only.
+
+- [ ] **REQ §1.2 Gap B — AutomationStepError shape divergence on missing-connection**
+  - Spec section: §1.2 Approach step 2 (literal example shape with `type: 'configuration'`, `status: 'missing_connection'`, `context: { automationId, missingKeys }`)
+  - Gap: existing `AutomationStepError` interface (`server/lib/workflow/types.ts:79`) does not have `'configuration'` in its `type` literal union and lacks `status`/`context` fields. Implementation pragmatically uses `type: 'execution'`, sets `status: 'missing_connection'` only on the event payload (not on the error itself), and inlines `missing.join(', ')` into the error message instead of populating a structured `context.missingKeys`.
+  - Suggested approach: either extend `AutomationStepError` to add `'configuration'` to its `type` union and add optional `status` + `context` fields (then update all error-handler call sites to handle the richer shape) OR amend the spec example to match the existing type system. Today's behaviour satisfies the user-facing acceptance criterion via the message text but does not satisfy structured-context consumers.
+
+- [ ] **REQ §1.3 Gap C — `workflowEngineApprovalResumeDispatch.integration.test.ts` is a stub**
+  - Spec section: §1.3 Tests + Definition of Done ("integration test added and green") and Acceptance ("a double-approve … results in exactly one webhook dispatch, asserted by direct call-count on the test webhook receiver — NOT inferred from terminal status alone")
+  - Gap: all three test cases in `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts` use `assert.ok(true, 'TODO: implement with test DB harness')`. Spec explicitly demands call-count assertion, not terminal-status assertion.
+  - Suggested approach: build a fake-webhook-receiver harness (similar to nock) that increments a counter and exposes it for assertion. Wire through a test DB that supports the `awaiting_approval → running` UPDATE race the implementation relies on at `workflowEngineService.ts:1752-1759`. Progress.md acknowledges manual smoke as "the gating acceptance check" — that is not what the spec asks for.
+
+- [ ] **REQ §1.7 Gap A — async-worker path transitively calls `checkThrottle`**
+  - Spec section: §1.7 step 1 ("Async-worker exclusion contract (MUST hold): the async-worker ingestion path MUST NOT call checkThrottle.")
+  - Gap: `incidentIngestorAsyncWorker.ts:15` calls `ingestInline(payload.input)`. The branch wired `checkThrottle` into `ingestInline`. Therefore the async-worker path now transitively calls `checkThrottle`. The spec's MUST is structurally violated by the implementation choice.
+  - Suggested approach: choose one of (a) split the body of `ingestInline` so the worker calls a `_ingestInlineSkippingThrottle` variant — but that introduces a new primitive in violation of §0.3 (b) collapse the contract: amend the spec to drop the async-worker-exclusion MUST since `recordIncident` routes EITHER through async OR through sync (line 90: `if (isAsyncMode())`), so there's no double-throttle in any single request lifecycle anyway, OR (c) move the throttle check up into `recordIncident` and gate it on `isAsyncMode() === false`. Option (b) reflects what the implementer actually achieved (single throttle point, no double-throttle); option (c) is the closest mechanical fix to the spec's intent.
+
