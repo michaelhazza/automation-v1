@@ -1292,3 +1292,86 @@ Per CLAUDE.md gate-cadence rule: `npm run test:gates` is ONLY run pre-merge ("we
 - Targeted integration test invocation only if the implementer wants belt-and-braces
 
 ---
+
+## §8 Execution-safety contracts
+
+Per `docs/spec-authoring-checklist.md` Section 10, every new write path or externally-triggered operation must declare its idempotency posture, retry classification, and concurrency guard. This section pins those contracts for every write introduced by this spec.
+
+### §8.1 Logger → log buffer write (G2)
+
+| Property | Value |
+|---|---|
+| **Write path** | `logger.{info,warn,error,debug}(event, data)` → fire-and-forget → `appendLogLine(line)` |
+| **Idempotency posture** | `non-idempotent (intentional)` — every log emission is a distinct event. Duplicate calls produce duplicate buffer entries; that is correct (a single log call could be made twice if the caller retries). |
+| **Retry classification** | `safe` — the buffer is in-memory + LRU-evicted. Repeated writes only push out older entries. |
+| **Concurrency guard** | Process-local; no inter-process race. Single-threaded V8 means concurrent calls serialise at the JS layer. |
+| **Failure mode** | The lazy import or the `appendLogLine` call may throw. Errors are swallowed by `appendLogLineSafe`. The log entry still goes to console (the primary log surface). The buffer is best-effort. |
+| **Loop hazard** | None. The buffer never calls back into the logger. |
+
+### §8.2 `JOB_CONFIG` lookup (G1)
+
+Not a write path — pure read. No execution-safety contract needed. The `deriveDlqQueueNames` function is pure, deterministic, and returns the same output for the same input.
+
+### §8.3 DLQ → `system_incidents` row (G1, G5, G11 — DLQ branch)
+
+| Property | Value |
+|---|---|
+| **Write path** | `dlqMonitorService.startDlqMonitor` → `boss.work('<queue>__dlq', handler)` → handler calls `recordIncident({source: 'job', fingerprintOverride: 'job:<queue>:dlq', ...})` |
+| **Idempotency posture** | `key-based` — partial unique index on `system_incidents.fingerprint WHERE status IN ('open','investigating','remediating','escalated')` (existing — see `server/db/schema/systemIncidents.ts:73-75`). Repeated DLQ events for the same queue collapse into one row with `occurrenceCount` ticking up. |
+| **Retry classification** | `safe` — `recordIncident` is fire-and-forget and never throws. Even if the upsert fails, `recordFailure()` increments the process-local counter, the self-check job picks it up, and a `self:ingestor:ingest_pipeline_degraded` row is created. |
+| **Concurrency guard** | DB upsert with `ON CONFLICT (fingerprint) WHERE status IN ('open',...) DO UPDATE SET occurrence_count = occurrence_count + 1`. First-write-wins on the insert path; subsequent concurrent writes hit the update branch and increment atomically. |
+| **Terminal event** | `occurrence` event appended to `system_incident_events` inside the same DB transaction as the upsert. Existing behaviour, unchanged. |
+
+### §8.4 Async-ingest queue → `system_incidents` row (G3)
+
+| Property | Value |
+|---|---|
+| **Write path** | `recordIncident` (async mode) → `boss.send('system-monitor-ingest', { input, correlationId })` → worker → `handleSystemMonitorIngest` → `ingestInline` → upsert |
+| **Idempotency posture** | `key-based` — same partial unique index as §8.3. pg-boss may deliver the same job twice (at-least-once). Duplicate deliveries collapse via the upsert. |
+| **Retry classification** | `guarded` — the worker re-throws on inner failure (`throw err` in `incidentIngestorAsyncWorker.ts:21`). pg-boss retries per `JOB_CONFIG.system-monitor-ingest.retryLimit` (3, with backoff). Retry exhaustion → `system-monitor-ingest__dlq`, which is subscribed (post G1) and will record a meta-incident with `fingerprintOverride: 'job:system-monitor-ingest:dlq'`. |
+| **Concurrency guard** | Same as §8.3 (partial unique index + upsert). |
+| **Loop hazard** | If the meta-incident from a `system-monitor-ingest__dlq` event itself fails to ingest in async mode, would it loop? The DLQ subscriber (`dlqMonitorService`) calls `recordIncident` synchronously (sync mode within its own scope — `recordIncident` checks the env var per call). So the DLQ-emitted incident bypasses the async queue entirely. No loop. **This is a correctness invariant — verify at implementation that `dlqMonitorService` does not somehow invoke the async path.** Documented in §3.4. |
+| **Terminal event** | Same as §8.3. |
+
+### §8.5 Webhook 5xx incident emission (G7)
+
+| Property | Value |
+|---|---|
+| **Write path** | webhook handler catch block → `recordIncident({source: 'route', fingerprintOverride: 'webhook:<provider>:<failure_class>'})` |
+| **Idempotency posture** | `key-based` via `fingerprintOverride`. Repeated handler failures with the same override collapse into one `system_incidents` row. |
+| **Retry classification** | `safe` — `recordIncident` is fire-and-forget. Webhook handler returns a 500 to the caller after the emit (or in the GitHub case, the caller already received a 200 ack at line 112 — emit is post-ack). |
+| **Concurrency guard** | DB upsert. |
+| **Failure mode in incident emission** | If `recordIncident` itself throws (impossible per its contract, but defensive), the handler still returns the 500 response. The catch is inside the handler's own try/catch. |
+| **Caller retry** | Webhook providers (GHL, GitHub) retry on 5xx. Each retry produces another incident (deduplicated to one row, `occurrenceCount` ticks up). This is the desired signal — repeated webhook failures mean the agent should triage. |
+
+### §8.6 Skill-analyzer terminal-failure incident emission (G11)
+
+| Property | Value |
+|---|---|
+| **Write path** | pg-boss handler catch block → `recordIncident({source: 'job', fingerprintOverride: 'skill_analyzer:terminal_failure', ...})` → re-throw → pg-boss retry/DLQ |
+| **Idempotency posture** | `key-based` via `fingerprintOverride`. All skill-analyzer terminal failures across all jobs collapse into one row. |
+| **Retry classification** | `guarded` — handler re-throws after emitting the incident. pg-boss retries per `JOB_CONFIG.skill-analyzer.retryLimit` (1, with 5-min delay). Retry exhaustion → `skill-analyzer__dlq`, subscribed (post G1) — emits another DLQ-sourced incident with `fingerprintOverride: 'job:skill-analyzer:dlq'`. |
+| **Concurrency guard** | DB upsert. |
+| **Dedup interaction** | The `skill_analyzer:terminal_failure` and `job:skill-analyzer:dlq` fingerprints are DIFFERENT. The first counts every retry attempt; the second only fires on retry exhaustion. Operators see both — first as "skill analyzer is failing" (high-cardinality, fast signal), second as "skill analyzer has given up" (lower-cardinality, terminal). Two related but distinct incidents is the intended design. |
+| **Re-throw rationale** | `processSkillAnalyzerJob` is crash-resumable per `JOB_CONFIG['skill-analyzer']` comment. Swallowing the error would mark the pg-boss job as `completed`, breaking crash-resume. |
+
+### §8.7 No state-machine modifications
+
+This spec does NOT introduce or modify any state machine. The triage agent's `triage_status` lifecycle, the incident `status` enum, the agent run statuses, and the workflow run status are all unchanged.
+
+### §8.8 No new DB unique constraints
+
+This spec does NOT introduce any new DB unique constraint. The existing partial unique index on `system_incidents.fingerprint` (created in Phase 0/0.5) is what guarantees dedup. No new HTTP-mapping concerns.
+
+### §8.9 Terminal event guarantee
+
+Every fail path defined by this spec produces exactly one `system_incidents` row (via dedup) with associated `system_incident_events` entries:
+
+- DLQ failure → `occurrence` event with `actor_kind: 'system'`.
+- Webhook failure → same.
+- Skill-analyzer terminal failure → same.
+- Async-ingest worker failure → same.
+
+The `occurrence` event is appended atomically with the row upsert (`incidentIngestor.ts:261-279`, in the same `db.transaction`). Post-terminal events (acknowledge, resolve, etc.) are unchanged from the existing pipeline.
+
+---
