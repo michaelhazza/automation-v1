@@ -1,68 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { db } from '../../db/index.js';
-import { systemIncidents } from '../../db/schema/index.js';
-import { eq } from 'drizzle-orm';
-import { hashFingerprint } from '../../services/incidentIngestorPure.js';
 
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-test('skill-analyzer terminal failure produces a system_incidents row', { skip: SKIP }, async () => {
+let db: typeof import('../../db/index.js')['db'];
+let systemIncidents: typeof import('../../db/schema/index.js')['systemIncidents'];
+let eq: typeof import('drizzle-orm')['eq'];
+let hashFingerprint: typeof import('../../services/incidentIngestorPure.js')['hashFingerprint'];
+let runSkillAnalyzerJobWithIncidentEmission: typeof import('../skillAnalyzerJobWithIncidentEmission.js')['runSkillAnalyzerJobWithIncidentEmission'];
+
+if (!SKIP) {
+  ({ db } = await import('../../db/index.js'));
+  ({ systemIncidents } = await import('../../db/schema/index.js'));
+  ({ eq } = await import('drizzle-orm'));
+  ({ hashFingerprint } = await import('../../services/incidentIngestorPure.js'));
+  ({ runSkillAnalyzerJobWithIncidentEmission } = await import('../skillAnalyzerJobWithIncidentEmission.js'));
+}
+
+test('skill-analyzer wrapper re-throws + writes incident', { skip: SKIP }, async () => {
   const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
-  const originalJobId = 'test-job-' + Date.now();
+  const fakeJobId = 'test-job-' + Date.now();
   let propagatedError: unknown = null;
-
   try {
-    const { recordIncident } = await import('../../services/incidentIngestor.js');
-
-    try {
-      throw new Error('simulated handler failure');
-    } catch (err) {
-      recordIncident({
-        source: 'job',
-        severity: 'high',
-        summary: `Skill analyzer terminal failure for job ${originalJobId}: simulated handler failure`,
-        errorCode: 'skill_analyzer_failed',
-        stack: err instanceof Error ? err.stack : undefined,
-        fingerprintOverride: 'skill_analyzer:terminal_failure',
-        errorDetail: { jobId: originalJobId },
-      });
-      throw err;
-    }
+    await runSkillAnalyzerJobWithIncidentEmission(fakeJobId, {
+      processFn: async (_jobId) => {
+        throw new Error('simulated handler failure');
+      },
+    });
   } catch (err) {
     propagatedError = err;
   }
+
+  assert.ok(propagatedError instanceof Error, 'expected error to be re-thrown');
+  assert.equal((propagatedError as Error).message, 'simulated handler failure');
 
   // Wait for the incident write to commit (sync mode).
   await new Promise(r => setTimeout(r, 100));
 
   const [row] = await db.select().from(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
-  assert.ok(row, 'expected a system_incidents row');
-  assert.equal(row.source, 'job');
-  assert.equal(row.severity, 'high');
+  assert.ok(row, 'expected a system_incidents row from wrapper invocation');
   assert.equal(row.errorCode, 'skill_analyzer_failed');
-  assert.ok((row.latestErrorDetail as { jobId?: string }).jobId === originalJobId, 'expected jobId in errorDetail');
-  assert.ok(propagatedError instanceof Error, 'expected error to be re-thrown');
-  assert.equal((propagatedError as Error).message, 'simulated handler failure');
+  assert.equal(row.severity, 'high');
+  assert.ok((row.latestErrorDetail as { jobId?: string }).jobId === fakeJobId, 'expected jobId in errorDetail');
 });
 
 test('skill-analyzer dedup: 5 failures collapse to one row with occurrenceCount=5', { skip: SKIP }, async () => {
   const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
-  const { recordIncident } = await import('../../services/incidentIngestor.js');
-
   for (let i = 0; i < 5; i++) {
-    recordIncident({
-      source: 'job',
-      severity: 'high',
-      summary: `Skill analyzer terminal failure for job test-${i}: bang`,
-      errorCode: 'skill_analyzer_failed',
-      fingerprintOverride: 'skill_analyzer:terminal_failure',
-      errorDetail: { jobId: `test-${i}` },
-    });
+    await runSkillAnalyzerJobWithIncidentEmission(`test-${i}`, {
+      processFn: async (_jobId) => {
+        throw new Error('bang');
+      },
+    }).catch(() => {/* expected re-throw, ignore */});
     await new Promise(r => setTimeout(r, 50));
   }
 
