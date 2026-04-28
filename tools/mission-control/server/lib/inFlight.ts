@@ -12,7 +12,6 @@ import { join } from 'node:path';
 import {
   parseCurrentFocusBlock,
   parseProgressMd,
-  parseReviewLogFilename,
   parseVerdictFromLog,
   pickLatestLogForSlug,
   type Phase,
@@ -42,6 +41,33 @@ export interface InFlightItem {
     completed_chunks: number | null;
     total_chunks: number | null;
   } | null;
+}
+
+/**
+ * Derive a phase from the latest review log's verdict — used when the build is
+ * not the active focus and therefore has no machine-block status of its own.
+ * Maps the green-family verdicts to MERGE_READY and the change-requested family
+ * to REVIEWING; falls back to BUILDING when there's no verdict.
+ */
+export function derivePhaseFromVerdict(verdict: string | null): Phase {
+  if (!verdict) return 'BUILDING';
+  switch (verdict) {
+    case 'APPROVED':
+    case 'READY_FOR_BUILD':
+    case 'CONFORMANT':
+    case 'CONFORMANT_AFTER_FIXES':
+    case 'PASS':
+    case 'PASS_WITH_DEFERRED':
+      return 'MERGE_READY';
+    case 'CHANGES_REQUESTED':
+    case 'NEEDS_REVISION':
+    case 'NEEDS_DISCUSSION':
+    case 'NON_CONFORMANT':
+    case 'FAIL':
+      return 'REVIEWING';
+    default:
+      return 'BUILDING';
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -138,7 +164,13 @@ export async function composeInFlight(config: Config): Promise<InFlightItem[]> {
 
     const isActive = activeFocus.slug === slug;
     const branch = isActive ? activeFocus.branch : null;
-    const phase: Phase = isActive && activeFocus.status ? activeFocus.status : 'BUILDING';
+    // S2: phase resolution per spec § C4 — machine block status when the build
+    // is the active focus, else derived from the latest review verdict, else
+    // BUILDING default.
+    const phase: Phase =
+      isActive && activeFocus.status
+        ? activeFocus.status
+        : derivePhaseFromVerdict(latest_review?.verdict ?? null);
 
     let pr: InFlightItem['pr'] = null;
     if (branch && config.githubRepo) {

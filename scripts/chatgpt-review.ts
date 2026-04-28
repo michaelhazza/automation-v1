@@ -104,9 +104,13 @@ function printHelp(): void {
 }
 
 async function readStdin(): Promise<string> {
+  // S1: when invoked from a TTY with no piped input, 'end' never fires until
+  // Ctrl-D, which silently hangs the CLI. Detect and return empty so the
+  // caller's "no input received" branch surfaces a clean error.
+  if (process.stdin.isTTY) return '';
   return new Promise((resolve, reject) => {
     let data = '';
-    process.stdin.setEncoding('utf-8');
+    process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk: string) => {
       data += chunk;
     });

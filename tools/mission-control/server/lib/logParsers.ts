@@ -189,7 +189,9 @@ export function parseProgressMd(content: string, buildSlug: string): BuildProgre
   // table-cell-style (`| Chunk 1 | [x] complete |`) and bullet-style
   // (`- [x] Item one`) progress markers. Header rows in tables don't have
   // checkboxes so they're naturally excluded.
-  const completed = (content.match(/\[x\]/gi) ?? []).length;
+  // N3: markdown convention for completed checkboxes is lowercase `[x]`; the
+  // matcher is case-sensitive on both branches for symmetry.
+  const completed = (content.match(/\[x\]/g) ?? []).length;
   const open = (content.match(/\[ \]/g) ?? []).length;
   const total = completed + open;
 
@@ -217,13 +219,17 @@ export function pickLatestLogForSlug(
     const meta = parseReviewLogFilename(filename);
     if (!meta) continue;
     if (meta.slug === buildSlug || meta.slug.startsWith(`${buildSlug}-`)) {
-      // Detect chunk-slug subset: if the matched slug is longer than the build
-      // slug, treat the suffix as the chunk slug.
+      // N4: spread into a new object before mutating so a future caller that
+      // caches `parseReviewLogFilename` results isn't affected by this side-effect.
       if (meta.slug !== buildSlug) {
-        meta.chunkSlug = meta.slug.slice(buildSlug.length + 1);
-        meta.slug = buildSlug;
+        matches.push({
+          ...meta,
+          chunkSlug: meta.slug.slice(buildSlug.length + 1),
+          slug: buildSlug,
+        });
+      } else {
+        matches.push({ ...meta });
       }
-      matches.push(meta);
     }
   }
   if (matches.length === 0) return null;

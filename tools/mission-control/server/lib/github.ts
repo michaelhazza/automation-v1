@@ -9,6 +9,9 @@
  */
 
 const CACHE_TTL_MS = 60_000;
+// S4: errors get a much shorter TTL so a transient 502 doesn't stick for the
+// full success window. Next 30s poll cycle retries.
+const CACHE_TTL_ERROR_MS = 5_000;
 const GITHUB_API = 'https://api.github.com';
 
 export type CiStatus = 'passing' | 'failing' | 'pending' | 'unknown';
@@ -37,8 +40,8 @@ function cacheGet<T>(key: string): T | undefined {
   return entry.value as T;
 }
 
-function cacheSet<T>(key: string, value: T): void {
-  cache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
+function cacheSet<T>(key: string, value: T, ttlMs: number = CACHE_TTL_MS): void {
+  cache.set(key, { value, expires: Date.now() + ttlMs });
 }
 
 function authHeaders(token: string | null): Record<string, string> {
@@ -70,7 +73,7 @@ export async function fetchPRForBranch(
     const url = `${GITHUB_API}/repos/${repo}/pulls?state=all&head=${encodeURIComponent(headRef)}&sort=created&direction=desc&per_page=1`;
     const res = await fetch(url, { headers: authHeaders(token) });
     if (!res.ok) {
-      cacheSet(cacheKey, null);
+      cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS);
       return null;
     }
     const list = (await res.json()) as Array<{
@@ -96,7 +99,7 @@ export async function fetchPRForBranch(
     cacheSet(cacheKey, summary);
     return summary;
   } catch {
-    cacheSet(cacheKey, null);
+    cacheSet(cacheKey, null, CACHE_TTL_ERROR_MS);
     return null;
   }
 }
@@ -118,7 +121,7 @@ export async function fetchCiStatusForBranch(
     const url = `${GITHUB_API}/repos/${repo}/commits/${encodeURIComponent(branch)}/check-runs`;
     const res = await fetch(url, { headers: authHeaders(token) });
     if (!res.ok) {
-      cacheSet(cacheKey, 'unknown' as CiStatus);
+      cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_ERROR_MS);
       return 'unknown';
     }
     const body = (await res.json()) as {
@@ -126,6 +129,8 @@ export async function fetchCiStatusForBranch(
     };
     const runs = body.check_runs ?? [];
     if (runs.length === 0) {
+      // Empty list is a real "no checks configured" state, not an error —
+      // cache for the full TTL so we don't hammer GitHub for nothing.
       cacheSet(cacheKey, 'unknown' as CiStatus);
       return 'unknown';
     }
@@ -133,7 +138,7 @@ export async function fetchCiStatusForBranch(
     cacheSet(cacheKey, status);
     return status;
   } catch {
-    cacheSet(cacheKey, 'unknown' as CiStatus);
+    cacheSet(cacheKey, 'unknown' as CiStatus, CACHE_TTL_ERROR_MS);
     return 'unknown';
   }
 }
@@ -147,8 +152,23 @@ export function deriveCiStatus(
 ): CiStatus {
   if (runs.length === 0) return 'unknown';
   if (runs.some((r) => r.status !== 'completed')) return 'pending';
-  if (runs.some((r) => r.conclusion === 'failure' || r.conclusion === 'timed_out' || r.conclusion === 'cancelled')) {
+  // S3: action_required is a CI gate the operator must address (required reviewer,
+  // workflow approval, etc.) — surface it as 'failing' so the dot turns red.
+  // 'stale' means the run is no longer authoritative; treat as 'pending' so the
+  // operator knows a re-run is needed.
+  if (
+    runs.some(
+      (r) =>
+        r.conclusion === 'failure' ||
+        r.conclusion === 'timed_out' ||
+        r.conclusion === 'cancelled' ||
+        r.conclusion === 'action_required',
+    )
+  ) {
     return 'failing';
+  }
+  if (runs.some((r) => r.conclusion === 'stale')) {
+    return 'pending';
   }
   if (runs.every((r) => r.conclusion === 'success' || r.conclusion === 'neutral' || r.conclusion === 'skipped')) {
     return 'passing';
