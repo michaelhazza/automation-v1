@@ -17,6 +17,7 @@
 - `tasks/builds/code-intel-phase-0/plan.md` (spec edits — not part of conformance check)
 
 **Run at:** 2026-04-28T04:04:26Z
+**Commit at finish:** `2cb7d9d5`
 
 ---
 
