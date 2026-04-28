@@ -1101,6 +1101,18 @@ When applying review feedback to a spec, contracts that the implementation must 
 
 ---
 
+### [2026-04-28] Pattern — Post-commit websocket emit primitive via AsyncLocalStorage
+
+`server/lib/postCommitEmitter.ts` implements request-scoped emit deferral using `node:async_hooks` `AsyncLocalStorage<PostCommitStore>`. Emits enqueued during a request are flushed on `res.finish` (2xx/3xx) or dropped on 4xx/5xx and premature disconnect (`res.close`). The middleware (`server/middleware/postCommitEmitter.ts`) MUST be mounted AFTER auth/org-tx middleware (`subdomainResolution` block) so the ALS store is inherited by all async children including `withOrgTx` callbacks — this ensures emits deferred inside a transaction actually fire after the transaction commits.
+
+**Three states:** open (enqueue appends), closed (enqueue fires immediately — closed-state fallback for post-`res.finish` async continuations), absent (no store bound — job workers emit inline, logged as `post_commit_emit_fallback { reason: 'no_store' }`). Closed-state fallback is critical: without it, an async continuation that runs after `res.finish` silently drops its emits.
+
+**Three structured log events:** `post_commit_emit_flushed { requestId, emitCount }` (gated on `emitCount > 0`), `post_commit_emit_dropped { requestId, droppedCount, statusCode? }` (gated on `droppedCount > 0`), `post_commit_emit_fallback { reason: 'no_store' | 'closed_store' }`. Both quantitative logs gate on a non-zero count to keep log volume tractable — without the gate every successful 2xx/3xx response that did not enqueue any work would emit `flushed { emitCount: 0 }`.
+
+**Scope:** currently wired only in `briefConversationWriter.writeConversationMessage`. Any other service that emits websocket events inline after a DB write should migrate to the same pattern to close the ghost-emit failure mode.
+
+---
+
 ### [2026-04-28] Ledger-canonical / payload-best-effort consistency contract (§1.1 LAEL)
 
 When an event record (the "ledger") and a companion content-payload record exist in the same transaction, the consistency model MUST be explicit: one is canonical and must succeed; the other is best-effort and must NOT roll back the canonical record on failure.

@@ -356,14 +356,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **S3 — strengthen rule-conflict parser tests.** `ruleConflictDetectorServicePure.parseConflictReportPure` drops malformed items silently via `continue`; production could let users save conflicting rules if the LLM returns malformed conflict objects. Add tests for: (a) existingRuleId not in candidatePool → dropped; (b) invalid `kind` → dropped; (c) confidence out of [0,1] → dropped.
 - [ ] **S4 — remove or re-label `cheap_answer` canned replies.** `briefSimpleReplyGeneratorPure` emits `source: 'canonical'` artefacts with hardcoded placeholder rows ("See revenue data"). Users see properly-sourced-looking results that are actually stubs. Either (a) add `'canned' | 'stub'` to `BriefResultSource` and re-label, or (b) remove the cheap_answer route from the tier-1 classifier until real data resolvers land. Option (b) is simpler.
 - [ ] **S6 — add trajectory tests for Phase 4 orchestrator gates.** The clarify/challenge gates are wired via masterPrompt text only (migration 0196). No runtime test pins "clarifyingEnabled=false → no `ask_clarifying_questions` tool call" or "estimatedCostCents > 20 AND sparringEnabled → `challengeOutput` on ApprovalCard". Prompt-only wiring regresses easily; a fixture under `tests/trajectories/` would catch drift.
-- [ ] **S8 — move conversation-message websocket emits to a post-commit boundary.** `briefConversationWriter.writeConversationMessage` emits websocket events inline after the insert. If the outer request tx rolls back after the insert but before response, clients see an "artefact appeared" event for a row that was never persisted. Options: defer emits until `res.finish`, or adopt a tx-outbox pattern.
+- [x] **S8 — move conversation-message websocket emits to a post-commit boundary.** `briefConversationWriter.writeConversationMessage` emits websocket events inline after the insert. If the outer request tx rolls back after the insert but before response, clients see an "artefact appeared" event for a row that was never persisted. Options: defer emits until `res.finish`, or adopt a tx-outbox pattern. **DONE** commit `60a68d07`
 - [ ] **N1 — validate `artefactId` UUID shape in `briefArtefactValidatorPure.validateBase`.** Currently `requireString` accepts `""`. Add a UUID regex.
 - [ ] **N2 — add prominent comment at `getBriefArtefacts` noting the backstop is a no-op until Phase 6.4 resolvers land** (`briefArtefactBackstop.ts` sets `idScopeCheck` and `scopedTotals` to `undefined`).
 - [ ] **N3 — make `conversations_unique_scope` index org-scoped.** Change to `(organisation_id, scope_type, scope_id)` so the uniqueness invariant also holds formally across orgs (UUID collision is improbable but the index semantically belongs org-scoped). Needs a new migration that drops + recreates the index.
 - [ ] **N4 — document the `scopeType` ↔ parent-table mapping** on `conversations.scope_id` in the Drizzle schema so future readers know which scope maps to `subaccount_agents.id` vs `agents.id` vs `tasks.id` vs `agent_runs.id`.
 - [ ] **N5 — inject clock into `ruleTeachabilityClassifierPure`.** Replace inline `new Date()` with a `now: Date` parameter to match the pure-module convention.
 - [ ] **N6 — inject `artefactIdProvider: () => string` into `briefSimpleReplyGeneratorPure`.** Currently uses `crypto.randomUUID()` inline; injection makes tests deterministic.
-- [ ] **N7 — paginate `GET /api/briefs/:briefId/artefacts`.** Currently pulls all artefacts and flattens client-side; a long-running Brief conversation could accumulate hundreds. Add `limit`/`cursor` query params before marketing demos.
+- [x] **N7 — paginate `GET /api/briefs/:briefId/artefacts`.** Currently pulls all artefacts and flattens client-side; a long-running Brief conversation could accumulate hundreds. Add `limit`/`cursor` query params before marketing demos. **DONE** commit `04613015`
 
 ## Deferred from dual-reviewer review — Universal Brief
 
@@ -372,7 +372,7 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 **Source log**: [tasks/review-logs/dual-review-log-universal-brief-2026-04-22T08-02-50Z.md](./review-logs/dual-review-log-universal-brief-2026-04-22T08-02-50Z.md)
 
 - [ ] **DR1 — add `POST /api/rules/draft-candidates` route to wire `ApprovalSuggestionPanel` to `ruleCandidateDrafter.draftCandidates`.** The client panel posts to `/api/rules/draft-candidates` with `{ artefactId, wasApproved }` but no route exists, so every click on “Yes, suggest a rule” 404s and the panel silently dismisses. Wiring requires non-trivial server logic: scan `conversation_messages.artefacts` JSONB for the `artefactId`, verify kind === 'approval', load the parent brief for `briefContext`, look up existing related rules, then call `draftCandidates(...)`. Non-blocking because the rest of the Universal Brief flow works; only the approval→rule teach-loop is dark. Defer to the same follow-up pass as S3 (rule-conflict parser tests). Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
-- [ ] **DR2 — re-invoke fast-path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).** `POST /api/conversations/:conversationId/messages` and `POST /api/briefs/:briefId/messages` currently only write the user turn into `conversation_messages` and return. Per spec §7.11 ("Re-invokes the fast path + Orchestrator if the message looks like a follow-up intent rather than a passive 'thanks'"), follow-up turns should run `classifyChatIntent` on the new text and — for `needs_orchestrator` / `needs_clarification` — re-enqueue `orchestratorFromTaskJob`. Without this, chat surfaces become one-way after the initial response: the user can send questions but the system never agent-runs on them. Architectural scope — needs design for non-Brief scopes (`task`, `agent_run`) that don't currently enqueue orchestration, idempotency for passive acks, and whether simple_reply/cheap_answer can produce new inline artefacts on follow-ups. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
+- [x] **DR2 — re-invoke fast-path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).** **DONE** commit `4d64df6d` `POST /api/conversations/:conversationId/messages` and `POST /api/briefs/:briefId/messages` currently only write the user turn into `conversation_messages` and return. Per spec §7.11 ("Re-invokes the fast path + Orchestrator if the message looks like a follow-up intent rather than a passive 'thanks'"), follow-up turns should run `classifyChatIntent` on the new text and — for `needs_orchestrator` / `needs_clarification` — re-enqueue `orchestratorFromTaskJob`. Without this, chat surfaces become one-way after the initial response: the user can send questions but the system never agent-runs on them. Architectural scope — needs design for non-Brief scopes (`task`, `agent_run`) that don't currently enqueue orchestration, idempotency for passive acks, and whether simple_reply/cheap_answer can produce new inline artefacts on follow-ups. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
 - [ ] **DR3 — wire approve/reject actions on `BriefApprovalCard` artefacts.** `BriefDetailPage.tsx` renders `<ApprovalCard />` without `onApprove`/`onReject` — the buttons render but clicks are silent no-ops. No server-side dispatch route exists either (grep for `/api/briefs/.*/approve` returns nothing). Blocks the entire write path: high-risk actions can be proposed by the Orchestrator but never approved through the primary detail surface. Architectural — needs: (1) new server route(s) to accept an approval decision and dispatch via `actionRegistry` / enqueue an orchestrator run, (2) execution record linkage so `executionId` + `executionStatus` on the artefact update, (3) client handlers that call the new route and refresh state. Pre-existing from commit 6af10f1 — not introduced by the pr-reviewer fix pass.
 
 ---
@@ -767,7 +767,7 @@ Strong Recommendations and Non-Blocking observations from PR review. Blocking fi
   - File: `server/services/clientPulseHighRiskService.ts` lines 162-169
   - Fix: one-shot process-level warning (module-init check + cached flag) or startup assertion in production
 
-- [ ] S3 — DashboardPage + ClientPulseDashboardPage error states are silent
+- [x] S3 — DashboardPage + ClientPulseDashboardPage error states are silent **DONE** commit `6ef1ea79`
   - Files: `client/src/pages/DashboardPage.tsx` lines 34-46; `client/src/pages/ClientPulseDashboardPage.tsx` lines 57-71
   - Every fetch swallows errors with console.error and returns null; user sees zero-state identical to real empty. Track hasError per source; surface inline retry banner
 
@@ -1104,6 +1104,91 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
 - **REQ #13 — `action: 'new'` emit on review item creation.** RESOLVED. Emit added inside `reviewService.createReviewItem` (`server/services/reviewService.ts:60-67`). Single call site closes all 6 caller paths.
 - **Bulk approve / bulk reject — `dashboard.approval.changed` not emitted from bulk paths.** RESOLVED. Single emit added per bulk request in `server/routes/reviewItems.ts` bulk-approve (after `reviewService.bulkApprove`) and bulk-reject (after `reviewService.bulkReject`). `subaccountId: null` per spec contract (string | null) — bulk batches may span subaccounts and the payload field is informational only (§4.3 payload-not-trusted rule).
 
+
+---
+
+## Deferred from plan review — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28
+**Source:** Pre-build plan review for `tasks/builds/pre-test-brief-and-ux/plan.md`
+
+- [ ] **PLAN-REVIEW-P4 — Error banner state type.** `DashboardErrorBanner` uses `Record<string, boolean>` per spec. Upgrade to `Record<string, 'ok' | 'failed'>` for richer observability (persistent-failure visibility, partial-retry tracking). Not scope creep today per §0.3 — spec names the boolean type explicitly.
+  - **Severity:** low (nice-to-have observability improvement)
+  - **Blocked on:** follow-up spec that updates §1.4 S3 type definition
+
+- [ ] **PLAN-REVIEW-P5 — DR2 runtime branching guard.** Add a dev-mode runtime assertion in `routes/conversations.ts` that throws if both the brief branch and the noop branch execute (or if neither executes). Current enforcement is via code-grep per spec acceptance criteria — a runtime guard would catch regressions earlier.
+  - **Severity:** low (defensive engineering)
+  - **Blocked on:** follow-up spec that names the guard explicitly (out of §0.3 scope for this spec)
+
+- [ ] **PLAN-REVIEW-P7 — Middleware ordering enforcement.** Tag `req.__txMounted = true` in the org-tx middleware; add an assertion in `postCommitEmitterMiddleware` that the tag is present on arrival. Current enforcement is manual PR-time inspection. The tag catches mount-order regressions without new infrastructure.
+  - **Severity:** low (defensive engineering, fragile if manually enforced)
+  - **Blocked on:** org-tx middleware being named in a follow-up spec (out of §0.3 scope for this spec)
+
+- [ ] **PLAN-REVIEW-P8 — Log prefix standardisation.** Unify structured log event names: `brief.*`, `conversation.*`, `post_commit.*` instead of the mixed `post_commit_emit_*` / `conversations_route.*` / `brief_artefacts.*` naming. Pays off in observability tooling (log aggregation, alerting). Requires a spec update before changing.
+  - **Severity:** cosmetic / low (no behaviour impact, audit-trail impact)
+  - **Blocked on:** follow-up spec that updates §1.1–§1.2 log definitions
+
+## Deferred from spec-conformance review — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28T03:07:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-test-brief-and-ux-2026-04-28T03-07-52Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md`
+
+The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly. The gaps below are about test-scope, manual-smoke recording, and PR-prep workflow checkpoints — none mechanical, all requiring human judgment.
+
+- [ ] REQ S3-8 — DashboardPage + ClientPulseDashboardPage manual smoke unrecorded
+  - Spec section: §1.4 DoD ("manual smoke recorded")
+  - Gap: `tasks/builds/pre-test-brief-and-ux/progress.md` § Manual smoke test results lists §1.4 as "_pending_"
+  - Suggested approach: stop API → reload → confirm banner names failed source → restart API → click Retry → confirm banner clears. Repeat per page. Paste outcome into the smoke table.
+
+- [ ] REQ N7-11 — BriefDetailPage manual smoke for >50-artefact Brief unrecorded
+  - Spec section: §1.3 DoD ("client smoke test recorded")
+  - Gap: `progress.md` § Manual smoke test results lists §1.3 as "_pending_"
+  - Suggested approach: open a Brief with > 50 artefacts in dev; verify initial 50; click "Load older"; verify next 50 prepend. Paste outcome.
+
+- [ ] REQ S8-10 — Integration test scope materially smaller than spec
+  - Spec section: §1.2 Tests ("Carved-out integration test... simulates a request lifecycle: middleware → writer enqueues → res.finish fires → assert emit invoked. Then a second case: middleware → writer enqueues → res.statusCode = 500 → res.finish fires → assert emit NOT invoked.")
+  - Gap: `briefConversationWriterPostCommit.integration.test.ts` exercises raw `createPostCommitStore` + `flushAll`/`reset`; never invokes the actual middleware nor `briefConversationWriter`. The store-contract piece is already unit-tested in `postCommitEmitter.test.ts`; the middleware+writer composition is currently unverified by automated tests.
+  - Suggested approach: either (a) wire a minimal Express app in the test that mounts `postCommitEmitterMiddleware`, calls a route that invokes `writeConversationMessage`, and asserts the emit fires after `res.finish` (and is dropped on `res.statusCode=500`), or (b) document the deferral in `progress.md` with a rationale that manual smoke + the existing unit tests give equivalent confidence.
+
+- [ ] REQ S8-11 — §1.2 500-rollback manual smoke unrecorded
+  - Spec section: §1.2 DoD ("manual smoke for the 500-rollback case completed and noted in progress.md")
+  - Gap: `progress.md` does not show §1.2 manual smoke results
+  - Suggested approach: trigger a contrived 500 in a route after `writeConversationMessage` runs; confirm in browser dev tools that NO websocket event arrives. Trigger happy-path; confirm event arrives. Paste outcome.
+
+- [ ] REQ S8-12 — KNOWLEDGE.md entry for the post-commit emit pattern missing
+  - Spec section: §4 Definition of Done item 6 ("KNOWLEDGE.md is updated with the post-commit emit pattern from §1.2 (it generalises beyond Brief artefacts and is the most reusable pattern surfaced by this spec)")
+  - Gap: KNOWLEDGE.md has no entry capturing the pattern
+  - Suggested approach: add a short ~2026-04-28 entry summarising (a) the failure mode (tx-rollback-then-emit produces ghost events), (b) the deferral primitive (AsyncLocalStorage-backed store, flush on `res.finish` 2xx/3xx, reset on 4xx/5xx + close, closed-state immediate-emit fallback), (c) the generalisation (any subsystem that emits via websocket inside a request-scoped tx benefits from the same pattern). Cite `server/lib/postCommitEmitter.ts` as the canonical source.
+
+- [ ] REQ DR2-8 — Integration test punts LLM classify + orchestrator enqueue assertions to manual smoke
+  - Spec section: §1.1 Tests ("Carved-out integration test... exercises the route end-to-end against a fake LLM provider, asserts user message is written once, fast-path classification fires, and orchestrator-routing job is enqueued for a `needs_orchestrator` decision")
+  - Gap: `conversationsRouteFollowUp.integration.test.ts` covers only (i) noop-path one-row write, (ii) DB-row→predicate dispatch, (iii) writer no-built-in-dedupe. The fake-LLM + orchestrator-enqueue assertions are punted to manual smoke per the test header.
+  - Suggested approach: either (a) wire a fake LLM provider stub (mock `classifyChatIntent` to return `{ route: 'needs_orchestrator', ... }`) and assert orchestrator-routing job appears in pg-boss, or (b) accept the punt and document it as a deliberate carve-out in `progress.md` with rationale ("hot-path carve-out: full DR2 chain requires live LLM + pg-boss; manual smoke + per-component unit + DB-row dispatch tests cover the failure modes the spec was protecting against").
+
+- [ ] REQ DR2-10 — DR2 manual dev-DB smoke unrecorded
+  - Spec section: §1.1 DoD ("route's brief-followup path verified manually against the dev DB — post a follow-up, confirm orchestrator job enqueues, observe the structured log line")
+  - Gap: `progress.md` shows DR2 smoke as not yet recorded
+  - Suggested approach: post a follow-up to a Brief-scoped conversation in dev; observe the `conversations_route.brief_followup_dispatched` log line; confirm an orchestrator-routing job appears in pg-boss. Paste outcome.
+
+- [ ] REQ X-1 — `tasks/todo.md` spec-named tickoffs (DR2 / S8 / N7 / S3) all still unchecked
+  - Spec section: §4 DoD item 2 + §5 Backlog tickoff checklist
+  - Gap: lines 359 (S8), 366 (N7), 374-375 (DR2), 770 (S3) in `tasks/todo.md` still `[ ]`. Spec lists these as the canonical "closed" markers.
+  - Suggested approach: tick each entry with a one-line resolution note pointing at the commit SHA or PR number. Conventionally done at PR open.
+
+- [ ] REQ X-2 + X-3 — progress.md final summary missing; spec §5 Tracking table SHAs missing
+  - Spec section: §4 DoD item 5 + §5 Tracking
+  - Gap: `progress.md` only has a setup section (no per-task results). Spec §5 Tracking table still shows all four items as `pending` with `—` SHAs.
+  - Suggested approach: at PR-prep time, append a session-end summary to `progress.md` and populate the spec §5 Tracking table with the four feature commits (`6ef1ea79` S3 / `04613015` N7 / `60a68d07` S8 / `4d64df6d` DR2).
+
+## Deferred from pr-reviewer — pre-test-brief-and-ux (2026-04-28)
+
+**Captured:** 2026-04-28
+**Source:** pr-reviewer APPROVE WITH STRONG RECOMMENDATIONS
+
+- [ ] **PR-S2 — writeConversationMessage dedupe: spec §0.5 claim vs. reality.** Spec §0.5 says DR2's "no duplicate user messages on retry" depends on `writeConversationMessage` dedupe. Integration test 4 (conversationsRouteFollowUp) proves the function has NO built-in dedupe — a second call produces a second row. Current protection is route-level (branch-before-write, exactly one call per request). For network-level retry safety, one of: (a) add idempotency key on `(conversationId, content, senderUserId)` within a short window per CLAUDE.md §8.11, (b) add HTTP-level idempotency key header at the route, or (c) amend spec §0.5 to say "route-level, not DB-level". Not blocking today (the route is correct); label as a future hardening item.
+
+- [x] **PR-N3 — two DB reads for same conversation in brief-followup path.** *(resolved 2026-04-28 in `da1c4f72` via R-4)* — added optional `prefetchedConv` parameter to `handleConversationFollowUp`; route caller now passes its already-resolved conv to skip the duplicate select. The `briefs.ts` caller (where `briefId` comes from URL params, not a pre-fetched conv) intentionally does not pass `prefetchedConv` and continues to re-select.
 
 ## Deferred from spec-conformance review — pre-test-backend-hardening (2026-04-28)
 
