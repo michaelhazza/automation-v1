@@ -3498,28 +3498,30 @@ export const WorkflowEngineService = {
     // Workflow-agent-step worker — runs the actual agent for prompt /
     // agent_call step types. Dynamic-imported to avoid pulling
     // agentExecutionService into the engine module's eager graph.
-    await pgboss.work(
-      AGENT_STEP_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
-        const data = job.data as {
-          WorkflowStepRunId: string;
-          WorkflowRunId: string;
-          organisationId: string;
-          subaccountId: string;
-          agentId: string;
-          stepId: string;
-          attempt: number;
-          renderedPrompt: string | null;
-          resolvedAgentInputs: Record<string, unknown>;
-          sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
-          // Decision-step-specific fields (absent for non-decision steps).
-          systemPromptAddendum?: string;
-          allowedToolSlugs?: string[];
-          timeoutSeconds?: number;
-          isDecisionRun?: boolean;
-          triggerContext?: Record<string, unknown>;
-        };
+    await createWorker<{
+      WorkflowStepRunId: string;
+      WorkflowRunId: string;
+      organisationId: string;
+      subaccountId: string;
+      agentId: string;
+      stepId: string;
+      attempt: number;
+      renderedPrompt: string | null;
+      resolvedAgentInputs: Record<string, unknown>;
+      sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
+      // Decision-step-specific fields (absent for non-decision steps).
+      systemPromptAddendum?: string;
+      allowedToolSlugs?: string[];
+      timeoutSeconds?: number;
+      isDecisionRun?: boolean;
+      triggerContext?: Record<string, unknown>;
+    }>({
+      queue: AGENT_STEP_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      // payload carries organisationId — default resolver applies
+      handler: async (job) => {
+        const data = job.data;
 
         // Re-verify the step run is still live before doing anything.
         // If it was invalidated between enqueue and worker pickup, drop.
@@ -3638,8 +3640,8 @@ export const WorkflowEngineService = {
           }
           throw err; // bubble for queue retry
         }
-      }
-    );
+      },
+    });
 
     // Cron schedule the watchdog every minute.
     try {
