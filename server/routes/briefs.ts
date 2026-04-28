@@ -20,15 +20,22 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
-    const { text, source, uiContext, subaccountId } = req.body as {
+    const {
+      text, source, uiContext, subaccountId,
+      explicitTitle, explicitDescription, priority,
+    } = req.body as {
       text?: string;
-      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic' | 'new_brief_modal';
       uiContext?: Partial<BriefUiContext>;
       subaccountId?: string;
+      explicitTitle?: string;
+      explicitDescription?: string;
+      priority?: 'low' | 'normal' | 'high' | 'urgent';
     };
 
-    if (!text?.trim()) {
-      res.status(400).json({ message: 'text is required' });
+    // text is required unless an explicit title is provided
+    if (!text?.trim() && !explicitTitle?.trim()) {
+      res.status(400).json({ message: 'text or explicitTitle is required' });
       return;
     }
 
@@ -43,9 +50,12 @@ router.post(
       organisationId: req.orgId!,
       subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
       submittedByUserId: req.user!.id,
-      text: text.trim(),
+      text: text?.trim() ?? explicitTitle!.trim(),
       source: source ?? 'global_ask_bar',
       uiContext: context,
+      explicitTitle: explicitTitle?.trim(),
+      explicitDescription: explicitDescription?.trim(),
+      priority,
     });
 
     res.status(201).json(result);

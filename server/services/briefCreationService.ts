@@ -16,21 +16,38 @@ export async function createBrief(input: {
   subaccountId?: string;
   submittedByUserId: string;
   text: string;
-  source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+  source: 'global_ask_bar' | 'slash_remember' | 'programmatic' | 'new_brief_modal';
   uiContext: BriefUiContext;
+  explicitTitle?: string;
+  explicitDescription?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
 }): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }> {
   // Classify BEFORE persisting the brief. classifyChatIntent can throw (LLM
   // outage, classifier internal error); running it first means a failure
   // never leaves an orphaned task / conversation in the DB. Phase 6 of the
   // pre-launch hardening sprint moved this call inside handleBriefMessage,
   // which inverted the ordering — restore the pre-Phase-6 invariant here.
+
+  // When an explicit title is supplied (New Brief modal), use it as-is.
+  // Otherwise derive from text with truncation.
+  const title = input.explicitTitle
+    ? input.explicitTitle
+    : input.text.length > 100
+    ? input.text.slice(0, 97) + '…'
+    : input.text;
+
+  // classifyChatIntent always receives the full free-text prompt.
+  // For modal submissions combine title + description so the classifier
+  // sees complete intent, not just the short title.
+  const classifyText = input.explicitTitle
+    ? [input.explicitTitle, input.explicitDescription].filter(Boolean).join('\n\n')
+    : input.text;
+
   const fastPathDecision = await classifyChatIntent({
-    text: input.text,
+    text: classifyText,
     uiContext: input.uiContext,
     config: DEFAULT_CHAT_TRIAGE_CONFIG,
   });
-
-  const title = input.text.length > 100 ? input.text.slice(0, 97) + '…' : input.text;
 
   const [task] = await db
     .insert(tasks)
@@ -38,9 +55,9 @@ export async function createBrief(input: {
       organisationId: input.organisationId,
       subaccountId: input.subaccountId ?? null,
       title,
-      description: input.text,
+      description: input.explicitDescription ?? input.text,
       status: 'inbox',
-      priority: 'normal' as const,
+      priority: (input.priority ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent',
       position: 0,
     })
     .returning();
@@ -63,7 +80,7 @@ export async function createBrief(input: {
     briefId,
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
-    text: input.text,
+    text: classifyText,          // ← was input.text
     uiContext: input.uiContext,
     isFollowUp: false,
     prefetchedDecision: fastPathDecision,
