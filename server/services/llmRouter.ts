@@ -1617,13 +1617,20 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       payloadRowId = inserted?.id ?? null;
       payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
     } catch (err) {
-      // Payload is best-effort; ledger is canonical. Insert failure does NOT
-      // affect the ledger row. The llm.completed event carries
-      // payloadInsertStatus: 'failed' so observers can detect the gap without
-      // querying the payload table.
+      // Payload is best-effort; ledger is canonical. Insert failure does NOT roll back the ledger row.
       logger.warn('lael_payload_insert_failed', {
         runId: ctx.runId, ledgerRowId: successLedgerRowId, error: err,
       });
+      // Defensive: delete any partially-inserted row so the post-commit invariant holds
+      // (payloadInsertStatus === 'failed' iff no agent_run_llm_payloads row exists post-commit).
+      try {
+        await db.delete(agentRunLlmPayloads).where(
+          eq(agentRunLlmPayloads.llmRequestId, successLedgerRowId)
+        );
+      } catch {
+        // DELETE failure is swallowed — the primary contract is already broken at this point.
+        // payloadInsertStatus: 'failed' on the event is the observable signal.
+      }
       payloadInsertStatus = 'failed';
     }
 
