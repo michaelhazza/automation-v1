@@ -17,6 +17,7 @@ import type {
 export type ValidationError =
   | { code: 'invalid_schema'; path: string; expected: string; got: string }
   | { code: 'missing_required'; field: string }
+  | { code: 'invalid_format'; field: string; message: string }
   | { code: 'invalid_enum'; field: string; value: unknown; validValues: string[] }
   | { code: 'orphan_parent'; parentArtefactId: string }
   | { code: 'duplicate_tip'; chainRoot: string; tips: string[] }
@@ -76,6 +77,22 @@ function checkEnum(
 ): void {
   if (value !== undefined && !validSet.has(value as string)) {
     errors.push({ code: 'invalid_enum', field, value, validValues: [...validSet] });
+  }
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireUuid(
+  errors: ValidationError[],
+  fieldName: string,
+  value: unknown,
+): void {
+  if (!value || typeof value !== 'string' || value.trim() === '') {
+    errors.push({ code: 'missing_required', field: fieldName });
+    return;
+  }
+  if (!UUID_REGEX.test(value)) {
+    errors.push({ code: 'invalid_format', field: fieldName, message: `${fieldName} must be a UUID` });
   }
 }
 
@@ -144,7 +161,7 @@ function requireBoolean(
 // ---------------------------------------------------------------------------
 
 function validateBase(errors: ValidationError[], obj: Record<string, unknown>): void {
-  requireString(errors, 'artefactId', obj['artefactId']);
+  requireUuid(errors, 'artefactId', obj['artefactId']);
   if (obj['status'] !== undefined) {
     checkEnum(errors, 'status', obj['status'], VALID_STATUSES as Set<string>);
   }

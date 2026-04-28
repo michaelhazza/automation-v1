@@ -54,7 +54,7 @@ function assertErrorCode(errors: ValidationError[], code: string, label: string)
 function makeStructured(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     kind: 'structured',
-    artefactId: 'art-001',
+    artefactId: '00000000-0000-0000-0000-000000000001',
     summary: 'Test result',
     entityType: 'contacts',
     filtersApplied: [],
@@ -71,7 +71,7 @@ function makeStructured(overrides: Record<string, unknown> = {}): Record<string,
 function makeApproval(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     kind: 'approval',
-    artefactId: 'art-002',
+    artefactId: '00000000-0000-0000-0000-000000000002',
     summary: 'Send email to 5 contacts',
     actionSlug: 'crm.send_email',
     actionArgs: { templateId: 'tpl-1' },
@@ -84,7 +84,7 @@ function makeApproval(overrides: Record<string, unknown> = {}): Record<string, u
 function makeError(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     kind: 'error',
-    artefactId: 'art-003',
+    artefactId: '00000000-0000-0000-0000-000000000003',
     errorCode: 'unsupported_query',
     message: 'Cannot handle this query type',
     ...overrides,
@@ -153,6 +153,41 @@ test('missing artefactId → missing_required', () => {
   const result = validateArtefactPure(rest);
   assert(!result.valid, 'expected invalid');
   assertErrorCode(result.valid ? [] : result.errors, 'missing_required', 'missing artefactId');
+});
+
+// ---------------------------------------------------------------------------
+// validateArtefactPure — artefactId UUID-shape validation (§1.6 N1)
+// ---------------------------------------------------------------------------
+
+test('artefactId empty string → missing_required', () => {
+  const result = validateArtefactPure(makeStructured({ artefactId: '' }));
+  assert(!result.valid, 'expected invalid');
+  const errors = result.valid ? [] : result.errors;
+  const match = errors.find(e => 'field' in e && e.field === 'artefactId');
+  assert(match !== undefined, 'expected an error on artefactId field');
+  const msg = 'message' in match! ? (match as { message: string }).message : '';
+  const code = match!.code;
+  assert(
+    code === 'missing_required' || msg.toLowerCase().includes('required'),
+    `expected error to indicate required, got code=${code} message=${msg}`,
+  );
+});
+
+test('artefactId non-UUID string → invalid_format with UUID message', () => {
+  const result = validateArtefactPure(makeStructured({ artefactId: 'banana' }));
+  assert(!result.valid, 'expected invalid');
+  const errors = result.valid ? [] : result.errors;
+  const match = errors.find(e => e.code === 'invalid_format' && 'field' in e && (e as { field: string }).field === 'artefactId');
+  assert(match !== undefined, 'expected invalid_format error on artefactId');
+  const msg = (match as { message: string }).message;
+  assert(msg.toLowerCase().includes('uuid'), `expected message to mention UUID, got: ${msg}`);
+});
+
+test('artefactId valid UUID → no artefactId error', () => {
+  const result = validateArtefactPure(makeStructured({ artefactId: '01234567-89ab-cdef-0123-456789abcdef' }));
+  const errors = result.valid ? [] : result.errors;
+  const artefactIdError = errors.find(e => 'field' in e && (e as { field: string }).field === 'artefactId');
+  assert(artefactIdError === undefined, 'expected no error on artefactId for valid UUID');
 });
 
 test('missing kind → missing_required', () => {
