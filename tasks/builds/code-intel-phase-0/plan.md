@@ -59,14 +59,47 @@ Emits two artifacts:
 
 Cold-build at `predev` is necessary but not sufficient. A typical dev session runs for hours; without an in-session refresh, the cache goes stale within minutes of the first file change. **Agents reading a stale cache get confidently wrong answers — the most concerning failure mode**, exactly the one the Graphify trial taught us to engineer away from. The advisory-hint framing (agents fall through to raw source on miss) does not protect against staleness — a stale cache "hits" with wrong data, no fall-through triggers.
 
-**Mechanism:** `predev` launches a `chokidar` file watcher as a detached background process. The watcher monitors `server/`, `client/`, `shared/` for `add` / `change` / `unlink` events on `.ts` / `.tsx` files. On each event:
+**Mechanism:** `predev` launches a `chokidar` file watcher as a detached background process. The watcher monitors `server/`, `client/`, `shared/` for `add` / `change` / `unlink` events on `.ts` / `.tsx` files.
 
-- **`add` / `change`:** SHA256 the file, compare to cache. If unchanged (mtime touched, content identical), skip. Otherwise re-extract via `ts-morph` (`Project.addSourceFileAtPath` + `getImportDeclarations` + `getExportSymbols`). Atomically rewrite the affected shard (write to `.tmp`, `rename` — OS-level atomic on POSIX and NTFS). Update `references/.code-graph-cache.json`. Re-emit `references/project-map.md` only if topology changed (a top-20 entry moved, a new file appeared with high inbound count, a previously zero-inbound file gained imports, etc.).
+**Watch scope — explicit ignore list (non-negotiable):**
+
+```js
+ignored: [
+  '**/node_modules/**',  // 10K+ files, never our code
+  '**/dist/**',          // build output
+  '**/.git/**',
+  'references/**',       // CRITICAL: prevents feedback loop — watcher writes shard → fires watch event → re-runs forever
+  '**/*.d.ts',           // type declarations only, no runtime relationships
+  '**/*.generated.ts',   // generated files (drizzle, etc.)
+]
+```
+
+The `references/**` ignore is load-bearing — without it the watcher writes its own shard files, observes the write, and self-triggers infinitely. Easy to test for; catastrophic if missed.
+
+**On each event:**
+
+- **`add` / `change`:** SHA256 the file, compare to cache. If unchanged (mtime touched, content identical — happens with some editors), skip. Otherwise re-extract via `ts-morph` (`Project.addSourceFileAtPath` + `getImportDeclarations` + `getExportSymbols`). Atomically rewrite the affected shard (write to `.tmp`, `rename` — OS-level atomic on POSIX and NTFS). Update `references/.code-graph-cache.json`. Re-emit `references/project-map.md` only on **topology change** (defined below).
 - **`unlink`:** remove from cache and shard. Same dead-file pruning as cold-build.
+- **Rename:** chokidar reports renames as **`unlink` of the old path + `add` of the new path** — two separate events. Treat them that way; do NOT special-case rename detection. Inbound-edge updates (other files importing the renamed path) propagate naturally because those files' next save will re-extract their imports.
 
-Per-event cost: <100 ms typical. Re-extracting one file is sub-50ms; the atomic shard rewrite is the dominant cost. Debounce events at 150 ms to coalesce rapid saves (e.g. find-and-replace across multiple files).
+**Topology change** (triggers `project-map.md` regen):
+1. A file appears in / disappears from the top-20-by-inbound-imports list, OR
+2. A file's inbound-import count crosses the zero-vs-nonzero boundary (became dead-code candidate, or stopped being one), OR
+3. A file added or unlinked under any of the watched directories.
 
-**Concurrency: lockfile-based singleton.** Multiple dev sessions on the same repo (a second `npm run dev`, an alternate config, a Claude Code session running its own `dev`) MUST NOT both run watchers — they'd race on shard writes. The watcher's first action is to acquire `references/.watcher.lock` (PID file via `proper-lockfile` or equivalent — handles Windows/POSIX differences). If a live process holds the lock, the new launcher exits silently and lets the existing watcher serve all sessions. Stale locks (PID dead) are released and reclaimed automatically. **One watcher per repo, regardless of session count.**
+Within-list reordering at positions 21+ is *not* a topology change — would churn the digest's diff for no reader value.
+
+**Event coalescing — 150 ms debounce + batch processing.** Per-file events that fire within a 150 ms window are coalesced (last-write-wins per path). Bulk events (≥10 events fired within 500 ms — typical of `git checkout` between branches, find-and-replace refactors, or large pulls) trigger a single batched re-extract pass instead of N serial passes. Without this, a branch switch with 200 changed files takes ~20 seconds of serial CPU; batched it takes ~2 seconds.
+
+**Per-event cost (post-coalescing):** <100 ms typical for single-file saves. Atomic shard rewrite is the dominant cost. Bulk pass: 200 changed files complete in ~2 s on a warm cache.
+
+**Failure logging — visible, not silent.** Unparseable files (syntax error, malformed AST, ts-morph throw) are:
+1. Written to `references/import-graph/.skipped.txt` (one line per file, `<path>\t<reason>`).
+2. Logged via `console.warn` to the dev server's stdout — visible in the same terminal as the dev output, not buried in a separate log file. Format: `[code-graph] skipped <path>: <reason>`.
+
+If skipped-file count exceeds 5% of files in any one directory, the dev server's `predev` cold-build fails with a non-zero exit code (configuration error, not advisory territory). The watcher itself does not fail the dev server on per-event parse errors — those just log and continue.
+
+**Concurrency: lockfile-based singleton.** Multiple dev sessions on the same repo (a second `npm run dev`, an alternate config, a Claude Code session running its own `dev`) MUST NOT both run watchers — they'd race on shard writes. The watcher's first action is to acquire `references/.watcher.lock` via `proper-lockfile` (handles Windows/POSIX differences) with a 10-second `stale` timeout. If a live process holds the lock, the new launcher exits silently and lets the existing watcher serve all sessions. Stale locks (PID dead, lock file older than 10s without heartbeat refresh) are released and reclaimed automatically — covers both clean exits and unclean crashes (`kill -9`, OOM, dev-server segfault). **One watcher per repo, regardless of session count.**
 
 **Lifecycle binding.** The watcher is launched detached by `predev` but registers `SIGTERM` / `SIGINT` handlers tied to the parent dev server's lifetime. When the dev server dies, the watcher dies and releases the lock. Crashed watchers leave a stale lock; the next session's lock-acquire detects-via-PID-liveness and reclaims it. No manual cleanup required.
 
@@ -101,8 +134,13 @@ This is deliberately friction-bearing: if the manual usage produces qualitative 
 **Watcher (in-session staleness protection):**
 - Editing any `.ts`/`.tsx` file under `server/`, `client/`, `shared/` mid-session results in the corresponding shard being updated within 200ms. Verifiable: tail the shard's mtime + content while editing a known import.
 - Adding a new file mid-session: appears in the shard within 200ms. Deleting a file mid-session: gone from the shard within 200ms.
+- Renaming a file (file system rename or `git mv`): old path gone, new path present, both within 400ms (two events, coalesced).
+- **No feedback loop:** writing a shard file MUST NOT re-trigger the watcher. Verifiable: edit a source file once; confirm exactly one watcher pass runs (one log line per event class), not a continuous loop.
+- **Branch-switch performance:** `git checkout` between two branches with ~200 changed files completes the watcher batch pass in <5s. Verifiable: time the first save event after the checkout; should be <5s end-to-end, not 20+ s of serial per-file work.
+- **Topology-change discrimination:** editing a file whose change does NOT alter top-20 inbound-import membership produces shard updates but NO `project-map.md` rewrite. Verifiable: digest mtime unchanged after the edit.
+- **Skipped-file logging:** introduce a file with a deliberate syntax error; confirm it appears in `references/import-graph/.skipped.txt` AND `console.warn` fires to the dev server's stdout. Removing the syntax error causes both to clear on the next save.
 - **Singleton enforcement:** running `npm run dev` a second time on the same checkout while a watcher already runs does NOT spawn a second watcher. Verifiable: `ps` (or `Get-Process` on Windows) shows exactly one `chokidar` process; the second `predev` exits silently after detecting the live lock.
-- **Stale-lock recovery:** `kill -9` the watcher process, then `npm run dev` again. The new launcher detects the dead PID, releases the stale lock, and starts a new watcher.
+- **Stale-lock recovery:** `kill -9` the watcher process, then `npm run dev` again. The new launcher detects the dead PID via `proper-lockfile`'s 10s stale check, releases the stale lock, and starts a new watcher.
 - **Atomic shard writes:** kill the watcher mid-edit cycle (`kill -9` while saving a file). Every shard file remains valid JSON — never partial. Verifiable with `jq . references/import-graph/*.json` after kill+restart.
 - **Lifecycle binding:** killing the dev server (`Ctrl+C`) terminates the watcher within 2s and releases the lock.
 
