@@ -64,14 +64,14 @@ export default function ClarificationInbox({ subaccountId }: ClarificationInboxP
     }
   }, [subaccountId]);
 
-  const refresh = useCallback(() => { void loadPending(); }, [loadPending]);
-
   useEffect(() => { void loadPending(); }, [loadPending]);
 
+  // WebSocket subscriptions — refresh on any clarification lifecycle event
+  // On reconnect, re-fetch baseline state via REST to catch any missed events
   useSocketRoom('subaccount', subaccountId, {
-    'clarification:pending': refresh,
-    'clarification:resolved': refresh,
-    'clarification:expired': refresh,
+    'clarification:pending': () => void loadPending(),
+    'clarification:resolved': () => void loadPending(),
+    'clarification:expired': () => void loadPending(),
   }, loadPending);
 
   // ──────────────────────────────────────────────────────────────────────────

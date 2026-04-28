@@ -9,6 +9,7 @@ import { fromOrgId } from '../../services/principal/fromOrgId.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { recordGhlMutation } from '../../services/ghlWebhookMutationsService.js';
 import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';
+import { recordIncident } from '../../services/incidentIngestor.js';
 
 const router = Router();
 
@@ -62,6 +63,20 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
     dbAccount = result.account;
   } catch (err) {
     console.error('[GHL Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+
+    // Surface to the System Monitor so the agent can triage repeated failures.
+    // fingerprintOverride pins the dedup key; stack-derived fingerprinting is
+    // unreliable inside webhook handlers because the failure surface depends on
+    // adapter internals we don't control.
+    recordIncident({
+      source: 'route',
+      summary: `GHL webhook DB lookup failed: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      errorCode: 'webhook_handler_failed',
+      stack: err instanceof Error ? err.stack : undefined,
+      fingerprintOverride: 'webhook:ghl:db_lookup_failed',
+      errorDetail: { locationId },
+    });
+
     res.status(500).json({ error: 'Internal error' });
     return;
   }

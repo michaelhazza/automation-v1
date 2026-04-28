@@ -314,6 +314,15 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] **Nearest-common-ancestor routing for cross-subtree reassignment** — ChatGPT suggested automatic NCA-based routing so two peer subtrees can exchange work without requiring the subaccount root as middleman. Out of scope for v1 where root-only is a deliberate simplification; revisit when a real cross-subtree workflow emerges that root-funnelling demonstrably bottlenecks. Requires algorithmic design + prompt-scaffolding decision about how the NCA is surfaced to the caller.
 - [ ] **Violation sampling / alerting tier above §17.3 rejection-rate metric** — ChatGPT suggested a sampling-based alert ladder (page on sustained rejection-rate anomalies, digest on daily trend breaks). Ops/observability concern rather than a delegation-contract concern; belongs in a post-launch monitoring spec or the ops playbook, not in this spec. Revisit after Phase 4 ships and there is a baseline rejection-rate distribution to calibrate against.
 
+### system-monitoring-coverage (2026-04-28)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-system-monitoring-coverage-2026-04-28T06-54-48Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-system-monitoring-coverage-spec.md`
+**PR:** #226 — https://github.com/michaelhazza/automation-v1/pull/226
+**Branch:** `claude/add-monitoring-logging-3xMKQ`
+
+- [ ] [auto] **Convert `withOrgTx` invariant from grep-check to lint rule or AST test** — Round 2 ChatGPT verdict surfaced this as the one minor observation (explicitly NOT a blocker, "natural evolution"). The §5.2 invariant "A handler passed to `createWorker` MUST NOT open its own org-scoped transaction" is currently enforced via `grep -n "withOrgTx" <file>` against each converted handler. The grep + decision table works for the current scope (3 handlers being converted) but is human-executed — every future `createWorker` call site re-introduces the verification burden. Long-term: replace with either (a) an ESLint custom rule that flags `withOrgTx(...)` calls inside the handler argument of `createWorker(...)`, or (b) a test-time AST check that walks `createWorker` call sites and asserts no nested `withOrgTx` in the handler body. **Reconsider per trigger:** when adding a 4th `createWorker` conversion OR when a `withOrgTx` regression slips past the grep check in code review. Until then, the human-executed grep is sufficient. Rationale: "not needed now, just a natural evolution" — ChatGPT Round 2 verdict.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -325,6 +334,11 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 ---
 
 ## PR Review deferred items
+
+### PR #226 — claude-add-monitoring-logging-3xMKQ (2026-04-28 — ChatGPT review round 1)
+
+- [ ] [user] **Add `createWorker`-only tripwire (CI grep against raw `boss.work(`)** — Reviewer flagged that two new direct `boss.work(...)` registrations in this PR ([server/index.ts:462](server/index.ts#L462) async-ingest worker, [server/index.ts:499](server/index.ts#L499) skill-analyzer worker) plus pre-existing [agentScheduleService.ts:92,183](server/services/agentScheduleService.ts) bypass the `createWorker` wrapper's instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry). Both new workers are deliberate system-level exceptions (no org context) and could move to `createWorker` with `resolveOrgContext: () => null`, but migrating mid-merge expands scope. Add a CI tripwire script (`scripts/verify-no-raw-boss-work.sh`) that fails the build on any new `boss.work(` outside an allowlist of explicit system-level exceptions; pair with code comments at the exception sites pointing to the allowlist. Trigger to act: when adding the next pg-boss worker registration, OR when an instrumentation regression slips past review. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-claude-add-monitoring-logging-3xMKQ-2026-04-28T22-09-33Z.md`. PR #226 — https://github.com/michaelhazza/automation-v1/pull/226.
+- [ ] [user] **Centralise integration-test skip pattern (`shouldSkipIntegration()` helper)** — Four files use minor variants of `process.env.NODE_ENV !== 'integration'` (`server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts`, `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts`, `server/services/__tests__/llmRouterLaelIntegration.test.ts`, `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`); other files self-skip on missing `DATABASE_URL` instead. Drift risk: if one test wants to add `DATABASE_URL` checking it must do it independently. Centralise to `tests/utils/shouldSkipIntegration.ts` exporting a single boolean (or a `describe.skipIf(...)` wrapper if Vitest API supports it). Trigger to act: when adding the next integration test OR when the divergence between checks creates a real false-skip. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-claude-add-monitoring-logging-3xMKQ-2026-04-28T22-09-33Z.md`. PR #226 — https://github.com/michaelhazza/automation-v1/pull/226.
 
 ### PR #218 — create-views (2026-04-28 — ChatGPT review round 1)
 
@@ -1444,3 +1458,36 @@ Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items we
   - Current behaviour: schema, writer, event service, and shared types correctly model `response` as nullable on the failure path. Nothing centrally enforces "consumers must null-check before nested-field access" — a consumer writing `payload.response.content` will crash at runtime if the row originated from a failure-path insert.
   - Suggested fix: add an invariant comment block at the canonical entry point (e.g. `server/routes/agentExecutionLog.ts` or the schema file) stating "All consumers MUST null-check response before accessing nested fields." Optional but stronger: add a typed assertion helper, e.g. `function assertResponsePresent(r: unknown): asserts r is Record<string, unknown>` so consumers can narrow once and reuse the narrowed reference.
   - Defer; not blocking. Implement when the next consumer is added or when a `response.X` access shows up in a code-review diff — that's the natural inflection point where the helper earns its keep. Type-level nullability on the field already gives compile-time safety today; the helper is a developer-ergonomics layer on top.
+
+---
+
+## Deferred findings — system-monitoring-coverage build (2026-04-28)
+
+### Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts
+
+`server/routes/webhooks/slackWebhook.ts` and `server/routes/webhooks/teamworkWebhook.ts`
+have inline `res.status(500)` paths that do not call `recordIncident`.
+These were out-of-scope for the system-monitoring-coverage build (spec §6.1.3 locked
+scope to GHL + GitHub only).
+
+Follow-up: apply the same `recordIncident` pattern to each inline 500 path in
+these files. Use `fingerprintOverride: 'webhook:slack:handler_failed'` and
+`fingerprintOverride: 'webhook:teamwork:handler_failed'` respectively.
+
+### workflow-bulk-parent-check JOB_CONFIG entry has no worker registration
+
+`workflow-bulk-parent-check` exists in `server/config/jobConfig.ts` with a
+`deadLetter` queue, so `dlqMonitorService` (via `deriveDlqQueueNames`) now
+subscribes to `workflow-bulk-parent-check__dlq` — but no producer or worker
+exists anywhere in the repository (`grep -rn "workflow-bulk-parent-check"
+server` returns only the JOB_CONFIG row).
+
+Origin: pr-reviewer SR-5. Spec §3.1 line 125 lists this queue's `createWorker`
+match as expected, but spec §5.2 line 885 hedges with "if present". The plan's
+preflight (Task 3.1 step 1) explicitly authorised omission when the queue isn't
+found.
+
+Follow-up: either find the missing worker registration site (audit log
+mentioned "Sprint 4 P3.1 bulk parent completion check"), or remove the
+`workflow-bulk-parent-check` entry from JOB_CONFIG if it's aspirational. Until
+then the DLQ subscription is harmless but noisy.

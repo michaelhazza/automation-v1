@@ -67,6 +67,7 @@ import { logger } from '../lib/logger.js';
 import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import { createWorker } from '../lib/createWorker.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
 import { WorkflowStepReviewService } from './workflowStepReviewService.js';
 import {
@@ -3471,57 +3472,56 @@ export const WorkflowEngineService = {
    * from server/index.ts in step 6).
    */
   async registerWorkers(): Promise<void> {
-    const pgboss = (await getPgBoss()) as unknown as {
-      work: (
-        name: string,
-        opts: Record<string, unknown>,
-        handler: (job: { id: string; data: unknown }) => Promise<void>
-      ) => Promise<void>;
-      schedule: (name: string, cron: string, data?: object, opts?: object) => Promise<void>;
-    };
+    const pgboss = await getPgBoss();
 
-    await pgboss.work(
-      TICK_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
+    await createWorker<{ runId: string }>({
+      queue: TICK_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      resolveOrgContext: () => null,  // tick reads org from workflow_runs row
+      handler: async (job) => {
         const data = job.data as { runId: string };
         await this.tick(data.runId);
-      }
-    );
+      },
+    });
 
-    await pgboss.work(
-      WATCHDOG_QUEUE,
-      { teamSize: 1, teamConcurrency: 1 },
-      async () => {
+    await createWorker<Record<string, never>>({
+      queue: WATCHDOG_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      resolveOrgContext: () => null,  // cross-org sweep, no single tenant
+      handler: async () => {
         await this.watchdogSweep();
-      }
-    );
+      },
+    });
 
     // Workflow-agent-step worker — runs the actual agent for prompt /
     // agent_call step types. Dynamic-imported to avoid pulling
     // agentExecutionService into the engine module's eager graph.
-    await pgboss.work(
-      AGENT_STEP_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
-        const data = job.data as {
-          WorkflowStepRunId: string;
-          WorkflowRunId: string;
-          organisationId: string;
-          subaccountId: string;
-          agentId: string;
-          stepId: string;
-          attempt: number;
-          renderedPrompt: string | null;
-          resolvedAgentInputs: Record<string, unknown>;
-          sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
-          // Decision-step-specific fields (absent for non-decision steps).
-          systemPromptAddendum?: string;
-          allowedToolSlugs?: string[];
-          timeoutSeconds?: number;
-          isDecisionRun?: boolean;
-          triggerContext?: Record<string, unknown>;
-        };
+    await createWorker<{
+      WorkflowStepRunId: string;
+      WorkflowRunId: string;
+      organisationId: string;
+      subaccountId: string;
+      agentId: string;
+      stepId: string;
+      attempt: number;
+      renderedPrompt: string | null;
+      resolvedAgentInputs: Record<string, unknown>;
+      sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
+      // Decision-step-specific fields (absent for non-decision steps).
+      systemPromptAddendum?: string;
+      allowedToolSlugs?: string[];
+      timeoutSeconds?: number;
+      isDecisionRun?: boolean;
+      triggerContext?: Record<string, unknown>;
+    }>({
+      queue: AGENT_STEP_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      // payload carries organisationId — default resolver applies
+      handler: async (job) => {
+        const data = job.data;
 
         // Re-verify the step run is still live before doing anything.
         // If it was invalidated between enqueue and worker pickup, drop.
@@ -3640,8 +3640,8 @@ export const WorkflowEngineService = {
           }
           throw err; // bubble for queue retry
         }
-      }
-    );
+      },
+    });
 
     // Cron schedule the watchdog every minute.
     try {
