@@ -3273,19 +3273,30 @@ Upsert + occurrence event + notify-enqueue happen in a single DB transaction to 
 
 Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missing_correlation_id` when `input.correlationId` is absent (per spec §6.9 — correlation-ID coverage is best-effort during ramp-up). Tagged-log-as-metric means the log pipeline counts occurrences; no separate counter primitive.
 
+### Coverage surface
+
+- **Log buffer (G2):** `logger.emit` calls `appendLogLineSafe` (lazy-loaded from `server/services/systemMonitor/logBuffer.ts`), wiring every structured log line into the in-process ring buffer. The adapter is in `server/lib/logger.ts`; pure conversion logic in `server/lib/loggerBufferAdapterPure.ts`.
+- **DLQ subscriptions (G1, G5):** `dlqMonitorService.ts` derives 40 queue names dynamically via `deriveDlqQueueNames(JOB_CONFIG)` (up from 8 hard-coded). Any new queue in `JOB_CONFIG` with a `deadLetter` field is covered automatically.
+- **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `workflowEngineService.ts`; `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation.
+- **Webhook 5xx emission (G7):** GHL webhook DB-lookup failure (`server/routes/webhooks/ghlWebhook.ts`) and GitHub webhook handler error (`server/routes/githubWebhook.ts`) both call `recordIncident` directly.
+- **Skill-analyzer terminal failure (G11):** The `skill-analyzer` pg-boss worker in `server/index.ts` wraps `processSkillAnalyzerJob` in a try/catch that calls `recordIncident` (fingerprint `skill_analyzer:terminal_failure`) before re-throwing, giving faster operator visibility ahead of the DLQ landing.
+
 ### Integration points
 
 | Caller | Source | Fingerprint |
 |--------|--------|-------------|
 | `asyncHandler.ts` | `route` | stack-derived |
 | Global error handler (`server/index.ts`) | `route` | stack-derived |
-| `dlqMonitorService.ts` | `job` | `job:<queue>:dlq` |
+| `dlqMonitorService.ts` — 40 queues derived from JOB_CONFIG | `job` | `job:<queue>:dlq` |
 | `agentExecutionService.ts` — failed/timeout/loop_detected | `agent` | stack-derived |
 | `connectorPollingService.ts` — connection error | `connector` | `connector:<type>:connection_error` |
 | `connectorPollingService.ts` — sync failure | `connector` | `connector:<type>:sync_failed` |
 | `skillExecutor.ts` — `fail_run` directive | `skill` | `skill:<slug>:fail_run` |
 | `llmRouter.ts` — all providers exhausted | `llm` | `llm:<provider>:<status>` |
 | `systemMonitorSelfCheckJob.ts` — ingest pipeline degraded | `self` | `self:ingestor:ingest_pipeline_degraded` |
+| GHL webhook handler (`ghlWebhook.ts`) — DB-lookup failure | `route` | stack-derived |
+| GitHub webhook handler (`githubWebhook.ts`) — handler error | `route` | stack-derived |
+| Skill-analyzer worker (`server/index.ts`) — terminal failure | `job` | `skill_analyzer:terminal_failure` |
 
 ### Notification
 
