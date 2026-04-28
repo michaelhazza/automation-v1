@@ -67,6 +67,7 @@ import { logger } from '../lib/logger.js';
 import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import { createWorker } from '../lib/createWorker.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
 import { WorkflowStepReviewService } from './workflowStepReviewService.js';
 import {
@@ -3471,23 +3472,18 @@ export const WorkflowEngineService = {
    * from server/index.ts in step 6).
    */
   async registerWorkers(): Promise<void> {
-    const pgboss = (await getPgBoss()) as unknown as {
-      work: (
-        name: string,
-        opts: Record<string, unknown>,
-        handler: (job: { id: string; data: unknown }) => Promise<void>
-      ) => Promise<void>;
-      schedule: (name: string, cron: string, data?: object, opts?: object) => Promise<void>;
-    };
+    const pgboss = await getPgBoss();
 
-    await pgboss.work(
-      TICK_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
+    await createWorker<{ runId: string }>({
+      queue: TICK_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      resolveOrgContext: () => null,  // tick reads org from workflow_runs row
+      handler: async (job) => {
         const data = job.data as { runId: string };
         await this.tick(data.runId);
-      }
-    );
+      },
+    });
 
     await pgboss.work(
       WATCHDOG_QUEUE,
