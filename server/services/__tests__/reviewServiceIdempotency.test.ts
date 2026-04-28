@@ -27,50 +27,80 @@ export {}; // force module scope — avoids top-level-await hoisting issues
 
 import assert from 'node:assert/strict';
 
+// Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
+// Tests that require a real Postgres instance are skipped unless DATABASE_URL is set.
+const SKIP = !process.env.DATABASE_URL;
+
 // ── Env preamble — must be before any module-level env reads ─────────────────
 await import('dotenv/config');
 process.env.NODE_ENV     = 'test';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: reviewServiceIdempotency.test requires a real DATABASE_URL.');
-  console.log('Set DATABASE_URL to a live Postgres connection string to run this test.\n');
-  process.exit(0);
+// ── Heavy DB modules — imported conditionally when !SKIP ─────────────────────
+// When SKIP is true the dynamic imports are not reached, so env.ts validation
+// and DB connection setup are bypassed entirely. Type-cast placeholders satisfy
+// TypeScript while dead code under SKIP is never reached.
+let db: Awaited<typeof import('../../db/index.js')>['db'];
+let client: Awaited<typeof import('../../db/index.js')>['client'];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'];
+let eq: Awaited<typeof import('drizzle-orm')>['eq'];
+let and: Awaited<typeof import('drizzle-orm')>['and'];
+let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisations'];
+let agents: Awaited<typeof import('../../db/schema/index.js')>['agents'];
+let subaccounts: Awaited<typeof import('../../db/schema/index.js')>['subaccounts'];
+let actions: Awaited<typeof import('../../db/schema/index.js')>['actions'];
+let reviewItems: Awaited<typeof import('../../db/schema/index.js')>['reviewItems'];
+let auditEvents: Awaited<typeof import('../../db/schema/index.js')>['auditEvents'];
+let reviewService: Awaited<typeof import('../reviewService.js')>['reviewService'];
+let __testHooks: Awaited<typeof import('../reviewService.js')>['__testHooks'];
+let mock: Awaited<typeof import('node:test')>['mock'];
+let actionService: Awaited<typeof import('../actionService.js')>['actionService'];
+let executionLayerService: Awaited<typeof import('../executionLayerService.js')>['executionLayerService'];
+
+if (!SKIP) {
+  // ── Imports (after env preamble) ─────────────────────────────────────────────
+  ({ db, client } = await import('../../db/index.js'));
+  ({ sql, eq, and } = await import('drizzle-orm'));
+  ({ organisations, agents, subaccounts, actions, reviewItems, auditEvents } = await import('../../db/schema/index.js'));
+  ({ reviewService, __testHooks } = await import('../reviewService.js'));
+  ({ mock } = await import('node:test'));
+
+  // Downstream services — mocked below so no real execution / state transitions
+  // occur. We only exercise the reviewItems table transaction semantics.
+  ({ actionService } = await import('../actionService.js'));
+  ({ executionLayerService } = await import('../executionLayerService.js'));
+
+  // ── Hook-presence assertion (MUST hold) ───────────────────────────────────────
+  assert.ok(
+    __testHooks !== undefined,
+    'reviewService.__testHooks must be exported for race determinism tests',
+  );
+  assert.ok(
+    'delayBetweenClaimAndCommit' in __testHooks,
+    'reviewService.__testHooks.delayBetweenClaimAndCommit must exist',
+  );
 }
-
-// ── Imports (after env preamble) ─────────────────────────────────────────────
-const { db, client } = await import('../../db/index.js');
-const { sql, eq, and } = await import('drizzle-orm');
-const { organisations, agents, subaccounts, actions, reviewItems, auditEvents } = await import('../../db/schema/index.js');
-const { reviewService, __testHooks } = await import('../reviewService.js');
-const { mock } = await import('node:test');
-
-// Downstream services — mocked below so no real execution / state transitions
-// occur. We only exercise the reviewItems table transaction semantics.
-const { actionService } = await import('../actionService.js');
-const { executionLayerService } = await import('../executionLayerService.js');
-
-// ── Hook-presence assertion (MUST hold) ───────────────────────────────────────
-assert.ok(
-  __testHooks !== undefined,
-  'reviewService.__testHooks must be exported for race determinism tests',
-);
-assert.ok(
-  'delayBetweenClaimAndCommit' in __testHooks,
-  'reviewService.__testHooks.delayBetweenClaimAndCommit must exist',
-);
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
+async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
+  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
+  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
+  if (opts.skip) {
+    skipped++;
+    console.log(`# SKIP ${name}`);
+    return;
+  }
   __testHooks.delayBetweenClaimAndCommit = undefined;
   mock.restoreAll();
   try {
-    await fn();
+    await body();
     passed++;
     console.log(`  PASS  ${name}`);
   } catch (err) {
@@ -247,18 +277,20 @@ function installServiceMocks(seededActionId: string, subaccountId: string, orgId
 // ── Shared fixture (seeded once, deleted in finally) ─────────────────────────
 
 let sharedIds: SeedIds | undefined;
-try {
-  sharedIds = await seedSharedFixture();
-} catch (err) {
-  console.error('FATAL: failed to seed shared fixture:', err);
-  process.exit(1);
+if (!SKIP) {
+  try {
+    sharedIds = await seedSharedFixture();
+  } catch (err) {
+    console.error('FATAL: failed to seed shared fixture:', err);
+    process.exit(1);
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Test 1 — Concurrent double-approve
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent double-approve: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', async () => {
+await test('concurrent double-approve: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', { skip: SKIP }, async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'double-approve');
 
   try {
@@ -324,7 +356,7 @@ await test('concurrent double-approve: one winner (wasIdempotent: false) + one i
 // Test 2 — Concurrent double-reject
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent double-reject: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', async () => {
+await test('concurrent double-reject: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', { skip: SKIP }, async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'double-reject');
 
   try {
@@ -382,7 +414,7 @@ await test('concurrent double-reject: one winner (wasIdempotent: false) + one id
 // Test 3 — Concurrent approve + reject
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent approve+reject: winner takes status, loser throws 409 ITEM_CONFLICT', async () => {
+await test('concurrent approve+reject: winner takes status, loser throws 409 ITEM_CONFLICT', { skip: SKIP }, async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'approve-reject');
 
   try {
@@ -442,7 +474,7 @@ await test('concurrent approve+reject: winner takes status, loser throws 409 ITE
 // (fails loudly if reviewService renames the string constant)
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('idempotent_race discriminant is the literal string "idempotent_race" in reviewService source', async () => {
+await test('idempotent_race discriminant is the literal string "idempotent_race" in reviewService source', { skip: SKIP }, async () => {
   // Read the source text at runtime to assert the discriminant value by name.
   // This test fails if someone renames 'idempotent_race' without updating this test.
   const { readFileSync } = await import('node:fs');
@@ -462,19 +494,21 @@ await test('idempotent_race discriminant is the literal string "idempotent_race"
 // Global cleanup + summary
 // ═════════════════════════════════════════════════════════════════════════════
 
-try {
-  if (sharedIds) {
-    await cleanupSharedFixture(sharedIds);
-  }
-} catch (err) {
-  console.warn('WARN: cleanup of shared fixture failed:', err);
-} finally {
+if (!SKIP) {
   try {
-    await client.end();
-  } catch {
-    // best-effort
+    if (sharedIds) {
+      await cleanupSharedFixture(sharedIds);
+    }
+  } catch (err) {
+    console.warn('WARN: cleanup of shared fixture failed:', err);
+  } finally {
+    try {
+      await client.end();
+    } catch {
+      // best-effort
+    }
   }
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
+console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
 if (failed > 0) process.exit(1);

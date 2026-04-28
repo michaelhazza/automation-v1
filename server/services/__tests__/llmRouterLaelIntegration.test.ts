@@ -32,6 +32,10 @@
 import { strict as assert } from 'node:assert';
 import * as crypto from 'node:crypto';
 
+// Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
+// Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
+const SKIP = process.env.NODE_ENV !== 'integration';
+
 await import('dotenv/config');
 
 process.env.NODE_ENV ??= 'test';
@@ -41,28 +45,42 @@ process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 // pair regardless of the resolveLLM heuristic state in the test DB.
 process.env.ROUTER_FORCE_FRONTIER = '1';
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: llmRouterLaelIntegration requires a real DATABASE_URL.');
-  console.log('Set DATABASE_URL to a live Postgres connection string to run this test.\n');
-  process.exit(0);
-}
+// Heavy DB modules are imported conditionally — when SKIP is true the dynamic
+// imports are not reached, so env.ts validation and DB connection setup are
+// bypassed entirely. Type-cast placeholders satisfy TypeScript while dead
+// code under SKIP is never reached.
+let db: Awaited<typeof import('../../db/index.js')>['db'];
+let agentExecutionEvents: Awaited<typeof import('../../db/schema/index.js')>['agentExecutionEvents'];
+let agentRunLlmPayloads: Awaited<typeof import('../../db/schema/index.js')>['agentRunLlmPayloads'];
+let llmRequests: Awaited<typeof import('../../db/schema/index.js')>['llmRequests'];
+let agentRuns: Awaited<typeof import('../../db/schema/index.js')>['agentRuns'];
+let agents: Awaited<typeof import('../../db/schema/index.js')>['agents'];
+let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisations'];
+let orgBudgets: Awaited<typeof import('../../db/schema/index.js')>['orgBudgets'];
+let costAggregates: Awaited<typeof import('../../db/schema/index.js')>['costAggregates'];
+let eq: Awaited<typeof import('drizzle-orm')>['eq'];
+let and: Awaited<typeof import('drizzle-orm')>['and'];
+let routeCall: Awaited<typeof import('../llmRouter.js')>['routeCall'];
+let registerProviderAdapter: Awaited<typeof import('../providers/registry.js')>['registerProviderAdapter'];
+let createFakeProviderAdapter: Awaited<typeof import('./fixtures/fakeProviderAdapter.js')>['createFakeProviderAdapter'];
 
-const { db } = await import('../../db/index.js');
-const {
-  agentExecutionEvents,
-  agentRunLlmPayloads,
-  llmRequests,
-  agentRuns,
-  agents,
-  organisations,
-  orgBudgets,
-  costAggregates,
-} = await import('../../db/schema/index.js');
-const { eq, and } = await import('drizzle-orm');
-const { routeCall } = await import('../llmRouter.js');
-const { registerProviderAdapter } = await import('../providers/registry.js');
-const { createFakeProviderAdapter } = await import('./fixtures/fakeProviderAdapter.js');
+if (!SKIP) {
+  ({ db } = await import('../../db/index.js'));
+  ({
+    agentExecutionEvents,
+    agentRunLlmPayloads,
+    llmRequests,
+    agentRuns,
+    agents,
+    organisations,
+    orgBudgets,
+    costAggregates,
+  } = await import('../../db/schema/index.js'));
+  ({ eq, and } = await import('drizzle-orm'));
+  ({ routeCall } = await import('../llmRouter.js'));
+  ({ registerProviderAdapter } = await import('../providers/registry.js'));
+  ({ createFakeProviderAdapter } = await import('./fixtures/fakeProviderAdapter.js'));
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Cleanup helper — co-located per §1.3 step 4a. Asserts zero rows for the
@@ -245,10 +263,20 @@ async function seedTestFixture(): Promise<{ orgId: string; agentId: string }> {
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 
-async function test(name: string, fn: () => Promise<void>) {
+async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
+  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
+  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
+  if (opts.skip) {
+    skipped++;
+    console.log(`# SKIP ${name}`);
+    return;
+  }
   try {
-    await fn();
+    await body();
     passed++;
     console.log(`  PASS  ${name}`);
   } catch (err) {
@@ -261,10 +289,14 @@ async function test(name: string, fn: () => Promise<void>) {
 console.log('');
 console.log('llmRouter — LAEL integration:');
 
-const { orgId, agentId } = await seedTestFixture();
+let orgId: string = '';
+let agentId: string = '';
+if (!SKIP) {
+  ({ orgId, agentId } = await seedTestFixture());
+}
 
 // ─── Test 1: happy-path agent-run emission ──────────────────────────────────
-await test('test 1: happy-path agent-run emits requested→completed with one referenced payload row', async () => {
+await test('test 1: happy-path agent-run emits requested→completed with one referenced payload row', { skip: SKIP }, async () => {
   const runId = crypto.randomUUID();
   await assertNoRowsForRunId(runId, [
     'agent_execution_events',
@@ -358,7 +390,7 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
 });
 
 // ─── Test 2: budget_blocked silence ─────────────────────────────────────────
-await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', async () => {
+await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
   // Deterministically trip the budget breaker by saturating the org-monthly
   // cap. We seed BOTH `org_budgets.monthlyCostLimitCents` (a tight cap) AND
   // a `cost_aggregates` row showing the org has already exceeded the cap;
@@ -545,7 +577,7 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
 });
 
 // ─── Test 3: non-agent-run silence ──────────────────────────────────────────
-await test('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', async () => {
+await test('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
   // No agent_runs row needed — sourceType !== 'agent_run' means LAEL gating
   // returns false. The ledger row is written with `runId: null` for system-
   // source calls, so cleanup CANNOT scope by runId — we'd leak the row on
@@ -619,6 +651,6 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
+console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
 console.log('');
 if (failed > 0) process.exit(1);

@@ -560,4 +560,4 @@ export const reviewService = {
 // behaviour is unchanged when this hook is unset (production-safety contract).
 export const __testHooks: {
   delayBetweenClaimAndCommit?: () => Promise<void>;
-} = {};
+} = { delayBetweenClaimAndCommit: undefined };

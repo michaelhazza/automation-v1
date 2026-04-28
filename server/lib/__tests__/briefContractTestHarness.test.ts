@@ -58,7 +58,7 @@ const CTX: CapabilityTestContext = {
 function makeStructured(overrides: Partial<BriefChatArtefact> = {}): BriefChatArtefact {
   return {
     kind: 'structured',
-    artefactId: 'art-s-1',
+    artefactId: '00000000-0000-0000-0000-000000000001',
     summary: 'Test result',
     entityType: 'contacts',
     filtersApplied: [],
@@ -75,7 +75,7 @@ function makeStructured(overrides: Partial<BriefChatArtefact> = {}): BriefChatAr
 function makeApproval(overrides: Partial<BriefChatArtefact> = {}): BriefChatArtefact {
   return {
     kind: 'approval',
-    artefactId: 'art-a-1',
+    artefactId: '00000000-0000-0000-0000-000000000002',
     summary: 'Send email',
     actionSlug: 'crm.send_email',
     actionArgs: {},
@@ -88,7 +88,7 @@ function makeApproval(overrides: Partial<BriefChatArtefact> = {}): BriefChatArte
 function makeError(overrides: Partial<BriefChatArtefact> = {}): BriefChatArtefact {
   return {
     kind: 'error',
-    artefactId: 'art-e-1',
+    artefactId: '00000000-0000-0000-0000-000000000003',
     errorCode: 'internal_error',
     message: 'Something went wrong',
     ...overrides,

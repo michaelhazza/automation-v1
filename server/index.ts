@@ -453,6 +453,30 @@ async function start() {
     const boss = await getPgBoss();
     await startDlqMonitor(boss);
     await registerSystemIncidentNotifyWorker(boss);
+    // Async-ingest worker — only registers when SYSTEM_INCIDENT_INGEST_MODE=async.
+    // Sync mode (the default) writes incidents inline in the calling process and
+    // has no consumer for this queue. Registering the worker unconditionally would
+    // cause the queue to drain even in sync mode, which is harmless but confusing.
+    //
+    // Always log the resolved mode so operators see the active path at boot,
+    // independent of whether the async branch executes. Useful when triaging
+    // "why is the queue empty?" without needing to grep env config.
+    const ingestMode = process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async' ? 'async' : 'sync';
+    logger.info('incident_ingest_mode', {
+      mode: ingestMode,
+      asyncWorkerRegistered: ingestMode === 'async',
+    });
+    if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+      const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+      await boss.work(
+        'system-monitor-ingest',
+        { teamSize: 4, teamConcurrency: 1 },
+        async (job: { id: string; data: unknown }) => {
+          await handleSystemMonitorIngest(job.data as Parameters<typeof handleSystemMonitorIngest>[0]);
+        }
+      );
+      logger.info('async_incident_ingest_worker_registered');
+    }
   }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
@@ -472,10 +496,19 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();
-      const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
+      const { runSkillAnalyzerJobWithIncidentEmission } = await import('./jobs/skillAnalyzerJobWithIncidentEmission.js');
+      const { getRetryCount } = await import('./lib/jobErrors.js');
+      // Surface terminal failures to the System Monitor. pg-boss retry exhaustion
+      // also lands in skill-analyzer__dlq (covered by Phase 1's DLQ derivation),
+      // but emitting here too gives faster visibility for failures that happen
+      // on the FINAL retry attempt — without this wrap, the operator sees no
+      // signal until the DLQ row lands.
+      // The wrapper only emits an incident when retryCount >= retryLimit
+      // (terminal attempt). Earlier-attempt throws rethrow without emitting.
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        await processSkillAnalyzerJob(jobId);
+        const retryCount = getRetryCount(job as { retrycount?: number } & Record<string, unknown>);
+        await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
       });
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);

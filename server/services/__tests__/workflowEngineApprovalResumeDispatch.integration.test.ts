@@ -44,34 +44,51 @@ import { strict as assert } from 'node:assert';
 import * as crypto from 'node:crypto';
 import { mock } from 'node:test';
 
+// Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
+// Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
+const SKIP = process.env.NODE_ENV !== 'integration';
+
 await import('dotenv/config');
 
 process.env.NODE_ENV ??= 'test';
 process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: workflowEngineApprovalResumeDispatch requires a real DATABASE_URL.');
-  console.log('Set DATABASE_URL to a live Postgres connection string to run this test.\n');
-  process.exit(0);
-}
+// Heavy DB modules are imported conditionally — when SKIP is true the dynamic
+// imports are not reached, so env.ts validation and DB connection setup are
+// bypassed entirely.
+let db: Awaited<typeof import('../../db/index.js')>['db'];
+let workflowRuns: Awaited<typeof import('../../db/schema/index.js')>['workflowRuns'];
+let workflowStepRuns: Awaited<typeof import('../../db/schema/index.js')>['workflowStepRuns'];
+let workflowStepReviews: Awaited<typeof import('../../db/schema/index.js')>['workflowStepReviews'];
+let workflowTemplates: Awaited<typeof import('../../db/schema/index.js')>['workflowTemplates'];
+let workflowTemplateVersions: Awaited<typeof import('../../db/schema/index.js')>['workflowTemplateVersions'];
+let automations: Awaited<typeof import('../../db/schema/index.js')>['automations'];
+let automationEngines: Awaited<typeof import('../../db/schema/index.js')>['automationEngines'];
+let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisations'];
+let eq: Awaited<typeof import('drizzle-orm')>['eq'];
+let and: Awaited<typeof import('drizzle-orm')>['and'];
+let WorkflowRunService: Awaited<typeof import('../workflowRunService.js')>['WorkflowRunService'];
+let startFakeWebhookReceiver: Awaited<typeof import('./fixtures/fakeWebhookReceiver.js')>['startFakeWebhookReceiver'];
+let webhookService: Awaited<typeof import('../webhookService.js')>['webhookService'];
 
-const { db } = await import('../../db/index.js');
-const {
-  workflowRuns,
-  workflowStepRuns,
-  workflowStepReviews,
-  workflowTemplates,
-  workflowTemplateVersions,
-  automations,
-  automationEngines,
-  organisations,
-} = await import('../../db/schema/index.js');
-const { eq, and } = await import('drizzle-orm');
-const { WorkflowRunService } = await import('../workflowRunService.js');
-const { startFakeWebhookReceiver } = await import('./fixtures/fakeWebhookReceiver.js');
-const { webhookService } = await import('../webhookService.js');
+if (!SKIP) {
+  ({ db } = await import('../../db/index.js'));
+  ({
+    workflowRuns,
+    workflowStepRuns,
+    workflowStepReviews,
+    workflowTemplates,
+    workflowTemplateVersions,
+    automations,
+    automationEngines,
+    organisations,
+  } = await import('../../db/schema/index.js'));
+  ({ eq, and } = await import('drizzle-orm'));
+  ({ WorkflowRunService } = await import('../workflowRunService.js'));
+  ({ startFakeWebhookReceiver } = await import('./fixtures/fakeWebhookReceiver.js'));
+  ({ webhookService } = await import('../webhookService.js'));
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Cleanup helper — co-located per §1.3 step 4a (re-used here with §1.4
@@ -319,10 +336,20 @@ async function seedRunWithAwaitingStep(opts: {
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 
-async function test(name: string, fn: () => Promise<void>) {
+async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, fn: () => Promise<void>): Promise<void>;
+async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
+  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
+  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
+  if (opts.skip) {
+    skipped++;
+    console.log(`# SKIP ${name}`);
+    return;
+  }
   try {
-    await fn();
+    await body();
     passed++;
     console.log(`  PASS  ${name}`);
   } catch (err) {
@@ -336,7 +363,7 @@ console.log('');
 console.log('workflowEngine — approval-resume dispatch:');
 
 // ─── Test 1: approved → fires webhook ONCE + reaches completed ──────────────
-await test('test 1: approved invoke_automation fires webhook and reaches completed status', async () => {
+await test('test 1: approved invoke_automation fires webhook and reaches completed status', { skip: SKIP }, async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     const fixture = await seedFixture(receiver.url);
@@ -397,7 +424,7 @@ await test('test 1: approved invoke_automation fires webhook and reaches complet
 });
 
 // ─── Test 2: concurrent double-approve fires webhook EXACTLY once ───────────
-await test('test 2: concurrent double-approve fires webhook exactly once + sign-call boundary spy', async () => {
+await test('test 2: concurrent double-approve fires webhook exactly once + sign-call boundary spy', { skip: SKIP }, async () => {
   const receiver = await startFakeWebhookReceiver();
   // Spy on the HMAC-signing call site INSIDE the dispatch path. The signing
   // call happens between the engine's race-resolving UPDATE and the outbound
@@ -489,7 +516,7 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
 });
 
 // ─── Test 3: rejected → no dispatch + no webhook ────────────────────────────
-await test('test 3: rejected invoke_automation completes without webhook dispatch + sign-call=0', async () => {
+await test('test 3: rejected invoke_automation completes without webhook dispatch + sign-call=0', { skip: SKIP }, async () => {
   const receiver = await startFakeWebhookReceiver();
   // Symmetric with Test 2: spy on the HMAC-signing boundary so a regression
   // that triggered a sign-then-crash-before-fetch path on the rejected
@@ -563,6 +590,6 @@ await test('test 3: rejected invoke_automation completes without webhook dispatc
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
+console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
 console.log('');
 if (failed > 0) process.exit(1);

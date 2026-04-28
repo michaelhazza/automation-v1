@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import type { AnalysisJob, AnalysisResult, BackupMetadata } from './types';
-import RestoreBackupControl, { type RestoreOutcome } from './RestoreBackupControl';
+import RestoreBackupControl, { type RestoreOutcome, type RestoreResult } from './RestoreBackupControl';
 import RestoreOutcomeBanner from './RestoreOutcomeBanner';
 
 interface ExecuteResult {
