@@ -91,6 +91,18 @@ assert.deepStrictEqual(
   { entityType: 'org', entityName: 'Acme', remainder: null },
 );
 
+// "please" in the middle of the entity segment (before the comma) is stripped
+assert.deepStrictEqual(
+  parseContextSwitchCommand('change to Acme please, create a campaign'),
+  { entityType: null, entityName: 'Acme', remainder: 'create a campaign' },
+);
+
+// filler prefix + trailing please
+assert.deepStrictEqual(
+  parseContextSwitchCommand('can you change to org Acme please'),
+  { entityType: 'org', entityName: 'Acme', remainder: null },
+);
+
 console.log('All parseContextSwitchCommand tests passed.');
 ```
 
@@ -118,7 +130,10 @@ const ORG_SYNONYMS = ['organisation', 'organization', 'org'];
 const SUBACCOUNT_SYNONYMS = ['sub-account', 'subaccount', 'client', 'company'];
 
 export function parseContextSwitchCommand(text: string): ContextSwitchCommand | null {
-  const trimmed = text.trim();
+  // Strip trailing politeness and leading filler words so "can you change to Acme please" works
+  const trimmed = text.trim()
+    .replace(/\s+(please|thanks)\.?$/i, '')
+    .replace(/^(can you|please|hey)\s+/i, '');
   const lower = trimmed.toLowerCase();
 
   for (const verb of SWITCH_VERBS) {
@@ -153,12 +168,16 @@ function splitEntityAndRemainder(
   entityType: 'org' | 'subaccount' | null,
 ): ContextSwitchCommand {
   const commaIdx = text.indexOf(',');
+  // Strip "please" from the entity segment only — handles "change to Acme please, do X"
+  // where "please" sits between the name and the comma rather than at the end of the string.
+  const rawEntity = commaIdx === -1 ? text : text.slice(0, commaIdx);
+  const entityName = rawEntity.replace(/\bplease\b/gi, '').trim();
   if (commaIdx === -1) {
-    return { entityType, entityName: text.trim(), remainder: null };
+    return { entityType, entityName, remainder: null };
   }
   return {
     entityType,
-    entityName: text.slice(0, commaIdx).trim(),
+    entityName,
     remainder: text.slice(commaIdx + 1).trim() || null,
   };
 }
@@ -189,7 +208,7 @@ git commit -m "feat(routing): add parseContextSwitchCommand pure parser"
 ```typescript
 // server/services/scopeResolutionService.test.ts
 import { strict as assert } from 'node:assert';
-import { disambiguationQuestion, deduplicateCandidates } from './scopeResolutionService.js';
+import { disambiguationQuestion, deduplicateCandidates, rankCandidates } from './scopeResolutionService.js';
 import type { ScopeCandidate } from './scopeResolutionService.js';
 
 // disambiguationQuestion
@@ -226,6 +245,25 @@ assert.deepStrictEqual(deduplicateCandidates(dupes), [
   { id: '2', name: 'Sales', type: 'subaccount' },
 ]);
 
+// rankCandidates — exact match floats to top; shorter name wins on tie
+const unranked: ScopeCandidate[] = [
+  { id: '3', name: 'Acme Holdings', type: 'org' },
+  { id: '1', name: 'Acme', type: 'org' },
+  { id: '2', name: 'Acme Pty Ltd', type: 'org' },
+];
+const ranked = rankCandidates(unranked, 'acme');
+assert.strictEqual(ranked[0]!.name, 'Acme'); // exact match
+assert.strictEqual(ranked[1]!.name, 'Acme Holdings'); // prefix, shorter
+assert.strictEqual(ranked[2]!.name, 'Acme Pty Ltd'); // prefix, longer
+
+// type bias — org wins over subaccount on equal score
+const mixed: ScopeCandidate[] = [
+  { id: '10', name: 'Acme', type: 'subaccount', orgName: 'Parent Co' },
+  { id: '11', name: 'Acme', type: 'org' },
+];
+const mixedRanked = rankCandidates(mixed, 'acme');
+assert.strictEqual(mixedRanked[0]!.type, 'org'); // org wins on score tie
+
 console.log('All scopeResolutionService tests passed.');
 ```
 
@@ -250,6 +288,7 @@ export interface ScopeCandidate {
   id: string;
   name: string;
   type: 'org' | 'subaccount';
+  orgName?: string; // parent org name for subaccounts — shown in disambiguation UI
 }
 
 export interface EntitySearchInput {
@@ -262,6 +301,9 @@ export interface EntitySearchInput {
 /**
  * ILIKE search for orgs/subaccounts matching `hint`, scoped to what the user
  * can see. system_admin sees all; others see only their own org and its subaccounts.
+ *
+ * NOTE: uses ILIKE %hint% for flexibility. At scale, switch to trigram index
+ * (pg_trgm) or prefix-only search for index-backed performance.
  */
 export async function findEntitiesMatching(input: EntitySearchInput): Promise<ScopeCandidate[]> {
   const { hint, entityType, userRole, organisationId } = input;
@@ -291,25 +333,51 @@ export async function findEntitiesMatching(input: EntitySearchInput): Promise<Sc
   }
 
   if (searchSubaccounts) {
-    // RLS via getOrgScopedDb restricts non-system-admin to their org's subaccounts
-    const rows = isSystemAdmin
-      ? await db
-          .select({ id: subaccounts.id, name: subaccounts.name })
+    // Join organisations to get parent org name for disambiguation display.
+    // RLS via getOrgScopedDb restricts non-system-admin to their org's subaccounts.
+    const subQuery = isSystemAdmin
+      ? db
+          .select({ id: subaccounts.id, name: subaccounts.name, orgName: organisations.name })
           .from(subaccounts)
+          .innerJoin(organisations, eq(subaccounts.organisationId, organisations.id))
           .where(ilike(subaccounts.name, pattern))
           .limit(10)
-      : await getOrgScopedDb('scope_resolution')
-          .select({ id: subaccounts.id, name: subaccounts.name })
+      : getOrgScopedDb('scope_resolution')
+          .select({ id: subaccounts.id, name: subaccounts.name, orgName: organisations.name })
           .from(subaccounts)
+          .innerJoin(organisations, eq(subaccounts.organisationId, organisations.id))
           .where(ilike(subaccounts.name, pattern))
           .limit(10);
-    results.push(...rows.map((r) => ({ id: r.id, name: r.name, type: 'subaccount' as const })));
+    const rows = await subQuery;
+    results.push(...rows.map((r) => ({ id: r.id, name: r.name, type: 'subaccount' as const, orgName: r.orgName })));
   }
 
-  return deduplicateCandidates(results);
+  return rankCandidates(deduplicateCandidates(results), hint);
 }
 
 // ── Pure helpers (exported for tests) ──────────────────────────────────────
+
+// Single source of truth for candidate scoring — used by both rankCandidates and the route's
+// auto-resolve logic. Exporting prevents the two from drifting independently.
+export function scoreCandidate(c: ScopeCandidate, hint: string): number {
+  const h = hint.toLowerCase();
+  const n = c.name.toLowerCase();
+  if (n === h) return 3;
+  if (n.startsWith(h)) return 2;
+  if (n.includes(h)) return 1;
+  return 0;
+}
+
+export function rankCandidates(candidates: ScopeCandidate[], hint: string): ScopeCandidate[] {
+  // Org wins over subaccount on equal score — matches user expectation for ambiguous input
+  const typeWeight = (c: ScopeCandidate) => (c.type === 'org' ? 1 : 0);
+  return [...candidates].sort(
+    (a, b) =>
+      scoreCandidate(b, hint) - scoreCandidate(a, hint) ||
+      typeWeight(b) - typeWeight(a) ||
+      a.name.length - b.name.length,
+  );
+}
 
 export function deduplicateCandidates(candidates: ScopeCandidate[]): ScopeCandidate[] {
   const seen = new Set<string>();
@@ -493,10 +561,13 @@ git commit -m "feat(routing): createBrief accepts explicit title/description/pri
 // server/routes/sessionMessage.ts
 
 import { Router } from 'express';
+import { eq } from 'drizzle-orm';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { db } from '../db/index.js';
+import { subaccounts } from '../db/schema/index.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
-import { findEntitiesMatching, disambiguationQuestion } from '../services/scopeResolutionService.js';
+import { findEntitiesMatching, disambiguationQuestion, scoreCandidate } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
 import type { Request } from 'express';
@@ -553,9 +624,18 @@ router.post(
 
     // ── Path B: "change to X [, remainder]" command ───────────────────────
     const command = parseContextSwitchCommand(text);
+    console.info('session.message', {
+      userId: req.user!.id,
+      commandDetected: !!command,
+      entityType: command?.entityType ?? null,
+      entityName: command?.entityName ?? null,
+    });
     if (command) {
-      if (!command.entityName) {
-        res.json({ type: 'error', message: 'Could not find an entity name in your request.' });
+      if (!command.entityName || command.entityName.length < 2) {
+        res.json({
+          type: 'error',
+          message: 'Please specify a valid organisation or subaccount name.',
+        });
         return;
       }
 
@@ -574,7 +654,21 @@ router.post(
         return;
       }
 
-      if (candidates.length === 1) {
+      // Auto-resolve if only one candidate, or if the top-ranked candidate scores
+      // strictly higher than the second (decisive match — no need to show disambiguation UI).
+      // Uses the same scoreCandidate from the service so ranking and auto-resolve never drift.
+      const shouldAutoResolve =
+        candidates.length === 1 ||
+        (candidates.length > 1 &&
+          scoreCandidate(candidates[0]!, command.entityName) >
+          scoreCandidate(candidates[1]!, command.entityName));
+      console.info('session.message:resolved', {
+        candidatesCount: candidates.length,
+        autoResolved: shouldAutoResolve,
+        topCandidate: candidates[0] ? { id: candidates[0].id, type: candidates[0].type } : null,
+      });
+
+      if (shouldAutoResolve) {
         const result = await resolveAndCreate({
           candidateId: candidates[0]!.id,
           candidateName: candidates[0]!.name,
@@ -634,8 +728,22 @@ async function resolveAndCreate(opts: {
 }): Promise<SessionMessageResponse> {
   const { candidateId, candidateName, candidateType, remainder, req } = opts;
 
-  const resolvedOrgId =
-    candidateType === 'org' ? candidateId : (req.orgId ?? req.user!.organisationId ?? null);
+  let resolvedOrgId: string | null;
+  if (candidateType === 'org') {
+    resolvedOrgId = candidateId;
+  } else {
+    // Do NOT assume req.orgId — the selected subaccount may belong to a different org
+    const [sub] = await db
+      .select({ organisationId: subaccounts.organisationId })
+      .from(subaccounts)
+      .where(eq(subaccounts.id, candidateId))
+      .limit(1);
+    // Hard fail — falling back to the wrong org would be a multi-tenant data integrity violation
+    if (!sub?.organisationId) {
+      return { type: 'error', message: 'Invalid subaccount selection — organisation not found.' };
+    }
+    resolvedOrgId = sub.organisationId;
+  }
   const resolvedSubaccountId = candidateType === 'subaccount' ? candidateId : null;
 
   if (!remainder) {
@@ -761,6 +869,7 @@ export interface ScopeCandidate {
   id: string;
   name: string;
   type: 'org' | 'subaccount';
+  orgName?: string; // parent org name for subaccounts — shown in disambiguation buttons
 }
 
 export type SessionMessageResponse =
@@ -892,7 +1001,7 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
               >
                 {c.name}
                 <span className="ml-1.5 text-xs text-gray-400">
-                  ({c.type === 'org' ? 'org' : 'subaccount'})
+                  ({c.type === 'org' ? 'org' : `subaccount${c.orgName ? ` — ${c.orgName}` : ''}`})
                 </span>
               </button>
             ))}
@@ -1097,14 +1206,25 @@ git commit -m "feat(routing): New Brief modal adds org/subaccount dropdowns + co
 Add to imports at the top of `BriefDetailPage.tsx`:
 
 ```typescript
+import { useState, useEffect, useRef } from 'react';
 import DelegationGraphView from '../components/run-trace/DelegationGraphView.js';
 ```
 
-Add state after existing state declarations inside the component:
+Add state and ref after existing state declarations inside the component:
 
 ```typescript
 const [activeRunId, setActiveRunId] = useState<string | null>(null);
 const [showGraph, setShowGraph] = useState(true);
+// Ref avoids stale closure inside the polling timer callbacks
+const activeRunIdRef = useRef<string | null>(null);
+```
+
+Add a sync effect to keep the ref current:
+
+```typescript
+useEffect(() => {
+  activeRunIdRef.current = activeRunId;
+}, [activeRunId]);
 ```
 
 - [ ] **Step 2: Add active-run fetch + polling effect**
@@ -1127,16 +1247,23 @@ useEffect(() => {
     }
   };
 
+  // Exponential backoff: first check at 500 ms, doubles each time up to 4 s max.
+  // Gives fast perceived responsiveness without hammering the server.
+  let delay = 500;
+  let timer: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    timer = setTimeout(async () => {
+      if (cancelled || activeRunIdRef.current) return;
+      await fetchActiveRun();
+      delay = Math.min(delay * 2, 4000);
+      schedule();
+    }, delay);
+  };
   void fetchActiveRun();
+  schedule();
 
-  // Poll every 4 s until we have a runId (orchestrator job is async)
-  const interval = setInterval(() => {
-    if (activeRunId) { clearInterval(interval); return; }
-    void fetchActiveRun();
-  }, 4000);
-
-  return () => { cancelled = true; clearInterval(interval); };
-}, [briefId, activeRunId]);
+  return () => { cancelled = true; clearTimeout(timer); };
+}, [briefId]); // activeRunId intentionally omitted — read via ref to avoid timer restart
 ```
 
 - [ ] **Step 3: Replace the return JSX with a split-pane layout**

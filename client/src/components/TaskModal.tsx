@@ -188,6 +188,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
 
   const load = async () => {
     setLoading(true);
+    setError('');
     try {
       const { data } = await api.get(`/api/subaccounts/${subaccountId}/tasks/${itemId}`);
       setTask(data);
@@ -205,6 +206,12 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
       setSelectedAgentIds(ids);
       setDueDate(data.dueDate ? data.dueDate.slice(0, 10) : '');
       loadMyVotes(data.activities);
+    } catch (err: unknown) {
+      console.error('[TaskModal] load error:', err);
+      const e = err as { response?: { data?: { error?: { message?: string } | string; message?: string }; status?: number } };
+      const errField = e.response?.data?.error;
+      const msg = typeof errField === 'string' ? errField : (errField?.message ?? e.response?.data?.message ?? 'Failed to load task');
+      setError(`${msg}${e.response?.status ? ` (${e.response.status})` : ''}`);
     } finally {
       setLoading(false);
     }
@@ -338,7 +345,11 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
   };
 
   if (loading) return <Modal title="Loading..." onClose={onClose}><div className="p-5">Loading...</div></Modal>;
-  if (!task) return null;
+  if (!task) return (
+    <Modal title="Error" onClose={onClose}>
+      <div className="p-5 text-[13px] text-red-600">{error || 'Task not found.'}</div>
+    </Modal>
+  );
 
   const tabs = [
     { key: 'details', label: 'Details' },

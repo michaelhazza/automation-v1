@@ -836,7 +836,6 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/llm-pnl" icon={<Icons.usage />} label="LLM P&L" />
-              <NavItem to="/system/organisation-templates" icon={<Icons.agents />} label="Organisation Templates" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
@@ -978,8 +977,8 @@ export default function Layout({ user, children }: LayoutProps) {
                 <input type="url" value={newProjectRepoUrl} onChange={(e) => setNewProjectRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
+                <button type="button" onClick={() => setShowCreateProject(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="btn btn-primary">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
               </div>
             </form>
           </div>
@@ -1126,8 +1125,8 @@ export default function Layout({ user, children }: LayoutProps) {
               </div>
 
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
+                <button type="button" onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="btn btn-primary">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
               </div>
             </form>
           </div>
@@ -1179,8 +1178,8 @@ export default function Layout({ user, children }: LayoutProps) {
                 <input type="text" value={newClientSlug} onChange={(e) => setNewClientSlug(e.target.value)} placeholder="acme-corp" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowCreateClient(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newClientName.trim() || createClientLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createClientLoading ? 'Creating...' : 'Create'}</button>
+                <button type="button" onClick={() => setShowCreateClient(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newClientName.trim() || createClientLoading} className="btn btn-primary">{createClientLoading ? 'Creating...' : 'Create'}</button>
               </div>
             </form>
           </div>
@@ -1235,8 +1234,8 @@ export default function Layout({ user, children }: LayoutProps) {
                 </select>
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowNewBrief(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{newBriefLoading ? 'Creating...' : 'Create Brief'}</button>
+                <button type="button" onClick={() => setShowNewBrief(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="btn btn-primary">{newBriefLoading ? 'Creating...' : 'Create Brief'}</button>
               </div>
             </form>
           </div>

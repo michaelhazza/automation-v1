@@ -2,24 +2,27 @@
  * Backfill system_skills DB rows from server/skills/*.md.
  *
  * Phase 0 of skill-analyzer-v2 migrates system skills from file-based to
- * DB-backed (see docs/skill-analyzer-v2-spec.md §10 Phase 0). This script
- * is the one-shot bridge: it parses every .md file via the pure parser,
- * validates handler_key = slug resolves to SKILL_HANDLERS, and upserts
- * each skill into the system_skills table by slug.
+ * DB-backed (see docs/skill-analyzer-v2-spec.md §10 Phase 0). This module
+ * is the bridge: it parses every .md file via the pure parser, validates
+ * handler_key = slug resolves to SKILL_HANDLERS, and upserts each skill
+ * into the system_skills table by slug.
  *
- * Idempotent — safe to re-run. Fails fast on any unregistered handler or
- * malformed .md file, printing the offender and exiting non-zero without
- * writing any rows.
+ * Idempotent — safe to re-run. Files that fail to parse, or that reference
+ * a handler not registered in SKILL_HANDLERS, are skipped with a warning
+ * rather than aborting the whole run. The startup validator
+ * (validateSystemSkillHandlers) still enforces handler presence on active
+ * rows, so unsafe rows can never reach runtime.
  *
- * Usage:
- *   npm run skills:backfill
- *   (or: tsx scripts/backfill-system-skills.ts)
+ * The exported `runSystemSkillsBackfill` is called by `scripts/seed.ts`
+ * (Phase 2) so a single `npm run seed` produces a complete DB. The CLI
+ * entrypoint below preserves the standalone `npm run skills:backfill`
+ * workflow for re-syncing skills without touching agents/templates.
  */
 
 import 'dotenv/config';
 import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { db, client } from '../server/db/index.js';
 import { systemSkills } from '../server/db/schema/systemSkills.js';
 import { eq } from 'drizzle-orm';
@@ -29,21 +32,36 @@ import { SKILL_HANDLERS } from '../server/services/skillExecutor.js';
 const __filename = fileURLToPath(import.meta.url);
 const SKILLS_DIR = join(dirname(__filename), '..', 'server', 'skills');
 
-interface BackfillResult {
-  slug: string;
-  action: 'inserted' | 'updated' | 'unchanged';
+export interface SystemSkillsBackfillResult {
+  total: number;
+  inserted: number;
+  updated: number;
+  parseErrors: string[];
+  missingHandlers: string[];
 }
 
-async function main(): Promise<void> {
-  console.log('[backfill] reading skills from', SKILLS_DIR);
+export interface SystemSkillsBackfillOpts {
+  /** Optional logger; defaults to console.log. */
+  log?: (msg: string) => void;
+  /** Optional warn channel; defaults to console.warn. */
+  warn?: (msg: string) => void;
+}
 
-  let files: string[];
-  try {
-    files = await readdir(SKILLS_DIR);
-  } catch (err) {
-    console.error('[backfill] skills directory not readable:', err);
-    process.exit(1);
-  }
+/**
+ * Run the system_skills backfill against the configured DB. Returns counts
+ * for the caller to format. Does NOT close the underlying pg client — that
+ * is the responsibility of the entrypoint (CLI or seed). Throws on a
+ * non-recoverable error (e.g. unreadable skills directory).
+ */
+export async function runSystemSkillsBackfill(
+  opts: SystemSkillsBackfillOpts = {},
+): Promise<SystemSkillsBackfillResult> {
+  const log = opts.log ?? ((msg: string) => console.log(msg));
+  const warn = opts.warn ?? ((msg: string) => console.warn(msg));
+
+  log(`[backfill] reading skills from ${SKILLS_DIR}`);
+
+  const files = await readdir(SKILLS_DIR);
 
   // Skip non-skill markdown files (README.md, NOTES.md, etc.). Skill files
   // have a slug-like filename — lowercase letters, digits, and underscores only.
@@ -51,11 +69,11 @@ async function main(): Promise<void> {
     .filter((f) => f.endsWith('.md'))
     .filter((f) => /^[a-z0-9_]+\.md$/.test(f))
     .sort();
-  console.log(`[backfill] found ${mdFiles.length} .md files`);
+  log(`[backfill] found ${mdFiles.length} .md files`);
 
   // ---------------------------------------------------------------------------
-  // Parse and validate every file BEFORE writing any rows. Fail fast so a
-  // half-backfilled DB never ships.
+  // Parse and validate every file BEFORE writing any rows. Files that fail
+  // either gate are skipped with a warning, not fatal.
   // ---------------------------------------------------------------------------
   const parsed: ParsedSystemSkillSeed[] = [];
   const parseErrors: string[] = [];
@@ -77,29 +95,35 @@ async function main(): Promise<void> {
     parsed.push(seed);
   }
 
+  // Parse failures and missing handlers are both skip-with-warning rather
+  // than fail-fast. Skill development is incremental: a .md file may land
+  // before its handler, or use a non-canonical frontmatter shape, and the
+  // previous fail-fast behaviour blocked all 167 inserts on a single bad
+  // file. The startup validator (validateSystemSkillHandlers) still enforces
+  // handler presence on active system_skills rows, so unsafe rows can never
+  // reach runtime — this only relaxes the seed-time gate.
   if (parseErrors.length > 0) {
-    console.error('[backfill] FAILED: could not parse these skill files:');
-    for (const slug of parseErrors) console.error(`  - ${slug}.md`);
-    await client.end();
-    process.exit(1);
+    warn(`[backfill] WARNING: ${parseErrors.length} skill file(s) skipped — could not parse:`);
+    for (const slug of parseErrors) warn(`  - ${slug}.md`);
+    warn('');
   }
 
   if (missingHandlers.length > 0) {
-    console.error('[backfill] FAILED: these skill slugs have no handler in SKILL_HANDLERS:');
-    for (const slug of missingHandlers) console.error(`  - ${slug}`);
-    console.error('');
-    console.error('Register handlers in server/services/skillExecutor.ts SKILL_HANDLERS before re-running the backfill.');
-    await client.end();
-    process.exit(1);
+    warn(`[backfill] WARNING: ${missingHandlers.length} skill file(s) skipped — no handler in SKILL_HANDLERS:`);
+    for (const slug of missingHandlers) warn(`  - ${slug}`);
+    warn('Add handlers in server/services/skillExecutor.ts SKILL_HANDLERS to seed these.');
+    warn('');
   }
 
-  console.log(`[backfill] validated ${parsed.length} skills, writing to DB...`);
+  const skipped = parseErrors.length + missingHandlers.length;
+  log(`[backfill] validated ${parsed.length} skills (${skipped} skipped), writing to DB...`);
 
   // ---------------------------------------------------------------------------
   // Upsert every parsed row by slug. Idempotent — re-runs leave the DB
   // unchanged if every row already matches.
   // ---------------------------------------------------------------------------
-  const results: BackfillResult[] = [];
+  let inserted = 0;
+  let updated = 0;
   for (const seed of parsed) {
     const existing = await db
       .select()
@@ -118,7 +142,7 @@ async function main(): Promise<void> {
         visibility: seed.visibility,
         isActive: seed.isActive,
       });
-      results.push({ slug: seed.slug, action: 'inserted' });
+      inserted++;
       continue;
     }
 
@@ -140,25 +164,46 @@ async function main(): Promise<void> {
         updatedAt: new Date(),
       })
       .where(eq(systemSkills.slug, seed.slug));
-    results.push({ slug: seed.slug, action: 'updated' });
+    updated++;
   }
 
-  console.log('[backfill] done:');
-  const inserted = results.filter((r) => r.action === 'inserted').length;
-  const updated = results.filter((r) => r.action === 'updated').length;
-  console.log(`  inserted: ${inserted}`);
-  console.log(`  updated:  ${updated}`);
-  console.log(`  total:    ${results.length}`);
-
-  await client.end();
+  return {
+    total: inserted + updated,
+    inserted,
+    updated,
+    parseErrors,
+    missingHandlers,
+  };
 }
 
-main().catch(async (err) => {
-  console.error('[backfill] fatal:', err);
-  try {
-    await client.end();
-  } catch {
-    // swallow — already failing
-  }
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// CLI entrypoint — invoked by `npm run skills:backfill`. Closes the pg
+// client at the end; the seed-driven path leaves the connection open
+// because seed.ts owns the lifecycle.
+// ---------------------------------------------------------------------------
+
+const isDirectInvocation = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
+
+async function main(): Promise<void> {
+  const result = await runSystemSkillsBackfill();
+  console.log('[backfill] done:');
+  console.log(`  inserted: ${result.inserted}`);
+  console.log(`  updated:  ${result.updated}`);
+  console.log(`  total:    ${result.total}`);
+}
+
+if (isDirectInvocation) {
+  main()
+    .then(async () => {
+      await client.end();
+    })
+    .catch(async (err) => {
+      console.error('[backfill] fatal:', err);
+      try {
+        await client.end();
+      } catch {
+        // swallow — already failing
+      }
+      process.exit(1);
+    });
+}

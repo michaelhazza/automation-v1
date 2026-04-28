@@ -315,7 +315,7 @@ Multi-step workflow automation with dependency graphs, parallel execution, branc
 - **Email digest delivery** — Playbooks can send markdown email digests to configured recipients with deduplication (no double-sends on retry)
 - **Knowledge bindings** — Steps can write their output back to shared memory on completion; optional "first run only" mode captures baseline facts once without overwriting on subsequent runs
 - **Onboarding auto-start** — Designated playbooks launch automatically in supervised mode when a new client workspace is created — the Onboarding tab tracks progress so nothing falls through the cracks
-- **Playbook Studio** — Chat-based authoring with validation, simulation, and cost estimation; platform and agency templates with versioning; fork and customise per agency; automatic recovery sweeps for stuck runs
+- **Workflow Studio** — Chat-based authoring with validation, simulation, and cost estimation; platform and agency templates with versioning; fork and customise per agency; automatic recovery sweeps for stuck runs
 - **No-code workflow migration wedge** — One-shot converter that ingests a no-code workflow JSON export and produces a draft supervised playbook, mapping each source node to a step with appropriate side-effect classification, approval gates, and a mapping report flagging anything the admin needs to review or rewrite. Credentials are never migrated; the admin re-authenticates via managed OAuth flows. Net effect: an agency's existing workflow library becomes multi-tenant, supervised, and cost-attributed in hours rather than a re-platforming project.
 
 ### Human-in-the-Loop
@@ -865,18 +865,18 @@ Complete list of all 112 skills.
 |-------|-------------|------|------|
 | `configure_integration` | Guide workspace integration setup with review gating | LLM | HITL |
 | `update_financial_record` | Write financial record update (budget/forecast/expense note) | Deterministic | HITL |
-| `config_publish_playbook_output_to_portal` | Publish a playbook step's output to the sub-account portal card; upserts the portal brief and marks the run portal-visible (playbook `action_call` steps only) | Deterministic | — |
-| `config_send_playbook_email_digest` | Send a markdown email digest to configured recipients with per-run deduplication; irreversible (playbook `action_call` steps only) | Deterministic | HITL |
+| `config_publish_workflow_output_to_portal` | Publish a workflow step's output to the sub-account portal card; upserts the portal brief and marks the run portal-visible (workflow `action_call` steps only) | Deterministic | — |
+| `config_send_workflow_email_digest` | Send a markdown email digest to configured recipients with per-run deduplication; irreversible (workflow `action_call` steps only) | Deterministic | HITL |
 
-### Playbook Studio
+### Workflow Studio
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
-| `playbook_estimate_cost` | Produce pessimistic cost estimate for candidate playbook | LLM | — |
-| `playbook_propose_save` | Record validated playbook definition for admin to save | Deterministic | — |
-| `playbook_read_existing` | Load existing playbook file for reference and pattern matching | Deterministic | — |
-| `playbook_simulate` | Static analysis pass returning parallelism and critical path | Deterministic | — |
-| `playbook_validate` | Run DAG validator against candidate definition | Deterministic | — |
+| `workflow_estimate_cost` | Produce pessimistic cost estimate for candidate workflow | LLM | — |
+| `workflow_propose_save` | Record validated workflow definition for admin to save | Deterministic | — |
+| `workflow_read_existing` | Load existing workflow file for reference and pattern matching | Deterministic | — |
+| `workflow_simulate` | Static analysis pass returning parallelism and critical path | Deterministic | — |
+| `workflow_validate` | Run DAG validator against candidate definition | Deterministic | — |
 
 ### Skill Studio
 
@@ -978,7 +978,7 @@ Complete list of all 112 skills.
 | 2026-04-17 | MCP call observability and cost attribution: add call observability and MCP cost attribution rows to MCP integrations table | — |
 | 2026-04-16 | Execution infrastructure hardening: exactly-once execution guarantees, real-time streaming, usage guardrails, test fixture integrity. Sharpen Execution Infrastructure differentiator and product section language. Update Inline Run Now bullet with live streaming and deduplication detail. | — |
 | 2026-04-16 | Hosted-routine / scheduled-prompt product-category positioning refresh: add Portfolio-wide scheduled-work visibility and Supervised migration from no-code workflow tools to Structural Differentiators; add "I'll use a hosted routines product from an LLM provider" objection row; sharpen existing scheduled-prompt objection row with portfolio-calendar and client-portal proof points; expand Replaces / Consolidates with hosted-routine and no-code migration rows; add portfolio calendar + inline Run Now test bullets to AI Agent System; add no-code migration wedge bullet to Playbook Engine; add discovery-call demo and "why not hosted routines" conversation bullets to GTM guidance. Ships in the same commit as `docs/routines-response-dev-spec.md`. | — |
-| 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_playbook_output_to_portal` and `config_send_playbook_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
+| 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_workflow_output_to_portal` and `config_send_workflow_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
 | 2026-04-14 | Apply Editorial Rules across customer-facing sections — scrub all named LLM / AI providers and their products from Positioning, Replaces / Consolidates, and Product Capabilities; rewrite in generic, vendor-neutral, marketing-appropriate language. Add Editorial Rules section and neutralise "default provider" language in Integrations Reference. Persist editorial rules in `CLAUDE.md`. | — |
 | 2026-04-14 | Add Positioning & Competitive Differentiation section (framing, structural differentiators, objection handling, GTM guidance, messaging north star); reframe Developer Tools (IEE) as Sandboxed Runtime with browser automation as the primary mode; extend Replaces / Consolidates table with rows covering shared team chat, scheduled-prompt tools, hosted single-agent platforms, self-build agent SDKs, and single-provider lock-in | — |
 | 2026-04-13 | Fix skill count: 100 skills (not 101); add 4 missing route entries (ClientPulse, GHL, Modules, Onboarding) to architecture.md; update migration list to 0109; fix project structure job list | — |

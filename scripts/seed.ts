@@ -17,33 +17,44 @@
  *
  *
  * Phases:
- *   [1/5] System bootstrap
+ *   [1/7] System bootstrap
  *         - system organisation ("System")
  *         - system admin user
  *
- *   [2/5] System agents (Automation OS company — the 16 business agents)
+ *   [2/7] System skills
+ *         - parses every server/skills/*.md file and upserts a row into
+ *           system_skills, keyed by slug. Uses the same code path as
+ *           `npm run skills:backfill` so a fresh `npm run seed` produces a
+ *           complete DB; agents seeded in Phase 3 can resolve their tool
+ *           slugs without a follow-up manual command.
+ *
+ *   [3/7] System agents (Automation OS company — the 16 business agents)
  *         - reads companies/automation-os/COMPANY.md and agents/<slug>/AGENTS.md
  *         - upserts 16 rows into system_agents
  *         - sets up the reportsTo hierarchy
  *
- *   [3/5] Playbook Author system agent (separate — Studio tool runner)
+ *   [4/7] Workflow Author system agent (separate — Studio tool runner)
  *         - reads server/agents/workflow-author/master-prompt.md
  *         - upserts a 17th system_agents row (isSystemManaged: true)
- *         - wires the 5 playbook_* Studio tool skills
+ *         - wires the 5 workflow_* Studio tool skills
  *
- *   [4/5] Playbook templates
+ *   [5/7] Workflow templates
  *         - discovers server/workflows/*.workflow.ts, imports each, and upserts
  *           via WorkflowTemplateService (DAG-validated)
  *         - seeds the portfolio-health-sweep template directly (non-standard
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
- *   [5/5] Dev fixtures (skipped in production)
+ *   [6/7] Dev fixtures (skipped in production)
  *         - Synthetos organisation + org admin user
  *         - Synthetos Workspace subaccount (16 system agents activated here)
  *         - Breakout Solutions subaccount (reporting agent only — for testing)
  *         - Reporting Agent (subaccount agent, wired with reporting skill bundle)
  *         - subaccount_agent link
  *         - integration_connection placeholders (web_login + slack, status=error)
+ *
+ *   [7/7] Configuration Assistant guidelines block
+ *         - seeds the runtime guidelines memory block for every org with
+ *           the Configuration Assistant agent activated
  *
  *
  * Usage:
@@ -68,7 +79,7 @@ import { resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { glob } from 'glob';
 import bcrypt from 'bcryptjs';
 
@@ -80,8 +91,8 @@ import { subaccountAgents } from '../server/db/schema/subaccountAgents.js';
 import { integrationConnections } from '../server/db/schema/integrationConnections.js';
 import {
   systemAgents,
-  systemPlaybookTemplates,
-  systemPlaybookTemplateVersions,
+  systemWorkflowTemplates,
+  systemWorkflowTemplateVersions,
 } from '../server/db/schema/index.js';
 import { modules } from '../server/db/schema/modules.js';
 import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
@@ -89,6 +100,7 @@ import { classifySkill } from './lib/skillClassification.js';
 import { WorkflowTemplateService } from '../server/services/workflowTemplateService.js';
 import type { WorkflowDefinition } from '../server/lib/workflow/types.js';
 import { seedConfigAgentGuidelinesAll } from './seedConfigAgentGuidelines.js';
+import { runSystemSkillsBackfill } from './backfill-system-skills.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -128,9 +140,14 @@ async function preflightVerifySkillVisibility(): Promise<void> {
   const violations: string[] = [];
 
   for (const file of files) {
-    if (!file.endsWith('.md')) continue;
+    // Match the same slug pattern the backfill uses — skips README.md and any
+    // dotted/uppercase non-skill markdown that happens to live in this folder.
+    if (!/^[a-z0-9_]+\.md$/.test(file)) continue;
     const slug = file.slice(0, -3);
-    const raw = (await readFile(join(skillsDir, file), 'utf-8')).replace(/\r\n/g, '\n');
+    // Strip BOM so the leading `^---` anchor matches files saved with UTF-8 BOM.
+    const raw = (await readFile(join(skillsDir, file), 'utf-8'))
+      .replace(/^﻿/, '')
+      .replace(/\r\n/g, '\n');
 
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) {
@@ -165,7 +182,7 @@ async function preflightVerifySkillVisibility(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase1_systemBootstrap(): Promise<string> {
-  logPhase(1, 6, 'System bootstrap');
+  logPhase(1, 7, 'System bootstrap');
 
   // 1a. System organisation — upsert
   const systemOrgId = await upsertOrganisation({
@@ -346,11 +363,35 @@ async function upsertSubaccount(values: {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2 — System agents from companies/automation-os/
+// Phase 2 — System skills (DB-backed)
+// ---------------------------------------------------------------------------
+// Upserts every server/skills/*.md into the system_skills table via the
+// shared backfill function. Runs before Phase 3 so the agents seeded there
+// can resolve their `default_system_skill_slugs` against existing rows.
+// Files that fail to parse or that reference an unregistered handler are
+// skipped with a warning — see runSystemSkillsBackfill for the contract.
+
+async function phase2_systemSkills(): Promise<void> {
+  logPhase(2, 7, 'System skills');
+
+  const result = await runSystemSkillsBackfill({
+    log: (msg) => log(`  ${msg}`),
+    warn: (msg) => log(`  ${msg}`),
+  });
+
+  const skipped = result.parseErrors.length + result.missingHandlers.length;
+  log(
+    `  [ok]   ${result.inserted} inserted, ${result.updated} updated` +
+      (skipped > 0 ? `, ${skipped} skipped (see warnings above)` : ''),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — System agents from companies/automation-os/
 // ---------------------------------------------------------------------------
 
-async function phase2_systemAgents(): Promise<void> {
-  logPhase(2, 6, 'System agents (Automation OS company)');
+async function phase3_systemAgents(): Promise<void> {
+  logPhase(3, 7, 'System agents (Automation OS company)');
 
   const companyDir = resolve('companies/automation-os');
   let parsed: ParsedCompany;
@@ -437,20 +478,20 @@ async function phase2_systemAgents(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 — Playbook Author system agent
+// Phase 4 — Workflow Author system agent
 // ---------------------------------------------------------------------------
 
-async function phase3_playbookAuthor(): Promise<void> {
-  logPhase(3, 6, 'Playbook Author system agent');
+async function phase4_workflowAuthor(): Promise<void> {
+  logPhase(4, 7, 'Workflow Author system agent');
 
   const SLUG = 'workflow-author';
   const PROMPT_PATH = resolve(process.cwd(), 'server/agents/workflow-author/master-prompt.md');
   const TOOL_SKILLS = [
-    'playbook_read_existing',
-    'playbook_validate',
-    'playbook_simulate',
-    'playbook_estimate_cost',
-    'playbook_propose_save',
+    'workflow_read_existing',
+    'workflow_validate',
+    'workflow_simulate',
+    'workflow_estimate_cost',
+    'workflow_propose_save',
   ];
 
   if (!existsSync(PROMPT_PATH)) {
@@ -460,11 +501,11 @@ async function phase3_playbookAuthor(): Promise<void> {
   const masterPrompt = readFileSync(PROMPT_PATH, 'utf8');
 
   const description =
-    'System agent that helps platform admins create new Playbook templates via chat. ' +
-    'Uses the 5 Playbook Studio tools (read_existing, validate, simulate, estimate_cost, ' +
+    'System agent that helps platform admins create new Workflow templates via chat. ' +
+    'Uses the 5 Workflow Studio tools (read_existing, validate, simulate, estimate_cost, ' +
     'propose_save) and never writes files itself.';
 
-  // Scope the lookup so a soft-deleted Playbook Author row never gets
+  // Scope the lookup so a soft-deleted Workflow Author row never gets
   // silently resurrected.
   const [existing] = await db
     .select()
@@ -475,7 +516,7 @@ async function phase3_playbookAuthor(): Promise<void> {
     const [created] = await db
       .insert(systemAgents)
       .values({
-        name: 'Playbook Author',
+        name: 'Workflow Author',
         slug: SLUG,
         description,
         masterPrompt,
@@ -489,32 +530,35 @@ async function phase3_playbookAuthor(): Promise<void> {
         defaultTokenBudget: 50000,
         defaultMaxToolCalls: 30,
         executionMode: 'api',
+        executionScope: 'org',
         isSystemManaged: true,
         isPublished: true,
       } as never)
       .returning();
-    log(`  [ok]   Created Playbook Author system agent: ${created.id}`);
+    log(`  [ok]   Created Workflow Author system agent: ${created.id}`);
     return;
   }
 
   await db
     .update(systemAgents)
     .set({
-      name: 'Playbook Author',
+      name: 'Workflow Author',
+      description,
       masterPrompt,
       defaultSystemSkillSlugs: TOOL_SKILLS,
+      executionScope: 'org',
       updatedAt: new Date(),
     } as never)
     .where(eq(systemAgents.id, existing.id));
-  log(`  [ok]   Updated existing Playbook Author system agent: ${existing.id}`);
+  log(`  [ok]   Updated existing Workflow Author system agent: ${existing.id}`);
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 — Playbook templates
+// Phase 5 — Workflow templates
 // ---------------------------------------------------------------------------
 
-async function phase4_playbookTemplates(): Promise<void> {
-  logPhase(4, 6, 'Playbook templates');
+async function phase5_workflowTemplates(): Promise<void> {
+  logPhase(5, 7, 'Workflow templates');
 
   await seedPlaybookFiles();
   await seedPortfolioHealthPlaybook();
@@ -522,7 +566,7 @@ async function phase4_playbookTemplates(): Promise<void> {
 }
 
 /**
- * Sets `onboarding_playbook_slugs` on the `client_pulse` module (Phase G / §10.6).
+ * Sets `onboarding_workflow_slugs` on the `client_pulse` module (Phase G / §10.6).
  * Idempotent — no-op when the slug is already present.
  */
 async function seedOnboardingModuleSlugs(): Promise<void> {
@@ -530,7 +574,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   const PLAYBOOK_SLUG = 'intelligence-briefing';
 
   const [mod] = await db
-    .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
+    .select({ id: modules.id, onboardingWorkflowSlugs: modules.onboardingWorkflowSlugs })
     .from(modules)
     .where(and(eq(modules.slug, REPORTING_MODULE_SLUG), isNull(modules.deletedAt)))
     .limit(1);
@@ -540,7 +584,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
     return;
   }
 
-  const already = (mod.onboardingPlaybookSlugs ?? []).includes(PLAYBOOK_SLUG);
+  const already = (mod.onboardingWorkflowSlugs ?? []).includes(PLAYBOOK_SLUG);
   if (already) {
     log(`  [skip] '${PLAYBOOK_SLUG}' already in '${REPORTING_MODULE_SLUG}'`);
     return;
@@ -549,7 +593,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   await db
     .update(modules)
     .set({
-      onboardingPlaybookSlugs: sql`array_append(${modules.onboardingPlaybookSlugs}, ${PLAYBOOK_SLUG})`,
+      onboardingWorkflowSlugs: sql`array_append(${modules.onboardingWorkflowSlugs}, ${PLAYBOOK_SLUG})`,
       updatedAt: new Date(),
     })
     .where(eq(modules.id, mod.id));
@@ -582,8 +626,9 @@ async function seedPlaybookFiles(): Promise<void> {
       summary[outcome] += 1;
     } catch (err) {
       summary.failed += 1;
-      const e = err as { message?: string };
-      failures.push({ file: relPath, error: e.message ?? String(err) });
+      const e = err as { message?: string; details?: unknown };
+      const detail = e.details ? ` — ${JSON.stringify(e.details)}` : '';
+      failures.push({ file: relPath, error: (e.message ?? String(err)) + detail });
     }
   }
 
@@ -595,7 +640,7 @@ async function seedPlaybookFiles(): Promise<void> {
     for (const f of failures) {
       log(`  [err]  ${f.file}: ${f.error}`);
     }
-    throw new Error(`${failures.length} playbook template(s) failed to seed`);
+    throw new Error(`${failures.length} workflow template(s) failed to seed`);
   }
 }
 
@@ -663,24 +708,24 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // Upsert template row
   const [existing] = await db
     .select()
-    .from(systemPlaybookTemplates)
-    .where(eq(systemPlaybookTemplates.slug, TEMPLATE_SLUG));
+    .from(systemWorkflowTemplates)
+    .where(eq(systemWorkflowTemplates.slug, TEMPLATE_SLUG));
 
   let templateId: string;
   if (existing) {
     templateId = existing.id;
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({
         name: TEMPLATE_NAME,
         description: definition.description,
         updatedAt: new Date(),
       })
-      .where(eq(systemPlaybookTemplates.id, existing.id));
+      .where(eq(systemWorkflowTemplates.id, existing.id));
     log(`  [update] portfolio-health-sweep template: ${templateId}`);
   } else {
     const [row] = await db
-      .insert(systemPlaybookTemplates)
+      .insert(systemWorkflowTemplates)
       .values({
         slug: TEMPLATE_SLUG,
         name: TEMPLATE_NAME,
@@ -695,38 +740,38 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   // (not templateId) and has no updatedAt / status columns on the version row.
   const [existingVersion] = await db
     .select()
-    .from(systemPlaybookTemplateVersions)
-    .where(eq(systemPlaybookTemplateVersions.systemTemplateId, templateId));
+    .from(systemWorkflowTemplateVersions)
+    .where(eq(systemWorkflowTemplateVersions.systemTemplateId, templateId));
 
   if (existingVersion) {
     await db
-      .update(systemPlaybookTemplateVersions)
+      .update(systemWorkflowTemplateVersions)
       .set({
         definitionJson: definition as unknown as Record<string, unknown>,
       })
-      .where(eq(systemPlaybookTemplateVersions.id, existingVersion.id));
+      .where(eq(systemWorkflowTemplateVersions.id, existingVersion.id));
     log(`  [update] portfolio-health-sweep v${existingVersion.version}`);
   } else {
-    await db.insert(systemPlaybookTemplateVersions).values({
+    await db.insert(systemWorkflowTemplateVersions).values({
       systemTemplateId: templateId,
       version: 1,
       definitionJson: definition as unknown as Record<string, unknown>,
     });
     // Bump latestVersion on parent template to match.
     await db
-      .update(systemPlaybookTemplates)
+      .update(systemWorkflowTemplates)
       .set({ latestVersion: 1, updatedAt: new Date() })
-      .where(eq(systemPlaybookTemplates.id, templateId));
+      .where(eq(systemWorkflowTemplates.id, templateId));
     log(`  [create] portfolio-health-sweep v1`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 — Dev fixtures (Breakout Solutions demo org)
+// Phase 6 — Dev fixtures (Breakout Solutions demo org)
 // ---------------------------------------------------------------------------
 
-async function phase5_devFixtures(): Promise<void> {
-  logPhase(5, 6, 'Dev fixtures (Synthetos demo org)');
+async function phase6_devFixtures(): Promise<void> {
+  logPhase(6, 7, 'Dev fixtures (Synthetos demo org)');
 
   const ORG_NAME = 'Synthetos';
   const ORG_SLUG = 'synthetos';
@@ -1066,6 +1111,33 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
   await activateBaselineSystemAgents(org.id, mainSubaccount.id);
 }
 
+/** BFS topological sort: roots (no parentSystemAgentId) first, children after. */
+function topoSortSystemAgents<T extends { id: string; parentSystemAgentId: string | null }>(
+  agents: T[],
+): T[] {
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const sorted: T[] = [];
+  const visited = new Set<string>();
+  const queue: T[] = agents.filter((a) => !a.parentSystemAgentId || !byId.has(a.parentSystemAgentId));
+  for (const a of queue) visited.add(a.id);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    sorted.push(current);
+    for (const child of agents) {
+      if (child.parentSystemAgentId === current.id && !visited.has(child.id)) {
+        visited.add(child.id);
+        queue.push(child);
+      }
+    }
+  }
+  // Append any disconnected nodes (should not happen in a well-formed hierarchy)
+  for (const a of agents) {
+    if (!visited.has(a.id)) sorted.push(a);
+  }
+  return sorted;
+}
+
 /**
  * For each system agent, upsert a corresponding `agents` row in the given
  * organisation (linked via systemAgentId) and, for subaccount-scoped agents,
@@ -1081,21 +1153,107 @@ async function activateBaselineSystemAgents(
 ): Promise<void> {
   log('\n  Activating baseline system agents in dev org...');
 
-  const allSystemAgents = await db
+  const rawSystemAgents = await db
     .select()
     .from(systemAgents)
     .where(and(eq(systemAgents.status, 'active'), isNull(systemAgents.deletedAt)));
 
-  if (allSystemAgents.length === 0) {
+  if (rawSystemAgents.length === 0) {
     log('  [warn] no system agents found — did Phase 2/3 run?');
     return;
   }
+
+  // Compute the set of slugs that belong to the current company manifest so we
+  // can skip stale system_agents rows that were removed from AGENTS.md but never
+  // soft-deleted (phase 3 upserts, it does not deactivate removed agents). A
+  // stale root agent (parentSystemAgentId IS NULL) that is also not in the
+  // manifest would otherwise become a second root and violate
+  // oneRootPerSubaccount when activated.
+  let manifestSlugs: Set<string> | null = null;
+  try {
+    const { parseCompanyFolder } = await import('../scripts/lib/companyParser.js');
+    const parsed = await parseCompanyFolder(resolve('companies/automation-os'));
+    manifestSlugs = new Set(parsed.agents.map((a: { slug: string }) => a.slug));
+  } catch {
+    // Non-fatal — if the manifest can't be parsed, fall back to activating all
+    // active system agents (the original behaviour).
+  }
+
+  // Filter to only agents present in the manifest (when available). This skips
+  // stale agents removed from AGENTS.md but still alive in the DB.
+  const activeSystemAgents = manifestSlugs
+    ? rawSystemAgents.filter((a) => manifestSlugs!.has(a.slug))
+    : rawSystemAgents;
+
+  // Actively deactivate org/subaccount rows for system agents that are no
+  // longer in the manifest. These are agents removed from AGENTS.md but still
+  // alive as rows in system_agents. Without this cleanup, stale agents appear
+  // as floating nodes in the org chart. This is idempotent — deactivating an
+  // already-inactive row is a no-op.
+  if (manifestSlugs) {
+    const staleSystemAgents = rawSystemAgents.filter((a) => !manifestSlugs!.has(a.slug));
+    if (staleSystemAgents.length > 0) {
+      const staleIds = staleSystemAgents.map((a) => a.id);
+      log(`  [info] deactivating stale system agent(s): ${staleSystemAgents.map((a) => a.slug).join(', ')}`);
+
+      // Find org-level agents linked to any stale system agent across ALL orgs.
+      // Scoping to a single org would miss stale rows in other orgs (e.g. the
+      // internal System Operations org that seeded the agent before it was
+      // removed from AGENTS.md).
+      const staleOrgAgents = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            inArray(agents.systemAgentId, staleIds),
+            isNull(agents.deletedAt),
+          ),
+        );
+
+      if (staleOrgAgents.length > 0) {
+        const staleAgentIds = staleOrgAgents.map((a) => a.id);
+
+        // Deactivate subaccountAgents links for the stale org agents.
+        await db
+          .update(subaccountAgents)
+          .set({ isActive: false, updatedAt: new Date() })
+          .where(
+            and(
+              inArray(subaccountAgents.agentId, staleAgentIds),
+              eq(subaccountAgents.isActive, true),
+            ),
+          );
+
+        // Soft-delete the org-level agents rows.
+        await db
+          .update(agents)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(inArray(agents.id, staleAgentIds));
+
+        log(`  [ok]   deactivated ${staleOrgAgents.length} stale org agent(s) and their subaccount links`);
+      }
+    }
+  }
+
+  // Process agents in topological order (roots first) so that when we INSERT a
+  // new subaccount_agents link we can immediately look up the parent's link id
+  // and set parentSubaccountAgentId. Without this, inserting any non-root agent
+  // as a root (parentSubaccountAgentId IS NULL, isActive = true) violates the
+  // oneRootPerSubaccount partial unique index.
+  const allSystemAgents = topoSortSystemAgents(activeSystemAgents);
 
   let orgAgentsCreated = 0;
   let orgAgentsUpdated = 0;
   let subaccountLinksCreated = 0;
   let subaccountLinksUpdated = 0;
   let orgScopedSkipped = 0;
+
+  // Tracks systemAgentId → subaccount_agents.id for the regular subaccount so
+  // the second-pass hierarchy wiring can resolve parentSubaccountAgentId.
+  const sysAgentIdToSaLinkId = new Map<string, string>();
+  // IDs of subaccount_agents rows that were inserted this run and need
+  // parentSubaccountAgentId + isActive set in the post-loop hierarchy pass.
+  const newlyInsertedSaLinkIds = new Set<string>();
 
   // Pre-fetch every existing non-system-managed agent in this org. Any slug
   // that already belongs to a custom (non-system-managed) agent is off-limits
@@ -1224,6 +1382,7 @@ async function activateBaselineSystemAgents(
             .set({
               isActive: true,
               skillSlugs,
+              agentTitle: sysAgent.agentTitle ?? null,
               tokenBudgetPerRun: sysAgent.defaultTokenBudget,
               maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
               updatedAt: new Date(),
@@ -1237,6 +1396,7 @@ async function activateBaselineSystemAgents(
             agentId: orgAgentId,
             isActive: true,
             skillSlugs,
+            agentTitle: sysAgent.agentTitle ?? null,
             tokenBudgetPerRun: sysAgent.defaultTokenBudget,
             maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
             timeoutSeconds: 300,
@@ -1265,30 +1425,67 @@ async function activateBaselineSystemAgents(
       // Refresh all mutable fields so upstream changes to the system agent's
       // default budgets propagate to every org. Without this, existing
       // subaccount links drift permanently from the current defaults.
+      //
+      // If the existing link has no parent but the system agent does, fix the
+      // stale null parent atomically in the same UPDATE so the row never
+      // violates the oneRootPerSubaccount index (WHERE parentSubaccountAgentId
+      // IS NULL AND isActive = true) when a second non-root root exists.
+      const staleMissingParent =
+        !existingLink.parentSubaccountAgentId && !!sysAgent.parentSystemAgentId;
+      const fixedParentId = staleMissingParent
+        ? (sysAgentIdToSaLinkId.get(sysAgent.parentSystemAgentId!) ?? null)
+        : undefined;
+
       await db
         .update(subaccountAgents)
         .set({
           isActive: true,
           skillSlugs,
+          agentTitle: sysAgent.agentTitle ?? null,
+          ...(fixedParentId !== undefined ? { parentSubaccountAgentId: fixedParentId } : {}),
           tokenBudgetPerRun: sysAgent.defaultTokenBudget,
           maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
           updatedAt: new Date(),
         })
         .where(eq(subaccountAgents.id, existingLink.id));
+      sysAgentIdToSaLinkId.set(sysAgent.id, existingLink.id);
       subaccountLinksUpdated += 1;
     } else {
-      await db.insert(subaccountAgents).values({
+      // Insert with isActive: false so the oneRootPerSubaccount partial unique
+      // index (WHERE parentSubaccountAgentId IS NULL AND isActive = true) is
+      // never triggered mid-loop. A second pass below wires parentSubaccountAgentId
+      // from the sysAgentIdToSaLinkId map and sets isActive: true.
+      const [inserted] = await db.insert(subaccountAgents).values({
         organisationId,
         subaccountId,
         agentId: orgAgentId,
-        isActive: true,
+        isActive: false,
         skillSlugs,
+        agentTitle: sysAgent.agentTitle ?? null,
         tokenBudgetPerRun: sysAgent.defaultTokenBudget,
         maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
         timeoutSeconds: 300,
-      });
+      }).returning({ id: subaccountAgents.id });
+      sysAgentIdToSaLinkId.set(sysAgent.id, inserted.id);
+      newlyInsertedSaLinkIds.add(inserted.id);
       subaccountLinksCreated += 1;
     }
+  }
+
+  // Second pass: wire parentSubaccountAgentId and activate newly inserted links.
+  // Now that all sysAgentIds are mapped, every parent lookup will resolve.
+  for (const sysAgent of allSystemAgents) {
+    const saLinkId = sysAgentIdToSaLinkId.get(sysAgent.id);
+    if (!saLinkId || !newlyInsertedSaLinkIds.has(saLinkId)) continue;
+
+    const parentSaLinkId = sysAgent.parentSystemAgentId
+      ? (sysAgentIdToSaLinkId.get(sysAgent.parentSystemAgentId) ?? null)
+      : null;
+
+    await db
+      .update(subaccountAgents)
+      .set({ parentSubaccountAgentId: parentSaLinkId, isActive: true, updatedAt: new Date() })
+      .where(eq(subaccountAgents.id, saLinkId));
   }
 
   log(
@@ -1316,20 +1513,21 @@ async function main(): Promise<void> {
   await preflightVerifySkillVisibility();
 
   await phase1_systemBootstrap();
-  await phase2_systemAgents();
-  await phase3_playbookAuthor();
-  await phase4_playbookTemplates();
+  await phase2_systemSkills();
+  await phase3_systemAgents();
+  await phase4_workflowAuthor();
+  await phase5_workflowTemplates();
 
   if (!IS_PRODUCTION) {
-    await phase5_devFixtures();
+    await phase6_devFixtures();
   } else {
-    console.log('\n[5/6] Dev fixtures — skipped (production mode)\n');
+    console.log('\n[6/7] Dev fixtures — skipped (production mode)\n');
   }
 
-  // Phase 6 — Configuration Assistant runtime guidelines memory block.
+  // Phase 7 — Configuration Assistant runtime guidelines memory block.
   // Runs in both production and dev. Seeds the guidelines block for every
   // org that has the Configuration Assistant agent activated. Idempotent.
-  logPhase(6, 6, 'Configuration Assistant guidelines block');
+  logPhase(7, 7, 'Configuration Assistant guidelines block');
   await seedConfigAgentGuidelinesAll(db, log);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -1348,7 +1546,10 @@ async function main(): Promise<void> {
 
 main()
   .catch((err) => {
-    console.error('\n✗ Seed failed:', err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg = cause instanceof Error ? ` (cause: ${cause.message})` : cause ? ` (cause: ${String(cause)})` : '';
+    console.error('\n✗ Seed failed:', msg + causeMsg);
     process.exitCode = 1;
   })
   .finally(() => pool.end());

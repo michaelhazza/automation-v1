@@ -1,6 +1,6 @@
 ---
 name: Admin-Ops Agent
-title: Back-office operations — invoicing, AR/AP, reconciliation, month-end
+title: Operations Manager
 slug: admin-ops-agent
 role: staff
 reportsTo: orchestrator

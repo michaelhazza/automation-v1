@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
@@ -26,8 +26,8 @@ const TAB_LABELS: Record<ActiveTab, string> = {
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
-const btnPrimary = 'px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors';
-const btnSecondary = 'px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors';
+const btnPrimary = 'btn btn-primary';
+const btnSecondary = 'btn btn-secondary';
 
 export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' }: { user: User; mode?: 'client' | 'admin' }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
@@ -37,10 +37,15 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [orgProcesses, setOrgProcesses] = useState<OrgProcess[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [searchParams] = useSearchParams();
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['integrations', 'board', 'categories']
     : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'memory', 'usage', 'admin'];
-  const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
+  const initialTab = (() => {
+    const t = searchParams.get('tab') as ActiveTab | null;
+    return t && visibleTabs.includes(t) ? t : visibleTabs[0];
+  })();
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
   const [error, setError] = useState('');
 
   const [showCatForm, setShowCatForm] = useState(false);
@@ -232,7 +237,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         <>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked workflows</h2>
-            <button onClick={() => setShowLinkForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+            <button onClick={() => setShowLinkForm(true)} className="btn btn-sm btn-primary">
               + Link workflow
             </button>
           </div>
@@ -293,7 +298,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                         </button>
                       </td>
                       <td className="px-4 py-3">
-                        <button onClick={() => setDeleteLinkId(link.linkId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
+                        <button onClick={() => setDeleteLinkId(link.linkId)} className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Remove</button>
                       </td>
                     </tr>
                   ))}
@@ -311,7 +316,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
               <p className="text-slate-500 text-sm mb-4">No board configuration yet. Initialise from the organisation board config.</p>
               {boardMsg && <div className={`text-[13px] mb-3 ${boardMsg.includes('Failed') ? 'text-red-500' : 'text-green-600'}`}>{boardMsg}</div>}
-              <button onClick={handleInitBoard} disabled={boardLoading} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+              <button onClick={handleInitBoard} disabled={boardLoading} className="btn btn-primary">
                 {boardLoading ? 'Initialising...' : 'Initialise from Org'}
               </button>
             </div>
@@ -320,10 +325,10 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
               {boardMsg && <div className={`text-[13px] mb-3 ${boardMsg.includes('Failed') ? 'text-red-500' : 'text-green-600'}`}>{boardMsg}</div>}
               <BoardColumnEditor columns={boardColumns} onChange={setBoardColumns} />
               <div className="mt-5 flex gap-3">
-                <button onClick={handleSaveBoardConfig} disabled={boardSaving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+                <button onClick={handleSaveBoardConfig} disabled={boardSaving} className="btn btn-primary">
                   {boardSaving ? 'Saving...' : 'Save Changes'}
                 </button>
-                <button onClick={handleResetFromOrg} disabled={boardSaving} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-sm font-medium rounded-lg transition-colors">
+                <button onClick={handleResetFromOrg} disabled={boardSaving} className="btn btn-secondary">
                   {boardSaving ? 'Resetting...' : 'Reset from Org'}
                 </button>
               </div>
@@ -337,7 +342,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         <>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-[18px] font-semibold text-slate-800 m-0">Portal categories</h2>
-            <button onClick={() => setShowCatForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+            <button onClick={() => setShowCatForm(true)} className="btn btn-sm btn-primary">
               + Add category
             </button>
           </div>
@@ -392,7 +397,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-[13px]">{cat.description ?? '—'}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => setDeleteCatId(cat.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Delete</button>
+                        <button onClick={() => setDeleteCatId(cat.id)} className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Delete</button>
                       </td>
                     </tr>
                   ))}
@@ -503,7 +508,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                 <p className="text-[12px] text-slate-400 mt-1.5 ml-14">When enabled, inbox items from this subaccount (tasks, reviews, failed runs) will appear in the org-wide inbox. When disabled, they are only visible in this subaccount's inbox.</p>
               </div>
             </div>
-            <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+            <button onClick={handleSaveSettings} className="btn btn-primary">
               Save changes
             </button>
           </div>
@@ -687,10 +692,10 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
           )}
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowTemplates(true)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
+          <button onClick={() => setShowTemplates(true)} className="btn btn-sm btn-secondary">
             Load Team Template
           </button>
-          <button onClick={() => setShowLinkForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+          <button onClick={() => setShowLinkForm(true)} className="btn btn-sm btn-primary">
             + Link Agent
           </button>
         </div>
@@ -728,7 +733,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                     <button
                       onClick={() => handleRunAgent(l.agentId, 'api')}
                       disabled={runningAgentId === l.agentId}
-                      className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 disabled:opacity-50 rounded-md text-[12px] font-medium transition-colors"
+                      className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-50"
                       title="Run via Anthropic API"
                     >
                       {runningAgentId === l.agentId ? 'Running...' : 'Run (API)'}
@@ -737,7 +742,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                       <button
                         onClick={() => handleRunAgent(l.agentId, 'claude-code')}
                         disabled={runningAgentId === l.agentId}
-                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-50 rounded-md text-[12px] font-medium transition-colors"
+                        className="btn btn-xs btn-ghost text-emerald-700 hover:bg-emerald-50"
                         title="Run via Claude Code CLI (uses Max plan)"
                       >
                         {runningAgentId === l.agentId ? 'Running...' : 'Run (Claude Code)'}
@@ -745,11 +750,11 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                     )}
                     <button
                       onClick={() => toggleExpand(l.agentId)}
-                      className="px-2 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-md text-[12px] transition-colors"
+                      className="btn btn-xs btn-ghost"
                     >
                       {expandedAgent === l.agentId ? 'Hide' : 'History'}
                     </button>
-                    <button onClick={() => setUnlinkAgentId(l.agentId)} className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-[12px] font-medium transition-colors">
+                    <button onClick={() => setUnlinkAgentId(l.agentId)} className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">
                       Unlink
                     </button>
                   </div>
@@ -892,7 +897,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                   <button
                     onClick={() => handleApplyTemplate(t.id)}
                     disabled={applyingTemplate === t.id}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[12px] font-semibold rounded-lg transition-colors shrink-0"
+                    className="btn btn-sm btn-primary shrink-0"
                   >
                     {applyingTemplate === t.id ? 'Applying...' : 'Apply'}
                   </button>
@@ -1058,7 +1063,7 @@ function DevContextConfig({ subaccountId }: { subaccountId: string }) {
       </div>
 
       <div className="mt-6">
-        <button onClick={handleSave} disabled={saving || !dec.projectRoot || !dec.testCommand} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+        <button onClick={handleSave} disabled={saving || !dec.projectRoot || !dec.testCommand} className="btn btn-primary">
           {saving ? 'Saving...' : 'Save Dev Context'}
         </button>
       </div>
@@ -1218,8 +1223,8 @@ function BeliefsTab({ subaccountId }: { subaccountId: string }) {
             </div>
             <div className="text-[12px] text-slate-500">Saving sets source to "User Override" with confidence 1.0</div>
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setEditBelief(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg">Cancel</button>
-              <button type="button" onClick={handleEdit} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save Override</button>
+              <button type="button" onClick={() => setEditBelief(null)} className="btn btn-secondary">Cancel</button>
+              <button type="button" onClick={handleEdit} className="btn btn-primary">Save Override</button>
             </div>
           </div>
         </Modal>
@@ -1358,7 +1363,7 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
                       type="button"
                       onClick={() => handleStart(row.slug)}
                       disabled={startingSlug === row.slug}
-                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-[13px] font-semibold rounded-lg transition-colors"
+                      className="btn btn-sm btn-primary"
                     >
                       {startingSlug === row.slug ? 'Starting...' : 'Start now'}
                     </button>

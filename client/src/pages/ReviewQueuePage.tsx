@@ -187,10 +187,10 @@ function NewBriefModal({
           {error && <p className="text-[13px] text-red-600 m-0">{error}</p>}
 
           <div className="flex gap-2 justify-end pt-1">
-            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">
+            <button type="button" onClick={onClose} className="btn btn-secondary">
               Cancel
             </button>
-            <button type="submit" disabled={saving || !title.trim()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors">
+            <button type="submit" disabled={saving || !title.trim()} className="btn btn-primary">
               {saving ? 'Creating...' : 'Create Brief'}
             </button>
           </div>
@@ -471,14 +471,14 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
             <div className="flex gap-2 mt-3">
               {!isEditing ? (
                 <>
-                  <button onClick={() => handleApprove(item.id)} disabled={isLoading} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve</button>
-                  <button onClick={() => startEditing(item)} disabled={isLoading} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Edit &amp; Approve</button>
-                  <button onClick={() => handleReject(item.id)} disabled={isLoading} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject</button>
+                  <button onClick={() => handleApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve</button>
+                  <button onClick={() => startEditing(item)} disabled={isLoading} className="btn btn-sm btn-secondary">Edit &amp; Approve</button>
+                  <button onClick={() => handleReject(item.id)} disabled={isLoading} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject</button>
                 </>
               ) : (
                 <>
-                  <button onClick={() => handleEditApprove(item.id)} disabled={isLoading} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve with Edits</button>
-                  <button onClick={() => setEditingId(null)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Cancel</button>
+                  <button onClick={() => handleEditApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve with Edits</button>
+                  <button onClick={() => setEditingId(null)} className="btn btn-sm btn-secondary">Cancel</button>
                 </>
               )}
             </div>
@@ -508,7 +508,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
         <p className="text-[13.5px] text-slate-500 mb-4">Create a brief to assign work to your AI team.</p>
         <button
           onClick={() => setShowNewBrief(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+          className="btn btn-sm btn-primary"
         >
           + New Brief
         </button>
@@ -555,8 +555,8 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
             <input type="checkbox" checked={selectedIds.size === reviewItems.length} onChange={toggleSelectAll} className="cursor-pointer accent-indigo-500" />
             <span className="text-[13px] text-slate-800 font-medium">{selectedIds.size} selected</span>
             <div className="ml-auto flex gap-2">
-              <button onClick={handleBulkApprove} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve Selected</button>
-              <button onClick={handleBulkReject} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject Selected</button>
+              <button onClick={handleBulkApprove} className="btn btn-sm btn-success">Approve Selected</button>
+              <button onClick={handleBulkReject} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject Selected</button>
             </div>
           </div>
         )}
@@ -601,8 +601,8 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => handleApproveRun(group.items)} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve All in Run</button>
-                    <button onClick={() => handleRejectRun(group.items)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject All in Run</button>
+                    <button onClick={() => handleApproveRun(group.items)} className="btn btn-sm btn-success">Approve All in Run</button>
+                    <button onClick={() => handleRejectRun(group.items)} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject All in Run</button>
                   </div>
                 </div>
                 <div className="divide-y divide-slate-50">
@@ -640,14 +640,14 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
               </button>
             )}
             {tab === 'review' && (
-              <button onClick={loadReview} className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[13px] text-slate-600 transition-colors">
+              <button onClick={loadReview} className="btn btn-sm btn-secondary">
                 Refresh
               </button>
             )}
             {tab === 'briefs' && (
               <button
                 onClick={() => setShowNewBrief(true)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+                className="btn btn-sm btn-primary"
               >
                 + New Brief
               </button>

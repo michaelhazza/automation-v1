@@ -8,9 +8,9 @@
  * Spec: docs/memory-and-briefings-spec.md §5.4 (S8)
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
-import { useSocket } from '../hooks/useSocket';
+import { useSocketRoom } from '../hooks/useSocket';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,49 +50,29 @@ export default function ClarificationInbox({ subaccountId }: ClarificationInboxP
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  const socket = useSocket();
-
-  const loadPending = async () => {
+  const loadPending = useCallback(async () => {
     try {
       const res = await api.get<{ items: ClarificationItem[] }>(
         `/api/subaccounts/${subaccountId}/clarifications/pending`,
       );
       setItems(res.data.items ?? []);
       setError(null);
-    } catch (err) {
+    } catch {
       setError('Failed to load clarifications.');
     } finally {
       setLoading(false);
     }
-  };
-
-  // Initial load
-  useEffect(() => {
-    loadPending();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
-  // WebSocket subscriptions — refresh on any clarification lifecycle event
-  useEffect(() => {
-    if (!socket) return;
+  const refresh = useCallback(() => { void loadPending(); }, [loadPending]);
 
-    const room = `subaccount:${subaccountId}`;
-    socket.emit('subscribe', { room });
+  useEffect(() => { void loadPending(); }, [loadPending]);
 
-    const refresh = () => loadPending();
-
-    socket.on('clarification:pending', refresh);
-    socket.on('clarification:resolved', refresh);
-    socket.on('clarification:expired', refresh);
-
-    return () => {
-      socket.emit('unsubscribe', { room });
-      socket.off('clarification:pending', refresh);
-      socket.off('clarification:resolved', refresh);
-      socket.off('clarification:expired', refresh);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, subaccountId]);
+  useSocketRoom('subaccount', subaccountId, {
+    'clarification:pending': refresh,
+    'clarification:resolved': refresh,
+    'clarification:expired': refresh,
+  }, loadPending);
 
   // ──────────────────────────────────────────────────────────────────────────
 

@@ -145,7 +145,12 @@ router.patch(
 
     const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
       isActive,
-      parentSubaccountAgentId,
+      // parentSubaccountAgentId must use conditional spread — updateLink uses
+      // an `'in data'` check (rather than `!== undefined`) so it can
+      // distinguish "not provided" from "explicitly null". Always passing the
+      // key would mean every PATCH re-parents the agent to null, violating
+      // the one-root-per-subaccount unique index for any non-root link.
+      ...('parentSubaccountAgentId' in req.body ? { parentSubaccountAgentId } : {}),
       agentRole,
       agentTitle,
       heartbeatEnabled,

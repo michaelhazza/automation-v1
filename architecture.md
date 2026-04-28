@@ -702,7 +702,7 @@ A deterministic-first natural-language CRM read layer shipped as PR #177. Staged
 
 ### File-based definitions
 
-Skills are defined as Markdown files in `server/skills/*.md`. There are 107 built-in system skills:
+Skills are defined as Markdown files in `server/skills/*.md`. Built-in system skills include:
 
 | Category | Skills |
 |----------|--------|
@@ -718,7 +718,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 107 buil
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
 | Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `compute_staff_activity_pulse`, `scan_integration_fingerprints`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
 | GEO (AI Search) | `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare` |
-| Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
+| Workflow Studio | `workflow_read_existing`, `workflow_validate`, `workflow_simulate`, `workflow_estimate_cost`, `workflow_propose_save` |
 | Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
@@ -2260,7 +2260,7 @@ Playbook Run (playbookRuns)
 | `playbookRuns` | Run instances. `subaccountId` (nullable since migration 0171), `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`, `scope` (`subaccount` \| `org`). CHECK constraint enforces scope/entity consistency: `subaccount` scope requires `subaccount_id`; `org` scope requires `subaccount_id IS NULL`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
-| `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
+| `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_workflow_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
 | `subaccountOnboardingState` | Completion tracking per `(subaccount_id, playbook_slug)` for onboarding runs. Upserted on every terminal transition by the engine via `upsertSubaccountOnboardingState`. Status values: `in_progress`, `completed`, `failed`. Columns: `id`, `organisation_id`, `subaccount_id`, `playbook_slug`, `status`, `last_run_id`, `started_at`, `completed_at`. Unique on `(subaccount_id, playbook_slug)`. (Migration 0124.) |
 
 Soft deletes on templates (`deletedAt`). Runs are append-only history.
@@ -2482,13 +2482,13 @@ Integrate into the existing permission set UI.
 - `/playbook-runs/:runId` — `PlaybookRunDetailPage` — run detail: vertical stepper showing DAG, each step expandable with inputs/output, edit button on completed steps, inline forms for `user_input` steps, approval UI for `approval` steps, live updates via WebSocket (deferred #4).
 - "Needs your input" is surfaced through the standard Inbox page — paused playbook runs route through `reviewItems` for approvals and through a dedicated inbox entry for `user_input` steps.
 
-**Playbook Studio (shipped — system-admin chat authoring):**
+**Workflow Studio (shipped — system-admin chat authoring):**
 
 - `/system/workflow-studio` — `WorkflowStudioPage` — chat-driven authoring experience. Backed by the `workflow-author` system agent (`server/agents/workflow-author/master-prompt.md`) with the five `workflow_*` Studio skills. Read-only file preview is rendered server-side via `/render` — the client never constructs the file body.
 
-**Author agent (deferred #6):** The Playbook Author is a system-managed agent — cannot be edited or deleted at org tier. Seeded via `scripts/seed-playbook-author.ts`. It is the only caller of the Studio tools; org agents do not get access to Studio endpoints (blocked by `requireSystemAdmin`).
+**Author agent (deferred #6):** The Workflow Author is a system-managed agent — cannot be edited or deleted at org tier. Seeded via Phase 3 of `scripts/seed.ts`. It is the only caller of the Studio tools; org agents do not get access to Studio endpoints (blocked by `requireSystemAdmin`).
 
-**Seeded templates:** Phase 1 ships with `server/workflows/event-creation.workflow.ts` as the reference system template. `npm run playbooks:validate` runs DAG validation on every seeded file in CI; `npm run playbooks:seed` loads them into `systemWorkflowTemplates`.
+**Seeded templates:** Phase 1 ships with `server/workflows/event-creation.workflow.ts` as the reference system template. `npm run playbooks:validate` runs DAG validation on every seeded file in CI; `npm run seed` (Phase 4) loads them into `systemWorkflowTemplates`.
 
 ### Invariants (non-negotiable)
 
@@ -2553,7 +2553,7 @@ Sources: health findings, pending reviews, open tasks, failed runs, playbook run
 
 ### Skill Studio (Feature 3)
 
-A chat-driven authoring surface for refining skill definitions and master prompts, backed by regression capture data. Mirrors Playbook Studio.
+A chat-driven authoring surface for refining skill definitions and master prompts, backed by regression capture data. Mirrors Workflow Studio.
 
 **Schema:** `skill_versions` (migration 0101) — immutable version history. Each row snapshots the full definition at that version. CHECK constraint ensures exactly one of `system_skill_id` or `skill_id` is set.
 

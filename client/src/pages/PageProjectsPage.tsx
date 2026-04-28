@@ -116,7 +116,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
           <h1 className="text-[22px] font-bold text-slate-900 tracking-tight m-0">Sites</h1>
           {clientName && <div className="text-[13px] text-slate-500 mt-0.5">{clientName}</div>}
         </div>
-        <button onClick={() => setShowNew(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+        <button onClick={() => setShowNew(true)} className="btn btn-sm btn-primary">
           + New Site
         </button>
       </div>
@@ -140,10 +140,10 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
               )}
             </div>
             <div className="flex gap-2">
-              <button onClick={handleCreate} disabled={!newName.trim() || !newSlug.trim() || saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              <button onClick={handleCreate} disabled={!newName.trim() || !newSlug.trim() || saving} className="btn btn-sm btn-primary">
                 {saving ? 'Creating…' : 'Create Site'}
               </button>
-              <button onClick={() => { setShowNew(false); setNewName(''); setNewSlug(''); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
+              <button onClick={() => { setShowNew(false); setNewName(''); setNewSlug(''); }} className="btn btn-sm btn-secondary">
                 Cancel
               </button>
             </div>
@@ -162,7 +162,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
           <div className="text-4xl mb-4">🌐</div>
           <div className="font-bold text-[18px] text-slate-900 mb-2">No sites yet</div>
           <div className="text-[14px] text-slate-500">Create your first site to get started.</div>
-          <button onClick={() => setShowNew(true)} className="mt-3.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={() => setShowNew(true)} className="btn btn-sm btn-primary mt-3.5">
             + New Site
           </button>
         </div>

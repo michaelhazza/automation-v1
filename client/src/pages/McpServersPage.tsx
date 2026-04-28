@@ -229,7 +229,7 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
               <p className="text-sm text-slate-500 mb-4">Browse the catalogue to add your first integration.</p>
               <button
                 onClick={() => setTab('catalogue')}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                className="btn btn-primary"
               >
                 Browse Catalogue
               </button>
@@ -292,21 +292,21 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
                           <button
                             onClick={() => handleTest(server.id)}
                             disabled={testingId === server.id}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer disabled:opacity-50"
+                            className="btn btn-xs btn-secondary"
                           >
                             {testingId === server.id ? 'Testing...' : 'Test'}
                           </button>
                           {item.toolCount > 0 && (
                             <button
                               onClick={() => setToolBrowserServer(server)}
-                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                              className="btn btn-xs btn-secondary"
                             >
                               Tools
                             </button>
                           )}
                           <button
                             onClick={() => handleEdit(server)}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                            className="btn btn-xs btn-secondary"
                           >
                             Edit
                           </button>
@@ -315,14 +315,14 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
                       {!isMcp && connector && (
                         <button
                           onClick={async () => { try { const syncUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync` : `/api/org/connectors/${connector.id}/sync`; await api.post(syncUrl); load(); } catch {} }}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                          className="btn btn-xs btn-secondary"
                         >
                           Sync Now
                         </button>
                       )}
                       <button
                         onClick={() => { setDeleteId(item.id); setDeleteType(isMcp ? 'mcp' : 'connector'); }}
-                        className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                        className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                       >
                         Delete
                       </button>
@@ -386,8 +386,8 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
           </label>
 
           <div className="flex gap-2.5 justify-end">
-            <button onClick={() => setEditServer(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-semibold border-0 cursor-pointer transition-colors">Cancel</button>
-            <button onClick={handleEditSave} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[13px] font-semibold border-0 cursor-pointer transition-colors">Save Changes</button>
+            <button onClick={() => setEditServer(null)} className="btn btn-sm btn-secondary">Cancel</button>
+            <button onClick={handleEditSave} className="btn btn-sm btn-primary">Save Changes</button>
           </div>
         </Modal>
       )}

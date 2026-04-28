@@ -214,7 +214,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
                             type="button"
                             onClick={saveSelection}
                             disabled={saving}
-                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-[12.5px] font-semibold rounded-lg"
+                            className="btn btn-sm btn-primary"
                           >
                             {saving ? 'Saving...' : 'Save'}
                           </button>
@@ -222,7 +222,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
                             type="button"
                             onClick={cancelEdit}
                             disabled={saving}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12.5px] font-medium rounded-lg"
+                            className="btn btn-sm btn-secondary"
                           >
                             Cancel
                           </button>
@@ -231,7 +231,7 @@ export default function SystemModulesPage({ user: _user }: Props) {
                         <button
                           type="button"
                           onClick={() => beginEdit(mod)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[12.5px] font-medium rounded-lg"
+                          className="btn btn-sm btn-secondary"
                         >
                           Edit onboarding
                         </button>

@@ -57,8 +57,14 @@ export const subaccountAgentService = {
         agentStatus: agents.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-      .where(and(eq(subaccountAgents.organisationId, organisationId), eq(subaccountAgents.subaccountId, subaccountId)));
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
 
     return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({
       id: link.id,
@@ -71,6 +77,11 @@ export const subaccountAgentService = {
       agentTitle: link.agentTitle,
       appliedTemplateId: link.appliedTemplateId,
       appliedTemplateVersion: link.appliedTemplateVersion,
+      // Heartbeat
+      heartbeatEnabled: link.heartbeatEnabled,
+      heartbeatIntervalHours: link.heartbeatIntervalHours,
+      heartbeatOffsetHours: link.heartbeatOffsetHours,
+      heartbeatOffsetMinutes: link.heartbeatOffsetMinutes,
       // Schedule & config
       scheduleCron: link.scheduleCron,
       scheduleEnabled: link.scheduleEnabled,
