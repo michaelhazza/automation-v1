@@ -15,6 +15,7 @@
   - [§0.2 Testing posture](#02-testing-posture)
   - [§0.3 No new primitives unless named](#03-no-new-primitives-unless-named)
   - [§0.4 Concurrency contract with pair spec](#04-concurrency-contract-with-pair-spec)
+  - [§0.5 Critical invariants index](#05-critical-invariants-index)
 - [§1 Items](#1-items)
   - [§1.1 DR2 — Re-invoke fast-path + Orchestrator on follow-up conversation messages](#11-dr2--re-invoke-fast-path--orchestrator-on-follow-up-conversation-messages)
   - [§1.2 S8 — Move conversation-message websocket emits to a post-commit boundary](#12-s8--move-conversation-message-websocket-emits-to-a-post-commit-boundary)
@@ -76,7 +77,7 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 | File | This spec | Pair spec |
 |------|-----------|-----------|
 | `server/routes/conversations.ts` | §1.1 | — |
-| `server/services/briefConversationService.ts` (read-only consume) | §1.1 | — |
+| `server/services/briefConversationService.ts` (return-type extension only — see §1.1 Approach step 2) | §1.1 | — |
 | `server/services/briefConversationWriter.ts` | §1.2 | — |
 | `server/lib/postCommitEmitter.ts` (NEW) | §1.2 | — |
 | `server/middleware/postCommitEmitter.ts` (NEW — request-scoped middleware) | §1.2 | — |
@@ -104,6 +105,17 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 
 **Schema coordination caveat.** §1.1 DR2 reads from the `conversations` table whose unique index is being changed by the pair spec's §1.4 N3. The change is strictly more permissive (drops nothing, only adds the org-scope dimension); §1.1 DR2's reads are by `(conversationId, organisationId)` which the new index covers as a leading-column subset. **No coordination required between the two specs.**
 
+### §0.5 Critical invariants index
+
+Quick-reference list of the contracts this spec establishes. Any change to the codebase that would weaken one of these requires re-reviewing the corresponding §1 item before merge.
+
+- **DR2 — Branch-before-write mutual exclusion.** `routes/conversations.ts` MUST branch on `selectConversationFollowUpAction(conv)` BEFORE any call to `writeConversationMessage`. The brief branch goes through `handleConversationFollowUp`; the noop branch calls `writeConversationMessage` directly. The two paths are mutually exclusive — never both, never inline write before branching. Source: §1.1 Approach steps 2–3.
+- **DR2 — `writeConversationMessage` dedupe semantics.** DR2's "no duplicate user messages on retry" guarantee depends on `writeConversationMessage` providing duplicate-message suppression for identical `(conversationId, content)` writes. Any change to its dedupe key, window, or removal of dedupe entirely MUST trigger a DR2 re-review. Source: §1.1 Approach step 5.
+- **DR2 — Uniform response shape.** `POST /api/conversations/:id/messages` returns `{ ...message, route, fastPathDecision }` on every successful response. `route` and `fastPathDecision` are populated for the brief branch and `null` for the noop branch — never `undefined`, never omitted. Source: §1.1 Approach step 4.
+- **S8 — Middleware ordering.** `postCommitEmitterMiddleware` MUST be mounted AFTER the org-tx middleware in `server/index.ts`. Mounting it earlier breaks the emit-after-commit guarantee and re-introduces ghost emits. Source: §1.2 Approach step 2.
+- **S8 — Closed-store immediate emit.** Once `flushAll()` or `reset()` runs, the post-commit store transitions to closed. Subsequent `enqueue(emit)` calls execute `emit` immediately rather than queuing. Without this, post-`res.finish` async continuations silently drop their emits. Source: §1.2 Approach step 1.
+- **N7 — `created_at` monotonicity.** Backward pagination over `conversation_messages` is duplicate-safe under concurrent inserts ONLY while every new row's `created_at` is ≥ every existing row's. Currently true via `created_at = now()` and single-primary writes. Violations (clock skew, replication, manual backdated inserts) force client-side `msgId` dedupe as the required fallback until the violation source is fixed. Source: §1.3 Pagination consistency model.
+
 ---
 
 ## §1 Items
@@ -114,18 +126,42 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 
 **Files.**
 - `server/routes/conversations.ts` — `POST /api/conversations/:conversationId/messages` handler at lines 74-105.
-- `server/services/briefConversationService.ts` (read-only consume — `handleConversationFollowUp` already exported, used by `routes/briefs.ts`).
+- `server/services/briefConversationService.ts` — `handleConversationFollowUp` already exported (used by `routes/briefs.ts`); this spec extends its return type to additionally surface the written conversation message (one extra capture + return field — see Approach step 2).
 - `server/services/__tests__/conversationsRoutePure.test.ts` (NEW — pure tests for the scope-dispatch predicate).
 
 **Goal.** When a user posts a follow-up message to `/api/conversations/:conversationId/messages`, the handler currently writes the user message and returns. For Brief-scoped conversations, the spec requires the handler to ALSO re-invoke the fast-path classifier and (where appropriate) re-enqueue the Orchestrator. The plumbing already exists in `briefConversationService.handleConversationFollowUp` — this item wires it into the polymorphic conversations route. Non-Brief scopes (`task`, `agent_run`) remain out of scope per the deferral note (covered in §3).
 
+**Write-path invariant (mandatory contract).** Stated explicitly so future refactors cannot silently reintroduce a duplicate write:
+
+> **For `scopeType === 'brief'`:** the route MUST NOT call `writeConversationMessage` directly. ALL message writes for the brief branch MUST go through `handleConversationFollowUp` (which calls `writeConversationMessage` internally at briefConversationService.ts:141).
+>
+> **For all other scope types (`task`, `agent_run`, …):** the route MUST NOT call `handleConversationFollowUp`. Message writes go through the inline `writeConversationMessage` call.
+>
+> The two paths are mutually exclusive — branch FIRST on scope, write SECOND. Never write inline before branching.
+
 **Approach.**
 1. **Pure scope-dispatch predicate.** Extract a tiny pure helper `selectConversationFollowUpAction(conv) → 'brief_followup' | 'noop'` that returns `'brief_followup'` iff `conv.scopeType === 'brief'`. All other scope types return `'noop'` for v1. Place in a new `server/services/conversationsRoutePure.ts` (since `routes/*` lacks a `*Pure` companion convention; mirror the pattern from `chatTriageClassifierPure.ts`).
-2. **Wire `handleConversationFollowUp` into the route.** In `routes/conversations.ts:75-105`, after the existing `assertCanViewConversation` check and the user-message write, branch on `selectConversationFollowUpAction(conv)`:
+2. **Extend `handleConversationFollowUp` to return the written message.** Currently `handleConversationFollowUp` returns `{ route, fastPathDecision }` and discards the result of its internal `writeConversationMessage` call (briefConversationService.ts:141). Capture that result and add it to the return:
    ```ts
+   // briefConversationService.ts — minimal extension
+   export async function handleConversationFollowUp(input: {...})
+     : Promise<{ message: ConversationMessage; route: DispatchRoute; fastPathDecision: FastPathDecision }> {
+     // ...
+     const message = await writeConversationMessage({ /* unchanged args */ });
+     const dispatch = await handleBriefMessage({ /* unchanged args */ });
+     return { message, ...dispatch };
+   }
+   ```
+   This is the only change to `briefConversationService.ts` — no behavioural change, no new primitive, just surfacing data that already exists internally. Required so the route's brief branch can produce the same `{ ...message, route, fastPathDecision }` response shape as the noop branch (see step 4).
+3. **Wire `handleConversationFollowUp` into the route — branch BEFORE any write.** In `routes/conversations.ts:75-105`, after the existing `assertCanViewConversation` check, branch on `selectConversationFollowUpAction(conv)` BEFORE any call to `writeConversationMessage`. The current route writes the message inline first; the new structure inverts that order so the brief branch returns early without ever invoking the inline writer:
+   ```ts
+   // Branch FIRST — do not touch writeConversationMessage above this point.
    const action = selectConversationFollowUpAction(conv);
+
    if (action === 'brief_followup') {
-     // briefId is stored on conv.scopeId for scopeType === 'brief'
+     // briefId is stored on conv.scopeId for scopeType === 'brief'.
+     // handleConversationFollowUp owns the message write internally and
+     // (per step 2) returns the message alongside the dispatch result.
      const result = await handleConversationFollowUp({
        conversationId,
        briefId: conv.scopeId,
@@ -135,25 +171,40 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
        uiContext: { source: 'conversations_route' },
        senderUserId: req.user!.id,
      });
-     res.status(201).json({ ...messageWriteResult, route: result.route, fastPathDecision: result.fastPathDecision });
+     res.status(201).json({
+       ...result.message,
+       route: result.route,
+       fastPathDecision: result.fastPathDecision,
+     });
      return;
    }
-   // 'noop' branch — for task / agent_run scopes, preserve current behaviour
-   res.status(201).json(messageWriteResult);
+
+   // 'noop' branch — task / agent_run scopes. Inline write is the ONLY
+   // write path here; handleConversationFollowUp is never invoked.
+   const messageWriteResult = await writeConversationMessage({ /* ... existing args ... */ });
+   res.status(201).json({
+     ...messageWriteResult,
+     route: null,
+     fastPathDecision: null,
+   });
    ```
-   **Important:** `handleConversationFollowUp` ALREADY calls `writeConversationMessage` internally (briefConversationService.ts:141). The route currently calls `writeConversationMessage` directly at lines 94-101. **The wiring change must drop the direct `writeConversationMessage` call from the brief-followup branch** to avoid duplicating the user message. The `'noop'` branch keeps the direct call.
-3. **Idempotency for follow-up re-invocation.** `handleBriefMessage` (called inside `handleConversationFollowUp`) performs `classifyChatIntent` and conditionally enqueues the orchestrator. Idempotency is the existing concern of those primitives, NOT a new contract this spec introduces. If the same message is posted twice (network retry), the duplicate-message detection in `writeConversationMessage` already short-circuits the second write — verify this assumption holds by reading the function before shipping. If it does not, surface as a §1.1 implementation blocker (not a scope expansion).
-4. **Subaccount context.** `conversations.subaccountId` is the canonical source. The route currently does not read `conv.subaccountId` because the direct `writeConversationMessage` call passes `subaccountId: undefined`. The new branch must pass `conv.subaccountId ?? null` through — `handleConversationFollowUp` requires it for orchestrator-routing context.
-5. **Non-Brief scopes (task / agent_run).** The original deferral note explicitly carves these out:
+   **Why early-return.** Inverting the order eliminates the failure mode where a future refactor re-orders the inline write above the branch and silently produces two user messages per Brief follow-up. The structural property (write happens in exactly one of two mutually-exclusive branches) is now visible in the code shape, not just stated as an invariant.
+4. **Response shape — uniform, never polymorphic.** Both branches return the same JSON keys: `{ ...message, route, fastPathDecision }`. The brief branch populates `route` and `fastPathDecision` from `handleConversationFollowUp`'s result; the noop branch sets both to `null`. Frontend code consumes a single non-discriminated shape — no `if (response.route !== undefined)` branching. This is the contract.
+5. **Idempotency for follow-up re-invocation.** `handleBriefMessage` (called inside `handleConversationFollowUp`) performs `classifyChatIntent` and conditionally enqueues the orchestrator. Idempotency is the existing concern of those primitives, NOT a new contract this spec introduces. If the same message is posted twice (network retry), the duplicate-message detection in `writeConversationMessage` already short-circuits the second write — verify this assumption holds by reading the function before shipping. If it does not, surface as a §1.1 implementation blocker (not a scope expansion).
+
+   **Dependency invariant (tripwire for future maintainers).** DR2 depends on `writeConversationMessage` providing duplicate-message suppression for identical `(conversationId, content)` writes within a short window. If that suppression is weakened, removed, or has its dedupe key changed (including for performance reasons), DR2's "no duplicate user messages on retry" acceptance criterion regresses silently. Any change to `writeConversationMessage`'s dedupe semantics MUST trigger a re-review of this section. This is documentation, not enforcement — the next person modifying the writer sees the constraint here, not in a runtime check.
+6. **Subaccount context.** `conversations.subaccountId` is the canonical source. The route currently does not read `conv.subaccountId` because the direct `writeConversationMessage` call passes `subaccountId: undefined`. The new branch must pass `conv.subaccountId ?? null` through — `handleConversationFollowUp` requires it for orchestrator-routing context.
+7. **Non-Brief scopes (task / agent_run).** The original deferral note explicitly carves these out:
    > "Architectural scope — needs design for non-Brief scopes (`task`, `agent_run`) that don't currently enqueue orchestration, idempotency for passive acks, and whether simple_reply/cheap_answer can produce new inline artefacts on follow-ups."
    This spec ships ONLY the brief branch. The `'noop'` branch matches the route's pre-spec behaviour for `task` / `agent_run`. A future spec covers them.
-6. **Telemetry log.** On entry to the brief-followup branch, emit a structured info log `conversations_route.brief_followup_dispatched` with `{ conversationId, briefId, organisationId, fastPathDecisionKind: result.fastPathDecision.kind }` so the testing round can confirm the wiring fires from real traffic.
+8. **Telemetry log.** On entry to the brief-followup branch, emit a structured info log `conversations_route.brief_followup_dispatched` with `{ conversationId, briefId, organisationId, fastPathDecisionKind: result.fastPathDecision.kind }` so the testing round can confirm the wiring fires from real traffic.
 
 **Acceptance criteria.**
 - `POST /api/conversations/:id/messages` against a Brief-scoped conversation: writes the user message exactly once (no duplication), invokes `classifyChatIntent`, and re-enqueues `orchestratorFromTaskJob` for `needs_orchestrator` / `needs_clarification` decisions.
 - Same endpoint against a `task` or `agent_run`-scoped conversation: writes the user message and returns 201 (existing behaviour preserved).
-- Response body for the brief branch carries `route` + `fastPathDecision` fields in addition to the standard message-write result; non-Brief branch returns the existing shape unchanged.
-- A duplicate POST with the same `(conversationId, content)` does not produce two user messages (existing duplicate-detection in `writeConversationMessage` is honoured by the brief branch).
+- **Uniform response shape.** Both branches return `{ ...message, route, fastPathDecision }`. Brief branch populates `route` and `fastPathDecision`; noop branch sets both to `null`. The keys are present on every successful response — never `undefined`, never omitted.
+- **Write-path mutual exclusion.** A code-grep over `routes/conversations.ts` shows exactly one call to `writeConversationMessage` and exactly one call to `handleConversationFollowUp`, both inside scope-discriminated branches; neither call appears outside its branch. Verified by reading the diff before merge.
+- A duplicate POST with the same `(conversationId, content)` does not produce two user messages (existing duplicate-detection in `writeConversationMessage` is honoured by both branches — the brief branch via `handleConversationFollowUp`'s internal call, the noop branch directly).
 - The `conversations_route.brief_followup_dispatched` log entry appears for every brief-followup dispatch, with the four documented fields.
 - Cross-brief / cross-conversation safety: `handleConversationFollowUp` already verifies the conversation belongs to the brief — the route relies on that check, no duplication.
 
@@ -193,6 +244,7 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
      enqueue(emit: () => void): void;
      flushAll(): void;
      reset(): void;
+     readonly isClosed: boolean;
    }
 
    // AsyncLocalStorage-backed singleton; the middleware (below) creates a
@@ -200,7 +252,14 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
    export function getPostCommitStore(): PostCommitStore | null;
    export function runWithPostCommitStore<T>(store: PostCommitStore, fn: () => Promise<T>): Promise<T>;
    ```
-   Implementation uses `node:async_hooks` `AsyncLocalStorage<PostCommitStore>`. `enqueue` pushes onto an in-memory array. `flushAll` iterates and invokes each emit; if any emit throws, log and continue (best-effort — one failed emit must not block the others). `reset` clears the queue (used after flush).
+   Implementation uses `node:async_hooks` `AsyncLocalStorage<PostCommitStore>`. The store has three observable states:
+   - **Open** — initial state; `enqueue(emit)` appends to an in-memory array.
+   - **Closed** — entered after `flushAll()` or `reset()` runs; further `enqueue(emit)` calls MUST execute the emit immediately (do not append). Identical to the no-store fallback (see step 3).
+   - **Absent** — caller has no bound store at all (job workers, cron); `getPostCommitStore()` returns `null`.
+
+   `flushAll` iterates the queue and invokes each emit (best-effort — if one throws, log and continue), then transitions the store to closed and clears the queue. `reset` clears the queue without invoking any emits, then transitions to closed. **Both `flushAll` and `reset` are terminal — once closed, the store cannot reopen for the remainder of the request.** Calling either method twice is a no-op (queue already empty, state already closed).
+
+   **Why closed → immediate emit (not silent drop).** Without this, an async continuation that runs after `res.finish` (e.g. a fire-and-forget orchestrator enqueue inside the request handler that schedules a `writeConversationMessage` further along its async chain) would land its emits on a dead queue and silently lose them. The closed-store fallback collapses this to the same code path as job-worker callers: there is no request lifecycle to wait for, so emit immediately. The two failure modes the deferral was set up to close are still closed: (a) tx-rollback-then-emit cannot occur because rollback happens inside the request and the queue is dropped via the 4xx/5xx branch in step 2 BEFORE close, (b) premature-disconnect-then-emit cannot occur because `res.close` runs `reset()` BEFORE the store is closed, dropping enqueued emits. The closed-state fallback covers ONLY the post-`res.finish` async-continuation case where the request already succeeded.
 2. **New middleware: `postCommitEmitter.ts`.**
    ```ts
    // server/middleware/postCommitEmitter.ts
@@ -225,39 +284,51 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
    };
    ```
    Mount in `server/index.ts` before the route registrations and AFTER the org-tx middleware (so the store sits inside the tx context — important because emits enqueued during the tx must flush after the tx commits).
-3. **Refactor `briefConversationWriter.ts`.** Replace the three direct emit calls with enqueues:
+
+   **Middleware ordering invariant (mandatory contract).** `postCommitEmitterMiddleware` MUST be mounted AFTER the org-tx middleware in `server/index.ts`. Mounting it before, or at a position that escapes the tx-middleware's async context, breaks the "emit-after-commit" guarantee — enqueues that occur inside `withOrgTx` callbacks would land on a store bound to a parent async context, which may flush before the inner tx commits, reintroducing the ghost-emit failure mode this spec is closing. Any refactor of `server/index.ts` middleware order MUST preserve this ordering. Verified at PR-review time by direct inspection of the mount sequence; no runtime assert (the tx middleware does not currently expose a request flag this primitive could check, and adding one is out of scope per §0.3).
+3. **Refactor `briefConversationWriter.ts`.** Replace the three direct emit calls with enqueues. `enqueue` itself handles the closed-store fallback, so callers don't branch on `isClosed`:
    ```ts
    const store = getPostCommitStore();
    if (store) {
+     // store.enqueue handles BOTH open (append) AND closed (immediate emit)
+     // states — caller does not need to inspect store.isClosed.
      store.enqueue(() => emitConversationUpdate(input.conversationId, 'conversation-message:new', { ... }));
      // ... and similarly for emitBriefArtefactNew / emitBriefArtefactUpdated
    } else {
-     // Fallback: jobs / cron / non-request callers do not have a store.
-     // Emit directly — there is no request to wait for.
+     // Absent-store fallback: jobs / cron / non-request callers have no
+     // bound store. Emit directly — there is no request lifecycle to wait
+     // for. Behaviourally identical to the closed-store path inside enqueue.
      emitConversationUpdate(input.conversationId, 'conversation-message:new', { ... });
    }
    ```
    The fallback is critical for callers that invoke `writeConversationMessage` from job workers (e.g. orchestrator-from-task) — those have no `res.finish` to wait for; emits there fire as soon as the writer commits.
 4. **Tx-vs-emit ordering.** The middleware runs OUTSIDE the request's org transaction (`withOrgTx` is per-route, started inside route handlers). The store is bound to the async context for the whole request, including inside any `withOrgTx` block. An enqueue happens during the tx; the actual emit fires post-`res.finish`, which is post-commit. **No new tx integration required.**
 5. **Why not a tx-outbox table?** The deferred-item note suggests "defer emits until `res.finish`, OR adopt a tx-outbox pattern." This spec picks the simpler one — `res.finish` is sufficient because the failure mode being closed (tx rollback emitting ghost events) is a request-scoped concern, not a cross-process durability concern. A tx-outbox would survive process crashes, but a process crash mid-request is a separate failure class and the lost emit is acceptable (clients reconnect and refetch on websocket reconnect — the same fallback the rest of the system uses).
-6. **Logging.** On flush, log a single structured `post_commit_emit_flushed` entry with `{ requestId, emitCount }` so the testing round can confirm the deferral pattern is firing. On `res.finish` with `statusCode >= 400`, log `post_commit_emit_dropped` with `{ requestId, droppedCount, statusCode }` so we can see how often non-2xx responses were preventing ghost-emits.
+6. **Logging.** Three structured log lines so the testing round has full visibility:
+   - `post_commit_emit_flushed { requestId, emitCount }` — emitted by `flushAll()` on success path. Confirms the deferral pattern is firing.
+   - `post_commit_emit_dropped { requestId, droppedCount, statusCode }` — emitted on `res.finish` with `statusCode >= 400` (or on `res.close` regardless of status). Confirms ghost-emit prevention is firing.
+   - `post_commit_emit_fallback { reason: 'no_store' | 'closed_store' }` — emitted at the immediate-emit code path inside `enqueue` (closed_store) and at the absent-store branch in `briefConversationWriter` (no_store). Tells us during debugging when an emit fired immediately rather than via the deferral queue. Both reasons are expected — `no_store` for every job-worker emit, `closed_store` for any post-`res.finish` async continuation. A spike in `closed_store` would indicate a code path doing more async work than the request lifecycle accounts for; worth investigating but not an error.
 
 **Acceptance criteria.**
 - A successful `POST /api/briefs/:id/messages` (200/201) results in: DB row written → tx committed → response sent → `res.finish` fires → enqueued emits flush. Verifiable by log ordering.
 - A failed POST that returns 4xx/5xx after the writer ran (contrived test): DB row written-then-rolled-back via outer error → enqueued emit dropped via the `statusCode >= 400` branch. NO websocket event reaches clients.
 - A premature client disconnect (`res.on('close')` fires before `'finish'`): enqueued emits dropped.
-- Job-worker callers of `writeConversationMessage` (no request store): emits fire inline (fallback branch).
-- Idempotent re-flush: if `flushAll` is called twice on the same store (defensive double-trigger), the second call is a no-op (queue cleared after first flush).
-- The `post_commit_emit_flushed` and `post_commit_emit_dropped` log entries appear with the documented fields.
+- Job-worker callers of `writeConversationMessage` (no request store): emits fire inline (fallback branch); `post_commit_emit_fallback { reason: 'no_store' }` logged.
+- **Post-`res.finish` async continuation:** an async path that calls `writeConversationMessage` AFTER `flushAll`/`reset` has run does NOT silently drop the emit — `enqueue` detects the closed state and executes the emit immediately; `post_commit_emit_fallback { reason: 'closed_store' }` logged. This is the failure mode the closed-state fallback closes.
+- Idempotent re-flush: if `flushAll` is called twice on the same store (defensive double-trigger), the second call is a no-op (queue cleared and state already closed after first flush).
+- The `post_commit_emit_flushed`, `post_commit_emit_dropped`, and `post_commit_emit_fallback` log entries appear with the documented fields.
+- **Middleware mount-order verification.** A direct inspection of `server/index.ts` confirms `postCommitEmitterMiddleware` is registered AFTER the org-tx middleware in the request pipeline. Captured in the PR description so the ordering is reviewable on every future change to the middleware stack.
 
 **Tests.**
 - `server/lib/__tests__/postCommitEmitter.test.ts` — cover:
-  1. `enqueue` then `flushAll` invokes the emit exactly once.
-  2. `enqueue` then `reset` invokes nothing.
-  3. `flushAll` after `reset` invokes nothing (queue clear).
+  1. `enqueue` then `flushAll` invokes the emit exactly once and transitions the store to closed (`isClosed === true` after).
+  2. `enqueue` then `reset` invokes nothing and transitions the store to closed.
+  3. `flushAll` after `reset` invokes nothing (queue clear, state already closed).
   4. `flushAll` with one emit that throws — second emit still runs (best-effort).
-  5. `runWithPostCommitStore` binds the store to the async context — `getPostCommitStore()` inside the callback returns the bound store; outside returns null.
-  6. Concurrent requests get isolated stores (run two `runWithPostCommitStore` calls in parallel; assert their enqueues do not bleed).
+  5. **Closed-state fallback:** `flushAll()` then `enqueue(emit)` — the post-flush enqueue MUST execute `emit` synchronously (not queue it), `isClosed` remains `true`, no second flush needed.
+  6. **Reset-then-enqueue closed-state fallback:** `reset()` then `enqueue(emit)` — same behaviour as case 5; reset path also leaves the store closed.
+  7. `runWithPostCommitStore` binds the store to the async context — `getPostCommitStore()` inside the callback returns the bound store; outside returns null.
+  8. Concurrent requests get isolated stores (run two `runWithPostCommitStore` calls in parallel; assert their enqueues do not bleed).
 - **Carved-out integration test** (allowed under §0.2): `server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts` simulates a request lifecycle: middleware → writer enqueues → `res.finish` fires → assert emit invoked. Then a second case: middleware → writer enqueues → `res.statusCode = 500` → `res.finish` fires → assert emit NOT invoked.
 - Manual smoke: trigger a contrived 500 in a route after `writeConversationMessage` runs; observe in browser dev tools that NO websocket event arrives. Trigger a happy-path message; observe the event arrives normally.
 
@@ -281,12 +352,24 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 
 **Goal.** Currently the route pulls every artefact for the brief and the client flattens all of them. A real Brief during testing produces tens to hundreds of artefacts (inline structured replies, approval cards, error cards). Add bounded pagination so the initial fetch returns the most-recent N and clients page backwards on demand.
 
+**Pagination consistency model (durable contract).** Stated upfront so future readers don't re-prosecute the question.
+
+> **Direction.** This pagination is BACKWARD-only. Page 1 returns the newest 50 artefacts; "Load older" returns the next 50 older. There is no "fetch newer than the cursor" semantic — newer artefacts arrive via the existing `emitBriefArtefactNew` websocket event and prepend to the in-memory list.
+>
+> **Why backward pagination is duplicate-safe under concurrent inserts.** New artefacts produced after the user's first page load have `created_at > cursor.ts` (because `conversation_messages.created_at = now()` at insert time and inserts are monotonic with wall-clock). The "Load older" query fetches `(created_at, id) < (cursor.ts, cursor.msgId)` — a strict bound that EXCLUDES every artefact newer than the cursor. New artefacts therefore reach the client via websocket and never via cursor pagination; there is no overlap, no duplicate, no skip.
+>
+> **Tiebreaker.** Two rows with identical `created_at` are disambiguated by the `id` column (UUID v4, lexicographic order) in both ORDER BY and the cursor predicate. This guarantees deterministic ordering even at sub-millisecond timestamp collisions.
+>
+> **Monotonicity assumption (explicit).** The pagination guarantee relies on `created_at` being monotonic per insert — i.e., every new row's `created_at` is `≥` every existing row's `created_at` at the moment of insert. True in this codebase given `conversation_messages.created_at = now()` and single-primary write semantics; not universally guaranteed in distributed systems (clock skew across nodes, replication lag, manual maintenance scripts inserting backdated rows would all violate it). If this invariant is violated, duplicate or skipped artefacts may occur and **client-side dedupe by `msgId` is the required fallback** until the monotonicity violation is fixed at the source.
+>
+> **What is explicitly out of scope.** Defensive measures against monotonicity violations (snapshot upper bound, server-side dedup, etc.) — not added in v1 because the violation is not currently possible. If a future code path introduces a backdated-insert pattern, this contract requires re-evaluation.
+
 **Approach (server).**
 1. **Query-param shape.** Match the existing cursor-pagination convention from `clientPulseHighRiskService.getPrioritisedClients`:
    ```
    GET /api/briefs/:briefId/artefacts?limit=50&cursor=<opaque>
    ```
-   - `limit?: number` — default 50, max 200, validated as integer in `[1, 200]`. Out-of-range values clamp to the bound (do NOT 400).
+   - `limit?: number` — default 50, max 200, validated as integer in `[1, 200]`. Out-of-range values clamp to the bound (do NOT 400). When clamping occurs, log `brief_artefacts.limit_clamped { briefId, requested, applied }` so the testing round can see whether clients are sending bad limits and whether the clamp ever silences a real bug. Log only on actual clamp (when `requested !== applied`); do not log every request.
    - `cursor?: string` — opaque base64-url-encoded JSON `{ ts: ISO8601, msgId: UUID }` representing "fetch artefacts older than this conversation_message". Absent on first request.
 2. **Pure cursor primitives.** In a new pure helper file `server/services/briefArtefactCursorPure.ts`:
    ```ts
@@ -323,7 +406,9 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 - A first-page request returns at most 50 artefacts (or up to `limit`, max 200) and a `nextCursor` if more exist.
 - A page-2 request with the cursor returns the next 50 older artefacts; `nextCursor` is null when the end is reached.
 - An invalid / stale cursor produces a first-page response (graceful), not a 400.
+- A request with `limit` outside `[1, 200]` (e.g. `limit=0`, `limit=500`, `limit=-1`) returns a clamped response (limit applied at 1 / 200 / 1 respectively) AND emits exactly one `brief_artefacts.limit_clamped` log entry per request with the requested vs applied values. A request with a valid limit emits zero clamping logs.
 - Total artefacts across all pages match the unpaginated total.
+- **Concurrent-insert duplicate-freedom.** Run a 3-step interleave: load page 1 → insert 5 new artefacts (simulating websocket arrivals at the top) → load page 2 with the page-1 cursor. The page-2 result MUST NOT contain any of the 5 newly-inserted artefacts (they are newer than the cursor) and MUST contain the next 50 older artefacts uninterrupted. Verifies the consistency model is honoured by the query.
 - Client UI: "Load older" appears iff `nextCursor !== null`; clicking it appends older artefacts in correct chronological order; the button disappears when `nextCursor === null`.
 - New artefacts arriving via websocket continue to render at the top of the list independent of pagination state.
 - Internal callers using the new `getAllBriefArtefacts` (option (a) in step 4) still pull the full result.
@@ -365,15 +450,38 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
      agents: false, activity: false, pulseAttention: false, clientHealth: false,
    });
    ```
-2. **Replace `.catch(() => ...)` with explicit error setters.** Today the parallel fetches at lines 232-235 use `.catch((err) => { console.error(...); return { data: ... } })`. Change each to set the corresponding error flag AND continue with the fallback shape:
+2. **Atomic error-state lifecycle — set ONCE per fetch cycle, not per promise.** Per-promise `setErrors(e => ({ ...e, agents: true }))` calls produce two failure modes that interact badly with React's render scheduling and parallel fetches:
+   - **Stale-fetch race.** Cycle A starts → user clicks Retry mid-flight → cycle B starts (resets all flags) → cycle A's late `.catch` fires → re-sets `agents: true` based on cycle A's stale closure, even though cycle B is already in flight or complete.
+   - **Inconsistent UI snapshots.** With four parallel fetches, four sequential `setErrors` calls produce three intermediate render states where some flags reflect cycle N and others reflect cycle N-1.
+
+   Use a per-cycle local-flag pattern instead. Every fetch cycle owns its own error map locally; state commits exactly once after `Promise.all` settles:
    ```ts
-   api.get('/api/agents').catch((err) => {
-     logger.error('[Dashboard] agents fetch failed', err);
-     setErrors(e => ({ ...e, agents: true }));
-     return { data: [] };
-   }),
+   async function refetchAll() {
+     // Track results in cycle-local flags — never touch React state mid-cycle.
+     const cycleErrors: DashboardErrorMap = {
+       agents: false, activity: false, pulseAttention: false, clientHealth: false,
+     };
+
+     const [agentsRes, activityRes, pulseRes, healthRes] = await Promise.all([
+       api.get('/api/agents').catch((err) => {
+         logger.error('[Dashboard] agents fetch failed', err);
+         cycleErrors.agents = true;
+         return { data: [] };
+       }),
+       api.get('/api/activity').catch((err) => {
+         logger.error('[Dashboard] activity fetch failed', err);
+         cycleErrors.activity = true;
+         return { data: [] };
+       }),
+       // ... pulseAttention, clientHealth — same shape
+     ]);
+
+     // Single atomic commit: reset + re-set in one render. No interleaved state.
+     setErrors(cycleErrors);
+     // Apply data results (existing code — agentsRes.data → setAgents(), etc.)
+   }
    ```
-   On retry success (next `setLoading(true)` cycle), clear the flag: `setErrors(e => ({ ...e, agents: false }));` at the start of the fetch chain.
+   **Why this is structurally correct, not just stylistic.** A single `setErrors(cycleErrors)` call replaces the entire error map atomically — no stale per-promise `setErrors` updates can land. If a stale cycle's `Promise.all` settles after a newer cycle has already committed its `cycleErrors`, the stale `setErrors` call still happens but is overwritten on the next cycle's commit; in the gap between, the user sees the stale-but-internally-consistent error map (not the inconsistent partial map the per-promise pattern produces). For full stale-cycle protection, a cycle counter check (`if (myCycle === currentCycleRef.current)`) can wrap the final `setErrors` — ship the simpler version first; add the counter only if the testing round surfaces a stale-snapshot regression.
 3. **Inline retry banner component.** Add a small `<DashboardErrorBanner errors={errors} onRetry={refetchAll} />` rendered above the main grid. It shows up only when at least one error is true:
    ```tsx
    {Object.values(errors).some(Boolean) && (
@@ -402,6 +510,8 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 **Acceptance criteria.**
 - DashboardPage: when one fetch fails (simulate by setting an invalid endpoint or by stopping the dev server mid-fetch), the banner appears naming the failed source. The rest of the dashboard renders with empty data for that source. Clicking Retry re-runs the fetch; on success the banner disappears.
 - DashboardPage: when no fetches fail, the banner does NOT render.
+- **Atomic error-state commits.** During a fetch cycle, `setErrors` is called exactly once (not once per promise). Verifiable via React DevTools render-tracing: a single state update per `refetchAll` invocation, regardless of how many of the four fetches failed.
+- **Mid-cycle Retry safety.** Triggering Retry while a previous cycle's fetches are still in-flight does not produce flicker: the new cycle's eventual `setErrors(cycleErrors)` overwrites the stale cycle's errors atomically, so the UI never displays a partially-merged error map.
 - ClientPulseDashboardPage: same behaviours, scoped to its two/three fetches.
 - "No data" empty state and "fetch failed" error state are visually distinct — testers can tell at a glance which is which.
 - No regression of existing live-polling, websocket merging, or auth-redirect behaviours.
@@ -416,7 +526,7 @@ This spec runs concurrently with `docs/superpowers/specs/2026-04-28-pre-test-bac
 
 **Dependencies.** None.
 
-**Risk.** Very low. Additive UI change; no existing flow is removed. The only regression vector is the per-source error state introducing re-render thrash if `setErrors` runs on every fetch — mitigate by setting only when the error flag actually changes (`setErrors(e => e.agents === true ? e : { ...e, agents: true })`).
+**Risk.** Very low. Additive UI change; no existing flow is removed. The atomic-commit pattern (one `setErrors` per cycle, see Approach step 2) avoids re-render thrash by construction — there is no per-promise state update to thrash. The only remaining regression vector is the stale-cycle race in Approach step 2; mitigated structurally (newer cycle's commit overwrites stale cycle's commit) and escalation path documented (cycle-counter ref guard) if testing surfaces it.
 
 **Definition of Done.** All acceptance criteria pass; pure helper test green; manual smoke recorded; `tasks/todo.md § S3` ticked off.
 
