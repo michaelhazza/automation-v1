@@ -69,4 +69,4 @@ None — all three Codex findings were accepted and fixed.
 
 **Verdict:** APPROVED — all 3 Codex findings (2× P1, 1× P2) accepted and fixed; iteration 2 produced no new findings. PR ready, all critical and important issues resolved.
 
-**Commit at finish:** _to be filled in after commit_
+**Commit at finish:** e039a4432940c8a35616f560f21580dcc0f67f94
