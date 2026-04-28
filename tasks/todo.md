@@ -1140,4 +1140,37 @@ Both items closed in this PR (2026-04-28) per user direction. Resolution:
   - Spec section: §1.7 step 1 ("Async-worker exclusion contract (MUST hold): the async-worker ingestion path MUST NOT call checkThrottle.")
   - Gap: `incidentIngestorAsyncWorker.ts:15` calls `ingestInline(payload.input)`. The branch wired `checkThrottle` into `ingestInline`. Therefore the async-worker path now transitively calls `checkThrottle`. The spec's MUST is structurally violated by the implementation choice.
   - Suggested approach: choose one of (a) split the body of `ingestInline` so the worker calls a `_ingestInlineSkippingThrottle` variant — but that introduces a new primitive in violation of §0.3 (b) collapse the contract: amend the spec to drop the async-worker-exclusion MUST since `recordIncident` routes EITHER through async OR through sync (line 90: `if (isAsyncMode())`), so there's no double-throttle in any single request lifecycle anyway, OR (c) move the throttle check up into `recordIncident` and gate it on `isAsyncMode() === false`. Option (b) reflects what the implementer actually achieved (single throttle point, no double-throttle); option (c) is the closest mechanical fix to the spec's intent.
+  - **Update 2026-04-28:** Resolved in commit `7ebac102` via Option (c) — throttle moved to `recordIncident`'s sync branch; `ingestInline` is now throttle-free. Async-worker exclusion test added in commit fixing pr-reviewer S2.
+
+- [ ] **REQ §1.1 Gap E — payload-insert catch path lacks contested-key DELETE** *(superseded)*
+  - **Update 2026-04-28:** Initially "fixed" by adding a defensive DELETE in commit `7ebac102`, but pr-reviewer S1 flagged residual non-atomicity (DELETE could itself throw, leaving payload row visible with `payloadInsertStatus: 'failed'` event). Resolved by wrapping the INSERT in a `db.transaction` so any thrown error inside auto-rolls-back — eliminating the defensive DELETE entirely. The post-commit invariant now holds structurally.
+
+## Deferred from pr-reviewer review — pre-test-backend-hardening
+
+**Captured**: 2026-04-28
+**Branch**: `claude/pre-test-backend-hardening`
+**Source log**: `tasks/review-logs/pr-review-log-pre-test-backend-hardening-2026-04-28T03-59-27Z.md`
+
+- [ ] **S4 — `decideApproval` returns inflated `newVersion` for the loser of an approve/approve race**
+  - File: `server/services/workflowRunService.ts:583`
+  - Issue: both winner and loser of a concurrent `decideApproval('approved')` race receive `newVersion: stepRun.version + 1`, but the actual post-commit DB version is `stepRun.version + 2` (one bump for `awaiting_approval → running`, one for `running → completed`). The loser gets a stale client cache key indistinguishable from the winner's response.
+  - Pre-existing behaviour, but spec §1.3 made the invocation pattern more concurrent. Worth a follow-up to either fetch the actual post-commit version after dispatch, or document `newVersion` as a "best-effort hint" in the API contract.
+
+- [x] **N1 — Decision-type drift in `resolveApprovalDispatchActionPure` not surfaced in helper signature** *(resolved 2026-04-28)*
+  - File: `server/services/resolveApprovalDispatchActionPure.ts`
+  - Resolution: added `export type ApprovalDecision = 'approved' | 'rejected' | 'edited'` to the helper file (now the canonical source of truth for the runtime decision shape). Updated the helper signature and the production caller `workflowRunService.decideApproval` to import the type rather than re-declaring the inline union. Drift between spec wording (`'approve' | 'reject'`) and codebase reality is now surfaced in one place. Route-layer request-validation types and DB column types intentionally retain their inline unions — they're separate concerns (HTTP body shape, persisted enum) from the runtime dispatch decision.
+
+- [ ] **N3 — Promote `requireUuid` to a shared validation helper when other boundaries hit malformed UUIDs**
+  - File: `server/services/briefArtefactValidatorPure.ts:83`
+  - Trigger: testing pass surfaces malformed UUIDs reaching other validation boundaries (`runId`, `subaccountId`, `automationId` from external clients with bad shape).
+  - Action when triggered: grep for `requireString` calls on `*Id` fields across `server/services/*ValidatorPure.ts` and promote `requireUuid` to a shared helper (likely `server/lib/validation/requireUuid.ts` or extend an existing pure-validator module).
+
+- [ ] **N4 — `__testHooks` discriminant-name regex test is fragile**
+  - File: `server/services/__tests__/reviewServiceIdempotency.test.ts:445–459`
+  - Issue: test reads `reviewService.ts` source via `readFileSync` and counts string-literal occurrences of `'idempotent_race'`. A future refactor that constants-extracts the literal (e.g. `const KIND_IDEMPOTENT_RACE = 'idempotent_race'`) preserves behaviour but reduces the count below 2, failing the test.
+  - Fix: assert on return-value shape instead of source-text layout — trigger a race and assert `result.wasIdempotent === true && getKindFromAuditTrail() === 'idempotent_race'`.
+
+- [ ] **N2 follow-up — Consider adding `firstObservedAt` to `clientpulse_cursor_secret_fallback` log entry**
+  - File: `server/services/clientPulseHighRiskService.ts:172–178`
+  - Spec §1.5 step 2 named the field; spec-conformance accepted the omission as PASS-with-deviation. Add the field if a downstream alert filter ever wants to deduplicate or correlate the one-shot warning across instances.
 

@@ -31,7 +31,7 @@ import type {
 import type { WorkflowDefinition, WorkflowStep, RunContext } from '../lib/workflow/types.js';
 import { logger } from '../lib/logger.js';
 import { WorkflowEngineService } from './workflowEngineService.js';
-import { resolveApprovalDispatchAction } from './resolveApprovalDispatchActionPure.js';
+import { resolveApprovalDispatchAction, type ApprovalDecision } from './resolveApprovalDispatchActionPure.js';
 import { WorkflowTemplateService } from './workflowTemplateService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 
@@ -539,7 +539,7 @@ export const WorkflowRunService = {
     organisationId: string,
     runId: string,
     stepRunId: string,
-    decision: 'approved' | 'rejected' | 'edited',
+    decision: ApprovalDecision,
     editedOutput: Record<string, unknown> | undefined,
     userId: string,
     expectedVersion?: number

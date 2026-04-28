@@ -65,7 +65,7 @@ export async function findOrCreateBriefConversation(input: {
       status: 'open',
       metadata: {},
     })
-    .onConflictDoNothing({ target: [conversations.scopeType, conversations.scopeId] })
+    .onConflictDoNothing({ target: [conversations.organisationId, conversations.scopeType, conversations.scopeId] })
     .returning();
   if (created) return created;
 

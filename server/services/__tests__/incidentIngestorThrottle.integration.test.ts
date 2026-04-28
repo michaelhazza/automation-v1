@@ -92,19 +92,23 @@ mock.module('../lib/env.js', {
 // recordIncident (sync branch) now owns the throttle check; ingestInline is
 // a pure write path with no throttle (spec §1.7).
 // ---------------------------------------------------------------------------
-import { recordIncident, __resetForTest } from '../incidentIngestor.js';
+import { recordIncident, ingestInline, __resetForTest } from '../incidentIngestor.js';
 import { getThrottledCount, __resetForTest as resetThrottle } from '../incidentIngestorThrottle.js';
+import type { IncidentInput } from '../incidentIngestorPure.js';
 
 // ---------------------------------------------------------------------------
-// Shared fixture — minimal valid IncidentInput.
+// Shared fixture — minimal valid IncidentInput. `source` MUST be a real
+// SystemIncidentSource value — the previous `test-source-${suffix}` literal
+// silently widened to string and bypassed the union check.
+// `satisfies IncidentInput` makes any future type drift loud.
 // ---------------------------------------------------------------------------
 function makeInput(suffix = 'A') {
   return {
-    source: `test-source-${suffix}` as const,
+    source: 'self',
     summary: `Test incident ${suffix}`,
-    severity: 'low' as const,
+    severity: 'low',
     correlationId: `corr-${suffix}`,
-  };
+  } satisfies IncidentInput;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,5 +187,55 @@ describe('recordIncident (sync branch) throttle integration', () => {
     } finally {
       t.mock.timers.reset();
     }
+  });
+});
+
+describe('ingestInline (async-worker path) bypasses throttle (spec §1.7 MUST)', () => {
+  beforeEach(() => {
+    __resetForTest();
+    resetThrottle();
+  });
+
+  afterEach(() => {
+    __resetForTest();
+    resetThrottle();
+  });
+
+  it('1000 direct ingestInline calls with the same fingerprint → getThrottledCount() stays at 0', async () => {
+    const input = makeInput('async-worker');
+    const CALLS = 1000;
+
+    for (let i = 0; i < CALLS; i++) {
+      await ingestInline(input);
+    }
+
+    // ingestInline is the path the async-worker calls directly. The throttle
+    // MUST NOT fire here — pg-boss provides backpressure for the async path.
+    // A regression that re-introduces the throttle inside ingestInline would
+    // increment getThrottledCount() above 0 here.
+    assert.equal(
+      getThrottledCount(),
+      0,
+      `expected getThrottledCount()=0 on ingestInline path, got ${getThrottledCount()}`,
+    );
+  });
+
+  it('cross-fingerprint ingestInline calls → still 0 throttled (proves no throttle is consulted for any fingerprint on this path)', async () => {
+    const inputA = makeInput('async-alpha');
+    const inputB = makeInput('async-beta');
+    const CALLS_EACH = 100;
+
+    for (let i = 0; i < CALLS_EACH; i++) {
+      await ingestInline(inputA);
+    }
+    for (let i = 0; i < CALLS_EACH; i++) {
+      await ingestInline(inputB);
+    }
+
+    assert.equal(
+      getThrottledCount(),
+      0,
+      `expected getThrottledCount()=0 across both fingerprints on ingestInline path, got ${getThrottledCount()}`,
+    );
   });
 });

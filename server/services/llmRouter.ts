@@ -1583,12 +1583,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // terminalStatus is always 'success', so the gate is effectively
   // (sourceType === 'agent_run' && runId present).
   //
-  // NOTE: the success terminal-write above does NOT run in a shared db.transaction
-  // with the payload insert because (a) the payload insert is best-effort and
-  // (b) the terminal row is already committed — wrapping them together would
-  // require the ledger write to be inside a new transaction, which changes
-  // ordering semantics for the cost breaker. Keeping them separate and
-  // best-effort is the correct consistency model (spec §4.5).
+  // The payload INSERT runs inside its own db.transaction so that any thrown
+  // error during the insert (or while reading .returning()) triggers automatic
+  // rollback — guaranteeing the post-commit invariant
+  // (payloadInsertStatus === 'failed' iff no agent_run_llm_payloads row exists).
+  // The ledger row is intentionally NOT pulled into this tx — it was already
+  // committed above, and wrapping ledger + payload together would change cost-
+  // breaker ordering semantics (spec §4.5).
   terminalStatus = 'success';
   if (shouldEmitLaelLifecycle(ctx, 'success') && successLedgerRowId) {
     let payloadRowId: string | null = null;
@@ -1607,31 +1608,25 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         response:        providerResponse as unknown as Record<string, unknown>,
         maxBytes:        64 * 1024,
       });
-      const [inserted] = await db.insert(agentRunLlmPayloads).values({
-        llmRequestId:   successLedgerRowId,
-        runId:          ctx.runId!,
-        organisationId: ctx.organisationId,
-        subaccountId:   ctx.subaccountId ?? null,
-        ...payloadRow,
-      }).returning({ id: agentRunLlmPayloads.llmRequestId });
-      payloadRowId = inserted?.id ?? null;
+      payloadRowId = await db.transaction(async (tx) => {
+        const [inserted] = await tx.insert(agentRunLlmPayloads).values({
+          llmRequestId:   successLedgerRowId,
+          runId:          ctx.runId!,
+          organisationId: ctx.organisationId,
+          subaccountId:   ctx.subaccountId ?? null,
+          ...payloadRow,
+        }).returning({ id: agentRunLlmPayloads.llmRequestId });
+        return inserted?.id ?? null;
+      });
       payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
     } catch (err) {
-      // Payload is best-effort; ledger is canonical. Insert failure does NOT roll back the ledger row.
+      // Payload is best-effort; ledger is canonical. The wrapping tx rolled back
+      // any partial INSERT, so the post-commit invariant holds without a defensive DELETE.
       logger.warn('lael_payload_insert_failed', {
         runId: ctx.runId, ledgerRowId: successLedgerRowId, error: err,
       });
-      // Defensive: delete any partially-inserted row so the post-commit invariant holds
-      // (payloadInsertStatus === 'failed' iff no agent_run_llm_payloads row exists post-commit).
-      try {
-        await db.delete(agentRunLlmPayloads).where(
-          eq(agentRunLlmPayloads.llmRequestId, successLedgerRowId)
-        );
-      } catch {
-        // DELETE failure is swallowed — the primary contract is already broken at this point.
-        // payloadInsertStatus: 'failed' on the event is the observable signal.
-      }
       payloadInsertStatus = 'failed';
+      payloadRowId = null;
     }
 
     laelCompletedEmitted = true;
