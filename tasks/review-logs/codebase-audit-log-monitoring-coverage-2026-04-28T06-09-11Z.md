@@ -510,3 +510,281 @@ This is **G15** in the executive summary.
 | Sysadmin operations (most) | partial G15 |
 | Async incident ingestor (when enabled) | ✗ G3 |
 | Triage agent log evidence (`read_logs_for_correlation_id`) | ✗ G2 |
+
+---
+
+## 5. Critical incident-emission gaps with file:line evidence
+
+This section catalogues each gap with the exact file:line so the implementer can edit directly. Same numbering as §1.
+
+### G1 — DLQ subscription coverage ~25%
+
+**Evidence:**
+- `server/services/dlqMonitorService.ts:14-23` — hard-coded `DLQ_QUEUES` array with 8 entries.
+- `server/config/jobConfig.ts:36-432` — 31 entries with `deadLetter:` declared.
+
+**Effect:** When jobs in unsubscribed DLQs exhaust retries, they sit in `<queue>__dlq` indefinitely. No `recordIncident`, no operator notification, no agent triage.
+
+**Fix shape:** Replace the hard-coded array with a derivation from `JOB_CONFIG`:
+
+```ts
+import { JOB_CONFIG } from '../config/jobConfig.js';
+
+const DLQ_QUEUES = Object.values(JOB_CONFIG)
+  .map(c => (c as { deadLetter?: string }).deadLetter)
+  .filter((d): d is string => !!d);
+```
+
+This auto-includes any new queue with `deadLetter:` declared. ~5 LOC change.
+
+**Risk:** None. The DLQ subscriptions are pure listeners that emit `recordIncident` on enqueue. Adding listeners can't double-count (each DLQ has at most one listener).
+
+### G2 — `logBuffer` never populated; `read_logs_for_correlation_id` always empty
+
+**Evidence:**
+- `server/services/systemMonitor/logBuffer.ts:19` — `appendLogLine(line)` exported.
+- `server/services/systemMonitor/skills/readLogsForCorrelationId.ts:14-15` — reads from buffer.
+- `server/lib/logger.ts:34-43` — `emit(entry)` only writes to console; never calls `appendLogLine`.
+- `grep -rn "appendLogLine" server` — only the definition + the skill's import.
+
+**Fix shape:** in `server/lib/logger.ts:34`, after `emit(entry)`:
+
+```ts
+function emit(entry: LogEntry): void {
+  // ...existing console writes...
+
+  // Feed the System Monitor's log buffer for correlation-ID-scoped retrieval.
+  if (typeof entry.correlationId === 'string' && entry.correlationId.length > 0) {
+    // Lazy import to avoid pulling systemMonitor into the logger's hot path graph.
+    void import('../services/systemMonitor/logBuffer.js').then(m => m.appendLogLine({
+      ts: new Date(entry.timestamp),
+      level: entry.level,
+      event: entry.event,
+      correlationId: entry.correlationId as string,
+      meta: { ...entry, timestamp: undefined, level: undefined, event: undefined, correlationId: undefined },
+    })).catch(() => { /* never let logger crash on buffer write */ });
+  }
+}
+```
+
+(Or eager import if the dependency direction is acceptable — `lib/logger.ts` → `services/systemMonitor/logBuffer.ts`. The buffer module has zero deps so this is safe.)
+
+**Risk:** Low. The buffer has its own LRU eviction (1000 lines / 500 KB). Per-log cost is one push + one optional shift.
+
+### G3 — `incidentIngestorAsyncWorker.handleSystemMonitorIngest` never registered
+
+**Evidence:**
+- `server/services/incidentIngestorAsyncWorker.ts:11` — `handleSystemMonitorIngest` exported.
+- `server/services/incidentIngestor.ts:117` — `boss.send('system-monitor-ingest', ...)` enqueues to this queue.
+- `grep -rn "handleSystemMonitorIngest\|'system-monitor-ingest'" server` — function is never registered as a `boss.work(...)` consumer.
+
+**Effect:** Currently dormant — default is `SYSTEM_INCIDENT_INGEST_MODE=sync`. The moment the env var flips to `async` (or someone tests async mode), every incident is enqueued and never consumed.
+
+**Fix shape:** Register on boot in `server/index.ts` near `await registerSystemIncidentNotifyWorker(boss);` (line ~455):
+
+```ts
+if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+  await boss.work('system-monitor-ingest', { teamSize: 4, teamConcurrency: 1 }, async (job) => {
+    const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+    await handleSystemMonitorIngest(job.data as SystemMonitorIngestPayload);
+  });
+}
+```
+
+Add `system-monitor-ingest` to `JOB_CONFIG` with a `deadLetter` so failures land in a DLQ that G1's fix subscribes to.
+
+**Risk:** None. Currently inert path becomes functional when toggled. Existing inline-mode tests in `__tests__/incidentIngestorPure.test.ts` already cover the shared `ingestInline` code path.
+
+### G4 — ~20 queues bypass `JOB_CONFIG` (no retry/timeout/DLQ)
+
+**Evidence:**
+- `server/services/queueService.ts:548-1142` — multiple `(boss as any).work(...)` calls for queues not in `JOB_CONFIG`.
+- `server/services/workflowEngineService.ts:3483-3503` — three workflow workers using raw `pgboss.work`.
+- `server/index.ts:476` — `boss.work('skill-analyzer', ...)` with no config bag.
+
+**Effect:** No retry policy (pg-boss defaults apply: usually retryLimit=0 or 2), no DLQ, no `recordIncident` on failure. The agent never sees these failures.
+
+**Fix shape:** For each queue, either:
+1. Add a `JOB_CONFIG` entry (with `deadLetter:`) and convert to `createWorker()`. This gets retry, timeout, AND DLQ subscription (post G1) for free.
+2. If the worker has bespoke needs that `createWorker` can't accommodate, wrap the handler in a try/catch that calls `recordIncident({source: 'job', ...})` directly, and add the `__dlq` queue to the explicit DLQ list.
+
+Option 1 is preferred — it's the convention.
+
+**Per-queue checklist** (worker registration → file:line → action):
+- `maintenance:cleanup-execution-files` — `queueService.ts:548` — has `JOB_CONFIG` entry; just convert to `createWorker`
+- `maintenance:cleanup-budget-reservations` — `queueService.ts:561` — same
+- `maintenance:memory-decay` — `queueService.ts:574` — same
+- `maintenance:security-events-cleanup` — `queueService.ts:587` — same
+- `maintenance:fast-path-decisions-prune` — `queueService.ts:599` — **no `JOB_CONFIG` entry** — add one
+- `maintenance:rule-auto-deprecate` — `queueService.ts:611` — add config + convert
+- `maintenance:fast-path-recalibrate` — `queueService.ts:623` — same
+- `maintenance:llm-ledger-archive` — `queueService.ts:638` — same
+- `maintenance:llm-started-row-sweep` — `queueService.ts:655` — same
+- `maintenance:stale-analyzer-job-sweep` — `queueService.ts:675` — same
+- `maintenance:llm-inflight-history-cleanup` — `queueService.ts:689` — same
+- `agent-run-cleanup` — `queueService.ts:704` — has config; just convert
+- `priority-feed-cleanup` — `queueService.ts:716` — has config; convert
+- `maintenance:memory-dedup` — `queueService.ts:729` — has config; convert
+- `maintenance:memory-entry-decay` — `queueService.ts:742` — add config + convert
+- `memory-hnsw-reindex` — `queueService.ts:756` — same
+- `memory-blocks-embedding-backfill` — `queueService.ts:769` — same
+- `maintenance:clarification-timeout-sweep` — `queueService.ts:789` — same
+- `maintenance:iee-main-app-reconciliation` — `queueService.ts:808` — same
+- `maintenance:memory-entry-quality-adjust` — `queueService.ts:821` — same
+- `maintenance:memory-block-synthesis` — `queueService.ts:834` — same
+- `maintenance:bundle-utilization` — `queueService.ts:849` — same
+- `maintenance:portfolio-briefing` — `queueService.ts:862` — same
+- `maintenance:portfolio-digest` — `queueService.ts:874` — same
+- `maintenance:protected-block-divergence` — `queueService.ts:887` — same
+- `agent-briefing-update` — `queueService.ts:900` — has config (but no `deadLetter`); add deadLetter + convert
+- `clientpulse:propose-interventions` — `queueService.ts:914` — has config; convert
+- `clientpulse:measure-outcomes` — `queueService.ts:930` — has config; convert
+- `workflow-resume` — `queueService.ts:992` — has config; convert
+- `memory-context-enrichment` — `queueService.ts:1027` — has config (no deadLetter); add + convert
+- `system-monitor-self-check` — `queueService.ts:1099` — add config (with deadLetter) + convert
+- `subscription-trial-check` — `queueService.ts:1110` — same
+- `slack-inbound` — `queueService.ts:1125` — has config (no deadLetter); add + convert
+- `orchestrator-from-task` — `queueService.ts:1142` — add config + convert
+- `skill-analyzer` — `index.ts:476` — has config; convert
+- `workflow-run-tick` — `workflowEngineService.ts:3483` — has config; convert
+- `workflow-watchdog` — `workflowEngineService.ts:3492` — has config; convert
+- `workflow-agent-step` — `workflowEngineService.ts:3503` — has config; convert
+
+**Risk:** Medium. `createWorker` opens an org-scoped Drizzle tx by default — handlers that intentionally span orgs (sweeps) need `resolveOrgContext: () => null` to opt out. The `withAdminConnection` pattern is already in use; just needs to be threaded through.
+
+### G5 — 6 queues in `JOB_CONFIG` with no `deadLetter:`
+
+**Evidence:** `server/config/jobConfig.ts` — search for entries that have `retryLimit` but no `deadLetter` key:
+- `slack-inbound` (line ~211)
+- `agent-briefing-update` (line ~258)
+- `memory-context-enrichment` (line ~267)
+- `page-integration` (line ~276)
+- `iee-cost-rollup-daily` (line ~315)
+- `connector-polling-tick` (line ~415)
+
+**Fix shape:** Add `deadLetter: '<queue>__dlq'` to each. Once G1 derives DLQ subscriptions from config, these auto-cover.
+
+**Risk:** None. Adds a DLQ where none existed; pg-boss creates the queue automatically.
+
+### G6 — `skillExecutor` only emits incidents on `onFailure='fail_run'`
+
+**Evidence:** `server/services/skillExecutor.ts:347-359` — `recordIncident` only called when `(actionDef?.onFailure ?? 'retry') === 'fail_run'`. Other failure dispositions (`retry`, `skip`, `fallback`) silently degrade.
+
+**Effect:** A skill configured with `onFailure: 'retry'` that fails on every retry attempt produces zero incidents. The agent run continues, eventually fails for a different reason, and the original skill's persistent failure is invisible.
+
+**Fix shape:** Two options:
+
+1. **Emit on every non-`success` skill execution** when `actionDef.failureSurfaceAsIncident !== false` — adds a per-skill kill switch.
+2. **Emit on `retry` exhaustion only** — keep transient failures quiet; surface persistent ones. Needs retry-count threading through `skillExecutor`.
+
+Option 2 is closer to the current design intent (transient retries are normal noise). Implementation: when retry-count == retry-cap and the call still fails, emit an incident with `fingerprintOverride: 'skill:<slug>:retry_exhausted'`.
+
+**Risk:** Medium. Requires retry-count plumbing in `skillExecutor`. Could produce incident churn during legitimate intermittent failures — should land *with* a per-skill suppression rule.
+
+### G7 — Webhook routes bypass `asyncHandler` in 5xx paths
+
+**Evidence:**
+- `server/routes/webhooks/ghlWebhook.ts:64-67` — DB lookup catch returns `res.status(500)` without throw.
+- `server/routes/githubWebhook.ts:122-124` — `try/catch` with `logger.error` only; no `recordIncident`.
+
+**Fix shape:** Two options:
+
+1. Wrap each handler in `asyncHandler` and let the global 5xx path handle it.
+2. Inside the existing catch blocks, call:
+   ```ts
+   recordIncident({
+     source: 'route',
+     summary: 'GHL webhook handler failure',
+     errorCode: 'webhook_handler_failed',
+     stack: err instanceof Error ? err.stack : undefined,
+     fingerprintOverride: 'webhook:ghl:handler_failed',
+     errorDetail: { delivery, event },
+   });
+   ```
+
+Option 2 keeps the early-ack response pattern (which webhook providers expect).
+
+**Risk:** Low. `recordIncident` is fire-and-forget; cannot fail the response.
+
+### G8 — Raw `boss.work` handlers don't call `recordIncident`
+
+This collapses into G1 + G4 once the listed queues all flow through `createWorker`. No separate fix.
+
+### G9 — `webhook` not in `SystemIncidentSource` enum
+
+**Evidence:** `server/db/schema/systemIncidents.ts:10` — `'route' | 'job' | 'agent' | 'connector' | 'skill' | 'llm' | 'synthetic' | 'self'`. No `'webhook'`.
+
+**Fix shape:**
+1. Migration: `ALTER TYPE` if implemented as enum, or just expand the union type if it's `text` (the schema uses `text().$type<...>()`, so just expand the TS type).
+2. Update `inferDefaultSeverity` in `incidentIngestorPure.ts` with a `webhook` branch.
+3. Update G7's emit calls to use `source: 'webhook'` instead of `'route'`.
+
+**Risk:** None. Pure enum expansion.
+
+### G10 — Missing read skills
+
+See §3.2 for the full list. Each is ~50 LOC following the existing pattern.
+
+### G11 — Skill analyzer doesn't emit incidents on terminal failure
+
+**Evidence:** `server/jobs/skillAnalyzerJob.ts` — only `logger.error` + `throw`. The throw exits the pg-boss handler, retries fire (retryLimit=1 with 5-min delay), exhaustion lands in `skill-analyzer__dlq` — which is **not subscribed** (G1).
+
+**Fix shape:** G1 fixes the post-DLQ surface. Additionally, wrap the top-level handler with a `recordIncident` on the catastrophic-failure path:
+
+```ts
+try {
+  await processSkillAnalyzerJob(jobId);
+} catch (err) {
+  recordIncident({
+    source: 'job',
+    summary: `Skill analyzer terminal failure for job ${jobId}: ${err instanceof Error ? err.message : String(err)}`,
+    errorCode: 'skill_analyzer_failed',
+    stack: err instanceof Error ? err.stack : undefined,
+    fingerprintOverride: 'skill_analyzer:terminal_failure',
+    severity: 'high',
+  });
+  throw err; // preserve pg-boss retry semantics
+}
+```
+
+**Risk:** None. Belt-and-braces — both per-failure and DLQ paths emit; dedup via fingerprint handles the overlap.
+
+### G12 — Missing synthetic checks
+
+See §3.4 for the candidate list. Each is ~30–50 LOC. Suggested priority order:
+1. HITL approval timeout (`actions.status='pending_review' AND created_at < now() - X hours`)
+2. Workflow run stuck non-terminal past expected runtime
+3. Scheduled-task dispatch silence
+4. Skill silence per-skill
+5. Brief artefact rejection rate elevated
+
+### G13 — Adapters have zero `recordIncident` calls
+
+**Evidence:** `grep -rn "recordIncident" server/adapters` returns nothing.
+
+**Effect:** Out-of-band adapter calls (token refresh, send-message, push, etc.) that fail are logged but not flagged.
+
+**Fix shape:** Each adapter has a small set of well-defined failure points. Audit `server/adapters/{ghl,slack,stripe,teamwork}.ts` for catch blocks; emit `recordIncident({source: 'connector', ...})` on persistent failures (token-refresh exhaustion, send-message after retries).
+
+**Risk:** Low. Need to be careful not to emit on transient single-call failures — emit on retry-exhaustion or rate-elevated only.
+
+### G14 — `processLocalFailureCounter` is process-local
+
+**Evidence:** Documented in `server/services/incidentIngestor.ts:36-37` and `architecture.md:3314`.
+
+**Effect:** Multi-instance deploy under-counts globally. Each process can detect its own degradation but can't see cluster-wide failures.
+
+**Fix:** Out of scope for launch (acknowledged in code). Phase 0.75 hardening item — Redis or DB-backed counter. Not a blocker.
+
+### G15 — Sysadmin operations missing incident emission
+
+**Evidence:** Various — see §4.10 table. Specific files:
+- `server/jobs/orgSubaccountMigrationJob.ts` — no `recordIncident` on partial failure
+- `server/services/configBackupService.ts` — no `recordIncident` on backup write failure
+- `server/services/dataRetentionService.ts` — partial-failure logger-only
+- OAuth integration token refresh — adapter-level (G13)
+- Scheduled task dispatch — `server/services/scheduledTaskService.ts` partial-failure path
+
+**Fix shape:** Point audit per file. Each is a wrap-and-emit edit, ~5 LOC.
+
+**Risk:** Low. These operations are low-frequency, so incident emission won't churn the agent.
