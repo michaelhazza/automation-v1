@@ -8,10 +8,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-26-home-dashboard-reactivity-spec.md
-**Active plan:** docs/superpowers/plans/2026-04-27-home-dashboard-reactivity.md
-**Active build slug:** home-dashboard-reactivity (PR #218 — branch `create-views`, awaiting merge after ChatGPT PR review APPROVED)
-**Last updated:** 2026-04-27
+**Active spec:** docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md
+**Active plan:** tasks/builds/pre-test-backend-hardening/plan.md
+**Active build slug:** pre-test-backend-hardening (branch `claude/pre-test-backend-hardening`, cut from `origin/main` 2026-04-28; plan-gate produced, awaiting executor session on Sonnet)
+**Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
+**Last updated:** 2026-04-28
+
+---
+
+**Previously active:** home-dashboard-reactivity (PR #218 — branch `create-views`, ChatGPT PR review APPROVED 2026-04-27, awaiting merge into `main`).
 
 ---
 
