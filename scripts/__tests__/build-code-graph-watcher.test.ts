@@ -192,29 +192,35 @@ async function main(): Promise<void> {
 
     await runTest('singleton-lock: second watcher exits cleanly without holding the lock', async () => {
       const watcherB = spawnWatcher();
-      const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null } | null>((resolve) => {
-        const timer = setTimeout(() => resolve(null), SINGLETON_TIMEOUT_MS);
-        watcherB.child.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          resolve({ code, signal });
+      try {
+        const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null } | null>((resolve) => {
+          const timer = setTimeout(() => resolve(null), SINGLETON_TIMEOUT_MS);
+          watcherB.child.once('exit', (code, signal) => {
+            clearTimeout(timer);
+            resolve({ code, signal });
+          });
         });
-      });
-      if (exitInfo === null) {
-        await killAndWait(watcherB.child);
-        throw new Error(`Watcher B did not exit within ${SINGLETON_TIMEOUT_MS}ms — singleton lock not enforced. Output:\n${watcherB.output()}`);
+        if (exitInfo === null) {
+          throw new Error(`Watcher B did not exit within ${SINGLETON_TIMEOUT_MS}ms — singleton lock not enforced. Output:\n${watcherB.output()}`);
+        }
+        assert(exitInfo.code === 0, `Watcher B exit code = ${exitInfo.code} (signal=${exitInfo.signal}); expected 0. Output:\n${watcherB.output()}`);
+        assert(
+          watcherB.output().includes('lock held by another process'),
+          `Watcher B should log "lock held by another process". Output:\n${watcherB.output()}`,
+        );
+        // Confirm watcherA was not displaced — its PID file must still match.
+        const pidStr = await fs.readFile(PID_PATH, 'utf8').catch(() => '');
+        assert(
+          pidStr.trim() === String(watcherA!.child.pid),
+          `PID file no longer points to watcher A — got "${pidStr.trim()}", expected "${watcherA!.child.pid}"`,
+        );
+        assert(!watcherA!.exited(), 'Watcher A should still be alive after watcher B exits');
+      } finally {
+        // Guarantee watcher B is reaped regardless of which assertion (or unexpected
+        // error) above throws. Without this, a stream error or OOM between spawn
+        // and the exit-await would orphan B until the parent process exits.
+        if (!watcherB.exited()) await killAndWait(watcherB.child);
       }
-      assert(exitInfo.code === 0, `Watcher B exit code = ${exitInfo.code} (signal=${exitInfo.signal}); expected 0. Output:\n${watcherB.output()}`);
-      assert(
-        watcherB.output().includes('lock held by another process'),
-        `Watcher B should log "lock held by another process". Output:\n${watcherB.output()}`,
-      );
-      // Confirm watcherA was not displaced — its PID file must still match.
-      const pidStr = await fs.readFile(PID_PATH, 'utf8').catch(() => '');
-      assert(
-        pidStr.trim() === String(watcherA!.child.pid),
-        `PID file no longer points to watcher A — got "${pidStr.trim()}", expected "${watcherA!.child.pid}"`,
-      );
-      assert(!watcherA!.exited(), 'Watcher A should still be alive after watcher B exits');
     });
 
     // ---- Test 2 — no feedback loop ----
