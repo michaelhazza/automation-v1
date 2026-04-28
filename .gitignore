@@ -19,5 +19,6 @@ references/.code-graph-cache.json
 references/.code-graph-watcher.log
 references/.watcher.lock
 references/.watcher.lock.lock
+references/.watcher.pid
 references/import-graph/
 references/project-map.md

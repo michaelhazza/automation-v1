@@ -39,6 +39,7 @@ const SKIPPED_PATH = path.join(SHARD_DIR, '.skipped.txt');
 const DIGEST_PATH = path.join(ROOT, 'references', 'project-map.md');
 const LOCK_PATH = path.join(ROOT, 'references', '.watcher.lock');
 const WATCHER_LOG_PATH = path.join(ROOT, 'references', '.code-graph-watcher.log');
+const WATCHER_PID_PATH = path.join(ROOT, 'references', '.watcher.pid');
 
 const CLIENT_TSCONFIG = path.join(ROOT, 'tsconfig.json');
 const SERVER_TSCONFIG = path.join(ROOT, 'server', 'tsconfig.json');
@@ -619,8 +620,14 @@ async function runWatcher(): Promise<void> {
     process.exit(0);
   }
 
+  // Write our PID so `--rebuild` can find and terminate us before dropping
+  // the cache. Without this, a live watcher with stale in-memory state
+  // would silently overwrite the freshly-rebuilt shards on its next event.
+  try { await fs.writeFile(WATCHER_PID_PATH, String(process.pid), 'utf8'); } catch {}
+
   // Cleanup on signal
   async function cleanup(): Promise<void> {
+    try { await fs.unlink(WATCHER_PID_PATH); } catch {}
     if (releaseLock) {
       try { await releaseLock(); } catch {}
       releaseLock = null;
@@ -1012,12 +1019,53 @@ async function main(): Promise<void> {
   }
 
   if (mode === 'rebuild') {
+    console.log('[code-graph] --rebuild: terminating any existing watcher…');
+    await terminateExistingWatcher();
     console.log('[code-graph] --rebuild: dropping cache…');
     try { await fs.unlink(CACHE_PATH); } catch {}
   }
 
   await coldBuild();
   await spawnWatcher(); // spawn watcher after cold build
+}
+
+/**
+ * Send SIGTERM to the watcher PID recorded at WATCHER_PID_PATH (if any),
+ * then force-clear the lockfile artifacts. Required by --rebuild: a live
+ * watcher carrying stale in-memory state would otherwise overwrite the
+ * freshly-rebuilt shards on its next file event.
+ *
+ * On Windows, Node's process.kill terminates the target unconditionally,
+ * so the watcher's cleanup handler does not run. The explicit unlink of
+ * the lock and PID files below covers that case. proper-lockfile would
+ * also reclaim a 10s-stale lock on its own, but unlinking is faster and
+ * ensures the next predev cold-build does not race.
+ */
+async function terminateExistingWatcher(): Promise<void> {
+  let pid: number | null = null;
+  try {
+    const pidStr = await fs.readFile(WATCHER_PID_PATH, 'utf8');
+    const parsed = parseInt(pidStr.trim(), 10);
+    if (!Number.isNaN(parsed)) pid = parsed;
+  } catch {
+    // No PID file — no live watcher tracked. Still proceed to clear lock
+    // artifacts below in case of orphaned files.
+  }
+
+  if (pid !== null) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      console.log(`[code-graph] --rebuild: sent SIGTERM to watcher (pid ${pid})`);
+      // Brief wait for graceful exit on POSIX; Windows kill is immediate.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch {
+      // ESRCH — process already gone.
+    }
+  }
+
+  try { await fs.unlink(WATCHER_PID_PATH); } catch {}
+  try { await fs.unlink(LOCK_PATH); } catch {}
+  try { await fs.rm(LOCK_PATH + '.lock', { recursive: true, force: true }); } catch {}
 }
 
 main().catch((err) => {
