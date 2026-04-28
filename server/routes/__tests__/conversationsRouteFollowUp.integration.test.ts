@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — gated on a real DATABASE_URL probe before dynamically importing IO modules."
 /**
  * conversationsRouteFollowUp.integration.test.ts
  *
@@ -25,14 +26,24 @@
  *
  * Tests MUST NOT assert websocket events or timing of emits (spec §1.1 step 4.6).
  */
+export {};
 
 import { strict as assert } from 'node:assert';
-import { eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import { tasks, conversations, conversationMessages } from '../../db/schema/index.js';
-import { writeConversationMessage } from '../../services/briefConversationWriter.js';
-import { assertCanViewConversation } from '../../services/briefConversationService.js';
-import { selectConversationFollowUpAction } from '../../services/conversationsRoutePure.js';
+
+await import('dotenv/config');
+
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
+  console.log('\nSKIP: conversationsRouteFollowUp.integration.test requires a real DATABASE_URL.\n');
+  process.exit(0);
+}
+
+const { db } = await import('../../db/index.js');
+const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
+const { writeConversationMessage } = await import('../../services/briefConversationWriter.js');
+const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
+const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
+const { eq } = await import('drizzle-orm');
 
 const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
@@ -141,6 +152,11 @@ async function run() {
 }
 
 void run().catch((err) => {
+  // FK violation on the test org means the DB isn't seeded with test fixtures.
+  if (err?.cause?.code === '23503' && String(err?.cause?.detail ?? '').includes('organisations')) {
+    console.log('\nSKIP: test org not present in DB — seed 00000000-0000-0000-0000-000000000001 to run this test.\n');
+    process.exit(0);
+  }
   console.error('Integration test failed:', err);
   process.exit(1);
 });
