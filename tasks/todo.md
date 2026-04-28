@@ -1331,3 +1331,29 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
 - [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
   - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
   - Defer to Phase 1 once shape stabilises — premature split risks churn if Phase 1 reshuffles boundaries again.
+
+## Deferred from spec-conformance review — dev-mission-control (2026-04-28)
+
+**Captured:** 2026-04-28T06:32:35Z
+**Source log:** `tasks/review-logs/spec-conformance-log-dev-mission-control-2026-04-28T06-29-40Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md`
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — root `package.json` scripts `review:chatgpt-pr`, `review:chatgpt-spec`, `mission-control:dev` are not wired
+  - Spec section: § 5 Modified files
+  - Gap: Spec explicitly names three scripts to add to root `package.json`. Implementation deliberately deferred per the user (HITL approval avoidance); current invocations call the CLI directly via `npx tsx scripts/chatgpt-review.ts` and `cd tools/mission-control && npm run dev`. The spec's § 10 Deferred items list does NOT formally cover this deferral, so the spec and implementation drift here.
+  - Suggested approach: either (a) add the three scripts in a follow-up commit with bodies that match the agent-definition invocations (`review:chatgpt-pr` → `git diff main...HEAD | tsx scripts/chatgpt-review.ts --mode pr`; `review:chatgpt-spec` → `tsx scripts/chatgpt-review.ts --mode spec --file`; `mission-control:dev` → `cd tools/mission-control && npm run dev`), or (b) update the spec § 10 to formally defer the script wiring with stated rationale.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `/api/github/prs` endpoint not implemented
+  - Spec section: § 5 Modified files (server/index.ts row), § 7 Execution model
+  - Gap: Spec § 5 lists `/api/github/prs` as one of the four endpoints the Express server exposes. Implementation has `/api/health`, `/api/in-flight`, `/api/builds`, `/api/current-focus`, `/api/review-logs` — no `/api/github/prs`. The PR + CI fetch logic exists in `server/lib/github.ts` and is consumed inside `composeInFlight`; `/api/in-flight` returns the PR data inline, so the dashboard works without a separate endpoint.
+  - Suggested approach: either (a) add a thin GET route `/api/github/prs?branch=<branch>` that calls `fetchPRForBranch` and returns the `PRSummary` (or an array, if rethought to list-many), or (b) update spec § 5 to remove the standalone endpoint and document that PR data flows via `/api/in-flight`. Option (b) matches the as-built read-only single-feed posture better.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `tasks/current-focus.md` machine block disagrees with prose body
+  - Spec section: § C3 (`Source-of-truth precedence: if the two disagree, the prose is canonical and the block is corrected`)
+  - Gap: The new machine block at the top of `tasks/current-focus.md` names `dev-mission-control` / status `BUILDING`, but the prose below names `pre-test-backend-hardening` / status `MERGE-READY`. By spec rule the prose wins and the block must be corrected. This is a content-state mismatch (the prose has not been updated to reflect that the dev-mission-control branch is the active sprint, OR the block was set prematurely).
+  - Suggested approach: human triage. Either (a) update the prose to reflect dev-mission-control as the active sprint, or (b) revert the block's `active_spec` / `active_plan` / `build_slug` / `branch` / `status` to mirror the pre-test-backend-hardening prose. Cannot be auto-resolved — requires knowing which is the truthful current sprint state.
+
+- [ ] [origin:spec-conformance:dev-mission-control:2026-04-28T06-29-40Z] [status:open] REQ — `scripts/chatgpt-review.ts` was implemented as two files (`chatgpt-review.ts` + `chatgpt-reviewPure.ts`); spec named only one
+  - Spec section: § 5 Files to change (New files)
+  - Gap: Spec § 5 lists a single new file `scripts/chatgpt-review.ts`. Implementation split into `scripts/chatgpt-review.ts` (CLI entry) and `scripts/chatgpt-reviewPure.ts` (pure helpers). The split is sound — it keeps fetch / fs side effects out of the unit-tested pure code. Test file is at `scripts/__tests__/chatgpt-reviewPure.test.ts` rather than the spec-named `scripts/__tests__/chatgpt-review.test.ts`.
+  - Suggested approach: low priority — the spec's intent (CLI + tsx unit tests for pure helpers) is met. Update spec § 5 in a follow-up to document the two-file shape, OR leave as a benign as-built improvement. Not blocking.
