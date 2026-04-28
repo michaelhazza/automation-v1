@@ -46,6 +46,8 @@ All four items implemented, tested, and committed on branch `pre-test-brief-and-
 | §1.2 S8 | `60a68d07` | AsyncLocalStorage postCommitEmitter; middleware; briefConversationWriter refactor; 8-case unit + lifecycle integration test |
 | §1.1 DR2 | `4d64df6d` | selectConversationFollowUpAction; branch-before-write; uniform response shape; predicate + DB integration tests |
 | Fix | `c8acd7ed` | Integration test DATABASE_URL guard + FK-violation skip (triageDurability pattern) |
+| Fix | `f850a86a` | pr-reviewer S-1 / S-3 / S-6 — DATABASE_URL guard, dropped-log gate, spec §5 + progress.md PR-prep |
+| Fix | `da1c4f72` | pr-reviewer R-1..R-4 — flushed-log gate, limit_invalid log, DR2 response-shape pure helper + tests, prefetchedConv to skip duplicate DB read |
 
 Pre-merge pipeline: tsc clean (pre-existing ClarificationInbox + SkillAnalyzer errors, not introduced by branch), 252 unit tests pass, client build clean, spec-conformance NON_CONFORMANT (9 directional gaps — all manual smokes or PR-prep workflow, no mechanical gaps).
 
