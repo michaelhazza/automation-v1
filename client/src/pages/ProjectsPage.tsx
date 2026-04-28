@@ -93,7 +93,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
           <h1 className="text-[22px] font-bold text-slate-900 tracking-tight m-0">Projects</h1>
           {clientName && <div className="text-[13px] text-slate-500 mt-0.5">{clientName}</div>}
         </div>
-        <button onClick={() => setShowNew(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+        <button onClick={() => setShowNew(true)} className="btn btn-sm btn-primary">
           + New Project
         </button>
       </div>
@@ -126,10 +126,10 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
             </div>
             <input className={inputCls} placeholder="GitHub repo URL (optional)" value={newRepoUrl} onChange={(e) => setNewRepoUrl(e.target.value)} />
             <div className="flex gap-2">
-              <button onClick={handleCreate} disabled={!newName.trim() || saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              <button onClick={handleCreate} disabled={!newName.trim() || saving} className="btn btn-sm btn-primary">
                 {saving ? 'Creating…' : 'Create Project'}
               </button>
-              <button onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); setNewRepoUrl(''); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
+              <button onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); setNewRepoUrl(''); }} className="btn btn-sm btn-secondary">
                 Cancel
               </button>
             </div>
@@ -153,7 +153,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
             {filter === 'all' ? 'Create your first project to organise work for this client.' : `No projects with ${filter} status.`}
           </div>
           {filter === 'all' && (
-            <button onClick={() => setShowNew(true)} className="mt-3.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+            <button onClick={() => setShowNew(true)} className="btn btn-sm btn-primary mt-3.5">
               + New Project
             </button>
           )}
@@ -177,7 +177,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
                   <div className="text-[11px] text-slate-400">Created {new Date(project.createdAt).toLocaleDateString()}</div>
                   <div className="flex-1" />
                   {project.status === 'active' && (
-                    <button onClick={() => handleArchive(project.id)} className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-medium border-0 cursor-pointer transition-colors">
+                    <button onClick={() => handleArchive(project.id)} className="btn btn-xs btn-ghost">
                       Archive
                     </button>
                   )}
