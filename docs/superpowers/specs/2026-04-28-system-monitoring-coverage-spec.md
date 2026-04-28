@@ -1375,3 +1375,183 @@ Every fail path defined by this spec produces exactly one `system_incidents` row
 The `occurrence` event is appended atomically with the row upsert (`incidentIngestor.ts:261-279`, in the same `db.transaction`). Post-terminal events (acknowledge, resolve, etc.) are unchanged from the existing pipeline.
 
 ---
+
+## §9 Rollout, verification, and risk register
+
+### §9.1 Rollout plan
+
+This is a single-branch, single-PR rollout. No staged release, no feature flags, no env-var rollout gate.
+
+```
+Branch: claude/add-monitoring-logging-3xMKQ (already created)
+
+Phase 1 (commits 1–8):  log buffer + DLQ derivation + JOB_CONFIG additions + async worker
+Phase 2 (commits 9–13): createWorker conversion (workflow + IEE)
+Phase 3 (commits 14–17): webhook 5xx + skill-analyzer terminal failure
+
+PR: open after commit 17.
+Reviewers:
+  - pr-reviewer (mandatory, per CLAUDE.md)
+  - dual-reviewer (recommended for Phase 2 boot-time wiring; user-triggered)
+  - chatgpt-pr-review (optional, after pr-reviewer if user wants the second-phase review pass)
+
+Pre-merge gate: npm run test:gates (per CLAUDE.md gate-cadence rule).
+```
+
+### §9.2 Verification checklist (V1–V7)
+
+After the PR merges to `main` (or against staging if available before merge), execute these manual smoke tests:
+
+#### V1 — Log buffer round trip (G2)
+
+```
+1. Hit any authenticated route. Note the response's correlationId from the JSON body.
+2. Wait 1-2 seconds for log emission to flush.
+3. Run a sysadmin query (psql or admin tool) that reads from logBuffer via
+   readLinesForCorrelationId('<id>', 100) — equivalent to invoking the
+   read_logs_for_correlation_id skill with that correlation ID.
+4. Assert lineCount > 0 and lines contain the route handler's events.
+```
+
+**Pass criterion:** at least one line returned. If zero, the lazy-import path failed silently.
+
+#### V2 — DLQ subscription coverage (G1, G5)
+
+For 3 representative queues from different categories — `workflow-run-tick`, `skill-analyzer`, `connector-polling-sync`:
+
+```
+1. Enqueue a poison-pill job with retryLimit=0 (or wait for natural retry exhaustion).
+2. Confirm pg-boss moves it to <queue>__dlq within seconds.
+3. Within 30s, query system_incidents:
+     SELECT * FROM system_incidents WHERE fingerprint = encode(sha256(:fp::text), 'hex')::text;
+   where :fp = 'job:<queue>:dlq'. (Or use hashFingerprint(:fp).slice(0, 16).)
+4. Assert one row with source='job', severity='high', errorCode='job_dlq'.
+```
+
+**Pass criterion:** all 3 queues produce incident rows.
+
+#### V3 — Async-ingest worker drains (G3)
+
+```
+1. Set SYSTEM_INCIDENT_INGEST_MODE=async in env. Restart the server.
+2. Trigger any 5xx route (force a DB error, cause an unhandled exception).
+3. Confirm via pg-boss SQL:
+     SELECT name, COUNT(*) FROM pgboss.job
+       WHERE name = 'system-monitor-ingest' GROUP BY name, state;
+   The count should briefly tick up from 0 then back to 0 within seconds.
+4. Confirm a system_incidents row was written.
+```
+
+**Pass criterion:** queue empties; row exists. If the queue stays at 1, the worker isn't registered.
+
+#### V4 — Workflow engine failures surface (G4-A)
+
+```
+1. Submit a workflow run with a step that intentionally throws on first invocation.
+   (Easiest: add a workflow with a prompt step pointing at a non-existent agent ID.)
+2. Confirm pg-boss retries the job per JOB_CONFIG.workflow-run-tick.retryLimit (3).
+3. Confirm the failed job ends up in workflow-run-tick__dlq (or workflow-agent-step__dlq depending on which queue actually surfaces).
+4. Confirm a system_incidents row appears within 30s of the DLQ landing.
+```
+
+**Pass criterion:** incident row exists with the matching `job:<queue>:dlq` fingerprint.
+
+#### V5 — Webhook 5xx emits incident (G7)
+
+```
+1. Send a GHL webhook for a locationId that does NOT exist in canonical_accounts
+   (or simulate the DB error via fault-injection wrapper).
+2. Confirm a system_incidents row with:
+     fingerprint = hashFingerprint('webhook:ghl:db_lookup_failed').slice(0, 16)
+     source = 'route'
+     errorCode = 'webhook_handler_failed'
+3. Repeat with a malformed GitHub webhook payload.
+4. Confirm a system_incidents row with fingerprint = hashFingerprint('webhook:github:handler_failed').slice(0, 16).
+```
+
+**Pass criterion:** both rows exist.
+
+#### V6 — Skill-analyzer terminal failure surfaces (G11)
+
+```
+1. Submit a skill-analyzer job with a payload that forces a terminal throw.
+   (Easiest: simulate via a test-only env-flag in the analyzer that throws on first call.)
+2. Within 1s, confirm a system_incidents row with:
+     fingerprintOverride captured as hashFingerprint('skill_analyzer:terminal_failure').slice(0, 16)
+     source = 'job'
+     severity = 'high'
+3. Repeat 5 times with different jobIds.
+4. Confirm one row with occurrenceCount=5 (NOT 5 separate rows).
+```
+
+**Pass criterion:** dedup works; single row with count=5.
+
+#### V7 — End-to-end: route → triage → diagnosis with log evidence (G2 + Phase 1 cumulative)
+
+This is the canonical end-to-end test for the entire System Monitor pipeline.
+
+```
+1. Trigger an incident from a route by causing a 5xx with a few logger.info / logger.error
+   calls that include the same correlationId as the request.
+2. Wait for the triage worker to pick up the incident (severity ≥ medium triggers triage).
+3. Read system_incidents.agent_diagnosis.evidence.
+4. Assert at least one evidence entry references a log line from V1's buffer
+   (look for { type: 'log_line', ... } or whatever the evidence shape is).
+```
+
+**Pass criterion:** the diagnosis cites log evidence. If it doesn't, the triage agent isn't reading the buffer — investigate `read_logs_for_correlation_id` skill invocation and buffer state.
+
+### §9.3 Failure modes during rollout
+
+| Failure | Symptom | Recovery |
+|---|---|---|
+| Lazy import fails on first log emission | All log calls succeed; buffer stays empty; tests fail V1 | Check `loggerBufferAdapterPure.ts` import path; check for runtime require errors in server boot logs |
+| `JOB_CONFIG` invariant test fails on commit 7 | CI gate red on `npm test` | A commit added a queue without `deadLetter:`; add it before merge |
+| DLQ round-trip timeout in V2 | No incident row after 30s | Verify the queue is in `JOB_CONFIG[*].deadLetter`; verify dlqMonitorService.startDlqMonitor was called at boot (`logger.info('dlq_monitor_started', ...)`) |
+| Async worker registered in sync mode | `system-monitor-ingest` queue drains even though sync ingest also fires | Bug — the env-var check failed. Verify `process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async'` is the gate |
+| `createWorker` opens orphan tx for cross-org sweeps | DB connection pool exhaustion under load | The watchdog/tick handlers must use `resolveOrgContext: () => null` — verify per §5.2 |
+| Skill-analyzer wrapper swallows the error instead of re-throwing | pg-boss marks the job `completed`; crash-resume contract broken; user sees no retry | Verify the `throw err` line is present after `recordIncident` |
+
+### §9.4 Risk register
+
+| ID | Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+| R1 | Logger lazy-import cycle bug — production hot path | Low | Critical (every log call could throw) | `appendLogLineSafe` swallows ALL errors; primary log surface (console) is unaffected. Test V1 catches missed wiring. |
+| R2 | `JOB_CONFIG` invariant test added but a future spec adds a queue without `deadLetter:` | Medium | Low (CI catches it) | Invariant test is the gate; new queues are forced to declare DLQ. |
+| R3 | `createWorker` org-tx prelude conflicts with handler's own tx | Medium | High (handler errors out) | `resolveOrgContext: () => null` opt-out documented in §5.2; verify per-handler at implementation. |
+| R4 | DLQ subscription explosion under boot — pg-boss creates 40 listeners | Low | Low (pg-boss handles many listeners; observed in similar projects) | Existing dlqMonitorService already iterates an array; just longer. teamSize is small (2). |
+| R5 | Async-ingest worker double-deliver due to pg-boss at-least-once + dedup window | Low | Low (dedup index handles it) | Partial unique index on fingerprint; concurrent upserts collapse to occurrenceCount++. |
+| R6 | Skill-analyzer wrapper triggers incident churn during transient retries | Medium | Low (operator UX noise; not a correctness issue) | `fingerprintOverride: 'skill_analyzer:terminal_failure'` collapses all retries into one row. |
+| R7 | Phase 2 `createWorker` conversion of workflow-watchdog breaks the watchdog cron behaviour | Low | Medium (workflow runs stuck) | Watchdog is a no-payload sweep; conversion preserves shape. Test V4 catches regression. |
+| R8 | Webhook 5xx incident floods if a downstream is down | Low | Low (dedup handles it; rate-limited via fingerprint throttle) | `incidentIngestorThrottle` already in place; `fingerprintOverride` collapses. |
+| R9 | Logger buffer write becomes a hot-path cost | Low | Low (LRU eviction is O(1) per push) | Lazy import + cached resolver; per-log overhead is one push + occasional shift. Measure post-launch if concern. |
+| R10 | Phase 1 lands without Phase 2/3 → partial coverage | High (it's the order) | Low (each phase is independently safe) | Each phase has standalone acceptance criteria (§4.9, §5.6, §6.6). Partial merge is correct behaviour. |
+
+### §9.5 Estimated effort
+
+| Phase | LOC (rough) | Sessions | Calendar time |
+|---|---|---|---|
+| Phase 1 | ~150 LOC code + ~120 LOC tests | 1 | 4–6 hours |
+| Phase 2 | ~80 LOC code (refactor) + verification | 1 | 3–4 hours |
+| Phase 3 | ~60 LOC code + ~80 LOC tests | 1 | 2–3 hours |
+| **Total** | ~290 LOC code + ~200 LOC tests | 2–3 sessions | 1–1.5 days |
+
+### §9.6 Pre-merge checklist
+
+- [ ] All 17 commits land on `claude/add-monitoring-logging-3xMKQ`.
+- [ ] `npm run lint` passes.
+- [ ] `npx tsc --noEmit` passes.
+- [ ] `bash scripts/run-all-unit-tests.sh` passes (includes new pure-helper + invariant tests).
+- [ ] `npm run test:gates` passes (gate-cadence rule — pre-merge only).
+- [ ] V1 (manual log-buffer round trip) executed and passed in staging.
+- [ ] V2 (3 DLQ round trips) executed and passed.
+- [ ] V3 (async-mode toggle test) executed and passed.
+- [ ] V4 (workflow failure surfaces) executed and passed.
+- [ ] V5 (webhook 5xx surfaces) executed and passed.
+- [ ] V6 (skill-analyzer dedup) executed and passed.
+- [ ] V7 (end-to-end with log evidence in diagnosis) executed and passed.
+- [ ] `architecture.md § System Monitor` updated to reflect new coverage list.
+- [ ] `pr-reviewer` returns PASS or findings addressed.
+- [ ] `dual-reviewer` (if user-triggered for Phase 2) returns PASS or findings addressed.
+
+---
