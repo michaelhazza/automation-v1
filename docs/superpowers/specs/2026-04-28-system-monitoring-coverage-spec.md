@@ -170,3 +170,65 @@ This spec assumes:
 All three are confirmed merged on `main` per `tasks/current-focus.md`. No predecessor work needs to land first.
 
 ---
+
+## §2 File inventory lock
+
+This table is the **single source of truth** for what the spec touches. Any prose reference to a file, column, migration, or function must appear here. Drift between prose and inventory is a `file-inventory-drift` finding.
+
+### §2.1 New files
+
+| File | Phase | Purpose |
+|---|---|---|
+| `server/lib/loggerBufferAdapterPure.ts` | 1 | Pure helper. Exports `buildLogLineForBuffer(entry: LogEntry): LogLine \| null` — returns the `LogLine` shape the buffer expects when `entry.correlationId` is a non-empty string, else `null`. No DB, no async, no logger import. |
+| `server/lib/__tests__/loggerBufferAdapterPure.test.ts` | 1 | Pure-helper test — covers (a) entries with valid correlationId, (b) entries with empty/missing correlationId, (c) meta-stripping of timestamp/level/event/correlationId from the meta object. |
+| `server/lib/__tests__/logger.integration.test.ts` | 1 | Integration test — calls `logger.info('test_event', { correlationId: 'cid-1', foo: 'bar' })` then asserts `readLinesForCorrelationId('cid-1', 100)` returns at least one line with `event === 'test_event'` and `meta.foo === 'bar'`. |
+| `server/services/dlqMonitorServicePure.ts` | 1 | Pure helper. Exports `deriveDlqQueueNames(config: typeof JOB_CONFIG): string[]` — iterates entries, returns the deduplicated `deadLetter` values. |
+| `server/services/__tests__/dlqMonitorServicePure.test.ts` | 1 | Pure-helper test — covers (a) all entries have `deadLetter`, (b) some entries lack `deadLetter`, (c) duplicate `deadLetter` values are deduplicated. |
+| `server/config/__tests__/jobConfigInvariant.test.ts` | 1 | Invariant test — asserts every `JOB_CONFIG` entry has a non-empty `deadLetter: string` matching `/^[a-z0-9:_-]+__dlq$/`. CI gate. |
+| `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts` | 1 | Integration test — picks one queue (`workflow-run-tick`), enqueues a poison-pill job with `retryLimit=0`, asserts within 30s that a `system_incidents` row exists with `fingerprint` matching `hashFingerprint('job:workflow-run-tick:dlq')`. |
+| `server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts` | 3 | Integration test — invokes the wrapper from §6.2 with a forced throw, asserts (a) one `system_incidents` row with `fingerprintOverride: 'skill_analyzer:terminal_failure'`, (b) error is propagated to caller. |
+
+### §2.2 Modified files
+
+| File | Phase | Change |
+|---|---|---|
+| [`server/lib/logger.ts`](../../server/lib/logger.ts) | 1 | Add a single call inside `emit(entry)` (line 34): `void appendLogLineSafe(entry)` where `appendLogLineSafe` lives in the same file and (a) calls `buildLogLineForBuffer(entry)` from `loggerBufferAdapterPure.ts`, (b) lazy-imports `appendLogLine` from `server/services/systemMonitor/logBuffer.ts`, (c) catches and swallows any error. |
+| [`server/services/dlqMonitorService.ts`](../../server/services/dlqMonitorService.ts) | 1 | Replace the hard-coded `DLQ_QUEUES` array (lines 14-23) with `import { deriveDlqQueueNames } from './dlqMonitorServicePure.js'; import { JOB_CONFIG } from '../config/jobConfig.js'; const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);`. No other change to the file. |
+| [`server/config/jobConfig.ts`](../../server/config/jobConfig.ts) | 1 | Add `deadLetter:` to the 6 entries listed in G5: `slack-inbound`, `agent-briefing-update`, `memory-context-enrichment`, `page-integration`, `iee-cost-rollup-daily`, `connector-polling-tick`. Each gets `deadLetter: '<queue-name>__dlq'`. |
+| [`server/index.ts`](../../server/index.ts) | 1 | Add an async-mode worker registration after the existing `await registerSystemIncidentNotifyWorker(boss);` line (~455). Conditional on `process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async'`. Also add the `system-monitor-ingest` JOB_CONFIG entry — see contracts §3.3. |
+| [`server/index.ts`](../../server/index.ts) | 3 | Wrap the existing `processSkillAnalyzerJob(jobId)` call (line 478) with a try/catch that calls `recordIncident({source: 'job', errorCode: 'skill_analyzer_failed', fingerprintOverride: 'skill_analyzer:terminal_failure', summary, stack})` and re-throws. |
+| [`server/config/jobConfig.ts`](../../server/config/jobConfig.ts) | 1 | Add a NEW entry for `system-monitor-ingest` with `retryLimit: 3, retryDelay: 10, retryBackoff: true, expireInSeconds: 60, deadLetter: 'system-monitor-ingest__dlq', idempotencyStrategy: 'fifo' as const`. |
+| [`server/services/incidentIngestorAsyncWorker.ts`](../../server/services/incidentIngestorAsyncWorker.ts) | 1 | No code change beyond export shape. The existing `handleSystemMonitorIngest` is consumed unchanged. |
+| [`server/services/workflowEngineService.ts`](../../server/services/workflowEngineService.ts) | 2 | Convert the 3 raw `pgboss.work(...)` registrations at lines 3483, 3492, 3503 (TICK_QUEUE, WATCHDOG_QUEUE, AGENT_STEP_QUEUE) to `createWorker(...)` calls. Also convert the `'workflow-bulk-parent-check'` registration if it exists in this file (verify at implementation time). The watchdog and tick queues use admin connections — pass `resolveOrgContext: () => null` to opt out of the per-job org tx. |
+| [`server/services/queueService.ts`](../../server/services/queueService.ts) | 2 | Verify-only — no code change in this phase. Note: the broader `queueService.ts` `boss.work` migration is deferred to a follow-up spec (see §10). The agent-step queue conversion is done inside `workflowEngineService.ts`. |
+| [`server/jobs/ieeRunCompletedHandler.ts`](../../server/jobs/ieeRunCompletedHandler.ts) | 2 | Verify the existing registration uses `createWorker`. If it does (audit suggests it does — line 80 uses `.work(...)` but may already be `createWorker`-wrapped), no change. If not, convert. |
+| [`server/services/ieeExecutionService.ts`](../../server/services/ieeExecutionService.ts) | 2 | Verify the IEE worker registrations route through `createWorker`. Adjust if not. |
+| [`server/routes/webhooks/ghlWebhook.ts`](../../server/routes/webhooks/ghlWebhook.ts) | 3 | Inside the catch block at lines 63-66 (DB lookup failure), call `recordIncident({source: 'route', errorCode: 'webhook_handler_failed', fingerprintOverride: 'webhook:ghl:db_lookup_failed', stack, summary, errorDetail: { locationId }})` before `res.status(500).json(...)`. |
+| [`server/routes/githubWebhook.ts`](../../server/routes/githubWebhook.ts) | 3 | Inside the catch block at lines 122-124, call `recordIncident({source: 'route', errorCode: 'webhook_handler_failed', fingerprintOverride: 'webhook:github:handler_failed', stack, summary, errorDetail: { event, delivery }})` after the `logger.error` call. Note: the response was already sent at line 112 (early-ack pattern); this incident emission happens post-ack and never affects the response. |
+
+### §2.3 Out-of-inventory (intentional)
+
+The following items appear in supporting prose (audit log, this spec's §10) but are NOT touched by this spec. Any pull request that violates this list is a `file-inventory-drift` finding.
+
+- `server/services/skillExecutor.ts` — G6 deferred
+- `server/db/schema/systemIncidents.ts` — G9 deferred (no `'webhook'` source value)
+- `server/services/systemMonitor/skills/*` — G10 deferred (no new read skills)
+- `server/services/systemMonitor/synthetic/*` — G12 deferred (no new synthetic checks)
+- `server/adapters/{ghl,slack,stripe,teamwork}.ts` — G13 deferred
+- `server/jobs/orgSubaccountMigrationJob.ts`, `server/services/configBackupService.ts`, `server/services/dataRetentionService.ts`, `server/services/scheduledTaskService.ts` — G15 deferred
+- `server/services/queueService.ts` raw `boss.work` registrations beyond what this spec touches in workflow / IEE — deferred to follow-up
+- All `server/services/systemMonitor/*` agent-side code — unchanged
+
+### §2.4 Migrations
+
+**Zero migrations.** This spec is config + boot-wiring + incident-emission edits only. If a migration is later required (e.g. to add `'webhook'` to `SystemIncidentSource`), claim the next free slot, add the migration to §2.1, and add a §2.4 row noting the down-migration filename. Today: nothing to claim.
+
+### §2.5 Environment variables
+
+| Var | Default | Phase | Purpose |
+|---|---|---|---|
+| `SYSTEM_INCIDENT_INGEST_MODE` | `'sync'` (existing) | 1 | Existing — gates whether the async worker registers on boot. No change to the variable's defaults; this spec just makes the async path actually consume the queue. |
+
+No new environment variables introduced.
+
+---
