@@ -43,3 +43,15 @@ server/services/__tests__/actionServiceCanonicalisationPure.test.ts bash:pass vi
 server/services/__tests__/agentExecutionEventServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/agentRunPayloadWriterFailurePathPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/agentRunPayloadWriterPure.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-02 (2026-04-30)
+server/services/__tests__/canonicalDataService.findAccountBySubaccountId.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/canonicalDataService.principalContext.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/chatTriageClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/contextAssemblyEnginePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/decideApprovalStepTypePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/dlqMonitorServiceForceSyncInvariant.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/dlqMonitorServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/drilldownOutcomeBadgePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/drilldownPendingInterventionPure.test.ts bash:pass vitest:pass match:yes

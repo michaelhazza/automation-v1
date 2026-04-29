@@ -1,3 +1,4 @@
+import { expect, test } from 'vitest';
 // guard-ignore-file: pure-helper-convention reason="uses dynamic imports to set stub env vars before module load; no static sibling import is possible for this pattern"
 /**
  * dlqMonitorServiceForceSyncInvariant.test.ts
@@ -20,9 +21,6 @@ process.env.EMAIL_FROM = process.env.EMAIL_FROM ?? 'stub@example.com';
 process.env.NODE_ENV = 'test';
 // Disable actual ingest so no DB writes occur if recordIncident leaks through.
 process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'false';
-
-import test from 'node:test';
-import assert from 'node:assert/strict';
 
 test('dlqMonitorService passes forceSync: true to recordIncident', async () => {
   const { startDlqMonitor } = await import('../dlqMonitorService.js');
@@ -51,13 +49,13 @@ test('dlqMonitorService passes forceSync: true to recordIncident', async () => {
 
   // Invoke one captured handler with a fake DLQ job.
   const [firstHandler] = handlers.values();
-  assert.ok(firstHandler, 'expected at least one DLQ handler registered');
+  expect(firstHandler).toBeTruthy();
 
   await firstHandler({
     id: 'job-1',
     data: { organisationId: 'org-1', subaccountId: 'sub-1' },
   });
 
-  assert.equal(captured.length, 1, 'expected exactly one recordIncident call');
-  assert.deepEqual(captured[0].opts, { forceSync: true });
+  expect(captured.length, 'expected exactly one recordIncident call').toBe(1);
+  expect(captured[0].opts).toEqual({ forceSync: true });
 });

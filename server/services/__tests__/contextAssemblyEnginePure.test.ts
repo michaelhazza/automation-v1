@@ -13,8 +13,7 @@
  *   c. Update EXPECTED_ASSEMBLY_VERSION below
  */
 
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import {
   ASSEMBLY_VERSION,
   serializeDocument,
@@ -57,18 +56,18 @@ const GOLDEN_HASH = createHash('sha256')
   .digest('hex');
 
 test('ASSEMBLY_VERSION is currently 1', () => {
-  assert.equal(ASSEMBLY_VERSION, EXPECTED_ASSEMBLY_VERSION);
+  expect(ASSEMBLY_VERSION).toBe(EXPECTED_ASSEMBLY_VERSION);
 });
 
 test('computePrefixHash produces stable output for golden fixture', () => {
   const hash = computePrefixHash(GOLDEN_COMPONENTS);
-  assert.equal(hash, GOLDEN_HASH);
+  expect(hash).toBe(GOLDEN_HASH);
 });
 
 test('computePrefixHash is deterministic (same input → same output)', () => {
   const hash1 = computePrefixHash(GOLDEN_COMPONENTS);
   const hash2 = computePrefixHash(GOLDEN_COMPONENTS);
-  assert.equal(hash1, hash2);
+  expect(hash1).toBe(hash2);
 });
 
 test('computePrefixHash differs when orderedDocumentIds changes', () => {
@@ -76,12 +75,12 @@ test('computePrefixHash differs when orderedDocumentIds changes', () => {
     ...GOLDEN_COMPONENTS,
     orderedDocumentIds: ['doc-cccc-0003', 'doc-dddd-0004'],
   };
-  assert.notEqual(computePrefixHash(modified), GOLDEN_HASH);
+  expect(computePrefixHash(modified)).not.toBe(GOLDEN_HASH);
 });
 
 test('computePrefixHash differs when assemblyVersion changes', () => {
   const modified: PrefixHashComponents = { ...GOLDEN_COMPONENTS, assemblyVersion: 2 };
-  assert.notEqual(computePrefixHash(modified), GOLDEN_HASH);
+  expect(computePrefixHash(modified)).not.toBe(GOLDEN_HASH);
 });
 
 test('computePrefixHash differs when modelFamily changes', () => {
@@ -89,18 +88,18 @@ test('computePrefixHash differs when modelFamily changes', () => {
     ...GOLDEN_COMPONENTS,
     modelFamily: 'anthropic.claude-opus-4-7',
   };
-  assert.notEqual(computePrefixHash(modified), GOLDEN_HASH);
+  expect(computePrefixHash(modified)).not.toBe(GOLDEN_HASH);
 });
 
 test('serializeDocument produces correct delimiter structure', () => {
   const result = serializeDocument({ documentId: 'doc-1', version: 3, content: 'hello world' });
-  assert.ok(result.startsWith('---DOC_START---\n'));
-  assert.ok(result.includes('id: doc-1\nversion: 3\n---\nhello world\n---DOC_END---\n'));
+  expect(result.startsWith('---DOC_START---\n')).toBeTruthy();
+  expect(result.includes('id: doc-1\nversion: 3\n---\nhello world\n---DOC_END---\n')).toBeTruthy();
 });
 
 test('serializeDocument is deterministic', () => {
   const args = { documentId: 'doc-x', version: 1, content: 'test content' };
-  assert.equal(serializeDocument(args), serializeDocument(args));
+  expect(serializeDocument(args)).toBe(serializeDocument(args));
 });
 
 test('assemblePrefix joins documents across snapshots in bundleId order', () => {
@@ -118,7 +117,7 @@ test('assemblePrefix joins documents across snapshots in bundleId order', () => 
   // bundle-a comes before bundle-z (ascending bundleId sort)
   const indexA = result.indexOf('id: doc-a');
   const indexB = result.indexOf('id: doc-b');
-  assert.ok(indexA < indexB, 'bundle-a docs should appear before bundle-z docs');
+  expect(indexA < indexB).toBeTruthy();
 });
 
 test('computeAssembledPrefixHash is deterministic', () => {
@@ -127,7 +126,7 @@ test('computeAssembledPrefixHash is deterministic', () => {
     modelFamily: 'anthropic.claude-sonnet-4-6',
     assemblyVersion: ASSEMBLY_VERSION,
   };
-  assert.equal(computeAssembledPrefixHash(input), computeAssembledPrefixHash(input));
+  expect(computeAssembledPrefixHash(input)).toBe(computeAssembledPrefixHash(input));
 });
 
 test('validateAssembly returns ok when within budget', () => {
@@ -148,9 +147,9 @@ test('validateAssembly returns ok when within budget', () => {
     perDocumentTopTokens: [{ documentId: 'doc-x', documentName: 'Doc X', tokens: 10_000 }],
     resolvedBudget: budget,
   });
-  assert.equal(result.kind, 'ok');
+  expect(result.kind).toBe('ok');
   if (result.kind === 'ok') {
-    assert.equal(result.softWarnTripped, false);
+    expect(result.softWarnTripped).toBe(false);
   }
 });
 
@@ -173,9 +172,9 @@ test('validateAssembly trips soft_warn when above ratio', () => {
     perDocumentTopTokens: [{ documentId: 'd', documentName: 'D', tokens: 7_500 }],
     resolvedBudget: budget,
   });
-  assert.equal(result.kind, 'ok');
+  expect(result.kind).toBe('ok');
   if (result.kind === 'ok') {
-    assert.equal(result.softWarnTripped, true);
+    expect(result.softWarnTripped).toBe(true);
   }
 });
 
@@ -197,9 +196,9 @@ test('validateAssembly returns breach when max_input_tokens exceeded', () => {
     perDocumentTopTokens: [],
     resolvedBudget: budget,
   });
-  assert.equal(result.kind, 'breach');
+  expect(result.kind).toBe('breach');
   if (result.kind === 'breach') {
-    assert.equal(result.payload.thresholdBreached, 'max_input_tokens');
+    expect(result.payload.thresholdBreached).toBe('max_input_tokens');
   }
 });
 
@@ -221,8 +220,8 @@ test('validateAssembly returns breach when per_document_cap exceeded', () => {
     perDocumentTopTokens: [{ documentId: 'big-doc', documentName: 'Big Doc', tokens: 90_000 }],
     resolvedBudget: budget,
   });
-  assert.equal(result.kind, 'breach');
+  expect(result.kind).toBe('breach');
   if (result.kind === 'breach') {
-    assert.equal(result.payload.thresholdBreached, 'per_document_cap');
+    expect(result.payload.thresholdBreached).toBe('per_document_cap');
   }
 });

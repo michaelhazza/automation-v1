@@ -4,8 +4,7 @@
  * Run via: npx tsx server/services/__tests__/chatTriageClassifierPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   classifyChatIntentPure,
   DEFAULT_CHAT_TRIAGE_CONFIG,
@@ -33,55 +32,55 @@ const baseInput = (text: string, overrides?: Partial<ChatTriageInput>): ChatTria
 
 test('returns simple_reply for filler "thanks"', () => {
   const r = classifyChatIntentPure(baseInput('thanks'));
-  assert.equal(r.route, 'simple_reply');
-  assert.ok(r.confidence >= 0.9);
-  assert.equal(r.tier, 1);
+  expect(r.route).toBe('simple_reply');
+  expect(r.confidence >= 0.9).toBeTruthy();
+  expect(r.tier).toBe(1);
 });
 
 test('returns simple_reply for "ok"', () => {
   const r = classifyChatIntentPure(baseInput('ok'));
-  assert.equal(r.route, 'simple_reply');
+  expect(r.route).toBe('simple_reply');
 });
 
 test('returns simple_reply for text shorter than 4 chars', () => {
   const r = classifyChatIntentPure(baseInput('yes'));
-  assert.equal(r.route, 'simple_reply');
+  expect(r.route).toBe('simple_reply');
 });
 
 test('returns cheap_answer for pipeline velocity query', () => {
   const r = classifyChatIntentPure(baseInput("what's my pipeline velocity this month"));
-  assert.equal(r.route, 'cheap_answer');
-  assert.equal(r.tier, 1);
+  expect(r.route).toBe('cheap_answer');
+  expect(r.tier).toBe(1);
 });
 
 test('returns cheap_answer for churn rate query', () => {
   const r = classifyChatIntentPure(baseInput('show me the churn rate for last quarter'));
-  assert.equal(r.route, 'cheap_answer');
+  expect(r.route).toBe('cheap_answer');
 });
 
 test('returns needs_clarification for short deictic reference', () => {
   const r = classifyChatIntentPure(baseInput('what about this?'));
-  assert.equal(r.route, 'needs_clarification');
-  assert.ok(r.confidence < 0.75);
+  expect(r.route).toBe('needs_clarification');
+  expect(r.confidence < 0.75).toBeTruthy();
 });
 
 test('returns needs_orchestrator with secondLookTriggered for write-intent', () => {
   const r = classifyChatIntentPure(baseInput('send an email to all VIP contacts'));
-  assert.equal(r.route, 'needs_orchestrator');
-  assert.equal(r.secondLookTriggered, true);
+  expect(r.route).toBe('needs_orchestrator');
+  expect(r.secondLookTriggered).toBe(true);
 });
 
 test('flags matched keywords in write-intent result', () => {
   const r = classifyChatIntentPure(baseInput('schedule a follow-up for this contact'));
-  assert.equal(r.route, 'needs_orchestrator');
-  assert.equal(r.secondLookTriggered, true);
-  assert.ok((r.keywords ?? []).includes('schedule'));
+  expect(r.route).toBe('needs_orchestrator');
+  expect(r.secondLookTriggered).toBe(true);
+  expect((r.keywords ?? []).includes('schedule')).toBeTruthy();
 });
 
 test('returns needs_orchestrator without second-look for read queries', () => {
   const r = classifyChatIntentPure(baseInput('show me all contacts added last week'));
-  assert.equal(r.route, 'needs_orchestrator');
-  assert.equal(r.secondLookTriggered, false);
+  expect(r.route).toBe('needs_orchestrator');
+  expect(r.secondLookTriggered).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -90,24 +89,24 @@ test('returns needs_orchestrator without second-look for read queries', () => {
 
 test('inherits subaccount scope when subaccountId is set', () => {
   const r = classifyChatIntentPure(baseInput('show me contacts'));
-  assert.equal(r.scope, 'subaccount');
+  expect(r.scope).toBe('subaccount');
 });
 
 test('defaults to org scope when no subaccountId in context', () => {
   const r = classifyChatIntentPure(baseInput('show me contacts', {
     uiContext: { ...baseUiContext, currentSubaccountId: undefined },
   }));
-  assert.equal(r.scope, 'org');
+  expect(r.scope).toBe('org');
 });
 
 test('overrides to org scope on "all clients" keyword', () => {
   const r = classifyChatIntentPure(baseInput('show me all clients activity'));
-  assert.equal(r.scope, 'org');
+  expect(r.scope).toBe('org');
 });
 
 test('overrides to system scope on "platform-wide" keyword', () => {
   const r = classifyChatIntentPure(baseInput('show me platform-wide usage stats'));
-  assert.equal(r.scope, 'system');
+  expect(r.scope).toBe('system');
 });
 
 // ---------------------------------------------------------------------------
@@ -116,12 +115,12 @@ test('overrides to system scope on "platform-wide" keyword', () => {
 
 test('deictic confidence is below tier1ConfidenceThreshold', () => {
   const r = classifyChatIntentPure(baseInput('what about them?'));
-  assert.ok(r.confidence < DEFAULT_CHAT_TRIAGE_CONFIG.tier1ConfidenceThreshold);
+  expect(r.confidence < DEFAULT_CHAT_TRIAGE_CONFIG.tier1ConfidenceThreshold).toBeTruthy();
 });
 
 test('write-intent confidence is at or above tier1ConfidenceThreshold', () => {
   const r = classifyChatIntentPure(baseInput('delete all inactive contacts'));
-  assert.ok(r.confidence >= DEFAULT_CHAT_TRIAGE_CONFIG.tier1ConfidenceThreshold);
+  expect(r.confidence >= DEFAULT_CHAT_TRIAGE_CONFIG.tier1ConfidenceThreshold).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -131,20 +130,20 @@ test('write-intent confidence is at or above tier1ConfidenceThreshold', () => {
 test('respects custom writeIntentKeywords', () => {
   const config = { ...DEFAULT_CHAT_TRIAGE_CONFIG, writeIntentKeywords: ['deploy'] };
   const r = classifyChatIntentPure(baseInput('deploy the new pipeline', { config }));
-  assert.equal(r.secondLookTriggered, true);
-  assert.ok((r.keywords ?? []).includes('deploy'));
+  expect(r.secondLookTriggered).toBe(true);
+  expect((r.keywords ?? []).includes('deploy')).toBeTruthy();
 });
 
 test('does not flag write-intent when writeIntentKeywords is empty', () => {
   const config = { ...DEFAULT_CHAT_TRIAGE_CONFIG, writeIntentKeywords: [] };
   const r = classifyChatIntentPure(baseInput('send email to contacts', { config }));
-  assert.equal(r.secondLookTriggered, false);
+  expect(r.secondLookTriggered).toBe(false);
 });
 
 test('respects riskySecondLookRoutes=[] — no second-look even for write-intent', () => {
   const config = { ...DEFAULT_CHAT_TRIAGE_CONFIG, riskySecondLookRoutes: [] as import('../../../shared/types/briefFastPath.js').FastPathRoute[] };
   const r = classifyChatIntentPure(baseInput('send email to contacts', { config }));
-  assert.equal(r.secondLookTriggered, false);
+  expect(r.secondLookTriggered).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -153,16 +152,16 @@ test('respects riskySecondLookRoutes=[] — no second-look even for write-intent
 
 test('handles empty string (short → simple_reply)', () => {
   const r = classifyChatIntentPure(baseInput(''));
-  assert.equal(r.route, 'simple_reply');
+  expect(r.route).toBe('simple_reply');
 });
 
 test('handles all-whitespace input', () => {
   const r = classifyChatIntentPure(baseInput('   '));
-  assert.equal(r.route, 'simple_reply');
+  expect(r.route).toBe('simple_reply');
 });
 
 test('does not treat "creation" as write-intent (word boundary)', () => {
   // "create" keyword uses \bcreate\b so "creation" does NOT match
   const r = classifyChatIntentPure(baseInput('show contact creation history'));
-  assert.equal(r.secondLookTriggered, false);
+  expect(r.secondLookTriggered).toBe(false);
 });
