@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, gte, lte, ilike } from 'drizzle-orm';
+import { eq, and, desc, isNull, gte, lte, ilike, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   agentRuns,
@@ -9,8 +9,10 @@ import {
   actions,
   executions,
   workflowRuns,
+  auditEvents,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
+import { workspaceActors } from '../db/schema/workspaceActors.js';
 import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
 import type { TriggerType } from './activityServicePure.js';
 
@@ -86,6 +88,7 @@ export type ActivityFilters = {
   from?: string;
   to?: string;
   agentId?: string;
+  actorId?: string;  // workspace_actors.id — covers humans + agents; takes precedence over agentId for workspace events
   severity?: string[];
   assignee?: string;
   q?: string;
@@ -500,6 +503,123 @@ async function fetchWorkflowExecutions(
 }
 
 // ---------------------------------------------------------------------------
+// Workspace audit event fetcher
+// ---------------------------------------------------------------------------
+
+export const WORKSPACE_EVENT_TYPES = new Set<string>([
+  'email.sent',
+  'email.received',
+  'calendar.event_created',
+  'calendar.event_accepted',
+  'calendar.event_declined',
+  'identity.provisioned',
+  'identity.activated',
+  'identity.suspended',
+  'identity.resumed',
+  'identity.revoked',
+  'identity.archived',
+  'identity.email_sending_enabled',
+  'identity.email_sending_disabled',
+  'identity.migrated',
+  'identity.migration_failed',
+  'identity.provisioning_failed',
+  'actor.onboarded',
+  'subaccount.migration_completed',
+]);
+
+function formatAuditEventSubject(action: ActivityType, metadata: Record<string, unknown>): string {
+  switch (action) {
+    case 'email.sent': return `Email sent${metadata.to ? ` to ${metadata.to}` : ''}`;
+    case 'email.received': return `Email received${metadata.from ? ` from ${metadata.from}` : ''}`;
+    case 'calendar.event_created': return 'Calendar event created';
+    case 'calendar.event_accepted': return 'Calendar event accepted';
+    case 'calendar.event_declined': return 'Calendar event declined';
+    case 'identity.provisioned': return 'Identity provisioned';
+    case 'identity.activated': return 'Identity activated';
+    case 'identity.suspended': return 'Identity suspended';
+    case 'identity.resumed': return 'Identity resumed';
+    case 'identity.revoked': return 'Identity revoked';
+    case 'identity.archived': return 'Identity archived';
+    case 'identity.email_sending_enabled': return 'Email sending enabled';
+    case 'identity.email_sending_disabled': return 'Email sending disabled';
+    case 'identity.migrated': return 'Identity migrated';
+    case 'identity.migration_failed': return 'Identity migration failed';
+    case 'identity.provisioning_failed': return 'Identity provisioning failed';
+    case 'actor.onboarded': return 'Agent onboarded';
+    case 'subaccount.migration_completed': return 'Workspace migration completed';
+    default: return (action as string).replace(/\./g, ' ');
+  }
+}
+
+async function fetchAuditEvents(
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
+  const orgId = orgIdFromScope(scope);
+  const subId = subaccountIdFromScope(scope);
+  const conditions: ReturnType<typeof eq>[] = [];
+
+  if (orgId) conditions.push(eq(auditEvents.organisationId, orgId));
+  if (filters.actorId) conditions.push(eq(auditEvents.workspaceActorId, filters.actorId));
+  if (filters.from) conditions.push(gte(auditEvents.createdAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(auditEvents.createdAt, new Date(filters.to)));
+
+  // Determine which workspace event types to fetch
+  const typeFilter = filters.type ?? [];
+  const workspaceTypes = typeFilter.length > 0
+    ? typeFilter.filter((t) => WORKSPACE_EVENT_TYPES.has(t))
+    : [...WORKSPACE_EVENT_TYPES];
+  if (workspaceTypes.length === 0) return [];
+
+  conditions.push(inArray(auditEvents.action, workspaceTypes));
+
+  const whereClause = subId
+    ? and(...conditions, eq(workspaceActors.subaccountId, subId))
+    : conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = await db
+    .select({
+      id: auditEvents.id,
+      action: auditEvents.action,
+      workspaceActorId: auditEvents.workspaceActorId,
+      metadata: auditEvents.metadata,
+      createdAt: auditEvents.createdAt,
+      actorDisplayName: workspaceActors.displayName,
+      actorSubaccountId: workspaceActors.subaccountId,
+    })
+    .from(auditEvents)
+    .leftJoin(workspaceActors, eq(workspaceActors.id, auditEvents.workspaceActorId))
+    .where(whereClause)
+    .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
+    .limit(200);
+
+  return rows.map((row) => {
+    const action = row.action as ActivityType;
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: row.id,
+      type: action,
+      status: 'completed' as NormalisedStatus,
+      subject: formatAuditEventSubject(action, metadata),
+      actor: row.actorDisplayName ?? 'System',
+      subaccountId: row.actorSubaccountId ?? null,
+      subaccountName: null,
+      agentId: null,
+      agentName: null,
+      severity: (row.action.includes('failed') ? 'warning' : null) as 'warning' | null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.createdAt.toISOString(),
+      detailUrl: '',
+      triggeredByUserId: null,
+      triggeredByUserName: null,
+      triggerType: null,
+      durationMs: null,
+      runId: null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sort + filter
 // ---------------------------------------------------------------------------
 
@@ -538,6 +658,7 @@ export async function listActivityItems(
     inboxItemRows,
     workflowRunRows,
     workflowExecRows,
+    auditEventItems,
   ] = await Promise.all([
     shouldFetch('agent_run') ? fetchAgentRuns(scope, filters) : [],
     shouldFetch('review_item') ? fetchReviewItems(scope, filters) : [],
@@ -545,6 +666,10 @@ export async function listActivityItems(
     shouldFetch('inbox_item') ? fetchInboxItems(scope, filters) : [],
     shouldFetch('workflow_run') ? fetchWorkflowRuns(scope, filters) : [],
     shouldFetch('workflow_execution') ? fetchWorkflowExecutions(scope, filters) : [],
+    // Fetch audit_events if any workspace type is requested (or if no type filter)
+    (typeFilter.length === 0 || typeFilter.some((t) => WORKSPACE_EVENT_TYPES.has(t)))
+      ? fetchAuditEvents(scope, filters)
+      : [],
   ]);
 
   // Merge all sources
@@ -555,6 +680,7 @@ export async function listActivityItems(
     ...inboxItemRows,
     ...workflowRunRows,
     ...workflowExecRows,
+    ...auditEventItems,
   ];
 
   // Apply post-merge filters
