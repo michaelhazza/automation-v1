@@ -9,6 +9,8 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
 import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
 import type { BriefCreationEnvelope } from '../../shared/types/briefFastPath.js';
 import type { Request } from 'express';
@@ -29,6 +31,16 @@ type SessionMessageResponse =
 router.post(
   '/api/session/message',
   authenticate,
+  // Rate-limit BEFORE permission check: 401 → 429 → 403 ordering invariant (spec §6.1)
+  asyncHandler(async (req, res, next) => {
+    const limitResult = await rateLimitCheck(rateLimitKeys.sessionMessage(req.user!.id), 30, 60);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt);
+      res.status(429).json({ type: 'error', message: 'Too many requests. Please try again later.' });
+      return;
+    }
+    next();
+  }),
   // Path B (with remainder) and Path C both call createBrief; gate the route on the
   // same BRIEFS_WRITE permission /api/briefs enforces so read-only users cannot
   // create briefs through GlobalAskBar.
