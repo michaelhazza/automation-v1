@@ -1,7 +1,7 @@
 # Agents Are Employees — Developer Brief
 
 **Slug:** `agent-as-employee`
-**Status:** Draft brief — for review and iteration before spec authoring.
+**Status:** Refined brief — pre-spec locks resolved 2026-04-29. Open product questions remain (see §7) but do not block spec authoring.
 **Class:** Major (cross-cutting — schema, identity, integrations, permissions, UX).
 **Predecessor analysis:** Google Cloud Next 2026 transcript review session, 2026-04-29.
 
@@ -76,7 +76,7 @@ For us internally, the success conditions are:
 
 - Adding Microsoft 365 later is purely an adapter — no canonical schema changes, no UI changes, no permission-system changes.
 - Switching a subaccount from Synthetos-native to Google Workspace (or vice-versa) is a defined operation with a defined data-history policy, not an ad-hoc migration.
-- An agent's read access to its own inbox, calendar, and documents is enforced by the same `ServicePrincipal` visibility predicate that already gates everything else — no new permission surface to maintain.
+- An agent's access to its own inbox, calendar, and documents is enforced by the existing `ServicePrincipal` predicate for Automation-OS-internal records and by the provider's own ACLs for provider-hosted resources (see §5 boundary rule). No new internal permission surface to maintain.
 
 ## 4. What the benefits are
 
@@ -131,6 +131,91 @@ The user (Michael) will be using Google Workspace personally, so the Google adap
 
 A single canonical workspace-identity table. An agent has a foreign key into it. A human has a foreign key into it. The org chart is a query against this one table. This is what makes "agents are real employees" literal rather than metaphorical.
 
+### Decided: actor vs identity — distinct concepts
+
+Two layers, separated by design:
+
+- **Actor** — the persistent logical entity (a specific agent or a specific human), identified by a canonical `actor_id`. Stable across backend migrations and identity changes.
+- **Identity** — a provider-scoped representation of an actor at a moment in time. Each backend (native, Google, Microsoft later) holds its own identity row, FK'd to the actor.
+
+Lifecycle states (next decision) apply to *identities*. Audit attribution, billing, and cross-backend continuity reference the *actor*. Business logic that needs "who did this" should query against `actor_id`, not against a backend-specific identity row.
+
+This separation is what makes migration, audit continuity, and future multi-backend work clean rather than a special case.
+
+### Decided: identity lifecycle states
+
+Every workspace identity — agent or human — passes through a fixed lifecycle:
+
+- **Provisioned** — record exists, no access yet.
+- **Active** — access granted, identity in use.
+- **Suspended** — access paused, identity preserved.
+- **Revoked** — access removed, identity preserved as audit anchor.
+- **Archived** — post-migration or end-of-life; queryable, no active access.
+
+Identities are immutable audit anchors. Deletion never removes historical linkage; revocation removes access while preserving the row and every reference to it. The Google adapter reconciles this against Workspace's hard-vs-soft-delete semantics — the canonical layer's contract takes priority. Without an explicit lifecycle model the spec drifts into inconsistent delete behaviour across adapters.
+
+### Decided: workspace migration creates a new identity, linked by canonical `actor_id`
+
+When a subaccount switches workspace backend (e.g. native → Google), no identity is moved or rewritten. A new identity row is provisioned in the new backend; the prior identity is archived. A persistent canonical `actor_id` links pre- and post-migration identities so audit history, message threads, and document references remain queryable as a single actor's record.
+
+Historical rows stay tagged to the archived identity. New rows tag to the new identity. The `actor_id` is the join key. This lifts the previous draft Q1 from open to decided and supplies the identity-continuity mechanism that was otherwise missing.
+
+### Decided: adapter contract invariant — identical observable behaviour
+
+Every workspace adapter — native, Google, Microsoft (later) — must produce identical observable behaviour for:
+
+- Identity provisioning and deprovisioning.
+- Email send and receive (including audit, rate-limit, and policy outcomes).
+- Calendar participation (invite, accept, decline).
+- Document access (read, write, share).
+
+A canonical-layer test suite exercises every adapter against the same scenarios. Behavioural divergence is a bug in the adapter, not a feature. This is what makes "adding Microsoft later is purely adapter work" a true claim at spec time rather than an aspiration.
+
+### Decided: agent email is routed through a platform-controlled pipeline — both directions
+
+All agent email — native or Google, inbound or outbound — passes through a single platform-controlled pipeline. Adapters call the pipeline; the pipeline calls providers. Adapters never bypass it.
+
+- **Outbound** egresses through the pipeline, which enforces audit logging, rate limiting, signing, and policy checks before provider dispatch.
+- **Inbound** is normalised through the pipeline before being surfaced to agents or workflows. Threading, attachments, and audit metadata are written canonically regardless of backend (Google push/watch + polling vs. native direct ingestion).
+
+This keeps deliverability, abuse controls, threading, and audit trails consistent across backends. Without the lock, Gmail's push/watch model and the native ingestion path diverge on every cross-cutting concern that customers experience as "the agent's behaviour."
+
+### Decided: provider permissions are the source of truth for provider-hosted resources
+
+Automation OS enforces access at the identity level — who is this principal, what is its lifecycle state, what scoped capabilities does it carry. It does **not** re-implement provider ACLs. If a Google Drive document is shared with `agent-sarah@clientco.com`, Google governs that access; we ask Google. Drive ACLs, Gmail thread visibility, and Calendar event visibility on the Google adapter are owned by Google.
+
+For native-backend resources we are the provider, so provider-permission rules apply to ourselves. This rule prevents the "split-brain permissions" failure mode where Automation OS and Google disagree about whether the agent can see a document.
+
+### Decided: org chart is representational only in v1
+
+The org chart visualises identity, role, and reporting line. It does **not** grant permissions, route messages, or affect orchestration. Reporting lines are display metadata. Any future change that makes them load-bearing for permissions or routing is a separate decision, recorded explicitly. We do not want a hidden permission system riding on the org chart.
+
+### Decided: native backend stays minimum viable
+
+The native backend implements the minimum capability needed for an agent to act as an employee — receive email, send email, hold a calendar identity, accept a meeting, hold a document reference. It does **not** chase feature parity with Gmail, Calendar, or Drive.
+
+Any feature proposed for native must answer: "does an agent need this to act like an employee?" If not, it does not ship in v1. The risk we are guarding against is overbuilding native into a workspace product while the Google and Microsoft adapters lag.
+
+### Decided: provisioning is confirmation-gated, idempotent, and reversible
+
+"Hire an agent" is a real provisioning action — on the Google backend it creates a real Google Workspace user on the customer's domain.
+
+- **Confirmation-gated.** Every provisioning action requires explicit operator confirmation before dispatch.
+- **Idempotent.** Provisioning is keyed by a request id; duplicate submissions (double-click, retry-after-timeout, network-glitch replay) must not create duplicate identities.
+- **Reversible.** Every provisioning action has a matching deprovision counterpart. Deprovision is itself idempotent and safe to retry.
+
+**Deprovision semantics.** Deprovision revokes access but does not delete or transfer the agent's owned resources — inbox, calendar events, documents — unless explicitly configured to. Ownership and retention policies are adapter-defined but must preserve audit continuity. After deprovision, the agent's history remains queryable via `actor_id`.
+
+This is the guardrail against accidental over-provisioning (domain pollution, unintended seat consumption, fat-fingered hires), against the irreversibility risk of "the agent went into Google before the operator meant to confirm," and against the data-loss risk of "deprovision silently wiped the inbox we needed for compliance."
+
+### Decided: an agent identity is a billable seat
+
+Each agent identity is a billable seat, distinct from human user seats. This is the commercial mirror of the structural decision that agents have their own identity, and it is the leverage point against bring-your-own-Claude/ChatGPT setups where the agent is a tool that consumes no licence.
+
+**Billing state is derived from identity lifecycle.** Only **Active** identities consume seats. Provisioned-but-not-yet-Active identities (mid-creation), Suspended identities, and Revoked / Archived identities do not. This lets operators temporarily suspend an agent without paying for it, and it removes ambiguity from seat-usage automation.
+
+Pricing details — per-seat amount, tiering, agency-bundled rates — are out of scope here. The lock is that *this* is the unit of monetisation, gated on lifecycle state.
+
 ## 6. Out of scope
 
 ### Explicitly deferred to a fast-follow
@@ -151,18 +236,9 @@ A single canonical workspace-identity table. An agent has a foreign key into it.
 
 ## 7. Open product questions
 
-Two questions need a call from the user before the spec lands.
+One core question and a handful of minor clarifications remain before the spec lands. None of these block the brief — they belong in spec — but settling them now avoids backtracking at schema and adapter time.
 
-### Q1. Workspace migration policy mid-flight
-
-A subaccount that initially adopts the native backend later upgrades to Google Workspace. What happens to the historical canonical rows tied to the native identities?
-
-- **Option A — keep history, archive identities.** Existing native identities are marked archived. New Google identities are minted. Historical mail, calendar, and document rows stay queryable but are tagged to the archived identity.
-- **Option B — fresh start.** New tenant, new identities, no historical bridge. Cleaner data, but loses historical search continuity for the agent's prior work.
-
-**Working recommendation:** Option A. Customers who upgrade workspace backends are usually customers who care about continuity. Cleaner-data is a developer concern, not a customer concern.
-
-### Q2. Native-backend agent email — what domain?
+### Q1. Native-backend agent email — what domain?
 
 An agent on the native backend is created with what email address?
 
@@ -171,6 +247,30 @@ An agent on the native backend is created with what email address?
 - **Option C — both, with B being optional polish.** Default to A; allow B as a vanity upgrade.
 
 **Working recommendation:** Option C. Ship A. Make B available as a self-serve setup step for customers who want it.
+
+### Q2. Profile photos — auto-generated or required?
+
+Does provisioning auto-generate a profile photo (deterministic, derived from agent name and role) or require a photo at hire time?
+
+**Working recommendation:** Auto-generate by default; allow operator override later. Lower friction at hire time. Photos are display metadata; nothing structural depends on them.
+
+### Q3. Email signatures — default or per-agent configurable?
+
+Does every agent ship with a default signature (e.g. "Sent by Sarah, AI agent at ClientCo, on behalf of Acme Agency"), or is the signature configurable per-agent at hire time?
+
+**Working recommendation:** Default signature with a single agency-level override. Per-agent configurability is v2 polish. Agents must always be visibly identified as agents in outbound communication — that part is non-negotiable for trust and disclosure; only the wording is flexible.
+
+### Q4. Document ownership — can agents own, or only access?
+
+Can an agent **own** documents (creator-of-record), or only access documents shared with it by a human?
+
+**Working recommendation:** Agents can own documents. A document an agent creates lives under the agent's identity, not under the human who triggered the creation. Consistent with the audit-attribution principle: "what did this agent do" must include "what did this agent create."
+
+### Q5. Meeting invitations — outbound or inbound only?
+
+Can an agent invite humans (or other agents) to meetings, or only respond to invitations sent to it?
+
+**Working recommendation:** Both. Outbound invites are consistent with the agent-as-employee framing. Restrictive defaults — "this agent can only respond, not initiate" — should come from policy or scope grants, not from the capability layer being missing.
 
 ## 8. What success looks like
 
@@ -187,7 +287,7 @@ By the same launch, internally we can demonstrate:
 
 - The same flow working against the native backend (no Google) and the Google backend, with identical user-facing UX.
 - Adding the Microsoft adapter post-launch is purely adapter work — no canonical or UX change.
-- Permission and visibility for an agent's mail, calendar, and documents is enforced through the same `ServicePrincipal` predicate that already gates everything else in the system.
+- Permission and visibility for an agent's mail, calendar, and documents is enforced through the existing `ServicePrincipal` predicate for internal records and through the provider's own ACLs for provider-hosted resources, per the §5 boundary rule.
 
 ## 9. Why this brief stops here
 
@@ -216,3 +316,18 @@ That work happens after this brief is reviewed and signed off. The pipeline from
 - **2026-04-29** — Canonical-first, mirroring CRM pattern, is non-negotiable. Hardcoding Google-specific fields on the `agents` table is rejected. Decided by user.
 - **2026-04-29** — Workspace tenant is per-subaccount, not per-agent. Decided jointly; user instinct confirmed by analysis.
 - **2026-04-29** — Agents and humans share one canonical identity table. Decided in original analysis; carried through.
+- **2026-04-29** — Identity lifecycle locked: provisioned → active → suspended → revoked → archived. Identities are immutable audit anchors. Decided by user.
+- **2026-04-29** — Workspace migration policy locked: new identity per backend, persistent canonical `actor_id` links pre- and post-migration identities. Lifts previous-draft Q1 from open to decided. Decided by user.
+- **2026-04-29** — Adapter contract invariant locked: identical observable behaviour across all adapters for identity / email / calendar / documents. Decided by user.
+- **2026-04-29** — Outbound email egresses through a single platform-controlled send pipeline (audit, rate-limit, policy). Decided by user.
+- **2026-04-29** — Provider permissions are the source of truth for provider-hosted resources; Automation OS does not re-implement provider ACLs. Decided by user.
+- **2026-04-29** — Org chart is representational only in v1; reporting lines do not grant permissions or affect orchestration. Decided by user.
+- **2026-04-29** — Native backend stays minimum viable; no Gmail/Drive feature parity. Decided by user.
+- **2026-04-29** — Provisioning is confirmation-gated and reversible via a matching deprovision flow. Decided by user.
+- **2026-04-29** — Agent identity is a billable seat, distinct from human user seats. Pricing details deferred. Decided by user.
+- **2026-04-29** — Actor vs identity vocabulary locked: actor is the persistent logical entity (canonical `actor_id`); identity is the provider-scoped representation. Lifecycle applies to identities; audit / billing / continuity reference the actor. Decided by user.
+- **2026-04-29** — Inbound email also routes through the platform-controlled pipeline; outbound + inbound symmetry. Decided by user.
+- **2026-04-29** — Provisioning is idempotent per request key; duplicate submissions must not create duplicate identities. Decided by user.
+- **2026-04-29** — Deprovision revokes access but preserves owned resources by default; retention policies are adapter-defined and must preserve audit continuity via `actor_id`. Decided by user.
+- **2026-04-29** — Seat consumption is derived from identity lifecycle: only Active identities consume seats. Decided by user.
+- **2026-04-29** — §3 and §8 wording tightened to align with the §5 provider-permission boundary rule (internal records via `ServicePrincipal`; provider-hosted resources via provider ACLs).
