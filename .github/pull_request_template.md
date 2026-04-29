@@ -12,9 +12,23 @@
   - [ ] All blocking findings are addressed in this PR or deferred to `tasks/todo.md` with an `[origin:<agent>:<slug>:<timestamp>]` tag and `[status:open]`.
   - [ ] Deferred items reference back to the source log via the `origin:` tag.
 - [ ] Architectural / RLS / migration / schema changes — `DEVELOPMENT_GUIDELINES.md` checklist (§9) cleared
+- [ ] **Allow-list bypass annotations** — if this PR touches a query against an RLS-not-applicable allowlist table (see `scripts/rls-not-applicable-allowlist.txt`), paste `grep -nE "@rls-allowlist-bypass" <file>` output below for each touched file:
+
+```
+<paste here, or "n/a — no allowlist-table queries touched">
+```
 
 ## Test plan
 
 <!-- Bulleted markdown checklist of TODOs for verifying the PR. -->
 
 - [ ]
+
+### RLS allow-list query touches (if applicable)
+
+If this PR touches a query against an RLS-not-applicable allow-list table,
+paste `grep -nE "@rls-allowlist-bypass" <each touched file>` output here:
+
+```
+(paste output, or write `n/a — no allow-list table queries touched`)
+```
