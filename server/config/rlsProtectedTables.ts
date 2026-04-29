@@ -690,12 +690,6 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-scoped page project containers — reveal content creation activity and project metadata.',
   },
   {
-    tableName: 'permission_groups',
-    schemaFile: 'migrations/0000_wandering_firedrake.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org permission group definitions — cross-tenant leak exposes IAM grouping structure and access control topology.',
-  },
-  {
     tableName: 'permission_sets',
     schemaFile: 'permissionSets.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',

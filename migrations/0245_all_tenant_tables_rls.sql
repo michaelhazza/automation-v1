@@ -556,24 +556,6 @@ CREATE POLICY page_projects_org_isolation ON page_projects
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── permission_groups ─────────────────────────────────────────────────────────
-ALTER TABLE permission_groups ENABLE ROW LEVEL SECURITY;
-ALTER TABLE permission_groups FORCE ROW LEVEL SECURITY;
--- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY permission_groups_org_isolation ON permission_groups; ALTER TABLE permission_groups NO FORCE ROW LEVEL SECURITY; ALTER TABLE permission_groups DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS permission_groups_org_isolation ON permission_groups;
-CREATE POLICY permission_groups_org_isolation ON permission_groups
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
-
 -- ── permission_sets ───────────────────────────────────────────────────────────
 ALTER TABLE permission_sets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets FORCE ROW LEVEL SECURITY;
