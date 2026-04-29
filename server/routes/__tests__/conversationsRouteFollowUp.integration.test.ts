@@ -28,52 +28,50 @@
  */
 export {};
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 
 await import('dotenv/config');
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: conversationsRouteFollowUp.integration.test requires a real DATABASE_URL.\n');
-  process.exit(0);
-}
+const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
 
-const { db } = await import('../../db/index.js');
-const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
-const { writeConversationMessage } = await import('../../services/briefConversationWriter.js');
-const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
-const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
-const { eq } = await import('drizzle-orm');
+test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
+  const { db } = await import('../../db/index.js');
+  const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
+  const { writeConversationMessage } = await import('../../services/briefConversationWriter.js');
+  const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
+  const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
+  const { eq } = await import('drizzle-orm');
 
-const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
-const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
+  const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
-async function seedConversation(scopeType: 'task' | 'brief'): Promise<{ scopeId: string; convId: string }> {
-  const [task] = await db.insert(tasks).values({
-    organisationId: TEST_ORG_ID,
-    title: `DR2 test ${scopeType}`,
-    description: 'Integration test — DR2',
-    status: 'inbox',
-    priority: 'normal' as const,
-    position: 0,
-  }).returning();
+  async function seedConversation(scopeType: 'task' | 'brief'): Promise<{ scopeId: string; convId: string }> {
+    const [task] = await db.insert(tasks).values({
+      organisationId: TEST_ORG_ID,
+      title: `DR2 test ${scopeType}`,
+      description: 'Integration test — DR2',
+      status: 'inbox',
+      priority: 'normal' as const,
+      position: 0,
+    }).returning();
 
-  const [conv] = await db.insert(conversations).values({
-    organisationId: TEST_ORG_ID,
-    scopeType,
-    scopeId: task!.id,
-    createdByUserId: STUB_USER_ID,
-    status: 'open' as const,
-  }).returning();
+    const [conv] = await db.insert(conversations).values({
+      organisationId: TEST_ORG_ID,
+      scopeType,
+      scopeId: task!.id,
+      createdByUserId: STUB_USER_ID,
+      status: 'open' as const,
+    }).returning();
 
-  return { scopeId: task!.id, convId: conv!.id };
-}
+    return { scopeId: task!.id, convId: conv!.id };
+  }
 
-async function cleanup(scopeId: string) {
-  await db.delete(tasks).where(eq(tasks.id, scopeId));
-}
+  async function cleanup(scopeId: string) {
+    await db.delete(tasks).where(eq(tasks.id, scopeId));
+  }
 
-async function run() {
   const seeded: string[] = [];
   try {
     // --- Test 1: noop path — task-scoped write produces exactly 1 row ---
@@ -123,8 +121,6 @@ async function run() {
     );
 
     // --- Test 4: no built-in dedupe — route single-call contract is load-bearing ---
-    // A second direct call to writeConversationMessage produces a second row.
-    // The route handler must call it at most once per request (branch-before-write).
     await writeConversationMessage({
       conversationId: t1.convId,
       briefId: t1.scopeId,
@@ -144,19 +140,7 @@ async function run() {
       2,
       'test 4: writeConversationMessage has no built-in dedupe — route single-call invariant is load-bearing',
     );
-
-    console.log('conversationsRouteFollowUp integration: all assertions passed');
   } finally {
     for (const id of seeded) await cleanup(id);
   }
-}
-
-void run().catch((err) => {
-  // FK violation on the test org means the DB isn't seeded with test fixtures.
-  if (err?.cause?.code === '23503' && String(err?.cause?.detail ?? '').includes('organisations')) {
-    console.log('\nSKIP: test org not present in DB — seed 00000000-0000-0000-0000-000000000001 to run this test.\n');
-    process.exit(0);
-  }
-  console.error('Integration test failed:', err);
-  process.exit(1);
 });

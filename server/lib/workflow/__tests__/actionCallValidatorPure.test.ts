@@ -12,29 +12,11 @@
  * Happy-path cases confirm that well-formed action_call steps pass.
  */
 
+import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { defineWorkflow } from '../defineWorkflow.js';
 import { validateDefinition } from '../validator.js';
 import type { ValidationResult, ValidationRule } from '../types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertHasRule(
   result: ValidationResult,
@@ -335,7 +317,4 @@ test('rejects action_call without actionSlug', () => {
   );
 });
 
-// ── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// ── Summary ────────────────────────────────────────────────────────────────

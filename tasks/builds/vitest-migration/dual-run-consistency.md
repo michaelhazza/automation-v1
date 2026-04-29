@@ -143,3 +143,15 @@ server/lib/__tests__/testRunIdempotencyPure.test.ts bash:pass vitest:pass match:
 server/lib/__tests__/utf8Truncate.test.ts bash:pass vitest:pass match:yes
 server/lib/schedule/__tests__/schedulePickerToCronPure.test.ts bash:pass vitest:pass match:yes
 server/lib/workflow/__tests__/actionCallAllowlistPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-04 (2026-04-29)
+server/lib/workflow/__tests__/actionCallValidatorPure.test.ts bash:pass vitest:pass match:yes
+server/lib/workflow/__tests__/agentDecisionEnvelope.test.ts bash:pass vitest:pass match:yes
+server/lib/workflow/__tests__/agentDecisionPure.test.ts bash:pass vitest:pass match:yes
+server/lib/workflow/__tests__/workflow.test.ts bash:pass vitest:pass match:yes
+server/routes/__tests__/briefsArtefactsPagination.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/routes/__tests__/conversationsRouteFollowUp.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/routes/__tests__/llmUsage.test.ts bash:pass vitest:pass match:yes
+server/routes/__tests__/reviewItems.test.ts bash:pass vitest:pass match:yes
+server/routes/__tests__/sessionMessage.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/activityService.test.ts bash:pass vitest:pass match:yes
