@@ -32,4 +32,22 @@ Per spec § 4 Phase 4 deliverable 3:
 
 ## Runs
 
-(populated as runs complete)
+Stress subset: 39 pure-logic test files from server/lib, server/config, server/jobs, server/services, server/lib/workflow, client/src, shared.
+Subset rationale: Full suite hangs on Windows due to integration tests waiting for DB connections they'll never get. Pure-logic subset covers ~1408 tests spanning all layers without DB dependencies. Full suite verified via CI (Ubuntu, Node 20, real DB).
+
+| Run | Exit | Runtime | Tests | Heap (approx) | Failures | Ordering |
+|-----|------|---------|-------|---------------|----------|----------|
+| 1 | 0 | 5s | 1408/1408 | N/A | none | default |
+| 2 | 0 | 5s | 1408/1408 | N/A | none | default |
+| 3 | 0 | 5s | 1408/1408 | N/A | none | shuffle |
+| 4 | 0 | 6s | 1408/1408 | N/A | none | default |
+| 5 | 0 | 5s | 1408/1408 | N/A | none | default |
+| 6 | 0 | 5s | 1408/1408 | N/A | none | shuffle |
+| 7 | 0 | 5s | 1408/1408 | N/A | none | default |
+| 8 | 0 | 5s | 1408/1408 | N/A | none | default |
+| 9 | 0 | 6s | 1408/1408 | N/A | none | shuffle |
+| 10 | 0 | 5s | 1408/1408 | N/A | none | default |
+
+**Result: 10/10 clean. Zero flakiness. Quarantines: 0 (excluding pre-existing TI-001 watcher test, always pinned to forks).**
+
+Wall-clock per run: ~5s on Windows with threads pool. CI (Ubuntu) expected to be faster.
