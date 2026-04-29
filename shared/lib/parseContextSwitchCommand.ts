@@ -48,10 +48,11 @@ function splitEntityAndRemainder(
   entityType: 'org' | 'subaccount' | null,
 ): ContextSwitchCommand {
   const commaIdx = text.indexOf(',');
-  // Strip "please" from the entity segment only — handles "change to Acme please, do X"
-  // where "please" sits between the name and the comma rather than at the end of the string.
+  // Strip a TRAILING "please" only — handles "change to Acme please, do X". A
+  // global \bplease\b strip would also chew the literal token from inside an
+  // entity name (e.g. tenant "Please Holdings" → "Holdings"), so anchor it.
   const rawEntity = commaIdx === -1 ? text : text.slice(0, commaIdx);
-  const entityName = rawEntity.replace(/\bplease\b/gi, '').trim();
+  const entityName = rawEntity.replace(/\s+please\s*$/i, '').trim();
   if (commaIdx === -1) {
     return { entityType, entityName, remainder: null };
   }

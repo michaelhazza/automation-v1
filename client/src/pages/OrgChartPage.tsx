@@ -190,7 +190,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
     ]).then(([saRes, _orgRes, liveRes]) => {
       const liveIds = new Set<string>((liveRes.data?.runningAgentIds ?? []) as string[]);
       setLiveAgentIds(liveIds);
-      setAgents(saRes.data as any[]);
+      setAgents(saRes.data as Omit<AgentNode, 'children'>[]);
     }).catch((err) => { console.error('[OrgChart] Failed to load org chart data:', err); setAgents([]); })
       .finally(() => setLoading(false));
   }, [activeClientId]);
@@ -516,7 +516,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
             onUpdate={async (linkId, config) => {
               await api.patch(`/api/subaccounts/${activeClientId}/agents/${linkId}`, config);
               const { data } = await api.get(`/api/subaccounts/${activeClientId}/agents`);
-              setAgents(data as any[]);
+              setAgents(data as Omit<AgentNode, 'children'>[]);
             }}
           />
         </div>

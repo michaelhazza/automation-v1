@@ -47,7 +47,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (166 entries)
+// Canonical handler key set (177 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -225,6 +225,18 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'crm.query',
   'ask_clarifying_questions',
   'challenge_assumptions',
+  // System Monitoring Agent handlers (wired in via system-monitor handler registry sync)
+  'read_agent_run',
+  'read_baseline',
+  'read_connector_state',
+  'read_dlq_recent',
+  'read_heuristic_fires',
+  'read_incident',
+  'read_logs_for_correlation_id',
+  'read_recent_runs_for_agent',
+  'read_skill_execution',
+  'write_diagnosis',
+  'write_event',
 ];
 
 // ---------------------------------------------------------------------------
@@ -260,11 +272,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 166 keys', () => {
+test('SKILL_HANDLERS has exactly 177 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 166) {
+  if (count !== 177) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 166. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 177. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

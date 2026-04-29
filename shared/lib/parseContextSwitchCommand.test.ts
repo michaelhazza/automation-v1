@@ -62,4 +62,15 @@ assert.deepStrictEqual(
   { entityType: 'org', entityName: 'Acme', remainder: null },
 );
 
+// "please" in the MIDDLE of an entity name must not be stripped (regression
+// guard: a global \bplease\b strip would mangle entities like "Please Holdings")
+assert.deepStrictEqual(
+  parseContextSwitchCommand('change to Please Holdings'),
+  { entityType: null, entityName: 'Please Holdings', remainder: null },
+);
+assert.deepStrictEqual(
+  parseContextSwitchCommand('change to org Please Holdings, show tasks'),
+  { entityType: 'org', entityName: 'Please Holdings', remainder: 'show tasks' },
+);
+
 console.log('All parseContextSwitchCommand tests passed.');
