@@ -41,7 +41,7 @@
 
 Close every multi-tenant data-isolation gap that is **still open at branch tip on `main` as of 2026-04-29** in the pre-prod-tenancy stream, drawn from the source brief and verified against current code. Three phases:
 
-1. **Phase 1 — RLS protected-tables registry triage** (`SC-2026-04-26-1`). Bring `scripts/verify-rls-protected-tables.sh` to exit 0. Register the 60 currently-unregistered tenant tables (or allow-list them with rationale), and remove the 4 stale entries. Where a tenant table is registered without a matching `CREATE POLICY` block, ship the missing policy migration.
+1. **Phase 1 — RLS protected-tables registry triage** (`SC-2026-04-26-1`). Drive `scripts/verify-rls-protected-tables.sh` to a CI-passing state (exit 0). Register the 61 currently-unregistered tenant tables (per §3.2 / §3.4.1 — that section is the source of truth for the count) or allow-list them with rationale, remove the 4 stale entries (§3.4.2), and resolve the 2 caller-level violations on `systemMonitor` files (§3.4.3). Where a tenant table is registered without a matching `CREATE POLICY` block, ship the missing policy migration.
 2. **Phase 2 — `intervention_outcomes` unique constraint + `ON CONFLICT DO NOTHING`** (`CHATGPT-PR203-R2`). Introduce the unique constraint that the brief specifies, replace the per-row `db.transaction` + advisory-lock pattern in `measureInterventionOutcomeJob.ts` with `INSERT ... ON CONFLICT (intervention_id) DO NOTHING`, and capture a load-test number.
 3. **Phase 3 — Maintenance-job per-org `withOrgTx` defense-in-depth** (`B10`, optional). The three maintenance jobs (`ruleAutoDeprecateJob`, `fastPathDecisionsPruneJob`, `fastPathRecalibrateJob`) already run successfully under `withAdminConnection` + per-org savepoint and are no longer silent no-ops. The remaining gap is a defense-in-depth upgrade — drop into `withOrgTx({ organisationId })` per org so RLS is engaged for the per-org work rather than running everything under `admin_role`. Conditional: ship only if Phase 1+2 finish with budget.
 
@@ -88,7 +88,7 @@ This is a Section-0 verification pass per the spec-authoring checklist. Every it
 | `P3-H2` — `briefVisibility.ts` → service | **closed** | `server/lib/briefVisibility.ts` is a thin re-export from `briefVisibilityService`. |
 | `P3-H3` — `onboardingStateHelpers.ts` → service | **closed** | `server/lib/workflow/onboardingStateHelpers.ts` is a thin re-export from `onboardingStateService`. |
 | `B10` — maintenance jobs `withAdminConnection` + per-org tx | **partial** | All three jobs use `withAdminConnection({ source })` + `SET LOCAL ROLE admin_role` + per-org savepoint via `tx.transaction(...)`. They run in production. Remaining gap: per-org work runs under `admin_role` (RLS bypassed) rather than dropping into a per-org `withOrgTx({ organisationId })`. Routed to **Phase 3** (this spec, optional). |
-| `SC-2026-04-26-1` — RLS registry triage | **open** | `bash scripts/verify-rls-protected-tables.sh` exits 1 with **67 violations** (63 unregistered tenant tables + 4 stale entries). Routed to **Phase 1**. |
+| `SC-2026-04-26-1` — RLS registry triage | **open** | `scripts/verify-rls-protected-tables.sh` exits 1 with **67 violations** (61 unregistered tenant tables + 4 stale registry entries + 2 caller-level `allowRlsBypass`-justification-comment violations on `server/services/systemMonitor/{baselines/refreshJob.ts:39, triage/loadCandidates.ts:45}`). Routed to **Phase 1**. |
 | `CHATGPT-PR203-R2` — `intervention_outcomes` unique + ON CONFLICT | **open** | `server/db/schema/interventionOutcomes.ts:35` is `index(...)` not `uniqueIndex(...)`. `server/jobs/measureInterventionOutcomeJob.ts:254` still uses per-row `db.transaction` + advisory lock. Routed to **Phase 2**. |
 
 ### §1.1 Closure update applied to `tasks/todo.md`
@@ -107,7 +107,7 @@ This is the file inventory lock per the spec-authoring checklist §2. Every file
 |---|---|---|---|
 | `0244` | `migrations/0244_intervention_outcomes_unique.sql` | `CREATE UNIQUE INDEX intervention_outcomes_intervention_unique ON intervention_outcomes(intervention_id)`. Replaces the existing non-unique `intervention_outcomes_intervention_idx`. Includes the `down` companion that recreates the non-unique index. | Phase 2 |
 | `0244.down` | `migrations/0244_intervention_outcomes_unique.down.sql` | Reverse: drop the unique index, recreate the non-unique index on `intervention_id`. | Phase 2 |
-| `0245+` | `migrations/0245_<table>_rls.sql` ... | Per-table policy migrations — one file per tenant-scoped table that the registry triage finds is **registered (or being newly registered) but missing a `CREATE POLICY` block**. The exact count is bounded by classification output (§3.4). Migrations are batched up to 4 tables per file when policies share the canonical org-isolation shape; tables needing parent-EXISTS or custom shapes get their own file. Maximum 11 new files (0245–0255) given the 12-number reservation. | Phase 1 |
+| `0245+` | `migrations/0245_<batch>_rls.sql` ... | Policy migrations for tenant-scoped tables that the registry triage finds are **registered (or being newly registered) but missing a `CREATE POLICY` block**. Batching rule: one migration file per policy-shape batch — up to 4 canonical-org-isolation tables per file; tables that need parent-EXISTS or any other custom shape each get their own standalone file. The exact file count is bounded by classification output (§3.4). Maximum 11 new files (0245–0255) given the 12-number reservation. | Phase 1 |
 
 **Migration shape for new policy files (canonical org-isolation):**
 
@@ -139,7 +139,10 @@ Use the shape established by `migrations/0229_reference_documents_force_rls_pare
 |---|---|---|
 | `server/config/rlsProtectedTables.ts` | Append entries for newly-registered tenant tables; remove the 4 stale entries (`document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`). Each new entry follows the existing `{ tableName, schemaFile, policyMigration, rationale }` shape. | Phase 1 |
 | `scripts/rls-not-applicable-allowlist.txt` | Append entries for tables classified as system-wide / cross-tenant / audit-only. Each entry obeys the 4-rule format already documented in the file header (one-sentence rationale, `[ref: ...]` citation, function-level `@rls-allowlist-bypass` annotation at every caller). | Phase 1 |
+| `server/services/systemMonitor/baselines/refreshJob.ts` | Move the existing `// allowRlsBypass: cross-tenant aggregate reads against agent_runs / agents.` comment to within +/-1 line of the `allowRlsBypass: true` flag (currently line 39). See §3.4.3. | Phase 1 |
+| `server/services/systemMonitor/triage/loadCandidates.ts` | Add an inline `// allowRlsBypass: <one-sentence justification naming the cross-org operation>` comment within +/-1 line of the `allowRlsBypass: true` flag at line 45. See §3.4.3. | Phase 1 |
 | `server/db/schema/interventionOutcomes.ts` | Replace `interventionIdx: index('intervention_outcomes_intervention_idx').on(table.interventionId)` (line 35) with `interventionUnique: uniqueIndex('intervention_outcomes_intervention_unique').on(table.interventionId)`. Drizzle import already includes `uniqueIndex`. | Phase 2 |
+| `server/services/interventionService.ts` | Change `recordOutcome` signature from `Promise<void>` to `Promise<boolean>` (returns `true` iff a new row was inserted, `false` on the `ON CONFLICT` no-op path). Replace the existing `db.insert(...).values(...)` call with `.onConflictDoNothing({ target: interventionOutcomes.interventionId })` and return `(result.rowCount ?? 0) > 0`. See §4.3 for the full new signature; §4.4 for the caller contract. | Phase 2 |
 | `server/jobs/measureInterventionOutcomeJob.ts` | Replace the per-row `db.transaction(...)` + advisory-lock + claim-verify block (currently lines 254–267) with a single `INSERT ... ON CONFLICT (intervention_id) DO NOTHING` returning a boolean for "row inserted vs. skipped". Drop the per-org `pg_advisory_xact_lock` call. | Phase 2 |
 | `server/jobs/ruleAutoDeprecateJob.ts` | (Phase 3) Replace the per-org savepoint `tx.transaction(async (subTx) => applyDecayForOrg(subTx, org.id))` with: enumerate orgs under `withAdminConnection`, then for each org open a fresh `withOrgTx({ organisationId: org.id, source: 'rule-auto-deprecate' })` and call the per-org function. Outer admin tx then becomes enumerator-only. | Phase 3 |
 | `server/jobs/fastPathDecisionsPruneJob.ts` | (Phase 3) Same pattern. | Phase 3 |
@@ -164,22 +167,30 @@ Use the shape established by `migrations/0229_reference_documents_force_rls_pare
 |---|---|---|
 | `scripts/run-all-gates.sh` | Add `run_gate "$SCRIPT_DIR/verify-rls-protected-tables.sh"` to the gate list. Currently the gate is callable but not registered in the harness, so its exit-0 condition is not enforced anywhere except CI manual invocation. Insertion goes after the existing `verify-rls-*` block (lines 74–76). | Phase 1 (last step) |
 
+### §2.6 Build artefacts (committed in this branch but outside `server/` / `client/`)
+
+| Path | Change | Phase |
+|---|---|---|
+| `tasks/builds/pre-prod-tenancy/progress.md` | Phase 1 implementer commits the filled §3.4.1 classification table here (one verdict per row) before any policy-migration commits. Phase 2 implementer appends the load-test result here (≥5× speedup vs. legacy or recorded blocker) per §4.7. | Phase 1 + Phase 2 |
+| `tasks/todo.md` | Append entries under the existing `## Deferred from pre-prod-tenancy spec` heading for any Phase-3 deferral, sister-branch-deferred policy migrations, load-test absolute-figure deferral, and gate-self-test fixture deferral (see §9). | Phase 1 + Phase 2 + Phase 3 |
+
 ---
 
 ## §3 — Phase 1 — RLS protected-tables registry triage (`SC-2026-04-26-1`)
 
 ### §3.1 Goal
 
-Bring `bash scripts/verify-rls-protected-tables.sh` to exit 0 on the post-merge `pre-prod-tenancy` head. Wire the gate into `scripts/run-all-gates.sh` so the CI harness fails on any future regression.
+Drive `scripts/verify-rls-protected-tables.sh` to a CI-passing state (exit 0) on the post-merge `pre-prod-tenancy` head. Wire the gate into `scripts/run-all-gates.sh` so the CI harness fails on any future regression. Gates are CI-only per CLAUDE.md — no part of this phase asks an implementer to run them locally; the acceptance criteria below are CI invariants.
 
 ### §3.2 Inputs (current state at branch creation)
 
-`bash scripts/verify-rls-protected-tables.sh` exits 1 with **67 violations**:
+`scripts/verify-rls-protected-tables.sh` exits 1 with **67 violations**:
 
-- **63 unregistered tenant tables** — the migration walker found `organisation_id` columns in `CREATE TABLE` bodies, but neither `server/config/rlsProtectedTables.ts` nor `scripts/rls-not-applicable-allowlist.txt` mentions the table.
+- **61 unregistered tenant tables** — the migration walker found `organisation_id` columns in `CREATE TABLE` bodies, but neither `server/config/rlsProtectedTables.ts` nor `scripts/rls-not-applicable-allowlist.txt` mentions the table.
 - **4 stale registry entries** — listed in the manifest but the migration walker found no matching `CREATE TABLE ... organisation_id` (these are parent-FK-scoped and do not carry a direct `organisation_id` column): `document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`.
+- **2 caller-level violations** — `server/services/systemMonitor/baselines/refreshJob.ts:39` and `server/services/systemMonitor/triage/loadCandidates.ts:45` use `allowRlsBypass: true` without a justification comment within +/-1 line of the flag (the existing comment in `refreshJob.ts` is on line 37, two lines above the flag; the gate's heuristic enforces +/-1).
 
-The brief's "60 unregistered + 4 stale = 64" figure has drifted to "63 unregistered + 4 stale = 67" because three more tenant tables landed on `main` between the brief authoring and branch creation. The **classification table in §3.4 is the source of truth** — not the brief's count.
+The brief's "60 unregistered + 4 stale = 64" figure has drifted to **61 unregistered + 4 stale + 2 caller-level = 67** because additional tenant tables and `allowRlsBypass` flags landed on `main` between the brief authoring and branch creation. The **classification tables in §3.4 are the source of truth** — not the brief's count.
 
 ### §3.3 Per-table classification rules
 
@@ -205,28 +216,79 @@ The table below is the **deliverable** of Phase 1 — it must be present in the 
 
 **At spec-authoring time the verdicts are not yet filled in.** The Phase 1 implementer fills the verdict column by walking the per-table classification rules in §3.3 against each row. The table below lists the 67 tables in the order the gate emitted them so the implementer can grep against the gate output.
 
-#### §3.4.1 Unregistered tenant tables (63)
+#### §3.4.1 Unregistered tenant tables (61)
 
-> **Implementer's task:** for each row, fill `Owning migration`, `Has policy?`, `Verdict` (`register` / `register-with-new-policy` / `allowlist`), and `Notes` (parent table + FK if parent-EXISTS; rationale citation if allowlist).
+> **Authoring posture.** This subsection lists the 61 tables the gate emits at branch tip. Per §3.4 framing, the verdict column is INTENTIONALLY EMPTY at spec-authoring time — Phase 1's first deliverable is for the implementer to fill it in `tasks/builds/pre-prod-tenancy/progress.md` (a copy of this table with verdicts) per the §3.3 decision tree, before any policy migrations are written. The spec captures the *shape* of the deliverable, not the verdicts themselves; pre-classifying 61 tables here would do the implementation work in the spec.
+>
+> **Implementer's task per row:** fill `Owning migration`, `Has policy?`, `Verdict` (`register` / `register-with-new-policy` / `allowlist`), and `Notes` (parent table + FK if parent-EXISTS; rationale citation if allowlist).
+>
+> Some rows may already be policied via a later migration that the gate missed (the gate is a registry/allow-list diff, not a policy diff); the classification output must reconcile each one against the migration history.
 
-```
-account_overrides, action_events, action_resume_events, agent_conversations,
-agent_prompt_revisions, agent_triggers, agents, board_configs, config_backups,
-config_history, connector_configs, executions, feedback_votes, geo_audits, goals,
-hierarchy_templates, iee_artifacts, iee_runs, iee_steps, intervention_outcomes,
-llm_inflight_history, mcp_server_configs, mcp_tool_invocations, org_agent_configs,
-org_budgets, org_margin_configs, org_memories, org_memory_entries, org_user_roles,
-organisation_secrets, page_projects, permission_groups, permission_sets,
-playbook_runs, playbook_templates, policy_rules, portal_briefs,
-process_connection_mappings, processed_resources, projects, scheduled_tasks,
-skill_analyzer_jobs, skill_idempotency_keys, skills, slack_conversations,
-subaccount_agents, subaccount_onboarding_state, subaccount_tags, subaccounts,
-system_incident_suppressions, system_incidents, task_attachments, task_categories,
-users, webhook_adapter_configs, workflow_engines, workflow_runs, workspace_entities,
-workspace_health_findings, workspace_items, workspace_memory_entries
-```
+| Table | Owning migration | Has policy? | Verdict | Notes |
+|---|---|---|---|---|
+| `account_overrides` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `action_events` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `action_resume_events` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `agent_conversations` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `agent_prompt_revisions` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `agent_triggers` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `agents` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `board_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `config_backups` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `config_history` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `connector_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `executions` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `feedback_votes` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `geo_audits` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `goals` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `hierarchy_templates` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `iee_artifacts` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `iee_runs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `iee_steps` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `intervention_outcomes` | _(implementer)_ | _(implementer)_ | _(implementer)_ | Phase 2 schema change adds a unique index on this table (§4.2); the registry/policy verdict here is independent of that. |
+| `llm_inflight_history` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `mcp_server_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `mcp_tool_invocations` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_agent_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_budgets` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_margin_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_memories` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_memory_entries` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `org_user_roles` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `organisation_secrets` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `page_projects` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `permission_groups` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `permission_sets` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `playbook_runs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `playbook_templates` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `policy_rules` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `portal_briefs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `process_connection_mappings` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `processed_resources` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `projects` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `scheduled_tasks` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `skill_analyzer_jobs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `skill_idempotency_keys` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `skills` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `slack_conversations` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `subaccount_agents` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `subaccount_onboarding_state` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `subaccount_tags` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `subaccounts` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `system_incident_suppressions` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `system_incidents` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `task_attachments` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `task_categories` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `users` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `webhook_adapter_configs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `workflow_engines` | _(implementer)_ | _(implementer)_ | _(implementer)_ | Owning migration is in `server/db/schema/agentRuns.ts` territory — sister-branch scope-out (§0.4). Registry edit only; any new policy migration deferred to `pre-prod-workflow-and-delegation` (§9). |
+| `workflow_runs` | _(implementer)_ | _(implementer)_ | _(implementer)_ | Same sister-branch scope-out as `workflow_engines`. |
+| `workspace_entities` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `workspace_health_findings` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `workspace_items` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
+| `workspace_memory_entries` | _(implementer)_ | _(implementer)_ | _(implementer)_ | |
 
-(63 entries — three may already be policied via a later migration that the brief's count missed. The implementer's classification output must reconcile each one.)
+(61 rows total — 2 of them, `workflow_engines` and `workflow_runs`, are sister-branch-owned per §0.4 and so are registry-edit-only here. Names are taken in the order the gate emitted them.)
 
 #### §3.4.2 Stale registry entries (4)
 
@@ -237,7 +299,16 @@ workspace_health_findings, workspace_items, workspace_memory_entries
 | `task_activities` | `taskActivities.ts` | `tasks` | `task_id` | `drop-from-registry` (verify parent has canonical org-isolation; if missing, ship a parent-EXISTS migration in `0245+` instead and keep the entry) |
 | `task_deliverables` | `taskDeliverables.ts` | `tasks` | `task_id` | `drop-from-registry` (same posture as `task_activities`) |
 
-**Hard requirement:** before dropping `task_activities` / `task_deliverables`, run `grep -nE "CREATE POLICY .* ON \"?tasks\"?" migrations/*.sql` and confirm a canonical org-isolation policy exists on `tasks`. If yes, drop. If no, escalate as a finding (the parent itself is leaky).
+**Hard requirement:** before dropping `task_activities` / `task_deliverables`, grep `migrations/*.sql` for `CREATE POLICY .* ON "?tasks"?` and confirm a canonical org-isolation policy exists on `tasks`. If yes, drop. If no, escalate as a finding (the parent itself is leaky).
+
+#### §3.4.3 Caller-level `allowRlsBypass` justification-comment violations (2)
+
+| Caller | Current state | Verdict |
+|---|---|---|
+| `server/services/systemMonitor/baselines/refreshJob.ts:39` | `allowRlsBypass: true` flag at line 39, justification comment exists at line 37 (two lines above) — outside the gate's +/-1-line window. | **Move the comment** from line 37 onto line 38 (immediately above the flag) so the gate's heuristic sees it. Do not change the substantive justification — it is already specific ("cross-tenant aggregate reads against agent_runs / agents"). |
+| `server/services/systemMonitor/triage/loadCandidates.ts:45` | Same pattern — `allowRlsBypass: true` without an inline justification comment within +/-1 line. | Same fix — add (or move) the justification comment to within +/-1 line of the flag. The substantive justification must name the cross-org operation per the gate's rejection of vague text ("needed", "admin work"). |
+
+`server/services/systemMonitor/**` is not in either sister-branch scope-out list (§0.4); these edits land in this branch.
 
 ### §3.5 Implementation approach
 
@@ -248,13 +319,14 @@ workspace_health_findings, workspace_items, workspace_memory_entries
    2. Append all `register` (policy-exists) entries to the manifest.
    3. Author + apply all `register-with-new-policy` migrations (`0245+`), one migration file per commit.
    4. Append `allowlist` entries to `scripts/rls-not-applicable-allowlist.txt`.
-   5. Add `run_gate "$SCRIPT_DIR/verify-rls-protected-tables.sh"` to `scripts/run-all-gates.sh`.
+   5. Resolve the §3.4.3 caller-level violations on the two `systemMonitor` files (move/add the inline `// allowRlsBypass: ...` justification comment within +/-1 line of the flag).
+   6. Add `run_gate "$SCRIPT_DIR/verify-rls-protected-tables.sh"` to `scripts/run-all-gates.sh`.
 4. **No edits to historical migrations.** The repo is append-only on migrations; if a tenant table's owning migration omitted RLS, the fix is a NEW migration, not an edit to the historical file.
 5. **No source edits in sister-branch areas.** If a table whose owning migration is `agentRuns.ts` (sister branch territory) needs a registration, the registry edit is permitted (the manifest is shared); the schema file and the table-creation migration are not touched. New policy migrations on those tables are deferred to the sister branch via a `## Deferred Items` entry — see §9.
 
 ### §3.6 Acceptance criteria
 
-- `bash scripts/verify-rls-protected-tables.sh` exits 0 on the post-merge `pre-prod-tenancy` head.
+- CI gate `verify-rls-protected-tables.sh` exits 0 on the post-merge `pre-prod-tenancy` head (gates run by CI, not locally — per CLAUDE.md).
 - `tasks/builds/pre-prod-tenancy/progress.md` contains the filled §3.4.1 classification table with one verdict per row.
 - `server/config/rlsProtectedTables.ts` no longer contains `document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables` entries (verified by `grep`).
 - Every new `register-with-new-policy` migration uses one of the two migration shapes in §2.1 (canonical org-isolation, or parent-EXISTS).
@@ -335,18 +407,28 @@ Replacement shape:
 const wrote = await interventionService.recordOutcome(decision.recordArgs!);
 ```
 
-`interventionService.recordOutcome` becomes the single owner of the insert and changes its underlying SQL to:
+`interventionService.recordOutcome` becomes the single owner of the insert. Its signature changes from `Promise<void>` to `Promise<boolean>` (the existing input shape is already a single inline object literal — see `server/services/interventionService.ts:53–70` — and is reused unchanged):
+
+```ts
+// before (server/services/interventionService.ts:53,70):
+async recordOutcome(data: { ...existing fields... }): Promise<void>
+
+// after:
+async recordOutcome(data: { ...existing fields... }): Promise<boolean>
+```
+
+The body changes its underlying SQL to:
 
 ```ts
 const result = await db
   .insert(interventionOutcomes)
-  .values({ /* ... */ })
+  .values({ /* ... existing field-mapping unchanged ... */ })
   .onConflictDoNothing({ target: interventionOutcomes.interventionId });
 
 return (result.rowCount ?? 0) > 0;
 ```
 
-(`db` here is whatever the existing service uses — likely the org-scoped DB. The org-scoping is already established by the calling middleware; this refactor does not change that.)
+(`db` here is the existing module-level handle the service already uses. The org-scoping is already established by the calling middleware; this refactor does not change that.)
 
 The advisory lock and the SELECT-then-INSERT pattern both go away. The lock was only needed because the index was non-unique — with the unique constraint, the kernel guarantees exactly-once.
 
@@ -389,9 +471,9 @@ If the load test cannot be set up locally because of seed-data dependencies, the
 - `server/jobs/measureInterventionOutcomeJob.ts` no longer contains `pg_advisory_xact_lock` or `db.transaction(` for the per-row write path. The `try/catch` block remains for non-`23505` errors only.
 - `interventionService.recordOutcome` (in `server/services/interventionService.ts` or wherever it lives) uses `.onConflictDoNothing({ target: interventionOutcomes.interventionId })`.
 - Pure test (`server/jobs/__tests__/measureInterventionOutcomeJobPure.test.ts` — extend if it exists) asserts the decision-classifier shape is unchanged.
-- Load test result (≥5× speedup vs. legacy or recorded blocker) appears in `tasks/builds/pre-prod-tenancy/progress.md`.
+- Load-test result appears in `tasks/builds/pre-prod-tenancy/progress.md`. The 5× speedup vs. legacy must be demonstrated against either the full §4.7 fixture (10,000 rows / 5 orgs) or the smaller fallback fixture (1,000 rows / 2 orgs); only the absolute rows/sec/org figure may be deferred (with a blocker note explaining why the local seed couldn't be set up — routed to §9).
 - `npx tsc --noEmit -p server/tsconfig.json` clean.
-- `bash scripts/verify-rls-protected-tables.sh` still exits 0 (the new schema change adds a UNIQUE index but no policy change; the table is already in the registry — see §3.4.1 — so this should be a no-op for the gate).
+- The Phase 2 schema change introduces no new RLS-gate violations of its own. (`intervention_outcomes` is named in §3.4.1 as a Phase 1 deliverable — Phase 1 owns driving `verify-rls-protected-tables.sh` to exit 0. Phase 2 is required not to *worsen* the gate; it is not on the hook for the pre-existing violation. See §6 / §8.1 for ordering.)
 
 ---
 
@@ -468,11 +550,25 @@ Key differences:
 - Outer admin tx is enumeration-only; advisory locks (if any) clearly scoped to enumeration vs. per-org work.
 - `npx tsc --noEmit -p server/tsconfig.json` clean.
 - Targeted pure tests for each job (extend existing pure tests if they exist) assert the org-enumeration order and the per-org function's contract are unchanged.
-- `bash scripts/verify-rls-protected-tables.sh` still exits 0.
+- CI gate `verify-rls-protected-tables.sh` still exits 0 (Phase 3 must not regress the Phase 1 deliverable; gates run by CI).
 
 ### §5.5 Decision rule for shipping Phase 3
 
 Phase 3 ships **only if Phase 1 + Phase 2 finish under the branch's reasonable budget** (rough heuristic: ≤ 3 days end-to-end). If they take longer, Phase 3 is deferred to a follow-up branch (entry in §9). The reason: the three jobs are functional today (no silent no-ops), and the upgrade is defense-in-depth, not correctness. Shipping a partial Phase 1+2 with a clean review trail beats shipping all three phases with a rushed Phase 3.
+
+### §5.6 Per-job concurrency contract (Section-10 §10.3)
+
+Phase 3 splits a single outer admin transaction into one admin enumeration tx plus one `withOrgTx` per org. That changes the lifetime of any advisory lock the original tx held. Every job's commit MUST declare, before it ships, which of the two patterns applies:
+
+- **Pattern A — enumeration-only lock.** The advisory lock was protecting enumeration only (mutual exclusion across concurrent runs of the same job). The lock stays inside the outer admin tx and is released when enumeration finishes; per-org work runs without the lock. Idempotency posture for per-org work: `state-based` (each per-org function already uses optimistic predicates / NOT-EXISTS guards). This is the expected pattern for all three jobs.
+
+- **Pattern B — per-org lock required.** The advisory lock was protecting per-org work (e.g. preventing two concurrent jobs from racing on the same org's writes). The Phase 3 commit for that job MUST acquire a session-level (cross-tx) lock outside `withOrgTx` per org, then drop into `withOrgTx` for the work. If the audit cannot cleanly express the lock with a session-level mechanism, the job is deferred to a follow-up branch (§9).
+
+**Pre-commit deliverable.** For each of the three jobs, the implementer commits a one-paragraph audit verdict to `tasks/builds/pre-prod-tenancy/progress.md` naming Pattern A or Pattern B and the line numbers consulted. If any job is Pattern B and the session-level mechanism isn't obviously equivalent, that job alone is deferred (the other two can still ship).
+
+**Idempotency posture per job:** `state-based` — each per-org function runs against optimistic predicates already enforced in its existing SQL. No new key-based guards are introduced; no terminal-event semantics change. Concurrency safety derives from (a) per-job advisory lock at enumeration (Pattern A) or session-level lock per org (Pattern B), plus (b) RLS-engaged tenant-scoped writes inside `withOrgTx`.
+
+**Retry classification:** `safe` — re-running any of the three jobs against the same per-org state produces the same result (the per-org SQL is already retry-safe; the new wrapper does not change that).
 
 ---
 
@@ -482,8 +578,8 @@ The branch reserves migration numbers `0244–0255`. The original brief reserved
 
 | Order | Number | File | Phase | Dependency |
 |---|---|---|---|---|
-| 1 | `0244` | `0244_intervention_outcomes_unique.sql` (+ `.down.sql`) | Phase 2 | None — independent of Phase 1. Can ship first if Phase 2 is started before Phase 1 finishes, but the recommended order is Phase 1 → Phase 2 (see §8). |
-| 2 | `0245+` | one or more `0245_<table>_rls.sql` per the §3.5 batching rule | Phase 1 | Each policy migration depends on the table's CREATE TABLE migration already being applied (which it always is — those are historical migrations). |
+| 1 | `0244` | `0244_intervention_outcomes_unique.sql` (+ `.down.sql`) | Phase 2 | None as a schema migration — `0244` is independent of the Phase 1 policy migrations. Can ship first if Phase 2 is started before Phase 1 finishes. The Phase 1 registry edit for `intervention_outcomes` is sequenced separately (§3.5) — Phase 1 still owns `verify-rls-protected-tables.sh` exit 0, not Phase 2 (§4.8). Recommended order is Phase 1 → Phase 2 (see §8). |
+| 2 | `0245+` | one or more `0245_<batch>_rls.sql` per the §3.5 batching rule | Phase 1 | Each policy migration depends on the table's CREATE TABLE migration already being applied (which it always is — those are historical migrations). |
 
 **Hard rules:**
 
@@ -605,15 +701,15 @@ Most of Section 10 of the checklist is concentrated in Phase 2 because Phase 1 i
 
 | Section-10 item | Where it lives in this spec | Phase |
 |---|---|---|
-| §10.1 Idempotency posture | §4.4 (`key-based`, unique key `intervention_outcomes(intervention_id)`, index `intervention_outcomes_intervention_unique`). | Phase 2 |
-| §10.2 Retry classification | §4.4 (`safe`). | Phase 2 |
-| §10.3 Concurrency guard for racing writes | §4.5 (DB unique constraint, first-commit-wins, losing caller sees `wrote=false`). | Phase 2 |
-| §10.4 Terminal event guarantee | N/A — the job emits no cross-flow events. The existing `measureInterventionOutcome.tick_complete` log is not a cross-flow terminal; it's a per-tick heartbeat. | — |
-| §10.5 No-silent-partial-success | §4.6 — `summary.failed` increments on any non-`23505` error; `summary.written` increments only on a true insert; `wrote=false` is silent because the row is correctly already present (this is success, not partial). | Phase 2 |
-| §10.6 Unique-constraint-to-HTTP mapping | N/A — this is a job, not a route. The job-internal mapping is in §4.6. | — |
+| §10.1 Idempotency posture | §4.4 (`key-based`, unique key `intervention_outcomes(intervention_id)`, index `intervention_outcomes_intervention_unique`); §5.6 (`state-based`, per-job optimistic predicates already in place). | Phase 2 + Phase 3 |
+| §10.2 Retry classification | §4.4 (`safe`); §5.6 (`safe`). | Phase 2 + Phase 3 |
+| §10.3 Concurrency guard for racing writes | §4.5 (DB unique constraint, first-commit-wins, losing caller sees `wrote=false`); §5.6 (per-job Pattern A vs. Pattern B advisory-lock audit, deliverable to `progress.md` before each Phase 3 job's commit). | Phase 2 + Phase 3 |
+| §10.4 Terminal event guarantee | N/A — neither the Phase 2 job nor the Phase 3 jobs emit cross-flow events. The existing `measureInterventionOutcome.tick_complete` log is not a cross-flow terminal; it's a per-tick heartbeat. | — |
+| §10.5 No-silent-partial-success | §4.6 — `summary.failed` increments on any non-`23505` error; `summary.written` increments only on a true insert; `wrote=false` is silent because the row is correctly already present (this is success, not partial). Phase 3 does not change any job's success/partial/failed semantics — the per-org function's existing accumulator is preserved. | Phase 2 + Phase 3 |
+| §10.6 Unique-constraint-to-HTTP mapping | N/A — neither phase introduces an HTTP route. The Phase 2 job-internal mapping is in §4.6. | — |
 | §10.7 State-machine closure | N/A — no state machine introduced or modified. | — |
 
-Phase 1 (registry triage) and Phase 3 (tx-shape upgrade) introduce no externally-triggered writes, no new state machines, and no new concurrent-write contests — they are mechanical refactors of existing primitives.
+Phase 1 (registry triage) introduces no externally-triggered writes, no new state machines, and no new concurrent-write contests — it is a mechanical refactor of the registry / allow-list manifest. Phase 3 changes the lifetime of an advisory lock for each maintenance job; the per-job lock-scope contract is pinned in §5.6.
 
 ---
 
