@@ -1701,3 +1701,41 @@ a staging environment with real app→DB network latency. Pass conditions remain
   - Spec / plan: invariant #10 — INFO log MUST include `rateLimitKey` when applicable.
   - Gap: `workspaceEmailPipeline.ts:87` always emits `rateLimitKey: null`; pipeline doesn't capture the actual key string from `defaultRateLimitCheck`.
   - Suggested approach: extend `defaultRateLimitCheck` return type to include the resolved key string for both identity and org scopes; pipeline logs the most-restrictive bucket key.
+
+## Deferred from spec-conformance review — agent-as-employee (re-run, 2026-04-29)
+
+**Captured:** 2026-04-29T12:45:59Z
+**Source log:** `tasks/review-logs/spec-conformance-log-agent-as-employee-2026-04-29T12-45-59Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`
+**Scope verified:** Phases A, B, C only — Phases D and E not yet implemented and explicitly out of this run's scope.
+
+**Closed since previous run:** D1, D3, D4, D5, D6, D7, D8, D9, D10, D12, D13, D14, D18 (13 items).
+**Closed with deviation:** D9 (uses `?tab=identity` instead of `?newlyOnboarded=1`), D16 (docs-only, always-was-deviation).
+**Subsumed:** D2 — D2 is largely closed; remaining sub-finding split out as D19.
+
+The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-verification pass.
+
+- [ ] **D11** — Signature template hard-coded; `WorkspaceTenantConfig` lookup unwired (carried forward from previous run)
+  - Spec section: §12 contract `WorkspaceTenantConfig` — `defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`. §17 Q3 — disclosure opt-in per subaccount.
+  - Gap: `workspaceMail.ts:122-134` still passes `subaccountName: subaccountId` (raw UUID) and `discloseAsAgent: false` literal; signature template comes from `identity.metadata.signature` instead of subaccount config. No `connectorConfigService.getWorkspaceTenantConfig` exists.
+  - Suggested approach: add `connectorConfigService.getWorkspaceTenantConfig(orgId, subaccountId)` returning the spec's `WorkspaceTenantConfig` shape; resolve subaccount display name via `subaccountService.getById`; pipeline's `signatureContext` is built from that.
+
+- [ ] **D15** — `verify-workspace-actor-coverage.ts` not wired into a CI workflow (carried forward; awaiting CI infra)
+  - Spec section: §16 acceptance criterion — "`verify-workspace-actor-coverage.ts` passes in CI"; plan Task A10 step 4.
+  - Gap: `.github/workflows/` directory still does not exist in the repo. Acceptance criterion cannot currently be evaluated.
+  - Suggested approach: confirm CI provider, wire the gate as a blocking step alongside `verify-rls-coverage.sh`. If CI is hosted outside `.github/workflows/`, document the integration point and add the same step there.
+
+- [ ] **D17** — Contract test fixtures pass `signature: null` though contract types `signature: string` (carried forward)
+  - Spec / contract: §7 `ProvisionParams.signature: string`.
+  - Gap: `canonicalAdapterContract.test.ts:25` still declares `signature: null`; compiles only because the test isn't strictly typed against the interface.
+  - Suggested approach: decide alongside D11 — if signature can be empty/absent, widen the contract to `string | null`; otherwise change fixtures to use empty strings. Pick one.
+
+- [ ] **D19** — Inbound webhook bootstrap identity lookup uses raw `db` outside any tx (NEW)
+  - Spec section: §10.5 multi-tenant safety; `DEVELOPMENT_GUIDELINES.md` §1 (RLS).
+  - Gap: `workspaceInboundWebhook.ts:171-175` looks up `workspace_identities` by `email_address` with no `app.organisation_id` set. Provider has no JWT, so the org isn't known yet — but `workspace_identities` is RLS-protected. Currently masked by dev's BYPASSRLS superuser; would return zero rows under a non-bypass connection.
+  - Suggested approach: wrap the email→identity lookup in `withAdminConnection` (admin role has BYPASSRLS, audited). Once identity is resolved, the existing `db.transaction()` + `set_config` + `withOrgTx({tx, organisationId, source: 'inbound-webhook'}, ...)` flow takes over correctly.
+
+- [ ] **D20** — Pipeline `db.transaction()` blocks not wrapped in `withOrgTx` (NEW; stylistic, no functional bug today)
+  - Spec section: §10.5; `DEVELOPMENT_GUIDELINES.md` §1.
+  - Gap: `workspaceEmailPipeline.ts:71,124` opens `db.transaction(async (tx) => { … })` and issues `set_config('app.organisation_id', orgId, true)` directly, but does NOT wrap with `withOrgTx({tx, organisationId, source: ...})`. The RLS session var IS set, so writes are protected — but the AsyncLocalStorage org context is not extended. Any code inside the tx that tried `getOrgScopedDb()` would resolve to the OUTER tx, not this inner one.
+  - Suggested approach: wrap each `db.transaction` block in `withOrgTx({tx, organisationId: orgId, source: 'workspaceEmailPipeline.send'}, ...)` matching the inbound-webhook pattern; preserve the `set_config` call.
