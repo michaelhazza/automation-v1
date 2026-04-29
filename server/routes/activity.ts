@@ -25,6 +25,7 @@ function parseFilters(query: Record<string, unknown>): ActivityFilters {
     from: typeof query.from === 'string' ? query.from : undefined,
     to: typeof query.to === 'string' ? query.to : undefined,
     agentId: typeof query.agentId === 'string' ? query.agentId : undefined,
+    actorId: typeof query.actorId === 'string' ? query.actorId : undefined,
     severity: asStringArray(query.severity),
     assignee: typeof query.assignee === 'string' ? query.assignee : undefined,
     q: typeof query.q === 'string' ? query.q : undefined,
