@@ -41,10 +41,8 @@
 // function `asserts` overloads via TypeScript decorators. Dynamic-importing
 // it strips the narrowing and triggers TS2775. Heavy DB modules stay dynamic
 // so the no-DATABASE_URL skip path returns before they boot.
-import { strict as assert } from 'node:assert';
+import { expect, vi } from 'vitest';
 import * as crypto from 'node:crypto';
-import { mock } from 'node:test';
-
 // Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
 // Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
 const SKIP = process.env.NODE_ENV !== 'integration';
@@ -390,27 +388,27 @@ await test('test 1: approved invoke_automation fires webhook and reaches complet
         crypto.randomUUID(), // userId
       );
 
-      assert.equal(result.stepRunStatus, 'completed', 'decideApproval should return completed');
+      expect(result.stepRunStatus, 'decideApproval should return completed').toBe('completed');
 
       // HTTP-layer assertion — exactly one dispatch.
-      assert.equal(receiver.callCount, 1, 'webhook must fire exactly once');
+      expect(receiver.callCount, 'webhook must fire exactly once').toBe(1);
       const call = receiver.calls[0];
-      assert.equal(call.path, webhookPath, 'webhook path must match the automation row');
+      expect(call.path, 'webhook path must match the automation row').toBe(webhookPath);
 
       // HMAC assertion — fail loudly if header is MISSING (not just on mismatch).
       const hmacHeader = call.headers['x-webhook-signature'];
-      assert.ok(hmacHeader, 'X-Webhook-Signature header must be present');
+      expect(hmacHeader).toBeTruthy();
       const expectedHmac = webhookService.signOutboundRequest(seed.stepRunId, 'test-hmac-secret');
-      assert.equal(hmacHeader, expectedHmac, 'HMAC signature must match expected value');
+      expect(hmacHeader, 'HMAC signature must match expected value').toBe(expectedHmac);
 
       // DB-side assertion — workflow_step_runs row reached completed.
       const [stepRun] = await db
         .select()
         .from(workflowStepRuns)
         .where(eq(workflowStepRuns.id, seed.stepRunId));
-      assert.ok(stepRun, 'step run row must exist');
-      assert.equal(stepRun.status, 'completed', 'step run must be completed');
-      assert.equal(stepRun.attempt, 1, 'attempt counter must be 1 (single dispatch)');
+      expect(stepRun).toBeTruthy();
+      expect(stepRun.status, 'step run must be completed').toBe('completed');
+      expect(stepRun.attempt, 'attempt counter must be 1 (single dispatch)').toBe(1);
 
       // The previously-mentioned automationId is now bound by reference; the
       // `unused` lint will complain if not used. Reference it explicitly so
@@ -437,7 +435,7 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
   // HTTP receiver count catches the inverse: signed once, but fetch
   // somehow fired twice (impossible in current code, but the dual assertion
   // is the load-bearing pattern the spec demands).
-  const signSpy = mock.method(webhookService, 'signOutboundRequest');
+  const signSpy = vi.spyOn(webhookService, 'signOutboundRequest');
   try {
     const fixture = await seedFixture(receiver.url);
     const webhookPath = `/auto-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -468,17 +466,10 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
       // the 409 guard pre-resume OR hits the alreadyResumed branch and
       // returns 'completed' as well.
       const fulfilled = results.filter((r) => r.status === 'fulfilled');
-      assert.ok(
-        fulfilled.length >= 1,
-        `at least one decideApproval call must succeed; got ${fulfilled.length}`,
-      );
+      expect(fulfilled.length >= 1).toBeTruthy();
 
       // ── HTTP-LAYER ASSERTION ────────────────────────────────────────────
-      assert.equal(
-        receiver.callCount,
-        1,
-        `concurrent double-approve must fire the webhook EXACTLY once; got ${receiver.callCount}`,
-      );
+      expect(receiver.callCount, `concurrent double-approve must fire the webhook EXACTLY once; got ${receiver.callCount}`).toBe(1);
 
       // ── BOUNDARY-LAYER ASSERTION (load-bearing alongside callCount) ─────
       // The sign call happens once per dispatch attempt. Filter the spy's
@@ -488,11 +479,7 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
       const signCallsForThisStep = signSpy.mock.calls.filter(
         (c) => c.arguments[0] === seed.stepRunId,
       );
-      assert.equal(
-        signCallsForThisStep.length,
-        1,
-        `signOutboundRequest must be invoked EXACTLY once for this stepRunId; got ${signCallsForThisStep.length} (total spy calls: ${signSpy.mock.calls.length})`,
-      );
+      expect(signCallsForThisStep.length, `signOutboundRequest must be invoked EXACTLY once for this stepRunId; got ${signCallsForThisStep.length} (total spy calls: ${signSpy.mock.calls.length})`).toBe(1);
 
       // ── DB-side terminal-state confirmation ─────────────────────────────
       // Single workflow_step_runs row, status='completed'. The `attempt`
@@ -505,8 +492,8 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
         .select()
         .from(workflowStepRuns)
         .where(eq(workflowStepRuns.id, seed.stepRunId));
-      assert.equal(stepRunRows.length, 1, 'exactly one step-run row');
-      assert.equal(stepRunRows[0].status, 'completed', 'terminal status must be completed');
+      expect(stepRunRows.length, 'exactly one step-run row').toBe(1);
+      expect(stepRunRows[0].status, 'terminal status must be completed').toBe('completed');
     } finally {
       await cleanupWorkflowScope({ runId: seed.runId, stepRunId: seed.stepRunId });
     }
@@ -525,7 +512,7 @@ await test('test 3: rejected invoke_automation completes without webhook dispatc
   // transmission) is caught even though the HTTP receiver count would
   // still show 0. The spec §1.4 Test 3 explicitly demands this dual-layer
   // negative-dispatch assertion to mirror Test 2's positive-dispatch shape.
-  const signSpy = mock.method(webhookService, 'signOutboundRequest');
+  const signSpy = vi.spyOn(webhookService, 'signOutboundRequest');
   try {
     const fixture = await seedFixture(receiver.url);
     const webhookPath = `/auto-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -549,10 +536,10 @@ await test('test 3: rejected invoke_automation completes without webhook dispatc
         undefined,
         crypto.randomUUID(),
       );
-      assert.equal(result.stepRunStatus, 'failed', 'rejection should produce failed status');
+      expect(result.stepRunStatus, 'rejection should produce failed status').toBe('failed');
 
       // HTTP-layer: zero webhook calls.
-      assert.equal(receiver.callCount, 0, 'rejected path must NOT fire the webhook');
+      expect(receiver.callCount, 'rejected path must NOT fire the webhook').toBe(0);
 
       // BOUNDARY-LAYER: zero sign calls scoped to this stepRunId. A regression
       // that triggered the dispatch path (sign-then-crash-before-fetch) on
@@ -561,26 +548,18 @@ await test('test 3: rejected invoke_automation completes without webhook dispatc
       const signCallsForThisStep = signSpy.mock.calls.filter(
         (c) => c.arguments[0] === seed.stepRunId,
       );
-      assert.equal(
-        signCallsForThisStep.length,
-        0,
-        `signOutboundRequest must NOT be invoked for a rejected stepRunId; got ${signCallsForThisStep.length} sign calls`,
-      );
+      expect(signCallsForThisStep.length, `signOutboundRequest must NOT be invoked for a rejected stepRunId; got ${signCallsForThisStep.length} sign calls`).toBe(0);
 
       const [stepRun] = await db
         .select()
         .from(workflowStepRuns)
         .where(eq(workflowStepRuns.id, seed.stepRunId));
-      assert.ok(stepRun);
-      assert.equal(stepRun.status, 'failed');
+      expect(stepRun).toBeTruthy();
+      expect(stepRun.status).toBe('failed');
       // Schema's `error` column carries the rejection reason — proves the
       // failure was via failStepRun('approval_rejected', ...) and not some
       // other crash path.
-      assert.match(
-        String(stepRun.error ?? ''),
-        /approval_rejected/,
-        'error reason must reflect the rejection',
-      );
+      expect(String(stepRun.error ?? '')).toMatch(/approval_rejected/);
     } finally {
       await cleanupWorkflowScope({ runId: seed.runId, stepRunId: seed.stepRunId });
     }

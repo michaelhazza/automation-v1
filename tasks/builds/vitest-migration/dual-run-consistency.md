@@ -67,3 +67,27 @@ server/services/__tests__/llmRouterTimeoutPure.test.ts bash:pass vitest:pass mat
 server/services/__tests__/managerGuardPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/memoryBlockCitationDetectorPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/memoryBlockRetrievalServicePure.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-04 (2026-04-30)
+server/services/__tests__/notifyOperatorFanoutServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/recommendedInterventionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/referenceDocumentServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/resolveRequiredConnectionsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleConflictDetectorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleTeachabilityClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillIdempotencyKeysPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillStudioServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts bash:pass vitest:fail match:expected-phase3
+server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-04 (2026-04-30)
+server/services/__tests__/notifyOperatorFanoutServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/recommendedInterventionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/referenceDocumentServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/resolveRequiredConnectionsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleConflictDetectorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleTeachabilityClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillIdempotencyKeysPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillStudioServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts bash:pass vitest:fail match:expected-phase3
+server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts bash:pass vitest:pass match:yes

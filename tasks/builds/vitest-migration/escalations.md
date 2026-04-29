@@ -26,3 +26,14 @@ Format per entry:
        skipped tests). Vitest correctly reports it as "skipped". This is the expected
        behavior after converting { skip: SKIP } to test.skipIf(SKIP). Not a bug.
   Decision: WHITELISTED. All integration tests with skip gates will show this pattern.
+
+- 2026-04-30, phase2-batch-04
+  File: server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts
+  What: bash:pass → vitest:fail (no test suite found — 0 tests registered with Vitest)
+  Why: File is a HYBRID: uses node:assert + mock from node:test BUT its test
+       registration uses a LOCAL handwritten `test` harness (lines 340-342), not
+       node:test's global test. The assert→expect and mock→vi conversions are correct.
+       The test registration (test('name', { skip }, fn)) must stay as-is for the
+       local harness to handle it. Vitest sees no registered tests.
+  Decision: EXPECTED — Phase 3 will wrap the 3 handwritten test() calls in Vitest's
+       test.skipIf() once the harness is replaced. Note added to Phase 3 batch build.

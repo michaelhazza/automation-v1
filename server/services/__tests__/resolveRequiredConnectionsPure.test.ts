@@ -5,8 +5,7 @@
  *   npx tsx --test server/services/__tests__/resolveRequiredConnectionsPure.test.ts
  */
 
-import { test } from 'node:test';
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { resolveRequiredConnections } from '../resolveRequiredConnectionsPure.js';
 
 const SUB = 'sub-001';
@@ -23,7 +22,7 @@ test('null requiredConnections + any mappings → ok: true, resolved: {}', () =>
     subaccountId: SUB,
     mappings: MAPPINGS,
   });
-  assert.deepEqual(result, { ok: true, resolved: {} });
+  expect(result).toEqual({ ok: true, resolved: {} });
 });
 
 // ── 2. empty requiredConnections ──────────────────────────────────────────────
@@ -34,7 +33,7 @@ test('empty requiredConnections + any mappings → ok: true, resolved: {}', () =
     subaccountId: SUB,
     mappings: MAPPINGS,
   });
-  assert.deepEqual(result, { ok: true, resolved: {} });
+  expect(result).toEqual({ ok: true, resolved: {} });
 });
 
 // ── 3. one required, matching mapping present ─────────────────────────────────
@@ -45,7 +44,7 @@ test('one required key with matching mapping → ok: true with resolved entry', 
     subaccountId: SUB,
     mappings: [{ connectionKey: 'ghl', connectionId: 'conn-ghl' }],
   });
-  assert.deepEqual(result, { ok: true, resolved: { ghl: 'conn-ghl' } });
+  expect(result).toEqual({ ok: true, resolved: { ghl: 'conn-ghl' } });
 });
 
 // ── 4. one required, no matching mapping ──────────────────────────────────────
@@ -56,7 +55,7 @@ test('one required key with no matching mapping → ok: false, missing: [key]', 
     subaccountId: SUB,
     mappings: [{ connectionKey: 'ghl', connectionId: 'conn-ghl' }],
   });
-  assert.deepEqual(result, { ok: false, missing: ['slack'] });
+  expect(result).toEqual({ ok: false, missing: ['slack'] });
 });
 
 // ── 5. multiple required, partial overlap — order preserved ───────────────────
@@ -68,10 +67,10 @@ test('multiple required with partial overlap → ok: false, missing in input ord
     subaccountId: SUB,
     mappings: [{ connectionKey: 'beta', connectionId: 'conn-beta' }],
   });
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (!result.ok) {
     // Order must match input order: alpha first, gamma second
-    assert.deepEqual(result.missing, ['alpha', 'gamma']);
+    expect(result.missing).toEqual(['alpha', 'gamma']);
   }
 });
 
@@ -81,9 +80,9 @@ test('multiple required, all missing — order matches input order', () => {
     subaccountId: SUB,
     mappings: [],
   });
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
   if (!result.ok) {
-    assert.deepEqual(result.missing, ['z', 'a', 'm']);
+    expect(result.missing).toEqual(['z', 'a', 'm']);
   }
 });
 
@@ -95,7 +94,7 @@ test('mapping with empty connectionId for a required key → treated as missing'
     subaccountId: SUB,
     mappings: [{ connectionKey: 'ghl', connectionId: '' }],
   });
-  assert.deepEqual(result, { ok: false, missing: ['ghl'] });
+  expect(result).toEqual({ ok: false, missing: ['ghl'] });
 });
 
 test('mapping with whitespace-only connectionId for a required key → treated as missing', () => {
@@ -104,7 +103,7 @@ test('mapping with whitespace-only connectionId for a required key → treated a
     subaccountId: SUB,
     mappings: [{ connectionKey: 'ghl', connectionId: '   ' }],
   });
-  assert.deepEqual(result, { ok: false, missing: ['ghl'] });
+  expect(result).toEqual({ ok: false, missing: ['ghl'] });
 });
 
 // ── 7. extra unrelated mapping keys → ignored ─────────────────────────────────
@@ -119,7 +118,7 @@ test('extra unrelated mapping keys → ignored, required keys resolved normally'
       { connectionKey: 'extra-key-2', connectionId: 'conn-extra-2' },
     ],
   });
-  assert.deepEqual(result, { ok: true, resolved: { ghl: 'conn-ghl' } });
+  expect(result).toEqual({ ok: true, resolved: { ghl: 'conn-ghl' } });
 });
 
 test('all required present with extra unrelated keys → ok: true, resolved only required', () => {
@@ -132,7 +131,7 @@ test('all required present with extra unrelated keys → ok: true, resolved only
       { connectionKey: 'unrelated', connectionId: 'conn-unrelated' },
     ],
   });
-  assert.deepEqual(result, { ok: true, resolved: { ghl: 'conn-ghl', slack: 'conn-slack' } });
+  expect(result).toEqual({ ok: true, resolved: { ghl: 'conn-ghl', slack: 'conn-slack' } });
 });
 
 // ── 8. input-permutation determinism (§8.21) ──────────────────────────────────
@@ -152,7 +151,7 @@ test('mappings input order does not affect resolved output', () => {
   const expected = { ghl: 'conn-ghl', slack: 'conn-slack', stripe: 'conn-stripe' };
   for (const mappings of permutations) {
     const r = resolveRequiredConnections({ automation: auto, subaccountId: 'sub-1', mappings });
-    assert.ok(r.ok);
-    if (r.ok) assert.deepStrictEqual(r.resolved, expected);
+    expect(r.ok).toBeTruthy();
+    if (r.ok) expect(r.resolved).toStrictEqual(expected);
   }
 });
