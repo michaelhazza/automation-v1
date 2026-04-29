@@ -20,7 +20,7 @@ export default defineConfig({
       'worker/**',
     ],
     env: {
-      JWT_SECRET: 'ci-throwaway-jwt-secret',
+      JWT_SECRET: 'ci-throwaway-jwt-secret-at-least-32-chars',
       EMAIL_FROM: 'ci@automation-os.local',
       NODE_ENV: 'test',
     },
