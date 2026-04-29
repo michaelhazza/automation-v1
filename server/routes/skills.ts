@@ -7,7 +7,9 @@ import { agentService } from '../services/agentService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import type { SkillTier } from '../lib/skillVisibility.js';
 
@@ -155,7 +157,12 @@ router.post('/api/org/skills/:skillId/test-run',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    checkTestRunRateLimit(req.user!.id);
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt);
+      res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
+      return;
+    }
     const { prompt, inputJson, idempotencyKey } = req.body as {
       prompt?: string;
       inputJson?: Record<string, unknown>;
