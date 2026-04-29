@@ -42,3 +42,47 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// ─── Workspace identity API wrappers (agents-as-employees) ────────────────────
+
+export const getSubaccountWorkspaceConfig = (saId: string) =>
+  api.get(`/api/subaccounts/${saId}/workspace`).then(r => r.data);
+
+export const configureWorkspace = (saId: string, body: { backend: string; connectorConfigId: string }) =>
+  api.post(`/api/subaccounts/${saId}/workspace/configure`, body).then(r => r.data);
+
+export const onboardAgentToWorkspace = (saId: string, body: Record<string, unknown>) =>
+  api.post(`/api/subaccounts/${saId}/workspace/onboard`, body).then(r => r.data);
+
+export const suspendAgentIdentity = (agentId: string) =>
+  api.post(`/api/agents/${agentId}/identity/suspend`).then(r => r.data);
+
+export const resumeAgentIdentity = (agentId: string) =>
+  api.post(`/api/agents/${agentId}/identity/resume`).then(r => r.data);
+
+export const revokeAgentIdentity = (agentId: string, confirmName: string) =>
+  api.post(`/api/agents/${agentId}/identity/revoke`, { confirmName }).then(r => r.data);
+
+export const archiveAgentIdentity = (agentId: string) =>
+  api.post(`/api/agents/${agentId}/identity/archive`).then(r => r.data);
+
+export const toggleAgentEmailSending = (agentId: string, enabled: boolean) =>
+  api.patch(`/api/agents/${agentId}/identity/email-sending`, { enabled }).then(r => r.data);
+
+export const getAgentMailbox = (agentId: string, cursor?: string) =>
+  api.get(`/api/agents/${agentId}/mailbox`, { params: cursor ? { cursor } : {} }).then(r => r.data);
+
+export const sendAgentEmail = (agentId: string, body: Record<string, unknown>) =>
+  api.post(`/api/agents/${agentId}/mailbox/send`, body).then(r => r.data);
+
+export const getAgentMailboxThread = (agentId: string, threadId: string) =>
+  api.get(`/api/agents/${agentId}/mailbox/threads/${threadId}`).then(r => r.data);
+
+export const getAgentCalendar = (agentId: string, from: string, to: string) =>
+  api.get(`/api/agents/${agentId}/calendar`, { params: { from, to } }).then(r => r.data);
+
+export const createAgentCalendarEvent = (agentId: string, body: Record<string, unknown>) =>
+  api.post(`/api/agents/${agentId}/calendar/events`, body).then(r => r.data);
+
+export const respondToAgentCalendarEvent = (agentId: string, eventId: string, response: string) =>
+  api.post(`/api/agents/${agentId}/calendar/events/${eventId}/respond`, { response }).then(r => r.data);
