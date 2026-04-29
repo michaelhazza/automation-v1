@@ -22,6 +22,12 @@ import {
 // Minimal test harness (tsx-compatible, no external deps)
 // ---------------------------------------------------------------------------
 
+function assertThrows(fn: () => unknown, label: string): void {
+  let thrown = false;
+  try { fn(); } catch { thrown = true; }
+  if (!thrown) throw new Error(`${label} — expected throw`);
+}
+
 function assertEqual<T>(a: T, b: T, label: string) {
   if (a !== b) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);

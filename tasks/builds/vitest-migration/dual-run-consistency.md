@@ -203,3 +203,15 @@ server/services/__tests__/computeStaffActivityPulsePure.test.ts bash:pass vitest
 server/services/__tests__/configAgentGuidelinesInjection.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/configDocumentParserServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/configHistoryServicePure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-09 (2026-04-29)
+server/services/__tests__/configUpdateOrganisationConfigPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/connectorPollingSchedulerPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/conversationsRoutePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/critiqueGatePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/delegationGrantValidatorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/delegationGraphServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/delegationOutcomeServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/deliveryServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/extractRunInsightsErrorMessagePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/fixtures/__tests__/fakeProviderAdapter.test.ts bash:pass vitest:pass match:yes
