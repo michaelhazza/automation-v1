@@ -5,6 +5,7 @@
 **Timestamp:** 2026-04-29T00:15:39Z
 **Branch:** fix-logical-deletes
 **Codex CLI:** v0.125.0 (auth: ChatGPT, model: gpt-5.5)
+**Commit at finish:** b57aeb1ef8d3c143ae4fe5a014bc14440d0114c9
 
 ---
 
