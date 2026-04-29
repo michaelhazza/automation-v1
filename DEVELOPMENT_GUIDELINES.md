@@ -64,9 +64,9 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 
 ## 5. Gates are the source of truth
 
-- **Blocking gates block merges — no exceptions.** No `--ignore` flags, no `# baseline-allow` on blocking gates, no deletion. Run all gates with `npm run test:gates`.
+- **Blocking gates block merges — no exceptions.** No `--ignore` flags, no `# baseline-allow` on blocking gates, no deletion. **Continuous integration runs the full gate suite as a pre-merge gate** — do NOT run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` locally. See `CLAUDE.md` § *Test gates are CI-only — never run locally* for the full rule.
 - **Historical baseline files need both conditions:** filename in the gate's `HISTORICAL_BASELINE_FILES` array AND a `-- @rls-baseline:` annotation in the file. One without the other still fails the gate.
-- **Re-run gates before each new phase.** Gate state drifts in pre-production — reconcile live violations against the spec's planned scope, never apply a stale fix list.
+- **Trust CI's gate result, not a local re-run.** Gate state drifts in pre-production. CI is the authoritative gate runner — read its output to reconcile live violations against the spec's planned scope. Never apply a stale fix list, and never invoke gate scripts locally to "preview" what CI will say.
 - **Warning-level gates are observability signals, not blockers.** A point-specific `# baseline-allow` with an explanatory comment is the right way to acknowledge a reviewed pattern. Never use blanket suppression.
 
 ### Gate authoring rules
@@ -94,7 +94,7 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 
 The current posture is `static_gates_primary` per `docs/spec-context.md`. This means:
 
-- **Gates pass = done.** A green gate run is the definition of done for a phase.
+- **Gates pass = done.** A green gate run in CI is the definition of done for a phase. Local sessions do not run the gate suite — see §5 and `CLAUDE.md` § *Test gates are CI-only — never run locally*.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
 - **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
 - **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
