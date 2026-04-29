@@ -5,6 +5,7 @@ dist/
 *.log
 .superpowers/brainstorm/
 .test-runs/
+.tmp-review/
 shared/iee/*.js
 .claude/*.lock
 tasks/codex-iter*.txt
