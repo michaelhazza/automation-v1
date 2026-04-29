@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -64,6 +64,24 @@ export const connectorConfigService = {
         eq(connectorConfigs.subaccountId, subaccountId),
         eq(connectorConfigs.connectorType, connectorType as ConnectorType),
       ));
+    return config ?? null;
+  },
+
+  /**
+   * Returns the first connector config for this subaccount whose connectorType
+   * differs from the given `connectorType`. Used by the /configure guard to
+   * detect a backend-swap attempt before any identities have been migrated.
+   */
+  async getBySubaccountAndDifferentType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        ne(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ))
+      .limit(1);
     return config ?? null;
   },
 

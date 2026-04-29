@@ -16,6 +16,7 @@ import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAda
 import { googleWorkspaceAdapter } from '../adapters/workspace/googleWorkspaceAdapter.js';
 import { auditEvents } from '../db/schema/auditEvents.js';
 import { env } from '../lib/env.js';
+import { failure } from '../../shared/iee/failure.js';
 
 function resolveAdapter(backend: string) {
   return backend === 'google_workspace' ? googleWorkspaceAdapter : nativeWorkspaceAdapter;
@@ -98,6 +99,19 @@ router.post(
 
     const configJson: Record<string, unknown> = {};
     if (domain) configJson.domain = domain;
+
+    // Guard: reject backend swap if non-archived identities exist.
+    // Same-backend reconfigure and initial configure are unaffected.
+    const existingOtherConfig = await connectorConfigService.getBySubaccountAndDifferentType(
+      req.orgId!, subaccountId, backend
+    );
+    if (existingOtherConfig) {
+      const activeIdentities = await workspaceIdentityService.getActiveIdentitiesForSubaccount(subaccountId);
+      if (activeIdentities.length > 0) {
+        return res.status(409).json(failure('workspace_configure_requires_migration',
+          'Backend cannot be changed while identities exist. Use /migrate.'));
+      }
+    }
 
     const existing = await connectorConfigService.getBySubaccountAndType(req.orgId!, subaccountId, backend);
 
