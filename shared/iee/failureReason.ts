@@ -52,6 +52,8 @@ export const FailureReason = z.enum([
   'workspace_email_sending_disabled',
   'workspace_provider_acl_denied',
   'workspace_idempotency_collision',
+  // Workspace actor hierarchy additions (agents-as-employees spec §6.1).
+  'parent_actor_cycle_detected',
   'unknown',
 ]);
 
