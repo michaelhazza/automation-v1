@@ -90,3 +90,61 @@ User reply: "all as recommended"
 - `security` (F3) — bypass annotations are convention-only; runtime enforcement is a follow-up.
 - `scope` (F4) — operational note for migration LOCK TABLE.
 
+---
+
+## Round 2 — 2026-04-29T09:14:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+Good correction. The lock-span fix is now structurally correct and removes the concurrency regression. No new blockers introduced. What remains are edge hardening and future-proofing gaps, not merge blockers.
+
+F1 — Lock spans sweep (re-review): The fix is now aligned with the intended invariant. Lock acquired once, enumeration + mutation both inside lock scope, no split-phase execution. Restores single-writer guarantee, deterministic decay behaviour, no double-application risk. Verdict: Correct and complete. No further action required.
+
+F2a — Invariant comment (sanity check): Directionally right but still too implicit for future contributors. What's missing: it explains what is safe, but not clearly why unsafe patterns break. Tighten with explicit clause: "This job is not idempotent. Any concurrent execution without the advisory lock will result in cumulative decay and premature deprecation." Turns documentation into a guardrail.
+
+F2b — Idempotency test (still deferred, still important): Has real value because lock correctness is now load-bearing. No safety net if someone later moves the lock again, parallelises the loop, or introduces retries incorrectly. Minimal high-leverage test: run job twice concurrently, assert total decay applied once and no additional rows updated second pass. Regression tripwire. Not blocking, but exact place bugs will re-enter.
+
+F3 — RLS bypass runtime enforcement (deferred): Still the biggest systemic risk, but correctly scoped as non-blocking. Allowlist annotations consistent, registry coverage disciplined. No runtime guarantee that call path is admin-only or misuse won't silently pass. Lightweight upgrade options: wrap withAdminConnection to assert admin scope, OR emit structured audit log on bypass reads.
+
+F5 (new) — Lock lifetime vs job duration: Long-running job = long-held advisory lock. If job stalls, next run blocks indefinitely. Recommendation: document bounded-runtime invariant — job must remain bounded (time or batch size), or future change: chunking + per-org locking. No code change needed now, just document.
+
+F6 — Measure-job invariant (re-check): Still valid. Wording should include "All side effects must occur after successful insert OR be idempotent". (Already covered by current wording — verified.)
+
+Final verdict: Ready to merge. APPROVED. Follow-ups worth doing soon: F2b regression test, F3 runtime guard, slightly strengthen invariant comments.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — Lock span re-review | technical | (reaffirm) | (no action) | n/a | ChatGPT confirmed correct and complete; no further action. |
+| F2a-tighten — Add explicit "not idempotent" clause to ruleAutoDeprecateJob header | technical | implement | auto (implement) | low | Documentation guardrail. One sentence added to the existing warning block. |
+| F2b — Idempotency test (concurrent-run regression tripwire) | technical | defer | auto (defer) | medium | Already deferred to tasks/todo.md § PR #235 from round 1. ChatGPT reaffirmed; no new defer entry needed. |
+| F3 — RLS bypass runtime enforcement | technical | defer | auto (defer) | medium | Already deferred to tasks/todo.md § PR #235 from round 1. ChatGPT reaffirmed; no new defer entry needed. |
+| F5 (new) — Bounded-runtime invariant for ruleAutoDeprecateJob | technical | implement | auto (implement) | low | New finding. Document the bounded-runtime contract in the header (org LIMIT 500, per-org row bound, scaling caveat) so future maintainers know not to remove the bounds without re-engineering the lock model. |
+| F6 — Measure-job invariant wording check | technical | reject | auto (reject) | low | Existing comment in measureInterventionOutcomeJob already captures the invariant ("Every code path inside the per-row loop, between the SELECT and the recordOutcome call, must be either (a) a pure read with no observable side effect, or (b) itself idempotent under repeated invocation"). ChatGPT's suggested wording is semantically identical. No change. |
+
+### Implemented (auto-applied technical, no escalations this round)
+
+- [auto] **F2a-tighten** — `server/jobs/ruleAutoDeprecateJob.ts` header: added explicit "not idempotent" clause to the Pattern B warning block: *"The job's mutation phase is NOT idempotent — any concurrent execution without the advisory lock results in cumulative decay and premature deprecation."* Sits before the existing technical detail about applyDecayForOrg's decay step, turning the warning from descriptive into prescriptive.
+- [auto] **F5** — `server/jobs/ruleAutoDeprecateJob.ts` header: added a Bounded-runtime contract section pinning the two bounds the lock-spans-sweep model relies on (org LIMIT 500, per-org bounded by row count of `deprecated_at IS NULL` rows) and the scaling step required if either bound is loosened (chunk + per-org locks + idempotent decay).
+
+### Deferred (no new entries — round 1 defers reaffirmed)
+
+- F2b idempotency test: already in tasks/todo.md § PR #235 [auto].
+- F3 RLS bypass runtime enforcement: already in tasks/todo.md § PR #235 [user].
+
+### Verification
+
+- `npx tsc --noEmit -p server/tsconfig.json` filtered to modified files: 0 errors. Pre-existing typecheck errors in unrelated files are untouched.
+- All round 2 changes are header-comment-only; no code-flow changes.
+
+### Top themes (Round 2)
+
+- `idempotency` (F2a-tighten) — wording strengthening on top of round 1's structural fix.
+- `scope` (F5) — new finding flagging bounded-runtime as a load-bearing assumption now that the lock spans the full sweep. Captured as documented invariant.
+
+### ChatGPT verdict for Round 2
+
+**APPROVED — Ready to merge.** Remaining items (F2b regression test, F3 RLS bypass runtime enforcement) are non-blocking follow-ups, both already routed to tasks/todo.md.
+

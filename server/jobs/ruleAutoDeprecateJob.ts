@@ -19,11 +19,13 @@
  *                    for full-sweep race protection.
  *
  *   ⚠ This is Pattern B, NOT Pattern A. The lock MUST span mutation, not just
- *     enumeration. applyDecayForOrg's decay step subtracts BLOCK_DECAY_RATE
- *     from quality_score on every invocation against rows where
- *     deprecated_at IS NULL — overlapping runners that read the same row
- *     from independent transactions would double-decay the value. Holding
- *     the lock across the full sweep eliminates the race.
+ *     enumeration. The job's mutation phase is NOT idempotent — any concurrent
+ *     execution without the advisory lock results in cumulative decay and
+ *     premature deprecation. applyDecayForOrg's decay step subtracts
+ *     BLOCK_DECAY_RATE from quality_score on every invocation against rows
+ *     where deprecated_at IS NULL — overlapping runners that read the same
+ *     row from independent transactions would double-decay the value.
+ *     Holding the lock across the full sweep eliminates the race.
  *
  * Idempotency model: lock-serialised + `WHERE deprecated_at IS NULL` predicate
  *   Mechanism:       the global advisory lock guarantees only one sweep can
@@ -48,6 +50,24 @@
  *     under admin_role, defense-in-depth comes from the explicit predicate.
  *   - Sequential per-org processing; no parallel fan-out in v1.
  *   - Terminal event emitted with outcome counters regardless of mixed results.
+ *
+ * Bounded-runtime contract:
+ *   The advisory lock is held for the duration of the entire sweep. The job
+ *   MUST therefore remain bounded:
+ *     (a) `SELECT id FROM organisations LIMIT 500` — hard cap on the number
+ *         of orgs processed per invocation. If org count exceeds 500, the
+ *         tail will not be processed this tick and will pick up the next.
+ *     (b) per-org work is bounded by row count of `memory_blocks WHERE
+ *         deprecated_at IS NULL` for that org — an O(N) sequential pass
+ *         through that filtered set with PK-targeted UPDATEs.
+ *   If either bound is loosened (e.g. removing the org LIMIT, fan-out to
+ *   parallel workers, retry inside the loop), the lock-held duration grows
+ *   correspondingly and the next scheduled tick will block until the
+ *   previous completes. Future scaling step: chunk the org list and use
+ *   per-org locks instead of one global lock — but that requires every
+ *   per-org tx to be its own atomic decay+deprecate unit and the decay
+ *   step must become idempotent (e.g. via a `last_decayed_at` predicate)
+ *   to survive concurrent same-org runners.
  *
  * __testHooks production safety: hook is undefined by default; the call site
  * uses the canonical `if (!__testHooks.<name>) return;` short-circuit so an
