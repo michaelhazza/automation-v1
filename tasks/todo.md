@@ -1602,3 +1602,19 @@ a staging environment with real app→DB network latency. Pass conditions remain
 
 - [x] **CONFORM-3 [CLOSED 2026-04-29]**: Phase 3 §5.2.1 audit triplet line-number drift for ruleAutoDeprecateJob
   - **Resolution:** Updated per-job audit paragraph in `tasks/builds/pre-prod-tenancy/progress.md` to use commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition). All three places now agree byte-identically per §5.2.1.
+
+## Test infrastructure hygiene
+
+### TI-001: Make build-code-graph-watcher.test.ts parallel-safe
+- File: scripts/__tests__/build-code-graph-watcher.test.ts
+- Quarantine date: 2026-04-29
+- Owner: unowned
+- Reason: spawns `tsx scripts/build-code-graph.ts` subprocesses, holds the
+  singleton lock at `references/.watcher.lock`, takes up to 120 s, and is
+  destructive of in-flight watcher state. Pinned to single-fork to prevent
+  collisions with any other test that touches the same lock or filesystem
+  paths.
+- Goal: refactor the test so its filesystem and subprocess effects are
+  scoped to a temp directory + injected lock path, then remove the
+  `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
+- Linked invariant: I-6 (quarantine contract with expiry pressure).

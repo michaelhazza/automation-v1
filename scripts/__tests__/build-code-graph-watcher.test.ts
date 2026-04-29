@@ -28,6 +28,14 @@
  *   (also picked up automatically by scripts/run-all-unit-tests.sh)
  */
 
+// @vitest-isolate
+// reason: spawns tsx subprocesses, holds references/.watcher.lock singleton,
+//         destructive of in-flight watcher state, runtime up to 120s
+// date: 2026-04-29
+// owner: unowned
+// follow-up: tasks/todo.md TI-001
+// review_after: 2026-05-29
+
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
