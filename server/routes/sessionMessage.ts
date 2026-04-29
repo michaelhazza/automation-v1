@@ -1,13 +1,12 @@
 // server/routes/sessionMessage.ts
 
 import { Router } from 'express';
-import { eq } from 'drizzle-orm';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
+import { logger } from '../lib/logger.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
-import { findEntitiesMatching, disambiguationQuestion, scoreCandidate } from '../services/scopeResolutionService.js';
+import { findEntitiesMatching, disambiguationQuestion, scoreCandidate, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
 import type { Request } from 'express';
@@ -45,6 +44,12 @@ router.post(
 
     // ── Path A: user clicked a disambiguation button ──────────────────────
     if (body.selectedCandidateId && body.selectedCandidateName && body.selectedCandidateType) {
+      // Reject malformed enum values before they reach the resolver — keeps
+      // the candidateType branch in resolveCandidateScope total.
+      if (body.selectedCandidateType !== 'org' && body.selectedCandidateType !== 'subaccount') {
+        res.status(400).json({ type: 'error', message: 'invalid selectedCandidateType' });
+        return;
+      }
       const result = await resolveAndCreate({
         candidateId: body.selectedCandidateId,
         candidateName: body.selectedCandidateName,
@@ -64,7 +69,7 @@ router.post(
 
     // ── Path B: "change to X [, remainder]" command ───────────────────────
     const command = parseContextSwitchCommand(text);
-    console.info('session.message', {
+    logger.info('session.message', {
       userId: req.user!.id,
       commandDetected: !!command,
       entityType: command?.entityType ?? null,
@@ -102,7 +107,7 @@ router.post(
         (candidates.length > 1 &&
           scoreCandidate(candidates[0]!, command.entityName) >
           scoreCandidate(candidates[1]!, command.entityName));
-      console.info('session.message:resolved', {
+      logger.info('session.message.resolved', {
         candidatesCount: candidates.length,
         autoResolved: shouldAutoResolve,
         topCandidate: candidates[0] ? { id: candidates[0].id, type: candidates[0].type } : null,
@@ -130,8 +135,30 @@ router.post(
     }
 
     // ── Path C: plain brief submission ────────────────────────────────────
-    const organisationId = sessionContext.activeOrganisationId ?? req.orgId!;
-    const subaccountId = sessionContext.activeSubaccountId ?? undefined;
+    // Use req.orgId (set by authenticate middleware from the user's auth or
+    // the X-Organisation-Id header for admins) as the canonical org. Never
+    // trust sessionContext.activeOrganisationId from the body — it would
+    // bypass the cross-org audit log and let any client write into any org.
+    const organisationId = req.orgId!;
+    // Cross-entity verification (DEVELOPMENT_GUIDELINES §9): a body-supplied
+    // subaccount id must belong to the resolved org before we write tasks.
+    // After an org-only context switch the GlobalAskBar can retain a stale
+    // activeSubaccountId in localStorage — silently drop it (and log for
+    // observability) instead of returning 404, so the user can still submit
+    // an org-scoped brief.
+    let subaccountId: string | undefined = sessionContext.activeSubaccountId ?? undefined;
+    if (subaccountId) {
+      try {
+        await resolveSubaccount(subaccountId, organisationId);
+      } catch {
+        logger.info('session.message.stale_subaccount_dropped', {
+          userId: req.user!.id,
+          organisationId,
+          suppliedSubaccountId: subaccountId,
+        });
+        subaccountId = undefined;
+      }
+    }
 
     const result = await createBrief({
       organisationId,
@@ -168,43 +195,44 @@ async function resolveAndCreate(opts: {
 }): Promise<SessionMessageResponse> {
   const { candidateId, candidateName, candidateType, remainder, req } = opts;
 
-  let resolvedOrgId: string | null;
-  if (candidateType === 'org') {
-    resolvedOrgId = candidateId;
-  } else {
-    // Do NOT assume req.orgId — the selected subaccount may belong to a different org
-    const [sub] = await db
-      .select({ organisationId: subaccounts.organisationId })
-      .from(subaccounts)
-      .where(eq(subaccounts.id, candidateId))
-      .limit(1);
-    // Hard fail — falling back to the wrong org would be a multi-tenant data integrity violation
-    if (!sub?.organisationId) {
-      return { type: 'error', message: 'Invalid subaccount selection — organisation not found.' };
-    }
-    resolvedOrgId = sub.organisationId;
+  // Re-validate authorisation server-side. The disambiguation UI presents only
+  // candidates the user can see, but the client controls the POST payload —
+  // without this check, a non-admin could submit any orgId/subaccountId UUID
+  // and create a brief in another tenant.
+  const resolved = await resolveCandidateScope({
+    candidateId,
+    candidateType,
+    userRole: req.user!.role,
+    userOrganisationId: req.user!.organisationId ?? req.orgId ?? null,
+  });
+  if (!resolved) {
+    return { type: 'error', message: 'Invalid selection — organisation or subaccount not accessible.' };
   }
-  const resolvedSubaccountId = candidateType === 'subaccount' ? candidateId : null;
+  const resolvedOrgId = resolved.resolvedOrgId;
+  const resolvedSubaccountId = resolved.resolvedSubaccountId;
+  // For an org candidate, the candidate name IS the org name. For a
+  // subaccount candidate, the parent org name comes from the resolver join.
+  const resolvedOrgName = candidateType === 'org' ? candidateName : resolved.resolvedOrgName;
 
   if (!remainder) {
     return {
       type: 'context_switch',
       organisationId: resolvedOrgId,
-      organisationName: candidateType === 'org' ? candidateName : null,
+      organisationName: resolvedOrgName,
       subaccountId: resolvedSubaccountId,
       subaccountName: candidateType === 'subaccount' ? candidateName : null,
     };
   }
 
   const result = await createBrief({
-    organisationId: resolvedOrgId!,
+    organisationId: resolvedOrgId,
     subaccountId: resolvedSubaccountId ?? undefined,
     submittedByUserId: req.user!.id,
     text: remainder,
     source: 'global_ask_bar',
     uiContext: {
       surface: 'global_ask_bar',
-      currentOrgId: resolvedOrgId!,
+      currentOrgId: resolvedOrgId,
       currentSubaccountId: resolvedSubaccountId ?? undefined,
       userPermissions: new Set<string>(),
     },
@@ -215,7 +243,7 @@ async function resolveAndCreate(opts: {
     briefId: result.briefId,
     conversationId: result.conversationId,
     organisationId: resolvedOrgId,
-    organisationName: candidateType === 'org' ? candidateName : null,
+    organisationName: resolvedOrgName,
     subaccountId: resolvedSubaccountId,
     subaccountName: candidateType === 'subaccount' ? candidateName : null,
   };

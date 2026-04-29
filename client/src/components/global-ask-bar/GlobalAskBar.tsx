@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api.js';
 import { isValidBriefText, type ScopeCandidate, type SessionMessageResponse } from './GlobalAskBarPure.js';
-import { getActiveOrgId, getActiveClientId, setActiveOrg, setActiveClient } from '../../lib/auth.js';
+import { getActiveOrgId, getActiveClientId, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
 
 type DisambiguationState = {
   candidates: ScopeCandidate[];
@@ -31,9 +31,16 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
       setDisambiguation({ candidates: data.candidates, question: data.question, remainder: data.remainder });
       return;
     }
-    // context_switch and brief_created both carry resolved context — apply it
+    // context_switch and brief_created both carry resolved context — apply it.
+    // For an org-only switch the server returns subaccountId=null; clear any
+    // stale activeSubaccountId from localStorage so the next submission isn't
+    // sent under a subaccount that belongs to the previous org.
     if (data.organisationId && data.organisationName) {
+      const orgChanged = data.organisationId !== getActiveOrgId();
       setActiveOrg(data.organisationId, data.organisationName);
+      if (orgChanged && !data.subaccountId) {
+        removeActiveClient();
+      }
     }
     if (data.subaccountId && data.subaccountName) {
       setActiveClient(data.subaccountId, data.subaccountName);

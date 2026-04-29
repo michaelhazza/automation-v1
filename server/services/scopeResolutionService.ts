@@ -108,6 +108,74 @@ export function deduplicateCandidates(candidates: ScopeCandidate[]): ScopeCandid
   });
 }
 
+/**
+ * Resolve a candidate id submitted from the disambiguation UI back to its
+ * organisation/subaccount tuple — with authorisation enforced.
+ *
+ * Non-admin org candidates: must equal the user's own org. Cross-tenant ids
+ * are rejected silently (returns null) to avoid leaking org existence.
+ *
+ * Non-admin subaccount candidates: looked up via getOrgScopedDb so RLS
+ * filters cross-tenant ids to zero rows.
+ *
+ * Admin candidates: looked up against raw db, matching the cross-tenant
+ * convention used by findEntitiesMatching above.
+ *
+ * Returns null when the candidate is not authorised for this user. Callers
+ * map null to a generic 'invalid selection' error.
+ */
+export async function resolveCandidateScope(input: {
+  candidateId: string;
+  candidateType: 'org' | 'subaccount';
+  userRole: string;
+  userOrganisationId: string | null;
+}): Promise<{
+  resolvedOrgId: string;
+  resolvedSubaccountId: string | null;
+  // Parent org name — returned for subaccount candidates so the client can
+  // update both activeOrgId AND activeOrgName atomically when the user picks
+  // a subaccount in another org. Without it the client would skip the org
+  // update (guard requires both id + name) and the next request would still
+  // send the OLD X-Organisation-Id header alongside the NEW subaccount.
+  resolvedOrgName: string | null;
+} | null> {
+  const { candidateId, candidateType, userRole, userOrganisationId } = input;
+  const isSystemAdmin = userRole === 'system_admin';
+
+  if (candidateType === 'org') {
+    if (!isSystemAdmin) {
+      if (!userOrganisationId || candidateId !== userOrganisationId) return null;
+      // Non-admin org candidate is the user's own org; the route already has
+      // the active org name available, so returning null here keeps the
+      // contract identical to pre-change behaviour for that branch.
+      return { resolvedOrgId: candidateId, resolvedSubaccountId: null, resolvedOrgName: null };
+    }
+    const [org] = await db
+      .select({ id: organisations.id, name: organisations.name })
+      .from(organisations)
+      .where(eq(organisations.id, candidateId))
+      .limit(1);
+    return org
+      ? { resolvedOrgId: org.id, resolvedSubaccountId: null, resolvedOrgName: org.name }
+      : null;
+  }
+
+  const tx = isSystemAdmin ? db : getOrgScopedDb('session.resolve_candidate');
+  const [sub] = await tx
+    .select({ organisationId: subaccounts.organisationId, orgName: organisations.name })
+    .from(subaccounts)
+    .innerJoin(organisations, eq(subaccounts.organisationId, organisations.id))
+    .where(eq(subaccounts.id, candidateId))
+    .limit(1);
+  return sub?.organisationId
+    ? {
+        resolvedOrgId: sub.organisationId,
+        resolvedSubaccountId: candidateId,
+        resolvedOrgName: sub.orgName ?? null,
+      }
+    : null;
+}
+
 export function disambiguationQuestion(candidates: ScopeCandidate[]): string {
   const hasOrg = candidates.some((c) => c.type === 'org');
   const hasSub = candidates.some((c) => c.type === 'subaccount');

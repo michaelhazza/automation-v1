@@ -534,7 +534,12 @@ export default function Layout({ user, children }: LayoutProps) {
     setNewBriefLoading(true);
     try {
       const targetOrgId = briefOrgOverride?.id ?? activeOrgId;
-      const targetSubaccountId = briefSubaccountOverride?.id ?? activeClientId ?? undefined;
+      // When the user picks a different org without picking a subaccount, do
+      // NOT fall back to the current activeClientId — that subaccount belongs
+      // to the previous org and would create a cross-tenant tasks row.
+      const orgChanged = !!briefOrgOverride && briefOrgOverride.id !== activeOrgId;
+      const targetSubaccountId =
+        briefSubaccountOverride?.id ?? (orgChanged ? undefined : activeClientId ?? undefined);
 
       const description = newBriefDesc.trim();
       const res = await api.post<{ briefId: string; conversationId: string }>(
@@ -1290,8 +1295,13 @@ export default function Layout({ user, children }: LayoutProps) {
                 </div>
               )}
 
-              {/* Subaccount override */}
-              {subaccounts.length > 0 && (
+              {/* Subaccount override — hidden when the user picks a different org,
+                  because the `subaccounts` list still belongs to the previously
+                  active org. Allowing a selection here would re-introduce the
+                  cross-tenant write defended against on submit (see comment at
+                  line 537). The user can pick the subaccount on the brief page
+                  after the context switch. */}
+              {subaccounts.length > 0 && !(briefOrgOverride && briefOrgOverride.id !== activeOrgId) && (
                 <div>
                   <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
                     Subaccount <span className="text-slate-400 font-normal">(optional)</span>

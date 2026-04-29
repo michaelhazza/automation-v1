@@ -7,9 +7,10 @@ import { decodeCursor } from '../services/briefArtefactCursorPure.js';
 import { handleConversationFollowUp } from '../services/briefConversationService.js';
 import { decideBriefApproval } from '../services/briefApprovalService.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
 import { tasks, agentRuns } from '../db/schema/index.js';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, asc } from 'drizzle-orm';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
@@ -39,16 +40,27 @@ router.post(
       return;
     }
 
+    // Cross-entity verification (DEVELOPMENT_GUIDELINES §9): when a
+    // subaccountId is supplied, confirm it belongs to req.orgId before any
+    // write. The Layout New Brief modal can present a stale subaccount list
+    // when an admin switches the org dropdown, and a malicious client could
+    // submit any UUID. resolveSubaccount throws { statusCode: 404 } on
+    // mismatch — asyncHandler maps that to a 404 response.
+    const effectiveSubaccountId = subaccountId ?? uiContext?.currentSubaccountId;
+    if (effectiveSubaccountId) {
+      await resolveSubaccount(effectiveSubaccountId, req.orgId!);
+    }
+
     const context: BriefUiContext = {
       surface: uiContext?.surface ?? 'global_ask_bar',
       currentOrgId: req.orgId!,
-      currentSubaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      currentSubaccountId: effectiveSubaccountId,
       userPermissions: new Set<string>(),
     };
 
     const result = await createBrief({
       organisationId: req.orgId!,
-      subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      subaccountId: effectiveSubaccountId,
       submittedByUserId: req.user!.id,
       text: text?.trim() ?? explicitTitle!.trim(),
       source: source ?? 'global_ask_bar',
@@ -93,6 +105,8 @@ router.get(
     const { briefId } = req.params;
     const tx = getOrgScopedDb('briefs.active_run');
 
+    // Oldest in-flight run wins so DelegationGraphView roots at the parent
+    // when a brief has both parent + child runs in flight (handoff/spawn chains).
     const [run] = await tx
       .select({ id: agentRuns.id })
       .from(agentRuns)
@@ -103,7 +117,7 @@ router.get(
           inArray(agentRuns.status, ['running', 'delegated', 'cancelling']),
         ),
       )
-      .orderBy(agentRuns.createdAt)
+      .orderBy(asc(agentRuns.createdAt))
       .limit(1);
 
     res.json({ runId: run?.id ?? null });
