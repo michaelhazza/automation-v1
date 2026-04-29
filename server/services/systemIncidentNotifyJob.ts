@@ -16,6 +16,7 @@ interface NotifyPayload {
   correlationId: string | null;
 }
 
+// @rls-allowlist-bypass: system_incidents registerSystemIncidentNotifyWorker [ref: spec §3.3.1]
 export async function registerSystemIncidentNotifyWorker(boss: PgBoss): Promise<void> {
   // teamSize 4 gives cross-instance parallelism; teamConcurrency 1 serialises
   // each worker instance so a single jobs-burst for one incident can't fan out

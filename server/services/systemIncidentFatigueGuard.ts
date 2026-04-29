@@ -13,6 +13,7 @@ export class SystemIncidentFatigueGuard extends AlertFatigueGuardBase {
     super(limits);
   }
 
+  // @rls-allowlist-bypass: system_incidents queryTodayCount [ref: spec §3.3.1]
   protected async queryTodayCount(fingerprint: string): Promise<number> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);

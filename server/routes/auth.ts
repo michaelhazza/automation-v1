@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -7,27 +6,10 @@ import { auditService } from '../services/auditService.js';
 import { validateBody } from '../middleware/validate.js';
 import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
-
-const forgotPasswordRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
-const resetPasswordRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 
 const router = Router();
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_MAX_ATTEMPTS = 10;
-const loginAttemptTimestamps = new Map<string, number[]>();
-
-function enforceLoginRateLimit(key: string): boolean {
-  const now = Date.now();
-  const attempts = loginAttemptTimestamps.get(key) ?? [];
-  const windowed = attempts.filter((ts) => now - ts < LOGIN_WINDOW_MS);
-  if (windowed.length >= LOGIN_MAX_ATTEMPTS) {
-    loginAttemptTimestamps.set(key, windowed);
-    return false;
-  }
-  windowed.push(now);
-  loginAttemptTimestamps.set(key, windowed);
-  return true;
-}
 
 // Validates password strength: min 8 chars, uppercase, number, special character
 function validatePasswordStrength(password: string): string | null {
@@ -39,8 +21,9 @@ function validatePasswordStrength(password: string): string | null {
 }
 
 router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
-  const rateKey = `signup:${req.ip}`;
-  if (!enforceLoginRateLimit(rateKey)) {
+  const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown'), 10, 900);
+  if (!limitResult.allowed) {
+    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
     return;
   }
@@ -65,8 +48,9 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
 
 router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
   const { email, password, organisationSlug } = req.body as LoginInput;
-  const rateKey = `${req.ip}:${String(email).toLowerCase()}`;
-  if (!enforceLoginRateLimit(rateKey)) {
+  const limitResult = await rateLimitCheck(rateLimitKeys.authLogin(req.ip ?? 'unknown', String(email)), 10, 900);
+  if (!limitResult.allowed) {
+    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
     return;
   }
@@ -105,7 +89,13 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
   res.json(result);
 }));
 
-router.post('/api/auth/forgot-password', forgotPasswordRateLimit, validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
+router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
+  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown'), 5, 900);
+  if (!limitResult.allowed) {
+    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+    res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });
+    return;
+  }
   const { email } = req.body as ForgotPasswordInput;
   const result = await authService.forgotPassword(email);
   auditService.log({
@@ -117,7 +107,13 @@ router.post('/api/auth/forgot-password', forgotPasswordRateLimit, validateBody(f
   res.json(result);
 }));
 
-router.post('/api/auth/reset-password', resetPasswordRateLimit, validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
+router.post('/api/auth/reset-password', validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
+  const limitResult = await rateLimitCheck(rateLimitKeys.authReset(req.ip ?? 'unknown'), 5, 900);
+  if (!limitResult.allowed) {
+    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+    res.status(429).json({ error: 'Too many password reset attempts. Please try again later.' });
+    return;
+  }
   const { token, password } = req.body as ResetPasswordInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {

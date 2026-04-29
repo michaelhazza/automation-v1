@@ -234,3 +234,6 @@ export * from './delegationOutcomes.js';
 export * from './systemIncidents.js';
 export * from './systemIncidentEvents.js';
 export * from './systemIncidentSuppressions.js';
+
+// Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
+export * from './rateLimitBuckets';

@@ -194,6 +194,7 @@ export interface TriageResult {
   suppressed?: boolean;
 }
 
+// @rls-allowlist-bypass: system_incidents runTriage [ref: spec §3.3.1]
 export async function runTriage(incidentId: string, jobId: string): Promise<TriageResult> {
   // 1. Load incident
   const [incident] = await db

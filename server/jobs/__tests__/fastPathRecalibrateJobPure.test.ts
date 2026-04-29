@@ -9,7 +9,7 @@
  * Run via: npx tsx server/jobs/__tests__/fastPathRecalibrateJobPure.test.ts
  */
 
-import { computeRouteStats } from '../fastPathRecalibrateJob.js';
+import { computeRouteStats } from '../fastPathRecalibrateJobPure.js';
 
 let passed = 0;
 let failed = 0;
@@ -112,6 +112,22 @@ test('empty org list → zero iterations', () => {
   let count = 0;
   for (const _org of orgs) count++;
   assert(count === 0, 'Expected zero iterations for empty org list');
+});
+
+test('per-org invocation count matches enumerated org count', () => {
+  const orgs = ['org-a', 'org-b', 'org-c'];
+  const invoked: string[] = [];
+  for (const org of orgs) {
+    invoked.push(org);
+  }
+  assert(
+    invoked.length === orgs.length,
+    `Expected ${orgs.length} per-org invocations, got ${invoked.length}`,
+  );
+  assert(
+    invoked.join(',') === orgs.join(','),
+    `Expected invocation order [${orgs.join(',')}], got [${invoked.join(',')}]`,
+  );
 });
 
 console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);

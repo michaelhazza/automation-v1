@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-04-28-system-monitoring-coverage-spec.md
-active_plan: tasks/builds/system-monitoring-coverage/plan.md
-build_slug: system-monitoring-coverage
-branch: claude/add-monitoring-logging-3xMKQ
-status: MERGE_READY
-last_updated: 2026-04-28
+active_spec: docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
+active_plan: tasks/builds/pre-prod-tenancy/plan.md
+build_slug: pre-prod-tenancy
+branch: pre-prod-tenancy
+status: PLANNING
+last_updated: 2026-04-29
 -->
 
 # Current Focus
@@ -19,15 +19,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-28-system-monitoring-coverage-spec.md
-**Active plan:** tasks/builds/system-monitoring-coverage/plan.md
-**Active build slug:** system-monitoring-coverage (branch `claude/add-monitoring-logging-3xMKQ`)
-**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance + pr-reviewer + dual-reviewer + chatgpt-pr-review (1 round, manual paste mode, all findings triaged). Cumulative chatgpt-review triage: 1 implement (`incident_ingest_mode` boot log) / 3 reject (1 documented intent + 2 verified false positives — duplicate-import hallucination + byte-identical "improvement") / 2 defer (createWorker tripwire + integration-test skip helper, both routed to `tasks/todo.md § PR Review deferred items / PR #226`). Architecture.md System Monitor § Coverage surface + Integration points table updated to include G3 + the three previously-undocumented call sites (synthetic checks, heuristic-fire sweep, manual test trigger). Closes G1, G2, G3, G4-A, G4-B, G5, G7, G11. 264 unit tests passing. Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Session log: `tasks/review-logs/chatgpt-pr-review-claude-add-monitoring-logging-3xMKQ-2026-04-28T22-09-33Z.md`. PR #226 — https://github.com/michaelhazza/automation-v1/pull/226. **Known pre-existing typecheck errors:** 63 errors in `server/services/systemMonitor/triage/*` and `writeHeuristicFire.ts` reference schema columns/exports that don't exist (`triageStatus`, `triageAttemptCount`, `lastTriageJobId`, `systemMonitorHeuristicFires`); pre-date this branch's review rounds and will need addressing before `npm run test:gates` passes.
+**Active spec:** docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
+**Active plan:** tasks/builds/pre-prod-tenancy/plan.md (pending — architect agent to author after `spec-reviewer`)
+**Active build slug:** pre-prod-tenancy (branch `pre-prod-tenancy`)
+**Status:** **PLANNING** — Major (architect first; full review pipeline). Branch created from origin/main. Verification pass against the source brief found that 14 of the 17 listed items are already shipped on `main` (Phase 1 RLS DB hardening closed by migrations 0227 / 0228 / 0229; route+service refactors P3-C6/C7/C8/C9/C10/C11/H2/H3 closed in-tree). Spec narrowed to three phases: (1) `SC-2026-04-26-1` RLS protected-tables registry triage — bring `verify-rls-protected-tables.sh` to exit 0 (currently 67 violations: 63 unregistered tenant tables + 4 stale entries); (2) `CHATGPT-PR203-R2` `intervention_outcomes` UNIQUE index + `ON CONFLICT DO NOTHING` migration + job refactor; (3) `B10` per-org `withOrgTx` defense-in-depth on three maintenance jobs (optional, conditional on §5.5 budget rule — jobs are no longer silent no-ops, so this is defense-in-depth not correctness). Migration range `0244–0255` reserved (brief reserved 0241–0252 but `main` already shipped 0241/0242/0243). 14 brief items marked `[x]` in `tasks/todo.md` with closure citations. Sister branches `pre-prod-boundary-and-brief-api` and `pre-prod-workflow-and-delegation` own scoped-out paths (see §0.4 in the spec). **Next:** run `spec-reviewer` on the draft spec, then `architect` to decompose into chunks at `tasks/builds/pre-prod-tenancy/plan.md`. Stop at plan gate — operator switches model from Opus to Sonnet before execution per CLAUDE.md model-guidance rule.
 
-**Recently merged (on main):** pre-test-integration-harness (PR #227 — MERGED 2026-04-28), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
-**Status:** **MERGE-READY** — full review pipeline complete: spec-conformance (CONFORMANT_AFTER_FIXES) → pr-reviewer (REQUEST_CHANGES → resolved in `84c828ee`) → chatgpt-pr-review (PASS, 2 rounds, log at `tasks/review-logs/chatgpt-pr-review-pre-test-backend-hardening-2026-04-28T05-00-00Z.md`). Pre-merge gate: run `npm run test:gates` per CLAUDE.md gate-cadence rule. Cumulative chatgpt-review triage: 4 implement / 7 reject (3 verified false positives) / 3 defer (all routed to `tasks/todo.md` with explicit trigger conditions). 3 durable KNOWLEDGE.md patterns extracted (lock-the-contract-you-already-have, external-reviewer-false-positive-discipline, record-the-rejected-option-in-deferred-todos).
-**Pair spec (concurrent, separate branch):** docs/superpowers/specs/2026-04-28-pre-test-brief-and-ux-spec.md
-**Last updated:** 2026-04-28
+**Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
+**Last updated:** 2026-04-29
 
 ---
 

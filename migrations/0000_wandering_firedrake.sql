@@ -1,3 +1,4 @@
+-- @rls-baseline: workflow_engines policy deferred to pre-prod-workflow-and-delegation branch (pre-prod-tenancy spec §0.4). Registry entry exists in server/config/rlsProtectedTables.ts as a registry-only deferral; the owning sister branch authors the canonical CREATE POLICY and removes this baseline entry when it lands.
 CREATE TABLE "execution_files" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"execution_id" uuid NOT NULL,

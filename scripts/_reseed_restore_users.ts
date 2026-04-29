@@ -17,28 +17,40 @@ console.log(`[restore] using backup: ${latest}`);
 
 const rows = JSON.parse(readFileSync(backupPath, 'utf8'));
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const client = await pool.connect();
 
 let updated = 0;
 let skipped = 0;
-for (const row of rows) {
-  const r = await pool.query(
-    `UPDATE users
-        SET password_hash = $1,
-            first_name    = $2,
-            last_name     = $3,
-            slack_user_id = $4,
-            updated_at    = now()
-      WHERE email = $5
-      RETURNING id, email`,
-    [row.password_hash, row.first_name, row.last_name, row.slack_user_id, row.email]
-  );
-  if (r.rowCount && r.rowCount > 0) {
-    console.log(`[restore] updated ${row.email} (id=${r.rows[0].id})`);
-    updated += r.rowCount;
-  } else {
-    console.log(`[restore] no match for ${row.email} — skipping`);
-    skipped++;
+
+try {
+  await client.query('BEGIN');
+  for (const row of rows) {
+    const r = await client.query(
+      `UPDATE users
+          SET password_hash = $1,
+              first_name    = $2,
+              last_name     = $3,
+              slack_user_id = $4,
+              updated_at    = now()
+        WHERE email = $5
+        RETURNING id, email`,
+      [row.password_hash, row.first_name, row.last_name, row.slack_user_id, row.email],
+    );
+    if (r.rowCount && r.rowCount > 0) {
+      console.log(`[restore] updated ${row.email} (id=${r.rows[0].id})`);
+      updated += r.rowCount;
+    } else {
+      console.log(`[restore] no match for ${row.email} — skipping`);
+      skipped++;
+    }
   }
+  await client.query('COMMIT');
+} catch (err) {
+  await client.query('ROLLBACK').catch(() => {});
+  throw err;
+} finally {
+  client.release();
 }
+
 console.log(`\n[restore] done: ${updated} updated, ${skipped} skipped`);
 await pool.end();

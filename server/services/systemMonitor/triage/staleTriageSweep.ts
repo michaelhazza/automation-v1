@@ -10,6 +10,7 @@ export { parseStaleAfterMinutesEnv } from './staleTriageSweepPure.js';
 // IO: executes UPDATE...RETURNING in a transaction with the events INSERT.
 // One agent_triage_timed_out event per flipped row, atomically with the status flip.
 // Uses the ORM builder for the UPDATE so Date parameters are serialised correctly.
+// @rls-allowlist-bypass: system_incidents runStaleTriageSweep [ref: spec §3.3.1]
 export async function runStaleTriageSweep(now: Date = new Date()): Promise<{ flipped: number }> {
   if (process.env.SYSTEM_MONITOR_TRIAGE_STALE_SWEEP_ENABLED === 'false') {
     return { flipped: 0 };

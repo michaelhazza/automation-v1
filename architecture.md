@@ -491,15 +491,17 @@ Inline Run Now test runs use a server-derived idempotency key built from canonic
 
 Tests: `server/lib/__tests__/testRunIdempotencyPure.test.ts` — 20 tests covering canonical serialization, key derivation, and dual-bucket boundary behaviour.
 
-### Test-run rate limiting — `server/lib/testRunRateLimit.ts`
+### Inbound rate limiting — `server/lib/inboundRateLimiter.ts`
 
-In-memory per-user rate limiter for test-run endpoints. Phase 1 design — process-local `Map<userId, timestamps[]>` with explicit limitations documented:
+Postgres-backed sliding-window rate limiter. Single CTE round-trip per check: derives window boundaries from DB time (`extract(epoch from now())`), UPSERTs the current bucket, reads the prior bucket, and returns counts. The DB is the canonical clock — multi-instance topologies cannot fragment buckets via clock skew (spec §6.2.3).
 
-- **Hard cap:** `MAX_TRACKED_USERS` (10,000) prevents unbounded memory growth; oldest entries evicted LRU-style when exceeded.
-- **Eviction metric:** `evictionCount` tracks total evictions; logs at threshold intervals (every 100) for operational visibility. `getTestRunRateLimitMetrics()` exposes current counts for health endpoints.
-- **Scaling note:** Effective rate multiplies by instance count under horizontal scaling. Replace with Redis/DB backing before multi-instance deployment.
+- **Key builders:** `server/lib/rateLimitKeys.ts` — all call sites must use a typed builder, never inline strings. Keys are versioned (`KEY_VERSION = 'v1'`; bump to invalidate all buckets — old rows age out via the cleanup job).
+- **429 headers:** `setRateLimitDeniedHeaders(res, resetAt, nowEpochMs)` — pass `limitResult.nowEpochMs` from the check result to compute `Retry-After` from DB-canonical time, not `Date.now()`.
+- **Increment-on-deny:** every `check()` call increments the bucket regardless of `allowed`/`denied`. Callers must not retry immediately on 429.
+- **Cleanup job:** `server/lib/rateLimitCleanupJob.ts` — deletes expired buckets on a schedule; uses `SKIP LOCKED` to avoid cross-instance contention. Logs `rate_limit.cleanup_capped` when the per-run cap is hit.
+- **Schema:** `server/db/schema/rateLimitBuckets.ts` — `rate_limit_buckets(key, window_start, count)`; PK `(key, window_start)`. Callers must encode `windowSec` in the key string if they reuse a namespace with multiple window sizes (latent risk — all current call sites use one `windowSec` per namespace).
 
-Tests: `server/services/__tests__/testRunRateLimitPure.test.ts` — 7 tests covering limits, boundary, window expiry, and per-user independence.
+Tests: `server/services/__tests__/rateLimiterPure.test.ts` (sliding-window math), `server/services/__tests__/rateLimitKeysPure.test.ts` (key builders).
 
 ### Test fixtures — `server/services/agentTestFixturesService.ts`
 
@@ -1579,7 +1581,8 @@ Examples: `agentExecutionServicePure.ts`, `regressionCaptureServicePure.ts`, `cr
 - `agentExecutionServicePure.checkpoint.test.ts` — crash-resume parity
 - `policyEngineService.scopeValidation.test.ts` — scope violation detection
 - `testRunIdempotencyPure.test.ts` — canonical JSON, key derivation, dual-bucket boundary (20 tests)
-- `testRunRateLimitPure.test.ts` — rate limit windows, eviction, per-user independence (7 tests)
+- `rateLimiterPure.test.ts` — sliding-window math, elapsedFraction, effective-count boundary (unit)
+- `rateLimitKeysPure.test.ts` — key builder normalisation, versioning, namespace uniqueness
 - `runStatusDriftPure.test.ts` — shared↔client enum drift detection (5 tests)
 - `scheduleCalendarServicePure.test.ts` — heartbeat/cron/RRULE projection, sort, cost estimation (23 tests)
 - Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, `priorityFeedServicePure.test.ts`, etc.

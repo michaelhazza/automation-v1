@@ -51,9 +51,18 @@ VIOLATIONS=0
 # and the manifest now points to 0229 for both entries. 0229 passes all gate
 # checks without baseline exemption.
 #
+# 0000_wandering_firedrake.sql and 0076_playbooks.sql are baselined per
+# pre-prod-tenancy spec §0.4: workflow_engines and workflow_runs are sister-branch
+# tables (owned by pre-prod-workflow-and-delegation). The manifest entries are
+# registry-only deferrals — the canonical CREATE POLICY statements are authored
+# in the sister branch, not here. The owning branch will remove these baseline
+# entries when its policy migration lands.
+#
 # Files in this list are exempt from the FORCE RLS and CREATE POLICY
 # checks when they carry a @rls-baseline: annotation comment.
 HISTORICAL_BASELINE_FILES=(
+  "0000_wandering_firedrake.sql"
+  "0076_playbooks.sql"
   "0204_document_bundles.sql"
   "0205_document_bundle_members.sql"
   "0206_document_bundle_attachments.sql"

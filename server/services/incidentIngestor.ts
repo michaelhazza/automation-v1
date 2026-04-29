@@ -144,6 +144,8 @@ async function enqueueIngest(input: IncidentInput): Promise<void> {
 }
 
 /** Shared code path for sync mode and the async worker. */
+// @rls-allowlist-bypass: system_incidents ingestInline [ref: spec §3.3.1]
+// @rls-allowlist-bypass: system_incident_suppressions ingestInline [ref: spec §3.3.1]
 export async function ingestInline(
   input: IncidentInput
 ): Promise<void> {

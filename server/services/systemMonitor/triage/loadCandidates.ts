@@ -42,7 +42,12 @@ async function loadAgentRunCandidates(now: Date): Promise<Candidate[]> {
   };
 
   const rows = await withAdminConnectionGuarded<Row[]>(
-    { allowRlsBypass: true, source: 'system_monitor_sweep', reason: 'cross-tenant agent run sweep for heuristic evaluation' },
+    {
+      // allowRlsBypass: cross-org candidate enumeration for triage scheduler
+      allowRlsBypass: true,
+      source: 'system_monitor_sweep',
+      reason: 'cross-tenant agent run sweep for heuristic evaluation',
+    },
     async (adminDb) => {
       const result: Row[] = await adminDb.execute(sql`
         SELECT

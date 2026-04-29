@@ -16,6 +16,7 @@ export const incidentSilence: SyntheticCheck = {
   description: "No system incidents recorded in the configured silence window despite recent monitoring activity from other synthetic checks.",
   defaultSeverity: 'high',
 
+  // @rls-allowlist-bypass: system_incidents run [ref: spec §3.3.1]
   async run(ctx: HeuristicContext): Promise<SyntheticResult> {
     const silenceHours = parseSilenceHoursEnv();
     const proofOfLifeHours = parseProofOfLifeHoursEnv();

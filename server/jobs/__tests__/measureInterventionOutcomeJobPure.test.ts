@@ -1,9 +1,18 @@
 /**
- * measureInterventionOutcomeJobPure.test.ts — B2 ship-gate.
+ * measureInterventionOutcomeJobPure.test.ts — B2 ship-gate + pre-refactor contract pin.
  *
- * End-to-end simulation: cold-start subaccount at atRisk → intervention
- * executes → synthetic post-window snapshot + assessment → outcome row args
- * reflect band change atRisk → watch and +18 delta.
+ * Dual purpose:
+ *
+ * 1. B2 ship-gate: end-to-end simulation — cold-start subaccount at atRisk →
+ *    intervention executes → synthetic post-window snapshot + assessment →
+ *    outcome row args reflect band change atRisk → watch and +18 delta.
+ *
+ * 2. Pre-prod-tenancy spec §7.2 pre-refactor pin: locks the
+ *    decideOutcomeMeasurement contract (all three branches: too_early /
+ *    no_post_snapshot / measure) before Task 2.4 replaces the per-row
+ *    db.transaction + pg_advisory_xact_lock + claim-verify with a DB-level
+ *    UNIQUE constraint + ON CONFLICT DO NOTHING. Any drift in the canonical
+ *    recordArgs shape during the Phase 2 refactor surfaces here as a failure.
  *
  * Runnable via:
  *   npx tsx server/jobs/__tests__/measureInterventionOutcomeJobPure.test.ts
