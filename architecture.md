@@ -207,6 +207,17 @@ Subaccount Agent (subaccountAgents table)
 
 Every override column is validated by `server/schemas/subaccountAgents.ts` (Zod) with `.partial()` on the update body, and the handler uses the `'key' in req.body` pattern so explicit `null` writes (e.g. clearing `customInstructions`) are distinguishable from "not sent".
 
+### Workspace identity model — invariants
+
+The "agents-as-employees" feature (migrations 0254–0258, spec `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`) layers a workspace identity on top of the three-tier model. Two invariants must hold across the codebase:
+
+1. **An agent's home subaccount is the actor's subaccount, not a `subaccount_agents` link.** Permission scope and identity ownership for any per-agent route (mailbox, calendar, identity lifecycle, email-sending toggle) MUST resolve via `agents.workspaceActorId → workspace_actors.subaccountId`. The `subaccount_agents` link table is many-to-many and resolving with `LIMIT 1` and no ordering is non-deterministic — it can let a caller authenticate against the wrong subaccount's permissions. The canonical resolver lives in each workspace route file (`server/routes/workspace.ts`, `workspaceMail.ts`, `workspaceCalendar.ts`) as `resolveAgentSubaccountId`.
+2. **`agents.workspaceActorId` is immutable post-onboarding.** The actor row is allocated once when the agent is created (or backfilled), and Phase E migrations move identities — not actors. Code that resolves "this agent's subaccount" relies on the FK never being repointed; if a future feature ever wants to move an agent between subaccounts, that work must update both rows in a single transaction and revisit every resolver. There is no DB trigger enforcing this today; it is a code-level invariant.
+
+If either invariant changes, search for `resolveAgentSubaccountId` and `workspaceActorId` and audit every call site — the assumptions are load-bearing for permission scoping.
+
+**Permission scope invariant (test-pinned):** `resolveAgentSubaccountId` resolves via `agents.workspaceActorId → workspace_actors.subaccountId`, NOT via `subaccount_agents`. If a future contributor reverts to `subaccount_agents LIMIT 1`, the unit test in `server/routes/__tests__/workspaceAgentScope.test.ts` will fail because the resolver becomes non-deterministic when an agent has multiple subaccount links.
+
 ---
 
 ## Orchestrator Capability-Aware Routing
