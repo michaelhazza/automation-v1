@@ -505,6 +505,360 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0238_system_agents_v7_1.sql',
     rationale: 'Per-org deduplication keys for skill invocations — response payloads may contain tool results or PII; cross-tenant leak exposes another org\'s skill execution history and cached outputs.',
   },
+  // 0245 — All 55 register-with-new-policy tenant tables (Phase 1 §3.5 step 4)
+  // Batch A — Agent domain
+  {
+    tableName: 'account_overrides',
+    schemaFile: 'accountOverrides.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org billing and usage overrides — cross-tenant leak exposes pricing exceptions and contract terms.',
+  },
+  {
+    tableName: 'action_events',
+    schemaFile: 'actionEvents.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Lifecycle events for proposed tool-call actions — payloads contain PII and business-sensitive operation details.',
+  },
+  {
+    tableName: 'action_resume_events',
+    schemaFile: 'actionResumeEvents.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Resume signals for paused actions — carry decision context including approval outcomes and operator reasoning.',
+  },
+  {
+    tableName: 'agent_conversations',
+    schemaFile: 'agentConversations.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-agent conversation threads — contain instruction sets and contextual turn history scoped to the org.',
+  },
+  {
+    tableName: 'agent_prompt_revisions',
+    schemaFile: 'agentPromptRevisions.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Version history of agent system prompts — exposes org-specific instruction tuning and proprietary automation logic.',
+  },
+  {
+    tableName: 'agent_triggers',
+    schemaFile: 'agentTriggers.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Webhook and schedule triggers that activate agents — reveal org automation topology and integration entry points.',
+  },
+  {
+    tableName: 'agents',
+    schemaFile: 'agents.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Core agent definitions including names, instructions, and capability configs — cross-tenant leak exposes org automation IP.',
+  },
+  {
+    tableName: 'board_configs',
+    schemaFile: 'boardConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org workspace board layout and column configurations — reveal operational workflows and task categorisation.',
+  },
+  {
+    tableName: 'executions',
+    schemaFile: 'executions.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Automation execution records with status and payloads — cross-tenant leak reveals operational patterns and business volume.',
+  },
+  {
+    tableName: 'feedback_votes',
+    schemaFile: 'feedbackVotes.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'User feedback on agent outputs — reveal quality signals and operator preferences scoped per org.',
+  },
+  {
+    tableName: 'goals',
+    schemaFile: 'goals.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-scoped strategic and operational goals — content is commercially sensitive and must not leak across tenants.',
+  },
+  {
+    tableName: 'mcp_server_configs',
+    schemaFile: 'mcpServerConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'MCP server connection configs including endpoint URLs and credentials — cross-tenant leak exposes integration secrets.',
+  },
+  {
+    tableName: 'mcp_tool_invocations',
+    schemaFile: 'mcpToolInvocations.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org MCP tool call ledger with inputs and outputs — may contain PII and reveals org automation activity.',
+  },
+  // Batch B — Org/Config domain
+  {
+    tableName: 'config_backups',
+    schemaFile: 'configBackups.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Point-in-time configuration snapshots for bulk restore — contain full org configuration including secrets references.',
+  },
+  {
+    tableName: 'config_history',
+    schemaFile: 'configHistory.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'JSONB changelog for configuration entities — reveals org configuration history including prior credential values.',
+  },
+  {
+    tableName: 'connector_configs',
+    schemaFile: 'connectorConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Integration connector configurations with API keys and connection parameters — direct credential leak risk.',
+  },
+  {
+    tableName: 'geo_audits',
+    schemaFile: 'geoAudits.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'GEO optimisation audit results per org — contain keyword analysis and competitive positioning data.',
+  },
+  {
+    tableName: 'hierarchy_templates',
+    schemaFile: 'hierarchyTemplates.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-defined agent hierarchy templates — reveal org automation architecture and role structures.',
+  },
+  {
+    tableName: 'iee_artifacts',
+    schemaFile: 'ieeArtifacts.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'IEE execution output artifacts — may contain processed data, analysis results, and tool outputs scoped per org.',
+  },
+  {
+    tableName: 'iee_runs',
+    schemaFile: 'ieeRuns.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Integrated execution environment run records — reveal org automation activity and processing patterns.',
+  },
+  {
+    tableName: 'iee_steps',
+    schemaFile: 'ieeSteps.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-step execution records within IEE runs — contain intermediate outputs and step-level tool interactions.',
+  },
+  {
+    tableName: 'intervention_outcomes',
+    schemaFile: 'interventionOutcomes.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'HITL decision outcomes per intervention — reveal operator approval patterns and business decision history.',
+  },
+  {
+    tableName: 'org_agent_configs',
+    schemaFile: 'orgAgentConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-level overrides for agent configuration — expose custom agent parameters and capability settings.',
+  },
+  {
+    tableName: 'org_budgets',
+    schemaFile: 'orgBudgets.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org LLM and execution budget limits — cross-tenant leak reveals financial configuration and usage caps.',
+  },
+  {
+    tableName: 'org_margin_configs',
+    schemaFile: 'orgMarginConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org billing margin multipliers and fixed fees — cross-tenant leak exposes pricing structure and contract terms. Nullable-aware policy: NULL rows are platform-global defaults.',
+  },
+  // Batch C — Memory/Workspace domain
+  {
+    tableName: 'org_memories',
+    schemaFile: 'orgMemories.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Compiled cross-subaccount org-level memory summaries — contain aggregated workspace intelligence scoped per org.',
+  },
+  {
+    tableName: 'org_memory_entries',
+    schemaFile: 'orgMemories.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Individual cross-subaccount insights extracted from agent runs — contain knowledge claims and operational patterns.',
+  },
+  {
+    tableName: 'org_user_roles',
+    schemaFile: 'orgUserRoles.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org role assignments mapping users to roles — cross-tenant leak exposes IAM structure and user privileges.',
+  },
+  {
+    tableName: 'organisation_secrets',
+    schemaFile: 'organisationSecrets.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Encrypted per-org secrets (API keys, credentials, tokens) — highest sensitivity; cross-tenant leak is a direct credentials breach.',
+  },
+  {
+    tableName: 'page_projects',
+    schemaFile: 'pageProjects.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-scoped page project containers — reveal content creation activity and project metadata.',
+  },
+  {
+    tableName: 'permission_groups',
+    schemaFile: 'migrations/0000_wandering_firedrake.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org permission group definitions — cross-tenant leak exposes IAM grouping structure and access control topology.',
+  },
+  {
+    tableName: 'permission_sets',
+    schemaFile: 'permissionSets.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Named permission set definitions per org — reveal the org\'s role-based access control model and capability grants.',
+  },
+  {
+    tableName: 'playbook_runs',
+    schemaFile: 'migrations/0076_playbooks.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org playbook execution instances with context and status — reveal automation workflows and operational activity.',
+  },
+  {
+    tableName: 'playbook_templates',
+    schemaFile: 'migrations/0076_playbooks.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-owned playbook templates defining multi-step automation workflows — contain proprietary automation IP.',
+  },
+  {
+    tableName: 'policy_rules',
+    schemaFile: 'policyRules.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-scoped agent behaviour policy rules — contain approval criteria and operation constraints that are commercially sensitive.',
+  },
+  {
+    tableName: 'portal_briefs',
+    schemaFile: 'portalBriefs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org.',
+  },
+  // Batch D — Data/Process domain
+  {
+    tableName: 'process_connection_mappings',
+    schemaFile: 'migrations/0018_three_level_process_framework.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-subaccount wiring of automation connection slots to integration connections — reveal integration topology and credential associations.',
+  },
+  {
+    tableName: 'processed_resources',
+    schemaFile: 'processedResources.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Deduplication and processing state for ingested resources — reveal ingestion patterns and data pipeline activity per org.',
+  },
+  {
+    tableName: 'projects',
+    schemaFile: 'projects.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-scoped project containers grouping tasks and automations — content and metadata are commercially sensitive.',
+  },
+  {
+    tableName: 'scheduled_tasks',
+    schemaFile: 'scheduledTasks.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Cron-scheduled agent tasks with configuration and data sources — reveal automation schedules and operational intent per org.',
+  },
+  {
+    tableName: 'skill_analyzer_jobs',
+    schemaFile: 'skillAnalyzerJobs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org skill analysis job records — reveal skill development activity and proprietary skill improvement patterns.',
+  },
+  {
+    tableName: 'skills',
+    schemaFile: 'skills.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Reusable skill definitions including instructions and tool schemas — org-level skills contain proprietary automation logic. Nullable-aware policy: NULL-org rows are system built-in skills.',
+  },
+  {
+    tableName: 'slack_conversations',
+    schemaFile: 'slackConversations.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org Slack conversational surface sessions — contain message history and org Slack integration context.',
+  },
+  {
+    tableName: 'subaccount_agents',
+    schemaFile: 'subaccountAgents.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Junction table wiring agents to subaccounts — reveals org agent assignment topology.',
+  },
+  {
+    tableName: 'subaccount_onboarding_state',
+    schemaFile: 'subaccountOnboardingState.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-subaccount onboarding step completion state — reveals org client onboarding progress and automation adoption.',
+  },
+  {
+    tableName: 'subaccount_tags',
+    schemaFile: 'subaccountTags.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-subaccount tag assignments — reveal org segmentation strategy and client categorisation.',
+  },
+  {
+    tableName: 'subaccounts',
+    schemaFile: 'subaccounts.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Core subaccount (client workspace) records — cross-tenant leak exposes the org\'s entire client list and portfolio.',
+  },
+  // Batch E — Tasks/Workspace/Sister-branch domain
+  {
+    tableName: 'task_attachments',
+    schemaFile: 'taskAttachments.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'File attachments on tasks — may contain PII, client data, and confidential deliverables.',
+  },
+  {
+    tableName: 'task_categories',
+    schemaFile: 'migrations/0000_wandering_firedrake.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-defined task taxonomy categories — reveal org workflow structure and operational categorisation.',
+  },
+  {
+    tableName: 'users',
+    schemaFile: 'users.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Org-scoped user accounts with PII (name, email, role) — cross-tenant leak directly exposes staff identity and access.',
+  },
+  {
+    tableName: 'webhook_adapter_configs',
+    schemaFile: 'webhookAdapterConfigs.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Per-org webhook adapter configurations with endpoint URLs and branding — reveal integration topology and credentials.',
+  },
+  {
+    tableName: 'workspace_entities',
+    schemaFile: 'workspaceEntities.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Workspace-level entity records — contain org operational data and client relationship information.',
+  },
+  {
+    tableName: 'workspace_health_findings',
+    schemaFile: 'workspaceHealthFindings.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Automated workspace health audit findings — reveal org operational issues and quality assessments.',
+  },
+  {
+    tableName: 'workspace_items',
+    schemaFile: 'migrations/0008_workspace_board.sql',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Board items in the org workspace — contain task-level data, assignments, and operational context.',
+  },
+  {
+    tableName: 'workspace_memory_entries',
+    schemaFile: 'workspaceMemories.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Individual subaccount-scoped memory entries extracted from agent runs — contain observations, decisions, and patterns with PII risk.',
+  },
+  // Sister-branch tables (workflow_engines owned by pre-prod-workflow-and-delegation — §0.4).
+  // Registry-only entries: no policy migration is being authored here.
+  // The owning branch is responsible for the CREATE POLICY statements.
+  // policyMigration references the original CREATE TABLE migration as a placeholder
+  // per the deferred-enforcement convention; the owning branch will update these
+  // entries with the correct policy migration file.
+  {
+    tableName: 'workflow_engines',
+    schemaFile: 'migrations/0000_wandering_firedrake.sql',
+    policyMigration: 'migrations/0000_wandering_firedrake.sql',
+    rationale: 'Legacy per-org workflow engine instances — reveal automation execution topology. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4).',
+  },
+  {
+    tableName: 'workflow_runs',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: 'migrations/0076_playbooks.sql',
+    rationale: 'Per-org workflow execution run records — reveal automation activity and execution history. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4).',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
