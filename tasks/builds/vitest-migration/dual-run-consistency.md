@@ -95,3 +95,15 @@ server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts bash:pass vi
 ### phase2 phase2-batch-05 (2026-04-30)
 server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts bash:pass vitest:pass match:yes
 server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-00 (2026-04-30)
+client/src/components/__tests__/DeliveryChannels.test.ts bash:pass vitest:pass match:yes
+client/src/components/__tests__/activityFeedMerge.test.ts bash:pass vitest:pass match:yes
+client/src/components/__tests__/dashboardErrorBannerPure.test.ts bash:pass vitest:pass match:yes
+client/src/components/agentRunLog/__tests__/eventRowPure.test.ts bash:pass vitest:pass match:yes
+client/src/components/clientpulse/__tests__/SparklineChart.test.ts bash:pass vitest:pass match:yes
+client/src/components/dashboard/__tests__/freshnessIndicator.test.ts bash:pass vitest:pass match:yes
+client/src/components/run-cost/__tests__/RunCostPanel.test.ts bash:pass vitest:pass match:yes
+client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts bash:pass vitest:pass match:yes
+client/src/lib/__tests__/formatDuration.test.ts bash:pass vitest:pass match:yes
+client/src/lib/__tests__/resolvePulseDetailUrl.test.ts bash:pass vitest:pass match:yes
