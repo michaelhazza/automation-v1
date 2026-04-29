@@ -46,3 +46,6 @@ export interface BriefCreationEnvelope {
   /** Display name for the resolved subaccount. May be null per the same rule. */
   subaccountName: string | null;
 }
+
+/** Canonical discriminated-union arm for the `brief_created` response type. Shared by server and client. */
+export type BriefCreatedResponse = { type: 'brief_created' } & BriefCreationEnvelope;

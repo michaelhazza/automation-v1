@@ -12,7 +12,7 @@ import { createBrief } from '../services/briefCreationService.js';
 import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
 import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
-import type { BriefCreationEnvelope } from '../../shared/types/briefFastPath.js';
+import type { BriefCreatedResponse } from '../../shared/types/briefFastPath.js';
 import type { Request } from 'express';
 
 const router = Router();
@@ -21,8 +21,6 @@ interface SessionContext {
   activeOrganisationId: string | null;
   activeSubaccountId: string | null;
 }
-
-type BriefCreatedResponse = { type: 'brief_created' } & BriefCreationEnvelope;
 
 type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
