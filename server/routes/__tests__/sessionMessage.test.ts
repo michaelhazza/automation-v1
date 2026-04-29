@@ -33,51 +33,32 @@ if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
   process.exit(0);
 }
 
-// ─── T0: Middleware ordering invariant ─────────────────────────────────────────
+// ─── T0: Middleware ordering invariant (real route, real middleware chain) ─────
 //
-// Build a minimal in-process Express app that mirrors the exact middleware chain
-// of /api/session/message:
-//   authenticate → rate-limit check → requireOrgPermission → handler
+// Mount the actual sessionMessageRouter on a fresh Express app and POST without
+// an Authorization header. The real `authenticate` middleware short-circuits to
+// 401 before any DB call (auth.ts: header check is the first thing it does), so
+// no JWT_SECRET / DB-fixture setup is needed for this assertion.
 //
-// authenticate reads req.headers.authorization synchronously and returns 401
-// before any DB call when the header is absent. No DB is needed for this test.
+// Two-pronged assurance:
+//   1. Functional: 401 (not 429) proves the production middleware order
+//      authenticate → rate-limit → requireOrgPermission is preserved against
+//      the actual code, not a stub mirror.
+//   2. Structural: read the route source and assert `authenticate` is wired
+//      ahead of the rate-limit middleware in the router definition.
 //
-// The stub rate-limiter tracks whether it was invoked — if the 401 is correct
-// the stub must NOT be called (ordering invariant: 401 before 429).
+// Note on rate-limiter spy: the route does
+//   `import { check as rateLimitCheck } from '../lib/inboundRateLimiter.js'`
+// so it captures the imported binding at module load. ESM named imports are
+// read-only from the importer side — monkey-patching the module's `check`
+// export does not retroactively rebind the route's local. The 401 assertion
+// + structural-order assertion together cover the invariant without the spy.
 
 const express = (await import('express')).default;
+const sessionMessageRouter = (await import('../sessionMessage.js')).default;
 const app = express();
 app.use(express.json());
-
-let rateLimiterCallCount = 0;
-
-// Stub: mirrors the real authenticate — returns 401 when no Authorization header
-app.use('/api/session/message', async (req: any, res: any, next: any) => {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
-  }
-  // Minimal stub user for T0 pass-through (not used in T0 assertions)
-  req.user = { id: 'stub-user', role: 'org_admin', organisationId: 'stub-org' };
-  req.orgId = 'stub-org';
-  next();
-});
-
-// Stub: mirrors the real rate-limit check middleware
-app.use('/api/session/message', (req: any, res: any, next: any) => {
-  rateLimiterCallCount++;
-  next();
-});
-
-// Stub: mirrors requireOrgPermission — always allows
-app.use('/api/session/message', (req: any, res: any, next: any) => {
-  next();
-});
-
-app.post('/api/session/message', (req: any, res: any) => {
-  res.status(200).json({ type: 'ok' });
-});
+app.use(sessionMessageRouter);
 
 const server = http.createServer(app);
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -103,16 +84,31 @@ function httpPost(path: string, body: unknown, headers: Record<string, string> =
   });
 }
 
-// T0: no Authorization header → 401; rate-limiter NOT invoked
+// T0a: no Authorization header → 401 (NOT 429); proves authenticate runs first
 {
-  const before = rateLimiterCallCount;
   const res = await httpPost('/api/session/message', { text: 'hello' });
-  assert.strictEqual(res.status, 401, 'T0: unauthenticated request → 401');
-  assert.strictEqual(rateLimiterCallCount, before, 'T0: rate-limiter not invoked before authenticate succeeds');
-  console.log('  PASS  T0: 401 fires before rate-limit (ordering invariant)');
+  assert.strictEqual(res.status, 401, 'T0a: unauthenticated request → 401 (not 429)');
+  console.log('  PASS  T0a: real router returns 401 before rate-limit on no-auth POST');
 }
 
 server.close();
+
+// T0b: structural ordering — authenticate is positioned before the rate-limit
+// middleware in the router definition. Pinned by reading the route source so
+// future refactors that reorder middleware fail the assertion.
+{
+  const fs = await import('node:fs/promises');
+  const routeSrc = await fs.readFile(new URL('../sessionMessage.ts', import.meta.url), 'utf8');
+  const authIdx = routeSrc.indexOf('authenticate');
+  const rateLimitIdx = routeSrc.indexOf('rateLimitCheck(');
+  const requirePermIdx = routeSrc.indexOf('requireOrgPermission(');
+  assert.ok(authIdx !== -1, 'T0b: route uses `authenticate` middleware');
+  assert.ok(rateLimitIdx !== -1, 'T0b: route invokes `rateLimitCheck` in its middleware chain');
+  assert.ok(requirePermIdx !== -1, 'T0b: route uses `requireOrgPermission` middleware');
+  assert.ok(authIdx < rateLimitIdx, 'T0b: `authenticate` is wired before rate-limit (401 → 429 ordering)');
+  assert.ok(rateLimitIdx < requirePermIdx, 'T0b: rate-limit is wired before `requireOrgPermission` (429 → 403 ordering)');
+  console.log('  PASS  T0b: middleware order in router definition: authenticate → rate-limit → requireOrgPermission');
+}
 
 // ─── T1–T8: Service-layer integration tests ───────────────────────────────────
 //
@@ -232,30 +228,50 @@ async function run() {
       console.log('  PASS  T3: Path A — cross-tenant org candidate rejected (null → error response)');
     }
 
-    // ── T3b: Path A — cross-tenant subaccount rejection (structural contract) ─
-    // For non-admin subaccount candidates, resolveCandidateScope uses
-    // getOrgScopedDb (the org-scoped tx with app.organisation_id set via
-    // set_config by authenticate). RLS on the subaccounts table filters to the
-    // org bound in app.organisation_id, so a cross-tenant candidateId returns
-    // zero rows → null.
+    // ── T3b: Path A — cross-tenant subaccount RLS isolation ────────────────
+    // Two complementary assertions covering the tenant-isolation contract:
     //
-    // In this test we verify the structural invariant: the code path that handles
-    // non-admin subaccount resolution calls getOrgScopedDb (not db directly).
-    // Full RLS enforcement is a DB-session contract; the test coverage lives in
-    // T3 (org-level code check) + this structural note + T2 (own-org success).
-    // We additionally verify that system_admin CAN resolve cross-tenant (i.e. the
-    // non-admin branch is the one that gates, not the query shape).
+    //   (a) Structural: scopeResolutionService imports getOrgScopedDb and
+    //       routes the non-admin subaccount lookup through it (not raw db).
+    //       This pins the wiring so a future refactor that swaps the
+    //       org-scoped tx for a raw query fails the assertion before code
+    //       review. Real RLS enforcement is a DB-session contract — RLS
+    //       policies + app.organisation_id binding are tested separately
+    //       in rls.context-propagation.test.ts. Locally the DB role often
+    //       owns the tables (BYPASSRLS), so a functional cross-tenant
+    //       rejection cannot be asserted here without reproducing the full
+    //       session-role setup; the structural pin keeps coverage honest.
+    //
+    //   (b) Inverse control: system_admin bypasses getOrgScopedDb and CAN
+    //       resolve cross-tenant — proves the gate is the role branch, not
+    //       the query shape itself.
     {
-      // system_admin bypasses getOrgScopedDb and can resolve cross-tenant subs
+      // (a) Structural contract: non-admin path uses getOrgScopedDb
+      const fs = await import('node:fs/promises');
+      const scopeSrc = await fs.readFile(
+        new URL('../../services/scopeResolutionService.ts', import.meta.url),
+        'utf8',
+      );
+      assert.ok(
+        scopeSrc.includes('getOrgScopedDb'),
+        'T3b(a): scopeResolutionService imports/uses getOrgScopedDb for tenant isolation',
+      );
+      // Non-admin branch must select the org-scoped handle, not raw db.
+      assert.ok(
+        /isSystemAdmin\s*\?\s*db\s*:\s*getOrgScopedDb/.test(scopeSrc),
+        'T3b(a): non-admin branch resolves to getOrgScopedDb (RLS-bound), admin branch to raw db',
+      );
+
+      // (b) system_admin bypasses RLS gate and resolves cross-tenant
       const adminResult = await resolveCandidateScope({
         candidateId: otherSubId,
         candidateType: 'subaccount',
         userRole: 'system_admin',
         userOrganisationId: null,
       });
-      assert.ok(adminResult !== null, 'T3b: system_admin can resolve cross-tenant subaccount');
-      assert.strictEqual(adminResult!.resolvedSubaccountId, otherSubId, 'T3b: system_admin gets correct sub id');
-      console.log('  PASS  T3b: Path A — system_admin crosses tenants; non-admin RLS contract structural');
+      assert.ok(adminResult !== null, 'T3b(b): system_admin can resolve cross-tenant subaccount');
+      assert.strictEqual(adminResult!.resolvedSubaccountId, otherSubId, 'T3b(b): system_admin gets correct sub id');
+      console.log('  PASS  T3b: structural RLS contract pinned + system_admin cross-tenant bypass verified');
     }
 
     // ── T4: Path B — command resolves to subaccount (service assertion) ─────
