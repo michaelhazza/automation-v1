@@ -248,3 +248,46 @@ Pin CI to Node 20 with `actions/setup-node@v4`:
 ```
 
 Pinning to the latest 20.x LTS line matches both the Dockerfile and the Replit production environment. Do NOT pick Node 22 unilaterally; it would diverge from production.
+
+---
+
+## 6. Repository structure notes
+
+### Top-level layout
+
+```
+automation-v1/
+  .claude/                Claude Code agent + skill definitions
+  .github/                pull_request_template.md only (no workflows)
+  attached_assets/
+  client/                 React + Vite frontend
+  companies/
+  db-init/
+  docs/                   Specs, briefs, this report
+  migrations/             247 numbered SQL migrations
+  prototypes/
+  reports/
+  scripts/                Migration runner, gates, QA scripts, seeds
+  server/                 Express + Drizzle backend (the bulk of test files)
+  shared/                 Shared types and pure helpers (some tests)
+  tasks/                  Build artifacts, TODOs, lessons
+  tests/                  trajectory JSON fixtures only
+  tools/                  Mission Control sub-app
+  worker/                 IEE worker process (Playwright runtime)
+```
+
+### Monorepo classification
+
+The repo is a SHALLOW monorepo. Three `package.json` files exist:
+
+1. `./package.json`: the main app. Defines `npm test`, all migration scripts, all gate scripts. CI's primary target.
+2. `./worker/package.json`: the IEE worker. Deliberately empty of dependencies, per its own header comment: "Runtime dependencies (drizzle-orm, postgres, pg-boss, playwright, zod) and dev tooling are intentionally NOT declared here, they are resolved from the repo root `node_modules` to avoid duplicate package installs that cause TypeScript type-identity conflicts during the Docker build." The worker has no `test` script and no `*.test.ts` files. CI does NOT need to install or build the worker package separately.
+3. `./tools/mission-control/package.json`: a self-contained read-only "What's In Flight" dashboard. Has its own `test` script (`tsx server/__tests__/logParsers.test.ts`) but is gated behind `tools/mission-control/` and is NOT discovered by `scripts/run-all-unit-tests.sh` (the runner only matches `**/__tests__/*.test.ts` paths, and the discovery starts from the repo root, but mission-control has its own `node_modules` resolution and is not in scope for the main suite). CI does NOT need to run mission-control tests.
+
+### IEE worker location
+
+In the same repo as the main app, under `worker/`. Source under `worker/src/` (handlers, persistence, browser, runtime). The IEE worker is built and shipped via its own Dockerfile (`worker/Dockerfile`) using the official Playwright base image. The worker's only test-shaped file is `worker/tests/dev/qualityChecks.unit.ts`, which is NOT a `*.test.ts` file and NOT discovered by `run-all-unit-tests.sh`. CI does not exercise it.
+
+### Implication for CI
+
+CI runs from the repo root with a single `npm ci && npm run migrate && npm test`. No sub-package installs, no worker build, no monorepo orchestration tool (no Turborepo, no Nx, no pnpm workspaces).
