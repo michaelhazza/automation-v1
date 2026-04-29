@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   applyAdd,
   applyIncomingEvent,
@@ -74,19 +73,19 @@ test('buildRuntimeKey composes idempotencyKey:attempt:startedAt', () => {
     attempt: 3,
     startedAt: '2026-04-20T10:00:00.000Z',
   });
-  assert.equal(key, 'org:run:agent:task:anthropic:sonnet:deadbeef:3:2026-04-20T10:00:00.000Z');
+  expect(key).toBe('org:run:agent:task:anthropic:sonnet:deadbeef:3:2026-04-20T10:00:00.000Z');
 });
 
 test('runtimeKey crash-restart safety — same (idempotencyKey, attempt) with different startedAt produces different keys', () => {
   const a = buildRuntimeKey({ idempotencyKey: 'k', attempt: 1, startedAt: '2026-04-20T10:00:00.000Z' });
   const b = buildRuntimeKey({ idempotencyKey: 'k', attempt: 1, startedAt: '2026-04-20T10:00:00.500Z' });
-  assert.notEqual(a, b);
+  expect(a).not.toBe(b);
 });
 
 test('buildEventId — `${runtimeKey}:${type}` shape', () => {
   const rk = 'key:1:2026-04-20T10:00:00.000Z';
-  assert.equal(buildEventId(rk, 'added'),   `${rk}:added`);
-  assert.equal(buildEventId(rk, 'removed'), `${rk}:removed`);
+  expect(buildEventId(rk, 'added')).toBe(`${rk}:added`);
+  expect(buildEventId(rk, 'removed')).toBe(`${rk}:removed`);
 });
 
 // ── Queueing delay (deferred-items brief §3) ──────────────────────────────
@@ -96,9 +95,9 @@ test('buildEntry — queuedAt and dispatchDelayMs carried through', () => {
     queuedAt:  '2026-04-20T10:00:00.000Z',
     startedAt: '2026-04-20T10:00:02.500Z',
   }));
-  assert.equal(entry.queuedAt, '2026-04-20T10:00:00.000Z');
-  assert.equal(entry.startedAt, '2026-04-20T10:00:02.500Z');
-  assert.equal(entry.dispatchDelayMs, 2500, 'delay = startedAt - queuedAt in ms');
+  expect(entry.queuedAt).toBe('2026-04-20T10:00:00.000Z');
+  expect(entry.startedAt).toBe('2026-04-20T10:00:02.500Z');
+  expect(entry.dispatchDelayMs, 'delay = startedAt - queuedAt in ms').toBe(2500);
 });
 
 test('buildEntry — dispatchDelayMs of 0 when queuedAt === startedAt', () => {
@@ -106,7 +105,7 @@ test('buildEntry — dispatchDelayMs of 0 when queuedAt === startedAt', () => {
     queuedAt:  '2026-04-20T10:00:00.000Z',
     startedAt: '2026-04-20T10:00:00.000Z',
   }));
-  assert.equal(entry.dispatchDelayMs, 0);
+  expect(entry.dispatchDelayMs).toBe(0);
 });
 
 test('buildEntry — dispatchDelayMs clamped to 0 on negative (clock drift)', () => {
@@ -116,7 +115,7 @@ test('buildEntry — dispatchDelayMs clamped to 0 on negative (clock drift)', ()
     queuedAt:  '2026-04-20T10:00:05.000Z',
     startedAt: '2026-04-20T10:00:00.000Z',
   }));
-  assert.equal(entry.dispatchDelayMs, 0);
+  expect(entry.dispatchDelayMs).toBe(0);
 });
 
 // ── Provider fallback visibility (deferred-items brief §4) ────────────────
@@ -127,9 +126,9 @@ test('buildEntry — attemptSequence and fallbackIndex carried through', () => {
     attemptSequence: 5,
     fallbackIndex:   1,
   }));
-  assert.equal(entry.attempt, 2, 'per-provider retry counter');
-  assert.equal(entry.attemptSequence, 5, 'monotonic across the whole routeCall');
-  assert.equal(entry.fallbackIndex, 1, '0 for primary, 1+ for each fallback');
+  expect(entry.attempt, 'per-provider retry counter').toBe(2);
+  expect(entry.attemptSequence, 'monotonic across the whole routeCall').toBe(5);
+  expect(entry.fallbackIndex, '0 for primary, 1+ for each fallback').toBe(1);
 });
 
 test('buildEntry — attemptSequence and attempt can diverge when fallback happens', () => {
@@ -142,9 +141,9 @@ test('buildEntry — attemptSequence and attempt can diverge when fallback happe
     attemptSequence: 3,
     fallbackIndex:   1,
   }));
-  assert.equal(entry.attempt, 1);
-  assert.equal(entry.attemptSequence, 3);
-  assert.equal(entry.fallbackIndex, 1);
+  expect(entry.attempt).toBe(1);
+  expect(entry.attemptSequence).toBe(3);
+  expect(entry.fallbackIndex).toBe(1);
 });
 
 // ── Deadline ──────────────────────────────────────────────────────────────
@@ -161,7 +160,7 @@ test('buildDeadlineAt = startedAt + timeoutMs + deadlineBufferMs across variable
       timeoutMs,
       deadlineBufferMs: 30_000,
     });
-    assert.equal(got, expected, `timeoutMs=${timeoutMs}`);
+    expect(got, `timeoutMs=${timeoutMs}`).toBe(expected);
   }
 });
 
@@ -170,22 +169,22 @@ test('buildDeadlineAt = startedAt + timeoutMs + deadlineBufferMs across variable
 test('applyAdd — first call produces kind=added with stateVersion=1', () => {
   const entry = buildEntry(entryInput());
   const out = applyAdd({ entry, existing: undefined });
-  assert.equal(out.kind, 'added');
+  expect(out.kind).toBe('added');
   if (out.kind !== 'added') return;
-  assert.equal(out.slot.state, 'active');
-  assert.equal(out.slot.stateVersion, 1);
-  assert.equal(out.envelope.type, 'added');
-  assert.equal(out.envelope.eventId, `${entry.runtimeKey}:added`);
-  assert.equal(out.envelope.entityId, entry.runtimeKey);
+  expect(out.slot.state).toBe('active');
+  expect(out.slot.stateVersion).toBe(1);
+  expect(out.envelope.type).toBe('added');
+  expect(out.envelope.eventId).toBe(`${entry.runtimeKey}:added`);
+  expect(out.envelope.entityId).toBe(entry.runtimeKey);
 });
 
 test('applyAdd — second call on same runtimeKey is no-op (add_noop_already_exists)', () => {
   const entry = buildEntry(entryInput());
   const existing = activeSlot(entry);
   const out = applyAdd({ entry, existing });
-  assert.equal(out.kind, 'noop_already_exists');
+  expect(out.kind).toBe('noop_already_exists');
   if (out.kind !== 'noop_already_exists') return;
-  assert.equal(out.reason, 'add_noop_already_exists');
+  expect(out.reason).toBe('add_noop_already_exists');
 });
 
 // ── State machine — remove ────────────────────────────────────────────────
@@ -203,17 +202,17 @@ test('applyRemove — first call transitions active → removed, stateVersion 1 
     evictionContext:   null,
     existing,
   });
-  assert.equal(out.kind, 'removed');
+  expect(out.kind).toBe('removed');
   if (out.kind !== 'removed') return;
-  assert.equal(out.slot.state, 'removed');
-  assert.equal(out.slot.stateVersion, 2);
-  assert.equal(out.envelope.payload.stateVersion, 2);
-  assert.equal(out.envelope.payload.terminalStatus, 'success');
-  assert.equal(out.envelope.payload.durationMs, 10_500);
-  assert.equal(out.envelope.payload.ledgerRowId, 'llm-req-id-1');
-  assert.equal(out.envelope.payload.ledgerCommittedAt, '2026-04-20T10:00:10.501Z');
-  assert.equal(out.envelope.payload.sweepReason, null);
-  assert.equal(out.envelope.payload.evictionContext, null);
+  expect(out.slot.state).toBe('removed');
+  expect(out.slot.stateVersion).toBe(2);
+  expect(out.envelope.payload.stateVersion).toBe(2);
+  expect(out.envelope.payload.terminalStatus).toBe('success');
+  expect(out.envelope.payload.durationMs).toBe(10_500);
+  expect(out.envelope.payload.ledgerRowId).toBe('llm-req-id-1');
+  expect(out.envelope.payload.ledgerCommittedAt).toBe('2026-04-20T10:00:10.501Z');
+  expect(out.envelope.payload.sweepReason).toBe(null);
+  expect(out.envelope.payload.evictionContext).toBe(null);
 });
 
 test('applyRemove — remove-while-already-removed is no-op (remove_noop_already_removed)', () => {
@@ -229,7 +228,7 @@ test('applyRemove — remove-while-already-removed is no-op (remove_noop_already
     evictionContext:   null,
     existing:          removed,
   });
-  assert.equal(out.kind, 'noop_already_removed');
+  expect(out.kind).toBe('noop_already_removed');
 });
 
 test('applyRemove — remove-missing-key is no-op (remove_noop_missing_key)', () => {
@@ -244,7 +243,7 @@ test('applyRemove — remove-missing-key is no-op (remove_noop_missing_key)', ()
     evictionContext:   null,
     existing:          undefined,
   });
-  assert.equal(out.kind, 'noop_missing_key');
+  expect(out.kind).toBe('noop_missing_key');
 });
 
 test('applyRemove — sweepReason populated iff terminalStatus==="swept_stale"', () => {
@@ -260,10 +259,10 @@ test('applyRemove — sweepReason populated iff terminalStatus==="swept_stale"',
     evictionContext:   null,
     existing,
   });
-  assert.equal(out.kind, 'removed');
+  expect(out.kind).toBe('removed');
   if (out.kind !== 'removed') return;
-  assert.equal(out.envelope.payload.terminalStatus, 'swept_stale');
-  assert.equal(out.envelope.payload.sweepReason, 'deadline_exceeded');
+  expect(out.envelope.payload.terminalStatus).toBe('swept_stale');
+  expect(out.envelope.payload.sweepReason).toBe('deadline_exceeded');
 });
 
 test('applyRemove — evictionContext populated iff terminalStatus==="evicted_overflow"', () => {
@@ -279,9 +278,9 @@ test('applyRemove — evictionContext populated iff terminalStatus==="evicted_ov
     evictionContext:   { activeCount: 5_000, capacity: 5_000 },
     existing,
   });
-  assert.equal(out.kind, 'removed');
+  expect(out.kind).toBe('removed');
   if (out.kind !== 'removed') return;
-  assert.deepEqual(out.envelope.payload.evictionContext, { activeCount: 5_000, capacity: 5_000 });
+  expect(out.envelope.payload.evictionContext).toEqual({ activeCount: 5_000, capacity: 5_000 });
 });
 
 // ── Incoming Redis event — stale/monotonic guard ──────────────────────────
@@ -297,7 +296,7 @@ test('applyIncomingEvent — incoming.startedAt < existing.startedAt is stale_ig
     entry:        older,
     existing:     activeSlot(newer),
   });
-  assert.equal(out.kind, 'stale_ignored');
+  expect(out.kind).toBe('stale_ignored');
 });
 
 test('applyIncomingEvent — same startedAt, incoming.stateVersion < existing.stateVersion is stale_ignored (v1 add after v2 remove)', () => {
@@ -311,7 +310,7 @@ test('applyIncomingEvent — same startedAt, incoming.stateVersion < existing.st
     entry,
     existing:     removed,
   });
-  assert.equal(out.kind, 'stale_ignored');
+  expect(out.kind).toBe('stale_ignored');
 });
 
 test('applyIncomingEvent — same startedAt, higher stateVersion on remove applies over an active slot', () => {
@@ -337,10 +336,10 @@ test('applyIncomingEvent — same startedAt, higher stateVersion on remove appli
     },
     existing,
   });
-  assert.equal(out.kind, 'apply_remove');
+  expect(out.kind).toBe('apply_remove');
   if (out.kind !== 'apply_remove') return;
-  assert.equal(out.slot.state, 'removed');
-  assert.equal(out.slot.stateVersion, 2);
+  expect(out.slot.state).toBe('removed');
+  expect(out.slot.stateVersion).toBe(2);
 });
 
 test('applyIncomingEvent — duplicate active add (same runtimeKey, both active, v1=v1) is stale_ignored', () => {
@@ -354,7 +353,7 @@ test('applyIncomingEvent — duplicate active add (same runtimeKey, both active,
     entry,
     existing,
   });
-  assert.equal(out.kind, 'stale_ignored');
+  expect(out.kind).toBe('stale_ignored');
 });
 
 // ── Terminal-status → ledger-row mapping ──────────────────────────────────
@@ -371,13 +370,13 @@ test('terminalStatusExpectsLedgerRow — every dispatched-attempt status expects
     'provider_not_configured',
     'partial',
   ] as const) {
-    assert.equal(terminalStatusExpectsLedgerRow(status), true, status);
+    expect(terminalStatusExpectsLedgerRow(status), status).toBe(true);
   }
 });
 
 test('terminalStatusExpectsLedgerRow — swept_stale + evicted_overflow do NOT expect a row', () => {
-  assert.equal(terminalStatusExpectsLedgerRow('swept_stale'), false);
-  assert.equal(terminalStatusExpectsLedgerRow('evicted_overflow'), false);
+  expect(terminalStatusExpectsLedgerRow('swept_stale')).toBe(false);
+  expect(terminalStatusExpectsLedgerRow('evicted_overflow')).toBe(false);
 });
 
 // ── Snapshot — cap + stable sort ──────────────────────────────────────────
@@ -386,14 +385,14 @@ test('compareForSnapshot — startedAt DESC, runtimeKey DESC tiebreak', () => {
   const a = buildEntry(entryInput({ idempotencyKey: 'aaa', startedAt: '2026-04-20T10:00:01.000Z' }));
   const b = buildEntry(entryInput({ idempotencyKey: 'bbb', startedAt: '2026-04-20T10:00:00.000Z' }));
   // b is older → a sorts first (DESC)
-  assert.equal(compareForSnapshot(a, b), -1);
+  expect(compareForSnapshot(a, b)).toBe(-1);
 
   // same startedAt, rk 'bbb' > 'aaa' → b sorts first
   const c = buildEntry(entryInput({ idempotencyKey: 'aaa', startedAt: '2026-04-20T10:00:00.000Z' }));
   const d = buildEntry(entryInput({ idempotencyKey: 'bbb', startedAt: '2026-04-20T10:00:00.000Z' }));
-  assert.equal(compareForSnapshot(d, c), -1);
-  assert.equal(compareForSnapshot(c, d),  1);
-  assert.equal(compareForSnapshot(c, c),  0);
+  expect(compareForSnapshot(d, c)).toBe(-1);
+  expect(compareForSnapshot(c, d)).toBe(1);
+  expect(compareForSnapshot(c, c)).toBe(0);
 });
 
 test('buildSnapshot — caps at limit, reports capped=true when count > limit', () => {
@@ -408,11 +407,11 @@ test('buildSnapshot — caps at limit, reports capped=true when count > limit', 
     hardCap:     500,
     generatedAt: '2026-04-20T10:00:12.000Z',
   });
-  assert.equal(out.capped, true);
-  assert.equal(out.entries.length, 5);
+  expect(out.capped).toBe(true);
+  expect(out.entries.length).toBe(5);
   // Newest-first: i=11, 10, 9, 8, 7
-  assert.equal(out.entries[0].idempotencyKey, 'k11');
-  assert.equal(out.entries[4].idempotencyKey, 'k7');
+  expect(out.entries[0].idempotencyKey).toBe('k11');
+  expect(out.entries[4].idempotencyKey).toBe('k7');
 });
 
 test('buildSnapshot — limit clamped to [1, hardCap] silently', () => {
@@ -423,13 +422,13 @@ test('buildSnapshot — limit clamped to [1, hardCap] silently', () => {
   }
   // limit above hardCap clamped down
   const above = buildSnapshot({ slots, limit: 10_000, hardCap: 500, generatedAt: 'now' });
-  assert.equal(above.entries.length, 3);
-  assert.equal(above.capped, false);
+  expect(above.entries.length).toBe(3);
+  expect(above.capped).toBe(false);
 
   // limit 0 clamped up to 1
   const zero = buildSnapshot({ slots, limit: 0, hardCap: 500, generatedAt: 'now' });
-  assert.equal(zero.entries.length, 1);
-  assert.equal(zero.capped, true);
+  expect(zero.entries.length).toBe(1);
+  expect(zero.capped).toBe(true);
 });
 
 test('buildSnapshot — excludes removed slots', () => {
@@ -440,8 +439,8 @@ test('buildSnapshot — excludes removed slots', () => {
     { entry: e2, state: 'removed', stateVersion: 2 },
   ];
   const out = buildSnapshot({ slots, limit: 500, hardCap: 500, generatedAt: 'now' });
-  assert.equal(out.entries.length, 1);
-  assert.equal(out.entries[0].runtimeKey, e1.runtimeKey);
+  expect(out.entries.length).toBe(1);
+  expect(out.entries[0].runtimeKey).toBe(e1.runtimeKey);
 });
 
 test('buildSnapshot — stable ordering: identical-startedAt rows come back in the same order across repeated calls', () => {
@@ -453,14 +452,8 @@ test('buildSnapshot — stable ordering: identical-startedAt rows come back in t
   const a = buildSnapshot({ slots, limit: 500, hardCap: 500, generatedAt: 'now' });
   const b = buildSnapshot({ slots, limit: 500, hardCap: 500, generatedAt: 'now' });
   // runtimeKey DESC → k-e, k-d, k-c, k-b, k-a
-  assert.deepEqual(
-    a.entries.map(e => e.idempotencyKey),
-    b.entries.map(e => e.idempotencyKey),
-  );
-  assert.deepEqual(
-    a.entries.map(e => e.idempotencyKey),
-    ['k-e', 'k-d', 'k-c', 'k-b', 'k-a'],
-  );
+  expect(a.entries.map(e => e.idempotencyKey)).toEqual(b.entries.map(e => e.idempotencyKey));
+  expect(a.entries.map(e => e.idempotencyKey)).toEqual(['k-e', 'k-d', 'k-c', 'k-b', 'k-a']);
 });
 
 // ── LRU overflow selection ────────────────────────────────────────────────
@@ -475,7 +468,7 @@ test('selectEvictionVictim — picks the slot with the smallest startedAt', () =
     activeSlot(oldest),
   ];
   const victim = selectEvictionVictim(slots);
-  assert.equal(victim?.entry.runtimeKey, oldest.runtimeKey);
+  expect(victim?.entry.runtimeKey).toBe(oldest.runtimeKey);
 });
 
 test('add() boundary — noop_already_exists must short-circuit BEFORE overflow eviction (pr-review blocking #1)', () => {
@@ -487,7 +480,7 @@ test('add() boundary — noop_already_exists must short-circuit BEFORE overflow 
 
   // applyAdd with the same runtimeKey + an existing slot → noop.
   const addOutcome = applyAdd({ entry: existingEntry, existing });
-  assert.equal(addOutcome.kind, 'noop_already_exists');
+  expect(addOutcome.kind).toBe('noop_already_exists');
 
   // Independently, at capacity with N-1 other active slots + this one,
   // selectEvictionVictim would happily return the oldest — that's the
@@ -504,8 +497,8 @@ test('add() boundary — noop_already_exists must short-circuit BEFORE overflow 
   // change would be destructive. The fix is to gate eviction on the
   // outcome tag, which this test documents.
   const victim = selectEvictionVictim(slots);
-  assert.notEqual(victim, null);
-  assert.notEqual(victim?.entry.runtimeKey, existingEntry.runtimeKey);
+  expect(victim).not.toBe(null);
+  expect(victim?.entry.runtimeKey).not.toBe(existingEntry.runtimeKey);
 });
 
 test('selectEvictionVictim — skips removed slots', () => {
@@ -516,7 +509,7 @@ test('selectEvictionVictim — skips removed slots', () => {
     activeSlot(e2),
   ];
   const victim = selectEvictionVictim(slots);
-  assert.equal(victim?.entry.runtimeKey, e2.runtimeKey);
+  expect(victim?.entry.runtimeKey).toBe(e2.runtimeKey);
 });
 
 // ── Active-count gauge payload ────────────────────────────────────────────
@@ -530,12 +523,12 @@ test('buildActiveCountPayload — activeCount equals sum of byCallSite and sum o
     { entry: buildEntry(entryInput({ idempotencyKey: 'kr' })), state: 'removed', stateVersion: 2 },
   ];
   const payload = buildActiveCountPayload(slots);
-  assert.equal(payload.activeCount, 3);
-  assert.equal(payload.byCallSite.app + payload.byCallSite.worker, 3);
-  assert.deepEqual(payload.byCallSite, { app: 1, worker: 2 });
+  expect(payload.activeCount).toBe(3);
+  expect(payload.byCallSite.app + payload.byCallSite.worker).toBe(3);
+  expect(payload.byCallSite).toEqual({ app: 1, worker: 2 });
   const providerSum = Object.values(payload.byProvider).reduce((a, b) => a + b, 0);
-  assert.equal(providerSum, 3);
-  assert.deepEqual(payload.byProvider, { anthropic: 2, openai: 1 });
+  expect(providerSum).toBe(3);
+  expect(payload.byProvider).toEqual({ anthropic: 2, openai: 1 });
 });
 
 // ── Sweep selection ───────────────────────────────────────────────────────
@@ -552,6 +545,6 @@ test('selectStaleEntries — returns only active slots past deadlineAt', () => {
   ];
   const nowMs = Date.parse('2026-04-20T09:30:00.000Z');   // > past.deadlineAt (09:10:30), < future.deadlineAt (10:10:30)
   const stale = selectStaleEntries({ slots, nowMs });
-  assert.equal(stale.length, 1);
-  assert.equal(stale[0].entry.runtimeKey, past.runtimeKey);
+  expect(stale.length).toBe(1);
+  expect(stale[0].entry.runtimeKey).toBe(past.runtimeKey);
 });

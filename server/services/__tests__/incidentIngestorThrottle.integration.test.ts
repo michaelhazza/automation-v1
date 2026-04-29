@@ -31,9 +31,6 @@ if (SKIP) {
   process.env.EMAIL_FROM ??= 'skip@placeholder.example';
 }
 
-import { describe, it, mock, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert/strict';
-
 // ---------------------------------------------------------------------------
 // Module-level mocks — must be applied before the modules under test load.
 // We mock the db module so ingestInline never touches a real database.
@@ -114,6 +111,7 @@ if (!SKIP) {
 //       hoisted before any module body code runs, bypassing mock.module), AND
 //   (b) when SKIP=true the import is never attempted, avoiding env.ts crash.
 // ---------------------------------------------------------------------------
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IncidentInput } from '../incidentIngestorPure.js';
 
 let recordIncident: Awaited<typeof import('../incidentIngestor.js')>['recordIncident'];
@@ -167,11 +165,7 @@ describe('recordIncident (sync branch) throttle integration', () => {
 
     // The throttle counter tracks how many calls checkThrottle blocked.
     // First call passes through; 999 subsequent calls are throttled.
-    assert.equal(
-      getThrottledCount(),
-      999,
-      `expected getThrottledCount()=999, got ${getThrottledCount()}`
-    );
+    expect(getThrottledCount(), `expected getThrottledCount()=999, got ${getThrottledCount()}`).toBe(999);
   });
 
   it('cross-fingerprint independence: 100 calls each for A and B → only 2 real calls (198 throttled)', { skip: SKIP }, async () => {
@@ -188,11 +182,7 @@ describe('recordIncident (sync branch) throttle integration', () => {
 
     // First call for each fingerprint passes through; all subsequent calls are throttled.
     const expected = (CALLS_EACH - 1) + (CALLS_EACH - 1);
-    assert.equal(
-      getThrottledCount(),
-      expected,
-      `expected getThrottledCount()=${expected}, got ${getThrottledCount()}`
-    );
+    expect(getThrottledCount(), `expected getThrottledCount()=${expected}, got ${getThrottledCount()}`).toBe(expected);
   });
 
   it('throttle window expiry: call once, advance fake clock past 1 second, call again → 2 real calls (1 throttled in between)', { skip: SKIP }, async (t) => {
@@ -203,18 +193,18 @@ describe('recordIncident (sync branch) throttle integration', () => {
 
       // First call: passes through (not throttled).
       await recordIncident(input);
-      assert.equal(getThrottledCount(), 0, 'first call should not be throttled');
+      expect(getThrottledCount(), 'first call should not be throttled').toBe(0);
 
       // Second call within the 1-second window: should be throttled.
       await recordIncident(input);
-      assert.equal(getThrottledCount(), 1, 'second call within window should be throttled');
+      expect(getThrottledCount(), 'second call within window should be throttled').toBe(1);
 
       // Advance fake clock past the 1-second throttle window.
       t.mock.timers.tick(1001);
 
       // Third call after window expires: should pass through again (no new throttle increment).
       await recordIncident(input);
-      assert.equal(getThrottledCount(), 1, 'call after window expiry should not be throttled (count stays at 1)');
+      expect(getThrottledCount(), 'call after window expiry should not be throttled (count stays at 1)').toBe(1);
     } finally {
       t.mock.timers.reset();
     }
@@ -244,11 +234,7 @@ describe('ingestInline (async-worker path) bypasses throttle (spec §1.7 MUST)',
     // MUST NOT fire here — pg-boss provides backpressure for the async path.
     // A regression that re-introduces the throttle inside ingestInline would
     // increment getThrottledCount() above 0 here.
-    assert.equal(
-      getThrottledCount(),
-      0,
-      `expected getThrottledCount()=0 on ingestInline path, got ${getThrottledCount()}`,
-    );
+    expect(getThrottledCount(), `expected getThrottledCount()=0 on ingestInline path, got ${getThrottledCount()}`).toBe(0);
   });
 
   it('cross-fingerprint ingestInline calls → still 0 throttled (proves no throttle is consulted for any fingerprint on this path)', { skip: SKIP }, async () => {
@@ -263,10 +249,6 @@ describe('ingestInline (async-worker path) bypasses throttle (spec §1.7 MUST)',
       await ingestInline(inputB);
     }
 
-    assert.equal(
-      getThrottledCount(),
-      0,
-      `expected getThrottledCount()=0 across both fingerprints on ingestInline path, got ${getThrottledCount()}`,
-    );
+    expect(getThrottledCount(), `expected getThrottledCount()=0 across both fingerprints on ingestInline path, got ${getThrottledCount()}`).toBe(0);
   });
 });

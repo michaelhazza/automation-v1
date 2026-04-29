@@ -55,3 +55,15 @@ server/services/__tests__/dlqMonitorServiceForceSyncInvariant.test.ts bash:pass 
 server/services/__tests__/dlqMonitorServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/drilldownOutcomeBadgePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/drilldownPendingInterventionPure.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-03 (2026-04-30)
+server/services/__tests__/incidentIngestorThrottle.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/llmInflightPayloadStorePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmInflightRegistryPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterErrorMappingPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterIdempotencyPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterPayloadEmissionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterTimeoutPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/managerGuardPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryBlockCitationDetectorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryBlockRetrievalServicePure.test.ts bash:pass vitest:pass match:yes
