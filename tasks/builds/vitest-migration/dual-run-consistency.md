@@ -359,3 +359,10 @@ server/services/workspaceHealth/detectors/__tests__/explicitDelegationSkillsWith
 server/services/workspaceHealth/detectors/__tests__/subaccountMultipleRoots.test.ts bash:pass vitest:pass match:yes
 server/services/workspaceHealth/detectors/__tests__/subaccountNoRoot.test.ts bash:pass vitest:pass match:yes
 server/skills/__tests__/clientPulseInterventionPrimitivesPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-22 (2026-04-29)
+server/tools/config/__tests__/configSkillHandlersPure.test.ts bash:pass vitest:pass match:yes
+shared/__tests__/errorCodePure.test.ts bash:pass vitest:pass match:yes
+shared/__tests__/stateMachineGuardsPure.test.ts bash:pass vitest:pass match:yes
+shared/lib/parseContextSwitchCommand.test.ts bash:not-discovered vitest:pass match:N/A
+server/services/scopeResolutionService.test.ts bash:not-discovered vitest:pass match:N/A
