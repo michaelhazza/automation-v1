@@ -157,3 +157,29 @@ The 1.47× local speedup does NOT satisfy the spec's ≥5× threshold. Root caus
 Note: `db.execute(sql`...${date}...`)` with Date objects fails in this tsx environment (postgres-js v3.4.8 + drizzle v0.45.1 `unsafe()` path Bug — `Buffer.byteLength` receives a Date). This blocks running the full job via `runMeasureInterventionOutcomes()` standalone. The write-path timing above bypasses the eligibility SELECT and directly benchmarks `recordOutcome()` (the bottleneck). The eligibility SELECT is not part of the performance comparison as it runs identically on both paths.
 
 Deferred: re-run on representative environment (staging/production with app→DB network latency) to verify ≥5× production speedup. See `tasks/todo.md § Deferred from pre-prod-tenancy spec`.
+
+---
+
+## Phase 2 acceptance ([spec round 7 — commit a9135930])
+
+### §4.8 criteria verification
+
+| Criterion | Status | Detail |
+|-----------|--------|--------|
+| `migrations/0244_intervention_outcomes_unique.sql` exists | PASS | 1121 bytes, last modified 2026-04-29T15:51:00Z |
+| `migrations/0244_intervention_outcomes_unique.down.sql` exists | PASS | 176 bytes, last modified 2026-04-29T15:51:00Z |
+| `interventionOutcomes.ts` uses `uniqueIndex` | PASS | Line 35: `interventionUnique: uniqueIndex('intervention_outcomes_intervention_unique').on(table.interventionId)` |
+| `measureInterventionOutcomeJob.ts` no `pg_advisory_xact_lock` or transaction lock | PASS | No matches (only reference is in comment at line 5 describing legacy approach) |
+| `interventionService.ts` uses `.onConflictDoNothing` | PASS | Line 107: `.onConflictDoNothing({ target: interventionOutcomes.interventionId })` |
+| Pure test suite | PASS | 11/11 passing: classification, too_early, no_post_snapshot, operator_alert, B2 SHIP GATE, failed execution, custom window |
+| Load-test triple in progress.md | PASS | §4.7 entry present (line 138) with absolute floor ≥200 rows/sec/org confirmed |
+| TypeScript clean on changed files | PASS | No errors on interventionService, interventionOutcomes, measureInterventionOutcome files |
+| Sister-branch scope-out | PASS | Empty result; no changes to scope-excluded files (sessionMessage, briefs, scopeResolutionService, briefCreationService, index, middleware, workflow services, agentRuns) |
+
+### Summary
+
+- All 9 criteria: **PASS**
+- Single-writer invariant: 1 write path (`interventionService.recordOutcome` with `onConflictDoNothing`)
+- Absolute floor: 300 rows/sec/org (spec ≥200)
+- Pure test gate: 11/11 passing
+- Schema state: clean (no TS errors, no scope leakage)
