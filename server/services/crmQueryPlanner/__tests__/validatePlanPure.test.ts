@@ -10,6 +10,12 @@ import { validatePlanPure, ValidationError } from '../validatePlanPure.js';
 import type { SchemaContext, ValidatorOptions } from '../validatePlanPure.js';
 import type { DraftQueryPlan, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
 
+function assertThrows(fn: () => unknown, label: string): void {
+  let thrown = false;
+  try { fn(); } catch { thrown = true; }
+  if (!thrown) throw new Error(`${label} — expected throw, but did not throw`);
+}
+
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);

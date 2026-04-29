@@ -323,3 +323,15 @@ server/services/crmQueryPlanner/__tests__/canonicalQueryRegistry.test.ts bash:pa
 server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts bash:pass vitest:pass match:yes
 server/services/crmQueryPlanner/__tests__/hybridExecutor.test.ts bash:pass vitest:pass match:yes
 server/services/crmQueryPlanner/__tests__/integration.test.ts bash:pass vitest:skip match:expected-skip
+
+### phase3 phase3-batch-19 (2026-04-29)
+server/services/crmQueryPlanner/__tests__/liveExecutor.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/llmPlannerPromptPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/normaliseIntentPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/planCachePure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/plannerCostPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/registryMatcherPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/resultNormaliserPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/schemaContextPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts bash:pass vitest:pass match:yes
+server/services/middleware/__tests__/errorHandling.failureError.test.ts bash:pass vitest:pass match:yes
