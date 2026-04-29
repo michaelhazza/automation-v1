@@ -232,6 +232,7 @@ export const subaccountAgentService = {
         agentModelProvider: agents.modelProvider,
         agentModelId: agents.modelId,
         agentDefaultSkillSlugs: agents.defaultSkillSlugs,
+        agentWorkspaceActorId: agents.workspaceActorId,
       })
       .from(subaccountAgents)
       .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
@@ -246,7 +247,7 @@ export const subaccountAgentService = {
 
     if (!row) throw { statusCode: 404, message: 'Agent link not found' };
 
-    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs } = row;
+    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs, agentWorkspaceActorId } = row;
     return {
       id: link.id,
       agentId: link.agentId,
@@ -288,6 +289,7 @@ export const subaccountAgentService = {
         modelProvider: agentModelProvider,
         modelId: agentModelId,
         defaultSkillSlugs: (agentDefaultSkillSlugs ?? []) as string[],
+        workspaceActorId: agentWorkspaceActorId ?? null,
       },
     };
   },
