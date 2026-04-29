@@ -7,7 +7,7 @@
  * See paperclip-hierarchy spec §7.2.
  */
 
-import { eq, or, inArray } from 'drizzle-orm';
+import { eq, or, inArray, and, isNull } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { agents } from '../db/schema/agents.js';
@@ -47,7 +47,7 @@ export async function buildForRun(
       handoffSourceRunId: agentRuns.handoffSourceRunId,
     })
     .from(agentRuns)
-    .innerJoin(agents, eq(agents.id, agentRuns.agentId))
+    .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
     .where(eq(agentRuns.id, runId));
 
   const allRows: RunRow[] = [];
@@ -56,7 +56,10 @@ export async function buildForRun(
     allRows.push({
       runId: rootDetail.id,
       agentId: rootDetail.agentId,
-      agentName: rootDetail.agentName,
+      // leftJoin + isNull(deletedAt) → agentName is null when the agent has
+      // been soft-deleted (or hard-deleted). Preserve the historical run row
+      // and surface a stable placeholder so RunRow.agentName stays non-null.
+      agentName: rootDetail.agentName ?? '(deleted agent)',
       isSubAgent: rootDetail.isSubAgent ?? false,
       delegationScope: rootDetail.delegationScope ?? null,
       hierarchyDepth: rootDetail.hierarchyDepth ?? null,
@@ -92,7 +95,7 @@ export async function buildForRun(
         handoffSourceRunId: agentRuns.handoffSourceRunId,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
       .where(
         or(
           inArray(agentRuns.parentRunId, frontier),
@@ -108,7 +111,8 @@ export async function buildForRun(
         allRows.push({
           runId: child.id,
           agentId: child.agentId,
-          agentName: child.agentName,
+          // Same null-coalesce as the root row above — see rationale at line ~59.
+          agentName: child.agentName ?? '(deleted agent)',
           isSubAgent: child.isSubAgent ?? false,
           delegationScope: child.delegationScope ?? null,
           hierarchyDepth: child.hierarchyDepth ?? null,
