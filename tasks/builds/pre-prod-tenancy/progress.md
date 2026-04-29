@@ -112,6 +112,18 @@ Verdict: pass
 
 ---
 
+## Phase 2 §4.2.0 pre-check ([spec round 7 — commit a9135930])
+
+- DB queried: dev (localhost:5432/automation_os)
+- Quiescence verified: yes — 0 active sessions (own session filters itself)
+- Quiescence command output: `count = 0`
+- Pre-check query result: empty — zero duplicate intervention_id values
+- Sample (if non-empty): n/a
+- Resolution: proceed-no-dedup
+- Dedup rule (if applied): n/a
+
+---
+
 ### Task 1.6 — Migration 0245 authored ([spec round 7 — commit a9135930])
 
 - Migration file: `migrations/0245_all_tenant_tables_rls.sql`
