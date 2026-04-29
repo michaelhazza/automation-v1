@@ -1,0 +1,10 @@
+server/services/__tests__/configUpdateOrganisationConfigPure.test.ts
+server/services/__tests__/connectorPollingSchedulerPure.test.ts
+server/services/__tests__/conversationsRoutePure.test.ts
+server/services/__tests__/critiqueGatePure.test.ts
+server/services/__tests__/delegationGrantValidatorPure.test.ts
+server/services/__tests__/delegationGraphServicePure.test.ts
+server/services/__tests__/delegationOutcomeServicePure.test.ts
+server/services/__tests__/deliveryServicePure.test.ts
+server/services/__tests__/extractRunInsightsErrorMessagePure.test.ts
+server/services/__tests__/fixtures/__tests__/fakeProviderAdapter.test.ts

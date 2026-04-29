@@ -1,0 +1,10 @@
+client/src/components/__tests__/DeliveryChannels.test.ts
+client/src/components/__tests__/activityFeedMerge.test.ts
+client/src/components/__tests__/dashboardErrorBannerPure.test.ts
+client/src/components/agentRunLog/__tests__/eventRowPure.test.ts
+client/src/components/clientpulse/__tests__/SparklineChart.test.ts
+client/src/components/dashboard/__tests__/freshnessIndicator.test.ts
+client/src/components/run-cost/__tests__/RunCostPanel.test.ts
+client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts
+client/src/lib/__tests__/formatDuration.test.ts
+client/src/lib/__tests__/resolvePulseDetailUrl.test.ts
