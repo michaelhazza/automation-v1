@@ -109,3 +109,14 @@ Verdict: pass
 - Entries before this PR: 0
 - Entries added this PR: 3 (llm_inflight_history, system_incidents, system_incident_suppressions)
 - Justification for growth: all three carry explicit sysadmin-gated bypass annotations in their schema files; confirmed allowlist per §3.3.1 criteria
+
+---
+
+### Task 1.6 — Migration 0245 authored ([spec round 7 — commit a9135930])
+
+- Migration file: `migrations/0245_all_tenant_tables_rls.sql`
+- Tables covered: 55 canonical org-isolation policies
+- Shape: canonical USING + WITH CHECK for 53 tables; nullable-aware (organisation_id IS NULL OR ...) for org_margin_configs and skills
+- Idempotency: DROP POLICY IF EXISTS ... ; CREATE POLICY ... shape throughout
+- Manifest entries added: 57 (55 with policyMigration pointing to 0245 + 2 sister-branch registry-only: workflow_engines, workflow_runs)
+- Per-block rollback comments: present on all 55 blocks; prior RLS state = disabled (no policy) for all
