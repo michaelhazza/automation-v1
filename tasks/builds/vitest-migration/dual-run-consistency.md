@@ -275,3 +275,15 @@ server/services/__tests__/rls.context-propagation.test.ts bash:pass vitest:skip 
 server/services/__tests__/rlsPredicateSqlBuilderPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/ruleCapturePolicyPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/ruleDraftCandidatesPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-15 (2026-04-29)
+server/services/__tests__/runContextLoader.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/runStatusDriftPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/scanIntegrationFingerprintsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/scheduleCalendarParity.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/scheduleCalendarServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/scopeResolutionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/seedConfigAgentGuidelinesPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePureDiffRows.test.ts bash:pass vitest:pass match:yes

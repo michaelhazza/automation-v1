@@ -124,7 +124,7 @@ test('preserves slug and name as snapshots', () => {
 test('score is the cosine similarity value', () => {
   const agents = [agent('a', [0.6, 0.8, 0])];
   const result = rankAgentsForCandidate(X_AXIS, agents);
-  expect(result[0].score).toBeCloseTo(0.6, 4)score');
+  expect(result[0].score).toBeCloseTo(0.6, 4);
 });
 
 test('custom threshold respected', () => {
