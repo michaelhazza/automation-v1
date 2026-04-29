@@ -186,6 +186,17 @@ Deferred: re-run on representative environment (staging/production with app→DB
 
 ---
 
+## Phase 3 §5.2.1 audit — fastPathRecalibrateJob ([spec round 7 — commit a9135930])
+
+- Lock acquisition: none — read-only job; no mutual-exclusion needed
+- Writes within lock scope (outer admin tx, before per-org dispatch): none — read-only job
+- Per-org function: inline closure (lines 108–127)
+- Per-org-function writes: none (read-only SELECT only; no INSERT/UPDATE/DELETE)
+- Pattern: **A**
+- Rationale: The job is read-only — it SELECTs from `fast_path_decisions` to emit calibration stats; it performs no writes. No advisory lock is needed. The job already correctly splits enumeration (Phase 1) and per-org reads (Phase 2) into separate transactions. The per-org block is upgraded from `withAdminConnection + SET LOCAL ROLE` to `db.transaction + withOrgTx` so that `app.organisation_id` is set and RLS policies engage for each org's SELECT, preventing any cross-org data bleed in the read path.
+
+---
+
 ## Phase 3 §5.2.1 audit — fastPathDecisionsPruneJob ([spec round 7 — commit a9135930])
 
 - Lock acquisition: none — job has no advisory lock (single-runner guarantee achieved by daily schedule + idempotent DELETE)
