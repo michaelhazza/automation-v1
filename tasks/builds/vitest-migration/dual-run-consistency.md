@@ -91,3 +91,7 @@ server/services/__tests__/skillIdempotencyKeysPure.test.ts bash:pass vitest:pass
 server/services/__tests__/skillStudioServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts bash:pass vitest:fail match:expected-phase3
 server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-05 (2026-04-30)
+server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts bash:pass vitest:pass match:yes
+server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts bash:pass vitest:pass match:yes
