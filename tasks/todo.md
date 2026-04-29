@@ -1561,6 +1561,11 @@ These directional findings surfaced during the spec-reviewer loop on the draft s
 - [ ] F10: Systematic coverage pass — audit all write endpoints for missing rate-limit protection (auth, public, session-message covered; others not) [user]
 - [ ] F11: Add near-capacity and success-sampling log events to rate limiter for observability completeness [user]
 
+### PR #235 — pre-prod-tenancy (2026-04-29)
+
+- [ ] F2b: Add idempotency-invariant test for `measureInterventionOutcomeJob` — assert all reads happen before `recordOutcome`, and that two parallel runs over the same row produce exactly one outcome row (the comment is in place; the test would lock the invariant in CI) [auto]
+- [ ] F3: Strengthen `@rls-allowlist-bypass` runtime enforcement — runtime assertion wrapper inside `withAdminConnectionGuarded` OR audit-log on every bypass read with caller + route. Architectural — touches `server/lib/adminDbConnection.ts` plus every annotated call site. Spec out audit-log vs hard-assert trade-off before implementing. [user]
+
 ---
 
 ## Deferred from pre-prod-tenancy spec
