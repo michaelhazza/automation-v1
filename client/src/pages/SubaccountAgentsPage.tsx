@@ -14,6 +14,7 @@ interface AgentLink {
   parentSubaccountAgentId: string | null;
   agentRole: string | null;
   agentTitle: string | null;
+  workspaceIdentityStatus: string | null;
   agent: { id: string; name: string; slug: string; status: string };
 }
 
@@ -453,12 +454,21 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                         >
                           Manage
                         </Link>
-                        <button
-                          onClick={() => setOnboardLink(link)}
-                          className="text-[12px] text-slate-500 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0"
-                        >
-                          Onboard to workplace
-                        </button>
+                        {link.workspaceIdentityStatus == null ? (
+                          <button
+                            onClick={() => setOnboardLink(link)}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0"
+                          >
+                            Onboard to workplace
+                          </button>
+                        ) : (
+                          <Link
+                            to={`/admin/subaccounts/${subaccountId}/agents/${link.id}/manage?tab=identity`}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 no-underline"
+                          >
+                            Identity
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>
