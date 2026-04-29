@@ -860,10 +860,34 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Legacy per-org workflow engine instances — reveal automation execution topology. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
   },
   {
+    tableName: 'automation_engines',
+    schemaFile: 'automationEngines.ts',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from workflow_engines (migration 0220) — same table, same deferral. RLS policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
     tableName: 'workflow_runs',
     schemaFile: 'workflowRuns.ts',
     policyMigration: '0076_playbooks.sql',
     rationale: 'Per-org workflow execution run records — reveal automation activity and execution history. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
+    tableName: 'flow_runs',
+    schemaFile: 'migrations/0037_phase1c_memory_and_workflows.sql',
+    policyMigration: '0076_playbooks.sql',
+    rationale: 'Renamed from workflow_runs (migration 0219) — org-scoped workflow execution instances. RLS policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
+    tableName: 'automations',
+    schemaFile: 'automations.ts',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from processes→tasks (migrations 0220/0010) — per-org automation definitions. RLS policy deferred; no CREATE POLICY exists yet across any migration. Baselined until policy migration is authored.',
+  },
+  {
+    tableName: 'canonical_flow_definitions',
+    schemaFile: 'migrations/0172_clientpulse_canonical_tables.sql',
+    policyMigration: '0172_clientpulse_canonical_tables.sql',
+    rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, same deferral as canonical_workflow_definitions.',
   },
 ];
 

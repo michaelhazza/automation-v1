@@ -121,9 +121,10 @@ MIGRATION_TABLES=$(sort -u "$MIGRATION_TABLES_FILE")
 #    add the new_name to MIGRATION_TABLES so renamed tables pass Check 2 ──────
 RENAME_MAP_FILE=$(mktemp)
 trap 'rm -f "$MIGRATION_TABLES_FILE" "$RENAME_MAP_FILE"' EXIT
+# Use [[:space:]]+ between tokens — migrations 0220/0221 pad with multiple spaces.
 find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
-  xargs -0 grep -hoE 'ALTER TABLE "?[a-zA-Z_]+"? RENAME TO "?[a-zA-Z_]+"?' 2>/dev/null |
-  sed -E 's/ALTER TABLE "?([a-zA-Z_]+)"? RENAME TO "?([a-zA-Z_]+)"?/\1 \2/' >> "$RENAME_MAP_FILE"
+  xargs -0 grep -hoE 'ALTER TABLE[[:space:]]+"?[a-zA-Z_]+"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?[a-zA-Z_]+"?' 2>/dev/null |
+  sed -E 's/ALTER TABLE[[:space:]]+"?([a-zA-Z_]+)"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?([a-zA-Z_]+)"?/\1 \2/' >> "$RENAME_MAP_FILE"
 
 EXPANDED=true
 while [ "$EXPANDED" = "true" ]; do
