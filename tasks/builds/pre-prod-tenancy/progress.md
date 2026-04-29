@@ -74,16 +74,12 @@
 | `workspace_memory_entries` | 0012_phase_one_autonomous_foundations.sql | no | register-with-new-policy | `organisation_id` NOT NULL; canonical shape (defined in workspaceMemories.ts) |
 
 ### Phase 1 migration-number pre-flight count
-- register-with-new-policy verdicts: 57 tables
-  - Minus 2 sister-branch owned (`workflow_engines`, `workflow_runs`) — registry-edit-only, no new policy migration
-  - Net register-with-new-policy migrations needed: 55 tables
-- Canonical-shape tables (batched up to 4 per file): 55 tables → ceil(55/4) = 14 files
+- register-with-new-policy verdicts: 57 tables (55 net, excluding 2 sister-branch owned)
+- Canonical-shape tables (all in one combined file): 55 tables → 1 file (user decision: batch all same-shape into single migration)
 - Parent-EXISTS tables (1 file each):                0 tables → 0 files
-- Total 0245+ migration files needed:                ceil(55/4) + 0 = **14**
+- Total 0245+ migration files needed:                1
 - Available migration slots (0245–0255):             11
-- Outcome: **OVERFLOW — 14 > 11; escalate before writing any policy migrations**
-
-> **Escalation required.** 14 migration files are needed but only 11 slots (0245–0255) are available. Per spec §6, the implementer must either (a) request a migration-number range extension on the branch, or (b) defer a batch of `register-with-new-policy` tables to a follow-up branch and capture them in `tasks/todo.md § Deferred from pre-prod-tenancy spec`. Do NOT begin writing `0245+` migration files until this is resolved.
+- Outcome: T=1 ≤ 11 → no overflow, proceed
 
 ---
 
