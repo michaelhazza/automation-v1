@@ -5,6 +5,7 @@
 - PR: #235 — https://github.com/michaelhazza/automation-v1/pull/235
 - Mode: manual
 - Started: 2026-04-29T08:49:10Z
+- **Verdict:** APPROVED (3 rounds — 4 implement / 1 reject / 2 defer; round 3 confirmation-only)
 
 ---
 
@@ -147,4 +148,80 @@ Final verdict: Ready to merge. APPROVED. Follow-ups worth doing soon: F2b regres
 ### ChatGPT verdict for Round 2
 
 **APPROVED — Ready to merge.** Remaining items (F2b regression test, F3 RLS bypass runtime enforcement) are non-blocking follow-ups, both already routed to tasks/todo.md.
+
+---
+
+## Round 3 — 2026-04-29T09:30:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: You've squeezed the meaningful risk out of this PR. The concurrency flaw is fixed, guardrails are now explicit, and what remains is clearly partitioned into non-blocking follow-ups. No new surface area introduced in Round 2.
+
+Final pass:
+- Concurrency + locking model: lock-scope fix (R1) holds up under re-check, no leakage, no split-phase risk reintroduced. Bounded-runtime invariant (R2) closes the only realistic operational edge. Status: Solid.
+- Invariant quality (after tightening): added clause makes failure mode explicit (not idempotent, concurrent execution → deterministic corruption / over-decay). Prevents future "optimisations" from breaking it. Status: Strong and future-proof.
+- No regression signals: across both jobs — no new retry ambiguity, no hidden second-writer paths, no drift between invariant and implementation. Status: Clean.
+- Deferred items correctly scoped: F2b regression tripwire, F3 system-level safety. Both properly isolated, not required for correctness of this change, unlikely to regress silently short-term.
+- One micro-check (defensive only): advisory lock key is stable + unique per job. If already true, nothing left to validate.
+
+Final verdict: APPROVED — merge. Diminishing returns — core bug fixed, system behaviour deterministic, documentation prevents accidental regression, remaining work correctly deferred.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| Lock-key stability + uniqueness micro-check | technical | reject (no change required) | auto (reject) | low | Confirmation-only finding. `hashtext('ruleAutoDeprecateJob')::bigint` is the standard Postgres-stable hashing pattern used across this codebase (also used by `measureInterventionOutcomeJob` historically). Key string `'ruleAutoDeprecateJob'` is unique to this job. ChatGPT explicitly noted "If that's already true, there is nothing left to validate here" — both conditions hold, no change needed. |
+
+### Implemented (none)
+
+No code changes this round. Session log updated only.
+
+### Deferred (no new entries)
+
+Round 1 + 2 defers reaffirmed (F2b, F3). No new defer entries.
+
+### Verification
+
+No code changes — no verification commands run.
+
+### Top themes (Round 3)
+
+- Confirmation-only round. No new findings, no change requests.
+
+### ChatGPT verdict for Round 3
+
+**APPROVED — merge.** Diminishing returns reached.
+
+---
+
+## Final Summary
+
+- **Rounds:** 3
+- **Auto-accepted (technical):** 4 implemented (F2a invariant comment, F4 PR description note, F2a-tighten guardrail clause, F5 bounded-runtime invariant) | 1 rejected (F6 wording sanity check — already covered) | 1 deferred (F2b idempotency test). Plus round 3 lock-key micro-check rejected as confirmation-only.
+- **User-decided (technical-escalated):** 1 implemented (F1 lock-spans-sweep fix — critical severity, escalated per carveout) | 0 rejected | 1 deferred (F3 RLS bypass runtime enforcement — defer + architectural).
+- **Index write failures:** 0
+- **Deferred to tasks/todo.md § PR Review deferred items / PR #235:**
+  - [auto] F2b — Idempotency invariant test for `measureInterventionOutcomeJob` (regression tripwire — comment is in place; test would lock the invariant in CI under concurrent-runner conditions).
+  - [user] F3 — Runtime enforcement of `@rls-allowlist-bypass` annotations (architectural — runtime-assert vs audit-log trade-off needs spec; touches `withAdminConnectionGuarded` plus every annotated call site).
+- **Architectural items surfaced to screen (user decisions):**
+  - F1 — Lock-spans-sweep fix in `ruleAutoDeprecateJob` — implemented per recommendation.
+  - F3 — RLS bypass runtime enforcement — deferred per recommendation.
+- **KNOWLEDGE.md updated:** yes (2 entries):
+  - `[2026-04-29] Pattern — Decay/increment-style UPDATEs are NOT idempotent; advisory lock must span mutation, not just enumeration`
+  - `[2026-04-29] Pattern — Replacing advisory-lock+NOT-EXISTS dedup with ON CONFLICT requires an explicit "no upstream side effects before insert" invariant`
+- **architecture.md updated:** no — no new product surface, no new structural primitives. The relevant rule (DEVELOPMENT_GUIDELINES.md §2 — SAVEPOINTs inside outer admin tx for global-lock maintenance jobs) was already documented; the round 1 fix brought the code back into compliance with an existing rule.
+- **progress.md updated:** yes — `tasks/builds/pre-prod-tenancy/progress.md` Phase 3 §5.2.1 audit for `ruleAutoDeprecateJob` corrected from Pattern A to Pattern B with a note pointing back to this review log. The original audit's flawed rationale was the source of the regression ChatGPT R1 caught.
+- **PR #235:** ready to merge at https://github.com/michaelhazza/automation-v1/pull/235
+
+### Consistency check
+
+No contradictions across rounds:
+- F1: implement (R1) → confirmed correct (R2) → confirmed correct (R3) — consistent.
+- F2a: implement (R1, comment added) → tighten (R2, guardrail clause added) → covered (R3) — consistent, additive.
+- F2b: defer (R1, auto) → defer-reaffirmed (R2, R3) — consistent.
+- F3: defer (R1, user) → defer-reaffirmed (R2, R3) — consistent.
+- F4: implement (R1) → not revisited — consistent.
+- F5: NEW in R2, implement → confirmed correct (R3) — consistent.
+- F6: NEW in R2, reject (already covered) → not revisited — consistent.
+- Lock-key micro-check: NEW in R3, reject (already true) — consistent.
 

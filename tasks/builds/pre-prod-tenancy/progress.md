@@ -259,13 +259,19 @@ Values below taken directly from commit messages to satisfy byte-for-byte agreem
 
 ---
 
-## Phase 3 §5.2.1 audit — ruleAutoDeprecateJob ([spec round 7 — commit a9135930])
+## Phase 3 §5.2.1 audit — ruleAutoDeprecateJob ([spec round 7 — commit a9135930], **corrected via PR #235 ChatGPT review R1, commit b2090323**)
 
-- Lock acquisition: line 175 (`pg_advisory_xact_lock(hashtext(lockKey)::bigint)`) — inside outer admin tx, before per-org loop
-- Writes within lock scope (outer admin tx, before per-org dispatch):
-  - none — the outer admin tx only runs `SET LOCAL ROLE admin_role` (line 164), acquires the advisory lock (line 175), and queries `SELECT id FROM organisations LIMIT 500` immediately after; all writes occur in the per-org function
+> **Audit correction (2026-04-29):** The original Pattern-A audit below was incorrect — the decay step is NOT idempotent (subtracts a delta, not state-based), so an enumeration-only lock allows two overlapping runners to double-decay the same row. ChatGPT PR #235 review round 1 caught this; the job was refactored to Pattern B (lock-spans-sweep + SAVEPOINT-per-org). See `tasks/review-logs/chatgpt-pr-review-pre-prod-tenancy-2026-04-29T08-49-10Z.md` § Round 1 F1 for full reasoning.
+
+### Corrected audit (post-fix, commit b2090323)
+
+- Lock acquisition: line 181 (`pg_advisory_xact_lock(hashtext(lockKey)::bigint)`) — inside outer admin tx that wraps BOTH enumeration AND per-org mutation
+- Lock scope: spans full sweep — released only when outer admin tx commits or rolls back
+- Writes within lock scope (outer admin tx, before per-org dispatch): none — the outer admin tx runs `SET LOCAL ROLE admin_role` (line 173), acquires the advisory lock (line 181), enumerates orgs, then loops; all writes occur in the per-org section under SAVEPOINTs
 - Per-org function: `applyDecayForOrg` (lines 104–150)
+- Per-org dispatch: `SAVEPOINT org_<i>` subtransaction inside the outer admin tx (lines 211–213). A per-org failure rolls back to its savepoint and the loop continues; siblings persist when the outer tx commits.
 - Per-org-function writes:
-  - lines 134–148 — per-org-scope — `UPDATE memory_blocks SET deprecated_at, deprecation_reason, updated_at WHERE id = $id AND organisation_id = $orgId` (auto-deprecate path; row id sourced from preceding SELECT WHERE deprecated_at IS NULL — deterministic PK WHERE clause); same range covers a second `UPDATE memory_blocks SET quality_score WHERE id = $id AND organisation_id = $orgId` (decay path; same PK WHERE clause)
-- Pattern: **A**
-- Rationale: Both UPDATEs target rows by primary-key `id` AND `organisation_id`, where the ids were just fetched from a `SELECT WHERE deprecated_at IS NULL` guard. A second sweep on the same state returns zero qualifying rows from the SELECT (already deprecated or score unchanged), so neither UPDATE fires — the writes are idempotent-by-construction. No INSERT without a unique constraint target, no UPDATE without a deterministic WHERE clause. The advisory lock's purpose is global cross-job mutual exclusion for the nightly sweep (single-runner guarantee, documented in the file header); it does not need to be per-org. Pattern A is correct: advisory lock stays in the outer admin (enumeration) tx; all per-org writes run inside `withOrgTx` with no separate lock needed.
+  - lines 132–137 — per-org-scope — `UPDATE memory_blocks SET deprecated_at, deprecation_reason, updated_at WHERE id = $id AND organisation_id = $orgId` (auto-deprecate path)
+  - lines 141–145 — per-org-scope — `UPDATE memory_blocks SET quality_score WHERE id = $id AND organisation_id = $orgId` (decay path; new score is computed as `currentScore - BLOCK_DECAY_RATE` — NOT idempotent across independent transactions)
+- Pattern: **B** — lock spans mutation, not just enumeration
+- Rationale: The decay path's UPDATE writes a value computed from the row's old value (`currentScore - BLOCK_DECAY_RATE`). Two overlapping runners that read the same row from independent transactions — runner 1 reads 0.50, decays to 0.48, commits; runner 2 (after lock release) reads 0.48, decays to 0.46 — produce cumulative decay. The advisory lock therefore MUST span both enumeration AND mutation. Implementation per DEVELOPMENT_GUIDELINES.md §2: SAVEPOINT subtransactions inside the outer admin tx. RLS bypassed under admin_role; `applyDecayForOrg`'s explicit `WHERE organisation_id = ${organisationId}::uuid` filter is the org-scope boundary. Bounded-runtime contract documented in the file header (org `LIMIT 500` + per-org bounded by `WHERE deprecated_at IS NULL` row count) — these bounds are load-bearing for the lock-held duration.
