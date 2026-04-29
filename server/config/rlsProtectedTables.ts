@@ -463,9 +463,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   // 0227 — Phase 1 RLS hardening: FORCE RLS on 2 tables that were missing it
   // in their original migrations 0202 and 0203.
   // 0229 — dedicated corrective migration that adds FORCE RLS + proper CREATE
-  // POLICY on reference_documents (direct org-isolation shape) and
-  // reference_document_versions (parent-EXISTS policy shape, no organisation_id
-  // column). 0229 is the authoritative manifest pointer for both tables;
+  // POLICY on reference_documents (direct org-isolation shape).
+  // reference_document_versions is parent-FK-scoped (parent policied via 0229);
   // 0202/0203 are no longer baselined in verify-rls-coverage.sh.
   {
     tableName: 'reference_documents',
@@ -474,22 +473,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
-    tableName: 'reference_document_versions',
-    schemaFile: 'referenceDocumentVersions.ts',
-    policyMigration: '0229_reference_documents_force_rls_parent_exists.sql',
-    rationale: 'Immutable content revisions for reference documents — same sensitivity as the parent document. Version history reveals editing patterns and prior document states. Policy uses parent-EXISTS shape (no organisation_id column); 0229 is the manifest pointer migration.',
-  },
-  {
     tableName: 'document_bundles',
     schemaFile: 'documentBundles.ts',
     policyMigration: '0204_document_bundles.sql',
     rationale: 'Document bundle groupings — names and descriptions can reveal organisational intent; bundle composition reveals which documents are used together. Cross-tenant leak exposes the org\'s knowledge structure.',
-  },
-  {
-    tableName: 'document_bundle_members',
-    schemaFile: 'documentBundleMembers.ts',
-    policyMigration: '0205_document_bundle_members.sql',
-    rationale: 'Join table linking documents to bundles — membership reveals bundle composition. Cross-tenant leak exposes the relationship between documents and bundles.',
   },
   {
     tableName: 'document_bundle_attachments',
