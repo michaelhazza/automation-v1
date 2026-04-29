@@ -83,3 +83,71 @@ Playwright is installed (`playwright`, `@playwright/test`) but only consumed by 
 ### pg-boss
 
 Zero `*.test.ts` files import `pg-boss`. The 10 integration tests that touch queue behaviour use the real `db` module via the integration gate (`NODE_ENV=integration` + `DATABASE_URL`), but no test boots a pg-boss worker.
+
+---
+
+## 2. Database setup
+
+### ORM
+
+Drizzle ORM. Confirmed via `package.json` (`drizzle-orm@^0.45.1`, `drizzle-kit@^0.31.10`) and `drizzle.config.ts`:
+
+```ts
+export default defineConfig({
+  schema: './server/db/schema/*',
+  out: './migrations',
+  dialect: 'postgresql',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+});
+```
+
+### Migration command for CI
+
+```bash
+npm run migrate
+```
+
+This script is `tsx scripts/migrate.ts`. It is a custom forward-only SQL runner, NOT `drizzle-kit migrate` and NOT `drizzle-kit push`. The header comment in `scripts/migrate.ts` explains why:
+
+> Replaces drizzle-kit migrate. Reads `migrations/*.sql` in lexical order, tracks applied files in a `schema_migrations` table, and applies any pending files in their own transaction. drizzle-kit migrate only applies migrations registered in `migrations/meta/_journal.json`. The team has been hand-writing SQL files (numbered 0041+) without registering them in the journal, so drizzle-kit silently skipped them.
+
+What `npm run migrate` does on a fresh database:
+
+1. Acquires a Postgres advisory lock (key `4242_0001`).
+2. Runs `CREATE EXTENSION IF NOT EXISTS pgcrypto`. Required by migration `0018` (`gen_random_bytes`).
+3. Creates `schema_migrations(filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ)`.
+4. Discovers every file matching `^\d{4}_.*\.sql$` under `migrations/`, sorted lexically.
+5. Applies each pending file in its own transaction.
+
+Re-runnable. Safe to invoke every CI run.
+
+The legacy entry `migrate:drizzle-legacy` (`drizzle-kit migrate`) exists in `package.json` but must NOT be used by CI. It only applies migrations registered in `_journal.json`, which is incomplete past file `0040`.
+
+### Migration file count and IEE coverage
+
+`migrations/` currently contains 247 files matching the SQL pattern, numbered `0000_*.sql` through `0243_*.sql` (plus `*.down.sql` partners and a `_down/`, `meta/` subdirectory).
+
+The IEE-specific tables (`iee_runs`, `iee_steps`, `iee_artifacts`, plus `llm_requests` columns) are migrated via:
+
+- `0070_iee_execution_environment.sql`
+- `0071_iee_event_emitted_at.sql`
+- `0176_iee_run_id_and_inflight_index.sql`
+
+These are normal numbered migrations applied by `npm run migrate`. There is no manual SQL approach in play. CI's migration step does cover them.
+
+### Test-database setup
+
+There is no dedicated test database setup script. The integration tests connect to whatever `DATABASE_URL` points at. The recommended CI pattern:
+
+1. Boot a Postgres 16 service container.
+2. Set `DATABASE_URL` to point at it.
+3. Run `npm run migrate` to bring the schema up.
+4. Run `npm test`.
+
+### Postgres extension requirement
+
+`pgcrypto` is auto-created by the migration runner, so CI does NOT need to install the extension via SQL. As long as the Postgres image bundles `pgcrypto` (the official `postgres:16` image does), the runner handles bootstrap.
+
+### Seed scripts
+
+`scripts/seed.ts` exists (`npm run seed`) and a production variant (`npm run seed:production`). Tests do NOT depend on seeded data. The `loadFixtures.ts` helper at `server/services/__tests__/fixtures/loadFixtures.ts` produces pure TypeScript fixture objects that integration tests consume directly. CI does NOT need to run seeds before tests.
