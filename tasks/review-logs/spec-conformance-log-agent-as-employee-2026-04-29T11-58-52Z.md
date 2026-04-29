@@ -7,6 +7,7 @@
 **Scope:** Phases A, B, C only (per caller — Phases D and E NOT yet implemented)
 **Changed-code set:** ~140 code files (server schema/services/routes/adapters, client pages/components, shared types, migrations, scripts)
 **Run at:** 2026-04-29T11:58:52Z
+**Commit at finish:** `5a2b4e4c`
 
 ---
 
