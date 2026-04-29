@@ -26,7 +26,25 @@ export type ActivityType =
   | 'health_finding'
   | 'inbox_item'
   | 'workflow_run'
-  | 'workflow_execution';
+  | 'workflow_execution'
+  | 'email.sent'
+  | 'email.received'
+  | 'calendar.event_created'
+  | 'calendar.event_accepted'
+  | 'calendar.event_declined'
+  | 'identity.provisioned'
+  | 'identity.activated'
+  | 'identity.suspended'
+  | 'identity.resumed'
+  | 'identity.revoked'
+  | 'identity.archived'
+  | 'identity.email_sending_enabled'
+  | 'identity.email_sending_disabled'
+  | 'identity.migrated'
+  | 'identity.migration_failed'
+  | 'identity.provisioning_failed'
+  | 'actor.onboarded'
+  | 'subaccount.migration_completed';
 
 export type NormalisedStatus =
   | 'active'
