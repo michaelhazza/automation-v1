@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-04-29-pre-prod-boundary-and-brief-api-spec.md
-active_plan: docs/superpowers/plans/2026-04-29-pre-prod-boundary-and-brief-api.md
-build_slug: pre-prod-boundary-and-brief-api
-branch: pre-prod-boundary-and-brief-api
-status: REVIEWING
+active_spec: docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
+active_plan: tasks/builds/pre-prod-tenancy/plan.md
+build_slug: pre-prod-tenancy
+branch: pre-prod-tenancy
+status: PLANNING
 last_updated: 2026-04-29
 -->
 
@@ -19,12 +19,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-29-pre-prod-boundary-and-brief-api-spec.md
-**Active plan:** docs/superpowers/plans/2026-04-29-pre-prod-boundary-and-brief-api.md
-**Active build slug:** pre-prod-boundary-and-brief-api (branch `pre-prod-boundary-and-brief-api`)
-**Status:** **REVIEWING** — all 7 phases fully implemented and committed. 29 commits on branch. All pure-unit tests pass (7 + 8 + 7 = 22). Typecheck clean. Review pipeline next: `spec-conformance` → `pr-reviewer`.
+**Active spec:** docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
+**Active plan:** tasks/builds/pre-prod-tenancy/plan.md (pending — architect agent to author after `spec-reviewer`)
+**Active build slug:** pre-prod-tenancy (branch `pre-prod-tenancy`)
+**Status:** **PLANNING** — Major (architect first; full review pipeline). Branch created from origin/main. Verification pass against the source brief found that 14 of the 17 listed items are already shipped on `main` (Phase 1 RLS DB hardening closed by migrations 0227 / 0228 / 0229; route+service refactors P3-C6/C7/C8/C9/C10/C11/H2/H3 closed in-tree). Spec narrowed to three phases: (1) `SC-2026-04-26-1` RLS protected-tables registry triage — bring `verify-rls-protected-tables.sh` to exit 0 (currently 67 violations: 63 unregistered tenant tables + 4 stale entries); (2) `CHATGPT-PR203-R2` `intervention_outcomes` UNIQUE index + `ON CONFLICT DO NOTHING` migration + job refactor; (3) `B10` per-org `withOrgTx` defense-in-depth on three maintenance jobs (optional, conditional on §5.5 budget rule — jobs are no longer silent no-ops, so this is defense-in-depth not correctness). Migration range `0244–0255` reserved (brief reserved 0241–0252 but `main` already shipped 0241/0242/0243). 14 brief items marked `[x]` in `tasks/todo.md` with closure citations. Sister branches `pre-prod-boundary-and-brief-api` and `pre-prod-workflow-and-delegation` own scoped-out paths (see §0.4 in the spec). **Next:** run `spec-reviewer` on the draft spec, then `architect` to decompose into chunks at `tasks/builds/pre-prod-tenancy/plan.md`. Stop at plan gate — operator switches model from Opus to Sonnet before execution per CLAUDE.md model-guidance rule.
 
-**Recently merged (on main):** system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
+**Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
 **Last updated:** 2026-04-29
 
 ---

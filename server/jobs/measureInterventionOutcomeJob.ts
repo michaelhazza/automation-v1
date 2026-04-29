@@ -1,30 +1,49 @@
 /**
  * measureInterventionOutcomeJob (queue: clientpulse:measure-outcomes)
  *
- * Concurrency model: per-org pg advisory lock
- *   Mechanism:       pg_advisory_xact_lock(hashtext('<orgId>::measureInterventionOutcomes')::bigint)
- *                    inside a per-org transaction. The lock is released when
- *                    the transaction commits or rolls back. The eligibility
- *                    SELECT itself runs cross-org (single LIMIT-200 sweep);
- *                    rows are then grouped by org and each group is processed
- *                    in its own transaction holding the per-org lock.
- *   Key/lock space:  per-(organisationId, 'measureInterventionOutcomes').
- *                    Distinct orgs proceed in parallel; two runners targeting
- *                    the same org serialise.
+ * Concurrency model: race-free at the write boundary via ON CONFLICT DO NOTHING
+ *   Mechanism:       no advisory lock. The cross-org SELECT (LIMIT 200) acts as
+ *                    a soft eligibility filter via `NOT EXISTS (...)`, and each
+ *                    row's outcome write goes through interventionService.recordOutcome
+ *                    which runs `INSERT ... ON CONFLICT (intervention_id) DO NOTHING`
+ *                    against the `intervention_outcomes` UNIQUE(intervention_id)
+ *                    constraint introduced in migration 0244. Two overlapping
+ *                    runners that both observe the same eligible row will both
+ *                    attempt the INSERT — the second loses the conflict and
+ *                    returns `wrote=false`. No double row, no application-side
+ *                    lock needed.
+ *   Lock space:      none — the constraint provides serialisation at the row
+ *                    level, not the org level.
  *
- * Idempotency model: claim+verify via NOT EXISTS predicate
- *   Mechanism:       the SELECT eligibility window already filters with
- *                    `NOT EXISTS (SELECT 1 FROM intervention_outcomes WHERE
- *                    intervention_id = a.id)`. Each row processed inserts
- *                    its outcome row exactly once via interventionService.recordOutcome.
- *                    A second invocation re-runs the same SELECT and finds
- *                    those rows are now filtered out — yielding an `examined=0`
- *                    summary, which the caller observes as a no-op.
+ * Idempotency model: ON CONFLICT-only — relies on recordOutcome being the SOLE
+ *                    mutation per processed row. The pre-filter `NOT EXISTS`
+ *                    in the SELECT is an optimisation, not a guarantee.
+ *
+ *   Mechanism:       per-row processing reads template config, post-window
+ *                    health snapshot, post-window assessment, and current
+ *                    action status (all SELECTs, no writes), computes the
+ *                    decision purely, then calls recordOutcome which is its
+ *                    own atomic INSERT...ON CONFLICT. A second invocation
+ *                    re-runs the SELECT, may pick up the same row (NOT EXISTS
+ *                    is racy), but the conflict path makes the second INSERT
+ *                    a no-op.
+ *
  *   Failure mode:    a per-row failure logs and increments `summary.failed`
  *                    without aborting the sweep. A mid-execution crash leaves
  *                    rows un-processed; the next tick picks them up via the
- *                    NOT EXISTS predicate. No partial outcome row is ever
- *                    written because recordOutcome is its own atomic insert.
+ *                    NOT EXISTS predicate.
+ *
+ *   ⚠ INVARIANT (load-bearing — do not break):
+ *                    Every code path inside the per-row loop, between the
+ *                    SELECT and the recordOutcome call, must be either (a)
+ *                    a pure read with no observable side effect, or (b)
+ *                    itself idempotent under repeated invocation with the
+ *                    same input. recordOutcome MUST remain the single
+ *                    mutation per row. Without the advisory lock, any
+ *                    upstream side effect introduced before the INSERT
+ *                    will fire on every overlapping runner — `ON CONFLICT
+ *                    DO NOTHING` only deduplicates the final write, not the
+ *                    work leading up to it.
  *
  * __testHooks production safety: hook is undefined by default; the call site
  * uses the canonical `if (!__testHooks.<name>) return;` short-circuit so an
@@ -41,7 +60,6 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions } from '../db/schema/actions.js';
-import { interventionOutcomes } from '../db/schema/interventionOutcomes.js';
 import {
   clientPulseHealthSnapshots,
   clientPulseChurnAssessments,
@@ -247,24 +265,9 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
         continue;
       }
 
-      // Per-org advisory lock + claim-verify: hold the lock for this org,
-      // re-check NOT EXISTS to defend against a sibling worker that wrote
-      // the outcome row between the eligibility SELECT and now, then write.
-      // The advisory lock is released when the transaction commits.
-      const wrote = await db.transaction(async (tx) => {
-        const lockKey = `${row.organisation_id}::measureInterventionOutcomes`;
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
-
-        const [existing] = await tx
-          .select({ id: interventionOutcomes.interventionId })
-          .from(interventionOutcomes)
-          .where(eq(interventionOutcomes.interventionId, row.id))
-          .limit(1);
-        if (existing) return false;
-
-        await interventionService.recordOutcome(decision.recordArgs!);
-        return true;
-      });
+      // recordOutcome internally INSERTs with ON CONFLICT (intervention_id) DO NOTHING.
+      // Returns true iff a new row was inserted; false on the no-op conflict path.
+      const wrote = await interventionService.recordOutcome(decision.recordArgs!);
 
       if (wrote) summary.written += 1;
     } catch (err) {

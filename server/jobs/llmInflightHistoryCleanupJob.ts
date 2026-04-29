@@ -23,6 +23,7 @@ interface CleanupResult {
   cutoff:      string;
 }
 
+// @rls-allowlist-bypass: llm_inflight_history cleanOldInflightHistoryRows [ref: spec §3.3.1]
 export async function cleanOldInflightHistoryRows(): Promise<CleanupResult> {
   const cutoff = computeInflightHistoryCutoff({
     nowMs:         Date.now(),

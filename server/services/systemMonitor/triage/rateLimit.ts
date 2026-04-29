@@ -32,6 +32,7 @@ export interface RateLimitResult {
  * Reads triage_attempt_count + last_triage_attempt_at from DB.
  * Returns allowed=true if the count is below the cap, or if the cap was hit but the window expired.
  */
+// @rls-allowlist-bypass: system_incidents checkRateLimit [ref: spec §3.3.1]
 export async function checkRateLimit(incidentId: string, now: Date = new Date()): Promise<RateLimitResult> {
   const [row] = await db
     .select({
@@ -68,6 +69,7 @@ export async function checkRateLimit(incidentId: string, now: Date = new Date())
  * incident and fires auto-escalation via the existing manual-escalate path if so.
  * No-op if AUTO_ESCALATE env var is false or conditions are not met.
  */
+// @rls-allowlist-bypass: system_incidents maybeAutoEscalate [ref: spec §3.3.1]
 export async function maybeAutoEscalate(incidentId: string, now: Date = new Date()): Promise<void> {
   if (!AUTO_ESCALATE) return;
 

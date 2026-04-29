@@ -6,14 +6,11 @@
  * Scheduled nightly in queueService.ts.
  *
  * Execution contract (Phase 3 — B10-MAINT-RLS):
- *   - withAdminConnection + SET LOCAL ROLE admin_role to bypass RLS for the
- *     cross-org read sweep.
+ *   - Org enumeration in a short-lived withAdminConnection + SET LOCAL ROLE admin_role.
  *   - Sequential per-org processing; no parallel fan-out in v1.
- *   - One admin transaction PER ORG. The org-list enumeration runs in its own
- *     short-lived admin tx; each per-org read runs in a fresh admin tx so a
- *     Postgres statement error in one org does not abort the surrounding
- *     transaction and poison every later org's work. Without this split,
- *     "partial" status is unachievable.
+ *   - Per-org SELECT runs in a fresh db.transaction + withOrgTx so that
+ *     app.organisation_id is set and RLS policies engage for each org's read.
+ *     A per-org error does not abort the surrounding sweep.
  *   - Per-org try/catch: one org failure is logged; iteration continues.
  *   - Terminal event emitted with outcome counters regardless of mixed results.
  *
@@ -23,8 +20,11 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
+import { computeRouteStats } from './fastPathRecalibrateJobPure.js';
 
 const SOURCE = 'fast-path-recalibrate' as const;
 const LOOKBACK_DAYS = 7;
@@ -38,25 +38,7 @@ export interface FastPathRecalibrateResult {
   durationMs: number;
 }
 
-/** Pure helper: compute per-route calibration stats from raw decision rows. */
-export function computeRouteStats(
-  rows: Array<{
-    route: string;
-    tier: number | null;
-    outcome: string | null;
-    overrodeTo: string | null;
-  }>,
-): Record<string, { count: number; overrideCount: number; tier2Count: number }> {
-  const byRoute: Record<string, { count: number; overrideCount: number; tier2Count: number }> = {};
-  for (const row of rows) {
-    const key = row.route;
-    if (!byRoute[key]) byRoute[key] = { count: 0, overrideCount: 0, tier2Count: 0 };
-    byRoute[key]!.count++;
-    if (row.outcome === 'user_overrode_scope' || row.overrodeTo) byRoute[key]!.overrideCount++;
-    if (row.tier === 2) byRoute[key]!.tier2Count++;
-  }
-  return byRoute;
-}
+export { computeRouteStats } from './fastPathRecalibrateJobPure.js';
 
 export async function runFastPathRecalibrate(): Promise<FastPathRecalibrateResult> {
   const jobRunId = crypto.randomUUID();
@@ -99,32 +81,34 @@ export async function runFastPathRecalibrate(): Promise<FastPathRecalibrateResul
   let orgsSucceeded = 0;
   let orgsFailed = 0;
 
-  // Phase 2 — per-org reads, each in its own admin tx so a per-org failure
-  // does not abort the surrounding transaction.
+  // Phase 2 — per-org reads, each in a fresh tenant-scoped tx so RLS policies
+  // engage for every SELECT. A per-org failure does not abort the sweep.
   for (const org of orgs) {
     logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
     const orgStart = Date.now();
     try {
-      const rows = await withAdminConnection(
-        { source: SOURCE, reason: `Recalibration read for org ${org.id}`, skipAudit: true },
-        async (tx) => {
-          await tx.execute(sql`SET LOCAL ROLE admin_role`);
-          return (await tx.execute(
-            sql`
-              SELECT decided_route AS route, decided_tier AS tier,
-                     downstream_outcome AS outcome, user_overrode_scope_to AS "overrodeTo"
-              FROM fast_path_decisions
-              WHERE organisation_id = ${org.id}::uuid
-                AND decided_at >= ${since}
-            `,
-          )) as unknown as Array<{
-            route: string;
-            tier: number | null;
-            outcome: string | null;
-            overrodeTo: string | null;
-          }>;
-        },
-      );
+      const rows = await db.transaction(async (orgTx) => {
+        await orgTx.execute(sql`SELECT set_config('app.organisation_id', ${org.id}, true)`);
+        return withOrgTx(
+          { tx: orgTx, organisationId: org.id, source: `${SOURCE}:per-org` },
+          async () => {
+            return (await orgTx.execute(
+              sql`
+                SELECT decided_route AS route, decided_tier AS tier,
+                       downstream_outcome AS outcome, user_overrode_scope_to AS "overrodeTo"
+                FROM fast_path_decisions
+                WHERE organisation_id = ${org.id}::uuid
+                  AND decided_at >= ${since}
+              `,
+            )) as unknown as Array<{
+              route: string;
+              tier: number | null;
+              outcome: string | null;
+              overrodeTo: string | null;
+            }>;
+          },
+        );
+      });
 
       if (rows.length > 0) {
         const byRoute = computeRouteStats(rows);
