@@ -22,10 +22,12 @@ interface SessionContext {
   activeSubaccountId: string | null;
 }
 
+type BriefCreatedResponse = { type: 'brief_created' } & BriefCreationEnvelope;
+
 type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
   | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
-  | ({ type: 'brief_created' } & BriefCreationEnvelope)
+  | BriefCreatedResponse
   | { type: 'error'; message: string };
 
 router.post(
