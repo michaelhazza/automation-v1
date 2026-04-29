@@ -335,3 +335,15 @@ server/services/crmQueryPlanner/__tests__/resultNormaliserPure.test.ts bash:pass
 server/services/crmQueryPlanner/__tests__/schemaContextPure.test.ts bash:pass vitest:pass match:yes
 server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts bash:pass vitest:pass match:yes
 server/services/middleware/__tests__/errorHandling.failureError.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-20 (2026-04-29)
+server/services/middleware/__tests__/reflectionLoopPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/baselines/__tests__/computeKLDivergencePure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/baselines/__tests__/computeOutputEntropyPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/heuristics/__tests__/heuristics25Pure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/heuristics/__tests__/heuristicsPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/synthetic/__tests__/sweepCoverageDegraded.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/synthetic/__tests__/syntheticChecksPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/triage/__tests__/clusterAndSelect.test.ts bash:pass vitest:pass match:yes

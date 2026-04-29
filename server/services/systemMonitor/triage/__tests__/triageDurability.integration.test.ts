@@ -30,11 +30,14 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT = '10';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration') {
+const SKIP_TRIAGE_DUR = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
+if (SKIP_TRIAGE_DUR) {
   console.log('\nSKIP: triageDurability.integration.test requires a real DATABASE_URL and NODE_ENV=integration.');
-  process.exit(0);
 }
 
+if (SKIP_TRIAGE_DUR) {
+  test.skip('triageDurability integration (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+} else {
 const { db } = await import('../../../../db/index.js');
 const { systemIncidents, systemIncidentEvents } = await import('../../../../db/schema/index.js');
 const { eq, sql } = await import('drizzle-orm');
@@ -203,3 +206,4 @@ try {
     // best-effort
   }
 }
+} // end if (!SKIP_TRIAGE_DUR)
