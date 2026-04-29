@@ -263,3 +263,15 @@ server/services/__tests__/pulseLaneClassifierPure.test.ts bash:pass vitest:pass 
 server/services/__tests__/pulseServiceResolvedUrl.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/rateLimitKeysPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/rateLimiterPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-14 (2026-04-29)
+server/services/__tests__/readPathResolutionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/regressionCaptureServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/resumeInvokeAutomationStepPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/retrievalPipelinePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/reviewServiceIdempotency.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/reviewServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/rls.context-propagation.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/rlsPredicateSqlBuilderPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleCapturePolicyPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ruleDraftCandidatesPure.test.ts bash:pass vitest:pass match:yes

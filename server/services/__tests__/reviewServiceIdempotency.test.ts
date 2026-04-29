@@ -79,31 +79,6 @@ if (!SKIP) {
 // ── Test runner ───────────────────────────────────────────────────────────────
 let skipped = 0;
 
-async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
-  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
-  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
-  if (opts.skip) {
-    skipped++;
-    console.log(`# SKIP ${name}`);
-    return;
-  }
-  __testHooks.delayBetweenClaimAndCommit = undefined;
-  mock.restoreAll();
-  try {
-    await body();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    __testHooks.delayBetweenClaimAndCommit = undefined;
-    mock.restoreAll();
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -281,7 +256,7 @@ if (!SKIP) {
 // Test 1 — Concurrent double-approve
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent double-approve: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('concurrent double-approve: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'double-approve');
 
   try {
@@ -347,7 +322,7 @@ await test('concurrent double-approve: one winner (wasIdempotent: false) + one i
 // Test 2 — Concurrent double-reject
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent double-reject: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('concurrent double-reject: one winner (wasIdempotent: false) + one idempotent_race (wasIdempotent: true)', async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'double-reject');
 
   try {
@@ -405,7 +380,7 @@ await test('concurrent double-reject: one winner (wasIdempotent: false) + one id
 // Test 3 — Concurrent approve + reject
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('concurrent approve+reject: winner takes status, loser throws 409 ITEM_CONFLICT', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('concurrent approve+reject: winner takes status, loser throws 409 ITEM_CONFLICT', async () => {
   const { actionId, reviewItemId } = await seedReviewFixture(sharedIds!, 'approve-reject');
 
   try {
@@ -465,7 +440,7 @@ await test('concurrent approve+reject: winner takes status, loser throws 409 ITE
 // (fails loudly if reviewService renames the string constant)
 // ═════════════════════════════════════════════════════════════════════════════
 
-await test('idempotent_race discriminant is the literal string "idempotent_race" in reviewService source', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('idempotent_race discriminant is the literal string "idempotent_race" in reviewService source', async () => {
   // Read the source text at runtime to assert the discriminant value by name.
   // This test fails if someone renames 'idempotent_race' without updating this test.
   const { readFileSync } = await import('node:fs');

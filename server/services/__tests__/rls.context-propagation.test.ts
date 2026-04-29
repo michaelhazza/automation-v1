@@ -37,20 +37,25 @@ import { expect, test } from 'vitest';
 
 export {};
 
-if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
-  console.log('\nRLS context-propagation test\n');
-  console.log('  SKIP  requires DATABASE_URL and NODE_ENV=integration');
-  console.log('\n  Skipped (not a failure).\n');
-  process.exit(0);
+const SKIP_RLS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
+if (SKIP_RLS) {
+  console.log('\nRLS context-propagation test — SKIP (requires DATABASE_URL and NODE_ENV=integration)\n');
 }
 
-// Dynamic imports only when we have a DATABASE_URL, so the skip path above
-// doesn't transitively load the drizzle / postgres-js modules (which would
-// crash on missing env vars during module evaluation).
-const { client, db } = await import('../../db/index.js');
-const { withOrgTx } = await import('../../instrumentation.js');
-const { RLS_PROTECTED_TABLES } = await import('../../config/rlsProtectedTables.js');
-const { sql } = await import('drizzle-orm');
+// Dynamic imports only when we have a DATABASE_URL + integration env.
+// When SKIP_RLS is true, none of these are reached.
+let client: Awaited<typeof import('../../db/index.js')>['client'] | undefined;
+let db: Awaited<typeof import('../../db/index.js')>['db'] | undefined;
+let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'] | undefined;
+let RLS_PROTECTED_TABLES: Awaited<typeof import('../../config/rlsProtectedTables.js')>['RLS_PROTECTED_TABLES'] = [];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'] | undefined;
+
+if (!SKIP_RLS) {
+  ({ client, db } = await import('../../db/index.js'));
+  ({ withOrgTx } = await import('../../instrumentation.js'));
+  ({ RLS_PROTECTED_TABLES } = await import('../../config/rlsProtectedTables.js'));
+  ({ sql } = await import('drizzle-orm'));
+}
 
 // Tables that enforce org isolation via parent-EXISTS (no direct organisation_id
 // column). The generic Layer A and write-rejection tests use
@@ -272,4 +277,8 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (!SKIP_RLS) {
+  await main();
+} else {
+  test.skip('rls.context-propagation (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+}

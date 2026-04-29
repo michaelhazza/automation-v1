@@ -41,7 +41,7 @@ console.log('\nRetrieval pipeline — weight profiles');
 test('all profiles have weights summing to 1.0', () => {
   for (const [name, w] of Object.entries(RETRIEVAL_PROFILES)) {
     const sum = w.rrf + w.quality + w.recency;
-    expect(sum).toBeCloseTo(1.0, 4)${name} weights sum to ${sum}`);
+    expect(sum).toBeCloseTo(1.0, 4);
   }
 });
 
