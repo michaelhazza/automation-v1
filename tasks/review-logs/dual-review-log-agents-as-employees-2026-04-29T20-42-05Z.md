@@ -17,7 +17,7 @@
 **Iterations run:** 2/3 (terminated early — iteration 2 raised one finding; all rejected → break)
 **Timestamp:** 2026-04-29T20:42:05Z
 **Codex CLI version:** v0.125.0 (research preview), model gpt-5.5
-**Commit at finish:** _filled in after auto-commit step below_
+**Commit at finish:** 1192607fe2190d2565efd66edd6c74b69c9bf7e7
 
 ---
 
