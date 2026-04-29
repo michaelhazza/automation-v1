@@ -3,6 +3,7 @@
 **Files reviewed:** full feature branch `pre-prod-boundary-and-brief-api` vs `main` (75 files, ~24.9 k insertions). Codex review focused on the Phase-1 Multer change + Phase-2 rate-limiter primitive + Phase-2 cleanup job — i.e. the runtime-critical infrastructure where regressions would block production boot.
 **Iterations run:** 2/3
 **Timestamp:** 2026-04-29T06:05:54Z
+**Commit at finish:** 6b2f1f84
 
 ---
 
