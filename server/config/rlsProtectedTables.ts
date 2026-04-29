@@ -696,16 +696,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Named permission set definitions per org — reveal the org\'s role-based access control model and capability grants.',
   },
   {
-    tableName: 'playbook_runs',
-    schemaFile: 'migrations/0076_playbooks.sql',
+    tableName: 'workflow_templates',
+    schemaFile: 'workflowTemplates.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org playbook execution instances with context and status — reveal automation workflows and operational activity.',
-  },
-  {
-    tableName: 'playbook_templates',
-    schemaFile: 'migrations/0076_playbooks.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Org-owned playbook templates defining multi-step automation workflows — contain proprietary automation IP.',
+    rationale: 'Org-owned workflow templates defining multi-step automation workflows — contain proprietary automation IP.',
   },
   {
     tableName: 'policy_rules',
@@ -721,8 +715,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   },
   // Batch D — Data/Process domain
   {
-    tableName: 'process_connection_mappings',
-    schemaFile: 'migrations/0018_three_level_process_framework.sql',
+    tableName: 'automation_connection_mappings',
+    schemaFile: 'automationConnectionMappings.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Per-subaccount wiring of automation connection slots to integration connections — reveal integration topology and credential associations.',
   },
@@ -794,10 +788,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'File attachments on tasks — may contain PII, client data, and confidential deliverables.',
   },
   {
-    tableName: 'task_categories',
-    schemaFile: 'migrations/0000_wandering_firedrake.sql',
+    tableName: 'automation_categories',
+    schemaFile: 'automationCategories.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Org-defined task taxonomy categories — reveal org workflow structure and operational categorisation.',
+    rationale: 'Org-defined automation taxonomy categories — reveal org workflow structure and operational categorisation.',
   },
   {
     tableName: 'users',
@@ -822,12 +816,6 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'workspaceHealthFindings.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Automated workspace health audit findings — reveal org operational issues and quality assessments.',
-  },
-  {
-    tableName: 'workspace_items',
-    schemaFile: 'migrations/0008_workspace_board.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Board items in the org workspace — contain task-level data, assignments, and operational context.',
   },
   {
     tableName: 'workspace_memory_entries',

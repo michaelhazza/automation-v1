@@ -574,13 +574,13 @@ CREATE POLICY permission_sets_org_isolation ON permission_sets
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── playbook_runs ─────────────────────────────────────────────────────────────
-ALTER TABLE playbook_runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE playbook_runs FORCE ROW LEVEL SECURITY;
+-- ── workflow_runs ─────────────────────────────────────────────────────────────
+ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_runs FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY playbook_runs_org_isolation ON playbook_runs; ALTER TABLE playbook_runs NO FORCE ROW LEVEL SECURITY; ALTER TABLE playbook_runs DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS playbook_runs_org_isolation ON playbook_runs;
-CREATE POLICY playbook_runs_org_isolation ON playbook_runs
+-- rollback: DROP POLICY workflow_runs_org_isolation ON workflow_runs; ALTER TABLE workflow_runs NO FORCE ROW LEVEL SECURITY; ALTER TABLE workflow_runs DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS workflow_runs_org_isolation ON workflow_runs;
+CREATE POLICY workflow_runs_org_isolation ON workflow_runs
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
@@ -592,13 +592,13 @@ CREATE POLICY playbook_runs_org_isolation ON playbook_runs
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── playbook_templates ────────────────────────────────────────────────────────
-ALTER TABLE playbook_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE playbook_templates FORCE ROW LEVEL SECURITY;
+-- ── workflow_templates ────────────────────────────────────────────────────────
+ALTER TABLE workflow_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_templates FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY playbook_templates_org_isolation ON playbook_templates; ALTER TABLE playbook_templates NO FORCE ROW LEVEL SECURITY; ALTER TABLE playbook_templates DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS playbook_templates_org_isolation ON playbook_templates;
-CREATE POLICY playbook_templates_org_isolation ON playbook_templates
+-- rollback: DROP POLICY workflow_templates_org_isolation ON workflow_templates; ALTER TABLE workflow_templates NO FORCE ROW LEVEL SECURITY; ALTER TABLE workflow_templates DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS workflow_templates_org_isolation ON workflow_templates;
+CREATE POLICY workflow_templates_org_isolation ON workflow_templates
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
@@ -646,13 +646,13 @@ CREATE POLICY portal_briefs_org_isolation ON portal_briefs
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── process_connection_mappings ───────────────────────────────────────────────
-ALTER TABLE process_connection_mappings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE process_connection_mappings FORCE ROW LEVEL SECURITY;
+-- ── automation_connection_mappings ───────────────────────────────────────────────
+ALTER TABLE automation_connection_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automation_connection_mappings FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY process_connection_mappings_org_isolation ON process_connection_mappings; ALTER TABLE process_connection_mappings NO FORCE ROW LEVEL SECURITY; ALTER TABLE process_connection_mappings DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS process_connection_mappings_org_isolation ON process_connection_mappings;
-CREATE POLICY process_connection_mappings_org_isolation ON process_connection_mappings
+-- rollback: DROP POLICY automation_connection_mappings_org_isolation ON automation_connection_mappings; ALTER TABLE automation_connection_mappings NO FORCE ROW LEVEL SECURITY; ALTER TABLE automation_connection_mappings DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automation_connection_mappings_org_isolation ON automation_connection_mappings;
+CREATE POLICY automation_connection_mappings_org_isolation ON automation_connection_mappings
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
@@ -870,13 +870,13 @@ CREATE POLICY task_attachments_org_isolation ON task_attachments
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── task_categories ───────────────────────────────────────────────────────────
-ALTER TABLE task_categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE task_categories FORCE ROW LEVEL SECURITY;
+-- ── automation_categories ───────────────────────────────────────────────────────────
+ALTER TABLE automation_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automation_categories FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY task_categories_org_isolation ON task_categories; ALTER TABLE task_categories NO FORCE ROW LEVEL SECURITY; ALTER TABLE task_categories DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS task_categories_org_isolation ON task_categories;
-CREATE POLICY task_categories_org_isolation ON task_categories
+-- rollback: DROP POLICY automation_categories_org_isolation ON automation_categories; ALTER TABLE automation_categories NO FORCE ROW LEVEL SECURITY; ALTER TABLE automation_categories DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS automation_categories_org_isolation ON automation_categories;
+CREATE POLICY automation_categories_org_isolation ON automation_categories
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
@@ -960,13 +960,13 @@ CREATE POLICY workspace_health_findings_org_isolation ON workspace_health_findin
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- ── workspace_items ───────────────────────────────────────────────────────────
-ALTER TABLE workspace_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workspace_items FORCE ROW LEVEL SECURITY;
+-- ── tasks ───────────────────────────────────────────────────────────
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
--- rollback: DROP POLICY workspace_items_org_isolation ON workspace_items; ALTER TABLE workspace_items NO FORCE ROW LEVEL SECURITY; ALTER TABLE workspace_items DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS workspace_items_org_isolation ON workspace_items;
-CREATE POLICY workspace_items_org_isolation ON workspace_items
+-- rollback: DROP POLICY tasks_org_isolation ON tasks; ALTER TABLE tasks NO FORCE ROW LEVEL SECURITY; ALTER TABLE tasks DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tasks_org_isolation ON tasks;
+CREATE POLICY tasks_org_isolation ON tasks
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
