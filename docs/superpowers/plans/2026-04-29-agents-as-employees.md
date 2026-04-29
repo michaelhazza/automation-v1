@@ -3463,9 +3463,18 @@ Run `pr-reviewer` agent on the PR before merge.
 
 ## Phase D — Org chart + Activity wiring + seats
 
-**Goal:** Render humans + agents on a single `OrgChartPage` driven by `workspace_actors.parent_actor_id`. Extend `ActivityPage` with the actor filter + new event types and merge `audit_events` rows into the activity feed. Add the per-agent Activity tab. Wire the seat-rollup job to call `deriveSeatConsumption` over `workspace_identities`. Un-redirect the subaccount-scoped Activity SPA route.
+**Goal:** Render humans + agents on a single `OrgChartPage` driven by `workspace_actors.parent_actor_id`. Extend `ActivityPage` with the actor filter + new event types and merge `audit_events` rows into the activity feed. Add the per-agent Activity tab. Wire the seat-rollup job to call `deriveSeatConsumption` over `workspace_identities`. Un-redirect the subaccount-scoped Activity SPA route. Also: harden the onboarding-orchestrator resume path so a partially-failed onboarding can be retried correctly (carried over from PR #237 Round 3 review).
 
 **Spec sections:** §3 (mockups 08, 14, 15), §4 (extend `OrgChartPage`, `activityService`), §5 (modified routes / pages), §10.6 (seat rollup), §12 (`ActivityFeedItem` ordering).
+
+**Phase D invariants:**
+
+- **D-Inv-0 (Time source — cross-phase):** The only valid time source across Phases D and E is `transaction_timestamp()` (or `now()` within an open transaction). `Date.now()`, request-time injection, and application-layer clock calls are forbidden for any timestamp that affects ordering, staleness measurement, or migration sequencing. Applies to: `audit_events`, cursor tokens, staleness thresholds, seat rollup timestamps, and migration state transitions.
+- **D-Inv-1 (Activity ordering):** `listActivityItems` sorts by `(created_at DESC, id DESC)` everywhere — this is the canonical cursor shape. `created_at` MUST be DB-generated (`now()` / `transaction_timestamp()`); never accepted from the client or set from application-layer `Date.now()`. Activity feed is append-only; ordering skew across concurrent writers (pipeline, onboarding, migration jobs) is tolerable up to ≤1 s. No client-side re-sort. All `audit_events` query branches use this sort; cursor tokens carry both fields.
+- **D-Inv-2 (Actor filter scope):** The `actorId` filter in `listActivityItems` is applied against `workspace_actors.id` only — never against identity IDs, email addresses, or provider-issued IDs. When an agent's identity migrates to a new backend its `workspace_actors.id` does not change, so the filter returns full history across both backends without gaps or duplicates.
+- **D-Inv-3 (Org chart tree integrity):** `parent_actor_id` must satisfy: (a) references an existing `workspace_actors` row OR is null, (b) referenced row belongs to the same subaccount, and (c) does not form a cycle — enforced write-time via a max-depth check of ≤10 hops from root. Cycles are prevented at write time, not detected at render time. Violations are data bugs — not render fallbacks. Server response must flag invalid parents; UI defensive rule: if a node's parent cannot be resolved (orphaned row), render at root level rather than crashing or hiding the node.
+- **D-Inv-4 (Seat mismatch disclosure):** `SeatsPanel` shows two values when live count (`workspace_identities WHERE status='active'`) differs from the rollup snapshot (`org_subscriptions.consumed_seats`): e.g. "4 active · billing snapshot: 3". When the two agree, show only the live count. Never silently show the stale number alone — trust erosion from the mismatch is worse than showing both. If the rollup snapshot timestamp is older than 2 h (indicating a failed or stuck job), the snapshot is considered stale and the panel shows only the live count with a "billing snapshot unavailable" note, not a potentially-stale number.
+- **D-Inv-5 (Staleness signal):** Activity panel and Seats panel each expose a "last updated: <timestamp>" line. Staleness is measured as `now() - last_successful_refresh_at` where both timestamps come from DB time — never from client-side `Date.now()` or the JavaScript clock. Multi-instance deployments agree on staleness because both read from the same DB clock. If staleness exceeds the configurable threshold (default: 5 min for Activity, 70 min for Seats), render a low-severity warning badge: "Data may be stale". Never block the primary action on staleness — it is an informational signal only.
 
 **Phase D exit checklist:**
 1. `npm run lint` + `npm run typecheck` + `npm run build:client` clean.
@@ -3474,6 +3483,88 @@ Run `pr-reviewer` agent on the PR before merge.
 4. Activity page exposes the actor filter; selecting an agent narrows results.
 5. Identity-lifecycle events (`identity.activated`, `identity.suspended`, `email.sent`, etc.) appear in the feed for the matching agent.
 6. Seat-rollup job writes the active count to `org_subscriptions.consumed_seats`, matches the inline `SeatsPanel` count.
+7. **Onboarding-resume hardening (D0):** retrying `workspaceOnboardingService.onboard` after a half-completed prior attempt advances the identity to `'active'` and emits all three audit events exactly once — no stuck-at-`'provisioned'` state.
+8. **Permission-scope invariant (D-Inv):** a unit test asserts `resolveAgentSubaccountId` resolves via `agents.workspaceActorId → workspace_actors.subaccountId` and ignores additional `subaccount_agents` link rows; `architecture.md` § *Workspace identity model — invariants* is up to date.
+9. Activity feed uses `(created_at DESC, id DESC)` cursor pagination throughout; no offset-based pagination remains (D-Inv-1).
+10. Actor filter in `ActivityPage` and `AgentActivityTab` is applied on `workspace_actors.id`; selecting an agent after an identity migration continues to show full history across both backends (D-Inv-2).
+11. Org chart orphan nodes render at root without crashing; circular-reference or cross-subaccount parent links are flagged as data bugs in the server response (D-Inv-3).
+12. `SeatsPanel` shows live + billing-snapshot counts when they diverge; shows only live count when they agree (D-Inv-4).
+13. Activity and Seats panels each display a "last updated" timestamp; a warning badge appears when data is stale beyond the configured threshold (D-Inv-5).
+
+---
+
+### Task D0: Onboarding orchestrator — resume after partial failure
+
+**Files:**
+- Modify: `server/services/workspace/workspaceOnboardingService.ts`
+- Add: `server/services/workspace/__tests__/workspaceOnboardingService.test.ts`
+
+**Spec reference:** §9.1 step 8 (three audit rows per onboarding); §14.1 (idempotency on `provisioning_request_id`); §14.4 (no-silent-partial-success).
+
+**Why:** Carried over from PR #237 ChatGPT Round 3 review. The current orchestrator returns `idempotent: true` as soon as a prior `workspaceIdentities` row exists for the `onboardingRequestId`, regardless of that identity's status. If the first attempt failed between the adapter `provisionIdentity` call (status='provisioned') and the `transition('activate')` step, retry returns success but the identity stays at `'provisioned'`. Audit events `actor.onboarded` and `identity.activated` are also missing on the resume path. This is a correctness gap, not a UX nit — the caller believes onboarding completed when the identity is actually still in limbo.
+
+- [ ] **Step 1: Make the idempotency hit status-aware**
+
+  In `workspaceOnboardingService.onboard`, after the existing `eq(workspaceIdentities.provisioningRequestId, ...)` lookup:
+  - If `existingIdentity.status === 'active'`: backfill any missing audit events (idempotent insert via `ON CONFLICT DO NOTHING` on a `(workspaceActorId, action, metadata->>'identityId')` partial index) and return `{ idempotent: true }`.
+  - If `existingIdentity.status === 'provisioned'`: skip the adapter call (already done), then continue with steps 7→9 (audit events + `transition('activate')`). `transition` is already race-safe via `noOpDueToRace`. Return `{ idempotent: true }` on success.
+  - Any other status (`suspended` / `revoked` / `archived`): return `failure('workspace_identity_provisioning_failed', 'identity already in terminal state')`.
+
+  Document the resume invariant in a 2-line comment at the top of `onboard()`.
+
+- [ ] **Step 2: Add the audit-event idempotency safeguard**
+
+  Add a unique partial index on `audit_events` so duplicate inserts no-op rather than double-write:
+
+  ```sql
+  CREATE UNIQUE INDEX IF NOT EXISTS audit_events_workspace_identity_action_uniq
+    ON audit_events (workspace_actor_id, action, ((metadata->>'identityId')))
+    WHERE entity_type = 'workspace_identity'
+      AND action IN ('identity.provisioned', 'identity.activated', 'actor.onboarded');
+  ```
+
+  Update both `db.insert(auditEvents).values(...)` calls in `onboard` to chain `.onConflictDoNothing()`. Leave the rest of `audit_events` writers untouched.
+
+- [ ] **Step 3: Targeted tsx tests**
+
+  - Stage A: prior attempt left identity at `'provisioned'` + only `identity.provisioned` audit row written → retry → identity reaches `'active'`, all three audit rows present, no duplicates.
+  - Stage B: prior attempt completed fully (`'active'` + three audit rows) → retry → no DB writes, returns `idempotent: true`.
+  - Stage C: prior attempt left identity at `'revoked'` → retry → returns `failure('workspace_identity_provisioning_failed', ...)`, no transitions attempted.
+
+- [ ] **Step 4: Typecheck + commit**
+
+```bash
+npx tsc --noEmit
+git add server/services/workspace/workspaceOnboardingService.ts \
+        server/services/workspace/__tests__/workspaceOnboardingService.test.ts \
+        migrations/<next-id>_audit_events_workspace_identity_uniq.sql
+git commit -m "fix(workspace): onboarding resume hardens against partial-failure retries"
+```
+
+---
+
+### Task D-Inv: Permission-scope invariant test
+
+**Files:**
+- Add: `server/routes/__tests__/workspaceAgentScope.test.ts`
+
+**Spec reference:** §10 (permission model); `architecture.md` § *Workspace identity model — invariants* (added during PR #237 review).
+
+**Why:** Carried over from PR #237 ChatGPT Round 3 review. The fix in PR #237 changed every workspace `resolveAgentSubaccountId` to resolve via `agents.workspaceActorId → workspace_actors.subaccountId` instead of `subaccount_agents` with `LIMIT 1`. A regression here is silent — permission scope would still resolve to *some* subaccount, just possibly the wrong one. A targeted test pins the invariant.
+
+- [ ] **Step 1: Author the test**
+
+  Seed: one agent X, its actor row in subaccount A, an additional `subaccount_agents` link row for the same agent in subaccount B. Caller has permission on B but not on A. Hit `GET /api/agents/X/identity`, `GET /api/agents/X/mailbox`, `GET /api/agents/X/calendar`. All three must return 403 — never 200, never 404.
+
+  Cover the three workspace route files with one shared seed helper. If a future contributor reverts to `subaccount_agents` with `LIMIT 1`, this test fails because the resolver would non-deterministically pick subaccount B (where the caller has permission) and return 200.
+
+- [ ] **Step 2: Run + commit**
+
+```bash
+npx tsx server/routes/__tests__/workspaceAgentScope.test.ts
+git add server/routes/__tests__/workspaceAgentScope.test.ts
+git commit -m "test(workspace): permission scope must come from canonical actor row"
+```
 
 ---
 
@@ -3560,9 +3651,9 @@ export async function listActivityItems(opts: {
 
 If both `actorId` and `agentId` are provided, treat them as equivalent for agent rows. Document the precedence (prefer `actorId`).
 
-- [ ] **Step 4: Cursor pagination per spec §12**
+- [ ] **Step 4: Cursor pagination per spec §12 + D-Inv-1**
 
-Replace any offset-based pagination with cursor-based: `WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id ASC LIMIT ?`.
+Replace any offset-based pagination with cursor-based: `WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`. Both sort columns descend — within the same timestamp, the higher (more recent) ID appears first. Cursor tokens carry both `createdAt` and `id`; the tuple comparison `(created_at, id) < (cursor_at, cursor_id)` is correct for forward pagination on a DESC/DESC sort.
 
 - [ ] **Step 5: Lint + typecheck + commit**
 
@@ -3891,15 +3982,195 @@ EOF
 
 **Spec sections:** §9.3 (migration runbook), §12 (`MigrateSubaccountResponse`), §13 (execution model — async with pg-boss), §14.1 (idempotency), §14.4 (no-silent-partial-success), §15 Phase E.
 
+**Phase E invariants (operational hardening):**
+
+- **E-Inv-1 (Backend source of truth):** `workspace_identities.backend` is the single source of truth for routing ALL operations for an identity. No pipeline, route handler, or worker caches the backend value across request boundaries. Every call resolves it at runtime by reading the row inside the transaction.
+- **E-Inv-2 (Per-identity migration state):** Each identity in a migration batch transitions through explicit states tracked in pg-boss job metadata and `audit_events`: `pending → in_progress → migrated | failed | skipped`. `migrated` and `skipped` are terminal states — the worker MUST check for terminal state at the very start of each attempt and return immediately without re-running any provisioning steps. A job that finds the target identity already in `migrated` state returns `skipped` (not an error). `failed` surfaces to the operator and requires explicit retry — no silent retry-forever.
+- **E-Inv-3 (Retry limits):** The `workspace.migrate-identity` pg-boss job is configured with `retryLimit: 5`, `retryDelay: 60` (seconds), `retryBackoff: true`. Apply ±25% jitter to retry delays to prevent thundering-herd re-attempts when a provider recovers from an outage (e.g. a 60 s delay becomes 45–75 s). After 5 failures the job enters `failed` state; the operator retries via the "Retry failed" CTA in the migration modal. This caps provider-quota blast radius.
+- **E-Inv-4 (Lookup-first provisioning):** All adapter `provisionIdentity` calls are lookup-first: the adapter checks whether the provider-side account already exists for the given `provisioningRequestId` before issuing a create. Never blind-create. This prevents duplicate provider accounts on retry even when the provider's own idempotency window has expired. Google Workspace is especially sensitive to this. If the lookup succeeds but returns inconsistent or partial data (e.g. provider record exists but the mapping doesn't match the idempotency key), the call MUST fail the job — never auto-heal. Silent auto-healing risks producing corrupt identity mappings that are difficult to detect and expensive to remediate.
+- **E-Inv-5 (Concurrency cap):** The pg-boss worker for `workspace.migrate-identity` reads `teamSize` from `WORKSPACE_MIGRATION_CONCURRENCY` env var (default: 8, safe range: 2–10). Different environments (dev, staging, prod) have different provider quotas — the cap must match. On provider rate-limit responses, `retryBackoff: true` with jitter applies exponential delay. This prevents a burst migration from starving the rest of the pipeline queue.
+- **E-Inv-6 (In-flight isolation):** `processIdentityMigration` reads `workspace_identities.backend` once, inside the TX boundary, and uses that value for every sub-call within the TX. All decisions derived from that read — adapter selection, routing, provisioning calls — must be completed within the same transaction scope. Performing the read inside the TX and then acting outside the TX defeats the isolation guarantee. The advisory lock acquired in `start()` guarantees no concurrent migration can modify the backend column for that subaccount while any in-progress TX is open. Mid-TX backend switching is forbidden.
+- **E-Inv-7 (Batch observability):** On batch completion, the `onComplete` hook emits exactly one structured INFO log: `{ migrationRequestId, batchId, subaccountId, actorId: null, total, completed, failed, skipped, durationMs, status }`. Per-identity errors are logged at WARN with `{ migrationRequestId, batchId, actorId, step, reason }`. Both `migrationRequestId` and `actorId` MUST appear in every log line. `migrationRequestId` enables batch-level correlation; `actorId` makes individual failure debugging trivial without a DB lookup. Batch-level logs use `actorId: null` to distinguish them from per-identity logs in structured log search.
+- **E-Inv-8 (Advisory lock scope + retry interaction):** The per-identity advisory lock inside `processIdentityMigration` is keyed on `hash(actorId)` — not the subaccount, not the batch. This scopes the lock to a single identity, allows concurrent processing of different identities within the same batch, and prevents two workers from racing on the same identity across retry attempts. The subaccount-level lock in `start()` prevents duplicate batches from being initiated; the per-identity lock prevents duplicate concurrent identity processing within a batch. **Lock + retry interaction:** when a retry attempt hits a lock that is still held (prior attempt still in flight), the retry MUST either block using `pg_try_advisory_lock` in a loop with exponential backoff, or return a deferred retry — it must never throw immediately on contention. Immediate contention failure produces false `failed` states under load and wastes retry budget.
+- **E-Inv-9 (State transition ordering):** Allowed migration state transitions: `pending → in_progress`, `in_progress → migrated | failed`, `failed → in_progress` (explicit operator retry only), `skipped → (terminal)`, `migrated → (terminal)`. Invalid transitions (e.g. `failed → migrated` without retry, `migrated → in_progress`) MUST be rejected. The worker checks current state at the start of each attempt; any terminal state (`migrated`, `skipped`) causes an immediate no-op return without issuing any provisioning calls.
+- **E-Inv-10 (Failure classification):** Every migration failure MUST be classified at throw time as `retryable` or `non-retryable`. Retryable: provider rate limit, transient timeout, lock contention. Non-retryable: identity already in terminal state, lookup-mismatch, invalid state transition, subaccount config missing. Non-retryable failures MUST bypass the pg-boss retry queue immediately — do not consume 5 retry slots on a failure that will never succeed regardless of retries. Classification is enforced in the `catch` blocks of `processIdentityMigration` steps (a), (b), (c), and (d).
+- **E-Inv-11 (Kill switch):** The `workspace.migrate-identity` worker checks `WORKSPACE_MIGRATION_PAUSED` env var at the start of each job. If `'true'`, the worker returns without processing (pg-boss will not mark the job failed — use a soft-skip pattern so the job is re-queued). This enables immediate halt of all in-flight migration workers without waiting for the queue to drain, without losing work, and without a deploy.
+- **E-Inv-12 (Explicit idempotency contract):** For any `(migrationRequestId, actorId)` pair, the system must guarantee exactly-once successful provisioning regardless of retries, restarts, or duplicate job delivery. Enforcement: (a) `provisioningRequestId` (`${migrationRequestId}:${actorId}`) is the uniqueness boundary — enforced by a DB unique constraint on `workspace_identities.provisioning_request_id` OR a deterministic lookup-first check before every provision call; (b) retries re-enter the flow without duplicating external side effects — the adapter lookup-first check (E-Inv-4) is the external-boundary enforcement mechanism; (c) partial commits (worker crash between steps) are recovered via per-step audit events — the next attempt reads current state (E-Inv-2, E-Inv-9) and continues from the correct step without re-running completed ones. This contract is the single guard against queue redelivery, worker mid-flight crashes, and partial-commit corruption.
+- **E-Inv-13 (External side-effect boundary):** External provider calls (provisioning, activation, archiving) MUST only occur after all preconditions have been validated and the system is in a state where retries are safe. The enforced order is: **validate → lock → decide → call provider**. Never call provider then validate — this creates a window where a failed validation leaves an orphaned provider account with no recovery path. Before issuing any provider create call, the provisioning intent must be recorded (via the `provisioningRequestId` in `workspace_identities` or a pre-insert row) so that a retry can detect "provision was attempted" and use the lookup-first path rather than blindly creating again. This is the primary defence against duplicate external accounts, orphaned provider mappings, and inconsistent state between DB and provider.
+
 **Phase E exit checklist:**
 1. `npm run lint` + `npm run typecheck` + `npm run build:client` clean.
 2. Adapter contract test suite extended with a "migrate" scenario passing for both native and google_mock.
 3. Manual UAT: pre-Phase-E subaccount on native → "Migrate" → modal → progress → Google identities active, native archived, single `actor_id` linking both.
 4. Manual UAT: simulate one identity failing → status `'partial'` returned → banner shows the per-actor reason + Retry CTA → retry only retries failed actors.
-5. **Targeted tsx tests — migration safety (run before Phase E PR):**
+5. **Configure-route guard (carried over from PR #237 ChatGPT review CR-237-1):** `POST /api/subaccounts/:subaccountId/workspace/configure` rejects with HTTP 409 + `failure('workspace_configure_requires_migration')` when the caller tries to set `connectorType` to a value different from the existing `connectorType` AND any non-archived `workspace_identities` rows already exist for the subaccount. The only legal post-onboard backend swap is via `/migrate`. Initial configure (no existing config) and same-backend re-configure (e.g. domain edit) continue to succeed. **Once E0 is merged, delete the temporary client-side `swapBlocked` gate added in PR #237's `WorkspaceTabContent.tsx` — server enforcement supersedes it.**
+6. **Pipeline RLS hygiene (D19 + D20 carried over from spec-conformance deferred queue):** `workspaceInboundWebhook.ts` bootstrap identity lookup runs inside `withAdminConnection` (admin role, BYPASSRLS, audited); every `db.transaction` block in `workspaceEmailPipeline.ts` and `workspaceMigrationService.ts` is wrapped in `withOrgTx({tx, organisationId, source: ...})` so the AsyncLocalStorage org context is extended for nested `getOrgScopedDb()` calls. This is a prerequisite — Phase E adds another transaction-heavy flow on top of the same pipeline.
+7. **Tenant-config wired through (D11 carried over):** `connectorConfigService.getWorkspaceTenantConfig(orgId, subaccountId)` returns the spec's `WorkspaceTenantConfig` shape (`defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`); `workspaceMail.ts` and the migration service build `signatureContext` from that resolver, not from raw `subaccountId` strings or hardcoded literals. Migration must preserve the resolved tenant config across backends.
+8. **Adapter contract fixture cleanup (D17 carried over):** `canonicalAdapterContract.test.ts` no longer passes `signature: null` against a `signature: string` contract. Pick one: widen the contract to `string | null` (with the migration-time decision documented) OR change all fixtures to use `''`. Lock the choice before adding the migration scenarios.
+9. **Targeted tsx tests — migration safety (run before Phase E PR):**
    - `tsx` test: all four terminal per-identity audit event actions emitted in the right scenario — `identity.migrated` (full success), `identity.migration_failed` (provision fails), `identity.migration_activation_failed` (activation fails after provision), `identity.migration_archive_failed` (archive fails after activation).
    - `tsx` test: retry after partial completion — if activation already succeeded (`noOpDueToRace: true`) and archive failed, retrying the job completes with `identity.migrated` and does not double-activate or double-provision.
    - `tsx` test: rate-limit window boundary — two sends within a window saturate the cap; third send at exact window-reset timestamp succeeds (confirms DB-time anchoring, not app-time).
+   - `tsx` test: configure-route guard — given an existing `synthetos_native` config with one active identity, a configure call with `backend: 'google_workspace'` returns 409; with `backend: 'synthetos_native'` (same) returns 200; with no prior config returns 200 regardless of backend.
+   - `tsx` test (carried from PR #237 R3): onboarding idempotency under retry — kill the orchestrator after `transition('activate')` returns `noOpDueToRace: true` mid-flight; retry must reach `'active'` with all three audit rows exactly once. (Companion test in Phase D Task D0 covers the partial-failure resume; this Phase E test covers the race-collision resume.)
+10. All adapter `provisionIdentity` calls are lookup-first; retrying after a provider-side timeout does not duplicate the provider account (E-Inv-4).
+11. Per-identity state (`pending / in_progress / migrated / failed / skipped`) is persisted in pg-boss job metadata; the status-poll endpoint aggregates it and returns an accurate `completed / total` ratio and per-actor state list (E-Inv-2).
+12. `workspace.migrate-identity` job has `retryLimit: 5`; after exhaustion the job enters `failed` state, the migration modal shows the Retry CTA, and re-submitting does not double-provision (E-Inv-3).
+13. pg-boss worker runs with `teamSize: 8`; triggering a 50-identity migration does not starve in-flight email pipeline jobs (E-Inv-5, manual observation).
+14. Batch-completion INFO log includes `{ total, completed, failed, skipped, durationMs }` and is emitted exactly once per batch (E-Inv-7).
+15. `workspace_identities.backend` is read inside each TX, not cached across request boundaries — verified by code review of E1 (E-Inv-1).
+16. An email-send or lifecycle-transition that arrives during migration for an identity whose job is `in_progress` routes correctly by reading `backend` at dispatch time; no split-brain behavior (E-Inv-6).
+17. Per-identity advisory lock is keyed on `hash(actorId)`; two workers processing different identities in the same batch do not block each other (E-Inv-8).
+18. State transition ordering is enforced: a `failed` job re-entering `in_progress` on explicit retry does not double-provision; a `migrated` identity re-submitted is returned as `skipped` (E-Inv-9).
+19. All log lines — batch-level and per-identity — include `migrationRequestId` as a top-level field (E-Inv-7).
+20. `teamSize` is read from `WORKSPACE_MIGRATION_CONCURRENCY` env var and defaults to 8 (E-Inv-5).
+21. Setting `WORKSPACE_MIGRATION_PAUSED=true` causes all in-flight workers to soft-skip without marking jobs failed; the queue drains cleanly on resume (E-Inv-11).
+22. Every failure in `processIdentityMigration` is classified retryable or non-retryable at throw time; a non-retryable failure does not consume retry slots (E-Inv-10).
+23. Status endpoint never reports `completed + failed + skipped > total`, never regresses terminal counts, never double-counts an identity across buckets.
+24. For any `(migrationRequestId, actorId)`, exactly-once provisioning is guaranteed across retries, restarts, and duplicate job delivery — verified by the adapter contract retry scenario (E-Inv-12).
+25. All provider calls (provision, activate, archive) are preceded by full precondition validation and state lock; no provider call precedes its validation step (E-Inv-13).
+
+---
+
+### Task E0: Tighten `/configure` so backend cannot be swapped while identities exist
+
+**Files:**
+- Modify: `server/routes/workspace.ts` (`POST /api/subaccounts/:subaccountId/workspace/configure`)
+- Modify: `shared/iee/failureReason.ts` — add `workspace_configure_requires_migration`
+
+**Spec reference:** §9.3 migration runbook (only `/migrate` may change backend post-onboard).
+
+**Why:** Pre-Phase-E, `/configure` lets a caller flip `backend` between `synthetos_native` and `google_workspace` even when active identities exist for the subaccount. `/migrate` is currently 501. Land this guard before E1 so the moment migration becomes real, the configure path can no longer bypass it. Carried over from PR #237 ChatGPT review item CR-237-1.
+
+- [ ] **Step 1: Add the `workspace_configure_requires_migration` failure reason**
+
+  Append to the `WORKSPACE_FAILURE_REASONS` enum in `shared/iee/failureReason.ts`. No other surface change — same `FailureObject` shape, returned with HTTP 409 from the configure route.
+
+- [ ] **Step 2: Implement the guard in the configure handler**
+
+  Logic: load the current `connectorConfig` for the subaccount (any backend, not just `synthetos_native`). If one exists AND its `connectorType` differs from `req.body.backend` AND `workspaceIdentities` has at least one row for the subaccount where `archived_at IS NULL`, return `res.status(409).json(failure('workspace_configure_requires_migration', 'Backend cannot be changed while identities exist. Use /migrate.'))`. Otherwise proceed with existing create/update logic. Same-backend reconfigure (domain edit) and initial configure remain unaffected.
+
+- [ ] **Step 3: Targeted tsx test**
+
+  Cover the three cases listed in the Phase E exit checklist (existing identities + different backend → 409; same backend → 200; no prior config → 200). Place under `server/routes/__tests__/workspace.configure.test.ts`.
+
+- [ ] **Step 4: Typecheck + commit**
+
+```bash
+npx tsc --noEmit
+git add server/routes/workspace.ts shared/iee/failureReason.ts server/routes/__tests__/workspace.configure.test.ts
+git commit -m "feat(workspace): guard /configure against backend swap when identities exist"
+```
+
+- [ ] **Step 5: Remove temporary client-side gate**
+
+  Once Step 2 lands, delete the `swapBlocked` constant + the two amber-banner branches in `client/src/components/workspace/WorkspaceTabContent.tsx` (introduced in PR #237 as a near-term UI complement). Server enforcement supersedes it; leaving both creates two sources of truth for the same constraint.
+
+---
+
+### Task E0a: Pipeline RLS hygiene — `withOrgTx` wrapping + admin-connection bootstrap
+
+**Files:**
+- Modify: `server/routes/workspaceInboundWebhook.ts` (bootstrap email→identity lookup)
+- Modify: `server/services/workspace/workspaceEmailPipeline.ts` (wrap `db.transaction` blocks)
+
+**Spec reference:** §10.5 multi-tenant safety; `DEVELOPMENT_GUIDELINES.md` §1 (RLS).
+
+**Why:** Carried over from spec-conformance deferred items D19 + D20. The native pipeline currently passes RLS only because dev runs as a BYPASSRLS superuser; in a non-bypass connection (which Phase E migration jobs may run under) the inbound webhook's bootstrap identity lookup would return zero rows, and any nested `getOrgScopedDb()` inside a pipeline transaction would resolve to the wrong scope. Phase E adds another transaction-heavy flow on top of the same pipeline — fix this before the migration service lands.
+
+- [ ] **Step 1: Wrap the inbound-webhook bootstrap lookup**
+
+  In `workspaceInboundWebhook.ts:171-175`, the `workspace_identities` email lookup happens before `app.organisation_id` is set — provider has no JWT, so the org isn't known yet. Wrap that single `select()` in `withAdminConnection(...)` (admin role has BYPASSRLS, audited). Once the identity is resolved, the existing `db.transaction()` + `set_config` + `withOrgTx({tx, organisationId, source: 'inbound-webhook'}, ...)` flow takes over correctly.
+
+- [ ] **Step 2: Wrap pipeline `db.transaction` blocks in `withOrgTx`**
+
+  Both transaction blocks in `workspaceEmailPipeline.ts:71` and `:124` issue `set_config('app.organisation_id', orgId, true)` directly. The RLS session var is set, so writes are protected — but the AsyncLocalStorage org context is not extended. Wrap each block in `withOrgTx({tx, organisationId: orgId, source: 'workspaceEmailPipeline.send'}, ...)` matching the inbound-webhook pattern; preserve the `set_config` call. Do the same for any `db.transaction` block introduced by `workspaceMigrationService.ts` in E1.
+
+- [ ] **Step 3: Targeted tsx test**
+
+  `tsx` test against a non-superuser DB role: `processInboundEmail` for a known identity correctly resolves and writes `workspace_messages` rows; `pipeline.send` correctly resolves rate limits inside the tx via `getOrgScopedDb()`. Without the fix both fail with zero rows / wrong-scope queries.
+
+- [ ] **Step 4: Typecheck + commit**
+
+```bash
+npx tsc --noEmit
+git add server/routes/workspaceInboundWebhook.ts server/services/workspace/workspaceEmailPipeline.ts
+git commit -m "fix(workspace): pipeline + inbound webhook honour withOrgTx / admin-connection RLS contracts"
+```
+
+---
+
+### Task E0b: Tenant-config resolver — wire `WorkspaceTenantConfig` through the pipeline
+
+**Files:**
+- Modify: `server/services/connectorConfigService.ts` (add `getWorkspaceTenantConfig`)
+- Modify: `server/routes/workspaceMail.ts` (build `signatureContext` from the resolver)
+- Migration: backfill default `WorkspaceTenantConfig` row for every existing subaccount
+
+**Spec reference:** §12 contract `WorkspaceTenantConfig` (`defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`); §17 Q3 disclosure opt-in per subaccount.
+
+**Why:** Carried over from spec-conformance deferred item D11. `workspaceMail.ts` currently passes `subaccountName: subaccountId` (raw UUID) and `discloseAsAgent: false` literal; the signature template comes from `identity.metadata.signature` rather than subaccount config. There is no `getWorkspaceTenantConfig` resolver. During migration, tenant-level config (signature, disclosure flag, vanity domain) MUST follow the subaccount across backends — otherwise migrated identities silently lose their disclosure/signature settings. Land before E1 so the migration loop has a single source of truth to copy from.
+
+- [ ] **Step 1: Add the resolver**
+
+  ```ts
+  // server/services/connectorConfigService.ts
+  async getWorkspaceTenantConfig(orgId: string, subaccountId: string): Promise<WorkspaceTenantConfig> {
+    // resolve subaccount.name for the signature templating context
+    // resolve connector_config.config_json for defaultSignatureTemplate / discloseAsAgent / vanityDomain
+    // fall back to org-level defaults where unset
+  }
+  ```
+
+  Return the spec's `WorkspaceTenantConfig` shape verbatim (in `shared/types/workspaceAdapterContract.ts` if it isn't already exported).
+
+- [ ] **Step 2: Pipe through the mailbox route**
+
+  Replace the hardcoded literals in `workspaceMail.ts:122-134` with `await connectorConfigService.getWorkspaceTenantConfig(req.orgId!, subaccountId)`. The pipeline's `signatureContext` is built from that. Same for any `sendEmail` call site in the migration service.
+
+- [ ] **Step 3: Targeted tsx test + manual UAT**
+
+  `tsx` test: a subaccount with `discloseAsAgent: true` produces a signature suffix containing the disclosure phrase; `false` does not. Manual UAT: migrate a subaccount native → Google; the Google-side identity inherits the same signature template + disclosure flag.
+
+- [ ] **Step 4: Typecheck + commit**
+
+```bash
+npx tsc --noEmit
+git add server/services/connectorConfigService.ts server/routes/workspaceMail.ts \
+        shared/types/workspaceAdapterContract.ts \
+        migrations/<next-id>_workspace_tenant_config_backfill.sql
+git commit -m "feat(workspace): tenant-config resolver wired through send pipeline"
+```
+
+---
+
+### Task E0c: Adapter contract fixture cleanup (D17)
+
+**Files:**
+- Modify: `server/adapters/workspace/__tests__/canonicalAdapterContract.test.ts`
+- (Optional) Modify: `shared/types/workspaceAdapterContract.ts` if widening contract
+
+**Spec reference:** §7 `ProvisionParams.signature: string`.
+
+**Why:** Carried over from spec-conformance deferred item D17. Test fixture passes `signature: null` against a `signature: string` contract — compiles only because the fixture isn't strictly typed. Decide before adding the migration scenario tests so the new fixtures don't bake the same drift in deeper.
+
+- [ ] **Step 1: Pick the contract shape**
+
+  Two options:
+  - **Widen** to `signature: string | null` if there's a real "no signature" case (matches the way `metadata.signature` is currently handled on the native adapter).
+  - **Tighten** fixtures to use `''` (empty string) and keep the contract strict.
+
+  Pick alongside Task E0b's tenant-config decision — they're related. Document the choice in `architecture.md` § *Workspace identity model — invariants*.
+
+- [ ] **Step 2: Apply the change + commit**
+
+```bash
+npx tsc --noEmit
+git add server/adapters/workspace/__tests__/canonicalAdapterContract.test.ts \
+        shared/types/workspaceAdapterContract.ts \
+        architecture.md
+git commit -m "chore(workspace): align adapter contract test fixtures with ProvisionParams"
+```
 
 ---
 
@@ -3962,7 +4233,7 @@ export async function start(params: MigrateStartParams): Promise<{ migrationJobB
         migrationRequestId: params.migrationRequestId,
         migrationJobBatchId: batchId,
         initiatedByUserId: params.initiatedByUserId,
-      });
+      }, { retryLimit: 5, retryDelay: 60, retryBackoff: true }); // E-Inv-3
     }
 
     return { migrationJobBatchId: batchId, total: identities.length };
@@ -4101,7 +4372,10 @@ async function resolveConflictFreeLocalPart(
 In `server/jobs/index.ts` (or wherever pg-boss handlers are registered), add:
 
 ```typescript
-boss.work('workspace.migrate-identity', async (job) => {
+// teamSize: env-configurable per E-Inv-5 (safe range 2–10, default 8).
+// retryBackoff + jitter inherited from job send options (E-Inv-3).
+const migrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
+boss.work('workspace.migrate-identity', { teamSize: migrationConcurrency }, async (job) => {
   const adapter = await resolveAdapter(job.data.targetBackend);
   await processIdentityMigration(job.data, { adapter });
 });
@@ -4154,7 +4428,16 @@ router.post('/api/subaccounts/:saId/workspace/migrate', authenticate, resolveSub
 
 - [ ] **Step 2: Add a status-poll endpoint**
 
-`GET /api/subaccounts/:saId/workspace/migrate/:batchId` — returns the per-batch state (running / success / partial / failed) by aggregating `audit_events` rows tagged with `metadata.batchId`. Used by the modal's progress polling.
+`GET /api/subaccounts/:saId/workspace/migrate/:batchId` — aggregates `audit_events` rows and pg-boss job metadata tagged with `metadata.batchId` and returns:
+
+- `status`: `running | success | partial | failed`
+- `total`: identity count enqueued
+- `completed`: count in `migrated` state
+- `failed`: count in `failed` state (exhausted retries)
+- `skipped`: count in `skipped` state (already migrated, idempotent)
+- `perIdentity`: array of `{ actorId, state: pending | in_progress | migrated | failed | skipped, reason? }`
+
+`perIdentity.state` maps to E-Inv-2 state values. The modal uses `completed / total` for the progress bar and `perIdentity` for the partial-failure list. Polling interval: 2 s. The denominator (`total`) is fixed at batch-enqueueing time and stored in the batch record — it never changes during processing. The numerator counts terminal-state identities (`migrated + failed + skipped`). This prevents the progress percentage from jumping backwards or exceeding 100% under concurrent updates. The status endpoint is eventually consistent but MUST guarantee: (a) `completed + failed + skipped` never exceeds `total`, (b) terminal state counts never regress between polls (a `migrated` count of 7 cannot become 6 on a subsequent poll), and (c) each identity is counted in exactly one state bucket — never double-counted across `migrated`, `failed`, and `skipped`. Future aggregation-query optimisations must preserve all three properties.
 
 - [ ] **Step 3: Lint + typecheck + commit**
 
