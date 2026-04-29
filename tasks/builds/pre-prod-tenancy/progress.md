@@ -186,6 +186,18 @@ Deferred: re-run on representative environment (staging/production with app→DB
 
 ---
 
+## Phase 3 §5.2.1 audit — fastPathDecisionsPruneJob ([spec round 7 — commit a9135930])
+
+- Lock acquisition: none — job has no advisory lock (single-runner guarantee achieved by daily schedule + idempotent DELETE)
+- Writes within lock scope (outer admin tx, before per-org dispatch): none — no outer lock scope
+- Per-org function: inline closure (lines 90–99)
+- Per-org-function writes:
+  - line 95 — per-org-scope — `DELETE FROM fast_path_decisions WHERE organisation_id = $orgId AND decided_at < $cutoff RETURNING id` (state-based idempotent; re-running deletes remaining expired rows, converging to zero)
+- Pattern: **A**
+- Rationale: The per-org DELETE targets rows by `organisation_id` AND `decided_at` — both deterministic WHERE clauses. No advisory lock is needed because the DELETE is state-based idempotent: re-running on the same state deletes whatever rows remain (none, if all were already deleted). The job already correctly splits enumeration (Phase 1) and per-org work (Phase 2) into separate transactions. The per-org block is upgraded from `withAdminConnection + SET LOCAL ROLE` to `db.transaction + withOrgTx` so that `app.organisation_id` is set and RLS policies engage for each org's DELETE.
+
+---
+
 ## Phase 3 §5.2.1 audit — ruleAutoDeprecateJob ([spec round 7 — commit a9135930])
 
 - Lock acquisition: line 169 (`pg_advisory_xact_lock(hashtext(lockKey)::bigint)`) — inside outer admin tx, before per-org loop
