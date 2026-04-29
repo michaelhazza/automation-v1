@@ -34,8 +34,7 @@ export async function runBaselineRefresh(): Promise<void> {
   await withAdminConnectionGuarded(
     {
       source: 'system_monitor_baseline_refresh',
-      // allowRlsBypass: cross-tenant aggregate reads against agent_runs / agents.
-      // system_monitor_baselines itself bypasses RLS (see rls-not-applicable-allowlist.txt).
+      // allowRlsBypass: cross-tenant aggregate reads against agent_runs / agents; system_monitor_baselines itself bypasses RLS (see rls-not-applicable-allowlist.txt).
       allowRlsBypass: true,
       reason: 'cross-tenant aggregate for system-scoped baseline refresh',
     },
