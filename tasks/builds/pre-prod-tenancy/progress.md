@@ -186,6 +186,33 @@ Deferred: re-run on representative environment (staging/production with app→DB
 
 ---
 
+## Phase 3 PR description draft (Task 3.8) ([spec round 7 — commit a9135930])
+
+Values below taken directly from commit messages to satisfy byte-for-byte agreement with PR description:
+
+```
+## Phase 3 advisory-lock audits
+- ruleAutoDeprecateJob.ts        : Pattern A | writes lines 134-148 | lock line 175
+- fastPathDecisionsPruneJob.ts   : Pattern A | write line 95 | no lock acquisition
+- fastPathRecalibrateJob.ts      : Pattern A | no writes (read-only) | no lock acquisition
+```
+
+---
+
+## Phase 3 acceptance ([spec round 7 — commit a9135930])
+
+- All §5.4 criteria confirmed.
+- Three jobs refactored: ruleAutoDeprecateJob, fastPathDecisionsPruneJob, fastPathRecalibrateJob.
+- Pattern verdicts: Pattern A for all three jobs.
+- withOrgTx grep: one call-site per job (lines 227, 89, 92 respectively) — 3/3 ✅
+- No per-org tx.transaction() savepoints: 0 matches ✅
+- Outer admin tx is enumeration-only for all three jobs ✅
+- TypeScript clean on all changed files ✅
+- Sister-branch scope-out: empty result ✅
+- CI gate snapshot: verify-rls-protected-tables.sh GREEN at commit c2bcf7ed (Phase 3 does not touch RLS policies) ✅
+
+---
+
 ## Phase 3 §5.2.1 audit — fastPathRecalibrateJob ([spec round 7 — commit a9135930])
 
 - Lock acquisition: none — read-only job; no mutual-exclusion needed
@@ -220,3 +247,4 @@ Deferred: re-run on representative environment (staging/production with app→DB
   - line 140–143 — per-org-scope — `UPDATE memory_blocks SET quality_score WHERE id = $id AND organisation_id = $orgId` (decay path; same PK WHERE clause)
 - Pattern: **A**
 - Rationale: Both UPDATEs target rows by primary-key `id` AND `organisation_id`, where the ids were just fetched from a `SELECT WHERE deprecated_at IS NULL` guard. A second sweep on the same state returns zero qualifying rows from the SELECT (already deprecated or score unchanged), so neither UPDATE fires — the writes are idempotent-by-construction. No INSERT without a unique constraint target, no UPDATE without a deterministic WHERE clause. The advisory lock's purpose is global cross-job mutual exclusion for the nightly sweep (single-runner guarantee, documented in the file header); it does not need to be per-org. Pattern A is correct: advisory lock stays in the outer admin (enumeration) tx; all per-org writes run inside `withOrgTx` with no separate lock needed.
+- **Reconciliation note (Task 3.8):** The refactor commit message (`271567ef`) cited `lines 134-148 (per-org writes); line 175 (lock acquisition)` which uses slightly different ranges. Grep verification of the pre-refactor file (`cf19c30e`) confirms: first `await tx.execute` UPDATE block at lines 132-136, second at 140-143, lock at line 169. The commit message used approximated ranges covering the same blocks. For the PR description block, commit message values are used to satisfy the byte-for-byte agreement requirement.
