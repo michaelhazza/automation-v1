@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import CommandPalette from './CommandPalette';
-import { GlobalAskBar } from './global-ask-bar/GlobalAskBar';
+import GlobalAskBar from './global-ask-bar/GlobalAskBar';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
@@ -303,6 +303,8 @@ export default function Layout({ user, children }: LayoutProps) {
   const [newBriefDesc, setNewBriefDesc] = useState('');
   const [newBriefPriority, setNewBriefPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
   const [newBriefLoading, setNewBriefLoading] = useState(false);
+  const [briefOrgOverride, setBriefOrgOverride] = useState<OrgOption | null>(null);
+  const [briefSubaccountOverride, setBriefSubaccountOverride] = useState<ClientOption | null>(null);
 
   // Dynamic nav lists
   interface NavProject { id: string; name: string; color: string; status: string; }
@@ -519,6 +521,63 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveClientNameState(sa.name);
   };
 
+  const handleOpenNewBrief = () => {
+    setBriefOrgOverride(orgs.find((o) => o.id === activeOrgId) ?? null);
+    setBriefSubaccountOverride(subaccounts.find((s) => s.id === activeClientId) ?? null);
+    setShowNewBrief(true);
+  };
+
+  const handleNewBriefSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!newBriefTitle.trim() || newBriefLoading) return;
+
+    setNewBriefLoading(true);
+    try {
+      const targetOrgId = briefOrgOverride?.id ?? activeOrgId;
+      // When the user picks a different org without picking a subaccount, do
+      // NOT fall back to the current activeClientId — that subaccount belongs
+      // to the previous org and would create a cross-tenant tasks row.
+      const orgChanged = !!briefOrgOverride && briefOrgOverride.id !== activeOrgId;
+      const targetSubaccountId =
+        briefSubaccountOverride?.id ?? (orgChanged ? undefined : activeClientId ?? undefined);
+
+      const description = newBriefDesc.trim();
+      const res = await api.post<{ briefId: string; conversationId: string }>(
+        '/api/briefs',
+        {
+          text: [newBriefTitle.trim(), description].filter(Boolean).join('\n\n'),
+          explicitTitle: newBriefTitle.trim(),
+          explicitDescription: description || undefined,
+          priority: newBriefPriority,
+          source: 'new_brief_modal',
+          subaccountId: targetSubaccountId,
+          uiContext: { surface: 'new_brief_modal', currentSubaccountId: targetSubaccountId },
+        },
+        targetOrgId && targetOrgId !== activeOrgId
+          ? { headers: { 'X-Organisation-Id': targetOrgId } }
+          : undefined,
+      );
+
+      // Switch context if user chose a different org or subaccount
+      if (briefOrgOverride && briefOrgOverride.id !== activeOrgId) {
+        handleSelectOrg(briefOrgOverride);
+      }
+      if (briefSubaccountOverride && briefSubaccountOverride.id !== activeClientId) {
+        handleSelectClient(briefSubaccountOverride);
+      }
+
+      setShowNewBrief(false);
+      setNewBriefTitle('');
+      setNewBriefDesc('');
+      setNewBriefPriority('normal');
+      navigate(`/admin/briefs/${res.data.briefId}`);
+    } catch (err) {
+      console.error('[Layout] Failed to create brief:', err);
+    } finally {
+      setNewBriefLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
       disconnectSocket();
@@ -681,7 +740,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && activeClientId && (
             <>
               <button
-                onClick={() => setShowNewBrief(true)}
+                onClick={handleOpenNewBrief}
                 className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
               >
                 <span><Icons.bolt /></span>
@@ -885,7 +944,7 @@ export default function Layout({ user, children }: LayoutProps) {
           </div>
           {/* Global Ask Bar — always visible when org context exists */}
           {hasOrgContext && (
-            <GlobalAskBar currentSubaccountId={activeClientId ?? undefined} />
+            <GlobalAskBar />
           )}
           {/* Cmd+K trigger */}
           <button
@@ -1194,28 +1253,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
               <button onClick={() => setShowNewBrief(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!newBriefTitle.trim() || newBriefLoading) return;
-              setNewBriefLoading(true);
-              try {
-                // Find top-level agent (no parent) to auto-assign
-                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch((err) => { console.error('[Layout] Failed to fetch agents for new brief:', err); return { data: [] }; });
-                const topAgent = (agentsRes.data as any[]).find((a: any) => a.isActive && !a.parentSubaccountAgentId);
-                await api.post(`/api/subaccounts/${activeClientId}/tasks`, {
-                  title: newBriefTitle.trim(),
-                  description: newBriefDesc.trim() || undefined,
-                  status: 'inbox',
-                  priority: newBriefPriority,
-                  assignedAgentId: topAgent?.agentId ?? undefined,
-                });
-                setShowNewBrief(false);
-                setNewBriefTitle('');
-                setNewBriefDesc('');
-                setNewBriefPriority('normal');
-              } catch { /* ignore */ }
-              finally { setNewBriefLoading(false); }
-            }} className="p-6 flex flex-col gap-4">
+            <form onSubmit={(e) => { void handleNewBriefSubmit(e); }} className="p-6 flex flex-col gap-4">
               <div>
                 <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Title</label>
                 <input autoFocus type="text" value={newBriefTitle} onChange={(e) => setNewBriefTitle(e.target.value)} placeholder="What needs to be done?" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -1233,6 +1271,56 @@ export default function Layout({ user, children }: LayoutProps) {
                   <option value="urgent">Urgent</option>
                 </select>
               </div>
+              {/* Org override — system admins only, when multiple orgs exist */}
+              {isSystemAdmin && orgs.length > 1 && (
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
+                    Organisation <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={briefOrgOverride?.id ?? ''}
+                    onChange={(e) => {
+                      const next = orgs.find((o) => o.id === e.target.value) ?? null;
+                      setBriefOrgOverride(next);
+                      setBriefSubaccountOverride(null);
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Use current organisation</option>
+                    {orgs.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Subaccount override — hidden when the user picks a different org,
+                  because the `subaccounts` list still belongs to the previously
+                  active org. Allowing a selection here would re-introduce the
+                  cross-tenant write defended against on submit (see comment at
+                  line 537). The user can pick the subaccount on the brief page
+                  after the context switch. */}
+              {subaccounts.length > 0 && !(briefOrgOverride && briefOrgOverride.id !== activeOrgId) && (
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
+                    Subaccount <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={briefSubaccountOverride?.id ?? ''}
+                    onChange={(e) => {
+                      const next = subaccounts.find((s) => s.id === e.target.value) ?? null;
+                      setBriefSubaccountOverride(next);
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Use current subaccount</option>
+                    {subaccounts.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex gap-2 justify-end pt-1">
                 <button type="button" onClick={() => setShowNewBrief(false)} className="btn btn-secondary">Cancel</button>
                 <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="btn btn-primary">{newBriefLoading ? 'Creating...' : 'Create Brief'}</button>

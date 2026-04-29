@@ -109,17 +109,17 @@ For each area / module approved for pass 2, in the framework's Default Execution
 
 1. Implement fixes one at a time. Smallest viable units (Rule 7). Never batch unrelated fixes into a single commit.
 2. Stage the fix and review the full diff (Rule 5). Confirm scope, no unrelated changes, no observability code removed, no `scripts/gates/*.sh` modified.
-3. Run validation per Rule 6. **No silent skips** — every check is either run or marked `N/A` in the log with a one-line reason.
+3. Run validation. **Test gates are CI-only — see CLAUDE.md § Test gates are CI-only.** Do NOT run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` from this agent. CI owns the full audit-time validation when the audit branch's PR is opened. **No silent skips** — every check below is either run or marked `N/A` in the log with a one-line reason.
 
    | Check | Command |
    |---|---|
    | Server typecheck | `npm run build:server` |
    | Client build | `npm run build:client` (if `client/` or `shared/` changed) |
-   | Static gates | `npm run test:gates` (always) |
-   | Unit tests | `npm run test:unit` (if covered logic changed) |
-   | QA tests | `npm run test:qa` (release-gate audits or QA-covered changes) |
-   | Skill visibility | `npm run skills:verify-visibility` (if skills changed) |
-   | Playbooks | `npm run playbooks:validate` (if `server/lib/workflow/` changed) |
+   | Targeted unit tests | Only the test files authored or modified by this fix — `npx tsx <path-to-test>`. Skip if the fix touched no test file. |
+   | Skill visibility | `npm run skills:verify-visibility` (only if skills changed AND this command is fast — single-file scope. If it scans the whole repo, defer to CI.) |
+   | Playbooks | `npm run playbooks:validate` (only if `server/lib/workflow/` changed AND single-playbook scope is supported — full-repo validation defers to CI.) |
+
+   If an audit pass identifies a missing static gate (a new `scripts/verify-*.sh` the codebase ought to have), authoring it is in scope for the audit. **Running the broader gate suite to "confirm" the new gate works is not** — write a targeted unit test for the gate's pure logic if you can; otherwise let CI run it.
 
 4. If any check fails, revert the area's commits (`git reset --hard <last-good-tag>`) and route findings to pass 3. **Do not retry the same fix twice** (CLAUDE.md Stuck Detection Protocol).
 5. If validation passes, commit: `audit: area <N> — <name>` or `audit: module <X> — <name>`. Tag checkpoint: `audit-area-<N>-complete` or `audit-module-<X>-complete`.
@@ -210,15 +210,15 @@ See framework §11 for the canonical template. The log lives at `tasks/review-lo
 - **Architectural decisions mid-pass-2:** stop and escalate. Do not unilaterally make architectural decisions inside an audit run.
 - **Critical findings (Rule 8 severity):** any RLS gap, idempotency hole, three-tier agent invariant violation, or capabilities editorial breach in customer-facing sections of `docs/capabilities.md` is `critical` severity and requires user sign-off before any pass-2 fix attempt.
 
-## Gate-Timing Rule (for remediation programmes that follow this audit)
+## Test gates are CI-only — never put them in a remediation plan
 
-When an audit produces findings that are resolved through a multi-chunk remediation programme:
+When an audit produces findings that are resolved through a multi-chunk remediation programme, the plan you (or the architect) hand off must **not** schedule any gate run in any phase. Continuous integration runs the complete suite as a pre-merge gate when the remediation branch's PR is opened.
 
-- **Bash gate scripts (`scripts/verify-*.sh`) do NOT run per-chunk.** They are slow static analyzers; per-chunk overhead adds no benefit.
-- **Timing:** (a) baseline run before Chunk 1 begins; (b) final pass after ALL chunks **and after `spec-conformance` has returned CONFORMANT** — never before spec-conformance completes.
-- Per-chunk verification uses only `npm run build:server` (fast typecheck) and targeted unit tests. Document this in the remediation plan's Executor notes and in any per-chunk "Verification commands" sections.
+- **Forbidden anywhere in a remediation plan:** `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`. No "baseline gate sweep", no "Programme-end full gate set", no per-chunk gate hook.
+- **Per-chunk verification is limited to:** `npm run lint`, `npm run typecheck` (or `npx tsc --noEmit`), `npm run build:server` / `npm run build:client` when the build surface changes, and **targeted execution of unit tests authored in THAT chunk** (single file via `npx tsx <path-to-test>`). Document this in the remediation plan's Executor notes and in every per-chunk "Verification commands" section.
+- If a remediation chunk depends on a gate-level invariant, write a targeted unit test for that invariant inside the chunk. Do not lean on the gate script — CI will run it.
 
-See also: `architect.md` § Gate-Timing Rule — the architect enforces the same rule when producing implementation plans.
+See also: `architect.md` § *Test gates are CI-only — never put them in a plan* — the architect enforces the same rule when producing implementation plans, and `CLAUDE.md` § *Test gates are CI-only — never run locally* for the canonical project-wide rule.
 
 ---
 

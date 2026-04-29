@@ -32,7 +32,7 @@ Organise findings into three tiers. Be specific — point to file paths and line
 
 ### Strong Recommendations (should fix)
 
-- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement
+- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement. The implementer authors and runs ONLY the new test file locally (`npx tsx <path-to-test>`); the broader suite runs in CI on the PR — never ask the implementer to run `npm test` or any test-gate command.
 - Opportunities where a simpler approach exists — with concrete suggestion
 - Performance issues that will matter at scale — with evidence, not speculation
 
@@ -124,3 +124,4 @@ Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUE
 - Don't nitpick style unless it violates a documented convention
 - When flagging missing tests, write the test description in Given/When/Then so it's immediately actionable
 - You have read-only tools. You review, you do not fix. Return your findings and let the main session implement.
+- **Test gates are CI-only — never recommend running them locally.** Do not ask the implementer to run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` as part of resolving a finding. Continuous integration runs the complete suite as a pre-merge gate. If you flag a missing test, the implementer authors it and runs only that single file (`npx tsx <path-to-test>`) — CI runs everything else. See `CLAUDE.md` § *Test gates are CI-only — never run locally*.

@@ -7,9 +7,10 @@ import { decodeCursor } from '../services/briefArtefactCursorPure.js';
 import { handleConversationFollowUp } from '../services/briefConversationService.js';
 import { decideBriefApproval } from '../services/briefApprovalService.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
-import { tasks } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { tasks, agentRuns } from '../db/schema/index.js';
+import { eq, and, inArray, asc } from 'drizzle-orm';
 import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
@@ -20,32 +21,53 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
-    const { text, source, uiContext, subaccountId } = req.body as {
+    const {
+      text, source, uiContext, subaccountId,
+      explicitTitle, explicitDescription, priority,
+    } = req.body as {
       text?: string;
-      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic' | 'new_brief_modal';
       uiContext?: Partial<BriefUiContext>;
       subaccountId?: string;
+      explicitTitle?: string;
+      explicitDescription?: string;
+      priority?: 'low' | 'normal' | 'high' | 'urgent';
     };
 
-    if (!text?.trim()) {
-      res.status(400).json({ message: 'text is required' });
+    // text is required unless an explicit title is provided
+    if (!text?.trim() && !explicitTitle?.trim()) {
+      res.status(400).json({ message: 'text or explicitTitle is required' });
       return;
+    }
+
+    // Cross-entity verification (DEVELOPMENT_GUIDELINES §9): when a
+    // subaccountId is supplied, confirm it belongs to req.orgId before any
+    // write. The Layout New Brief modal can present a stale subaccount list
+    // when an admin switches the org dropdown, and a malicious client could
+    // submit any UUID. resolveSubaccount throws { statusCode: 404 } on
+    // mismatch — asyncHandler maps that to a 404 response.
+    const effectiveSubaccountId = subaccountId ?? uiContext?.currentSubaccountId;
+    if (effectiveSubaccountId) {
+      await resolveSubaccount(effectiveSubaccountId, req.orgId!);
     }
 
     const context: BriefUiContext = {
       surface: uiContext?.surface ?? 'global_ask_bar',
       currentOrgId: req.orgId!,
-      currentSubaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      currentSubaccountId: effectiveSubaccountId,
       userPermissions: new Set<string>(),
     };
 
     const result = await createBrief({
       organisationId: req.orgId!,
-      subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      subaccountId: effectiveSubaccountId,
       submittedByUserId: req.user!.id,
-      text: text.trim(),
+      text: text?.trim() ?? explicitTitle!.trim(),
       source: source ?? 'global_ask_bar',
       uiContext: context,
+      explicitTitle: explicitTitle?.trim(),
+      explicitDescription: explicitDescription?.trim(),
+      priority,
     });
 
     res.status(201).json(result);
@@ -70,6 +92,35 @@ router.get(
     }
 
     res.json(meta);
+  }),
+);
+
+// GET /api/briefs/:briefId/active-run — runId of the current in-flight agent
+// run for this brief. BriefDetailPage polls this to wire the live graph panel.
+router.get(
+  '/api/briefs/:briefId/active-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const { briefId } = req.params;
+    const tx = getOrgScopedDb('briefs.active_run');
+
+    // Oldest in-flight run wins so DelegationGraphView roots at the parent
+    // when a brief has both parent + child runs in flight (handoff/spawn chains).
+    const [run] = await tx
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.taskId, briefId),
+          eq(agentRuns.organisationId, req.orgId!),
+          inArray(agentRuns.status, ['running', 'delegated', 'cancelling']),
+        ),
+      )
+      .orderBy(asc(agentRuns.createdAt))
+      .limit(1);
+
+    res.json({ runId: run?.id ?? null });
   }),
 );
 
