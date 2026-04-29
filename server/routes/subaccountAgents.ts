@@ -9,7 +9,9 @@ import { agentExecutionService } from '../services/agentExecutionService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
-import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 
 const router = Router();
@@ -283,7 +285,12 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, linkId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    checkTestRunRateLimit(req.user!.id);
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt);
+      res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
+      return;
+    }
     const link = await subaccountAgentService.getLinkById(req.orgId!, subaccountId, linkId);
     const { prompt, inputJson, idempotencyKey } = req.body as {
       prompt?: string;
