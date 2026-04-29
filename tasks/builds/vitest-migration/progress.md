@@ -1,6 +1,6 @@
 # Vitest Migration — Session Progress
 
-Current phase: Phase 0 complete — proceeding to Phase 1.
+Current phase: Phase 3 — handwritten harness migration. Batch 0/22 done.
 
 Spec: docs/test-migration-spec.md
 Plan: docs/superpowers/plans/2026-04-29-vitest-migration.md
@@ -26,9 +26,11 @@ Phase 0 baseline commit SHA: 883b1c4b8fc217284b51361b5029ef151eb7b515
 
 ## Session handoff notes
 
-Phase 0 complete: all 5 tasks done. Branch: claude/vitest-migration-2026-04-29 pushed.
-CI note: .github/workflows/ci.yml triggers only on push-to-main or PRs with
-ready-to-merge label. Phase 0 adds only doc files — no gate/QA impact. PR #236 (main)
-was green. Full CI verification deferred to Phase 5 PR (mandatory gate before cutover).
-Next: Phase 1 scaffolding (install vitest@2.x, create vitest.config.ts, add
-test:unit:vitest script, run discovery, build fixture inventory).
+Phase 3 batch 0 done (10 files). 22 batches remaining.
+Converters: scripts/convert-node-test-batch.mjs (Phase 2), scripts/convert-handwritten-harness.mjs (Phase 3).
+Key learnings:
+- resolvePulseDetailUrl: module-level spy needs beforeEach/afterAll
+- Files with top-level blocks (no function test harness): wrapped in test('assertions', () => {...})
+- node:assert imports (not /strict): handled by hasNodeAssertImport flag
+- if(failed>0){} without process.exit: left by boilerplate removal, needs manual cleanup
+Next: Batches 1-22 via parallel subagents, then outlier wrap (Task 3.N).
