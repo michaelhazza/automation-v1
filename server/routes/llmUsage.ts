@@ -14,7 +14,7 @@ import {
   agentRuns,
   subaccounts,
 } from '../db/schema/index.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
 import type { RoutingLogFilters } from '../services/llmUsageService.js';
 
@@ -56,7 +56,7 @@ router.get(
       // Top 10 subaccounts by monthly spend — scoped to this org
       db.select({ costAggregate: costAggregates })
         .from(costAggregates)
-        .innerJoin(subaccounts, eq(costAggregates.entityId, subaccounts.id))
+        .innerJoin(subaccounts, and(eq(costAggregates.entityId, subaccounts.id), isNull(subaccounts.deletedAt)))
         .where(
           and(
             eq(costAggregates.entityType, 'subaccount'),

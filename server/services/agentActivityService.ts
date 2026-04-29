@@ -52,8 +52,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(agentRuns.createdAt))
       .limit(limit)
@@ -101,8 +101,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(and(...conditions));
 
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
@@ -211,7 +211,7 @@ export const agentActivityService = {
         agentName: agents.name,
       })
       .from(taskActivities)
-      .leftJoin(agents, eq(agents.id, taskActivities.agentId))
+      .leftJoin(agents, and(eq(agents.id, taskActivities.agentId), isNull(agents.deletedAt)))
       .innerJoin(tasks, eq(tasks.id, taskActivities.taskId));
 
     if (params.subaccountId) {
@@ -282,8 +282,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(and(
         eq(agentRuns.organisationId, organisationId),
         sql`(${agentRuns.id} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentRunId} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentSpawnRunId} = ANY(${chainIds}::uuid[]))`,

@@ -59,7 +59,9 @@ export async function buildForRun(
       // leftJoin + isNull(deletedAt) → agentName is null when the agent has
       // been soft-deleted (or hard-deleted). Preserve the historical run row
       // and surface a stable placeholder so RunRow.agentName stays non-null.
-      agentName: rootDetail.agentName ?? '(deleted agent)',
+      // Suffix with the first 8 chars of the agent UUID so multiple deleted
+      // agents in the same delegation graph remain distinguishable in traces.
+      agentName: rootDetail.agentName ?? `(deleted agent ${rootDetail.agentId.slice(0, 8)})`,
       isSubAgent: rootDetail.isSubAgent ?? false,
       delegationScope: rootDetail.delegationScope ?? null,
       hierarchyDepth: rootDetail.hierarchyDepth ?? null,
@@ -112,7 +114,7 @@ export async function buildForRun(
           runId: child.id,
           agentId: child.agentId,
           // Same null-coalesce as the root row above — see rationale at line ~59.
-          agentName: child.agentName ?? '(deleted agent)',
+          agentName: child.agentName ?? `(deleted agent ${child.agentId.slice(0, 8)})`,
           isSubAgent: child.isSubAgent ?? false,
           delegationScope: child.delegationScope ?? null,
           hierarchyDepth: child.hierarchyDepth ?? null,

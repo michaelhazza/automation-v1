@@ -128,3 +128,21 @@ _(none — three findings were confirmations, two findings were diff-misread hal
 
 11 uncommitted files exist on this branch (the bulk of the soft-delete fix); PR #232 currently contains only the `delegationGraphService.ts` commit. The `chatgpt-pr-review` agent does not commit source code on the user's behalf — the main session must commit those files before merge.
 
+---
+
+## Addendum — 2026-04-29 (post-finalisation, main session)
+
+User overrode the Round 2 defer decision: "don't defer, fix what needs to be fixed here."
+
+**Action taken:** Implemented the Round 2 #4 placeholder-distinguishability suggestion in source.
+
+- File: `server/services/delegationGraphService.ts` (lines ~63 and ~117)
+- Change: `agentName: rootDetail.agentName ?? '(deleted agent)'` → `agentName: rootDetail.agentName ?? \`(deleted agent ${rootDetail.agentId.slice(0, 8)})\`` (and identical change for `child` row in the BFS loop).
+- Rationale: `agentRuns.agentId` is `notNull` per schema (verified in `server/db/schema/agentRuns.ts:24-26`), so `.slice(0, 8)` is safe without optional chaining. First 8 chars of the UUID are sufficient to disambiguate multiple deleted agents in a single delegation graph during debug.
+- Comment updated above each call site to document the suffix's purpose.
+- Typecheck (`npx tsc --noEmit -p server/tsconfig.json`): 0 new errors introduced. Pre-existing errors on this branch are in `server/services/systemMonitor/triage/**` and `server/tests/**`, unrelated.
+- `tasks/todo.md` deferred entry for PR #232 removed (resolved in source rather than backlog).
+- Final-summary tally above should now read: 1 implemented (was 0); 0 deferred (was 1).
+
+**Reclassification:** Round 2 #4 — DEFERRED → IMPLEMENTED.
+
