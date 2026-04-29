@@ -1,4 +1,11 @@
 import 'dotenv/config';
+
+if (process.env.NODE_ENV !== 'development') {
+  throw new Error(
+    `[reseed] Refusing to run: NODE_ENV is "${process.env.NODE_ENV ?? 'undefined'}", expected "development". This script DROPs and recreates the database.`,
+  );
+}
+
 import { Pool } from 'pg';
 
 const url = new URL(process.env.DATABASE_URL!);
