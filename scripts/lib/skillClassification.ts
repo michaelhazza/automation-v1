@@ -43,7 +43,7 @@
  *   - Workspace memory       — read/write workspace, update memory blocks
  *   - HITL & orchestration   — request_approval, spawn_sub_agents
  *   - Cascading context      — read_data_source (data attached to runs)
- *   - Playbook Studio tools  — only visible to the Playbook Author system agent
+ *   - Workflow Studio tools  — only visible to the Workflow Author system agent
  */
 export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
   // Task board primitives
@@ -61,16 +61,22 @@ export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
   // HITL and orchestration
   'request_approval',
   'spawn_sub_agents',
+  'list_my_subordinates',
 
   // Cascading context data sources (runtime-loaded, not user-facing)
   'read_data_source',
 
-  // Playbook Studio tools — only invoked by the Playbook Author system agent
-  'playbook_read_existing',
-  'playbook_validate',
-  'playbook_simulate',
-  'playbook_estimate_cost',
-  'playbook_propose_save',
+  // Workflow Studio tools — only invoked by the Workflow Author system agent
+  'workflow_read_existing',
+  'workflow_validate',
+  'workflow_simulate',
+  'workflow_estimate_cost',
+  'workflow_propose_save',
+
+  // Workflow runtime plumbing — invoked internally by the workflow runner,
+  // not user-configurable
+  'config_publish_workflow_output_to_portal',
+  'config_send_workflow_email_digest',
 ]);
 
 export type DesiredVisibility = 'none' | 'basic' | 'full';

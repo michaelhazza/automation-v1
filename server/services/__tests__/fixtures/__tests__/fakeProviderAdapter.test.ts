@@ -22,6 +22,12 @@ import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
 // can run in environments without the production env vars that registry.ts
 // transitively requires (registry → anthropicAdapter → env.ts → envSchema.parse).
 
+// Skip registry-dependent cases (7–13) when DATABASE_URL is absent. The
+// adapter self-tests (Cases 1–6) run unconditionally because they have no
+// env or DB dependency. The SKIP flag only gates the registry import and the
+// cases that follow it.
+const SKIP = !process.env.DATABASE_URL;
+
 let passed = 0;
 let failed = 0;
 
@@ -166,6 +172,25 @@ await test('reset() clears calls + cancels pending error/latency/response overri
 // above always run (they test only the adapter — no env deps). If the environment
 // lacks the required vars (DATABASE_URL etc.) the import below throws and only
 // the registry suite fails, not the core suite.
+if (SKIP) {
+  const REGISTRY_CASES = [
+    'register + restore restores the EXACT prior state at the key',
+    'calling restore() twice is a no-op the second time',
+    'registering B over A and restoring B brings A back',
+    'same-key SEQUENTIAL: B sees only its own calls',
+    'same-key PARALLEL: each adapter sees only its own calls',
+    'non-LIFO restore: outer registration restored BEFORE inner returns to original state',
+    'non-LIFO restore preserves pre-existing prior across out-of-order finalisers',
+  ];
+  for (const name of REGISTRY_CASES) {
+    console.log(`  SKIP  ${name}`);
+  }
+  console.log('');
+  console.log(`${passed} passed, ${failed} failed, ${REGISTRY_CASES.length} skipped`);
+  console.log('');
+  process.exit(failed > 0 ? 1 : 0);
+}
+
 const { registerProviderAdapter, getProviderAdapter } =
   await import('../../../providers/registry.js');
 

@@ -1,6 +1,6 @@
 ---
 name: Head of Commercial
-title: CRO — Coordinates commercial pipeline (Finance, CRM, SDR)
+title: CRO
 slug: head-of-commercial
 role: manager
 reportsTo: orchestrator

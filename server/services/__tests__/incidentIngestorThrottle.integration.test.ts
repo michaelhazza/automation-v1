@@ -19,82 +19,113 @@ process.env.NODE_ENV = 'test';
 process.env.SYSTEM_INCIDENT_THROTTLE_MS = '1000';
 process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'true';
 
+// Skip all tests when DATABASE_URL is absent. The test body never touches a
+// real DB (the db module is mocked below), but env.ts validates DATABASE_URL
+// at module load time — without a value the import crashes before any test
+// can run. Setting a placeholder here lets the module load; the { skip: SKIP }
+// option on each it() ensures the tests are still marked skipped, not run.
+const SKIP = !process.env.DATABASE_URL;
+if (SKIP) {
+  process.env.DATABASE_URL ??= 'postgres://placeholder/skip';
+  process.env.JWT_SECRET ??= 'skip-placeholder-jwt';
+  process.env.EMAIL_FROM ??= 'skip@placeholder.example';
+}
+
 import { describe, it, mock, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks — must be applied before the modules under test load.
 // We mock the db module so ingestInline never touches a real database.
+// Only registered when !SKIP — mock.module is not available in tsx without
+// --experimental-vm-modules, and when SKIP=true we never import the modules
+// under test, so the mocks are unnecessary anyway.
 // ---------------------------------------------------------------------------
 
-// Mock the db module to avoid real DB calls.
-// ingestInline calls db.select().from().where().limit() (suppression check)
-// and db.transaction() (the upsert).  We return empty suppression list
-// and a no-op transaction.
-mock.module('../db/index.js', {
-  namedExports: {
-    db: {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            limit: async () => [],
+if (!SKIP) {
+  // Mock the db module to avoid real DB calls.
+  // ingestInline calls db.select().from().where().limit() (suppression check)
+  // and db.transaction() (the upsert).  We return empty suppression list
+  // and a no-op transaction.
+  mock.module('../db/index.js', {
+    namedExports: {
+      db: {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => [],
+            }),
           }),
         }),
-      }),
-      transaction: async (fn: (tx: unknown) => Promise<void>) => {
-        // Provide a minimal tx that satisfies ingestInline's execute calls.
-        const tx = {
-          execute: async () => [
-            {
-              id: 'mock-incident-id',
-              occurrence_count: 1,
-              severity: 'low',
-              was_inserted: true,
-            },
-          ],
-        };
-        await fn(tx);
+        transaction: async (fn: (tx: unknown) => Promise<void>) => {
+          // Provide a minimal tx that satisfies ingestInline's execute calls.
+          const tx = {
+            execute: async () => [
+              {
+                id: 'mock-incident-id',
+                occurrence_count: 1,
+                severity: 'low',
+                was_inserted: true,
+              },
+            ],
+          };
+          await fn(tx);
+        },
       },
     },
-  },
-});
+  });
 
-// Mock pg-boss so notify enqueue is a no-op.
-mock.module('../lib/pgBossInstance.js', {
-  namedExports: {
-    getPgBoss: async () => ({
-      send: async () => undefined,
-    }),
-  },
-});
-
-// Mock the logger so log output doesn't pollute test output.
-mock.module('../lib/logger.js', {
-  namedExports: {
-    logger: {
-      debug: () => undefined,
-      warn: () => undefined,
-      error: () => undefined,
-      info: () => undefined,
+  // Mock pg-boss so notify enqueue is a no-op.
+  mock.module('../lib/pgBossInstance.js', {
+    namedExports: {
+      getPgBoss: async () => ({
+        send: async () => undefined,
+      }),
     },
-  },
-});
+  });
 
-// Mock env (used by some imports inside incidentIngestor).
-mock.module('../lib/env.js', {
-  namedExports: {
-    env: {},
-  },
-});
+  // Mock the logger so log output doesn't pollute test output.
+  mock.module('../lib/logger.js', {
+    namedExports: {
+      logger: {
+        debug: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+        info: () => undefined,
+      },
+    },
+  });
+
+  // Mock env (used by some imports inside incidentIngestor).
+  mock.module('../lib/env.js', {
+    namedExports: {
+      env: {},
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Import modules under test AFTER mocks are registered.
 // recordIncident (sync branch) now owns the throttle check; ingestInline is
 // a pure write path with no throttle (spec §1.7).
+//
+// These must be DYNAMIC imports so that:
+//   (a) mock.module() interceptions are applied first (static imports are
+//       hoisted before any module body code runs, bypassing mock.module), AND
+//   (b) when SKIP=true the import is never attempted, avoiding env.ts crash.
 // ---------------------------------------------------------------------------
-import { recordIncident, ingestInline, __resetForTest } from '../incidentIngestor.js';
-import { getThrottledCount, __resetForTest as resetThrottle } from '../incidentIngestorThrottle.js';
 import type { IncidentInput } from '../incidentIngestorPure.js';
+
+let recordIncident: Awaited<typeof import('../incidentIngestor.js')>['recordIncident'];
+let ingestInline: Awaited<typeof import('../incidentIngestor.js')>['ingestInline'];
+let __resetForTest: Awaited<typeof import('../incidentIngestor.js')>['__resetForTest'];
+let getThrottledCount: Awaited<typeof import('../incidentIngestorThrottle.js')>['getThrottledCount'];
+let resetThrottle: Awaited<typeof import('../incidentIngestorThrottle.js')>['__resetForTest'];
+
+if (!SKIP) {
+  ({ recordIncident, ingestInline, __resetForTest } = await import('../incidentIngestor.js'));
+  ({ getThrottledCount, __resetForTest: resetThrottle } = await import('../incidentIngestorThrottle.js'));
+}
 
 // ---------------------------------------------------------------------------
 // Shared fixture — minimal valid IncidentInput. `source` MUST be a real
@@ -126,7 +157,7 @@ describe('recordIncident (sync branch) throttle integration', () => {
     resetThrottle();
   });
 
-  it('burst dedup: 1000 sequential calls with the same fingerprint → 1 real call + 999 throttled (via getThrottledCount)', async () => {
+  it('burst dedup: 1000 sequential calls with the same fingerprint → 1 real call + 999 throttled (via getThrottledCount)', { skip: SKIP }, async () => {
     const input = makeInput('A');
     const CALLS = 1000;
 
@@ -143,7 +174,7 @@ describe('recordIncident (sync branch) throttle integration', () => {
     );
   });
 
-  it('cross-fingerprint independence: 100 calls each for A and B → only 2 real calls (198 throttled)', async () => {
+  it('cross-fingerprint independence: 100 calls each for A and B → only 2 real calls (198 throttled)', { skip: SKIP }, async () => {
     const inputA = makeInput('alpha');
     const inputB = makeInput('beta');
     const CALLS_EACH = 100;
@@ -164,7 +195,7 @@ describe('recordIncident (sync branch) throttle integration', () => {
     );
   });
 
-  it('throttle window expiry: call once, advance fake clock past 1 second, call again → 2 real calls (1 throttled in between)', async (t) => {
+  it('throttle window expiry: call once, advance fake clock past 1 second, call again → 2 real calls (1 throttled in between)', { skip: SKIP }, async (t) => {
     t.mock.timers.enable({ apis: ['Date'] });
 
     try {
@@ -201,7 +232,7 @@ describe('ingestInline (async-worker path) bypasses throttle (spec §1.7 MUST)',
     resetThrottle();
   });
 
-  it('1000 direct ingestInline calls with the same fingerprint → getThrottledCount() stays at 0', async () => {
+  it('1000 direct ingestInline calls with the same fingerprint → getThrottledCount() stays at 0', { skip: SKIP }, async () => {
     const input = makeInput('async-worker');
     const CALLS = 1000;
 
@@ -220,7 +251,7 @@ describe('ingestInline (async-worker path) bypasses throttle (spec §1.7 MUST)',
     );
   });
 
-  it('cross-fingerprint ingestInline calls → still 0 throttled (proves no throttle is consulted for any fingerprint on this path)', async () => {
+  it('cross-fingerprint ingestInline calls → still 0 throttled (proves no throttle is consulted for any fingerprint on this path)', { skip: SKIP }, async () => {
     const inputA = makeInput('async-alpha');
     const inputB = makeInput('async-beta');
     const CALLS_EACH = 100;

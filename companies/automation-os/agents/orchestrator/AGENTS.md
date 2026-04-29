@@ -1,6 +1,6 @@
 ---
-name: Orchestrator
-title: COO — Operational Coordinator
+name: Chief Operating Officer
+title: COO
 slug: orchestrator
 reportsTo: null
 model: claude-opus-4-6

@@ -306,7 +306,7 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
             <button
               onClick={handleSave}
               disabled={!hasChanges || saving}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[14px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
@@ -347,7 +347,7 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
             <button
               onClick={handleSaveBrand}
               disabled={!brandHasChanges || (!!brandColor && !isValidHex) || savingBrand}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[14px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {savingBrand ? 'Saving...' : 'Save Branding'}
             </button>
@@ -384,7 +384,7 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
             <button
               onClick={handleSaveGovernance}
               disabled={!governanceHasChanges || savingGovernance}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[14px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {savingGovernance ? 'Saving...' : 'Save Governance'}
             </button>
@@ -444,7 +444,7 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
             <button
               onClick={handleSavePulse}
               disabled={!pulseHasChanges || savingPulse}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[14px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {savingPulse ? 'Saving...' : 'Save Thresholds'}
             </button>
@@ -535,7 +535,7 @@ function PermissionsTab() {
         <p className="text-[14px] text-slate-500 m-0">Define reusable bundles of permissions for org users and subaccount members</p>
         <button
           onClick={() => { setShowCreateForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + New set
         </button>
@@ -557,8 +557,8 @@ function PermissionsTab() {
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
-            <button onClick={() => setShowCreateForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={handleCreate} className="btn btn-primary">Create</button>
+            <button onClick={() => setShowCreateForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -592,11 +592,11 @@ function PermissionsTab() {
               <div className="text-xs text-slate-400">{ps.permissionKeys.length} permission{ps.permissionKeys.length !== 1 ? 's' : ''}</div>
             </div>
             <div className="flex gap-2 shrink-0">
-              <button onClick={() => setEditSet(ps)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">
+              <button onClick={() => setEditSet(ps)} className="btn btn-sm btn-secondary">
                 Edit permissions
               </button>
               {!ps.isDefault && (
-                <button onClick={() => setDeleteId(ps.id)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[13px] font-medium transition-colors">
+                <button onClick={() => setDeleteId(ps.id)} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">
                   Delete
                 </button>
               )}
@@ -727,10 +727,10 @@ function PermissionSetEditor({
       <div className="flex items-center justify-between">
         <span className="text-[12px] text-slate-400">{selected.size} permission{selected.size !== 1 ? 's' : ''} selected</span>
         <div className="flex gap-3">
-          <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors cursor-pointer border-0">
+          <button onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>
-          <button onClick={() => onSave([...selected])} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors cursor-pointer border-0">
+          <button onClick={() => onSave([...selected])} className="btn btn-primary">
             Save changes
           </button>
         </div>

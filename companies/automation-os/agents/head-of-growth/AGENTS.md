@@ -1,6 +1,6 @@
 ---
 name: Head of Growth
-title: CMO — Coordinates growth and marketing execution
+title: CMO
 slug: head-of-growth
 role: manager
 reportsTo: orchestrator

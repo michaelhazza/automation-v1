@@ -46,8 +46,10 @@ export function extractSection(body: string, heading: string): string | null {
  *  missing tool definition, invalid JSON). Callers decide how to report the
  *  failure (the backfill script logs and exits non-zero; tests assert null). */
 export function parseSkillFile(slug: string, raw: string): ParsedSystemSkillSeed | null {
-  // Normalize Windows CRLF → LF before any regex matching
-  const normalised = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Strip UTF-8 BOM and normalize CRLF → LF before any regex matching. Without
+  // the BOM strip the leading `^---` anchor in the frontmatter regex misses,
+  // and the file silently parses as null (skipped by the backfill).
+  const normalised = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
   // Split frontmatter
   const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
