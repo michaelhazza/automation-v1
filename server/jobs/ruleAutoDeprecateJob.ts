@@ -29,24 +29,19 @@
  *                    rather than aborting the sweep.
  *
  * Execution contract (Phase 3 — B10-MAINT-RLS):
- *   - withAdminConnection + SET LOCAL ROLE admin_role to bypass RLS for the
- *     cross-org decay sweep (no app.organisation_id → fail-closed otherwise).
+ *   - Step 1: short-lived withAdminConnection + SET LOCAL ROLE admin_role for
+ *     org enumeration only. The global advisory lock is acquired here and
+ *     released when the enumeration tx commits.
+ *   - Step 2: per-org db.transaction + withOrgTx — sets app.organisation_id
+ *     so RLS policies are engaged for each org's writes. A per-org failure
+ *     rolls back that org's tx only; the sweep continues to the next org.
  *   - Sequential per-org processing; no parallel fan-out in v1.
- *   - Per-org SAVEPOINT (nested tx). The outer admin tx holds the global
- *     advisory lock for the duration of the sweep; each per-org block runs
- *     inside a SAVEPOINT (drizzle nested tx) so a Postgres statement error
- *     in one org rolls back its savepoint only — the parent tx stays alive,
- *     the lock stays held, and subsequent orgs can still run. Without this
- *     split, "partial" status is unachievable: after one tx.execute throws,
- *     every later statement in the same tx fails with "current transaction
- *     is aborted".
  *   - Terminal event emitted with outcome counters regardless of mixed results.
  *
- * Per-org decay logic is run inline using the admin tx (mirrors the
- * memoryDedupJob.ts pattern where deduplicateSubaccount receives tx as a
- * parameter). The original applyBlockQualityDecay service function uses the
- * top-level `db` handle, which cannot inherit the admin bypass; the inline
- * variant below preserves identical arithmetic against the admin tx.
+ * Per-org decay logic is run inside each org's tenant-scoped tx. The advisory
+ * lock is Pattern A (enumeration-only): both UPDATEs in applyDecayForOrg
+ * target rows by PK (id + organisation_id), with preceding SELECT guarded by
+ * deprecated_at IS NULL, making them idempotent-by-construction.
  *
  * __testHooks production safety: hook is undefined by default; the call site
  * uses the canonical `if (!__testHooks.<name>) return;` short-circuit so an
@@ -56,6 +51,8 @@
 
 import { sql } from 'drizzle-orm';
 import type { OrgScopedTx } from '../db/index.js';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
 
@@ -157,14 +154,18 @@ export async function runRuleAutoDeprecate(): Promise<RuleAutoDeprecateResult> {
 
   let result: RuleAutoDeprecateResult;
 
+  // Step 1: enumerate orgs under admin_role — short-lived tx, releases
+  // the advisory lock as soon as it commits.
+  let orgs: Array<{ id: string }>;
   try {
-    result = await withAdminConnection(
-      { source: SOURCE, reason: 'Nightly cross-org memory_blocks quality decay sweep' },
+    orgs = await withAdminConnection(
+      { source: SOURCE, reason: 'Nightly cross-org memory_blocks quality decay sweep: enumerate orgs' },
       async (tx) => {
         await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-        // Global advisory lock — prevents concurrent job invocations from
-        // racing. Released automatically when this transaction commits.
+        // Global advisory lock (Pattern A) — prevents concurrent job
+        // invocations from racing. Scoped to the enumeration tx only;
+        // released automatically when this transaction commits.
         const lockKey = 'ruleAutoDeprecateJob';
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 
@@ -172,72 +173,9 @@ export async function runRuleAutoDeprecate(): Promise<RuleAutoDeprecateResult> {
           await __testHooks.pauseBetweenClaimAndCommit();
         }
 
-        const orgs = (await tx.execute(
+        return (await tx.execute(
           sql`SELECT id FROM organisations LIMIT 500`,
         )) as unknown as Array<{ id: string }>;
-
-        if (orgs.length === 0) {
-          const noopResult: RuleAutoDeprecateResult = {
-            status: 'noop',
-            reason: 'no_rows_to_claim',
-            jobRunId,
-            durationMs: Date.now() - startedAt,
-          };
-          logger.info(`${SOURCE}.completed`, noopResult);
-          return noopResult;
-        }
-
-        let totalDecayed = 0;
-        let totalAutoDeprecated = 0;
-        let orgsSucceeded = 0;
-        let orgsFailed = 0;
-
-        for (const org of orgs) {
-          logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
-          const orgStart = Date.now();
-          try {
-            // SAVEPOINT per org — isolates per-org statement errors so the
-            // outer tx (and its advisory lock + admin_role) survive failures.
-            const { decayed, autoDeprecated } = await tx.transaction(async (subTx) => {
-              return applyDecayForOrg(subTx, org.id);
-            });
-            totalDecayed += decayed;
-            totalAutoDeprecated += autoDeprecated;
-            orgsSucceeded++;
-            logger.info(`${SOURCE}.org_completed`, {
-              jobRunId,
-              orgId: org.id,
-              rowsAffected: decayed + autoDeprecated,
-              durationMs: Date.now() - orgStart,
-              status: 'success',
-            });
-          } catch (err) {
-            orgsFailed++;
-            logger.error(`${SOURCE}.org_failed`, {
-              jobRunId,
-              orgId: org.id,
-              error: err instanceof Error ? err.message : String(err),
-              errorClass: err instanceof Error ? 'tx_failure' : 'unknown',
-              status: 'failed',
-            });
-          }
-        }
-
-        const status: 'success' | 'partial' | 'failed' =
-          orgsFailed === 0 ? 'success'
-          : orgsSucceeded === 0 ? 'failed'
-          : 'partial';
-
-        return {
-          status,
-          jobRunId,
-          totalDecayed,
-          totalAutoDeprecated,
-          orgsAttempted: orgs.length,
-          orgsSucceeded,
-          orgsFailed,
-          durationMs: Date.now() - startedAt,
-        };
       },
     );
   } catch (err) {
@@ -258,6 +196,76 @@ export async function runRuleAutoDeprecate(): Promise<RuleAutoDeprecateResult> {
     });
     return result;
   }
+
+  if (orgs.length === 0) {
+    const noopResult: RuleAutoDeprecateResult = {
+      status: 'noop',
+      reason: 'no_rows_to_claim',
+      jobRunId,
+      durationMs: Date.now() - startedAt,
+    };
+    logger.info(`${SOURCE}.completed`, noopResult);
+    return noopResult;
+  }
+
+  // Step 2: per-org work, each in a fresh tenant-scoped tx so RLS
+  // policies are engaged for every write. A per-org failure does not
+  // abort the surrounding sweep.
+  let totalDecayed = 0;
+  let totalAutoDeprecated = 0;
+  let orgsSucceeded = 0;
+  let orgsFailed = 0;
+
+  for (const org of orgs) {
+    logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
+    const orgStart = Date.now();
+    try {
+      const { decayed, autoDeprecated } = await db.transaction(async (orgTx) => {
+        await orgTx.execute(
+          sql`SELECT set_config('app.organisation_id', ${org.id}, true)`,
+        );
+        return withOrgTx(
+          { tx: orgTx, organisationId: org.id, source: `${SOURCE}:per-org` },
+          () => applyDecayForOrg(orgTx, org.id),
+        );
+      });
+      totalDecayed += decayed;
+      totalAutoDeprecated += autoDeprecated;
+      orgsSucceeded++;
+      logger.info(`${SOURCE}.org_completed`, {
+        jobRunId,
+        orgId: org.id,
+        rowsAffected: decayed + autoDeprecated,
+        durationMs: Date.now() - orgStart,
+        status: 'success',
+      });
+    } catch (err) {
+      orgsFailed++;
+      logger.error(`${SOURCE}.org_failed`, {
+        jobRunId,
+        orgId: org.id,
+        error: err instanceof Error ? err.message : String(err),
+        errorClass: err instanceof Error ? 'tx_failure' : 'unknown',
+        status: 'failed',
+      });
+    }
+  }
+
+  const status: 'success' | 'partial' | 'failed' =
+    orgsFailed === 0 ? 'success'
+    : orgsSucceeded === 0 ? 'failed'
+    : 'partial';
+
+  result = {
+    status,
+    jobRunId,
+    totalDecayed,
+    totalAutoDeprecated,
+    orgsAttempted: orgs.length,
+    orgsSucceeded,
+    orgsFailed,
+    durationMs: Date.now() - startedAt,
+  };
 
   logger.info(`${SOURCE}.completed`, result);
   return result;
