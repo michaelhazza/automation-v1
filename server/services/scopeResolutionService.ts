@@ -2,6 +2,8 @@ import { ilike, eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations, subaccounts } from '../db/schema/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { shouldSearchEntityHint } from './scopeResolutionPure.js';
+export { shouldSearchEntityHint } from './scopeResolutionPure.js';
 
 export interface ScopeCandidate {
   id: string;
@@ -26,6 +28,7 @@ export interface EntitySearchInput {
  */
 export async function findEntitiesMatching(input: EntitySearchInput): Promise<ScopeCandidate[]> {
   const { hint, entityType, userRole, organisationId } = input;
+  if (!shouldSearchEntityHint(hint)) return [];
   // Escape ILIKE special chars to prevent pattern injection
   const pattern = `%${hint.trim().replace(/[%_\\]/g, '\\$&')}%`;
   const results: ScopeCandidate[] = [];
