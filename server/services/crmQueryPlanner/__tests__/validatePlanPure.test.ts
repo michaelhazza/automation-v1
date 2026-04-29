@@ -5,47 +5,14 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { validatePlanPure, ValidationError } from '../validatePlanPure.js';
 import type { SchemaContext, ValidatorOptions } from '../validatePlanPure.js';
 import type { DraftQueryPlan, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
-
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
-
-function assertThrows(fn: () => void, rule: string, label = '') {
-  try {
-    fn();
-    throw new Error(`${label || rule}: expected ValidationError, but did not throw`);
-  } catch (e) {
-    if (e instanceof ValidationError) {
-      if (e.rejectedRule !== rule) {
-        throw new Error(`${label || rule}: expected rule ${rule}, got ${e.rejectedRule}`);
-      }
-    } else {
-      throw e;
-    }
   }
 }
 
@@ -141,15 +108,15 @@ function fullOpts(overrides: Partial<ValidatorOptions> = {}): ValidatorOptions {
 
 test('stage1_mode: valid draft passes and returns QueryPlan with validated:true', () => {
   const plan = validatePlanPure(makeDraft(), stage1Opts());
-  assertEqual(plan.validated, true, 'validated');
-  assertEqual(plan.stageResolved, 1, 'stageResolved');
+  expect(plan.validated, 'validated').toBe(true);
+  expect(plan.stageResolved, 'stageResolved').toBe(1);
 });
 
 // Rule 2 — field existence (stage1_mode)
 test('stage1_mode Rule 2: valid filter field passes', () => {
   const draft = makeDraft({ filters: [{ field: 'updatedAt', operator: 'lt', value: 30, humanLabel: 'lt 30' }] });
   const plan = validatePlanPure(draft, stage1Opts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('stage1_mode Rule 2: invalid filter field throws field_existence', () => {
@@ -166,7 +133,7 @@ test('stage1_mode Rule 2: invalid projection field throws field_existence', () =
 test('stage1_mode Rule 3: valid operator for field passes', () => {
   const draft = makeDraft({ filters: [{ field: 'updatedAt', operator: 'lt', value: 30, humanLabel: 'lt 30' }] });
   const plan = validatePlanPure(draft, stage1Opts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('stage1_mode Rule 3: invalid operator for field throws operator_sanity', () => {
@@ -183,7 +150,7 @@ test('stage1_mode Rule 3: eq not allowed on updatedAt throws operator_sanity', (
 test('stage1_mode Rule 9: projectable field passes', () => {
   const draft = makeDraft({ projection: ['updatedAt'] });
   const plan = validatePlanPure(draft, stage1Opts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('stage1_mode Rule 9: non-projectable field throws projection_overlap', () => {
@@ -200,14 +167,14 @@ test('stage1_mode Rule 9: unknown projection field throws field_existence', () =
 
 test('full mode: valid draft passes with validated:true and stageResolved:3', () => {
   const plan = validatePlanPure(makeDraft(), fullOpts());
-  assertEqual(plan.validated, true, 'validated');
-  assertEqual(plan.stageResolved, 3, 'stageResolved');
+  expect(plan.validated, 'validated').toBe(true);
+  expect(plan.stageResolved, 'stageResolved').toBe(3);
 });
 
 // Rule 1 — entity existence
 test('full mode Rule 1: valid entity passes', () => {
   const plan = validatePlanPure(makeDraft({ primaryEntity: 'opportunities' }), fullOpts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('full mode Rule 1: invalid entity throws entity_existence', () => {
@@ -219,7 +186,7 @@ test('full mode Rule 1: invalid entity throws entity_existence', () => {
 test('full mode Rule 4: from < to passes', () => {
   const draft = makeDraft({ dateContext: { kind: 'absolute', from: '2024-01-01', to: '2024-01-31' } });
   const plan = validatePlanPure(draft, fullOpts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('full mode Rule 4: from >= to throws date_range_sanity', () => {
@@ -236,7 +203,7 @@ test('full mode Rule 7: hybrid without canonicalCandidateKey throws hybrid_patte
 test('full mode Rule 7: hybrid with valid canonicalCandidateKey passes', () => {
   const draft = makeDraft({ source: 'hybrid', canonicalCandidateKey: 'contacts.inactive_over_days' });
   const plan = validatePlanPure(draft, fullOpts());
-  assert(plan.validated, 'validated');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('full mode Rule 7: hybrid with unknown key throws hybrid_pattern_check', () => {
@@ -248,8 +215,8 @@ test('full mode Rule 7: hybrid with unknown key throws hybrid_pattern_check', ()
 test('full mode Rule 8 case (a): live plan with no live-only filters promotes to canonical', () => {
   const draft = makeDraft({ source: 'live', canonicalCandidateKey: 'contacts.inactive_over_days' });
   const plan = validatePlanPure(draft, fullOpts());
-  assertEqual(plan.source, 'canonical', 'source promoted to canonical');
-  assert(plan.validated, 'validated');
+  expect(plan.source, 'source promoted to canonical').toBe('canonical');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('full mode Rule 8 case (b): live plan with exactly one live-only filter promotes to hybrid', () => {
@@ -260,9 +227,9 @@ test('full mode Rule 8 case (b): live plan with exactly one live-only filter pro
   });
   // schemaContext: null — skip field-existence so the precedence rule is the only gate under test
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'hybrid', 'source promoted to hybrid');
-  assertEqual(plan.hybridPattern, 'canonical_base_with_live_filter', 'hybrid pattern pinned');
-  assert(plan.validated, 'validated');
+  expect(plan.source, 'source promoted to hybrid').toBe('hybrid');
+  expect(plan.hybridPattern, 'hybrid pattern pinned').toBe('canonical_base_with_live_filter');
+  expect(plan.validated, 'validated').toBeTruthy();
 });
 
 test('full mode Rule 8 case (c): live plan with multiple live-only filters stays live', () => {
@@ -275,13 +242,13 @@ test('full mode Rule 8 case (c): live plan with multiple live-only filters stays
     ],
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live when hybrid shape does not match');
+  expect(plan.source, 'source stays live when hybrid shape does not match').toBe('live');
 });
 
 test('full mode Rule 8: live plan without canonicalCandidateKey stays live', () => {
   const draft = makeDraft({ source: 'live', canonicalCandidateKey: null });
   const plan = validatePlanPure(draft, fullOpts());
-  assertEqual(plan.source, 'live', 'source stays live when no candidate key');
+  expect(plan.source, 'source stays live when no candidate key').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical-resolvable filter blocks promotion to canonical — stays live', () => {
@@ -294,7 +261,7 @@ test('full mode Rule 8: non-canonical-resolvable filter blocks promotion to cano
     filters: [{ field: 'bogus_field', operator: 'eq', value: 'x', humanLabel: 'bogus' }],
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — base not canonical-resolvable');
+  expect(plan.source, 'source stays live — base not canonical-resolvable').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical-resolvable base + one live-only filter blocks promotion to hybrid — stays live', () => {
@@ -310,7 +277,7 @@ test('full mode Rule 8: non-canonical-resolvable base + one live-only filter blo
     ],
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — hybrid base not canonical-resolvable');
+  expect(plan.source, 'source stays live — hybrid base not canonical-resolvable').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical projection field blocks promotion — stays live', () => {
@@ -322,7 +289,7 @@ test('full mode Rule 8: non-canonical projection field blocks promotion — stay
     projection: ['bogus_projection_field'],
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — projection not canonical-resolvable');
+  expect(plan.source, 'source stays live — projection not canonical-resolvable').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical sort field blocks promotion — stays live', () => {
@@ -334,7 +301,7 @@ test('full mode Rule 8: non-canonical sort field blocks promotion — stays live
     sort: [{ field: 'bogus_sort_field', direction: 'asc' }],
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — sort not canonical-resolvable');
+  expect(plan.source, 'source stays live — sort not canonical-resolvable').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical aggregation field blocks promotion — stays live', () => {
@@ -346,7 +313,7 @@ test('full mode Rule 8: non-canonical aggregation field blocks promotion — sta
     aggregation: { type: 'sum', field: 'bogus_agg_field' },
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — aggregation field not canonical-resolvable');
+  expect(plan.source, 'source stays live — aggregation field not canonical-resolvable').toBe('live');
 });
 
 test('full mode Rule 8: non-canonical aggregation groupBy blocks promotion — stays live', () => {
@@ -356,7 +323,7 @@ test('full mode Rule 8: non-canonical aggregation groupBy blocks promotion — s
     aggregation: { type: 'group_by', groupBy: ['bogus_groupby_field'] },
   });
   const plan = validatePlanPure(draft, fullOpts({ schemaContext: null }));
-  assertEqual(plan.source, 'live', 'source stays live — groupBy not canonical-resolvable');
+  expect(plan.source, 'source stays live — groupBy not canonical-resolvable').toBe('live');
 });
 
 // Rule 10 — capability check
@@ -380,10 +347,7 @@ test('full mode Rule 10: forward-looking canonical.* capability is skipped', () 
   const draft = makeDraft({ source: 'canonical', canonicalCandidateKey: 'contacts.inactive_over_days' });
   // canonical.contacts.read is forward-looking — should not fail even without it
   const plan = validatePlanPure(draft, fullOpts({ callerCapabilities: new Set() }));
-  assert(plan.validated, 'forward-looking cap skipped');
+  expect(plan.validated, 'forward-looking cap skipped').toBeTruthy();
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -287,3 +287,15 @@ server/services/__tests__/seedConfigAgentGuidelinesPure.test.ts bash:pass vitest
 server/services/__tests__/skillAnalyzerServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/skillAnalyzerServicePureDiffRows.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-16 (2026-04-29)
+server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePureMergePrompt.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePureV6.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillAnalyzerServicePureValidation.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillExecutor.reassignTask.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillExecutor.spawnSubAgents.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillExecutorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillHandlerRegistryEquivalence.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillParserServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/skillService.resolver.test.ts bash:pass vitest:pass match:yes

@@ -20,22 +20,8 @@
  *   npx tsx server/services/__tests__/workspaceMemoryService.test.ts
  */
 
+import { expect, test } from 'vitest';
 import type { RunOutcome } from '../workspaceMemoryServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('\n--- workspaceMemoryService overrides ---');
 
@@ -236,4 +222,3 @@ await test('RunOutcome literal type-check — all runResultStatus values', () =>
 
 console.log(`\n  ${passed + failed} tests total; ${passed} passed, ${failed} failed`);
 await client.end();
-if (failed > 0) process.exit(1);

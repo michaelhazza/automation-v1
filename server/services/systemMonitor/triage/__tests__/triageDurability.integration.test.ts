@@ -16,6 +16,8 @@
  * Uses __testHooks.stubSystemOpsContext + throwAfterIncrement to isolate the
  * increment / idempotency predicate without needing a full org/agent context seeded.
  */
+import { expect, test } from 'vitest';
+
 export {};
 
 await import('dotenv/config');
@@ -46,21 +48,6 @@ try {
   console.log('\nSKIP: migration 0239 not applied (column last_triage_job_id missing).');
   console.log('Apply the migration and re-run.\n');
   process.exit(0);
-}
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-  }
 }
 
 function check(condition: boolean, label: string): void {
@@ -216,6 +203,3 @@ try {
     // best-effort
   }
 }
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
