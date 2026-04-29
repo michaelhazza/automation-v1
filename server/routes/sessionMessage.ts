@@ -167,7 +167,9 @@ router.post(
     if (subaccountId) {
       try {
         await resolveSubaccount(subaccountId, organisationId);
-      } catch {
+      } catch (err) {
+        const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+        if (statusCode !== 404) throw err;
         logger.warn('session.message.stale_subaccount_dropped', {
           userId: req.user!.id,
           organisationId,
