@@ -31,3 +31,15 @@ server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts bash:
 server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts bash:pass vitest:pass match:yes
 server/lib/__tests__/agentRunVisibilityPure.test.ts bash:pass vitest:pass match:yes
 server/lib/__tests__/derivedDataMissingLog.test.ts bash:pass vitest:pass match:yes
+
+### phase2 phase2-batch-01 (2026-04-30)
+server/lib/__tests__/idempotencyVersionPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/logger.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/lib/__tests__/loggerBufferAdapterPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/reconciliationRequiredErrorPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/redactionPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/softBreakerPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/actionServiceCanonicalisationPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionEventServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunPayloadWriterFailurePathPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunPayloadWriterPure.test.ts bash:pass vitest:pass match:yes
