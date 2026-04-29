@@ -186,6 +186,29 @@ Deferred: re-run on representative environment (staging/production with app→DB
 
 ---
 
+## Pre-merge baseline reverification ([spec round 7 — commit a9135930])
+
+- §1 closure evidence still holds: yes — all 13 items re-verified at branch tip f95a6e20
+  - P3-C1: `migrations/0227_rls_hardening_corrective.sql:22-39` — memory_review_queue ENABLE+FORCE+policy ✅
+  - P3-C2: `migrations/0227_rls_hardening_corrective.sql:41-59` — drop_zone_upload_audit FORCE ✅
+  - P3-C3: `migrations/0227_rls_hardening_corrective.sql:61-79` — onboarding_bundle_configs FORCE ✅
+  - P3-C4: `migrations/0227_rls_hardening_corrective.sql:81-99` — trust_calibration_state FORCE ✅
+  - GATES-2026-04-26-1: `migrations/0229_reference_documents_force_rls_parent_exists.sql` exists ✅
+  - P3-C6: `server/routes/memoryReviewQueue.ts` imports memoryReviewQueueService + resolveSubaccount ✅
+  - P3-C7: `server/routes/systemAutomations.ts` imports only systemAutomationService ✅
+  - P3-C8: `server/routes/subaccountAgents.ts` carries 14 resolveSubaccount call sites (≥9) ✅
+  - P3-C9: `server/routes/clarifications.ts` imports clarificationService + resolveSubaccount ✅
+  - P3-C10: `server/services/documentBundleService.ts` uses getOrgScopedDb (verifySubjectExists applies org filter) ✅
+  - P3-C11: `server/services/skillStudioService.ts:168, 309, 318` carry org filter via eq(skills.organisationId, orgId) ✅
+  - P3-H2: `server/lib/briefVisibility.ts` is a thin re-export (13 lines) ✅
+  - P3-H3: `server/lib/workflow/onboardingStateHelpers.ts` is a thin re-export (14 lines) ✅
+- Sister-branch merge from main during in-flight: none
+- Sister-branch scope-out: empty result ✅
+- TypeScript clean on all changed files ✅
+- CI status at branch tip: pushed for gate verification in Task 1.10; Phase 3 does not affect gate
+
+---
+
 ## Phase 3 PR description draft (Task 3.8) ([spec round 7 — commit a9135930])
 
 Values below taken directly from commit messages to satisfy byte-for-byte agreement with PR description:
