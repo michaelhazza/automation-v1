@@ -251,3 +251,15 @@ server/services/__tests__/onboardingStateServicePure.test.ts bash:pass vitest:pa
 server/services/__tests__/operationalConfigSchemaPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/orgConfigServiceReadPathPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/orgOperationalConfigMigrationPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-13 (2026-04-29)
+server/services/__tests__/policyEngineService.scopeValidation.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/policyEngineServicePure.confidence.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/portfolioRollupServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/principalContextConstructorsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/priorityFeedServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/pulseConfigServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/pulseLaneClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/pulseServiceResolvedUrl.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/rateLimitKeysPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/rateLimiterPure.test.ts bash:pass vitest:pass match:yes

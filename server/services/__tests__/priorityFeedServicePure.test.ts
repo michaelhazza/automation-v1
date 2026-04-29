@@ -27,7 +27,7 @@ test('critical item at t=0, same subaccount → score = 1.0', () => {
     source: 'health_finding', id: '1', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 0, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(1.0, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(1.0, 4);
 });
 
 test('warning item at t=0, same subaccount → score = 0.6', () => {
@@ -35,7 +35,7 @@ test('warning item at t=0, same subaccount → score = 0.6', () => {
     source: 'review_item', id: '2', subaccountId: 'sub-1',
     severity: 'warning', ageHours: 0, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(0.6, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.6, 4);
 });
 
 test('info item at t=0, same subaccount → score = 0.3', () => {
@@ -43,7 +43,7 @@ test('info item at t=0, same subaccount → score = 0.3', () => {
     source: 'task', id: '3', subaccountId: 'sub-1',
     severity: 'info', ageHours: 0, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(0.3, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.3, 4);
 });
 
 test('critical item at 7 days (168h), same subaccount → score = 2.0', () => {
@@ -51,7 +51,7 @@ test('critical item at 7 days (168h), same subaccount → score = 2.0', () => {
     source: 'health_finding', id: '4', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 168, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4);
 });
 
 test('age factor caps at 2.0 beyond 7 days', () => {
@@ -59,7 +59,7 @@ test('age factor caps at 2.0 beyond 7 days', () => {
     source: 'health_finding', id: '5', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 500, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4);
 });
 
 test('cross-subaccount → 0.1 relevance', () => {
@@ -68,7 +68,7 @@ test('cross-subaccount → 0.1 relevance', () => {
     severity: 'critical', ageHours: 0, assignedSubaccountId: 'sub-2',
     metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(0.1, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.1, 4);
 });
 
 test('org-wide (no assignedSubaccountId) → 0.5 relevance', () => {
@@ -76,7 +76,7 @@ test('org-wide (no assignedSubaccountId) → 0.5 relevance', () => {
     source: 'health_finding', id: '7', subaccountId: 'sub-2',
     severity: 'critical', ageHours: 0, metadata: {},
   };
-  expect(scoreEntry(entry, caller)).toBeCloseTo(0.5, 4)score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.5, 4);
 });
 
 // ── rankFeed ────────────────────────────────────────────────

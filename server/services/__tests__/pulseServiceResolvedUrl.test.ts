@@ -179,4 +179,3 @@ test('getItem-equivalent carries resolvedUrl field', () => {
 // ---------------------------------------------------------------------------
 
 console.log(`\n=== Summary ===`);
-console.log(`  FAIL: ${failed}`);
