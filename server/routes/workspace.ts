@@ -198,6 +198,29 @@ router.get(
 // For agent-scoped routes, we manually resolve subaccount and check permissions
 // (requireSubaccountPermission needs :subaccountId in params which isn't available here).
 
+// GET /api/agents/:agentId/identity
+router.get(
+  '/api/agents/:agentId/identity',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const subaccountId = await resolveAgentSubaccountId(agentId, req.orgId!);
+    const allowed = await hasSubaccountPermission(req, subaccountId, SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW);
+    if (!allowed) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
+    res.json({
+      identityId: identity.id,
+      emailAddress: identity.emailAddress,
+      emailSendingEnabled: identity.emailSendingEnabled,
+      status: identity.status,
+      displayName: identity.displayName,
+    });
+  }),
+);
+
 // POST /api/agents/:agentId/identity/suspend
 router.post(
   '/api/agents/:agentId/identity/suspend',

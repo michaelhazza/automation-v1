@@ -7,6 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AgentRunCancelButton from '../components/AgentRunCancelButton';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 import { toast } from 'sonner';
+import { WorkspaceTabContent } from '../components/workspace/WorkspaceTabContent';
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
@@ -18,11 +19,11 @@ interface Subaccount { id: string; name: string; slug: string; status: string; i
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'integrations' | 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'memory' | 'usage' | 'admin';
+type ActiveTab = 'integrations' | 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'memory' | 'usage' | 'admin' | 'workspace';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   integrations: 'Integrations', onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
-  categories: 'Categories', tags: 'Tags', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
+  categories: 'Categories', tags: 'Tags', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -40,7 +41,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [searchParams] = useSearchParams();
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['integrations', 'board', 'categories']
-    : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'memory', 'usage', 'admin'];
+    : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'memory', 'usage', 'workspace', 'admin'];
   const initialTab = (() => {
     const t = searchParams.get('tab') as ActiveTab | null;
     return t && visibleTabs.includes(t) ? t : visibleTabs[0];
@@ -536,6 +537,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading usage data...</div>}>
           <UsagePage user={_user as any} embedded />
         </Suspense>
+      )}
+
+      {/* Workspace */}
+      {activeTab === 'workspace' && subaccountId && (
+        <WorkspaceTabContent subaccountId={subaccountId} />
       )}
     </div>
   );

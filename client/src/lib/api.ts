@@ -86,3 +86,6 @@ export const createAgentCalendarEvent = (agentId: string, body: Record<string, u
 
 export const respondToAgentCalendarEvent = (agentId: string, eventId: string, response: string) =>
   api.post(`/api/agents/${agentId}/calendar/events/${eventId}/respond`, { response }).then(r => r.data);
+
+export const getAgentIdentity = (agentId: string) =>
+  api.get(`/api/agents/${agentId}/identity`).then(r => r.data);
