@@ -183,3 +183,17 @@ Deferred: re-run on representative environment (staging/production with app→DB
 - Absolute floor: 300 rows/sec/org (spec ≥200)
 - Pure test gate: 11/11 passing
 - Schema state: clean (no TS errors, no scope leakage)
+
+---
+
+## Phase 3 §5.2.1 audit — ruleAutoDeprecateJob ([spec round 7 — commit a9135930])
+
+- Lock acquisition: line 169 (`pg_advisory_xact_lock(hashtext(lockKey)::bigint)`) — inside outer admin tx, before per-org loop
+- Writes within lock scope (outer admin tx, before per-org dispatch):
+  - none — the outer admin tx only runs `SET LOCAL ROLE admin_role` (line 164), acquires the advisory lock (line 169), and queries `SELECT id FROM organisations LIMIT 500` (line 175–177); all writes occur in the per-org function
+- Per-org function: `applyDecayForOrg` (lines 104–150)
+- Per-org-function writes:
+  - line 132–136 — per-org-scope — `UPDATE memory_blocks SET deprecated_at, deprecation_reason, updated_at WHERE id = $id AND organisation_id = $orgId` (auto-deprecate path; row id sourced from preceding SELECT WHERE deprecated_at IS NULL — deterministic PK WHERE clause)
+  - line 140–143 — per-org-scope — `UPDATE memory_blocks SET quality_score WHERE id = $id AND organisation_id = $orgId` (decay path; same PK WHERE clause)
+- Pattern: **A**
+- Rationale: Both UPDATEs target rows by primary-key `id` AND `organisation_id`, where the ids were just fetched from a `SELECT WHERE deprecated_at IS NULL` guard. A second sweep on the same state returns zero qualifying rows from the SELECT (already deprecated or score unchanged), so neither UPDATE fires — the writes are idempotent-by-construction. No INSERT without a unique constraint target, no UPDATE without a deterministic WHERE clause. The advisory lock's purpose is global cross-job mutual exclusion for the nightly sweep (single-runner guarantee, documented in the file header); it does not need to be per-org. Pattern A is correct: advisory lock stays in the outer admin (enumeration) tx; all per-org writes run inside `withOrgTx` with no separate lock needed.
