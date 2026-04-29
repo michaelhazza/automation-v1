@@ -461,6 +461,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
+    tableName: 'reference_document_versions',
+    schemaFile: 'referenceDocumentVersions.ts',
+    policyMigration: '0229_reference_documents_force_rls_parent_exists.sql',
+    rationale: 'Versioned snapshots of reference documents — reveal document edit history and content evolution; scoped via parent document\'s organisation_id.',
+  },
+  {
     tableName: 'document_bundles',
     schemaFile: 'documentBundles.ts',
     policyMigration: '0204_document_bundles.sql',
@@ -469,7 +475,7 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'document_bundle_members',
     schemaFile: 'documentBundleMembers.ts',
-    policyMigration: '0228_phantom_var_sweep.sql',
+    policyMigration: '0205_document_bundle_members.sql',
     rationale: 'Join table linking documents to bundles — scoped via parent bundle\'s organisation_id. Cross-tenant leak exposes which documents belong to which org\'s knowledge bundles.',
   },
   {
@@ -787,6 +793,18 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Core subaccount (client workspace) records — cross-tenant leak exposes the org\'s entire client list and portfolio.',
   },
   // Batch E — Tasks/Workspace/Sister-branch domain
+  {
+    tableName: 'task_activities',
+    schemaFile: 'taskActivities.ts',
+    policyMigration: '0091_rls_task_activities_deliverables.sql',
+    rationale: 'Per-task activity log entries — reveal task lifecycle events and agent actions; cross-tenant leak exposes operational detail.',
+  },
+  {
+    tableName: 'task_deliverables',
+    schemaFile: 'taskDeliverables.ts',
+    policyMigration: '0091_rls_task_activities_deliverables.sql',
+    rationale: 'Task deliverable artefacts — may contain client-facing output, proprietary content, and PII; cross-tenant leak is a direct data breach.',
+  },
   {
     tableName: 'task_attachments',
     schemaFile: 'taskAttachments.ts',
