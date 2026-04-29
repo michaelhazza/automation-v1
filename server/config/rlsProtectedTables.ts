@@ -467,6 +467,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Document bundle groupings — names and descriptions can reveal organisational intent; bundle composition reveals which documents are used together. Cross-tenant leak exposes the org\'s knowledge structure.',
   },
   {
+    tableName: 'document_bundle_members',
+    schemaFile: 'documentBundleMembers.ts',
+    policyMigration: '0228_phantom_var_sweep.sql',
+    rationale: 'Join table linking documents to bundles — scoped via parent bundle\'s organisation_id. Cross-tenant leak exposes which documents belong to which org\'s knowledge bundles.',
+  },
+  {
     tableName: 'document_bundle_attachments',
     schemaFile: 'documentBundleAttachments.ts',
     policyMigration: '0206_document_bundle_attachments.sql',
