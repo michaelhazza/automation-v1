@@ -48,7 +48,7 @@ export default api;
 export const getSubaccountWorkspaceConfig = (saId: string) =>
   api.get(`/api/subaccounts/${saId}/workspace`).then(r => r.data);
 
-export const configureWorkspace = (saId: string, body: { backend: string; connectorConfigId: string }) =>
+export const configureWorkspace = (saId: string, body: { backend: string; domain?: string }) =>
   api.post(`/api/subaccounts/${saId}/workspace/configure`, body).then(r => r.data);
 
 export const onboardAgentToWorkspace = (saId: string, body: Record<string, unknown>) =>

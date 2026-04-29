@@ -67,24 +67,27 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    const { backend, connectorConfigId: providedConfigId } = req.body as {
+    const { backend, domain } = req.body as {
       backend: 'synthetos_native' | 'google_workspace';
-      connectorConfigId: string;
+      domain?: string;
     };
 
     await resolveSubaccount(subaccountId, req.orgId!);
+
+    const configJson: Record<string, unknown> = {};
+    if (domain) configJson.domain = domain;
 
     const existing = await connectorConfigService.getBySubaccountAndType(req.orgId!, subaccountId, backend);
 
     if (!existing) {
       const created = await connectorConfigService.createForSubaccount(req.orgId!, subaccountId, {
         connectorType: backend,
-        configJson: { connectorConfigId: providedConfigId },
+        configJson,
       });
       res.json({ configured: true, connectorConfigId: created.id });
     } else {
       await connectorConfigService.update(existing.id, req.orgId!, {
-        configJson: { ...(existing.configJson as Record<string, unknown> ?? {}), connectorConfigId: providedConfigId },
+        configJson: { ...(existing.configJson as Record<string, unknown> ?? {}), ...configJson },
       });
       res.json({ configured: true, connectorConfigId: existing.id });
     }
