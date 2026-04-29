@@ -215,7 +215,7 @@ export default function AgentCalendarPage({ user: _user }: { user: User }) {
               </button>
             </div>
 
-            {selectedEvent.metadata?.gcal_event_id && (
+            {typeof selectedEvent.metadata?.gcal_event_id === 'string' && (
               <a
                 href={`https://calendar.google.com/calendar/event?eid=${selectedEvent.metadata.gcal_event_id}`}
                 target="_blank"

@@ -167,7 +167,7 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
                     </span>
                   </div>
                   <div className="text-[13px] text-slate-700 whitespace-pre-wrap">{msg.bodyText ?? '(no body)'}</div>
-                  {msg.metadata?.gmail_thread_id && (
+                  {typeof msg.metadata?.gmail_thread_id === 'string' && (
                     <a
                       href={`https://mail.google.com/mail/u/0/#inbox/${msg.metadata.gmail_thread_id}`}
                       target="_blank"

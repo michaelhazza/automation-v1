@@ -526,7 +526,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
           {!identityLoading && identity && link && (
             <>
               <IdentityCard
-                identity={identity}
+                identity={{ ...identity, id: identity.identityId }}
                 actor={{ displayName: link.agent.name, agentRole: null }}
                 onSuspend={() => setSuspendOpen(true)}
                 onResume={async () => {
