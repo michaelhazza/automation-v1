@@ -107,3 +107,15 @@ client/src/components/run-cost/__tests__/RunCostPanel.test.ts bash:pass vitest:p
 client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts bash:pass vitest:pass match:yes
 client/src/lib/__tests__/formatDuration.test.ts bash:pass vitest:pass match:yes
 client/src/lib/__tests__/resolvePulseDetailUrl.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-01 (2026-04-29)
+client/src/pages/__tests__/dashboardVersioning.test.ts bash:pass vitest:pass match:yes
+scripts/__tests__/auditSubaccountRootsPure.test.ts bash:pass vitest:pass match:yes
+scripts/__tests__/build-code-graph-watcher.test.ts bash:pass vitest:pass match:yes
+scripts/__tests__/chatgpt-reviewPure.test.ts bash:pass vitest:pass match:yes
+scripts/__tests__/rlsContractImportTypePure.test.ts bash:pass vitest:pass match:yes
+server/config/__tests__/actionRegistry.test.ts bash:pass vitest:pass match:yes
+server/config/__tests__/actionSlugAliasesPure.test.ts bash:pass vitest:pass match:yes
+server/config/__tests__/sensitiveConfigPathsRegistryPure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/bundleUtilizationJob.idempotency.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/connectorPollingSync.idempotency.test.ts bash:pass vitest:pass match:yes
