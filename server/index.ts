@@ -445,6 +445,16 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
 });
 
 async function start() {
+  // Phase 3: webhook secret boot assertion (spec §6.3.1).
+  // Must run BEFORE any service initialisation so a misconfigured production
+  // process exits in milliseconds rather than after kicking off background workers,
+  // pg-boss queues, schedule reconciliation, or binding the HTTP port.
+  if (env.NODE_ENV === 'production' && !env.WEBHOOK_SECRET) {
+    throw new Error(
+      '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
+    );
+  }
+
   await seedPermissions();
   await backfillOrgUserRoles();
   await agentService.scheduleAllProactiveSources();
@@ -575,13 +585,6 @@ async function start() {
   } catch (err) {
     console.error('[boot] system skill handler validation failed:', err);
     throw err;
-  }
-
-  // Phase 3: webhook secret boot assertion (spec §6.3.1).
-  if (env.NODE_ENV === 'production' && !env.WEBHOOK_SECRET) {
-    throw new Error(
-      '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
-    );
   }
 
   initWebSocket(httpServer);
