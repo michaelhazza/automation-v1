@@ -347,3 +347,15 @@ server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts
 server/services/systemMonitor/synthetic/__tests__/sweepCoverageDegraded.test.ts bash:pass vitest:pass match:yes
 server/services/systemMonitor/synthetic/__tests__/syntheticChecksPure.test.ts bash:pass vitest:pass match:yes
 server/services/systemMonitor/triage/__tests__/clusterAndSelect.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-21 (2026-04-29)
+server/services/systemMonitor/triage/__tests__/promptValidation.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/triage/__tests__/rateLimitPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/triage/__tests__/triageAdmit.test.ts bash:pass vitest:pass match:yes
+server/services/systemMonitor/triage/__tests__/triageDurability.integration.test.ts bash:pass vitest:skip match:expected-skip
+server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts bash:pass vitest:pass match:yes
+server/services/workspaceHealth/detectors/__tests__/explicitDelegationSkillsWithoutChildren.test.ts bash:pass vitest:pass match:yes
+server/services/workspaceHealth/detectors/__tests__/subaccountMultipleRoots.test.ts bash:pass vitest:pass match:yes
+server/services/workspaceHealth/detectors/__tests__/subaccountNoRoot.test.ts bash:pass vitest:pass match:yes
+server/skills/__tests__/clientPulseInterventionPrimitivesPure.test.ts bash:pass vitest:pass match:yes
