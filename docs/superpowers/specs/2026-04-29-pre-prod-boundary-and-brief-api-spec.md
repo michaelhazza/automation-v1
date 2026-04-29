@@ -107,19 +107,23 @@ This is the single source of truth for what the spec touches. Every prose refere
 | `server/routes/public/formSubmission.ts` | Modified | 2 | Replace `ipHits` / `pageHits` Maps + `checkRateLimit` helper with `rateLimiter.check`. |
 | `server/routes/public/pageTracking.ts` | Modified | 2 | Replace `trackHits` Map + `checkTrackRateLimit` helper with `rateLimiter.check`. |
 | `server/lib/testRunRateLimit.ts` | **Deleted** | 2 | All callers migrated to `rateLimiter.check` with a test-run-keyed limit. |
-| Callers of `checkTestRunRateLimit` | Modified | 2 | Use `rateLimiter.check` directly. (architect to enumerate; expected: a single call site) |
+| `server/routes/agents.ts`, `server/routes/skills.ts`, `server/routes/subaccountAgents.ts`, `server/routes/subaccountSkills.ts` | Modified | 2 | Replace each `checkTestRunRateLimit(req.user!.id)` call with `await rateLimiter.check('testrun:user:' + req.user!.id, TEST_RUN_RATE_LIMIT_PER_HOUR, 3600)` and reject on `!allowed`. |
+| `server/services/__tests__/testRunRateLimitPure.test.ts` | **Deleted** | 2 | Test file targets the about-to-be-deleted `testRunRateLimit.ts`; the equivalent coverage is provided by the `computeEffectiveCount` pure-unit test (§12) plus the static inspection of the four caller routes. |
 | `server/index.ts` | Modified | 2 + 3 | Phase 2: register the rate-limit cleanup job alongside the other queue workers in `start()` (pg-boss recommended; if `setInterval` is chosen the registration still lives here). Phase 3: add boot-time assertion `env.NODE_ENV === 'production' && !env.WEBHOOK_SECRET` → throw. Add one-time `logger.warn` on dev-mode fallback when `verifyCallbackToken` first runs without a secret. |
 | `server/services/webhookService.ts` | Modified | 3 | One-time `logger.warn` shim invoked from `verifyCallbackToken` when `secret` is absent in non-production. (architect: warn-once-per-process vs warn-once-per-secret-rotation — see §7.3) |
 | `shared/types/briefFastPath.ts` | Modified | 4 | Add `BriefCreationEnvelope` type. |
 | `server/routes/briefs.ts` | Modified | 4 | Return value typed as `BriefCreationEnvelope`. |
-| `server/routes/sessionMessage.ts` | Modified | 4 + 6 | Path C response carries `BriefCreationEnvelope` fields. Phase 6 adds `rateLimiter.check` middleware applied to all paths (A/B/C). |
+| `server/routes/sessionMessage.ts` | Modified | 4 + 6 | Phase 4: every `brief_created` arm of `SessionMessageResponse` (Path A `pendingRemainder` resolution, Path B decisive command, Path C plain submission) returns `{ type: 'brief_created' } & BriefCreationEnvelope`. Phase 6 adds `rateLimiter.check` middleware applied to all paths (A/B/C). |
 | `client/src/components/Layout.tsx` | Modified | 4 | New Brief modal consumes `BriefCreationEnvelope`. |
-| `client/src/components/global-ask-bar/GlobalAskBar.tsx` | Modified | 4 | Path C handler consumes `BriefCreationEnvelope`. |
+| `client/src/components/global-ask-bar/GlobalAskBar.tsx` | Modified | 4 | Every `brief_created` response arm (Paths A/B/C) is consumed via `BriefCreationEnvelope`. |
 | `client/src/components/global-ask-bar/GlobalAskBarPure.ts` | Modified | 4 | `SessionMessageResponse` `brief_created` arm uses `BriefCreationEnvelope`. |
 | `server/services/scopeResolutionService.ts` | Modified | 5 | Add exported pure helper `shouldSearchEntityHint(hint: string): boolean`; call it at the top of `findEntitiesMatching` to short-circuit when the hint is too short. |
 | `server/routes/__tests__/sessionMessage.test.ts` | **New** | 6 | Path A/B/C, cross-tenant rejection, stale-subaccount drop integration tests. |
 | `scripts/_reseed_drop_create.ts` | Modified | 7 | NODE_ENV guard at top of script. |
 | `scripts/_reseed_restore_users.ts` | Modified | 7 | Wrap restore loop in a raw `pg` `Pool` client transaction (`BEGIN` / `COMMIT` / `ROLLBACK`); the script uses raw `pg`, not Drizzle. |
+| `package.json` (server workspace) + lockfile | Modified | 2 | Remove `express-rate-limit` from dependencies (no remaining call site after Phase 2 migration). Lockfile regenerated. |
+| `server/services/__tests__/rateLimiterPure.test.ts` | **New** | 2 | Pure-unit tests for `computeEffectiveCount(prevCount, currentCount, elapsedFractionOfCurrentWindow)` at boundary, mid-window, and full-window edges. |
+| `server/services/__tests__/scopeResolutionPure.test.ts` | **New** | 5 | Pure-unit tests for `shouldSearchEntityHint(hint)` (returns `false` for `''`, `' '`, `'a'`; `true` for `'ab'` and longer). May extend an existing `*Pure.test.ts` file in the same directory if conventions there favour grouping. |
 | `tasks/current-focus.md` | Modified | (housekeeping) | Update mission-control block + prose to point at this spec. |
 
 ## 6. Phase plan
@@ -131,9 +135,9 @@ This is the single source of truth for what the spec touches. Every prose refere
 **Change:**
 
 - Replace the single `multer.memoryStorage()` instance with `multer.diskStorage({ destination: os.tmpdir() })` for **all uploads**. The hybrid memory/disk variant (memory below 5 MB, disk above) is recorded in §13 Deferred items as the fallback if measured cost makes pure-disk untenable; for this spec, disk-storage for all uploads is the chosen verdict — simpler, fewer moving parts, no in-memory branch to test, acceptable in a pre-production codebase.
-- Drop `limits.fileSize` from `500 * 1024 * 1024` to `50 * 1024 * 1024` (50 MB hard cap). Architect to confirm 50 MB vs 25 MB; default recommendation is 50 MB so existing PDF/screenshot uploads keep working.
+- Drop `limits.fileSize` from `500 * 1024 * 1024` to `50 * 1024 * 1024` (50 MB hard cap). 50 MB is the chosen verdict — existing PDF/screenshot uploads keep working without change.
 
-**Tempfile cleanup:** disk-stored Multer files are not auto-cleaned. Add a request-scoped cleanup hook (`res.on('close', () => fs.unlink(file.path, …))`) inside `validateMultipart` so abandoned uploads don't accumulate in `tmpdir`. Architect to confirm: whether the cleanup hook lives in the middleware itself or in each consuming route. Default recommendation: middleware-level — fewer call sites to audit.
+**Tempfile cleanup:** disk-stored Multer files are not auto-cleaned. Add a request-scoped cleanup hook (`res.on('close', () => fs.unlink(file.path, …))`) **inside `validateMultipart`** (middleware-level, not per-route) so abandoned uploads don't accumulate in `tmpdir`. Middleware-level keeps the cleanup contract in one place — no route-level audit surface — and §10.6 covers the per-request safety semantics.
 
 **Out of scope:** changing the `validateMultipart` export signature. Existing callers (`upload.any()`) keep working unchanged.
 
@@ -177,13 +181,39 @@ Mirrors the SQL. Exported from `server/db/schema/index.ts`. No relations; no `or
 See §7.1 for the contract. Implementation invariants:
 
 - **Window alignment:** `window_start = floor(now / windowSec) * windowSec`. Two callers within the same window write to the same row.
-- **UPSERT increment:** `INSERT … ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limit_buckets.count + 1 RETURNING count`. Single round-trip; PostgreSQL's `INSERT ... ON CONFLICT DO UPDATE` is per-row atomic at any isolation level (no explicit locking required, no SERIALIZABLE needed). The race-claim ordering (§ 8.10) is satisfied: the count increment is the state claim; if it returns a value > limit the caller is rejected before any side effect.
-- **Sliding window read:** `check()` queries the previous window + current window with a weighted-sum approximation: `effectiveCount = prevCount * (1 - elapsedFractionOfCurrentWindow) + currentCount`. This is the standard sliding-log approximation that avoids O(N) timestamp storage; architect to confirm the approximation is acceptable vs a hard fixed-window (default recommendation: weighted, since fixed-window allows 2x burst at window boundaries).
-- **No in-process caching:** every `check()` does the read + UPSERT. The cost is one DB round-trip per rate-limit check; for our traffic profile this is acceptable.
+- **UPSERT-and-read in a single CTE round-trip.** The primitive issues exactly one statement per `check()` — a CTE that increments the current window via UPSERT and reads the previous window's row in the same query:
+
+  ```sql
+  WITH upserted AS (
+    INSERT INTO rate_limit_buckets (key, window_start, count)
+    VALUES ($1, $current_window_start, 1)
+    ON CONFLICT (key, window_start) DO UPDATE
+      SET count = rate_limit_buckets.count + 1
+    RETURNING count AS current_count
+  ),
+  prev AS (
+    SELECT count AS prev_count FROM rate_limit_buckets
+    WHERE key = $1 AND window_start = $previous_window_start
+  )
+  SELECT
+    upserted.current_count,
+    COALESCE(prev.prev_count, 0) AS prev_count
+  FROM upserted LEFT JOIN prev ON true;
+  ```
+
+  The increment and the previous-window read are a single round-trip; PostgreSQL's `INSERT ... ON CONFLICT DO UPDATE` is per-row atomic at any isolation level (no explicit locking required, no SERIALIZABLE needed). The race-claim ordering (§ 8.10) is satisfied: the count increment is the state claim; if `effectiveCount > limit` the caller is rejected before any side effect.
+
+- **Sliding window math.** After the round-trip returns `current_count` and `prev_count`, the primitive computes `effectiveCount = prev_count * (1 - elapsedFractionOfCurrentWindow) + current_count` — the standard sliding-log approximation that avoids O(N) timestamp storage. The pure helper `computeEffectiveCount(prevCount, currentCount, elapsedFractionOfCurrentWindow)` is unit-tested at edges (boundary moment, mid-window, full-window). Architect to confirm the approximation is acceptable vs a hard fixed-window (default recommendation: weighted, since fixed-window allows 2x burst at window boundaries).
+
+- **No in-process caching:** every `check()` does the single CTE round-trip described above. For our traffic profile this is acceptable.
 
 #### 2.4 Cleanup job `server/lib/rateLimitCleanupJob.ts`
 
-`DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '1 hour'`. Frequency: once every 5 minutes. Architect to call: pg-boss worker vs `setInterval` in the boot path. Default recommendation: pg-boss worker for parity with other maintenance jobs. If pg-boss, register in `server/index.ts` `start()` alongside the other queue workers.
+`DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '2 hours'`. Frequency: once every 5 minutes.
+
+**TTL retention rationale.** The sliding-window read in §7.1 needs the *previous* window's row, not just the current one. The longest `windowSec` in the call-site set is `3600` (the test-run hourly limiter, §6.2.5). The cleanup cutoff therefore must be at least `2 * max(windowSec)` = 2 hours so the previous-window row is still present at the moment the current window rolls over. A 1-hour cutoff would race the test-run limiter's window boundary and silently degrade the sliding-window approximation back to a fixed-window. The `2 hours` value is conservative for the current call-site set; if a longer-window call site is ever added, this constant is updated in the same PR.
+
+Architect to call (intentional architect-deferral): pg-boss worker vs `setInterval` in the boot path. Default recommendation: pg-boss worker for parity with other maintenance jobs. If pg-boss, register in `server/index.ts` `start()` alongside the other queue workers (the file inventory in §5 already lists `server/index.ts` as a Phase 2 modification for this purpose).
 
 #### 2.5 Call-site migration
 
@@ -196,7 +226,7 @@ Each of the call sites enumerated below switches in the same PR as Phase 2. No "
 | `server/routes/auth.ts` forgot/reset password | `express-rate-limit` instances | `rateLimiter.check('auth:forgot:' + ip, 5, 900)` and `rateLimiter.check('auth:reset:' + ip, 5, 900)`. Suggested: 5 / 15 min mirrors current. |
 | `server/routes/public/formSubmission.ts` | local Maps `ipHits` + `pageHits` | `rateLimiter.check('public:form:ip:' + ip, 5, 60)` AND `rateLimiter.check('public:form:page:' + pageId, 50, 60)` |
 | `server/routes/public/pageTracking.ts` | local Map `trackHits` | `rateLimiter.check('public:track:ip:' + ip, 60, 60)` |
-| `server/lib/testRunRateLimit.ts` callers | `checkTestRunRateLimit(userId)` | `rateLimiter.check('testrun:user:' + userId, TEST_RUN_RATE_LIMIT_PER_HOUR, 3600)` |
+| `server/routes/agents.ts:167`, `server/routes/skills.ts:158`, `server/routes/subaccountAgents.ts:286`, `server/routes/subaccountSkills.ts:125` | `checkTestRunRateLimit(userId)` (sync; throws on limit) | `await rateLimiter.check('testrun:user:' + userId, TEST_RUN_RATE_LIMIT_PER_HOUR, 3600)`; reject on `!allowed`. The four call sites become async (already inside async route handlers). |
 
 After migration, the following are deleted:
 - `server/lib/testRunRateLimit.ts` (file).
@@ -204,7 +234,7 @@ After migration, the following are deleted:
 - The local Maps + `checkRateLimit` helpers in both public routes.
 - `express-rate-limit` from `server/package.json` if no other call site remains.
 
-**On-failure behaviour:** when `rateLimiter.check` returns `allowed: false`, the route responds with **429** + a body matching the existing route's response shape (so existing client UX is preserved). Architect to confirm: should `resetAt` be exposed as a `Retry-After` header? Default recommendation: yes — it's already computed and standardising on `Retry-After` is cheap.
+**On-failure behaviour:** when `rateLimiter.check` returns `allowed: false`, the route responds with **429** + a body matching the existing route's response shape (so existing client UX is preserved) AND a `Retry-After: <secondsUntilResetAt>` header derived from `result.resetAt`. The `Retry-After` header is mandatory across every 429 path the new primitive emits (auth, public form, public track, test-run, sessionMessage); the §7.1 contract carries the canonical formula.
 
 **No env-flag rollback shim** (per `DEVELOPMENT_GUIDELINES § 8.6`). The new primitive replaces three structurally-broken implementations; rolling back to "in-process Map limiter" is not a credible recovery path. If the new primitive misbehaves under load in pre-production testing, the recovery is to fix forward — a two-line PR that raises the per-call-site `limit` constants (effectively disabling the gate) or reverts the commit. No env-flag knob is introduced.
 
@@ -228,7 +258,7 @@ The throw is caught by the existing `start().catch()` at the bottom of `server/i
 
 `server/services/webhookService.ts` `verifyCallbackToken` already has a `if (!secret) return true` open-mode branch (lines 75–76). Add a one-time `logger.warn('webhook.open_mode_active', { … })` the first time this branch executes per process. This satisfies `DEVELOPMENT_GUIDELINES § 8.20` — when an enforcement is conditional, the boundary still emits an observable signal.
 
-Implementation: a module-level `let warned = false` flag; warn-once-per-process. Architect to confirm: warn-once-per-process is sufficient (default recommendation) vs warn-once-per-secret-rotation. Per-process is simpler and the operational signal is "this server has webhook open mode active" — a single warning at boot answers that.
+Implementation: a module-level `let warned = false` flag; warn-once-per-process. Architect to confirm: warn-once-per-process is sufficient (default recommendation) vs warn-once-per-secret-rotation. Per-process is simpler and the operational signal is "this server has webhook open mode active" — a single warning on the first callback verification per process answers that.
 
 **Per-request HMAC verification when a secret IS present** stays unchanged. The boot-time assertion + open-mode warning are the only two changes to webhook auth.
 
@@ -238,7 +268,7 @@ Implementation: a module-level `let warned = false` flag; warn-once-per-process.
 
 Define `BriefCreationEnvelope` in `shared/types/briefFastPath.ts` (extending the file that already houses `BriefUiContext` and `FastPathDecision`). See §7.4 for the contract.
 
-The envelope **is** the output of `createBrief()` plus the optional resolved-context fields that `/api/session/message` Path C carries. Both routes return a value satisfying this type.
+The envelope **is** the output of `createBrief()` plus the resolved-context fields (`organisationId`, `subaccountId`, `organisationName`, `subaccountName`). All envelope fields are required at the type level; the name fields and `subaccountId` may be `null` when the route does not have a pre-loaded lookup or the brief is org-scoped (see §7.4 for the per-field nullability matrix). Both routes return a value satisfying this type.
 
 #### 4.2 Route changes
 
@@ -247,10 +277,10 @@ The envelope **is** the output of `createBrief()` plus the optional resolved-con
 - Returns `BriefCreationEnvelope` directly (currently returns the raw `createBrief()` result, which already includes `briefId`, `conversationId`, `fastPathDecision` — adding `organisationId` and `subaccountId` is a one-line addition).
 - `organisationName` / `subaccountName` are returned when known (from the resolved subaccount lookup) and `null` otherwise. The Layout modal already tolerates this.
 
-**`server/routes/sessionMessage.ts`** Path C:
+**`server/routes/sessionMessage.ts`** every `brief_created` arm (Path A `pendingRemainder` resolution, Path B decisive command, Path C plain submission):
 
-- The existing `SessionMessageResponse` discriminated union keeps its shape, but the `brief_created` arm's payload becomes a structural superset: `{ type: 'brief_created' } & BriefCreationEnvelope`. The other three arms (`disambiguation`, `context_switch`, `error`) are unchanged — they are not brief-creation results.
-- The existing `organisationName: null` / `subaccountName: null` literal returns are kept (already known to be null in this path; F15 deferred entry covers a future fix).
+- The existing `SessionMessageResponse` discriminated union keeps its shape, but **every** `brief_created` arm's payload becomes a structural superset: `{ type: 'brief_created' } & BriefCreationEnvelope`. The other three arms (`disambiguation`, `context_switch`, `error`) are unchanged — they are not brief-creation results.
+- The existing `organisationName: null` / `subaccountName: null` literal returns are kept on the paths where the route does not have a pre-loaded name lookup (Path C currently); F15 deferred entry covers backfilling them.
 
 #### 4.3 Client changes
 
@@ -260,7 +290,7 @@ The envelope **is** the output of `createBrief()` plus the optional resolved-con
 
 **`client/src/components/global-ask-bar/GlobalAskBar.tsx`**:
 
-- The Path C handler already consumes `data.organisationId`, `data.subaccountId`, `data.briefId`. The new envelope adds `fastPathDecision` and `conversationId` — both are forward-compatible (existing handler ignores extra fields). No code change required in `handleResponse` beyond the type change in `GlobalAskBarPure.ts`.
+- Every `brief_created` response (Paths A/B/C) is now typed as `{ type: 'brief_created' } & BriefCreationEnvelope`. The Path C handler already consumes `data.organisationId`, `data.subaccountId`, `data.briefId`; the new envelope adds `fastPathDecision` and `conversationId` — both are forward-compatible (existing handler ignores extra fields). No code change required in `handleResponse` beyond the type change in `GlobalAskBarPure.ts`.
 
 **`client/src/components/global-ask-bar/GlobalAskBarPure.ts`**:
 
@@ -305,7 +335,7 @@ export async function findEntitiesMatching(input: EntitySearchInput): Promise<Sc
 
 - **Key shape:** `'session:message:user:' + req.user.id` — per-user. Architect to confirm: per-user vs per-user+org. Default recommendation: per-user (the limit is on a logged-in user's typing rate, not on a tenant; user IDs are globally unique).
 - **Limit:** 30 / minute. Architect to confirm. Default recommendation: 30/minute is generous for human typing and conservative against scripted abuse.
-- **Failure mode:** 429 + `{ type: 'error', message: 'Too many requests, please slow down.' }` — keeps the existing `SessionMessageResponse` `error` arm shape so GlobalAskBar's existing error handler renders correctly. Add `Retry-After` header (per Phase 2 standardisation).
+- **Failure mode:** 429 + `{ type: 'error', message: 'Too many requests, please slow down.' }` — keeps the existing `SessionMessageResponse` `error` arm shape so GlobalAskBar's existing error handler renders correctly. `Retry-After` header is set per Phase 2's mandatory standard.
 
 The limit applies to **all paths** (A/B/C). A user hammering the disambiguation Path A is just as abusive as one hammering Path C; one limit covers all.
 
@@ -346,7 +376,7 @@ Architect to confirm: is the `NODE_ENV` check sufficient, or do we also gate on 
 
 #### 7.2 Reseed transaction wrap
 
-`scripts/_reseed_restore_users.ts`: wrap the per-row `UPDATE` loop in `pool.query('BEGIN')` / `'COMMIT'` (the script uses raw `pg` `Pool`, not Drizzle, so the call is the raw transaction API):
+`scripts/_reseed_restore_users.ts`: lease a single `client` via `pool.connect()` and run all of `BEGIN` / `UPDATE` / `COMMIT` / `ROLLBACK` through `client.query`. Never call `pool.query` for any of these — that returns a different connection per call and would not establish a transaction. The script uses raw `pg` `Pool`, not Drizzle:
 
 ```ts
 const client = await pool.connect();
@@ -388,8 +418,13 @@ export interface RateLimitCheckResult {
 /**
  * Sliding-window rate-limit check. Atomic: every call is counted (UPSERT)
  * regardless of allowed; allowed=false means the count is over the limit
- * for the effective window. The caller MUST reject on allowed=false; the
- * primitive does not throw.
+ * for the effective window. The caller MUST reject on allowed=false.
+ *
+ * The primitive does NOT throw for denial outcomes — denial is `allowed: false`,
+ * not an exception. Operational failures (DB connection drop, query error)
+ * propagate as a rejected promise; the caller's existing error-handling path
+ * maps these to a 500. Per §10.1, the caller MUST NOT retry — a transparent
+ * retry could double-count if the first call's UPSERT actually committed.
  *
  * @param key Caller-defined key. Conventional shape: `{namespace}:{kind}:{value}`
  *            e.g. `auth:login:1.2.3.4:user@example.com`. The primitive treats
@@ -397,6 +432,7 @@ export interface RateLimitCheckResult {
  * @param limit Maximum allowed calls per window.
  * @param windowSec Window size in seconds. Used for window alignment.
  * @returns Decision + remaining-budget metadata for the response.
+ * @throws Operational DB errors (connection drop, query failure) only — never throws to signal denial.
  */
 export function check(key: string, limit: number, windowSec: number): Promise<RateLimitCheckResult>;
 ```
@@ -423,7 +459,7 @@ window_start='2026-04-29T12:30:00.000Z'
 count=4
 ```
 
-After the cleanup interval (window_start older than `now - 1h`), this row is deleted.
+After the cleanup interval (window_start older than `now - 2h`, see §6.2.4 for the `2 * max(windowSec)` retention rationale), this row is deleted.
 
 **Source-of-truth precedence:** the `rate_limit_buckets` table is the single representation. There is no in-memory cache; every check is a round-trip. If a future implementation introduces an LRU cache (out of scope), the table remains canonical and the cache is best-effort.
 
@@ -480,7 +516,7 @@ export interface BriefCreationEnvelope {
 
 **Producer:** `server/routes/briefs.ts` (`POST /api/briefs` returns `BriefCreationEnvelope`); `server/routes/sessionMessage.ts` Path C and Path A `brief_created` arms (return `{ type: 'brief_created' } & BriefCreationEnvelope`).
 
-**Consumer:** `client/src/components/Layout.tsx` New Brief modal; `client/src/components/global-ask-bar/GlobalAskBar.tsx` Path C handler.
+**Consumer:** `client/src/components/Layout.tsx` New Brief modal; `client/src/components/global-ask-bar/GlobalAskBar.tsx` every `brief_created` arm handler (Paths A/B/C).
 
 **Example instance:**
 
@@ -561,7 +597,7 @@ Per [docs/spec-authoring-checklist.md § 10](../../spec-authoring-checklist.md),
 
 ### 10.2 Rate-limit cleanup job
 
-- **Operation:** `DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '1 hour'`.
+- **Operation:** `DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '2 hours'` (see §6.2.4 for the `2 * max(windowSec)` retention rationale).
 - **Idempotency posture:** `safe`. Re-running the same DELETE against the now-cleaned table is a no-op.
 - **Retry classification:** `safe`. pg-boss's retry policy applies; multiple worker instances racing on the cleanup is harmless (one wins the lock; others find no rows to delete).
 - **Concurrency guard:** none needed. Multiple workers running the same DELETE concurrently is correct under MVCC.
@@ -640,14 +676,14 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary; runtime_test
 | `rateLimiter.check` window-edge math | the sliding-window formula `effectiveCount = prevCount * (1 - elapsedFractionOfCurrentWindow) + currentCount` is exposed as a pure helper (e.g. `computeEffectiveCount(prevCount, currentCount, elapsedFractionOfCurrentWindow)`) and unit-tested at edges (boundary moment, mid-window, full-window) | Pure unit | 2 |
 | `shouldSearchEntityHint` | returns `false` for `''`, `' '`, `'a'`; `true` for `'ab'` and longer (the predicate `findEntitiesMatching` consults) | Pure unit | 5 |
 | `sessionMessage` | T1–T8 (see § 6.2 table) | Integration (real DB) | 6 |
-| Reseed `_reseed_drop_create.ts` | throws when `NODE_ENV !== 'development'` | Pure unit (mock `process.env`) | 7 |
+| Reseed `_reseed_drop_create.ts` | static inspection: the top-of-script `if (process.env.NODE_ENV !== 'development') throw …` block is present and runs before any `pool.connect()` / DDL statement. No runtime test — the guard is a single literal check; introducing a pure helper to test it would add abstraction the script doesn't otherwise need. | Static inspection | 7 |
 | Reseed `_reseed_restore_users.ts` | rollback path: static inspection that the `try { BEGIN … COMMIT } catch { ROLLBACK }` shape is present, all DML uses the leased `client`, and the `pool.connect()` is `client.release()`d in `finally`. No runtime test — `pg`'s transaction semantics are not under test. | Static inspection | 7 |
 
 **Out of scope for testing:**
 
 - Frontend unit tests for `Layout.tsx` / `GlobalAskBar.tsx` envelope changes (per spec-context).
 - E2E flow tests of the New Brief modal end-to-end (per spec-context).
-- Multer disk-spillover tests beyond a smoke check that a >5 MB upload survives a round-trip without OOM (recorded in the PR description, not as a test file).
+- Multer upload-flow tests beyond a manual PR smoke that a sizeable upload (e.g. ~20 MB, well under the 50 MB cap) survives a round-trip via the new `multer.diskStorage` configuration without OOM (recorded in the PR description, not as a test file).
 
 **Static gates that must continue to pass:**
 
@@ -667,7 +703,8 @@ Items mentioned in spec prose but intentionally deferred to a future PR or sprin
 - **Centralising the integration-test skip helper** (`shouldSkipIntegration()` per `tasks/todo.md` PR #226 deferred entry). The new `sessionMessage.test.ts` uses the existing per-file `process.env.DATABASE_URL` check; centralising is a separate refactor.
 - **#27 Centralised auth/permission audit trail.** Out of scope per brief; broader follow-up.
 - **Multer disk-storage hybrid (memory below 5 MB, disk above).** Architect-decision section in Phase 1 recommends pure disk-storage for simplicity; the hybrid approach is the deferred fallback if pure-disk turns out to have a measured cost.
-- **`Retry-After` header standardisation.** Phase 2 / 6 recommend including `Retry-After` on 429 responses. If the architect rejects this in favour of body-only `resetAt`, the standardisation deferral is recorded here.
+<!-- Retry-After header standardisation: NOT deferred. Phase 2 / 6 mandate it on every 429 emitted by the new primitive (see §6.2.5 on-failure behaviour and §7.1 contract). -->
+
 
 ## 14. Acceptance criteria
 
