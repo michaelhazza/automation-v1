@@ -162,6 +162,10 @@ import documentBundlesRouter from './routes/documentBundles.js';
 import systemIncidentsRouter from './routes/systemIncidents.js';
 import { recordIncident } from './services/incidentIngestor.js';
 import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
+// Workspace identity routes (agents-as-employees)
+import workspaceRouter from './routes/workspace.js';
+import workspaceMailRouter from './routes/workspaceMail.js';
+import workspaceCalendarRouter from './routes/workspaceCalendar.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -364,6 +368,9 @@ app.use(delegationOutcomesRouter);
 app.use(referenceDocumentsRouter);
 app.use(documentBundlesRouter);
 app.use(systemIncidentsRouter);
+app.use(workspaceRouter);
+app.use(workspaceMailRouter);
+app.use(workspaceCalendarRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
