@@ -90,3 +90,32 @@ Recommended sequence for the main session:
 3. **CONFORM-3 last** — pure documentation reconciliation. Easiest path: amend the `ruleAutoDeprecateJob` paragraph in `progress.md` to cite the commit-message line ranges (134-148, 175) so all three places agree.
 
 After resolving these, run `pr-reviewer` on the expanded changed-code set.
+
+---
+
+## Closure update — 2026-04-29 (post-conformance fix-up by main session)
+
+All 3 directional gaps closed inline by the main session.
+
+**CONFORM-1 → Option (a) applied:**
+- Added `0000_wandering_firedrake.sql` and `0076_playbooks.sql` to `HISTORICAL_BASELINE_FILES` in `scripts/verify-rls-coverage.sh` with descriptive comment block.
+- Added `@rls-baseline:` annotation comment to both migration files (header insert).
+- Fixed redundant `migrations/` prefix on `policyMigration` field for `workflow_engines` / `workflow_runs` registry entries (convention is filename-only).
+- Verified: `bash scripts/verify-rls-coverage.sh` violation count dropped 10 → 8; remaining 8 are pre-existing about other tables (`task_activities`, `task_deliverables`, `reference_document_versions`, `document_bundle_members`) — out of scope for this branch.
+- Honors §3.4.1 registry-only rule, §7.1 CI invariant, and §0.4 sister-branch scope-out.
+
+**CONFORM-2 → Tightening + admin-bypass migration applied:**
+- Audit confirmed: only `seedBuiltInSkills` (boot-time at `server/index.ts:462`) writes `organisation_id = NULL` rows. No tenant routes write NULL. `org_margin_configs` has no tenant writes at all.
+- Migration 0245 WITH CHECK clauses on `org_margin_configs` (lines 449-465) and `skills` (lines 763-779) tightened to canonical shape: drop `organisation_id IS NULL OR ...` from WITH CHECK; keep nullable-aware allowance only in USING (so tenants still READ platform-global rows).
+- Migration 0245 header note updated: NULL writes are now reserved for migrations / admin_role connections (BYPASSRLS) — tenant code cannot insert/update NULL `organisation_id` rows.
+- `seedBuiltInSkills` migrated to `withAdminConnection({ source: 'skill-seed', ... }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })` so boot-time NULL writes go via admin path.
+- Now fully compliant with spec §2.1 canonical shape.
+
+**CONFORM-3 → Documentation reconciliation applied:**
+- Updated `tasks/builds/pre-prod-tenancy/progress.md` per-job audit paragraph for `ruleAutoDeprecateJob` to cite commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition).
+- Removed the round-trip reconciliation note (line 273).
+- All three places (commit message `271567ef`, PR-description draft, progress.md per-job paragraph) now agree byte-identically per §5.2.1.
+
+**Updated verdict:** **CONFORMANT_AFTER_FIXES** — all 3 directional gaps closed. The 8 remaining `verify-rls-coverage.sh` violations are pre-existing on `main` and out of scope for this branch (other tables not in §3.4 classification table).
+
+Closure commit: pending — main session commits with all conformance fixes bundled.

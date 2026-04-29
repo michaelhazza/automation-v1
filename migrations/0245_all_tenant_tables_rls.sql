@@ -1,8 +1,11 @@
 -- Migration 0245: Canonical org-isolation RLS policies for all 55 tenant tables
 -- registered in server/config/rlsProtectedTables.ts as 'register-with-new-policy'.
 -- All tables use the canonical USING + WITH CHECK shape from spec §2.1.
--- Exceptions: org_margin_configs and skills use nullable-aware USING + WITH CHECK
--- (organisation_id IS NULL rows are visible cross-tenant as platform defaults).
+-- Exceptions: org_margin_configs and skills use nullable-aware USING (read) +
+-- canonical WITH CHECK (write). organisation_id IS NULL rows are platform-global
+-- defaults visible cross-tenant for READ; WRITE of NULL rows is reserved for
+-- migrations / boot-time admin paths (admin_role + BYPASSRLS) — tenant code
+-- cannot insert/update NULL organisation_id rows.
 -- Each table block is independently revertible via its own rollback comment.
 -- This migration is idempotent: DROP POLICY IF EXISTS ... ; CREATE POLICY ... shape.
 
@@ -440,7 +443,9 @@ CREATE POLICY org_budgets_org_isolation ON org_budgets
 
 -- ── org_margin_configs ────────────────────────────────────────────────────────
 -- NOTE: organisation_id is nullable; NULL rows are platform-global defaults
--- visible cross-tenant. Nullable-aware USING + WITH CHECK shape applied.
+-- visible cross-tenant for READ. Tenants may NOT write NULL rows — that path is
+-- reserved for migrations / admin_role connections (BYPASSRLS). Nullable-aware
+-- USING (read), strict WITH CHECK (write) per spec §2.1 canonical shape.
 ALTER TABLE org_margin_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE org_margin_configs FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
@@ -456,12 +461,9 @@ CREATE POLICY org_margin_configs_org_isolation ON org_margin_configs
     )
   )
   WITH CHECK (
-    organisation_id IS NULL
-    OR (
-      current_setting('app.organisation_id', true) IS NOT NULL
-      AND current_setting('app.organisation_id', true) <> ''
-      AND organisation_id = current_setting('app.organisation_id', true)::uuid
-    )
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
 -- ── org_memories ─────────────────────────────────────────────────────────────
@@ -754,7 +756,10 @@ CREATE POLICY skill_analyzer_jobs_org_isolation ON skill_analyzer_jobs
 
 -- ── skills ────────────────────────────────────────────────────────────────────
 -- NOTE: organisation_id is nullable; NULL rows are system/built-in skills
--- visible cross-tenant. Nullable-aware USING + WITH CHECK shape applied.
+-- visible cross-tenant for READ. Tenants may NOT write NULL rows — that path is
+-- reserved for the `seedBuiltInSkills` boot routine, which runs via
+-- `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS). Nullable-aware
+-- USING (read), strict WITH CHECK (write) per spec §2.1 canonical shape.
 ALTER TABLE skills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE skills FORCE ROW LEVEL SECURITY;
 -- prior RLS state: disabled (no policy)
@@ -770,12 +775,9 @@ CREATE POLICY skills_org_isolation ON skills
     )
   )
   WITH CHECK (
-    organisation_id IS NULL
-    OR (
-      current_setting('app.organisation_id', true) IS NOT NULL
-      AND current_setting('app.organisation_id', true) <> ''
-      AND organisation_id = current_setting('app.organisation_id', true)::uuid
-    )
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
 -- ── slack_conversations ───────────────────────────────────────────────────────

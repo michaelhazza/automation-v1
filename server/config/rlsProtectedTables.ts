@@ -850,14 +850,14 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'workflow_engines',
     schemaFile: 'migrations/0000_wandering_firedrake.sql',
-    policyMigration: 'migrations/0000_wandering_firedrake.sql',
-    rationale: 'Legacy per-org workflow engine instances — reveal automation execution topology. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4).',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Legacy per-org workflow engine instances — reveal automation execution topology. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
   },
   {
     tableName: 'workflow_runs',
     schemaFile: 'workflowRuns.ts',
-    policyMigration: 'migrations/0076_playbooks.sql',
-    rationale: 'Per-org workflow execution run records — reveal automation activity and execution history. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4).',
+    policyMigration: '0076_playbooks.sql',
+    rationale: 'Per-org workflow execution run records — reveal automation activity and execution history. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
   },
 ];
 
