@@ -350,7 +350,7 @@ export const webLoginConnectionService = {
         name: agents.name,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.organisationId, organisationId),

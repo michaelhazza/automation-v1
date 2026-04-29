@@ -399,7 +399,7 @@ async function fetchWorkflowRuns(
       subaccountName: subaccounts.name,
     })
     .from(workflowRuns)
-    .leftJoin(subaccounts, eq(subaccounts.id, workflowRuns.subaccountId))
+    .leftJoin(subaccounts, and(eq(subaccounts.id, workflowRuns.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
     .limit(200);
@@ -445,7 +445,7 @@ async function fetchWorkflowExecutions(
       triggeredByUserLastName: users.lastName,
     })
     .from(executions)
-    .leftJoin(subaccounts, eq(subaccounts.id, executions.subaccountId))
+    .leftJoin(subaccounts, and(eq(subaccounts.id, executions.subaccountId), isNull(subaccounts.deletedAt)))
     // LEFT JOIN users — deleted user yields null, does NOT drop the row
     .leftJoin(users, eq(users.id, executions.triggeredByUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)

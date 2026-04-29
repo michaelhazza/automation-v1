@@ -1491,3 +1491,37 @@ Follow-up: either find the missing worker registration site (audit log
 mentioned "Sprint 4 P3.1 bulk parent completion check"), or remove the
 `workflow-bulk-parent-check` entry from JOB_CONFIG if it's aspirational. Until
 then the DLQ subscription is harmless but noisy.
+
+
+---
+
+## Follow-up: Remaining soft-delete join gaps (fix-logical-deletes-2)
+
+**Source:** pr-reviewer on branch `fix-logical-deletes` (2026-04-29)
+
+The `fix-logical-deletes` branch fixed the 24 join sites listed in
+`docs/soft-delete-filter-gaps-spec.md`. The pr-reviewer found additional
+unguarded joins not covered by the spec. These should be fixed in a follow-up PR
+(`fix-logical-deletes-2`) to keep scope clean.
+
+### WHERE-clause only (functionally correct, convention-violating — isNull in WHERE, not join)
+- `server/tools/internal/assignTask.ts:55` — agents join
+- `server/services/agentExecutionService.ts:3057` — agents join
+- `server/services/agentScheduleService.ts:221` — agents join
+- `server/services/capabilityMapService.ts:203` — agents join
+- `server/services/scheduleCalendarService.ts:123` — agents join
+- `server/services/skillExecutor.ts:3375,3589,3839` — agents joins (3 sites)
+
+### No deletedAt filter at all (genuine Category A gaps)
+- `server/services/subaccountAgentService.ts:227` — `getLinkById` innerJoin agents (operational)
+- `server/services/subaccountAgentService.ts:390` — `getTree` innerJoin agents (org-chart, exact pattern that triggered the original bug)
+- `server/services/hierarchyRouteResolverService.ts:58` — agents join, runtime routing path
+- `server/services/workspaceHealth/workspaceHealthService.ts:266-267` — agents + subaccounts joins, no soft-delete filter
+- `server/services/workspaceHealth/workspaceHealthService.ts:317` — subaccounts join
+- `server/services/workspaceHealth/detectors/explicitDelegationSkillsWithoutChildren.ts:41` — agents join
+- `server/services/subaccountAgentService.ts:499` — leftJoin systemAgents, no isNull(systemAgents.deletedAt)
+- `server/jobs/proposeClientPulseInterventionsJob.ts:309` — innerJoin systemAgents
+- `server/services/clientPulseInterventionContextService.ts:366` — innerJoin systemAgents
+- `server/services/configUpdateOrganisationService.ts:59` — innerJoin systemAgents
+- `server/services/workflowActionCallExecutor.ts:74` — innerJoin systemAgents
+- `server/tools/config/configSkillHandlers.ts:34` — innerJoin systemAgents (same file as fix-logical-deletes)
