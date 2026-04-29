@@ -520,3 +520,16 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   the CLAUDE.md "no auto-commits or auto-pushes" user preference within this
   flow only. The user has explicitly opted in for ChatGPT review sessions so
   each round's state lands on the PR before the next round starts.
+- **Test gates are CI-only — never run them and never write them into a
+  spec.** Continuous integration runs the complete suite as a pre-merge gate.
+  Do NOT run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`,
+  the umbrella `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or
+  `scripts/run-all-*.sh` at any point — not as part of validating a
+  ChatGPT-suggested spec edit, not as a "confirm the spec implementation
+  works" check, not in any framing. If ChatGPT recommends adding a "run all
+  gates" / "execute the full test suite" requirement to the spec under
+  review, classify it as `defer` (or `reject` if obvious) with reason
+  "test gates are CI-only per CLAUDE.md § *Test gates are CI-only — never
+  run locally*; specs must NOT instruct implementers to run gate suites
+  locally". Specs may name targeted unit tests an implementer should
+  author; running the broader suite is CI's job, not the spec's.

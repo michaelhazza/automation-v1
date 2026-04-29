@@ -516,7 +516,18 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
   as `auto (<recommendation>)`, and include it in the round summary's
   `Auto-accepted (technical)` counts so the user can see what shipped.
 - Always run `npm run lint && npm run typecheck` after implementing any
-  approved items (auto or user) — lint/type gates apply identically to both.
+  approved items (auto or user) — lint/type checks apply identically to both.
+  These are the ONLY verification commands this agent runs per round. Test
+  gates are CI-only — never run `npm run test:gates`, `npm run test:qa`,
+  `npm run test:unit`, the umbrella `npm test`, `scripts/verify-*.sh`,
+  `scripts/gates/*.sh`, or `scripts/run-all-*.sh` per round, between rounds,
+  or at finalization. Continuous integration runs the complete suite as a
+  pre-merge gate on the PR. If a round authored a single new test file,
+  running only that file via `npx tsx <path-to-test>` to confirm it passes
+  is allowed; running the rest of the suite is not. If ChatGPT recommends
+  running gates locally, classify the finding as `defer` with reason
+  "test gates are CI-only per CLAUDE.md" and log accordingly. See
+  `CLAUDE.md` § *Test gates are CI-only — never run locally*.
 - Never modify files outside this PR scope during a round.
 - When unsure: recommend `defer` and explain why. For a `technical` finding
   that means the item is escalated (step 3a → step 3b) so the user sees the

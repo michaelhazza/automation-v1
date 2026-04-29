@@ -54,10 +54,10 @@ Run these after every non-trivial change. No task is complete until all relevant
 | Trigger | Command | Max auto-fix attempts |
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
-| Any TypeScript change | `npm run typecheck` | 3 |
-| Logic change in server/ | `npm test` (or relevant suite) | 2 |
+| Any TypeScript change | `npm run typecheck` (or `npx tsc --noEmit`) | 3 |
+| Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
-| Client change | `npm run build` | 2 |
+| Client change | `npm run build:client` | 2 |
 
 ### Rules
 - Run the relevant checks, not all of them, unless the change spans client + server.
@@ -68,14 +68,22 @@ Run these after every non-trivial change. No task is complete until all relevant
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
 
-### Gate-cadence rule (overrides default per-change verification for `npm run test:gates`)
+### Test gates are CI-only — never run locally
 
-`npm run test:gates` (and the umbrella `npm test`, which runs gates first) is **expensive** — it spans every contract / RLS / schema gate in the repo and routinely takes minutes. It is NOT part of the per-change verification loop. Only run it when the user signals **"we're done, prepare for merge"** (or equivalent — typically after `final-review` finishes and we're staging the PR for merge). For routine mid-iteration verification:
-- Use `npx tsc --noEmit` for typecheck.
-- Use `bash scripts/run-all-unit-tests.sh` (or a single targeted `npx tsx <file>`) for unit tests.
-- Use `npm run build:client` / `npm run build:server` only when the change touches the build surface.
+Full test-gate suites and whole-repo verification scripts DO NOT run in any local agent or development session. **Continuous integration runs the complete suite as a pre-merge gate.** This rule applies to every agent in `.claude/agents/`, every skill, every review loop iteration, and every main-session task — no carve-outs.
 
-This rule applies to all sessions, including review-loop iterations. Skipping the gates suite mid-iteration is the correct default; running it pre-merge is the correct exception.
+**Forbidden locally — no exceptions:**
+- `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`.
+- `bash scripts/run-all-unit-tests.sh`, `bash scripts/run-all-gates.sh`.
+- Any individual `scripts/verify-*.sh` or `scripts/gates/*.sh` invocation. They are slow whole-repo scanners; CI runs them.
+- Any "regression sanity check", "quick re-verify everything", "confirm no regression" framing — these are dressed-up gate runs.
+
+**Allowed locally:**
+- `npm run lint`, `npm run typecheck` (or `npx tsc --noEmit`).
+- `npm run build:server` / `npm run build:client` when the change touches the build surface.
+- **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Point: confirm the new test runs and passes. Not to re-run anything else.
+
+Authoring tests and gates is encouraged — running the full battery of them locally is not. CI handles that.
 
 ---
 

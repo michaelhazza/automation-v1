@@ -137,41 +137,36 @@ These are non-negotiable. Every plan must respect them:
 - Idempotency keys on agent runs — any new run creation path must support deduplication
 - Heartbeat changes must account for minute-level offset precision (heartbeatOffsetMinutes)
 
-## Gate-Timing Rule (applies to every multi-chunk plan)
+## Test gates are CI-only — never put them in a plan
 
-**Bash gate scripts (`scripts/verify-*.sh`) are slow static analyzers. They run TWICE TOTAL per build — once at the start, once at the very end. Anywhere else is forbidden.**
+**Full test-gate suites and whole-repo verification scripts DO NOT appear in any plan you produce. Continuous integration runs the complete suite as a pre-merge gate.** Do not write a Phase 0 baseline gate run, a Programme-end gate sweep, or any per-chunk gate hook into the plan — CI owns all of it.
 
-This rule exists because gate scripts run for 30s–2min each; running them per-chunk multiplies build wall-clock by N×gate-count for no signal. The baseline establishes a known starting point; the final pass confirms the end state. Anything in between is wasted compute.
+**Forbidden anywhere in any plan you write:**
+- `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`.
+- `bash scripts/run-all-unit-tests.sh`, `bash scripts/run-all-gates.sh`.
+- Any individual `scripts/verify-*.sh` or `scripts/gates/*.sh` invocation.
+- Any "baseline gate sweep", "Programme-end full gate set", "regression sanity check", or "quick re-verify" — dressed-up gate runs are still gate runs.
+- Hedging language ("optionally", "if helpful", "feel free to") around any of the above. Subagents read hedges as permission.
 
-Every plan you produce must follow this exact pattern:
+**What every chunk's "Verification commands" section IS allowed to contain:**
+- `npm run lint` and `npm run typecheck` (or `npx tsc --noEmit`).
+- `npm run build:server` / `npm run build:client` when the chunk touches the build surface.
+- **Targeted execution of unit tests authored in THIS chunk** — a single file via `npx tsx <path-to-test>`. Authoring new tests and new gate scripts is encouraged; running the rest of the suite is not.
 
-### Phase 0 — Baseline & pre-existing fixes (before Chunk 1 begins)
-
-1. Run all relevant gates once to capture the current violation set.
-2. **If any pre-existing violations would block or interact with the planned work** (e.g. the chunks extend the violating code, or the new code depends on the violated invariant), fix them as the first chunk of the plan. Then re-run only the affected gate(s) to confirm green before starting Chunk 1.
-3. Pre-existing violations that do NOT block the planned work go in a "Known baseline violations" section of the plan and are ignored for the rest of the build — they are not the implementer's burden.
-
-### Development phases (Chunks 1..N)
-
-- **Per-chunk verification commands MUST be limited to:** `npm run build:server` (fast typecheck) + any targeted unit tests added in that chunk. Nothing else.
-- **Forbidden mid-build, in any form:**
-  - `scripts/verify-*.sh` of any kind
-  - "Run verify-X to confirm no regression" — never write this in a plan
-  - Whole-repo lint or full test-suite passes between chunks
-  - Any gate run framed as "sanity check" / "regression check" / "quick re-verify"
-- If a chunk's correctness depends on a gate-level invariant, write a targeted unit test for that invariant inside the chunk. Do not lean on the gate script.
-
-### Final phase — Programme-end verification (after ALL chunks AND spec-conformance complete)
-
-- Run the full gate set once. This is the ONLY post-baseline gate run.
-- Spec-conformance runs BEFORE the final gate pass, not after — if spec-conformance applies fixes, those fixes are part of what the final gate pass validates.
+**If a chunk's correctness depends on a gate-level invariant**, write a targeted unit test for that invariant inside the chunk. The test runs locally on its own (single file). The chunk is responsible for the test passing; CI is responsible for proving nothing else regressed.
 
 ### What this means for the plan document
 
-- Each chunk's "Verification commands" section lists ONLY `npm run build:server` + targeted unit tests. It must not contain any `scripts/verify-*.sh` invocation.
-- The plan ends with a single "Programme-end verification" section listing the full gate set, ordered after spec-conformance.
-- The plan's "Executor notes" must include this line verbatim: **"Gate scripts run TWICE TOTAL per this plan: once during Phase 0 baseline (and any pre-existing-violation fixes) and once during Programme-end verification after all chunks AND spec-conformance. Running them between chunks, after individual fixes, or as 'regression sanity checks' is forbidden — it adds wall-clock cost without adding signal."**
-- Do not introduce hedging language ("optionally", "if helpful", "feel free to") around gate timing. Subagents read hedges as permission.
+- Each chunk's "Verification commands" section lists ONLY lint, typecheck, build:server/client (when relevant), and targeted unit tests for that chunk. No `scripts/verify-*.sh`, no `npm run test:*` umbrella commands.
+- The plan does NOT include a "Phase 0 baseline" section that runs gates, and does NOT include a "Programme-end verification" section that runs the full gate set. CI does both.
+- The plan's "Executor notes" must include this line verbatim: **"Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not."**
+
+### Pre-existing violations — handle without running gates
+
+If you suspect pre-existing gate violations may interact with the planned work, do NOT write a "run gates to baseline" step. Instead:
+1. Identify the suspected violation by static reasoning (read the code, read the gate script's grep pattern, point at the offending line).
+2. If the new code clearly depends on or extends the violating pattern, add a "Pre-existing violation to fix in Chunk 1" item with the file, the fix, and a one-line justification.
+3. CI will catch any baseline violation we missed when the PR is opened — that is the expected behaviour.
 
 ---
 
