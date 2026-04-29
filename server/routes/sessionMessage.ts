@@ -36,7 +36,7 @@ router.post(
     const limitResult = await rateLimitCheck(rateLimitKeys.sessionMessage(req.user!.id), 30, 60);
     if (!limitResult.allowed) {
       setRateLimitDeniedHeaders(res, limitResult.resetAt);
-      res.status(429).json({ type: 'error', message: 'Too many requests. Please try again later.' });
+      res.status(429).json({ type: 'error', message: 'Too many requests, please slow down.' });
       return;
     }
     next();
