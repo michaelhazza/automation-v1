@@ -54,6 +54,7 @@ export const FailureReason = z.enum([
   'workspace_idempotency_collision',
   // Workspace actor hierarchy additions (agents-as-employees spec §6.1).
   'parent_actor_cycle_detected',
+  'workspace_mirror_write_failed',
   'unknown',
 ]);
 
