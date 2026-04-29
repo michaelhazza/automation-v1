@@ -3,10 +3,10 @@ import { authenticate, requireSubaccountPermission, hasSubaccountPermission } fr
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { agents, subaccountAgents } from '../db/schema/index.js';
+import { agents, subaccountAgents, users } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { workspaceIdentityService } from '../services/workspace/workspaceIdentityService.js';
@@ -14,6 +14,7 @@ import * as workspaceOnboardingService from '../services/workspace/workspaceOnbo
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import { googleWorkspaceAdapter } from '../adapters/workspace/googleWorkspaceAdapter.js';
 import { auditEvents } from '../db/schema/auditEvents.js';
+import { env } from '../lib/env.js';
 
 function resolveAdapter(backend: string) {
   return backend === 'google_workspace' ? googleWorkspaceAdapter : nativeWorkspaceAdapter;
@@ -45,24 +46,38 @@ async function resolveAgentIdentity(agentId: string, organisationId: string) {
   return { agent, identity };
 }
 
-// ─── Helper: resolve agent's subaccountId ─────────────────────────────────────
+// ─── Helper: resolve agent's canonical subaccountId ───────────────────────────
+// The agent's home subaccount is the one that owns its workspace_actor row
+// (agents.workspace_actor_id → workspace_actors.subaccount_id). The legacy
+// `subaccount_agents` link table can map an agent to multiple subaccounts —
+// resolving permission scope from there with LIMIT 1 was non-deterministic
+// and could let a caller authenticate via the "wrong" subaccount link.
 
 async function resolveAgentSubaccountId(agentId: string, organisationId: string): Promise<string> {
-  const [link] = await getOrgScopedDb('workspace.resolveAgentSubaccountId')
-    .select({ subaccountId: subaccountAgents.subaccountId })
-    .from(subaccountAgents)
-    .where(
-      and(
-        eq(subaccountAgents.agentId, agentId),
-        eq(subaccountAgents.organisationId, organisationId),
-      ),
-    )
+  const scopedDb = getOrgScopedDb('workspace.resolveAgentSubaccountId');
+  const [agent] = await scopedDb
+    .select({ workspaceActorId: agents.workspaceActorId })
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
     .limit(1);
 
-  if (!link) {
-    throw Object.assign(new Error('Agent is not linked to any subaccount'), { statusCode: 404 });
+  if (!agent) {
+    throw Object.assign(new Error('Agent not found'), { statusCode: 404 });
   }
-  return link.subaccountId;
+  if (!agent.workspaceActorId) {
+    throw Object.assign(new Error('Agent has no workspace actor'), { statusCode: 404 });
+  }
+
+  const [actor] = await scopedDb
+    .select({ subaccountId: workspaceActors.subaccountId })
+    .from(workspaceActors)
+    .where(eq(workspaceActors.id, agent.workspaceActorId))
+    .limit(1);
+
+  if (!actor) {
+    throw Object.assign(new Error('Workspace actor not found'), { statusCode: 404 });
+  }
+  return actor.subaccountId;
 }
 
 // ─── POST /api/subaccounts/:subaccountId/workspace/configure ─────────────────
@@ -195,9 +210,17 @@ router.get(
     const suspended = identities.filter((i) => i.status === 'suspended').length;
     const total = identities.length;
 
+    // Surface the effective email domain so the UI can render
+    // `<localPart>@<domain>` previews without hardcoding a literal.
+    const configDomain = (connectorConfig?.configJson as Record<string, unknown> | undefined)?.domain;
+    const emailDomain = typeof configDomain === 'string' && configDomain.length > 0
+      ? configDomain
+      : (env.NATIVE_EMAIL_DOMAIN || 'workspace.local');
+
     res.json({
       backend: connectorConfig?.connectorType ?? null,
       connectorConfigId: connectorConfig?.id ?? null,
+      emailDomain,
       seatUsage: { active, suspended, total },
     });
   }),
@@ -384,6 +407,21 @@ router.patch(
     }
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
+
+    // State guard: email sending can only be toggled on identities that are
+    // actually capable of sending. Revoked/archived identities are terminal
+    // and toggling on them is meaningless — return 409 so the UI can refresh.
+    const TOGGLE_ALLOWED: ReadonlyArray<string> = ['active', 'suspended', 'provisioned'];
+    if (!TOGGLE_ALLOWED.includes(identity.status)) {
+      res.status(409).json({
+        error: {
+          code: 'invalid_identity_state',
+          message: `Cannot toggle email sending on identity in status '${identity.status}'.`,
+        },
+      });
+      return;
+    }
+
     await workspaceIdentityService.setEmailSending(identity.id, enabled, req.userId!);
     await getOrgScopedDb('workspace.emailSending').insert(auditEvents).values({
       organisationId: req.orgId!,
@@ -394,6 +432,164 @@ router.patch(
       metadata: { identityId: identity.id, enabled },
     });
     res.json({ identityId: identity.id, emailSendingEnabled: enabled });
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/org-chart ──────────────────
+
+interface OrgChartNode {
+  actorId: string;
+  actorKind: 'agent' | 'human';
+  displayName: string;
+  parentActorId: string | null;
+  parentValidationError?: 'cross_subaccount_parent' | 'cycle_detected';
+  agentRole: string | null;
+  agentTitle: string | null;
+  identity?: { id: string; emailAddress: string; status: string; photoUrl: string | null };
+  user?: { id: string; email: string };
+}
+
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/org-chart',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+
+    const db = getOrgScopedDb('workspace.orgChart');
+
+    // Fetch all workspace actors for this subaccount
+    const actorRows = await db
+      .select({
+        actorId: workspaceActors.id,
+        actorKind: workspaceActors.actorKind,
+        displayName: workspaceActors.displayName,
+        parentActorId: workspaceActors.parentActorId,
+        agentRole: workspaceActors.agentRole,
+        agentTitle: workspaceActors.agentTitle,
+        // Agent join
+        agentId: agents.id,
+        // User join
+        userId: users.id,
+        userEmail: users.email,
+        // Identity join (active, non-archived)
+        identityId: workspaceIdentities.id,
+        identityEmail: workspaceIdentities.emailAddress,
+        identityStatus: workspaceIdentities.status,
+        identityPhotoUrl: workspaceIdentities.photoUrl,
+      })
+      .from(workspaceActors)
+      .leftJoin(agents, eq(agents.workspaceActorId, workspaceActors.id))
+      .leftJoin(users, eq(users.workspaceActorId, workspaceActors.id))
+      .leftJoin(
+        workspaceIdentities,
+        and(
+          eq(workspaceIdentities.actorId, workspaceActors.id),
+          isNull(workspaceIdentities.archivedAt),
+        ),
+      )
+      .where(eq(workspaceActors.subaccountId, subaccountId));
+
+    // Build a set of all actor IDs in this subaccount for cross-subaccount parent validation
+    const actorIdSet = new Set(actorRows.map((r) => r.actorId));
+
+    // Cycle detection via max-depth check (≤10 hops from any node to root)
+    const parentMap = new Map<string, string | null>();
+    for (const r of actorRows) {
+      parentMap.set(r.actorId, r.parentActorId);
+    }
+
+    function isInCycle(startId: string): boolean {
+      const visited = new Set<string>();
+      let current: string | null = startId;
+      let hops = 0;
+      while (current !== null && hops <= 10) {
+        if (visited.has(current)) return true;
+        visited.add(current);
+        current = parentMap.get(current) ?? null;
+        hops++;
+      }
+      return hops > 10;
+    }
+
+    const nodes: OrgChartNode[] = actorRows.map((r) => {
+      let parentActorId: string | null = r.parentActorId;
+      let parentValidationError: OrgChartNode['parentValidationError'] = undefined;
+
+      if (parentActorId !== null) {
+        if (!actorIdSet.has(parentActorId)) {
+          // D-Inv-3: parent points outside this subaccount
+          parentActorId = null;
+          parentValidationError = 'cross_subaccount_parent';
+        } else if (isInCycle(r.actorId)) {
+          parentActorId = null;
+          parentValidationError = 'cycle_detected';
+        }
+      }
+
+      const node: OrgChartNode = {
+        actorId: r.actorId,
+        actorKind: r.actorKind as 'agent' | 'human',
+        displayName: r.displayName,
+        parentActorId,
+        agentRole: r.agentRole,
+        agentTitle: r.agentTitle,
+      };
+
+      if (parentValidationError) {
+        node.parentValidationError = parentValidationError;
+      }
+
+      if (r.identityId) {
+        node.identity = {
+          id: r.identityId,
+          emailAddress: r.identityEmail!,
+          status: r.identityStatus!,
+          photoUrl: r.identityPhotoUrl ?? null,
+        };
+      }
+
+      if (r.userId) {
+        node.user = {
+          id: r.userId,
+          email: r.userEmail!,
+        };
+      }
+
+      return node;
+    });
+
+    res.json(nodes);
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/actors ─────────────────────
+
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/actors',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+
+    const db = getOrgScopedDb('workspace.actors');
+
+    const rows = await db
+      .select({
+        actorId: workspaceActors.id,
+        displayName: workspaceActors.displayName,
+        actorKind: workspaceActors.actorKind,
+      })
+      .from(workspaceActors)
+      .where(eq(workspaceActors.subaccountId, subaccountId));
+
+    res.json(
+      rows.map((r) => ({
+        actorId: r.actorId,
+        displayName: r.displayName,
+        actorKind: r.actorKind as 'agent' | 'human',
+      })),
+    );
   }),
 );
 
