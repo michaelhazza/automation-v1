@@ -98,18 +98,6 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0081_rls_llm_requests_audit.sql',
     rationale: 'Cross-cutting audit log — access patterns, permission changes, admin actions.',
   },
-  {
-    tableName: 'task_activities',
-    schemaFile: 'taskActivities.ts',
-    policyMigration: '0091_rls_task_activities_deliverables.sql',
-    rationale: 'Task comment/activity feed — user comments and agent posts.',
-  },
-  {
-    tableName: 'task_deliverables',
-    schemaFile: 'taskDeliverables.ts',
-    policyMigration: '0091_rls_task_activities_deliverables.sql',
-    rationale: 'Task outputs uploaded by agents — files, drafts, reports.',
-  },
   // 0082 — Sprint 2 P1.1 Layer 3 security event stream
   {
     tableName: 'tool_call_security_events',

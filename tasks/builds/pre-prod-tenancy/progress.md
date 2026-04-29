@@ -89,6 +89,13 @@
 - `task_activities` → drop pending USING+WITH CHECK confirmation on `tasks` parent (Task 1.4)
 - `task_deliverables` → drop pending USING+WITH CHECK confirmation on `tasks` parent (Task 1.4)
 
+### Task 1.4 — `tasks` parent USING + WITH CHECK verification ([spec round 7 — commit a9135930])
+
+- Policy migration: `migrations/0079_rls_tasks_actions_runs.sql`
+- USING clause present: yes
+- WITH CHECK clause present: yes
+- Verdict: drop-children-from-registry
+
 ### §3.4.3 — Caller-level violations (2)
 - `server/services/systemMonitor/baselines/refreshJob.ts:39` — move existing comment from line ~37 onto line 38
 - `server/services/systemMonitor/triage/loadCandidates.ts:45` — add inline justification within ±1 line
