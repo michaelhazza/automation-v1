@@ -1,11 +1,14 @@
 import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { withOrgTx } from '../../instrumentation.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../../db/schema/workspaceActors.js';
 import { workspaceMessages } from '../../db/schema/workspaceMessages.js';
 import { auditEvents } from '../../db/schema/auditEvents.js';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { failure } from '../../../shared/iee/failure.js';
 import { logger } from '../../lib/logger.js';
+import { rateLimitKeys } from '../../lib/rateLimitKeys.js';
 import { computeDedupeKey, applySignature, resolveThreadId } from './workspaceEmailPipelinePure.js';
 import type { SendEmailParams, InboundMessage, WorkspaceAdapter } from '../../../shared/types/workspaceAdapterContract.js';
 import type { SendEmailResult } from '../../../shared/types/workspaceAdapterContract.js';
@@ -30,8 +33,10 @@ export async function send(
   params: SendEmailParams,
   deps: PipelineDeps,
 ): Promise<SendEmailResult | ReturnType<typeof failure>> {
+  const scopedDb = getOrgScopedDb('workspaceEmailPipeline.send');
+
   // Step 1: load identity, check sending-enabled
-  const [identity] = await db.select().from(workspaceIdentities).where(eq(workspaceIdentities.id, params.fromIdentityId));
+  const [identity] = await scopedDb.select().from(workspaceIdentities).where(eq(workspaceIdentities.id, params.fromIdentityId));
   if (!identity) return failure('internal_error', `Identity ${params.fromIdentityId} not found`);
   if (!identity.emailSendingEnabled) {
     return failure('workspace_email_sending_disabled', 'email sending is disabled for this identity', { identityId: params.fromIdentityId });
@@ -50,7 +55,7 @@ export async function send(
   }
 
   // Step 4: apply signature
-  const [actorRow] = await db.select().from(workspaceActors).where(eq(workspaceActors.id, identity.actorId));
+  const [actorRow] = await scopedDb.select().from(workspaceActors).where(eq(workspaceActors.id, identity.actorId));
   const signedBody = applySignature(params.bodyText, {
     template: deps.signatureContext.template,
     agentName: identity.displayName,
@@ -60,20 +65,30 @@ export async function send(
     discloseAsAgent: deps.signatureContext.discloseAsAgent,
   });
 
-  // Step 5: write audit row (TX1 anchor — committed before adapter call)
-  const [auditRow] = await db.insert(auditEvents).values({
-    organisationId: orgId,
-    actorType: 'agent',
-    workspaceActorId: identity.actorId,
-    action: 'email.sent',
-    entityType: 'workspace_message',
-    metadata: {
-      toAddresses: params.toAddresses,
-      subject: params.subject,
-      skill: params.policyContext.skill,
-      runId: params.policyContext.runId,
-    },
-  }).returning();
+  const identityRateLimitKey = rateLimitKeys.workspaceEmailIdentity(identity.id);
+
+  // Step 5: write audit row (TX1 anchor — committed in its own transaction before adapter call)
+  let auditRow: { id: string };
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+    const [inserted] = await withOrgTx(
+      { tx, organisationId: orgId, source: 'pipeline.send.tx1' },
+      () => tx.insert(auditEvents).values({
+        organisationId: orgId,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'email.sent',
+        entityType: 'workspace_message',
+        metadata: {
+          toAddresses: params.toAddresses,
+          subject: params.subject,
+          skill: params.policyContext.skill,
+          runId: params.policyContext.runId,
+        },
+      }).returning(),
+    );
+    auditRow = inserted;
+  });
 
   // Invariant #10 — structured INFO log at operation start
   logger.info('workspace.email.send', {
@@ -84,9 +99,9 @@ export async function send(
     identityId: identity.id,
     connectorType: identity.backend,
     connectorConfigId: identity.connectorConfigId,
-    rateLimitKey: null,
+    rateLimitKey: identityRateLimitKey,
     requestId: params.policyContext.runId ?? null,
-    auditEventId: auditRow.id,
+    auditEventId: auditRow!.id,
     skill: params.policyContext.skill ?? null,
   });
 
@@ -94,49 +109,60 @@ export async function send(
   const adapterResult = await deps.adapter.sendEmail({
     ...params,
     bodyText: signedBody,
-    idempotencyKey: auditRow.id,
+    idempotencyKey: auditRow!.id,
   });
 
-  // TX2: canonical mirror write
+  // TX2: canonical mirror write — separate committed transaction after adapter success
   try {
     const threadId = params.threadId ?? await resolveThreadId(
       { inReplyToExternalId: params.inReplyToExternalId, referencesExternalIds: [] },
       async (ids) => {
         if (!ids.length) return null;
-        const [row] = await db.select({ threadId: workspaceMessages.threadId })
+        const [row] = await scopedDb.select({ threadId: workspaceMessages.threadId })
           .from(workspaceMessages)
           .where(eq(workspaceMessages.externalMessageId, ids[0]));
         return row?.threadId ?? null;
       },
     );
-    const [inserted] = await db.insert(workspaceMessages).values({
-      organisationId: orgId,
-      subaccountId: identity.subaccountId,
-      identityId: identity.id,
-      actorId: identity.actorId,
-      threadId,
-      externalMessageId: adapterResult.externalMessageId,
-      direction: 'outbound',
-      fromAddress: identity.emailAddress,
-      toAddresses: params.toAddresses,
-      ccAddresses: params.ccAddresses ?? null,
-      subject: params.subject,
-      bodyText: params.bodyText,
-      bodyHtml: params.bodyHtml ?? null,
-      sentAt: new Date(),
-      auditEventId: auditRow.id,
-      metadata: adapterResult.metadata ?? {},
-    }).returning();
-    return { messageId: inserted.id, externalMessageId: adapterResult.externalMessageId };
+    let insertedMsg: { id: string };
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      const [inserted] = await withOrgTx(
+        { tx, organisationId: orgId, source: 'pipeline.send.tx2' },
+        () => tx.insert(workspaceMessages).values({
+          organisationId: orgId,
+          subaccountId: identity.subaccountId,
+          identityId: identity.id,
+          actorId: identity.actorId,
+          threadId,
+          externalMessageId: adapterResult.externalMessageId,
+          direction: 'outbound',
+          fromAddress: identity.emailAddress,
+          toAddresses: params.toAddresses,
+          ccAddresses: params.ccAddresses ?? null,
+          subject: params.subject,
+          bodyText: params.bodyText,
+          bodyHtml: params.bodyHtml ?? null,
+          sentAt: new Date(),
+          auditEventId: auditRow!.id,
+          metadata: adapterResult.metadata ?? {},
+        }).returning(),
+      );
+      insertedMsg = inserted;
+    });
+    return { messageId: insertedMsg!.id, externalMessageId: adapterResult.externalMessageId };
   } catch (mirrorErr: unknown) {
     const errMsg = mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr);
     logger.error('workspace.email.mirror_write_failed', {
-      auditEventId: auditRow.id,
+      organisationId: orgId,
+      operation: 'send',
+      actorId: identity.actorId,
+      auditEventId: auditRow!.id,
       externalMessageId: adapterResult.externalMessageId,
       error: errMsg,
     });
     return failure('workspace_mirror_write_failed', 'canonical mirror write failed after successful send', {
-      auditEventId: auditRow.id,
+      auditEventId: auditRow!.id,
       externalMessageId: adapterResult.externalMessageId,
     });
   }
@@ -148,6 +174,8 @@ export async function ingest(
   raw: InboundMessage,
   _deps: { adapter: WorkspaceAdapter },
 ): Promise<{ messageId: string; deduplicated: boolean }> {
+  const scopedDb = getOrgScopedDb('workspaceEmailPipeline.ingest');
+
   const dedupeKey = computeDedupeKey({
     fromAddress: raw.fromAddress,
     subject: raw.subject ?? '',
@@ -159,14 +187,14 @@ export async function ingest(
     { inReplyToExternalId: raw.inReplyToExternalId ?? undefined, referencesExternalIds: raw.referencesExternalIds },
     async (ids) => {
       if (!ids.length) return null;
-      const [row] = await db.select({ threadId: workspaceMessages.threadId })
+      const [row] = await scopedDb.select({ threadId: workspaceMessages.threadId })
         .from(workspaceMessages)
         .where(eq(workspaceMessages.externalMessageId, ids[0]));
       return row?.threadId ?? null;
     },
   );
 
-  const [identity] = await db.select().from(workspaceIdentities).where(eq(workspaceIdentities.id, identityId));
+  const [identity] = await scopedDb.select().from(workspaceIdentities).where(eq(workspaceIdentities.id, identityId));
   if (!identity) throw new Error(`Identity ${identityId} not found`);
 
   logger.info('workspace.email.ingest', {
@@ -181,7 +209,22 @@ export async function ingest(
     requestId: null,
   });
 
-  const [auditRow] = await db.insert(auditEvents).values({
+  // Preflight dedupe check — must happen BEFORE the audit row insert so that a
+  // duplicate webhook delivery does not produce a stranded audit_event row.
+  // Doing the lookup inside the same request-scoped transaction is safe here
+  // because no writes have happened yet; a race-induced 23505 below is handled
+  // by re-throwing so the provider retries and this preflight catches it.
+  const [existingByDedupe] = await scopedDb.select({ id: workspaceMessages.id })
+    .from(workspaceMessages)
+    .where(and(
+      eq(workspaceMessages.identityId, identity.id),
+      sql`${workspaceMessages.metadata}->>'dedupe_key' = ${dedupeKey}`,
+    ));
+  if (existingByDedupe) {
+    return { messageId: existingByDedupe.id, deduplicated: true };
+  }
+
+  const [auditRow] = await scopedDb.insert(auditEvents).values({
     organisationId: orgId,
     actorType: 'agent',
     workspaceActorId: identity.actorId,
@@ -190,37 +233,29 @@ export async function ingest(
     metadata: { fromAddress: raw.fromAddress, subject: raw.subject },
   }).returning();
 
-  try {
-    const [inserted] = await db.insert(workspaceMessages).values({
-      organisationId: orgId,
-      subaccountId: identity.subaccountId,
-      identityId: identity.id,
-      actorId: identity.actorId,
-      threadId,
-      externalMessageId: raw.externalMessageId,
-      direction: 'inbound',
-      fromAddress: raw.fromAddress,
-      toAddresses: raw.toAddresses,
-      ccAddresses: raw.ccAddresses,
-      subject: raw.subject,
-      bodyText: raw.bodyText,
-      bodyHtml: raw.bodyHtml,
-      sentAt: raw.sentAt,
-      receivedAt: raw.receivedAt,
-      auditEventId: auditRow.id,
-      attachmentsCount: raw.attachmentsCount,
-      metadata: { dedupe_key: dedupeKey, provider_id: raw.rawProviderId },
-    }).returning();
-    return { messageId: inserted.id, deduplicated: false };
-  } catch (err: unknown) {
-    const pgErr = err as { code?: string };
-    if (pgErr?.code === '23505') {
-      // Unique constraint violated — deduplicated
-      const [existing] = await db.select({ id: workspaceMessages.id })
-        .from(workspaceMessages)
-        .where(sql`${workspaceMessages.metadata}->>'dedupe_key' = ${dedupeKey}`);
-      return { messageId: existing?.id ?? '', deduplicated: true };
-    }
-    throw err;
-  }
+  // INSERT may still race with a concurrent delivery and raise 23505. We do
+  // NOT recover via the same (now-aborted) transaction — let it bubble so the
+  // outer webhook handler returns 5xx, the provider retries, and the preflight
+  // above resolves the retry as `deduplicated: true`.
+  const [inserted] = await scopedDb.insert(workspaceMessages).values({
+    organisationId: orgId,
+    subaccountId: identity.subaccountId,
+    identityId: identity.id,
+    actorId: identity.actorId,
+    threadId,
+    externalMessageId: raw.externalMessageId,
+    direction: 'inbound',
+    fromAddress: raw.fromAddress,
+    toAddresses: raw.toAddresses,
+    ccAddresses: raw.ccAddresses,
+    subject: raw.subject,
+    bodyText: raw.bodyText,
+    bodyHtml: raw.bodyHtml,
+    sentAt: raw.sentAt,
+    receivedAt: raw.receivedAt,
+    auditEventId: auditRow.id,
+    attachmentsCount: raw.attachmentsCount,
+    metadata: { dedupe_key: dedupeKey, provider_id: raw.rawProviderId },
+  }).returning();
+  return { messageId: inserted.id, deduplicated: false };
 }

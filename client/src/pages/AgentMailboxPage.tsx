@@ -82,7 +82,12 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
     if (!agentId) return;
     setSending(true);
     try {
-      await sendAgentEmail(agentId, { to: composeTo, subject: composeSubject, bodyText: composeBody });
+      // Body shape matches `SendEmailParams` per the route contract.
+      const toAddresses = composeTo
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await sendAgentEmail(agentId, { toAddresses, subject: composeSubject, bodyText: composeBody });
       setComposeOpen(false);
       setComposeTo('');
       setComposeSubject('');
