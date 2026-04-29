@@ -87,15 +87,36 @@ export function scoreCandidate(c: ScopeCandidate, hint: string): number {
   return 0;
 }
 
+// Org wins over subaccount on equal score — matches user expectation for ambiguous input.
+// Exported so auto-resolve can use the same primitive as ranking.
+export function typeWeight(c: ScopeCandidate): number {
+  return c.type === 'org' ? 1 : 0;
+}
+
 export function rankCandidates(candidates: ScopeCandidate[], hint: string): ScopeCandidate[] {
-  // Org wins over subaccount on equal score — matches user expectation for ambiguous input
-  const typeWeight = (c: ScopeCandidate) => (c.type === 'org' ? 1 : 0);
   return [...candidates].sort(
     (a, b) =>
       scoreCandidate(b, hint) - scoreCandidate(a, hint) ||
       typeWeight(b) - typeWeight(a) ||
       a.name.localeCompare(b.name),
   );
+}
+
+// True iff the top-ranked candidate decisively beats the second after rankCandidates
+// has sorted the list — i.e. strictly higher score, or tied score with a different
+// type (ranking already preferred org). Name-only tiebreaks are not decisive — those
+// are coin-flips and the caller should fall back to the disambiguation UI rather than
+// auto-resolving on lexicographic order. Single-candidate lists are decisive by
+// definition; empty lists are not.
+export function isTopCandidateDecisive(candidates: ScopeCandidate[], hint: string): boolean {
+  if (candidates.length === 0) return false;
+  if (candidates.length === 1) return true;
+  const top = candidates[0]!;
+  const second = candidates[1]!;
+  const topScore = scoreCandidate(top, hint);
+  const secondScore = scoreCandidate(second, hint);
+  if (topScore !== secondScore) return topScore > secondScore;
+  return typeWeight(top) !== typeWeight(second);
 }
 
 export function deduplicateCandidates(candidates: ScopeCandidate[]): ScopeCandidate[] {

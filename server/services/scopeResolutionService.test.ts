@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { disambiguationQuestion, deduplicateCandidates, rankCandidates } from './scopeResolutionService.js';
+import { disambiguationQuestion, deduplicateCandidates, rankCandidates, isTopCandidateDecisive } from './scopeResolutionService.js';
 import type { ScopeCandidate } from './scopeResolutionService.js';
 
 // disambiguationQuestion
@@ -54,5 +54,37 @@ const mixed: ScopeCandidate[] = [
 ];
 const mixedRanked = rankCandidates(mixed, 'acme');
 assert.strictEqual(mixedRanked[0]!.type, 'org'); // org wins on score tie
+
+// isTopCandidateDecisive — decisive iff strict score win OR tied score with different types
+assert.strictEqual(isTopCandidateDecisive([], 'acme'), false); // empty
+assert.strictEqual(
+  isTopCandidateDecisive([{ id: '1', name: 'Acme', type: 'org' }], 'acme'),
+  true,
+); // single
+
+const strictScoreWin = rankCandidates(
+  [
+    { id: '1', name: 'Acme Holdings', type: 'org' }, // includes
+    { id: '2', name: 'Acme', type: 'org' }, // exact
+  ],
+  'acme',
+);
+assert.strictEqual(isTopCandidateDecisive(strictScoreWin, 'acme'), true); // exact > includes
+
+const tiedScoreDifferentType = rankCandidates(
+  [
+    { id: '1', name: 'Acme', type: 'subaccount', orgName: 'Parent Co' },
+    { id: '2', name: 'Acme', type: 'org' },
+  ],
+  'acme',
+);
+assert.strictEqual(isTopCandidateDecisive(tiedScoreDifferentType, 'acme'), true); // org wins on type
+
+const tiedScoreSameTypeDifferentName: ScopeCandidate[] = [
+  { id: '1', name: 'Acme Pty Ltd', type: 'org' }, // prefix
+  { id: '2', name: 'Acme Holdings', type: 'org' }, // prefix
+];
+const lexTied = rankCandidates(tiedScoreSameTypeDifferentName, 'acme');
+assert.strictEqual(isTopCandidateDecisive(lexTied, 'acme'), false); // name-only tiebreak is NOT decisive
 
 console.log('All scopeResolutionService tests passed.');

@@ -6,7 +6,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { logger } from '../lib/logger.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
-import { findEntitiesMatching, disambiguationQuestion, scoreCandidate, resolveCandidateScope } from '../services/scopeResolutionService.js';
+import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
 import type { Request } from 'express';
@@ -99,14 +99,13 @@ router.post(
         return;
       }
 
-      // Auto-resolve if only one candidate, or if the top-ranked candidate scores
-      // strictly higher than the second (decisive match — no need to show disambiguation UI).
-      // Uses the same scoreCandidate from the service so ranking and auto-resolve never drift.
-      const shouldAutoResolve =
-        candidates.length === 1 ||
-        (candidates.length > 1 &&
-          scoreCandidate(candidates[0]!, command.entityName) >
-          scoreCandidate(candidates[1]!, command.entityName));
+      // Auto-resolve when the top candidate decisively beats the second (single
+      // result, strictly higher score, or tied score with a different type).
+      // Routed through isTopCandidateDecisive so ranking and auto-resolve share a
+      // primitive — previously the auto-resolve check considered score only, while
+      // ranking used score+typeWeight, leaving disambiguation UI surfaced for cases
+      // ranking would have decided deterministically.
+      const shouldAutoResolve = isTopCandidateDecisive(candidates, command.entityName);
       logger.info('session.message.resolved', {
         candidatesCount: candidates.length,
         autoResolved: shouldAutoResolve,
@@ -151,7 +150,7 @@ router.post(
       try {
         await resolveSubaccount(subaccountId, organisationId);
       } catch {
-        logger.info('session.message.stale_subaccount_dropped', {
+        logger.warn('session.message.stale_subaccount_dropped', {
           userId: req.user!.id,
           organisationId,
           suppliedSubaccountId: subaccountId,

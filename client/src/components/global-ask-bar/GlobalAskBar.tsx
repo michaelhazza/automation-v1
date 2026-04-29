@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api.js';
 import { isValidBriefText, type ScopeCandidate, type SessionMessageResponse } from './GlobalAskBarPure.js';
-import { getActiveOrgId, getActiveClientId, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
+import { getActiveOrgId, getActiveOrgName, getActiveClientId, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
 
 type DisambiguationState = {
   candidates: ScopeCandidate[];
@@ -32,12 +32,14 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
       return;
     }
     // context_switch and brief_created both carry resolved context — apply it.
-    // For an org-only switch the server returns subaccountId=null; clear any
-    // stale activeSubaccountId from localStorage so the next submission isn't
-    // sent under a subaccount that belongs to the previous org.
-    if (data.organisationId && data.organisationName) {
+    // organisationId is the source of truth; organisationName may be omitted when
+    // the server already knows context did not change (path-C brief_created).
+    // Falling back to the stored name keeps the id update deterministic instead
+    // of silently skipping it on a missing name and leaving the next request
+    // pinned to the old org.
+    if (data.organisationId) {
       const orgChanged = data.organisationId !== getActiveOrgId();
-      setActiveOrg(data.organisationId, data.organisationName);
+      setActiveOrg(data.organisationId, data.organisationName ?? getActiveOrgName() ?? '');
       if (orgChanged && !data.subaccountId) {
         removeActiveClient();
       }

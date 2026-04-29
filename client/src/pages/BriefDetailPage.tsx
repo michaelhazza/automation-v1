@@ -123,6 +123,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [showGraph, setShowGraph] = useState(true);
+  const [activeRunPollGaveUp, setActiveRunPollGaveUp] = useState(false);
   // Ref avoids stale closure inside the polling timer callbacks
   const activeRunIdRef = useRef<string | null>(null);
 
@@ -152,6 +153,21 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
     }
   }, [briefId]);
 
+  // Reset state synchronously when navigating between briefs so the previous
+  // brief's title/messages/artefacts/active run don't render against the new
+  // briefId until the fetch resolves. Without this, navigating brief-A → brief-B
+  // briefly shows brief-A's content under brief-B's URL.
+  useEffect(() => {
+    setBrief(null);
+    setMessages([]);
+    setArtefacts([]);
+    setChainState({ artefacts: [] });
+    setNextCursor(null);
+    setActiveRunId(null);
+    setActiveRunPollGaveUp(false);
+    setIsLoading(true);
+  }, [briefId]);
+
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
@@ -175,12 +191,22 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
 
     // Exponential backoff: first check at 500 ms, doubles each time up to 4 s max.
     // Gives fast perceived responsiveness without hammering the server.
+    // Bounded by MAX_ATTEMPTS — stops after roughly two minutes (≈ 0.5 + 1 + 2 + 27×4)
+    // so a brief whose run never materialises does not poll forever.
+    const MAX_ATTEMPTS = 30;
     let delay = 500;
+    let attempts = 0;
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
       timer = setTimeout(async () => {
         if (cancelled || activeRunIdRef.current) return;
+        attempts += 1;
         await fetchActiveRun();
+        if (cancelled || activeRunIdRef.current) return;
+        if (attempts >= MAX_ATTEMPTS) {
+          setActiveRunPollGaveUp(true);
+          return;
+        }
         delay = Math.min(delay * 2, 4000);
         schedule();
       }, delay);
@@ -303,6 +329,12 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         <Link to="/" className="text-gray-400 hover:text-gray-600">Briefs</Link>
         {brief?.title && <><span className="text-gray-300">/</span><span className="text-gray-600 truncate">{brief.title}</span></>}
       </div>
+
+      {activeRunPollGaveUp && !activeRunId && (
+        <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-100">
+          Live run view unavailable for this brief.
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         {/* Left — chat panel */}
