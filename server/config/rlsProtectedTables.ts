@@ -498,6 +498,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0217_delegation_outcomes.sql',
     rationale: 'Per-run delegation decision log — caller/target agent ids and scope reveal agent hierarchy topology; cross-tenant leak would expose one org\'s agent structure to another.',
   },
+  // 0238 — System Agents v7.1: skill idempotency key store
+  {
+    tableName: 'skill_idempotency_keys',
+    schemaFile: 'skillIdempotencyKeys.ts',
+    policyMigration: '0238_system_agents_v7_1.sql',
+    rationale: 'Per-org deduplication keys for skill invocations — response payloads may contain tool results or PII; cross-tenant leak exposes another org\'s skill execution history and cached outputs.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
