@@ -44,7 +44,7 @@
  *         - seeds the portfolio-health-sweep template directly (non-standard
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
- *   [6/7] Dev fixtures (skipped in production)
+ *   [6/8] Dev fixtures (skipped in production)
  *         - Synthetos organisation + org admin user
  *         - Synthetos Workspace subaccount (16 system agents activated here)
  *         - Breakout Solutions subaccount (reporting agent only — for testing)
@@ -1537,7 +1537,7 @@ async function main(): Promise<void> {
   if (!IS_PRODUCTION) {
     await phase6_devFixtures();
   } else {
-    console.log('\n[6/7] Dev fixtures — skipped (production mode)\n');
+    console.log('\n[6/8] Dev fixtures — skipped (production mode)\n');
   }
 
   // Phase 7 — Configuration Assistant runtime guidelines memory block.

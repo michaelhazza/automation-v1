@@ -62,7 +62,7 @@ export async function seedWorkspaceActors(
     })
     .from(subaccountAgents)
     .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-    .where(and(eq(subaccountAgents.isActive, true), isNull(agents.workspaceActorId)));
+    .where(and(eq(subaccountAgents.isActive, true), isNull(agents.workspaceActorId), isNull(agents.deletedAt)));
 
   let agentActorsCreated = 0;
   for (const row of agentCandidates) {
@@ -100,7 +100,7 @@ export async function seedWorkspaceActors(
     .from(subaccountUserAssignments)
     .innerJoin(users, eq(users.id, subaccountUserAssignments.userId))
     .innerJoin(subaccounts, eq(subaccounts.id, subaccountUserAssignments.subaccountId))
-    .where(isNull(users.workspaceActorId));
+    .where(and(isNull(users.workspaceActorId), isNull(users.deletedAt)));
 
   let userActorsCreated = 0;
   for (const row of userCandidates) {

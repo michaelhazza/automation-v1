@@ -159,13 +159,13 @@ export const SUBACCOUNT_PERMISSIONS = {
   // "Upcoming Work" card path without granting general workspace.view.
   SCHEDULE_VIEW_CALENDAR: 'subaccount.schedule.view_calendar',
   // Workspace identity (agents-as-employees; migration 0257)
-  WORKSPACE_MANAGE: 'subaccounts:manage_workspace',
-  AGENTS_ONBOARD: 'agents:onboard',
-  AGENTS_MANAGE_LIFECYCLE: 'agents:manage_lifecycle',
-  AGENTS_TOGGLE_EMAIL: 'agents:toggle_email',
-  AGENTS_VIEW_MAILBOX: 'agents:view_mailbox',
-  AGENTS_VIEW_CALENDAR: 'agents:view_calendar',
-  AGENTS_VIEW_ACTIVITY: 'agents:view_activity',
+  WORKSPACE_CONNECTOR_MANAGE: 'subaccount.workspace.manage_connector',
+  AGENTS_ONBOARD: 'subaccount.agents.onboard',
+  AGENTS_MANAGE_LIFECYCLE: 'subaccount.agents.manage_lifecycle',
+  AGENTS_TOGGLE_EMAIL: 'subaccount.agents.toggle_email',
+  AGENTS_VIEW_MAILBOX: 'subaccount.agents.view_mailbox',
+  AGENTS_VIEW_CALENDAR: 'subaccount.agents.view_calendar',
+  AGENTS_VIEW_ACTIVITY: 'subaccount.agents.view_activity',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -311,14 +311,14 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.IEE_USAGE_VIEW,
     description: 'View IEE usage and billing data for this subaccount',
     groupName: 'subaccount.billing' },
-  // subaccounts.workspace (agents-as-employees; migration 0257)
-  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE,       description: 'Configure and manage the subaccount workspace connector',  groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_ONBOARD,         description: 'Onboard an agent to the workplace (provision identity)',    groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_MANAGE_LIFECYCLE, description: 'Suspend, resume, or revoke an agent identity',             groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_TOGGLE_EMAIL,    description: 'Enable or disable outbound email sending for an agent',     groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_MAILBOX,    description: 'View an agent\'s mailbox',                                  groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_CALENDAR,   description: 'View an agent\'s calendar',                                 groupName: 'subaccounts.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_ACTIVITY,   description: 'View an agent\'s activity feed',                            groupName: 'subaccounts.workspace' },
+  // subaccount.workspace + subaccount.agents (agents-as-employees; migration 0257)
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE, description: 'Configure and manage the subaccount workspace connector',  groupName: 'subaccount.workspace' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_ONBOARD,             description: 'Onboard an agent to the workplace (provision identity)',    groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_MANAGE_LIFECYCLE,    description: 'Suspend, resume, or revoke an agent identity',             groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_TOGGLE_EMAIL,        description: 'Enable or disable outbound email sending for an agent',     groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_MAILBOX,        description: "View an agent's mailbox",                                   groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_CALENDAR,       description: "View an agent's calendar",                                  groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_ACTIVITY,       description: "View an agent's activity feed",                             groupName: 'subaccount.agents' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
