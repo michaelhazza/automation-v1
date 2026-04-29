@@ -73,6 +73,12 @@ export async function check(
   limit: number,
   windowSec: number,
 ): Promise<RateLimitCheckResult> {
+  if (!Number.isInteger(windowSec) || windowSec <= 0) {
+    throw new Error(`inboundRateLimiter.check: windowSec must be a positive integer (got ${windowSec})`);
+  }
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`inboundRateLimiter.check: limit must be a positive integer (got ${limit})`);
+  }
   const result = await db.execute<CheckRow>(sql`
     WITH bounds AS (
       SELECT
