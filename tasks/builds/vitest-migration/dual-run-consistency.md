@@ -299,3 +299,15 @@ server/services/__tests__/skillExecutorPure.test.ts bash:pass vitest:pass match:
 server/services/__tests__/skillHandlerRegistryEquivalence.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/skillParserServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/skillService.resolver.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-17 (2026-04-29)
+server/services/__tests__/staleConnectorDetectorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/subaccountOnboardingServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/systemIncidentServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/systemPnlServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/systemSkillHandlerValidatorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/systemSkillServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/toolCallsLogProjectionServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/topicClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/trajectoryServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/trustCalibrationServicePure.test.ts bash:pass vitest:pass match:yes
