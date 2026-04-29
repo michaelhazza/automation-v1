@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import os from 'node:os';
 
 export default defineConfig({
   resolve: {
@@ -26,10 +27,10 @@ export default defineConfig({
       SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1',
       SYSTEM_INCIDENT_THROTTLE_MS: '100',
     },
-    pool: 'forks',
     poolOptions: {
-      forks: {
-        singleFork: true,
+      threads: {
+        maxThreads: Math.max(1, (os.cpus()?.length ?? 2) - 1),
+        minThreads: 1,
       },
     },
     poolMatchGlobs: [
