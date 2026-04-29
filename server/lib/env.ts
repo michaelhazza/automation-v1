@@ -155,6 +155,10 @@ const envSchema = z.object({
     .positive()
     .optional()
     .default(30),
+  // Workspace — Native backend
+  // Domain used for agent email addresses provisioned by the native backend.
+  // Example: workspace.acme.com  Falls back to 'workspace.local' when unset.
+  NATIVE_EMAIL_DOMAIN: z.string().optional().default(''),
 });
 
 export const env = envSchema.parse(process.env);
