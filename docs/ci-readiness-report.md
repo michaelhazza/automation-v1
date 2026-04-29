@@ -151,3 +151,17 @@ There is no dedicated test database setup script. The integration tests connect 
 ### Seed scripts
 
 `scripts/seed.ts` exists (`npm run seed`) and a production variant (`npm run seed:production`). Tests do NOT depend on seeded data. The `loadFixtures.ts` helper at `server/services/__tests__/fixtures/loadFixtures.ts` produces pure TypeScript fixture objects that integration tests consume directly. CI does NOT need to run seeds before tests.
+
+---
+
+## 3. Existing workflows
+
+`.github/` contains exactly one file:
+
+- `.github/pull_request_template.md`
+
+There is no `.github/workflows/` directory. There are no workflow files. There is no `.github/dependabot.yml`. There is no `.github/actions/` directory.
+
+There are no existing CI processes that would conflict with or overlap the planned workflow. The implementation can create `.github/workflows/ci.yml` cleanly.
+
+The planned workflow will be the first CI configured for this repo.
