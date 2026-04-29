@@ -215,3 +215,15 @@ server/services/__tests__/delegationOutcomeServicePure.test.ts bash:pass vitest:
 server/services/__tests__/deliveryServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/extractRunInsightsErrorMessagePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/fixtures/__tests__/fakeProviderAdapter.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-10 (2026-04-29)
+server/services/__tests__/fixtures/__tests__/fakeWebhookReceiver.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/ghlWebhookMutationsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/hermesTier1Integration.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/hierarchyContextBuilderServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/hierarchyRouteResolverServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/incidentIngestorIdempotency.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/incidentIngestorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/incidentIngestorThrottle.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/interventionActionMetadataPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/interventionIdempotencyKeysPure.test.ts bash:pass vitest:pass match:yes

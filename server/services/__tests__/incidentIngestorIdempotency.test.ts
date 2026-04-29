@@ -7,7 +7,7 @@
 
 process.env.NODE_ENV = 'test';
 // Set a short TTL for the TTL-expiry test (must be set before module import)
-process.env.SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS = '0.05'; // 50ms
+process.env.SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS = '0.1'; // 100ms
 
 import { expect, test } from 'vitest';
 import {
@@ -47,7 +47,7 @@ test('returns true for duplicate key within TTL (hit)', () => {
 test('returns false for a key after TTL expires', async () => {
   __resetForTest();
   checkAndRecord('fp:ttl-test');
-  await sleep(70); // wait beyond the 50ms TTL
+  await sleep(150); // wait beyond the 100ms TTL
   const result = checkAndRecord('fp:ttl-test');
   expect(result, 'call after TTL expiry should be miss').toBe(false);
 });

@@ -7,7 +7,7 @@
 
 process.env.NODE_ENV = 'test';
 // Set a short throttle window for tests (must be set before module import)
-process.env.SYSTEM_INCIDENT_THROTTLE_MS = '50';
+process.env.SYSTEM_INCIDENT_THROTTLE_MS = '100';
 
 import { expect, test } from 'vitest';
 import {
@@ -47,7 +47,7 @@ test('returns true within throttle window (throttled)', () => {
 test('returns false after throttle window expires', async () => {
   __resetForTest();
   checkThrottle('fp-c');
-  await sleep(60);
+  await sleep(150);
   const result = checkThrottle('fp-c');
   expect(result, 'call after window should not be throttled').toBe(false);
 });

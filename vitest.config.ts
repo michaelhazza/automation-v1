@@ -23,6 +23,8 @@ export default defineConfig({
       JWT_SECRET: 'ci-throwaway-jwt-secret-at-least-32-chars',
       EMAIL_FROM: 'ci@automation-os.local',
       NODE_ENV: 'test',
+      SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1',
+      SYSTEM_INCIDENT_THROTTLE_MS: '100',
     },
     pool: 'forks',
     poolOptions: {
