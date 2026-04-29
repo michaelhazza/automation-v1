@@ -5,9 +5,10 @@ import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
 import { agents, subaccountAgents } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gte, lte } from 'drizzle-orm';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import type { CreateEventParams } from '../adapters/workspace/workspaceAdapterContract.js';
+import { workspaceCalendarEvents } from '../db/schema/workspaceCalendarEvents.js';
 
 const router = Router();
 
@@ -70,7 +71,17 @@ router.get(
     const { identity } = await resolveIdentityForAgent(agentId, req.orgId!);
 
     const untilDate = to ? new Date(to) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const events = await nativeWorkspaceAdapter.fetchUpcoming(identity.id, untilDate);
+    const events = await db
+      .select()
+      .from(workspaceCalendarEvents)
+      .where(
+        and(
+          eq(workspaceCalendarEvents.identityId, identity.id),
+          gte(workspaceCalendarEvents.endsAt, new Date()),
+          lte(workspaceCalendarEvents.startsAt, untilDate),
+        )
+      )
+      .orderBy(workspaceCalendarEvents.startsAt);
 
     res.json({ events });
   }),

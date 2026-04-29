@@ -8,10 +8,11 @@ interface Message {
   threadId: string;
   subject: string;
   fromAddress: string;
-  toAddress: string;
+  toAddresses: string[];
   bodyText: string | null;
   direction: 'inbound' | 'outbound';
-  receivedAt: string;
+  receivedAt: string | null;
+  sentAt: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -45,7 +46,7 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
       const threadMap = new Map<string, Thread>();
       for (const m of messages) {
         const existing = threadMap.get(m.threadId);
-        if (!existing || new Date(m.receivedAt) > new Date(existing.lastMessage.receivedAt)) {
+        if (!existing || new Date(m.receivedAt ?? m.sentAt ?? 0) > new Date(existing.lastMessage.receivedAt ?? existing.lastMessage.sentAt ?? 0)) {
           threadMap.set(m.threadId, {
             threadId: m.threadId,
             subject: m.subject,
@@ -57,7 +58,7 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
         }
       }
       setThreads(Array.from(threadMap.values()).sort(
-        (a, b) => new Date(b.lastMessage.receivedAt).getTime() - new Date(a.lastMessage.receivedAt).getTime()
+        (a, b) => new Date(b.lastMessage.receivedAt ?? b.lastMessage.sentAt ?? 0).getTime() - new Date(a.lastMessage.receivedAt ?? a.lastMessage.sentAt ?? 0).getTime()
       ));
     } catch {
       // ignore — no identity provisioned yet
@@ -131,7 +132,7 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
               <div className="text-[13px] font-medium text-slate-800 truncate">{thread.subject}</div>
               <div className="text-[11px] text-slate-400 mt-0.5 truncate">{thread.lastMessage.fromAddress}</div>
               <div className="text-[11px] text-slate-400 mt-0.5">
-                {new Date(thread.lastMessage.receivedAt).toLocaleString()}
+                {new Date(thread.lastMessage.receivedAt ?? thread.lastMessage.sentAt ?? 0).toLocaleString()}
               </div>
             </button>
           ))}
@@ -159,7 +160,7 @@ export default function AgentMailboxPage({ user: _user }: { user: User }) {
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-[12px] font-medium text-slate-700">{msg.fromAddress}</span>
-                    <span className="text-[11px] text-slate-400">{new Date(msg.receivedAt).toLocaleString()}</span>
+                    <span className="text-[11px] text-slate-400">{new Date(msg.receivedAt ?? msg.sentAt ?? 0).toLocaleString()}</span>
                     <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium ${
                       msg.direction === 'outbound' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
                     }`}>

@@ -6,11 +6,11 @@ import { getAgentCalendar, createAgentCalendarEvent, respondToAgentCalendarEvent
 interface CalendarEvent {
   id: string;
   title: string;
-  startAt: string;
-  endAt: string;
-  attendees: string[];
-  responseStatus: 'accepted' | 'declined' | 'tentative' | 'pending' | null;
-  organizerEmail: string | null;
+  startsAt: string;
+  endsAt: string;
+  attendeeEmails: string[];
+  responseStatus: 'needs_action' | 'accepted' | 'declined' | 'tentative' | null;
+  organiserEmail: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -30,14 +30,14 @@ const RESPONSE_LABEL: Record<string, string> = {
   accepted: 'Accepted',
   declined: 'Declined',
   tentative: 'Tentative',
-  pending: 'Pending',
+  needs_action: 'Pending',
 };
 
 const RESPONSE_CLS: Record<string, string> = {
   accepted: 'bg-green-100 text-green-700',
   declined: 'bg-red-100 text-red-700',
   tentative: 'bg-amber-100 text-amber-700',
-  pending: 'bg-slate-100 text-slate-600',
+  needs_action: 'bg-slate-100 text-slate-600',
 };
 
 export default function AgentCalendarPage({ user: _user }: { user: User }) {
@@ -76,9 +76,9 @@ export default function AgentCalendarPage({ user: _user }: { user: User }) {
     try {
       await createAgentCalendarEvent(agentId, {
         title: newTitle,
-        startAt: new Date(newStart).toISOString(),
-        endAt: new Date(newEnd).toISOString(),
-        attendees: newAttendees.split(',').map(s => s.trim()).filter(Boolean),
+        startsAt: new Date(newStart).toISOString(),
+        endsAt: new Date(newEnd).toISOString(),
+        attendeeEmails: newAttendees.split(',').map(s => s.trim()).filter(Boolean),
       });
       setNewEventOpen(false);
       setNewTitle('');
@@ -142,10 +142,10 @@ export default function AgentCalendarPage({ user: _user }: { user: User }) {
             >
               <div className="text-[13px] font-medium text-slate-800 truncate">{event.title}</div>
               <div className="text-[11px] text-slate-400 mt-0.5">
-                {new Date(event.startAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                {new Date(event.startsAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
               </div>
               {event.responseStatus && (
-                <span className={`mt-1 inline-block text-[10px] px-2 py-0.5 rounded-full font-medium ${RESPONSE_CLS[event.responseStatus] ?? RESPONSE_CLS.pending}`}>
+                <span className={`mt-1 inline-block text-[10px] px-2 py-0.5 rounded-full font-medium ${RESPONSE_CLS[event.responseStatus] ?? RESPONSE_CLS.needs_action}`}>
                   {RESPONSE_LABEL[event.responseStatus] ?? event.responseStatus}
                 </span>
               )}
@@ -166,7 +166,7 @@ export default function AgentCalendarPage({ user: _user }: { user: User }) {
             <div className="flex items-start justify-between mb-4">
               <h2 className="text-[18px] font-semibold text-slate-900">{selectedEvent.title}</h2>
               {selectedEvent.responseStatus && (
-                <span className={`text-[12px] px-3 py-1 rounded-full font-medium ${RESPONSE_CLS[selectedEvent.responseStatus] ?? RESPONSE_CLS.pending}`}>
+                <span className={`text-[12px] px-3 py-1 rounded-full font-medium ${RESPONSE_CLS[selectedEvent.responseStatus] ?? RESPONSE_CLS.needs_action}`}>
                   {RESPONSE_LABEL[selectedEvent.responseStatus] ?? selectedEvent.responseStatus}
                 </span>
               )}
@@ -175,18 +175,18 @@ export default function AgentCalendarPage({ user: _user }: { user: User }) {
             <div className="space-y-2 text-[13px] text-slate-700 mb-6">
               <div>
                 <span className="text-slate-400 mr-2">When</span>
-                {new Date(selectedEvent.startAt).toLocaleString()} – {new Date(selectedEvent.endAt).toLocaleString()}
+                {new Date(selectedEvent.startsAt).toLocaleString()} – {new Date(selectedEvent.endsAt).toLocaleString()}
               </div>
-              {selectedEvent.organizerEmail && (
+              {selectedEvent.organiserEmail && (
                 <div>
                   <span className="text-slate-400 mr-2">Organizer</span>
-                  {selectedEvent.organizerEmail}
+                  {selectedEvent.organiserEmail}
                 </div>
               )}
-              {selectedEvent.attendees.length > 0 && (
+              {selectedEvent.attendeeEmails.length > 0 && (
                 <div>
                   <span className="text-slate-400 mr-2">Attendees</span>
-                  {selectedEvent.attendees.join(', ')}
+                  {selectedEvent.attendeeEmails.join(', ')}
                 </div>
               )}
             </div>
