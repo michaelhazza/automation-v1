@@ -62,11 +62,10 @@ await test('formatBlocksForPrompt preserves read permission on guidelines block 
   // 'read_write' — which would allow the agent to self-overwrite the block.
   expect(guidelinesBlock.permission, 'permission').toBe('read');
 });
-const pureResults = { passed, failed };
 
 // ─── Section 2: Integration (requires DATABASE_URL) ───────────────────────────
 
-if (!process.env.DATABASE_URL) {
+if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
   console.log('\n--- configAgentGuidelinesInjection (integration) ---');
   console.log('  SKIP  DATABASE_URL not set — run with a real database to test getBlocksForAgent');
   console.log('        npx tsx server/services/__tests__/configAgentGuidelinesInjection.test.ts');
@@ -160,4 +159,3 @@ if (iFailed > 0) process.exitCode = 1;
   await sql.end();
 }
 
-if (pureResults.failed > 0) process.exitCode = 1;

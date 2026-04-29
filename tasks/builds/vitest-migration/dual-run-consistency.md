@@ -191,3 +191,15 @@ server/services/__tests__/bundleSuggestionDismissalsPure.test.ts bash:pass vites
 server/services/__tests__/canonicalDictionaryRendererPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/canonicalDictionaryValidatorPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/canonicalRegistryDriftPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-08 (2026-04-29)
+server/services/__tests__/clarificationServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/clientPulseHighRiskPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/clientPulseIngestionPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/clientPulseInterventionProposerPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/computeMeaningfulOutputPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/computeRunResultStatusPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/computeStaffActivityPulsePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/configAgentGuidelinesInjection.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/configDocumentParserServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/configHistoryServicePure.test.ts bash:pass vitest:pass match:yes
