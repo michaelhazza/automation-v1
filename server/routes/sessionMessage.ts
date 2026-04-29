@@ -1,10 +1,11 @@
 // server/routes/sessionMessage.ts
 
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { logger } from '../lib/logger.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
 import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
@@ -27,6 +28,10 @@ type SessionMessageResponse =
 router.post(
   '/api/session/message',
   authenticate,
+  // Path B (with remainder) and Path C both call createBrief; gate the route on the
+  // same BRIEFS_WRITE permission /api/briefs enforces so read-only users cannot
+  // create briefs through GlobalAskBar.
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
     const body = req.body as {
       text?: string;

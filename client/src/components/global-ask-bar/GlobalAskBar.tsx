@@ -37,10 +37,15 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
     // Falling back to the stored name keeps the id update deterministic instead
     // of silently skipping it on a missing name and leaving the next request
     // pinned to the old org.
+    //
+    // Subaccount clearing is unconditional on response.subaccountId === null —
+    // server response is authoritative, so a same-org context switch (or stale
+    // subaccount drop) that returns no subaccount must clear localStorage too.
+    // Gating on orgChanged left a stale subaccount visible when the user moved
+    // back to org-level inside their existing org.
     if (data.organisationId) {
-      const orgChanged = data.organisationId !== getActiveOrgId();
       setActiveOrg(data.organisationId, data.organisationName ?? getActiveOrgName() ?? '');
-      if (orgChanged && !data.subaccountId) {
+      if (!data.subaccountId) {
         removeActiveClient();
       }
     }

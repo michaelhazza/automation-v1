@@ -82,3 +82,62 @@ architecture, error_handling, other (logic-gap), test_coverage, performance, sec
 
 ---
 
+## Round 2 — 2026-04-29T01:25:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary
+Round 1 fixes are correct and cleanly implemented. You addressed the intended issues without introducing scope creep, and most of the risk areas are now materially safer.
+
+There are 2 real issues introduced / still present, plus 2 smaller correctness gaps worth tightening before merge.
+
+Validation of Round 1 fixes
+✅ F2 — stale subaccount logging (correctly upgraded to warn, structured payload present, event name explicit). Production-grade observability.
+✅ F3 — auto-resolve vs ranking consistency (isTopCandidateDecisive uses same primitives; tests cover edge cases).
+✅ F4 — GlobalAskBar state coupling (organisationId now drives state; name fallback robust).
+✅ F9 — polling cap (MAX_ATTEMPTS=30, backoff preserved, UI fallback added).
+
+🔴 New / remaining issues
+1. AUTH BYPASS on /api/session/message (critical) — router.post('/api/session/message', authenticate, ...) — no requireOrgPermission(BRIEFS_WRITE). Path C and Path B both call createBrief; bypasses /api/briefs permission model. Impact: read-only users can create briefs; silent privilege escalation. Fix: requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE).
+2. GlobalAskBar stale subaccount bug (still present) — current logic only clears subaccount when orgChanged. User can switch to same org but remove subaccount → stale subaccount persists. Fix: drop the `orgChanged` gate; always clear when server returns subaccountId=null.
+
+🟠 Medium issues
+3. Double navigate + dead code in GlobalAskBar — claims duplicate navigate(`/admin/briefs/${data.briefId}`) in post() in addition to handleResponse(). Asserts SessionMessageResponse is a union and not all responses have briefId; risk of runtime bugs and duplicate navigation.
+4. Missing subaccount validation in Path A (edge but real) — resolveCandidateScope is good but resolveSubaccount is not re-checked. Mostly safe due to resolver logic; consistency suggestion: all subaccount writes should pass resolveSubaccount.
+
+🟢 Minor observations (no action required)
+parseContextSwitchCommand improvements solid. scopeResolutionService now clean and well-factored. Test coverage for ranking logic excellent. BriefDetailPage polling ref fix correct. Layout cross-tenant protections well thought through.
+
+Final verdict: CHANGES_REQUESTED. Must-fix: requireOrgPermission(BRIEFS_WRITE), GlobalAskBar stale subaccount clearing. Strongly recommended: remove duplicate/unsafe navigation logic.
+```
+
+### Verdict (parsed)
+CHANGES_REQUESTED (1 critical security + 1 medium bug)
+
+### Top themes (finding_type vocabulary)
+security, error_handling, other (hallucinated finding), test_coverage
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F10 — `/api/session/message` missing `requireOrgPermission(BRIEFS_WRITE)` | technical-escalated (critical severity + visible permission change) | implement | implement | critical | Real auth bypass; mechanical fix to match `/api/briefs` middleware. |
+| F11 — GlobalAskBar gates subaccount-clear on `orgChanged` — stale subaccount on same-org context | user-facing (state visible) | implement | implement | medium | Server response is authoritative; drop the `orgChanged &&` condition so client aligns whenever server returns `subaccountId=null`. |
+| F12 — Claimed duplicate `navigate()` in `post()` and `handleResponse()` | technical | reject | auto (reject) | medium | Verified file: only one `navigate()` exists in `handleResponse`, gated on `data.type === 'brief_created'`. ChatGPT hallucinated the duplicate. |
+| F13 — Add `resolveSubaccount` to Path A for consistency with Path C | technical | reject | auto (reject) | low | Path A's `resolveCandidateScope` already validates subaccount via RLS (non-admin: `getOrgScopedDb`; admin: raw lookup). `resolveSubaccount` has different semantics (verifies subaccountId belongs to a *given* orgId) — Path A is *resolving* the org, not validating against one. Suggestion misplaced; ChatGPT explicitly tagged as "not mandatory". |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+- [user, F10] Added `requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE)` middleware to `/api/session/message` in [server/routes/sessionMessage.ts:30](server/routes/sessionMessage.ts#L30). Added imports for `requireOrgPermission` and `ORG_PERMISSIONS`. Read-only users will now get 403 instead of silently creating briefs through GlobalAskBar.
+- [user, F11] Dropped the `orgChanged && ` condition in [client/src/components/global-ask-bar/GlobalAskBar.tsx:38-50](client/src/components/global-ask-bar/GlobalAskBar.tsx#L38-L50). Subaccount now clears unconditionally whenever response carries `subaccountId=null`. Aligns client with server truth on all paths (same-org context switch, stale-subaccount drop, brief_created at org-level).
+
+### Verification
+
+- `npx tsc -p server/tsconfig.json --noEmit` — 98 pre-existing errors, zero new errors from Round 2 edits.
+- `npx tsc -p client/tsconfig.json --noEmit` — clean.
+- Imports verified: `requireOrgPermission` exported from [server/middleware/auth.ts:260](server/middleware/auth.ts#L260); `ORG_PERMISSIONS.BRIEFS_WRITE = 'org.briefs.write'` defined at [server/lib/permissions.ts:85](server/lib/permissions.ts#L85).
+
+---
+
+
