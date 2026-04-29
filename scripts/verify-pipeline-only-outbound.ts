@@ -1,6 +1,9 @@
 import { execSync } from 'node:child_process';
 
-const allowed = ['server/services/workspace/workspaceEmailPipeline.ts'];
+const allowed = [
+  'server/services/workspace/workspaceEmailPipeline.ts',
+  'server/adapters/workspace/__tests__/',
+];
 
 let rawOutput = '';
 try {

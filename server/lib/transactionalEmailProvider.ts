@@ -29,6 +29,7 @@ export async function sendThroughProvider(opts: SendEmailOptions): Promise<SendE
       subject: opts.subject,
       text: opts.bodyText,
       html: opts.bodyHtml ?? undefined,
+      attachments: opts.attachments?.map(a => ({ filename: a.name, content: a.content, contentType: a.contentType })),
     });
     return { messageId: result.data?.id ?? null };
   }
@@ -43,6 +44,7 @@ export async function sendThroughProvider(opts: SendEmailOptions): Promise<SendE
       subject: opts.subject,
       text: opts.bodyText,
       html: opts.bodyHtml ?? undefined,
+      attachments: opts.attachments?.map(a => ({ filename: a.name, content: Buffer.from(a.content).toString('base64'), type: a.contentType, disposition: 'attachment' })),
     });
     return { messageId: null }; // SendGrid doesn't return a stable message ID synchronously
   }
@@ -61,6 +63,7 @@ export async function sendThroughProvider(opts: SendEmailOptions): Promise<SendE
       subject: opts.subject,
       text: opts.bodyText,
       html: opts.bodyHtml ?? undefined,
+      attachments: opts.attachments?.map(a => ({ filename: a.name, content: a.content, contentType: a.contentType })),
     });
     return { messageId: info.messageId ?? null };
   }
