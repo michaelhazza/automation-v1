@@ -99,3 +99,13 @@
 ### §3.4.3 — Caller-level violations (2)
 - `server/services/systemMonitor/baselines/refreshJob.ts:39` — move existing comment from line ~37 onto line 38
 - `server/services/systemMonitor/triage/loadCandidates.ts:45` — add inline justification within ±1 line
+
+### Mutual-exclusion check ([spec round 7 — commit a9135930])
+Command: comm -12 <(awk '/^[^#]/{print $1}' scripts/rls-not-applicable-allowlist.txt | sort -u) <(grep -oE "tableName: '[^']+" server/config/rlsProtectedTables.ts | sed "s/tableName: '//" | sort -u)
+Output: <empty>
+Verdict: pass
+
+### Allowlist growth ([spec round 7 — commit a9135930])
+- Entries before this PR: 0
+- Entries added this PR: 3 (llm_inflight_history, system_incidents, system_incident_suppressions)
+- Justification for growth: all three carry explicit sysadmin-gated bypass annotations in their schema files; confirmed allowlist per §3.3.1 criteria

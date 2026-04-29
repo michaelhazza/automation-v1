@@ -64,5 +64,8 @@
 # list, which would otherwise let unrelated cross-tenant logic drift in
 # under cover of a legitimate bypass.
 #
-# (Currently empty — every tenant table on `main` is registered in
-# rlsProtectedTables.ts. Add new entries below as needed.)
+# (Add new entries below in alphabetical order by table name.)
+
+llm_inflight_history  Reads are system-admin only and intentionally cross-tenant (same posture as llm_requests_archive); the table is a short-TTL forensic ledger of in-flight add/remove events, not per-org ownership data.  [ref: spec §3.3.1]
+system_incident_suppressions  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table holds cross-tenant named mute rules with nullable organisation_id (NULL = suppress everywhere), not per-org ownership data.  [ref: spec §3.3.1]
+system_incidents  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table is a cross-tenant incident sink with nullable organisation_id (NULL = system-level incident), not per-org ownership data.  [ref: spec §3.3.1]

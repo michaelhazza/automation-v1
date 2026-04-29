@@ -723,6 +723,7 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
 
 const INFLIGHT_HISTORY_HARD_CAP = 1_000;
 
+// @rls-allowlist-bypass: llm_inflight_history listInflightHistory [ref: spec §3.3.1]
 export async function listInflightHistory(filters: {
   from?: Date | null;
   to?: Date | null;

@@ -58,6 +58,7 @@ const SEVERITY_SORT_SQL = sql`CASE
 // ---------------------------------------------------------------------------
 
 export const systemIncidentService = {
+  // @rls-allowlist-bypass: system_incidents listIncidents [ref: spec §3.3.1]
   async listIncidents(filters: IncidentListFilters): Promise<{ incidents: SystemIncident[]; total: number }> {
     const limit = Math.min(filters.limit ?? 50, 200);
     const offset = filters.offset ?? 0;
@@ -105,6 +106,7 @@ export const systemIncidentService = {
     return { incidents, total: Number(totalResult[0]?.count ?? 0) };
   },
 
+  // @rls-allowlist-bypass: system_incidents getIncident [ref: spec §3.3.1]
   async getIncident(id: string): Promise<{ incident: SystemIncident; events: SystemIncidentEvent[] }> {
     const [incident] = await db.select().from(systemIncidents).where(eq(systemIncidents.id, id));
     if (!incident) throw { statusCode: 404, message: 'Incident not found' };
@@ -118,6 +120,7 @@ export const systemIncidentService = {
     return { incident, events };
   },
 
+  // @rls-allowlist-bypass: system_incidents acknowledgeIncident [ref: spec §3.3.1]
   async acknowledgeIncident(id: string, userId: string): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
@@ -143,6 +146,7 @@ export const systemIncidentService = {
     });
   },
 
+  // @rls-allowlist-bypass: system_incidents resolveIncident [ref: spec §3.3.1]
   async resolveIncident(id: string, userId: string, note?: string, linkedPrUrl?: string): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
@@ -199,6 +203,8 @@ export const systemIncidentService = {
     });
   },
 
+  // @rls-allowlist-bypass: system_incidents suppressIncident [ref: spec §3.3.1]
+  // @rls-allowlist-bypass: system_incident_suppressions suppressIncident [ref: spec §3.3.1]
   async suppressIncident(id: string, userId: string, reason: string, duration: SuppressionDuration): Promise<SystemIncident> {
     return db.transaction(async (tx) => {
       const [incident] = await tx.select().from(systemIncidents).where(eq(systemIncidents.id, id));
@@ -245,6 +251,7 @@ export const systemIncidentService = {
     });
   },
 
+  // @rls-allowlist-bypass: system_incidents escalateIncidentToAgent [ref: spec §3.3.1]
   async escalateIncidentToAgent(id: string, userId: string): Promise<{ incident: SystemIncident; taskId: string }> {
     const { incident } = await this.getIncident(id);
 
@@ -326,6 +333,7 @@ export const systemIncidentService = {
     return { incident: updated.row, taskId: updated.taskId };
   },
 
+  // @rls-allowlist-bypass: system_incident_suppressions listSuppressions [ref: spec §3.3.1]
   async listSuppressions(filter?: { activeOnly?: boolean }): Promise<SystemIncidentSuppression[]> {
     const now = new Date();
     const conditions = filter?.activeOnly
@@ -339,6 +347,8 @@ export const systemIncidentService = {
       .orderBy(desc(systemIncidentSuppressions.createdAt));
   },
 
+  // @rls-allowlist-bypass: system_incident_suppressions removeSuppression [ref: spec §3.3.1]
+  // @rls-allowlist-bypass: system_incidents removeSuppression [ref: spec §3.3.1]
   async removeSuppression(id: string, userId: string): Promise<void> {
     const [suppression] = await db
       .select()
@@ -382,6 +392,7 @@ export const systemIncidentService = {
   },
 
   // Test incident trigger (admin page test button, §8.9)
+  // @rls-allowlist-bypass: system_incidents createTestIncident [ref: spec §3.3.1]
   async createTestIncident(userId: string, triggerNotifications = false): Promise<SystemIncident> {
     const { recordIncident } = await import('./incidentIngestor.js');
     const { hashFingerprint } = await import('./incidentIngestorPure.js');
