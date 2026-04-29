@@ -374,7 +374,7 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 **Branch**: `claude/implement-universal-brief-qJzP8`
 **Source log**: [tasks/review-logs/pr-review-log-universal-brief-2026-04-22T07-35-39Z.md](./review-logs/pr-review-log-universal-brief-2026-04-22T07-35-39Z.md)
 
-- [ ] **B10 — maintenance jobs bypass the admin/org tx contract (architectural).** `server/jobs/ruleAutoDeprecateJob.ts`, `fastPathDecisionsPruneJob.ts`, and `fastPathRecalibrateJob.ts` read/write RLS-protected tables (`memory_blocks`, `fast_path_decisions`) from outside any `withAdminConnection` / `withOrgTx` block. Without `app.organisation_id` or `SET LOCAL ROLE admin_role`, the selects return zero rows per org and the jobs are silent no-ops. Fix: enumerate orgs inside `withAdminConnection({ source: 'rule-auto-deprecate' })` with `SET LOCAL ROLE admin_role`, then wrap each per-org iteration in `withOrgTx({ organisationId: org.id, source: '…' })`. Mirrors the `memoryDedupJob.ts` pattern. Not blocking end-user functionality (the feature still works), but the decay/pruning never runs until fixed.
+- [ ] **B10 — maintenance jobs defense-in-depth: per-org `withOrgTx` (architectural, partial).** `server/jobs/ruleAutoDeprecateJob.ts`, `fastPathDecisionsPruneJob.ts`, and `fastPathRecalibrateJob.ts` already use `withAdminConnection({ source: ... })` + `SET LOCAL ROLE admin_role` for the org enumeration and per-org savepoints (`tx.transaction(async (subTx) => …)`). They are **no longer silent no-ops** — decay / prune / recalibrate run successfully against every org. Remaining gap: the per-org work runs under `admin_role` (which bypasses RLS) rather than dropping back into a per-org `withOrgTx({ organisationId, source })` connection that re-engages tenant-scoped policies. Upgrade is defense-in-depth, not correctness — and the canonical reference job `server/jobs/memoryDedupJob.ts` cited in the original brief also runs work directly under `admin_role` without per-subaccount `withOrgTx`, so this is a stronger pattern than the existing house style. Routed to the pre-prod-tenancy spec (Phase 3, optional) — see `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`.
 - [ ] **S2 — add skill definition .md files for `ask_clarifying_questions` and `challenge_assumptions`.** Handlers are wired in `SKILL_HANDLERS` so runtime dispatch works, but the file-based definitions pattern (`server/skills/*.md` with frontmatter) expects them. Without the .md these capabilities won't surface in the config assistant or skill studio UIs. Reference: `architecture.md` §Skill System.
 - [ ] **S3 — strengthen rule-conflict parser tests.** `ruleConflictDetectorServicePure.parseConflictReportPure` drops malformed items silently via `continue`; production could let users save conflicting rules if the LLM returns malformed conflict objects. Add tests for: (a) existingRuleId not in candidatePool → dropped; (b) invalid `kind` → dropped; (c) confidence out of [0,1] → dropped.
 - [ ] **S4 — remove or re-label `cheap_answer` canned replies.** `briefSimpleReplyGeneratorPure` emits `source: 'canonical'` artefacts with hardcoded placeholder rows ("See revenue data"). Users see properly-sourced-looking results that are actually stubs. Either (a) add `'canned' | 'stub'` to `BriefResultSource` and re-label, or (b) remove the cheap_answer route from the tier-1 classifier until real data resolvers land. Option (b) is simpler.
@@ -865,19 +865,19 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 
 ### Phase 1 — Multi-Tenancy & RLS Hardening (Critical)
 
-- [ ] **P3-C5 — Phantom RLS session var `app.current_organisation_id`** in migrations 0205, 0206, 0207, 0208. critical/high. RLS policies reference a var that is never set by `withOrgTx` — policies silently fail-open. Fix: new corrective migration replacing all occurrences with `current_setting('app.organisation_id', true)` per migration 0213 pattern.
-- [ ] **P3-C1 — Missing `FORCE ROW LEVEL SECURITY` + `CREATE POLICY` on `memory_review_queue`** (migration 0139). critical/high. Fix: new patch migration `ALTER TABLE memory_review_queue ENABLE ROW LEVEL SECURITY; ALTER TABLE memory_review_queue FORCE ROW LEVEL SECURITY;` + `CREATE POLICY` keyed on `app.organisation_id`.
-- [ ] **P3-C2 — Missing `FORCE ROW LEVEL SECURITY` on `drop_zone_upload_audit`** (migration 0141). critical/high. Fix: new patch migration `ALTER TABLE drop_zone_upload_audit FORCE ROW LEVEL SECURITY`.
-- [ ] **P3-C3 — Missing `FORCE ROW LEVEL SECURITY` on `onboarding_bundle_configs`** (migration 0142). critical/high. Fix: new patch migration `ALTER TABLE onboarding_bundle_configs FORCE ROW LEVEL SECURITY`.
-- [ ] **P3-C4 — Missing `FORCE ROW LEVEL SECURITY` on `trust_calibration_state`** (migration 0147). critical/high. Fix: new patch migration `ALTER TABLE trust_calibration_state FORCE ROW LEVEL SECURITY`.
-- [ ] **P3-C6 — Direct `db` import in `server/routes/memoryReviewQueue.ts`** — bypasses RLS middleware. critical/high. Also missing `resolveSubaccount` call on `:subaccountId` param. Fix: move all DB access to `server/services/memoryReviewQueueService.ts`; add `resolveSubaccount(req.params.subaccountId, req.orgId!)`.
-- [ ] **P3-C7 — Direct `db` import in `server/routes/systemAutomations.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer.
-- [ ] **P3-C8 — Direct `db` import in `server/routes/subaccountAgents.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer.
-- [ ] **P3-C9 — Missing `resolveSubaccount` in `server/routes/clarifications.ts`** on `:subaccountId` param. critical/high. Fix: add `resolveSubaccount(req.params.subaccountId, req.orgId!)`.
-- [ ] **P3-C10 — Missing `organisationId` filter in `server/services/documentBundleService.ts:679,685`** — queries `agents` and `tasks` tables by `id` only. critical/high. Fix: add `eq(table.organisationId, organisationId)` to both WHERE clauses.
-- [ ] **P3-C11 — Missing `organisationId` filter in `server/services/skillStudioService.ts:168,309`** — queries `skills` table by `id` only. critical/high. Fix: add `eq(skills.organisationId, organisationId)` to both WHERE clauses.
-- [ ] **P3-H2 — Direct `db` import in `server/lib/briefVisibility.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer.
-- [ ] **P3-H3 — Direct `db` import in `server/lib/workflow/onboardingStateHelpers.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer.
+- [x] **P3-C5 — Phantom RLS session var `app.current_organisation_id`** in migrations 0205, 0206, 0207, 0208. critical/high. RLS policies reference a var that is never set by `withOrgTx` — policies silently fail-open. Fix: new corrective migration replacing all occurrences with `current_setting('app.organisation_id', true)` per migration 0213 pattern. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. DB state was repaired at runtime by `migrations/0213_fix_cached_context_rls.sql` and an idempotent audit-trail re-sweep was applied by `migrations/0228_phantom_var_sweep.sql`. The historical 0205–0208 files are deliberately not edited per the repo's append-only migration convention.
+- [x] **P3-C1 — Missing `FORCE ROW LEVEL SECURITY` + `CREATE POLICY` on `memory_review_queue`** (migration 0139). critical/high. Fix: new patch migration `ALTER TABLE memory_review_queue ENABLE ROW LEVEL SECURITY; ALTER TABLE memory_review_queue FORCE ROW LEVEL SECURITY;` + `CREATE POLICY` keyed on `app.organisation_id`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Fixed by `migrations/0227_rls_hardening_corrective.sql` lines 22–39 (ENABLE+FORCE+canonical org-isolation policy).
+- [x] **P3-C2 — Missing `FORCE ROW LEVEL SECURITY` on `drop_zone_upload_audit`** (migration 0141). critical/high. Fix: new patch migration `ALTER TABLE drop_zone_upload_audit FORCE ROW LEVEL SECURITY`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Fixed by `migrations/0227_rls_hardening_corrective.sql` lines 41–59.
+- [x] **P3-C3 — Missing `FORCE ROW LEVEL SECURITY` on `onboarding_bundle_configs`** (migration 0142). critical/high. Fix: new patch migration `ALTER TABLE onboarding_bundle_configs FORCE ROW LEVEL SECURITY`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Fixed by `migrations/0227_rls_hardening_corrective.sql` lines 61–79.
+- [x] **P3-C4 — Missing `FORCE ROW LEVEL SECURITY` on `trust_calibration_state`** (migration 0147). critical/high. Fix: new patch migration `ALTER TABLE trust_calibration_state FORCE ROW LEVEL SECURITY`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Fixed by `migrations/0227_rls_hardening_corrective.sql` lines 81–99.
+- [x] **P3-C6 — Direct `db` import in `server/routes/memoryReviewQueue.ts`** — bypasses RLS middleware. critical/high. Also missing `resolveSubaccount` call on `:subaccountId` param. Fix: move all DB access to `server/services/memoryReviewQueueService.ts`; add `resolveSubaccount(req.params.subaccountId, req.orgId!)`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Route now imports `memoryReviewQueueService` (no `db` import) and calls `resolveSubaccount(subaccountId, orgId)` on the subaccount-scoped path.
+- [x] **P3-C7 — Direct `db` import in `server/routes/systemAutomations.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Route now imports only `systemAutomationService` (no `db` / `drizzle-orm` imports).
+- [x] **P3-C8 — Direct `db` import in `server/routes/subaccountAgents.ts`** — bypasses RLS middleware. critical/high. Fix: move DB access to service layer. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Route now uses `subaccountAgentService`, `agentBeliefService`, `agentScheduleService`, `agentExecutionService` and carries 9 `resolveSubaccount(req.params.subaccountId, req.orgId!)` call sites.
+- [x] **P3-C9 — Missing `resolveSubaccount` in `server/routes/clarifications.ts`** on `:subaccountId` param. critical/high. Fix: add `resolveSubaccount(req.params.subaccountId, req.orgId!)`. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Route now uses `clarificationService` and calls `resolveSubaccount(subaccountId, orgId)`.
+- [x] **P3-C10 — Missing `organisationId` filter in `server/services/documentBundleService.ts:679,685`** — queries `agents` and `tasks` tables by `id` only. critical/high. Fix: add `eq(table.organisationId, organisationId)` to both WHERE clauses. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. `verifySubjectExists` now uses `getOrgScopedDb(...)` and applies `eq(table.organisationId, organisationId)` on every branch (agent / task / scheduled_task).
+- [x] **P3-C11 — Missing `organisationId` filter in `server/services/skillStudioService.ts:168,309`** — queries `skills` table by `id` only. critical/high. Fix: add `eq(skills.organisationId, organisationId)` to both WHERE clauses. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring (originally resolved 2026-04-25; see `## Deferred from spec-conformance review — audit-remediation (2026-04-25)` REQ #11/#12 entry below). Lines 168, 309, and 318 all carry the org filter; both `getSkillStudioContext` and `saveSkillVersion` throw when `orgId` is missing for non-system scopes.
+- [x] **P3-H2 — Direct `db` import in `server/lib/briefVisibility.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. The lib file is now a thin re-export from `server/services/briefVisibilityService` (no `db` imports remain in `server/lib/briefVisibility.ts`).
+- [x] **P3-H3 — Direct `db` import in `server/lib/workflow/onboardingStateHelpers.ts`** — bypasses RLS middleware. high/high. Fix: refactor to call `withOrgTx` or delegate to service layer. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. The lib file is now a thin re-export from `server/services/onboardingStateService` (no `db` imports remain).
 
 ---
 
@@ -1026,7 +1026,7 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
   - Suggested approach: write `scripts/__tests__/derived-data-null-safety/run-fixture-check.sh` (mirror the shape of `scripts/__tests__/principal-context-propagation/run-fixture-check.sh`) that copies the fixture into a temp `server/` path, runs the gate, asserts at least one violation lands for the temp path, then cleans up. Alternatively: add a `--fixture-path <dir>` argument to the gate itself so a self-test runner can point it at the fixture directory without copying. Either approach takes <30 min.
   - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #59h.
 
-- [ ] **GATES-2026-04-26-1** — `reference_documents` (0202) and `reference_document_versions` (0203) FORCE RLS hardening.
+- [x] **GATES-2026-04-26-1** — `reference_documents` (0202) and `reference_document_versions` (0203) FORCE RLS hardening. **CLOSED 2026-04-29** — verified during pre-prod-tenancy spec authoring. Fixed by `migrations/0229_reference_documents_force_rls_parent_exists.sql` (FORCE RLS on both tables; canonical org-isolation policy on `reference_documents`; parent-EXISTS variant on `reference_document_versions`). The 0202/0203 baseline allowlist entries have been removed from `scripts/verify-rls-coverage.sh` (`HISTORICAL_BASELINE_FILES` now contains only 0204/0205/0206/0207/0208/0212).
   - **Severity: medium (security posture).** FORCE RLS prevents the table owner from bypassing the existing policies — the same risk that `DEVELOPMENT_GUIDELINES.md` §1.2 identifies as the entire reason FORCE matters. Without it, a malicious or accidentally privileged DB connection (e.g. a misconfigured admin pool) could read across tenants on these two tables. The ALS-managed application pool does not run as table owner, so production blast radius is bounded — but the gap is real and should not be lost.
   - Surfaced by: `scripts/verify-rls-coverage.sh` after the manifest entries were re-pointed at 0202/0203 in this session.
   - Status: both files are now baselined in `HISTORICAL_BASELINE_FILES` with `@rls-baseline:` annotations. CREATE POLICY exists (org-isolation on parent doc; parent-EXISTS on versions); FORCE RLS does not.
@@ -1535,7 +1535,6 @@ unguarded joins not covered by the spec. These should be fixed in a follow-up PR
 - `server/services/workflowActionCallExecutor.ts:74` — innerJoin systemAgents
 - `server/tools/config/configSkillHandlers.ts:34` — innerJoin systemAgents (same file as fix-logical-deletes)
 
-
 ---
 
 ## Deferred from spec-reviewer review — pre-prod-boundary-and-brief-api
@@ -1561,3 +1560,45 @@ These directional findings surfaced during the spec-reviewer loop on the draft s
 - [ ] F9: Extract rate-limit check pattern to a shared `rateLimit({ keyBuilder, limit, window })` middleware — currently duplicated across all rate-limited routes [user]
 - [ ] F10: Systematic coverage pass — audit all write endpoints for missing rate-limit protection (auth, public, session-message covered; others not) [user]
 - [ ] F11: Add near-capacity and success-sampling log events to rate limiter for observability completeness [user]
+
+### PR #235 — pre-prod-tenancy (2026-04-29)
+
+- [ ] F2b: Add idempotency-invariant test for `measureInterventionOutcomeJob` — assert all reads happen before `recordOutcome`, and that two parallel runs over the same row produce exactly one outcome row (the comment is in place; the test would lock the invariant in CI) [auto]
+- [ ] F3: Strengthen `@rls-allowlist-bypass` runtime enforcement — runtime assertion wrapper inside `withAdminConnectionGuarded` OR audit-log on every bypass read with caller + route. Architectural — touches `server/lib/adminDbConnection.ts` plus every annotated call site. Spec out audit-log vs hard-assert trade-off before implementing. [user]
+
+---
+
+## Deferred from pre-prod-tenancy spec
+
+### Phase 2 §4.7 load-test — speedup re-measurement on production environment
+`intervention_outcomes` ON CONFLICT throughput comparison was run on localhost loopback
+(Intel Core Ultra 7 258V, PostgreSQL 18.3, Node.js v20.19.6).
+
+Local result: 1.47× speedup (300 rows/sec/org new path vs 204 rows/sec/org legacy path).
+Absolute floor: PASS (300 ≥ 200 rows/sec/org).
+Correctness: PASS (200 rows written, 0 duplicates, concurrency check clean).
+
+Speedup FAILS the ≥5× spec threshold locally because loopback eliminates per-round-trip
+network latency — the dominant cost of the legacy 200-row per-row-transaction path in
+production. On staging/prod with 5–20ms app→DB latency, expected speedup is 10×–40×.
+
+Action: re-run `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` after deploy to
+a staging environment with real app→DB network latency. Pass conditions remain:
+≥5× speedup vs legacy advisory-lock path AND ≥200 rows/sec/org.
+
+---
+
+## Deferred from spec-conformance review — pre-prod-tenancy (2026-04-29)
+
+**Captured:** 2026-04-29T06:57:41Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-prod-tenancy-2026-04-29T06-57-41Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`
+
+- [x] **CONFORM-1 [CLOSED 2026-04-29]**: workflow_engines / workflow_runs manifest entries cite migrations that contain no `CREATE POLICY` block
+  - **Resolution:** Option (a) — added `0000_wandering_firedrake.sql` and `0076_playbooks.sql` to `HISTORICAL_BASELINE_FILES` in `scripts/verify-rls-coverage.sh` with `@rls-baseline:` annotations in both migration files. Also fixed redundant `migrations/` prefix in registry `policyMigration` entries (convention is filename only). `verify-rls-coverage.sh` workflow_engines/workflow_runs violations now resolved (gate violation count 10 → 8; remaining 8 are pre-existing about other tables). Honors §3.4.1 registry-only rule, §7.1 CI invariant, and §0.4 sister-branch scope-out.
+
+- [x] **CONFORM-2 [CLOSED 2026-04-29]**: Nullable-aware RLS policy on `org_margin_configs` and `skills` allows tenant code paths to write `organisation_id = NULL` rows
+  - **Resolution:** Audit confirmed only one tenant write path on `skills` could hit NULL — `seedBuiltInSkills` at boot. Migration 0245 WITH CHECK clauses tightened to canonical shape (drop `IS NULL` from WITH CHECK; keep nullable-aware USING for read access). `seedBuiltInSkills` migrated to `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS) so boot-time NULL writes go via admin path. `org_margin_configs` had no tenant writes at all — only migration 0024 seeds the platform-default NULL row. Now fully compliant with spec §2.1 canonical shape.
+
+- [x] **CONFORM-3 [CLOSED 2026-04-29]**: Phase 3 §5.2.1 audit triplet line-number drift for ruleAutoDeprecateJob
+  - **Resolution:** Updated per-job audit paragraph in `tasks/builds/pre-prod-tenancy/progress.md` to use commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition). All three places now agree byte-identically per §5.2.1.

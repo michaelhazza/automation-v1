@@ -6,6 +6,7 @@ import type { SkillExecutionContext } from '../../skillExecutor.js';
 
 const MAX_EVENTS = 20;
 
+// @rls-allowlist-bypass: system_incidents executeReadIncident [ref: spec §3.3.1]
 export async function executeReadIncident(
   input: Record<string, unknown>,
   _context: SkillExecutionContext,

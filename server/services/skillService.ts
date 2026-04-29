@@ -1,6 +1,7 @@
 import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { configHistoryService } from './configHistoryService.js';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 import type { AnthropicTool } from './llmService.js';
@@ -671,43 +672,63 @@ export const skillService = {
   },
 
   /**
-   * Seed built-in skills (idempotent — skips if slug already exists)
+   * Seed built-in skills (idempotent — skips if slug already exists).
+   *
+   * Built-in skills carry `organisation_id = NULL` (platform-global rows visible
+   * to every tenant for READ). Migration 0245 tightens the `skills` RLS WITH
+   * CHECK clause to reject NULL writes from tenant code paths, so this seed
+   * MUST run via `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS).
    */
   async seedBuiltInSkills() {
     const builtInSkills = getBuiltInSkillDefinitions();
 
-    for (const def of builtInSkills) {
-      const existing = await db
-        .select()
-        .from(skills)
-        .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)));
+    await withAdminConnection(
+      {
+        source: 'skill-seed',
+        reason: 'boot-time built-in skills seed (organisation_id = NULL platform-global rows)',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      if (existing.length > 0) {
-        // Update existing built-in skill with latest instructions (if changed)
-        const current = existing[0];
-        if (current.instructions !== (def.instructions ?? null)) {
-          await db.update(skills).set({
-            instructions: def.instructions ?? null,
+        for (const def of builtInSkills) {
+          const existing = (await tx
+            .select()
+            .from(skills)
+            .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)))) as Array<{
+            id: string;
+            instructions: string | null;
+          }>;
+
+          if (existing.length > 0) {
+            const current = existing[0];
+            if (current.instructions !== (def.instructions ?? null)) {
+              await tx
+                .update(skills)
+                .set({
+                  instructions: def.instructions ?? null,
+                  updatedAt: new Date(),
+                })
+                // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug; runs under admin_role bypass"
+                .where(eq(skills.id, current.id));
+            }
+            continue;
+          }
+
+          await tx.insert(skills).values({
+            organisationId: null,
+            name: def.name,
+            slug: def.slug,
+            description: def.description,
+            skillType: 'built_in',
+            definition: def.definition,
+            instructions: def.instructions,
+            isActive: true,
+            createdAt: new Date(),
             updatedAt: new Date(),
-          // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug"
-          }).where(eq(skills.id, current.id));
+          });
         }
-        continue;
-      }
-
-      await db.insert(skills).values({
-        organisationId: null,
-        name: def.name,
-        slug: def.slug,
-        description: def.description,
-        skillType: 'built_in',
-        definition: def.definition,
-        instructions: def.instructions,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    }
+      },
+    );
   },
 };
 

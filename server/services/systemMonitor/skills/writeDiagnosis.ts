@@ -16,6 +16,7 @@ import { systemIncidentEvents } from '../../../db/schema/systemIncidentEvents.js
 import { validateInvestigatePrompt } from '../triage/promptValidation.js';
 import type { SkillExecutionContext } from '../../skillExecutor.js';
 
+// @rls-allowlist-bypass: system_incidents executeWriteDiagnosis [ref: spec §3.3.1]
 export async function executeWriteDiagnosis(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
