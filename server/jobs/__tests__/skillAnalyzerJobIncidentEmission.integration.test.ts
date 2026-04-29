@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="integration test uses conditional lazy imports for NODE_ENV gating; no static sibling module import is applicable"
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
