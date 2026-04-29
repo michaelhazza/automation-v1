@@ -108,7 +108,11 @@ export async function check(
     FROM upserted CROSS JOIN bounds LEFT JOIN prev ON true
   `);
 
-  const row = result.rows[0];
+  // `drizzle-orm/postgres-js` returns the row array directly from `db.execute()`,
+  // not a `{ rows }` wrapper. Canonical examples: `connectorPollingSync.ts`,
+  // `agentRunCleanupJob.ts`. Treat `result` as the array.
+  const rows = result as unknown as CheckRow[];
+  const row = rows[0];
   if (!row) {
     throw new Error('inboundRateLimiter.check: CTE produced no row');
   }

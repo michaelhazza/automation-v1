@@ -39,7 +39,11 @@ export async function runRateLimitCleanupOnce(): Promise<{ rowsDeleted: number; 
       WHERE r.key = v.key AND r.window_start = v.window_start
       RETURNING 1 AS ok
     `);
-    const batchRows = result.rows.length;
+    // `drizzle-orm/postgres-js` returns the row array directly — see
+    // `inboundRateLimiter.check` and `connectorPollingSync.ts` for canonical
+    // examples of accessing the row count from the array length.
+    const rows = result as unknown as Array<{ ok: number }>;
+    const batchRows = rows.length;
     rowsDeleted += batchRows;
     if (batchRows < BATCH_SIZE) {
       return { rowsDeleted, iterations, capped: false };
