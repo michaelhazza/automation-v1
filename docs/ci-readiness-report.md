@@ -222,3 +222,29 @@ env:
 ### Variables NOT needed by tests but read at module-load time
 
 Some service modules read env vars at import time. If a test transitively imports such a module, CI may need a placeholder so the import does not throw. Searching `**/*.test.ts` for direct `process.env.X` access produced the list above; the four "definitely needed" entries cover the import-time reads observed across the suite. If a CI run surfaces a `Missing required env: FOO` error from `server/lib/env.ts`, add `FOO` to the env block with a throwaway value (the validation runs at module-load, not at request time).
+
+---
+
+## 5. Node version to use
+
+There is no `.nvmrc`, no `.node-version`, and no `engines` field in `package.json`.
+
+Indirect signals all point to Node 20:
+
+- Root `Dockerfile`: `FROM node:20-slim`.
+- Root `package.json`: `"@types/node": "^20.11.5"`.
+- `tools/mission-control/package.json`: `"@types/node": "^20.11.0"`.
+- `.replit`: `modules = ["nodejs-20", "bash", "web", "postgresql-16"]`.
+
+### Recommendation
+
+Pin CI to Node 20 with `actions/setup-node@v4`:
+
+```yaml
+- uses: actions/setup-node@v4
+  with:
+    node-version: '20'
+    cache: 'npm'
+```
+
+Pinning to the latest 20.x LTS line matches both the Dockerfile and the Replit production environment. Do NOT pick Node 22 unilaterally; it would diverge from production.
