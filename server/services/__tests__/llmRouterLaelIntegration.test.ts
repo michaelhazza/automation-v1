@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="integration test uses conditional lazy imports for NODE_ENV gating; no static sibling module import is applicable"
 /**
  * Integration test — exercises the LAEL lifecycle (`llm.requested` +
  * `llm.completed`) emission through `llmRouter.routeCall` against a real DB

@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="pure logic is tested inline within this handwritten harness; parent-directory sibling import not applicable for this self-contained test pattern"
 /**
  * bundleSuggestionDismissalsPure.test.ts
  *

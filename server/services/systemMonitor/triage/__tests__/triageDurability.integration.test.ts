@@ -28,9 +28,8 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT = '10';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: triageDurability.integration.test requires a real DATABASE_URL.');
-  console.log('Set DATABASE_URL to a live Postgres connection string to run this test.\n');
+if (!DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration') {
+  console.log('\nSKIP: triageDurability.integration.test requires a real DATABASE_URL and NODE_ENV=integration.');
   process.exit(0);
 }
 

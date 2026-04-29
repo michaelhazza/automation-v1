@@ -195,7 +195,7 @@ async function run() {
     // (getOrgScopedDb). Wrap in withOrgTx + db.transaction to mirror what the
     // authenticate middleware sets up for every HTTP request.
     {
-      const result = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => { // guard-ignore: rls-contract-compliance reason="test infrastructure mirrors authenticate middleware's request-level tx setup; not a production route handler"
         return withOrgTx(
           { tx, organisationId: ownedOrgId, userId: STUB_USER_ID, source: 'test:T2' },
           () =>
@@ -278,7 +278,7 @@ async function run() {
     // Path B parses the command, calls findEntitiesMatching, then resolveAndCreate.
     // We verify the resolver correctly scopes the subaccount for the matching org.
     {
-      const result = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => { // guard-ignore: rls-contract-compliance reason="test infrastructure mirrors authenticate middleware's request-level tx setup; not a production route handler"
         return withOrgTx(
           { tx, organisationId: ownedOrgId, userId: STUB_USER_ID, source: 'test:T4' },
           () =>

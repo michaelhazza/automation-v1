@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 
 // Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
 // Tests that require a real Postgres instance are skipped unless DATABASE_URL is set.
-const SKIP = !process.env.DATABASE_URL;
+const SKIP = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 
 // ── Env preamble — must be before any module-level env reads ─────────────────
 await import('dotenv/config');

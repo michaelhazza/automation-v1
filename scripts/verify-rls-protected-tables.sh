@@ -117,6 +117,37 @@ find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
 
 MIGRATION_TABLES=$(sort -u "$MIGRATION_TABLES_FILE")
 
+# ── Rename expansion: if old_name has org_id in migrations and was renamed,
+#    add the new_name to MIGRATION_TABLES so renamed tables pass Check 2 ──────
+RENAME_MAP_FILE=$(mktemp)
+trap 'rm -f "$MIGRATION_TABLES_FILE" "$RENAME_MAP_FILE"' EXIT
+# Use [[:space:]]+ between tokens — migrations 0220/0221 pad with multiple spaces.
+find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
+  xargs -0 grep -hoE 'ALTER TABLE[[:space:]]+"?[a-zA-Z_]+"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?[a-zA-Z_]+"?' 2>/dev/null |
+  sed -E 's/ALTER TABLE[[:space:]]+"?([a-zA-Z_]+)"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?([a-zA-Z_]+)"?/\1 \2/' >> "$RENAME_MAP_FILE"
+
+EXPANDED=true
+while [ "$EXPANDED" = "true" ]; do
+  EXPANDED=false
+  while read -r old new; do
+    [ -z "$old" ] || [ -z "$new" ] && continue
+    if echo "$MIGRATION_TABLES" | grep -qx "$old" && ! echo "$MIGRATION_TABLES" | grep -qx "$new"; then
+      echo "$new" >> "$MIGRATION_TABLES_FILE"
+      EXPANDED=true
+    fi
+  done < "$RENAME_MAP_FILE"
+  MIGRATION_TABLES=$(sort -u "$MIGRATION_TABLES_FILE")
+done
+
+# ── Check2-exempt: join tables scoped via parent (no direct organisation_id).
+#    Listed in the allowlist under a "# check2-exempt:" section header. ───────
+CHECK2_EXEMPT=$(awk '
+  /^[[:space:]]*#[[:space:]]*check2-exempt:/ { in_section = 1; next }
+  in_section && /^[[:space:]]*#/ { next }
+  in_section && /^[[:space:]]*$/ { next }
+  in_section { print $1 }
+' "$ALLOWLIST" | sort -u)
+
 # ── Check 1: tables in migrations missing from registry + allowlist ─────────
 while IFS= read -r table; do
   [ -z "$table" ] && continue
@@ -136,6 +167,10 @@ done <<< "$MIGRATION_TABLES"
 while IFS= read -r table; do
   [ -z "$table" ] && continue
   if echo "$MIGRATION_TABLES" | grep -qx "$table"; then
+    continue
+  fi
+  # Skip join tables explicitly exempted from check 2 (scoped via parent table).
+  if [ -n "$CHECK2_EXEMPT" ] && echo "$CHECK2_EXEMPT" | grep -qx "$table"; then
     continue
   fi
   emit_violation "$GUARD_ID" "error" "$MANIFEST" "0" \

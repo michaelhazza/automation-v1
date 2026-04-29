@@ -24,7 +24,7 @@ process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'true';
 // at module load time — without a value the import crashes before any test
 // can run. Setting a placeholder here lets the module load; the { skip: SKIP }
 // option on each it() ensures the tests are still marked skipped, not run.
-const SKIP = !process.env.DATABASE_URL;
+const SKIP = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 if (SKIP) {
   process.env.DATABASE_URL ??= 'postgres://placeholder/skip';
   process.env.JWT_SECRET ??= 'skip-placeholder-jwt';

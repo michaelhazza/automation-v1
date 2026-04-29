@@ -67,6 +67,23 @@
 # (Add new entries below in alphabetical order by table name.)
 
 llm_inflight_history  Reads are system-admin only and intentionally cross-tenant (same posture as llm_requests_archive); the table is a short-TTL forensic ledger of in-flight add/remove events, not per-org ownership data.  [ref: spec §3.3.1]
+permission_groups  Table was created with organisation_id in migration 0000 but dropped entirely in migration 0005 — it does not exist at runtime and cannot receive an RLS policy.
+playbook_runs  Table was renamed to workflow_runs in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_runs in migration 0245.
+playbook_templates  Table was renamed to workflow_templates in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_templates in migration 0245.
+process_categories  Intermediate rename of task_categories (renamed task_categories→process_categories in 0010, then process_categories→automation_categories in 0220); the CREATE TABLE is in migration 0000 as task_categories. RLS policy lives on automation_categories in migration 0245.
+process_connection_mappings  Table was renamed to automation_connection_mappings in migration 0220; the CREATE TABLE (with organisation_id) is in migration 0018 under the old name. RLS policy lives on automation_connection_mappings in migration 0245.
+processes  Intermediate rename of tasks (renamed tasks→processes in 0010, then processes→automations in 0220); the CREATE TABLE is in migration 0000 as tasks. RLS policy deferred with automations.
 rate_limit_buckets  System-wide rate-limit infrastructure; keys are opaque caller-defined strings, rows are not tenant-private. [ref: docs/superpowers/specs/2026-04-29-pre-prod-boundary-and-brief-api-spec.md#8]
 system_incident_suppressions  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table holds cross-tenant named mute rules with nullable organisation_id (NULL = suppress everywhere), not per-org ownership data.  [ref: spec §3.3.1]
 system_incidents  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table is a cross-tenant incident sink with nullable organisation_id (NULL = system-level incident), not per-org ownership data.  [ref: spec §3.3.1]
+task_categories  Table was renamed to process_categories (migration 0010) then to automation_categories (migration 0220); the CREATE TABLE (with organisation_id) is in migration 0000 under the old name. RLS policy lives on automation_categories in migration 0245.
+workspace_items  Table was renamed to tasks in migration 0010; the CREATE TABLE (with organisation_id) is in migration 0008 under the old name. RLS policy lives on tasks in migration 0245.
+
+# check2-exempt: join tables registered in rlsProtectedTables.ts that are
+# scoped via a parent table (no direct organisation_id column). These tables
+# have RLS policies that join to the parent to enforce org isolation, so they
+# legitimately have no CREATE TABLE ... organisation_id in any migration.
+document_bundle_members  Scoped via document_bundles.organisation_id through an EXISTS policy; no direct organisation_id column on the join table.
+reference_document_versions  organisation_id added via ALTER TABLE ADD COLUMN in migration 0229 (not in CREATE TABLE block); scoped to the parent reference_document via EXISTS policy.
+task_activities  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
+task_deliverables  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
