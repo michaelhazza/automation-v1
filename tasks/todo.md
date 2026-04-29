@@ -1602,3 +1602,102 @@ a staging environment with real app→DB network latency. Pass conditions remain
 
 - [x] **CONFORM-3 [CLOSED 2026-04-29]**: Phase 3 §5.2.1 audit triplet line-number drift for ruleAutoDeprecateJob
   - **Resolution:** Updated per-job audit paragraph in `tasks/builds/pre-prod-tenancy/progress.md` to use commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition). All three places now agree byte-identically per §5.2.1.
+
+---
+
+## Deferred from spec-conformance review — agent-as-employee (2026-04-29)
+
+**Captured:** 2026-04-29T11:58:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-agent-as-employee-2026-04-29T11-58-52Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`
+**Scope verified:** Phases A, B, C only — Phases D and E not yet implemented and explicitly out of this run's scope.
+
+- [ ] **D1** — `workspaceEmailPipeline.send` does not use `withOrgTx`; raw `db` import bypasses RLS session-var
+  - Spec section: §10.5 (multi-tenant safety checklist), §10.2 (RLS); plan Task B6 step 1.
+  - Gap: pipeline reads/writes 4 canonical tables outside any `withOrgTx`; works only because dev runs as a BYPASSRLS superuser.
+  - Suggested approach: wrap audit-anchor TX1 and mirror-write TX2 in their own `withOrgTx(orgId, ...)` blocks. Same pattern for `ingest`.
+
+- [ ] **D2** — Routes import `db` directly across all 4 new workspace route files
+  - Spec section: §10.5; `DEVELOPMENT_GUIDELINES.md` §2.
+  - Gap: `workspace.ts`, `workspaceMail.ts`, `workspaceCalendar.ts`, `workspaceInboundWebhook.ts` all import `db` and run inline lookups (resolveAgentSubaccountId, identity lookup, mailbox thread query).
+  - Suggested approach: introduce `resolveAgentActiveIdentity(agentId, orgId)` and similar helpers in the workspace services, switch routes to call services. Each helper uses `withOrgTx`.
+
+- [ ] **D3** — Adapters import `db` directly and write canonical rows outside `withOrgTx`
+  - Spec section: §7 mirroring invariant; plan invariant #6.
+  - Gap: `nativeWorkspaceAdapter` and `googleWorkspaceAdapter` both import `db` and insert into `workspace_identities` and `workspace_calendar_events` with no `withOrgTx`.
+  - Suggested approach: caller (pipeline / onboarding service) opens `withOrgTx`, passes the scoped `db` into the adapter; or each adapter method opens its own `withOrgTx(organisationId, ...)` from the params it already receives.
+
+- [ ] **D4** — Calendar invite iCal attachments dropped by transactional email provider
+  - Spec section: §8.3 (RFC 5546 calendar-over-email).
+  - Gap: `transactionalEmailProvider.sendThroughProvider` declares `attachments` in its options interface but the resend / sendgrid branches never forward them to the provider SDK. Native `createEvent` writes the local row but the email recipient receives a plain text body with no `.ics` payload.
+  - Suggested approach: forward `attachments` to Resend (`attachments: [{filename, content, contentType}]`), SendGrid (`attachments: [{content, type, filename}]`), and SMTP (`attachments` array directly).
+
+- [ ] **D5** — Native rate-limit caps deviate from spec §8.1 (amended)
+  - Spec section: §8.1 amended — per-identity 60/min, 1000/hour, 5000/day; per-org 600/min, 20000/hour, 100000/day.
+  - Gap: `workspaceEmailRateLimit.defaultRateLimitCheck` enforces only one window — 60/hour identity + 1000/hour org. Per-minute and per-day caps absent; identity cap is 60× tighter than spec, org cap 20× tighter.
+  - Suggested approach: extend `inboundRateLimiter.check` to accept `[{cap, windowSec}]` arrays, check all in one round-trip, return whichever fails first (with the relevant `windowResetAt`).
+
+- [ ] **D6** — `verify-pipeline-only-outbound.ts` allow-list missing the contract test fixture
+  - Spec section: §7 (static check).
+  - Gap: gate's `allowed = ['server/services/workspace/workspaceEmailPipeline.ts']` but `canonicalAdapterContract.test.ts:59` calls `adapter.sendEmail(...)`. Gate would fail in CI.
+  - Suggested approach: extend `allowed` to also include `server/adapters/workspace/__tests__/**`. Spec intent is "production code goes through the pipeline" — test fixtures are not production code.
+
+- [ ] **D7** — `AgentMailboxPage` Message shape mismatched with route response
+  - Spec section: §5 mockup 10; §6.3.
+  - Gap: page expects `toAddress: string` and `receivedAt: string`; route returns `toAddresses: string[]` and `receivedAt: string | null` directly from the Drizzle row.
+  - Suggested approach: align UI types to schema names (`toAddresses`, `receivedAt`); compute `displayedAt = receivedAt ?? sentAt` for outbound rows that have null `receivedAt`.
+
+- [ ] **D8** — `AgentCalendarPage` event shape mismatched
+  - Spec section: §5 mockup 11; §6.4; §7 adapter `CalendarEvent`.
+  - Gap: page expects `id, startAt, endAt, attendees, organizerEmail`; route returns adapter shape `{externalEventId, organiserEmail, startsAt, endsAt, attendeeEmails, ...}` (no `id`).
+  - Suggested approach: change route to return `workspace_calendar_events` rows directly (which include `id`), or redefine `CalendarEvent` to be the canonical row shape and have UI consume those names.
+
+- [ ] **D9** — `OnboardAgentModal` does not deep-link to identity tab on success
+  - Spec section: §5 frontend modified row for `SubaccountAgentEditPage.tsx` — "Default to 'identity' when navigating from a freshly onboarded agent (`?newlyOnboarded=1` query param)".
+  - Gap: modal calls `onSuccess(identityId)` callback but does not navigate; parent page `SubaccountAgentsPage` does not navigate either. `SubaccountAgentEditPage` reads `tab` URL param, not `newlyOnboarded`.
+  - Suggested approach: parent page navigates on `onSuccess` to `/admin/subaccounts/:saId/agents/:linkId/manage?tab=identity&newlyOnboarded=1` (mockup 07 → 09). Either honour `newlyOnboarded` as default-to-identity or rely on `?tab=identity`.
+
+- [ ] **D10** — Per-row "Onboard to workplace" CTA shown unconditionally on every agent row
+  - Spec section: §2 — "per-row 'Onboard to workplace' action **on agents that aren't yet onboarded**".
+  - Gap: CTA renders for every link in `SubaccountAgentsPage` regardless of identity status.
+  - Suggested approach: include `link.workspaceIdentityStatus` in the `/api/subaccounts/:saId/agents` response; gate the CTA on `=== null`. Show an "Identity" badge for already-onboarded rows.
+
+- [ ] **D11** — Signature template hard-coded; `WorkspaceTenantConfig` lookup unwired
+  - Spec section: §12 contract `WorkspaceTenantConfig` — `defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`. §17 Q3 — disclosure opt-in per subaccount.
+  - Gap: `workspaceMail.ts:127-133` passes `subaccountName: subaccountId` (raw UUID) and `discloseAsAgent: false` literal; signature template comes from `identity.metadata.signature` instead of subaccount config.
+  - Suggested approach: add `connectorConfigService.getWorkspaceTenantConfig(orgId, subaccountId)` returning the `WorkspaceTenantConfig` shape; pipeline's `signatureContext` is built from that.
+
+- [ ] **D12** — `workspace_messages.actor_id == workspace_identities.actor_id` invariant not DB-enforced
+  - Spec section: §6.3 trust invariant — "treated as a hard data-integrity invariant".
+  - Gap: pipeline correctly populates `actor_id` from a fresh identity read, but no CHECK or trigger on the DB. Future writers that take `actor_id` from caller input would not be caught.
+  - Suggested approach: add a BEFORE INSERT/UPDATE trigger on `workspace_messages` asserting `NEW.actor_id = (SELECT actor_id FROM workspace_identities WHERE id = NEW.identity_id)`. Mirrors `workspace_identities_actor_same_subaccount` already in 0254.
+
+- [ ] **D13** — Onboarding service does not write `identity.provisioned` audit event
+  - Spec section: §9.1 step 8 — emit three audit rows per onboarding (`actor.onboarded`, `identity.provisioned`, `identity.activated`).
+  - Gap: `workspaceOnboardingService.onboard` writes only `actor.onboarded` + `identity.activated`. The `identity.provisioned` row is missing.
+  - Suggested approach: insert the `identity.provisioned` row immediately after `adapter.provisionIdentity` returns, before `transition('activate')`. Single 3-row insert is fine.
+
+- [ ] **D14** — Revoke `confirmName` checks against `workspace_actors.displayName` instead of UI-visible name
+  - Spec / mockup: mockup 13 — "type the agent's name to confirm".
+  - Gap: `workspace.ts:285-296` compares `confirmName` against the actor's `display_name`. If the operator edited the display name during onboarding (e.g. "Sarah" → "Sarah J"), the revoke dialog rejects valid input.
+  - Suggested approach: clarify which name the dialog asks the operator to type (mockup says "agent's name"), then either compare against `agents.name` OR keep actor display_name and document that mockup 13 is "type the workspace display name". Front-end already has the comparison source; route should accept whichever the dialog prompts with.
+
+- [ ] **D15** — `verify-workspace-actor-coverage.ts` not wired into a CI workflow
+  - Spec section: §16 acceptance criterion — "`verify-workspace-actor-coverage.ts` passes in CI"; plan Task A10 step 4.
+  - Gap: gate exists but `progress.md` notes ".github/workflows/ directory absent — CI wiring deferred". Acceptance criterion cannot currently be evaluated.
+  - Suggested approach: confirm CI provider, wire the gate as a blocking step alongside `verify-rls-coverage.sh`. If CI is hosted outside `.github/workflows/`, document the integration point and add the same step there.
+
+- [ ] **D16** — Permission key naming convention diverges from spec wording
+  - Spec section: §10.1 (uses colon-separated form `agents:onboard`). Implementation uses dot-namespaced `subaccount.agents.onboard` per established convention.
+  - Gap: documentation-only — keys are functionally correct but textually different.
+  - Suggested approach: update spec wording in a follow-up `chatgpt-spec-review` cycle to reflect the established convention, OR document the convention in `docs/capabilities.md` once added. Do NOT rewrite the keys.
+
+- [ ] **D17** — Contract test fixtures pass `signature: null` though contract types `signature: string`
+  - Spec / contract: §7 `ProvisionParams.signature: string`.
+  - Gap: `canonicalAdapterContract.test.ts:25` declares `signature: null` (and `photoUrl: null`); compiles only because the test isn't strictly typed against the interface.
+  - Suggested approach: decide alongside D11 — if signature can be empty/absent, widen the contract to `string | null`; otherwise change fixtures to use empty strings. Pick one.
+
+- [ ] **D18** — `rateLimitKey` always logged as `null` in pipeline INFO line
+  - Spec / plan: invariant #10 — INFO log MUST include `rateLimitKey` when applicable.
+  - Gap: `workspaceEmailPipeline.ts:87` always emits `rateLimitKey: null`; pipeline doesn't capture the actual key string from `defaultRateLimitCheck`.
+  - Suggested approach: extend `defaultRateLimitCheck` return type to include the resolved key string for both identity and org scopes; pipeline logs the most-restrictive bucket key.
