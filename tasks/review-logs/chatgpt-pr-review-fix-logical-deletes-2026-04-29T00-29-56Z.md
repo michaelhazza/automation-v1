@@ -146,3 +146,55 @@ User overrode the Round 2 defer decision: "don't defer, fix what needs to be fix
 
 **Reclassification:** Round 2 #4 — DEFERRED → IMPLEMENTED.
 
+---
+
+## Round 3 — 2026-04-29 (final pass)
+
+### ChatGPT Feedback (raw)
+
+> **1) Join strategy consistency.** Operational queries → innerJoin + isNull(...); historical/audit → leftJoin + isNull(...). Matches the new KNOWLEDGE.md rule. Subtle edge: leftJoin queries that select e.g. `subaccountName` still surface null rows when the entity is deleted — fine if every consumer tolerates null. Decision (not a fix): if UI/consumers tolerate null → fine; if not → silent UI degradation later. Acceptable as-is, only place bugs could surface later.
+>
+> **2) Partial rollout risk.** The branch's own todo highlights remaining gaps (`fix-logical-deletes-2`). Some services correctly filtered, some still leaking. Strategic question: comfortable merging with partial coverage? If yes, be explicit about scope split.
+>
+> **3) Delegation graph improvement.** `(deleted agent ${agentId.slice(0,8)})` — clean, deterministic, debuggable. No further work.
+>
+> **4) Regression / safety scan.** Type safety covered, query correctness consistent, no data loss, UI crashes unlikely. No hidden failure modes.
+>
+> **Verdict:** Technically ready, architecturally sound, only risk is partial rollout inconsistency. Merge this and queue `fix-logical-deletes-2`.
+
+### Triage
+
+| # | Title | Triage | Decision | Severity | Rationale |
+|---|-------|--------|----------|----------|-----------|
+| 1 | Null tolerance at consumer sites | technical | accept (mixed) | medium | Real concern. `subaccountName` was already nullable pre-PR (no consumer regression). `agentName` from `agentActivityService.{listRuns,getRunDetail,getRunChain}` was non-null via `innerJoin(agents)` and is now nullable — `TraceChainSidebar.tsx:103` and `TraceChainTimeline.tsx:87-88` interpolate it directly without a null guard, so a deleted agent would render as literal `null` text. Fix: mirror delegationGraphService's coalesce at all three service call sites. |
+| 2 | Partial rollout risk | strategic | reject | n/a | Already addressed. `tasks/todo.md` § "Follow-up: Remaining soft-delete join gaps (fix-logical-deletes-2)" enumerates 13 specific call sites identified by pr-reviewer. Scope split is deliberate and documented. |
+| 3 | Delegation graph improvement | technical | accept (no-op) | n/a | Confirmation of Round 2 addendum. No action. |
+| 4 | Regression scan | technical | accept (no-op) | n/a | Confirmation. No action. |
+
+### Implemented
+
+**File:** `server/services/agentActivityService.ts` — three call sites coalesce `agentName` with the same `(deleted agent <id-prefix>)` placeholder used in `delegationGraphService.ts`:
+- `listRuns()` line ~65 — primary listing endpoint, consumed by SessionLogCardList and the activity dashboard.
+- `getRunDetail()` line ~152 — single-run detail view, consumed by RunTraceView.
+- `getRunChain()` line ~310 — trace chain BFS, consumed by TraceChainSidebar / TraceChainTimeline (the components that interpolate `agentName` directly).
+
+Each call site uses `run.agentId.slice(0, 8)` (or `row.run.agentId`) — `agentRuns.agentId` is `notNull` per schema, so `.slice` is safe without optional chaining. Comments at each site cross-reference delegationGraphService's rationale.
+
+Typecheck: `npx tsc --noEmit -p server/tsconfig.json` and `npx tsc --noEmit -p client/tsconfig.json` — 0 new errors in either.
+
+### Round outcome
+
+- Auto-accepted (technical): 1 implemented (#1), 2 rejected as no-op confirmations (#3, #4), 0 deferred.
+- User-decided: 0 implemented, 1 rejected as already-handled (#2 partial rollout — see existing follow-up in tasks/todo.md).
+
+---
+
+## Final Summary (revised after Round 3)
+
+- **Rounds:** 3
+- **Total findings:** 13 across 3 rounds (3 in Round 1, 6 in Round 2, 4 in Round 3).
+- **Implemented:** 2 (Round 2 #4 placeholder distinguishability + Round 3 #1 nullability propagation across agentActivityService).
+- **Rejected:** 11 (3 Round 1 hallucinations + 5 Round 2 hallucinations/confirmations/premature-abstraction + 3 Round 3 confirmations/already-handled).
+- **Deferred:** 0 (the original Round 2 defer was reversed and implemented).
+- **PR:** #232 — APPROVED, ready to merge.
+

@@ -62,7 +62,11 @@ export const agentActivityService = {
     return rows.map(({ run, agentName, agentSlug, subaccountName }) => ({
       id: run.id,
       agentId: run.agentId,
-      agentName,
+      // leftJoin + isNull(deletedAt) → agentName is null when the agent was
+      // soft-deleted. Mirror delegationGraphService's stable placeholder so
+      // UI consumers (e.g. TraceChainSidebar/Timeline) never render literal
+      // null. agentRuns.agentId is notNull per schema, so .slice is safe.
+      agentName: agentName ?? `(deleted agent ${run.agentId.slice(0, 8)})`,
       agentSlug,
       subaccountId: run.subaccountId,
       subaccountName,
@@ -147,7 +151,8 @@ export const agentActivityService = {
     // row.run. Spread carries it through.
     return {
       ...row.run,
-      agentName: row.agentName,
+      // Same soft-delete placeholder rationale as listRuns above.
+      agentName: row.agentName ?? `(deleted agent ${row.run.agentId.slice(0, 8)})`,
       agentSlug: row.agentSlug,
       subaccountName: row.subaccountName,
       mcpCallSummary,
@@ -306,7 +311,9 @@ export const agentActivityService = {
         runSource: run.runSource,
         runType: run.runType,
         status: run.status,
-        agentName,
+        // Same soft-delete placeholder rationale as listRuns above —
+        // TraceChainSidebar / TraceChainTimeline interpolate this directly.
+        agentName: agentName ?? `(deleted agent ${run.agentId.slice(0, 8)})`,
         subaccountName,
         startedAt: run.startedAt,
         completedAt: run.completedAt,
