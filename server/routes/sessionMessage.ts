@@ -10,6 +10,7 @@ import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCo
 import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
+import type { BriefCreationEnvelope } from '../../shared/types/briefFastPath.js';
 import type { Request } from 'express';
 
 const router = Router();
@@ -22,7 +23,7 @@ interface SessionContext {
 type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
   | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
-  | { type: 'brief_created'; briefId: string; conversationId: string; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
+  | ({ type: 'brief_created' } & BriefCreationEnvelope)
   | { type: 'error'; message: string };
 
 router.post(
@@ -182,6 +183,7 @@ router.post(
       type: 'brief_created',
       briefId: result.briefId,
       conversationId: result.conversationId,
+      fastPathDecision: result.fastPathDecision,
       organisationId,
       organisationName: null,
       subaccountId: subaccountId ?? null,
@@ -246,6 +248,7 @@ async function resolveAndCreate(opts: {
     type: 'brief_created',
     briefId: result.briefId,
     conversationId: result.conversationId,
+    fastPathDecision: result.fastPathDecision,
     organisationId: resolvedOrgId,
     organisationName: resolvedOrgName,
     subaccountId: resolvedSubaccountId,
