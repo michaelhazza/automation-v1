@@ -17,3 +17,12 @@ Format per entry:
 - User acknowledgement (timestamp + decision)
 
 (empty)
+
+- 2026-04-30, phase2-batch-00
+  File: server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts
+  What: bash:pass → vitest:skip (dual-run mismatch)
+  Why: Integration test uses test.skipIf(SKIP) where SKIP = NODE_ENV !== 'integration'.
+       The bash runner ran it with NODE_ENV=test and reported PASS (node:test exits 0 for
+       skipped tests). Vitest correctly reports it as "skipped". This is the expected
+       behavior after converting { skip: SKIP } to test.skipIf(SKIP). Not a bug.
+  Decision: WHITELISTED. All integration tests with skip gates will show this pattern.
