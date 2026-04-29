@@ -9,6 +9,7 @@
  *   npx tsx server/services/__tests__/clientPulseHighRiskPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   applyFilters,
   applyPagination,
@@ -18,38 +19,6 @@ import {
   formatLastAction,
   type ClientRow,
 } from '../clientPulseHighRiskService.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    const result = fn();
-    if (result && typeof (result as Promise<void>).then === 'function') {
-      (result as Promise<void>)
-        .then(() => {
-          passed++;
-          console.log(`  PASS  ${name}`);
-        })
-        .catch((err: unknown) => {
-          failed++;
-          console.log(`  FAIL  ${name}`);
-          console.log(`        ${err instanceof Error ? err.message : err}`);
-        });
-    } else {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    }
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -94,71 +63,71 @@ const SAMPLE_ROWS: ClientRow[] = [
 // ── mapDbBandToApi ───────────────────────────────────────────────────────────
 
 test('mapDbBandToApi: atRisk → at_risk', () => {
-  assertEqual(mapDbBandToApi('atRisk'), 'at_risk', 'band mapping');
+  expect(mapDbBandToApi('atRisk'), 'band mapping').toBe('at_risk');
 });
 
 test('mapDbBandToApi: critical → critical', () => {
-  assertEqual(mapDbBandToApi('critical'), 'critical', 'band mapping');
+  expect(mapDbBandToApi('critical'), 'band mapping').toBe('critical');
 });
 
 test('mapDbBandToApi: watch → watch', () => {
-  assertEqual(mapDbBandToApi('watch'), 'watch', 'band mapping');
+  expect(mapDbBandToApi('watch'), 'band mapping').toBe('watch');
 });
 
 test('mapDbBandToApi: healthy → healthy', () => {
-  assertEqual(mapDbBandToApi('healthy'), 'healthy', 'band mapping');
+  expect(mapDbBandToApi('healthy'), 'band mapping').toBe('healthy');
 });
 
 // ── formatLastAction ─────────────────────────────────────────────────────────
 
 test('formatLastAction: null when no action', () => {
-  assertEqual(formatLastAction(null, null), null, 'no action');
+  expect(formatLastAction(null, null), 'no action').toBe(null);
 });
 
 test('formatLastAction: formats days ago correctly', () => {
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const result = formatLastAction('send_email', threeDaysAgo);
-  assert(result !== null, 'result should not be null');
-  assert(result!.includes('send_email'), 'should include actionType');
-  assert(result!.includes('3d ago'), `should include "3d ago", got: ${result}`);
+  expect(result !== null, 'result should not be null').toBeTruthy();
+  expect(result!.includes('send_email'), 'should include actionType').toBeTruthy();
+  expect(result!.includes('3d ago'), `should include "3d ago", got: ${result}`).toBeTruthy();
 });
 
 test('formatLastAction: 0d ago for very recent action', () => {
   const result = formatLastAction('update_contact', new Date());
-  assert(result !== null, 'result should not be null');
-  assert(result!.includes('0d ago'), `should include "0d ago", got: ${result}`);
+  expect(result !== null, 'result should not be null').toBeTruthy();
+  expect(result!.includes('0d ago'), `should include "0d ago", got: ${result}`).toBeTruthy();
 });
 
 // ── applyFilters: band filtering ─────────────────────────────────────────────
 
 test('applyFilters: band=all excludes healthy', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'all' });
-  assert(result.every(r => r.healthBand !== 'healthy'), 'band=all should exclude healthy');
-  assert(result.length === 5, `expected 5 rows, got ${result.length}`);
+  expect(result.every(r => r.healthBand !== 'healthy'), 'band=all should exclude healthy').toBeTruthy();
+  expect(result.length === 5, `expected 5 rows, got ${result.length}`).toBeTruthy();
 });
 
 test('applyFilters: band=healthy returns ONLY healthy', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'healthy' });
-  assert(result.length === 1, `expected 1 healthy row, got ${result.length}`);
-  assertEqual(result[0].subaccountId, 'sub-4', 'should be sub-4 healthy row');
+  expect(result.length === 1, `expected 1 healthy row, got ${result.length}`).toBeTruthy();
+  expect(result[0].subaccountId, 'should be sub-4 healthy row').toBe('sub-4');
 });
 
 test('applyFilters: band=critical returns only critical', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'critical' });
-  assert(result.length === 2, `expected 2 critical rows, got ${result.length}`);
-  assert(result.every(r => r.healthBand === 'critical'), 'all results should be critical');
+  expect(result.length === 2, `expected 2 critical rows, got ${result.length}`).toBeTruthy();
+  expect(result.every(r => r.healthBand === 'critical'), 'all results should be critical').toBeTruthy();
 });
 
 test('applyFilters: band=at_risk returns only at_risk', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'at_risk' });
-  assert(result.length === 2, `expected 2 at_risk rows, got ${result.length}`);
-  assert(result.every(r => r.healthBand === 'at_risk'), 'all results should be at_risk');
+  expect(result.length === 2, `expected 2 at_risk rows, got ${result.length}`).toBeTruthy();
+  expect(result.every(r => r.healthBand === 'at_risk'), 'all results should be at_risk').toBeTruthy();
 });
 
 test('applyFilters: band=watch returns only watch', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'watch' });
-  assert(result.length === 1, `expected 1 watch row, got ${result.length}`);
-  assert(result.every(r => r.healthBand === 'watch'), 'all results should be watch');
+  expect(result.length === 1, `expected 1 watch row, got ${result.length}`).toBeTruthy();
+  expect(result.every(r => r.healthBand === 'watch'), 'all results should be watch').toBeTruthy();
 });
 
 // ── applyFilters: search ──────────────────────────────────────────────────────
@@ -166,31 +135,31 @@ test('applyFilters: band=watch returns only watch', () => {
 test('applyFilters: q=fooCorp matches case-insensitively', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'all', q: 'fooCorp' });
   // 'FooCorp HQ' and 'foobar tools' both contain 'foo' — but 'fooCorp' only matches 'FooCorp HQ'
-  assert(result.length === 1, `expected 1 match, got ${result.length}`);
-  assertEqual(result[0].subaccountId, 'sub-5', 'should be FooCorp HQ');
+  expect(result.length === 1, `expected 1 match, got ${result.length}`).toBeTruthy();
+  expect(result[0].subaccountId, 'should be FooCorp HQ').toBe('sub-5');
 });
 
 test('applyFilters: q=foo matches both FooCorp and foobar case-insensitively', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'all', q: 'foo' });
-  assert(result.length === 2, `expected 2 matches, got ${result.length}`);
+  expect(result.length === 2, `expected 2 matches, got ${result.length}`).toBeTruthy();
 });
 
 test('applyFilters: q is trimmed and case-insensitive', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'all', q: '  ACME  ' });
-  assert(result.length === 1, `expected 1 match, got ${result.length}`);
-  assertEqual(result[0].subaccountId, 'sub-1', 'should match Acme Corp');
+  expect(result.length === 1, `expected 1 match, got ${result.length}`).toBeTruthy();
+  expect(result[0].subaccountId, 'should match Acme Corp').toBe('sub-1');
 });
 
 test('applyFilters: q with no matches returns empty', () => {
   const result = applyFilters(SAMPLE_ROWS, { band: 'all', q: 'zzznomatch' });
-  assertEqual(result.length, 0, 'should return empty array');
+  expect(result.length, 'should return empty array').toBe(0);
 });
 
 // ── applyFilters: default (no params) ────────────────────────────────────────
 
 test('applyFilters: no params acts like band=all (excludes healthy)', () => {
   const result = applyFilters(SAMPLE_ROWS, {});
-  assert(result.every(r => r.healthBand !== 'healthy'), 'no params should exclude healthy');
+  expect(result.every(r => r.healthBand !== 'healthy'), 'no params should exclude healthy').toBeTruthy();
 });
 
 // ── Sort order ────────────────────────────────────────────────────────────────
@@ -206,7 +175,7 @@ test('applyFilters preserves sort: PENDING first regardless of band', () => {
   // We test sortClientRows directly or via applyPagination ordering.
   // Here just confirm filter passes all non-healthy rows through without reordering.
   const result = applyFilters(rows, { band: 'all' });
-  assertEqual(result.length, 3, 'all 3 non-healthy rows pass through');
+  expect(result.length, 'all 3 non-healthy rows pass through').toBe(3);
 });
 
 // ── applyPagination ───────────────────────────────────────────────────────────
@@ -223,28 +192,28 @@ const SORTED_ROWS: ClientRow[] = [
 
 test('applyPagination: default limit=7 returns all 5 when fewer than 7', () => {
   const { rows, nextCursor } = applyPagination(SORTED_ROWS, { limit: 7 });
-  assertEqual(rows.length, 5, 'should return all 5 rows');
-  assertEqual(nextCursor, null, 'no nextCursor when all rows returned');
+  expect(rows.length, 'should return all 5 rows').toBe(5);
+  expect(nextCursor, 'no nextCursor when all rows returned').toBe(null);
 });
 
 test('applyPagination: limit=2 returns first 2 rows and a cursor', async () => {
   const { rows, nextCursor } = applyPagination(SORTED_ROWS, { limit: 2 });
-  assertEqual(rows.length, 2, 'should return 2 rows');
-  assertEqual(rows[0].subaccountId, 'sub-2', 'first row should be PENDING (sub-2)');
-  assertEqual(rows[1].subaccountId, 'sub-1', 'second row should be sub-1');
-  assert(nextCursor !== null, 'should have nextCursor');
+  expect(rows.length, 'should return 2 rows').toBe(2);
+  expect(rows[0].subaccountId, 'first row should be PENDING (sub-2)').toBe('sub-2');
+  expect(rows[1].subaccountId, 'second row should be sub-1').toBe('sub-1');
+  expect(nextCursor !== null, 'should have nextCursor').toBeTruthy();
 });
 
 test('applyPagination: page 2 with cursor has no duplicates', async () => {
   const page1 = applyPagination(SORTED_ROWS, { limit: 2 });
-  assert(page1.nextCursor !== null, 'page1 should have cursor');
+  expect(page1.nextCursor !== null, 'page1 should have cursor').toBeTruthy();
 
   const page2 = applyPagination(SORTED_ROWS, { limit: 2, cursor: page1.nextCursor! });
-  assertEqual(page2.rows.length, 2, 'page2 should have 2 rows');
+  expect(page2.rows.length, 'page2 should have 2 rows').toBe(2);
 
   const page1Ids = new Set(page1.rows.map(r => r.subaccountId));
   for (const row of page2.rows) {
-    assert(!page1Ids.has(row.subaccountId), `duplicate row found: ${row.subaccountId}`);
+    expect(!page1Ids.has(row.subaccountId), `duplicate row found: ${row.subaccountId}`).toBeTruthy();
   }
 });
 
@@ -252,8 +221,8 @@ test('applyPagination: page 3 (last page) has no cursor', async () => {
   const page1 = applyPagination(SORTED_ROWS, { limit: 2 });
   const page2 = applyPagination(SORTED_ROWS, { limit: 2, cursor: page1.nextCursor! });
   const page3 = applyPagination(SORTED_ROWS, { limit: 2, cursor: page2.nextCursor! });
-  assertEqual(page3.rows.length, 1, 'page3 should have 1 remaining row');
-  assertEqual(page3.nextCursor, null, 'page3 should have no nextCursor');
+  expect(page3.rows.length, 'page3 should have 1 remaining row').toBe(1);
+  expect(page3.nextCursor, 'page3 should have no nextCursor').toBe(null);
 });
 
 test('applyPagination: all pages combined = all rows, in order, no duplicates', async () => {
@@ -262,19 +231,19 @@ test('applyPagination: all pages combined = all rows, in order, no duplicates', 
   const page3 = applyPagination(SORTED_ROWS, { limit: 2, cursor: page2.nextCursor! });
 
   const all = [...page1.rows, ...page2.rows, ...page3.rows];
-  assertEqual(all.length, 5, 'total across pages should be 5');
+  expect(all.length, 'total across pages should be 5').toBe(5);
   const ids = all.map(r => r.subaccountId);
   const unique = [...new Set(ids)];
-  assertEqual(unique.length, 5, 'no duplicate ids across pages');
+  expect(unique.length, 'no duplicate ids across pages').toBe(5);
   // Verify order preserved
-  assertEqual(ids[0], 'sub-2', 'page1 row1 = sub-2');
-  assertEqual(ids[4], 'sub-3', 'page3 last = sub-3');
+  expect(ids[0], 'page1 row1 = sub-2').toBe('sub-2');
+  expect(ids[4], 'page3 last = sub-3').toBe('sub-3');
 });
 
 test('applyPagination: hasMore is true when more rows exist', () => {
   const { rows, nextCursor } = applyPagination(SORTED_ROWS, { limit: 2 });
-  assert(nextCursor !== null, 'hasMore should be true (cursor present)');
-  assertEqual(rows.length, 2, '2 rows on this page');
+  expect(nextCursor !== null, 'hasMore should be true (cursor present)').toBeTruthy();
+  expect(rows.length, '2 rows on this page').toBe(2);
 });
 
 test('applyPagination: hard max 25 enforced (limit=100 → at most 25)', () => {
@@ -282,7 +251,7 @@ test('applyPagination: hard max 25 enforced (limit=100 → at most 25)', () => {
     makeRow({ subaccountId: `sub-${i}`, subaccountName: `Client ${i}`, healthScore: i + 1, healthBand: 'critical', hasPendingIntervention: false }),
   );
   const { rows } = applyPagination(manyRows, { limit: 100 });
-  assert(rows.length <= 25, `should be at most 25, got ${rows.length}`);
+  expect(rows.length <= 25, `should be at most 25, got ${rows.length}`).toBeTruthy();
 });
 
 test('applyPagination: default limit is 7', () => {
@@ -290,8 +259,8 @@ test('applyPagination: default limit is 7', () => {
     makeRow({ subaccountId: `sub-${i}`, subaccountName: `Client ${i}`, healthScore: i + 1, healthBand: 'critical', hasPendingIntervention: false }),
   );
   const { rows, nextCursor } = applyPagination(manyRows, { limit: 7 });
-  assertEqual(rows.length, 7, 'default limit is 7');
-  assert(nextCursor !== null, 'should have cursor for more rows');
+  expect(rows.length, 'default limit is 7').toBe(7);
+  expect(nextCursor !== null, 'should have cursor for more rows').toBeTruthy();
 });
 
 // ── Cursor encode/decode roundtrip ────────────────────────────────────────────
@@ -301,10 +270,10 @@ test('encodeCursor / decodeCursor roundtrip is stable', () => {
   const secret = 'test-secret-for-unit-tests';
   const cursor = encodeCursor(payload, secret);
   const decoded = decodeCursor(cursor, secret);
-  assert(decoded !== null, 'decoded should not be null');
-  assertEqual(decoded!.score, payload.score, 'score mismatch');
-  assertEqual(decoded!.name, payload.name, 'name mismatch');
-  assertEqual(decoded!.id, payload.id, 'id mismatch');
+  expect(decoded !== null, 'decoded should not be null').toBeTruthy();
+  expect(decoded!.score, 'score mismatch').toEqual(payload.score);
+  expect(decoded!.name, 'name mismatch').toEqual(payload.name);
+  expect(decoded!.id, 'id mismatch').toEqual(payload.id);
 });
 
 test('decodeCursor: tampered cursor returns null', () => {
@@ -314,19 +283,19 @@ test('decodeCursor: tampered cursor returns null', () => {
   // Tamper: flip one character
   const tampered = cursor.slice(0, -3) + 'XXX';
   const decoded = decodeCursor(tampered, secret);
-  assertEqual(decoded, null, 'tampered cursor should decode to null');
+  expect(decoded, 'tampered cursor should decode to null').toBe(null);
 });
 
 test('decodeCursor: cursor signed with different secret returns null', () => {
   const payload = { score: 55, name: 'Acme Corp', id: 'sub-1' };
   const cursor = encodeCursor(payload, 'secret-A');
   const decoded = decodeCursor(cursor, 'secret-B');
-  assertEqual(decoded, null, 'wrong-secret cursor should decode to null');
+  expect(decoded, 'wrong-secret cursor should decode to null').toBe(null);
 });
 
 test('decodeCursor: garbage string returns null', () => {
   const decoded = decodeCursor('not-a-valid-cursor', 'any-secret');
-  assertEqual(decoded, null, 'garbage cursor should decode to null');
+  expect(decoded, 'garbage cursor should decode to null').toBe(null);
 });
 
 test('encodeCursor: same input always yields same output (deterministic)', () => {
@@ -334,34 +303,32 @@ test('encodeCursor: same input always yields same output (deterministic)', () =>
   const secret = 'deterministic-test';
   const c1 = encodeCursor(payload, secret);
   const c2 = encodeCursor(payload, secret);
-  assertEqual(c1, c2, 'cursor should be deterministic');
+  expect(c1, 'cursor should be deterministic').toEqual(c2);
 });
 
 // ── Response shape validation ────────────────────────────────────────────────
 
 test('ClientRow shape has all required fields', () => {
   const row = makeRow();
-  assert('subaccountId' in row, 'missing subaccountId');
-  assert('subaccountName' in row, 'missing subaccountName');
-  assert('healthScore' in row, 'missing healthScore');
-  assert('healthBand' in row, 'missing healthBand');
-  assert('healthScoreDelta7d' in row, 'missing healthScoreDelta7d');
-  assert('sparklineWeekly' in row, 'missing sparklineWeekly');
-  assert('lastActionText' in row, 'missing lastActionText');
-  assert('hasPendingIntervention' in row, 'missing hasPendingIntervention');
-  assert('drilldownUrl' in row, 'missing drilldownUrl');
-  assertEqual(row.drilldownUrl, '/clientpulse/clients/sub-1', 'drilldownUrl format');
+  expect('subaccountId' in row, 'missing subaccountId').toBeTruthy();
+  expect('subaccountName' in row, 'missing subaccountName').toBeTruthy();
+  expect('healthScore' in row, 'missing healthScore').toBeTruthy();
+  expect('healthBand' in row, 'missing healthBand').toBeTruthy();
+  expect('healthScoreDelta7d' in row, 'missing healthScoreDelta7d').toBeTruthy();
+  expect('sparklineWeekly' in row, 'missing sparklineWeekly').toBeTruthy();
+  expect('lastActionText' in row, 'missing lastActionText').toBeTruthy();
+  expect('hasPendingIntervention' in row, 'missing hasPendingIntervention').toBeTruthy();
+  expect('drilldownUrl' in row, 'missing drilldownUrl').toBeTruthy();
+  expect(row.drilldownUrl, 'drilldownUrl format').toBe('/clientpulse/clients/sub-1');
 });
 
 test('drilldownUrl always uses /clientpulse/clients/<subaccountId>', () => {
   const row = makeRow({ subaccountId: 'abc-123', drilldownUrl: '/clientpulse/clients/abc-123' });
-  assertEqual(row.drilldownUrl, '/clientpulse/clients/abc-123', 'drilldownUrl format');
+  expect(row.drilldownUrl, 'drilldownUrl format').toBe('/clientpulse/clients/abc-123');
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────────
 
 setTimeout(() => {
   console.log('\n─────────────────────────────────────────────────');
-  console.log(`  ${passed} passed  |  ${failed} failed`);
-  if (failed > 0) process.exit(1);
 }, 200);

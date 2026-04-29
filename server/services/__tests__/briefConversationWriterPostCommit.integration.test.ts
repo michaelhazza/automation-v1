@@ -15,6 +15,7 @@
  *   npx tsx server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import {
   createPostCommitStore,
@@ -68,5 +69,3 @@ import {
   assert.ok(store.isClosed, '5xx: store closed after reset');
   assert.strictEqual(store.pendingCount, 0, '5xx: queue cleared by reset');
 }
-
-console.log('briefConversationWriterPostCommit: all lifecycle assertions passed');

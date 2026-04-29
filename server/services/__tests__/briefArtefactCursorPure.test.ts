@@ -5,6 +5,7 @@
  *   npx tsx server/services/__tests__/briefArtefactCursorPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import {
   encodeCursor,
@@ -76,5 +77,3 @@ const validPosition: CursorPosition = {
 {
   assert.strictEqual(isValidCursor('bad-cursor'), false, 'garbage → false');
 }
-
-console.log('briefArtefactCursorPure: all assertions passed');

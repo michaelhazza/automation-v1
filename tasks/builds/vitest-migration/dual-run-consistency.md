@@ -167,3 +167,15 @@ server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts bash:pass
 server/services/__tests__/agentExecutionServicePure.plan.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/agentExecutionServicePure.toolIntent.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-06 (2026-04-29)
+server/services/__tests__/agentExecutionServiceWb1Pure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunCleanupJobPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunFinalizationServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunHandoffServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentRunMessageServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/alertFatigueGuard.regression.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/assertSingleWebhookPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/beliefConflictServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefApprovalServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefArtefactBackstopPure.test.ts bash:pass vitest:pass match:yes

@@ -23,6 +23,7 @@
  *   npx tsx server/services/__tests__/hermesTier1Integration.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import {
@@ -31,21 +32,6 @@ import {
   selectPromotedEntryType,
   type RunOutcome,
 } from '../workspaceMemoryServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('Hermes Tier 1 — cross-phase interactions (§9.3.1):');
@@ -184,6 +170,4 @@ test('pure determinism: same inputs → same entryType', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

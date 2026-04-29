@@ -11,23 +11,9 @@
  *   npx tsx server/services/__tests__/fixtures/__tests__/fakeWebhookReceiver.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { startFakeWebhookReceiver } from '../fakeWebhookReceiver.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('FakeWebhookReceiver self-test:');
@@ -220,6 +206,4 @@ await test('close() releases the port', async () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

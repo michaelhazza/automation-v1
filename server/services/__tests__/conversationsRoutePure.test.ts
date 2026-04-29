@@ -5,6 +5,7 @@
  *   npx tsx server/services/__tests__/conversationsRoutePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import {
   selectConversationFollowUpAction,
@@ -95,5 +96,3 @@ assert.strictEqual(
   assert.notStrictEqual(extras.route, null, 'brief: route is non-null');
   assert.notStrictEqual(extras.fastPathDecision, null, 'brief: fastPathDecision is non-null');
 }
-
-console.log('conversationsRoutePure: all predicate matrix + DR2 contract assertions passed');

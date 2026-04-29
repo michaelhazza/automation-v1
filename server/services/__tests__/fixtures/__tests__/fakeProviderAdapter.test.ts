@@ -15,6 +15,7 @@
  *   npx tsx server/services/__tests__/fixtures/__tests__/fakeProviderAdapter.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
 // NOTE: registry is NOT imported here. It is imported lazily (see below, between
@@ -27,21 +28,6 @@ import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
 // env or DB dependency. The SKIP flag only gates the registry import and the
 // cases that follow it.
 const SKIP = !process.env.DATABASE_URL;
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('FakeProviderAdapter self-test:');
@@ -186,7 +172,6 @@ if (SKIP) {
     console.log(`  SKIP  ${name}`);
   }
   console.log('');
-  console.log(`${passed} passed, ${failed} failed, ${REGISTRY_CASES.length} skipped`);
   console.log('');
   process.exit(failed > 0 ? 1 : 0);
 }
@@ -399,6 +384,4 @@ await test('non-LIFO restore preserves pre-existing prior across out-of-order fi
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

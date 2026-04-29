@@ -5,6 +5,7 @@
  *   npx tsx server/services/__tests__/briefArtefactPaginationPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { computeNextCursor } from '../briefArtefactPaginationPure.js';
 import { decodeCursor } from '../briefArtefactCursorPure.js';
@@ -72,5 +73,3 @@ const row = (i: number) => ({
   assert.ok(decoded !== null);
   assert.strictEqual(decoded!.msgId, row(2).id, 'cursor from the single kept row');
 }
-
-console.log('briefArtefactPaginationPure: all assertions passed');

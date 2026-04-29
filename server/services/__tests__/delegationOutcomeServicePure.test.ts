@@ -11,6 +11,7 @@
  *   - buildListQueryFilters: limit clamping to 500, default since (seven days ago)
  */
 
+import { expect, test } from 'vitest';
 import {
   assertDelegationOutcomeShape,
   buildListQueryFilters,
@@ -21,39 +22,9 @@ import {
 // Minimal test harness (tsx-compatible, no external deps)
 // ---------------------------------------------------------------------------
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (a !== b) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
-
-function assertThrows(fn: () => void, containsText: string, label: string) {
-  try {
-    fn();
-    throw new Error(`${label} — expected to throw but did not`);
-  } catch (err) {
-    if (err instanceof Error && err.message === `${label} — expected to throw but did not`) {
-      throw err;
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes(containsText)) {
-      throw new Error(`${label} — expected error to contain "${containsText}", got: ${msg}`);
-    }
   }
 }
 
@@ -152,27 +123,27 @@ test('all valid direction values — pass', () => {
 
 test('limit defaults to 100 when not provided', () => {
   const result = buildListQueryFilters({});
-  assertEqual(result.limit, 100, 'default limit');
+  expect(result.limit, 'default limit').toBe(100);
 });
 
 test('limit clamped to 500 when above cap', () => {
   const result = buildListQueryFilters({ limit: 9999 });
-  assertEqual(result.limit, 500, 'limit cap');
+  expect(result.limit, 'limit cap').toBe(500);
 });
 
 test('limit clamped to 500 when exactly 500', () => {
   const result = buildListQueryFilters({ limit: 500 });
-  assertEqual(result.limit, 500, 'limit at cap');
+  expect(result.limit, 'limit at cap').toBe(500);
 });
 
 test('limit below 500 is preserved', () => {
   const result = buildListQueryFilters({ limit: 42 });
-  assertEqual(result.limit, 42, 'limit below cap');
+  expect(result.limit, 'limit below cap').toBe(42);
 });
 
 test('limit set to default when 0 or negative', () => {
-  assertEqual(buildListQueryFilters({ limit: 0 }).limit, 100, 'limit zero → default');
-  assertEqual(buildListQueryFilters({ limit: -5 }).limit, 100, 'limit negative → default');
+  expect(buildListQueryFilters({ limit: 0 }).limit, 'limit zero → default').toBe(100);
+  expect(buildListQueryFilters({ limit: -5 }).limit, 'limit negative → default').toBe(100);
 });
 
 test('since defaults to approximately seven days ago', () => {
@@ -196,44 +167,44 @@ test('since defaults to approximately seven days ago', () => {
 test('since is preserved when a valid Date is passed', () => {
   const d = new Date('2024-01-15T00:00:00Z');
   const result = buildListQueryFilters({ since: d });
-  assertEqual(result.since.getTime(), d.getTime(), 'since preserved');
+  expect(result.since.getTime(), 'since preserved').toEqual(d.getTime());
 });
 
 test('since parsed from ISO string', () => {
   const iso = '2024-03-10T08:00:00Z';
   const result = buildListQueryFilters({ since: iso });
-  assertEqual(result.since.toISOString(), new Date(iso).toISOString(), 'since from string');
+  expect(result.since.toISOString(), 'since from string').toEqual(new Date(iso).toISOString());
 });
 
 test('outcome unknown value drops to undefined', () => {
   const result = buildListQueryFilters({ outcome: 'maybe' });
-  assertEqual(result.outcome, undefined, 'unknown outcome → undefined');
+  expect(result.outcome, 'unknown outcome → undefined').toBe(undefined);
 });
 
 test('delegationDirection unknown value drops to undefined', () => {
   const result = buildListQueryFilters({ delegationDirection: 'sideways' });
-  assertEqual(result.delegationDirection, undefined, 'unknown direction → undefined');
+  expect(result.delegationDirection, 'unknown direction → undefined').toBe(undefined);
 });
 
 test('valid outcome values are preserved', () => {
-  assertEqual(buildListQueryFilters({ outcome: 'accepted' }).outcome, 'accepted', 'accepted preserved');
-  assertEqual(buildListQueryFilters({ outcome: 'rejected' }).outcome, 'rejected', 'rejected preserved');
+  expect(buildListQueryFilters({ outcome: 'accepted' }).outcome, 'accepted preserved').toBe('accepted');
+  expect(buildListQueryFilters({ outcome: 'rejected' }).outcome, 'rejected preserved').toBe('rejected');
 });
 
 test('valid direction values are preserved', () => {
-  assertEqual(buildListQueryFilters({ delegationDirection: 'down' }).delegationDirection, 'down', 'down preserved');
-  assertEqual(buildListQueryFilters({ delegationDirection: 'up' }).delegationDirection, 'up', 'up preserved');
-  assertEqual(buildListQueryFilters({ delegationDirection: 'lateral' }).delegationDirection, 'lateral', 'lateral preserved');
+  expect(buildListQueryFilters({ delegationDirection: 'down' }).delegationDirection, 'down preserved').toBe('down');
+  expect(buildListQueryFilters({ delegationDirection: 'up' }).delegationDirection, 'up preserved').toBe('up');
+  expect(buildListQueryFilters({ delegationDirection: 'lateral' }).delegationDirection, 'lateral preserved').toBe('lateral');
 });
 
 test('string limit "200" is parsed and returned as 200', () => {
   const result = buildListQueryFilters({ limit: '200' });
-  assertEqual(result.limit, 200, 'string limit parsed');
+  expect(result.limit, 'string limit parsed').toBe(200);
 });
 
 test('string limit "600" is capped at MAX_LIMIT (500)', () => {
   const result = buildListQueryFilters({ limit: '600' });
-  assertEqual(result.limit, 500, 'string limit capped at 500');
+  expect(result.limit, 'string limit capped at 500').toBe(500);
 });
 
 // ---------------------------------------------------------------------------
@@ -241,5 +212,3 @@ test('string limit "600" is capped at MAX_LIMIT (500)', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`delegationOutcomeServicePure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

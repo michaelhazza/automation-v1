@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/configDocumentParserServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   validateParsedField,
   computeOutcome,
@@ -15,33 +16,10 @@ import {
 } from '../configDocumentParserServicePure.js';
 import type { ConfigQuestion, ParsedConfigField } from '../../types/configSchema.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false`);
 }
 
 console.log('');
@@ -63,51 +41,51 @@ const urlQ: ConfigQuestion = { id: 'q.url', section: 's', question: '?', type: '
 
 test('unknown fieldId → invalid', () => {
   const r = validateParsedField({ fieldId: 'q.missing', answer: 'x', confidence: 1 }, undefined);
-  assertTrue(r.invalid === true, 'invalid');
+  expect(r.invalid === true, 'invalid').toBe(true);
 });
 
 test('null answer stays valid (gap captured separately)', () => {
   const r = validateParsedField({ fieldId: 'q.text', answer: null, confidence: 0 }, textQ);
-  assertFalse(r.invalid === true, 'null = not invalid');
+  expect(r.invalid === true, 'null = not invalid').toBe(false);
 });
 
 test('email validation catches malformed address', () => {
   const r = validateParsedField({ fieldId: 'q.email', answer: 'not-an-email', confidence: 0.9 }, emailQ);
-  assertTrue(r.invalid === true, 'rejected');
+  expect(r.invalid === true, 'rejected').toBe(true);
 });
 
 test('valid email passes', () => {
   const r = validateParsedField({ fieldId: 'q.email', answer: 'alice@acme.com', confidence: 0.9 }, emailQ);
-  assertFalse(r.invalid === true, 'ok');
+  expect(r.invalid === true, 'ok').toBe(false);
 });
 
 test('URL must start with http(s)://', () => {
   const bad = validateParsedField({ fieldId: 'q.url', answer: 'acme.com', confidence: 0.9 }, urlQ);
-  assertTrue(bad.invalid === true, 'rejected');
+  expect(bad.invalid === true, 'rejected').toBe(true);
   const good = validateParsedField({ fieldId: 'q.url', answer: 'https://acme.com', confidence: 0.9 }, urlQ);
-  assertFalse(good.invalid === true, 'ok');
+  expect(good.invalid === true, 'ok').toBe(false);
 });
 
 test('select option not in list → invalid', () => {
   const r = validateParsedField({ fieldId: 'q.select', answer: 'z', confidence: 0.9 }, selectQ);
-  assertTrue(r.invalid === true, 'bad option');
+  expect(r.invalid === true, 'bad option').toBe(true);
 });
 
 test('multiselect with value outside options → invalid', () => {
   const r = validateParsedField({ fieldId: 'q.multi', answer: ['x', 'bad'], confidence: 0.9 }, multiQ);
-  assertTrue(r.invalid === true, 'bad element');
+  expect(r.invalid === true, 'bad element').toBe(true);
 });
 
 test('boolean expects boolean', () => {
   const bad = validateParsedField({ fieldId: 'q.bool', answer: 'true', confidence: 1 }, boolQ);
-  assertTrue(bad.invalid === true, 'string rejected');
+  expect(bad.invalid === true, 'string rejected').toBe(true);
   const good = validateParsedField({ fieldId: 'q.bool', answer: true, confidence: 1 }, boolQ);
-  assertFalse(good.invalid === true, 'boolean ok');
+  expect(good.invalid === true, 'boolean ok').toBe(false);
 });
 
 test('confidence out of [0,1] → invalid', () => {
   const r = validateParsedField({ fieldId: 'q.text', answer: 'x', confidence: 2 }, textQ);
-  assertTrue(r.invalid === true, 'out of range');
+  expect(r.invalid === true, 'out of range').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -129,9 +107,9 @@ test('all required high-confidence → auto_apply, zero gaps', () => {
     { fieldId: 'q.c', answer: 'v3', confidence: 0.9 },
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'auto_apply', 'outcome');
-  assertEqual(r.gaps.length, 0, 'no gaps');
-  assertEqual(r.autoApplyFields.length, 3, '3 auto-apply');
+  expect(r.outcome, 'outcome').toBe('auto_apply');
+  expect(r.gaps.length, 'no gaps').toBe(0);
+  expect(r.autoApplyFields.length, '3 auto-apply').toBe(3);
 });
 
 test('required unanswered → gaps', () => {
@@ -141,9 +119,9 @@ test('required unanswered → gaps', () => {
     { fieldId: 'q.c', answer: 'v3', confidence: 0.9 },
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'gaps', 'outcome');
-  assertEqual(r.gaps.length, 1, '1 gap');
-  assertEqual(r.gaps[0].fieldId, 'q.b', 'q.b');
+  expect(r.outcome, 'outcome').toBe('gaps');
+  expect(r.gaps.length, '1 gap').toBe(1);
+  expect(r.gaps[0].fieldId, 'q.b').toBe('q.b');
 });
 
 test('required below threshold → gap', () => {
@@ -153,8 +131,8 @@ test('required below threshold → gap', () => {
     { fieldId: 'q.c', answer: 'v3', confidence: 0.9 },
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'gaps', 'outcome');
-  assertEqual(r.gaps.length, 1, '1 gap');
+  expect(r.outcome, 'outcome').toBe('gaps');
+  expect(r.gaps.length, '1 gap').toBe(1);
 });
 
 test('optional unanswered → NOT a gap', () => {
@@ -164,8 +142,8 @@ test('optional unanswered → NOT a gap', () => {
     { fieldId: 'q.c', answer: null, confidence: 0 }, // optional unanswered
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'auto_apply', 'optional miss is not a gap');
-  assertEqual(r.gaps.length, 0, 'no gaps');
+  expect(r.outcome, 'optional miss is not a gap').toBe('auto_apply');
+  expect(r.gaps.length, 'no gaps').toBe(0);
 });
 
 test('empty / unrecognisable document → rejected', () => {
@@ -175,8 +153,8 @@ test('empty / unrecognisable document → rejected', () => {
     { fieldId: 'q.c', answer: null, confidence: 0 },
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'rejected', 'rejected');
-  assertTrue(Boolean(r.rejectionReason), 'has reason');
+  expect(r.outcome, 'rejected').toBe('rejected');
+  expect(Boolean(r.rejectionReason), 'has reason').toBe(true);
 });
 
 test('schema field absent from parsed output → gap (required)', () => {
@@ -186,8 +164,8 @@ test('schema field absent from parsed output → gap (required)', () => {
     // q.b missing
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'gaps', 'outcome');
-  assertEqual(r.gaps[0].fieldId, 'q.b', 'q.b is the gap');
+  expect(r.outcome, 'outcome').toBe('gaps');
+  expect(r.gaps[0].fieldId, 'q.b is the gap').toBe('q.b');
 });
 
 test('invalid field counts as gap when required', () => {
@@ -197,8 +175,8 @@ test('invalid field counts as gap when required', () => {
     { fieldId: 'q.c', answer: 'v3', confidence: 0.9 },
   ];
   const r = computeOutcome({ parsed, schema });
-  assertEqual(r.outcome, 'gaps', 'outcome');
-  assertTrue(r.gaps.some((g) => g.fieldId === 'q.b'), 'q.b is gap');
+  expect(r.outcome, 'outcome').toBe('gaps');
+  expect(r.gaps.some((g) => g.fieldId === 'q.b'), 'q.b is gap').toBe(true);
 });
 
 test('threshold override respected', () => {
@@ -207,7 +185,7 @@ test('threshold override respected', () => {
     { fieldId: 'q.b', answer: 'v2', confidence: 0.5 },
   ];
   const r = computeOutcome({ parsed, schema: schema.slice(0, 2), threshold: 0.4 });
-  assertEqual(r.outcome, 'auto_apply', 'passes under lower threshold');
+  expect(r.outcome, 'passes under lower threshold').toBe('auto_apply');
 });
 
 test('exactly at threshold → auto-apply (inclusive)', () => {
@@ -216,10 +194,8 @@ test('exactly at threshold → auto-apply (inclusive)', () => {
     { fieldId: 'q.b', answer: 'v2', confidence: PARSE_CONFIDENCE_THRESHOLD },
   ];
   const r = computeOutcome({ parsed, schema: schema.slice(0, 2) });
-  assertEqual(r.outcome, 'auto_apply', 'at threshold passes');
+  expect(r.outcome, 'at threshold passes').toBe('auto_apply');
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);
