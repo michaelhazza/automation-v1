@@ -291,3 +291,101 @@ In the same repo as the main app, under `worker/`. Source under `worker/src/` (h
 ### Implication for CI
 
 CI runs from the repo root with a single `npm ci && npm run migrate && npm test`. No sub-package installs, no worker build, no monorepo orchestration tool (no Turborepo, no Nx, no pnpm workspaces).
+
+---
+
+## 7. Risks and recommendations
+
+Specific, named risks that could make CI flaky, slow, or fail on first run.
+
+### R1: Integration tests boot pg-boss and `db` modules with side effects
+
+**Files:**
+- `server/lib/__tests__/logger.integration.test.ts`
+- `server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts`
+- `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
+- `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts`
+- `server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts`
+- `server/services/__tests__/incidentIngestorThrottle.integration.test.ts`
+- `server/routes/__tests__/conversationsRouteFollowUp.integration.test.ts`
+- `server/routes/__tests__/briefsArtefactsPagination.integration.test.ts`
+- `server/services/crmQueryPlanner/__tests__/integration.test.ts`
+- `server/services/systemMonitor/triage/__tests__/triageDurability.integration.test.ts`
+
+**Behaviour:** all 10 self-skip via `process.env.NODE_ENV !== 'integration'` and `!process.env.DATABASE_URL`. With `NODE_ENV` left unset (or set to `test`), they print a skip line and exit zero. They are then NO RISK to PR-gating CI.
+
+**Recommendation:** keep `NODE_ENV` unset (or `test`) on the PR-gating job. Do NOT promote these to a hard-run set without first verifying they pass against a real DB locally; some have `// Implementer-supplied:` TODO blocks that mean the test body is incomplete and would no-op even when not skipped.
+
+**No `--exclude` flag is needed.** The existing skip-gates handle this natively.
+
+### R2: `run-all-unit-tests.sh` runs every test file sequentially via `npx tsx`
+
+**Behaviour:** the discovery loop calls `npx tsx <file>` for each of 275 files, one at a time. Each `tsx` invocation pays its own cold-start cost (transpile, module load). On a GitHub Actions standard runner this is 10 to 25 minutes wall-clock for the unit suite alone.
+
+**Recommendation for the implementation prompt:** accept the wall-clock cost on the first iteration; do not introduce a parallel runner in this CI cut. If the suite proves too slow, a later improvement can swap to xargs `-P` or a per-directory chunking strategy. Out of scope for this CI bring-up.
+
+### R3: Static gate scripts are grep-based and assume specific repo layout
+
+**Behaviour:** every `verify-*.sh` greps relative to repo root. They depend on:
+- `node_modules/` being present (for some gates that exclude it from search)
+- The full source tree (no shallow checkout)
+
+**Recommendation:** use `actions/checkout@v4` with default `fetch-depth: 1` (shallow is fine, gates do not consult git history). Run `npm ci` before any gate.
+
+### R4: Migration runner takes a Postgres advisory lock
+
+**Behaviour:** `scripts/migrate.ts` calls `pg_advisory_lock(4242_0001)` and never releases until the script exits. If two CI jobs share a database, the second blocks until the first finishes. With a per-job service container, this is moot.
+
+**Recommendation:** use a per-job Postgres service container (the standard `services:` block on GitHub Actions). Do NOT share a Postgres instance across jobs.
+
+### R5: First migration run on Postgres 16 needs `pgcrypto`
+
+**Behaviour:** migration `0018` calls `gen_random_bytes()` from `pgcrypto`. The migration runner creates the extension on every run (`CREATE EXTENSION IF NOT EXISTS pgcrypto`).
+
+**Recommendation:** the official `postgres:16` Docker image bundles `pgcrypto` as a contrib module, so `CREATE EXTENSION` works without installing additional packages. No special service-container config required.
+
+### R6: Two test files live outside `__tests__/` and are NOT run by the unit runner
+
+**Files:**
+- `shared/lib/parseContextSwitchCommand.test.ts`
+- `server/services/scopeResolutionService.test.ts`
+
+**Behaviour:** `run-all-unit-tests.sh` discovers only `**/__tests__/*.test.ts`. These two files are silently skipped today, in local dev and CI alike.
+
+**Recommendation:** out of scope for the CI implementation prompt. Flag for follow-up triage. Either move them under `__tests__/` or extend the discovery glob, but not as part of this CI bring-up.
+
+### R7: `.env.example` declares roughly 50 vars, only 4 are import-time required for tests
+
+**Behaviour:** see § 4. The minimal env block (`DATABASE_URL`, `JWT_SECRET`, `EMAIL_FROM`, `NODE_ENV=test`) covers the observed test imports.
+
+**Recommendation:** start with the minimal block. If a CI run surfaces a `Missing required env: FOO` error, append `FOO=ci-throwaway` and re-run. Do NOT preload the entire `.env.example` into the workflow; most variables are runtime-only and would be noise.
+
+### R8: No frontend tests, no API contract tests
+
+**Behaviour:** zero `*.test.tsx` files, zero supertest, zero React Testing Library. This is a deliberate posture documented in `docs/testing-structure-Apr26.md`.
+
+**Recommendation:** out of scope. CI must NOT attempt to discover or run frontend tests. The implementation prompt should not include any `npm run build:client` step in the test job (that belongs in a separate build job if needed at all).
+
+### R9: No `engines` field, no `.nvmrc`, drift risk
+
+**Behaviour:** Node version is implicit. A future contributor on Node 22 might unintentionally bump APIs that production (Node 20) does not have.
+
+**Recommendation:** out of scope for CI bring-up, but flag for follow-up: add either an `engines` field or a `.nvmrc` to make the Node version explicit at the repo level. CI workflow should pin to Node 20 explicitly regardless.
+
+### R10: Integration test bodies contain TODO placeholders
+
+**Files:** `server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts` (and likely others) contain commented-out bodies marked `// Implementer-supplied:`. They self-skip today and would still pass-as-no-op if `NODE_ENV=integration` were set, because the assertions are guarded by absent state.
+
+**Recommendation:** do not enable `NODE_ENV=integration` on PR-gating CI. If integration coverage is wanted, schedule a separate workflow on push-to-main only.
+
+### Summary of recommendations for the implementation prompt
+
+1. Single job named `test`. Steps: checkout, setup-node 20, npm ci, start postgres:16 service, run migrations, run `npm test`, post Slack.
+2. Env block: `DATABASE_URL`, `JWT_SECRET`, `EMAIL_FROM`. Leave `NODE_ENV` unset or set to `test`.
+3. No `--exclude` flag for tests; integration tests self-skip.
+4. No Playwright browser install.
+5. No worker build.
+6. No frontend build.
+7. Use `actions/checkout@v4`, `actions/setup-node@v4` with `cache: 'npm'`.
+8. Concurrency group on the ref to cancel superseded runs.
+9. PR trigger: `pull_request` on `labeled` and `synchronize`, with a job-level `if` that checks for the `ready-to-merge` label OR a push-to-main event.
