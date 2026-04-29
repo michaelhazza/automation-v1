@@ -35,7 +35,7 @@ router.post(
   asyncHandler(async (req, res, next) => {
     const limitResult = await rateLimitCheck(rateLimitKeys.sessionMessage(req.user!.id), 30, 60);
     if (!limitResult.allowed) {
-      setRateLimitDeniedHeaders(res, limitResult.resetAt);
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
       res.status(429).json({ type: 'error', message: 'Too many requests, please slow down.' });
       return;
     }

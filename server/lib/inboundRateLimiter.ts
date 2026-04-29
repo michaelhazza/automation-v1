@@ -28,14 +28,23 @@ export interface RateLimitCheckResult {
    * End of the current FIXED window. Approximation.
    */
   resetAt: Date;
+  /**
+   * DB-canonical "now" in milliseconds (extract(epoch from now()) * 1000).
+   * Use this — not Date.now() — to compute Retry-After so clock drift across
+   * instances cannot produce negative or inflated values (spec §6.2.3 invariant).
+   */
+  nowEpochMs: number;
 }
 
 /**
  * Derives the `Retry-After` header value (whole seconds) from a `resetAt` instant.
  * Centralised so every 429 emission shares the same rounding rule.
+ *
+ * @param nowMs DB-canonical now in ms (limitResult.nowEpochMs). Falls back to
+ *              Date.now() only when called outside a rate-limit check context.
  */
-export function getRetryAfterSeconds(resetAt: Date): number {
-  return Math.max(1, Math.ceil((resetAt.getTime() - Date.now()) / 1000));
+export function getRetryAfterSeconds(resetAt: Date, nowMs = Date.now()): number {
+  return Math.max(1, Math.ceil((resetAt.getTime() - nowMs) / 1000));
 }
 
 /**
@@ -46,9 +55,12 @@ export const RATE_LIMIT_POLICY_HEADER_VALUE = 'sliding-window;no-auto-retry';
 /**
  * Sets the canonical 429 response headers: `Retry-After` (RFC 7231)
  * and `X-RateLimit-Policy`.
+ *
+ * @param nowMs DB-canonical now in ms (limitResult.nowEpochMs). Falls back to
+ *              Date.now() when omitted — pass it for spec §6.2.3 compliance.
  */
-export function setRateLimitDeniedHeaders(res: import('express').Response, resetAt: Date): void {
-  res.set('Retry-After', String(getRetryAfterSeconds(resetAt)));
+export function setRateLimitDeniedHeaders(res: import('express').Response, resetAt: Date, nowMs = Date.now()): void {
+  res.set('Retry-After', String(getRetryAfterSeconds(resetAt, nowMs)));
   res.set('X-RateLimit-Policy', RATE_LIMIT_POLICY_HEADER_VALUE);
 }
 
@@ -143,5 +155,5 @@ export async function check(
     });
   }
 
-  return { allowed, remaining, resetAt };
+  return { allowed, remaining, resetAt, nowEpochMs: Number(row.now_epoch) * 1000 };
 }

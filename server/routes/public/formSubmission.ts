@@ -24,13 +24,13 @@ router.post(
 
     const ipResult = await rateLimitCheck(rateLimitKeys.publicFormIp(ip), 5, 60);
     if (!ipResult.allowed) {
-      setRateLimitDeniedHeaders(res, ipResult.resetAt);
+      setRateLimitDeniedHeaders(res, ipResult.resetAt, ipResult.nowEpochMs);
       res.status(429).json({ error: 'Too many submissions. Please try again later.' });
       return;
     }
     const pageResult = await rateLimitCheck(rateLimitKeys.publicFormPage(pageId ?? 'unknown'), 50, 60);
     if (!pageResult.allowed) {
-      setRateLimitDeniedHeaders(res, pageResult.resetAt);
+      setRateLimitDeniedHeaders(res, pageResult.resetAt, pageResult.nowEpochMs);
       res.status(429).json({ error: 'This form is receiving too many submissions. Please try again later.' });
       return;
     }

@@ -168,7 +168,7 @@ router.post('/api/agents/:id/test-run',
     const { id } = req.params;
     const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
     if (!limitResult.allowed) {
-      setRateLimitDeniedHeaders(res, limitResult.resetAt);
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
       res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
       return;
     }

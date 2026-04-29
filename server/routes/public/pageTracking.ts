@@ -21,7 +21,7 @@ router.post('/api/public/track', validateBody(pageTrackingBody), asyncHandler(as
 
   const limitResult = await rateLimitCheck(rateLimitKeys.publicTrackIp(ip), 60, 60);
   if (!limitResult.allowed) {
-    setRateLimitDeniedHeaders(res, limitResult.resetAt);
+    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).end();
     return;
   }
