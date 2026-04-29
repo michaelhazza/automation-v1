@@ -26,6 +26,9 @@ Phase 0 baseline commit SHA: 883b1c4b8fc217284b51361b5029ef151eb7b515
 
 ## Session handoff notes
 
-Phase 0 complete: all 5 tasks done. Branch: claude/vitest-migration-2026-04-29.
-CI triggered on push (Task 0.5). Next: Phase 1 scaffolding (install vitest@2.x, create
-vitest.config.ts, add test:unit:vitest script, run discovery, build fixture inventory).
+Phase 0 complete: all 5 tasks done. Branch: claude/vitest-migration-2026-04-29 pushed.
+CI note: .github/workflows/ci.yml triggers only on push-to-main or PRs with
+ready-to-merge label. Phase 0 adds only doc files — no gate/QA impact. PR #236 (main)
+was green. Full CI verification deferred to Phase 5 PR (mandatory gate before cutover).
+Next: Phase 1 scaffolding (install vitest@2.x, create vitest.config.ts, add
+test:unit:vitest script, run discovery, build fixture inventory).
