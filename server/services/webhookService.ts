@@ -24,6 +24,9 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { emailService } from './emailService.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { logger } from '../lib/logger.js';
+
+let webhookOpenModeWarned = false;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -73,7 +76,16 @@ export const webhookService = {
    */
   verifyCallbackToken(executionId: string, token?: string, engineHmacSecret?: string): boolean {
     const secret = engineHmacSecret ?? env.WEBHOOK_SECRET;
-    if (!secret) return true;
+    if (!secret) {
+      if (!webhookOpenModeWarned) {
+        webhookOpenModeWarned = true;
+        logger.warn('webhook.open_mode_active', {
+          reason: 'WEBHOOK_SECRET unset; verifyCallbackToken accepts any token',
+          nodeEnv: env.NODE_ENV,
+        });
+      }
+      return true;
+    }
     if (!token) return false;
     const expected = crypto
       .createHmac('sha256', secret)

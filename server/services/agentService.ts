@@ -1,4 +1,5 @@
 import { eq, and, or, isNull, asc, max, desc } from 'drizzle-orm';
+import * as fs from 'node:fs';
 import { db } from '../db/index.js';
 import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks } from '../db/schema/index.js';
 import crypto from 'crypto';
@@ -1005,11 +1006,14 @@ export const agentService = {
     const fileId = uuidv4();
     const storagePath = `agent-data-sources/${agentId}/${fileId}-${file.originalname}`;
 
+    // `validateMultipart` uses `multer.diskStorage` (spec §6.1) so files arrive
+    // on disk at `file.path`, not in `file.buffer`. Stream from disk.
     const s3 = getS3Client();
     await s3.send(new PutObjectCommand({
       Bucket: getBucketName(),
       Key: storagePath,
-      Body: file.buffer,
+      Body: fs.createReadStream(file.path),
+      ContentLength: file.size,
       ContentType: file.mimetype,
     }));
 
@@ -1590,11 +1594,14 @@ export const agentService = {
     const fileId = uuidv4();
     const storagePath = `scheduled-task-data-sources/${scheduledTaskId}/${fileId}-${file.originalname}`;
 
+    // `validateMultipart` uses `multer.diskStorage` (spec §6.1) so files arrive
+    // on disk at `file.path`, not in `file.buffer`. Stream from disk.
     const s3 = getS3Client();
     await s3.send(new PutObjectCommand({
       Bucket: getBucketName(),
       Key: storagePath,
-      Body: file.buffer,
+      Body: fs.createReadStream(file.path),
+      ContentLength: file.size,
       ContentType: file.mimetype,
     }));
 

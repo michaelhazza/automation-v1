@@ -11,7 +11,7 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
 import { tasks, agentRuns } from '../db/schema/index.js';
 import { eq, and, inArray, asc } from 'drizzle-orm';
-import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
+import type { BriefCreationEnvelope, BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
 
@@ -70,7 +70,16 @@ router.post(
       priority,
     });
 
-    res.status(201).json(result);
+    const envelope: BriefCreationEnvelope = {
+      briefId: result.briefId,
+      conversationId: result.conversationId,
+      fastPathDecision: result.fastPathDecision,
+      organisationId: req.orgId!,
+      subaccountId: effectiveSubaccountId ?? null,
+      organisationName: null,
+      subaccountName: null,
+    };
+    res.status(201).json(envelope);
   }),
 );
 

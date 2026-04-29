@@ -66,3 +66,5 @@
 #
 # (Currently empty — every tenant table on `main` is registered in
 # rlsProtectedTables.ts. Add new entries below as needed.)
+
+rate_limit_buckets  System-wide rate-limit infrastructure; keys are opaque caller-defined strings, rows are not tenant-private. [ref: docs/superpowers/specs/2026-04-29-pre-prod-boundary-and-brief-api-spec.md#8]
