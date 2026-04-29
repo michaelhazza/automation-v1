@@ -14,6 +14,7 @@
  *   npx tsx server/services/__tests__/invokeAutomationStepErrorShapePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -22,21 +23,6 @@ import {
   KNOWN_AUTOMATION_STEP_ERROR_STATUSES,
   type AutomationStepError,
 } from '../../lib/workflow/types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('AutomationStepError shape (§1.6):');
@@ -156,6 +142,4 @@ test('case 4: every status string written by production code is listed in KNOWN_
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/memoryCitationDetectorPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   normaliseText,
   tokenize,
@@ -18,33 +19,10 @@ import {
   computeFinalCitation,
 } from '../memoryCitationDetectorPure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false`);
 }
 
 console.log('');
@@ -57,34 +35,34 @@ console.log('');
 
 console.log('normaliseText:');
 
-test('lowercases', () => assertEqual(normaliseText('HELLO World'), 'hello world', 'case'));
-test('collapses whitespace', () => assertEqual(normaliseText('a   b\nc'), 'a b c', 'ws'));
-test('strips punctuation', () => assertEqual(normaliseText('a, b! c.'), 'a b c', 'punct'));
-test('empty → empty', () => assertEqual(normaliseText('   '), '', 'empty'));
+test('lowercases', () => expect(normaliseText('HELLO World'), 'case').toBe('hello world'));
+test('collapses whitespace', () => expect(normaliseText('a   b\nc'), 'ws').toBe('a b c'));
+test('strips punctuation', () => expect(normaliseText('a, b! c.'), 'punct').toBe('a b c'));
+test('empty → empty', () => expect(normaliseText('   '), 'empty').toBe(''));
 
 console.log('tokenize:');
 
-test('empty → []', () => assertEqual(tokenize('').length, 0, 'empty'));
-test('3 tokens', () => assertEqual(tokenize('foo bar baz').length, 3, '3'));
+test('empty → []', () => expect(tokenize('').length, 'empty').toBe(0));
+test('3 tokens', () => expect(tokenize('foo bar baz').length, '3').toBe(3));
 
 console.log('ngramSet:');
 
 test('4 tokens → 2 trigrams', () => {
   const grams = ngramSet('a b c d', 3);
-  assertEqual(grams.size, 2, '2 trigrams');
-  assertTrue(grams.has('a b c'), 'first gram');
-  assertTrue(grams.has('b c d'), 'second gram');
+  expect(grams.size, '2 trigrams').toBe(2);
+  expect(grams.has('a b c'), 'first gram').toBe(true);
+  expect(grams.has('b c d'), 'second gram').toBe(true);
 });
 
 test('2 tokens < n → single partial gram', () => {
   const grams = ngramSet('a b', 3);
-  assertEqual(grams.size, 1, 'one partial');
-  assertTrue(grams.has('a b'), 'partial gram');
+  expect(grams.size, 'one partial').toBe(1);
+  expect(grams.has('a b'), 'partial gram').toBe(true);
 });
 
 test('empty → empty set', () => {
   const grams = ngramSet('', 3);
-  assertEqual(grams.size, 0, 'empty');
+  expect(grams.size, 'empty').toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -95,11 +73,11 @@ console.log('jaccard:');
 
 test('identical sets → 1', () => {
   const s = new Set(['a', 'b', 'c']);
-  assertEqual(jaccard(s, s), 1, 'identical');
+  expect(jaccard(s, s), 'identical').toBe(1);
 });
 
 test('disjoint sets → 0', () => {
-  assertEqual(jaccard(new Set(['a']), new Set(['b'])), 0, 'disjoint');
+  expect(jaccard(new Set(['a']), new Set(['b'])), 'disjoint').toBe(0);
 });
 
 test('half overlap: {a,b} vs {a,c} → 1/3', () => {
@@ -108,7 +86,7 @@ test('half overlap: {a,b} vs {a,c} → 1/3', () => {
   if (Math.abs(r - 1 / 3) > 1e-9) throw new Error(`expected 1/3, got ${r}`);
 });
 
-test('empty + empty → 0', () => assertEqual(jaccard(new Set(), new Set()), 0, 'empty empty'));
+test('empty + empty → 0', () => expect(jaccard(new Set(), new Set()), 'empty empty').toBe(0));
 
 // ---------------------------------------------------------------------------
 // Tool-call arg extraction
@@ -118,26 +96,26 @@ console.log('extractArgStrings:');
 
 test('string arg', () => {
   const s = extractArgStrings('hello');
-  assertTrue(s.has('hello'), 'hello');
+  expect(s.has('hello'), 'hello').toBe(true);
 });
 
 test('nested object', () => {
   const s = extractArgStrings({ name: 'alice', meta: { id: '123' } });
-  assertTrue(s.has('alice'), 'alice');
-  assertTrue(s.has('123'), '123');
+  expect(s.has('alice'), 'alice').toBe(true);
+  expect(s.has('123'), '123').toBe(true);
 });
 
 test('array of strings', () => {
   const s = extractArgStrings(['a', 'b', { c: 'd' }]);
-  assertTrue(s.has('a'), 'a');
-  assertTrue(s.has('d'), 'd nested');
+  expect(s.has('a'), 'a').toBe(true);
+  expect(s.has('d'), 'd nested').toBe(true);
 });
 
-test('null → empty set', () => assertEqual(extractArgStrings(null).size, 0, 'null'));
+test('null → empty set', () => expect(extractArgStrings(null).size, 'null').toBe(0));
 
 test('numbers coerced', () => {
   const s = extractArgStrings(42);
-  assertTrue(s.has('42'), '42');
+  expect(s.has('42'), '42').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -148,32 +126,32 @@ console.log('computeToolCallScore:');
 
 test('exact phrase match → 1.0', () => {
   const score = computeToolCallScore(['alice@acme.com'], [{ to: 'alice@acme.com' }]);
-  assertEqual(score, 1.0, 'exact match');
+  expect(score, 'exact match').toBe(1.0);
 });
 
 test('substring match → 1.0', () => {
   const score = computeToolCallScore(['acme'], [{ to: 'alice@acme.com' }]);
-  assertEqual(score, 1.0, 'substring');
+  expect(score, 'substring').toBe(1.0);
 });
 
 test('no match → 0', () => {
   const score = computeToolCallScore(['bob'], [{ to: 'alice@acme.com' }]);
-  assertEqual(score, 0, 'no match');
+  expect(score, 'no match').toBe(0);
 });
 
 test('empty phrases → 0', () => {
   const score = computeToolCallScore([], [{ to: 'a' }]);
-  assertEqual(score, 0, 'empty phrases');
+  expect(score, 'empty phrases').toBe(0);
 });
 
 test('empty args → 0', () => {
   const score = computeToolCallScore(['a'], []);
-  assertEqual(score, 0, 'empty args');
+  expect(score, 'empty args').toBe(0);
 });
 
 test('case-insensitive', () => {
   const score = computeToolCallScore(['ACME'], [{ to: 'alice@acme.com' }]);
-  assertEqual(score, 1.0, 'case-insensitive');
+  expect(score, 'case-insensitive').toBe(1.0);
 });
 
 // ---------------------------------------------------------------------------
@@ -190,8 +168,8 @@ test('verbatim → high ratio + cited=true', () => {
     overlapMin: 0.35,
     tokenMin: 8,
   });
-  assertEqual(result.ratio, 1, 'identical ratio');
-  assertTrue(result.cited, 'cited');
+  expect(result.ratio, 'identical ratio').toBe(1);
+  expect(result.cited, 'cited').toBe(true);
 });
 
 test('disjoint → ratio 0 + cited=false', () => {
@@ -201,8 +179,8 @@ test('disjoint → ratio 0 + cited=false', () => {
     overlapMin: 0.35,
     tokenMin: 8,
   });
-  assertEqual(result.ratio, 0, 'disjoint');
-  assertFalse(result.cited, 'not cited');
+  expect(result.ratio, 'disjoint').toBe(0);
+  expect(result.cited, 'not cited').toBe(false);
 });
 
 test('high ratio but low token count → cited=false (dual-floor)', () => {
@@ -214,8 +192,8 @@ test('high ratio but low token count → cited=false (dual-floor)', () => {
     overlapMin: 0.35,
     tokenMin: 8,
   });
-  assertTrue(result.ratio >= 0.35, 'ratio passes');
-  assertFalse(result.cited, 'token floor blocks short-snippet citation');
+  expect(result.ratio >= 0.35, 'ratio passes').toBe(true);
+  expect(result.cited, 'token floor blocks short-snippet citation').toBe(false);
 });
 
 test('ratio below floor but many overlapping tokens → cited=false', () => {
@@ -229,7 +207,7 @@ test('ratio below floor but many overlapping tokens → cited=false', () => {
     overlapMin: 0.5,
     tokenMin: 1,
   });
-  assertFalse(result.cited, 'ratio floor blocks');
+  expect(result.cited, 'ratio floor blocks').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -244,8 +222,8 @@ test('tool-call 1.0 + text miss → cited via tool-call path', () => {
     textMatch: { ratio: 0, overlap: 0, entrySize: 0, generatedSize: 0, cited: false },
     threshold: 0.7,
   });
-  assertTrue(result.cited, 'cited via tool-call');
-  assertEqual(result.finalScore, 1.0, 'max(1,0)=1');
+  expect(result.cited, 'cited via tool-call').toBe(true);
+  expect(result.finalScore, 'max(1,0)=1').toBe(1.0);
 });
 
 test('tool-call 0 + text match cited → cited via text path', () => {
@@ -254,7 +232,7 @@ test('tool-call 0 + text match cited → cited via text path', () => {
     textMatch: { ratio: 0.9, overlap: 50, entrySize: 60, generatedSize: 60, cited: true },
     threshold: 0.7,
   });
-  assertTrue(result.cited, 'cited via text');
+  expect(result.cited, 'cited via text').toBe(true);
   if (Math.abs(result.finalScore - 0.9) > 1e-9) throw new Error('finalScore=0.9');
 });
 
@@ -264,7 +242,7 @@ test('tool-call 0 + text match not cited → not cited', () => {
     textMatch: { ratio: 0.3, overlap: 5, entrySize: 20, generatedSize: 20, cited: false },
     threshold: 0.7,
   });
-  assertFalse(result.cited, 'neither path');
+  expect(result.cited, 'neither path').toBe(false);
 });
 
 test('final_score = max(toolCall, textScore) independent of cited flag', () => {
@@ -277,6 +255,4 @@ test('final_score = max(toolCall, textScore) independent of cited flag', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

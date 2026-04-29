@@ -7,30 +7,12 @@
  *   npx tsx server/services/__tests__/pulseConfigServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   PULSE_MAJOR_THRESHOLD_DEFAULTS,
   CURRENCY_DEFAULT,
   PULSE_MAJOR_THRESHOLD_MAX_MINOR,
 } from '../../config/pulseThresholds.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  if (a !== b) throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-}
 
 console.log('');
 console.log('pulseConfigServicePure — Pulse v1');
@@ -39,11 +21,11 @@ console.log('');
 // ── Default threshold values ──────────────────────────────────────
 
 test('perActionMinor default is 5000 (AUD $50.00)', () => {
-  assertEqual(PULSE_MAJOR_THRESHOLD_DEFAULTS.perActionMinor, 5000, 'perActionMinor');
+  expect(PULSE_MAJOR_THRESHOLD_DEFAULTS.perActionMinor, 'perActionMinor').toBe(5000);
 });
 
 test('perRunMinor default is 50000 (AUD $500.00)', () => {
-  assertEqual(PULSE_MAJOR_THRESHOLD_DEFAULTS.perRunMinor, 50000, 'perRunMinor');
+  expect(PULSE_MAJOR_THRESHOLD_DEFAULTS.perRunMinor, 'perRunMinor').toBe(50000);
 });
 
 test('perRunMinor >= perActionMinor by default', () => {
@@ -55,7 +37,7 @@ test('perRunMinor >= perActionMinor by default', () => {
 // ── Currency default ──────────────────────────────────────────────
 
 test('default currency is AUD', () => {
-  assertEqual(CURRENCY_DEFAULT, 'AUD', 'CURRENCY_DEFAULT');
+  expect(CURRENCY_DEFAULT, 'CURRENCY_DEFAULT').toBe('AUD');
 });
 
 test('default currency is a 3-char uppercase ISO 4217 code', () => {
@@ -67,7 +49,7 @@ test('default currency is a 3-char uppercase ISO 4217 code', () => {
 // ── Threshold max ─────────────────────────────────────────────────
 
 test('max threshold is 1_000_000 (AUD $10,000)', () => {
-  assertEqual(PULSE_MAJOR_THRESHOLD_MAX_MINOR, 1_000_000, 'PULSE_MAJOR_THRESHOLD_MAX_MINOR');
+  expect(PULSE_MAJOR_THRESHOLD_MAX_MINOR, 'PULSE_MAJOR_THRESHOLD_MAX_MINOR').toEqual(1_000_000);
 });
 
 test('defaults are within max threshold', () => {
@@ -82,5 +64,3 @@ test('defaults are within max threshold', () => {
 // ── Report ────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`  ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

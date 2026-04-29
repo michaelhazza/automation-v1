@@ -23,9 +23,9 @@
  * Run via:
  *   npx tsx server/services/__tests__/reviewServiceIdempotency.test.ts
  */
-export {}; // force module scope — avoids top-level-await hoisting issues
+import { expect, test } from 'vitest';
 
-import assert from 'node:assert/strict';
+export {}; // force module scope — avoids top-level-await hoisting issues
 
 // Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
 // Tests that require a real Postgres instance are skipped unless DATABASE_URL is set.
@@ -72,19 +72,11 @@ if (!SKIP) {
   ({ executionLayerService } = await import('../executionLayerService.js'));
 
   // ── Hook-presence assertion (MUST hold) ───────────────────────────────────────
-  assert.ok(
-    __testHooks !== undefined,
-    'reviewService.__testHooks must be exported for race determinism tests',
-  );
-  assert.ok(
-    'delayBetweenClaimAndCommit' in __testHooks,
-    'reviewService.__testHooks.delayBetweenClaimAndCommit must exist',
-  );
+  expect(__testHooks !== undefined).toBeTruthy();
+  expect('delayBetweenClaimAndCommit' in __testHooks).toBeTruthy();
 }
 
 // ── Test runner ───────────────────────────────────────────────────────────────
-let passed = 0;
-let failed = 0;
 let skipped = 0;
 
 async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
@@ -282,7 +274,6 @@ if (!SKIP) {
     sharedIds = await seedSharedFixture();
   } catch (err) {
     console.error('FATAL: failed to seed shared fixture:', err);
-    process.exit(1);
   }
 }
 
@@ -509,6 +500,3 @@ if (!SKIP) {
     }
   }
 }
-
-console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
-if (failed > 0) process.exit(1);

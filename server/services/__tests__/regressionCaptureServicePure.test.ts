@@ -12,6 +12,7 @@
  * tests guard the invariants explicitly.
  */
 
+import { expect, test } from 'vitest';
 import {
   canonicalise,
   fingerprint,
@@ -19,25 +20,6 @@ import {
   materialiseCapture,
   type MaterialiseInputs,
 } from '../regressionCaptureServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -80,28 +62,28 @@ console.log('');
 test('canonicalise sorts object keys recursively', () => {
   const a = canonicalise({ b: 1, a: 2, nested: { z: 1, a: 2 } });
   const b = canonicalise({ a: 2, b: 1, nested: { a: 2, z: 1 } });
-  assertEqual(a, b, 'key-order independent');
-  assert(a.indexOf('"a"') < a.indexOf('"b"'), 'a appears before b');
+  expect(a, 'key-order independent').toEqual(b);
+  expect(a.indexOf('"a"') < a.indexOf('"b"'), 'a appears before b').toBeTruthy();
 });
 
 test('canonicalise preserves array order', () => {
   const a = canonicalise([1, 2, 3]);
   const b = canonicalise([3, 2, 1]);
-  assert(a !== b, 'arrays are order-sensitive');
+  expect(a !== b, 'arrays are order-sensitive').toBeTruthy();
 });
 
 test('canonicalise drops undefined values but preserves null', () => {
   const out = canonicalise({ a: null, b: undefined, c: 1 });
-  assert(out.includes('"a":null'), 'null preserved');
-  assert(!out.includes('"b"'), 'undefined dropped');
-  assert(out.includes('"c":1'), 'c preserved');
+  expect(out.includes('"a":null'), 'null preserved').toBeTruthy();
+  expect(!out.includes('"b"'), 'undefined dropped').toBeTruthy();
+  expect(out.includes('"c":1'), 'c preserved').toBeTruthy();
 });
 
 test('canonicalise handles primitives', () => {
-  assertEqual(canonicalise(null), 'null', 'null');
-  assertEqual(canonicalise(42), '42', 'number');
-  assertEqual(canonicalise('hello'), '"hello"', 'string');
-  assertEqual(canonicalise(true), 'true', 'boolean');
+  expect(canonicalise(null), 'null').toBe('null');
+  expect(canonicalise(42), 'number').toBe('42');
+  expect(canonicalise('hello'), 'string').toBe('"hello"');
+  expect(canonicalise(true), 'boolean').toBe('true');
 });
 
 test('canonicalise rejects cycles', () => {
@@ -113,34 +95,34 @@ test('canonicalise rejects cycles', () => {
   } catch {
     thrown = true;
   }
-  assert(thrown, 'cycle detected');
+  expect(thrown, 'cycle detected').toBeTruthy();
 });
 
 // ── fingerprint ─────────────────────────────────────────────────────
 test('fingerprint is 16 hex chars', () => {
   const fp = fingerprint({ anything: 'goes' });
-  assertEqual(fp.length, 16, 'length 16');
-  assert(/^[0-9a-f]{16}$/.test(fp), 'hex only');
+  expect(fp.length, 'length 16').toBe(16);
+  expect(/^[0-9a-f]{16}$/.test(fp), 'hex only').toBeTruthy();
 });
 
 test('fingerprint is deterministic for equal inputs', () => {
   const a = fingerprint({ a: 1, b: [1, 2], c: { x: 1, y: 2 } });
   const b = fingerprint({ c: { y: 2, x: 1 }, b: [1, 2], a: 1 });
-  assertEqual(a, b, 'semantically equal → same hash');
+  expect(a, 'semantically equal → same hash').toEqual(b);
 });
 
 test('fingerprint differs for distinct values', () => {
   const a = fingerprint({ a: 1 });
   const b = fingerprint({ a: 2 });
-  assert(a !== b, 'different values → different hash');
+  expect(a !== b, 'different values → different hash').toBeTruthy();
 });
 
 // ── trimTranscript ──────────────────────────────────────────────────
 test('trimTranscript passes through short transcripts', () => {
   const t = [{ role: 'user' as const, content: 'a' }, { role: 'assistant' as const, content: 'b' }];
   const out = trimTranscript(t, 10);
-  assertEqual(out.length, 2, 'length preserved');
-  assertEqual(out[0].content, 'a', 'first preserved');
+  expect(out.length, 'length preserved').toBe(2);
+  expect(out[0].content, 'first preserved').toBe('a');
 });
 
 test('trimTranscript keeps the tail of long transcripts', () => {
@@ -149,29 +131,29 @@ test('trimTranscript keeps the tail of long transcripts', () => {
     content: `msg-${i}`,
   }));
   const out = trimTranscript(t, 10);
-  assertEqual(out.length, 10, 'trimmed to 10');
-  assertEqual(out[0].content, 'msg-20', 'keeps last 10');
-  assertEqual(out[9].content, 'msg-29', 'final message preserved');
+  expect(out.length, 'trimmed to 10').toBe(10);
+  expect(out[0].content, 'keeps last 10').toBe('msg-20');
+  expect(out[9].content, 'final message preserved').toBe('msg-29');
 });
 
 test('trimTranscript returns a copy (not a reference)', () => {
   const t = [{ role: 'user' as const, content: 'a' }];
   const out = trimTranscript(t, 10);
-  assert(out !== t, 'copy not reference');
+  expect(out !== t, 'copy not reference').toBeTruthy();
 });
 
 // ── materialiseCapture ──────────────────────────────────────────────
 test('materialiseCapture builds a version 1 contract', () => {
   const cap = materialiseCapture(baseInputs());
-  assertEqual(cap.inputContract.version, 1, 'input contract version');
-  assertEqual(cap.rejectedCall.version, 1, 'rejected call version');
+  expect(cap.inputContract.version, 'input contract version').toBe(1);
+  expect(cap.rejectedCall.version, 'rejected call version').toBe(1);
 });
 
 test('materialiseCapture preserves the tool manifest order', () => {
   const cap = materialiseCapture(baseInputs());
-  assertEqual(cap.inputContract.toolManifest.length, 2, 'two tools');
-  assertEqual(cap.inputContract.toolManifest[0].name, 'send_email', 'first tool');
-  assertEqual(cap.inputContract.toolManifest[1].name, 'create_deal', 'second tool');
+  expect(cap.inputContract.toolManifest.length, 'two tools').toBe(2);
+  expect(cap.inputContract.toolManifest[0].name, 'first tool').toBe('send_email');
+  expect(cap.inputContract.toolManifest[1].name, 'second tool').toBe('create_deal');
 });
 
 test('materialiseCapture drops null descriptions from tool manifest', () => {
@@ -184,7 +166,7 @@ test('materialiseCapture drops null descriptions from tool manifest', () => {
     }),
   );
   const first = cap.inputContract.toolManifest[0];
-  assert(!('description' in first), 'null description omitted');
+  expect(!('description' in first), 'null description omitted').toBeTruthy();
 });
 
 test('materialiseCapture hash is stable across key-order changes', () => {
@@ -194,12 +176,8 @@ test('materialiseCapture hash is stable across key-order changes', () => {
       rejectedArgs: { subject: 'please review', to: 'ceo@example.com' },
     }),
   );
-  assertEqual(
-    a.rejectedCallHash,
-    b.rejectedCallHash,
-    'rejected args key order does not affect hash',
-  );
-  assertEqual(a.inputContractHash, b.inputContractHash, 'input contract hash stable');
+  expect(a.rejectedCallHash, 'rejected args key order does not affect hash').toEqual(b.rejectedCallHash);
+  expect(a.inputContractHash, 'input contract hash stable').toEqual(b.inputContractHash);
 });
 
 test('materialiseCapture hash changes when system prompt drifts', () => {
@@ -207,15 +185,8 @@ test('materialiseCapture hash changes when system prompt drifts', () => {
   const b = materialiseCapture(
     baseInputs({ systemPromptSnapshot: 'You are an agent. Follow the NEW rules.' }),
   );
-  assert(
-    a.inputContractHash !== b.inputContractHash,
-    'prompt drift changes input contract hash',
-  );
-  assertEqual(
-    a.rejectedCallHash,
-    b.rejectedCallHash,
-    'rejected call hash unaffected by prompt drift',
-  );
+  expect(a.inputContractHash !== b.inputContractHash, 'prompt drift changes input contract hash').toBeTruthy();
+  expect(a.rejectedCallHash, 'rejected call hash unaffected by prompt drift').toEqual(b.rejectedCallHash);
 });
 
 test('materialiseCapture hash changes when tool manifest changes', () => {
@@ -225,10 +196,7 @@ test('materialiseCapture hash changes when tool manifest changes', () => {
       toolManifest: [{ name: 'send_email' }], // create_deal removed
     }),
   );
-  assert(
-    a.inputContractHash !== b.inputContractHash,
-    'tool manifest drift changes input contract hash',
-  );
+  expect(a.inputContractHash !== b.inputContractHash, 'tool manifest drift changes input contract hash').toBeTruthy();
 });
 
 test('materialiseCapture hash changes when rejected args change', () => {
@@ -236,10 +204,7 @@ test('materialiseCapture hash changes when rejected args change', () => {
   const b = materialiseCapture(
     baseInputs({ rejectedArgs: { to: 'other@example.com', subject: 'please review' } }),
   );
-  assert(
-    a.rejectedCallHash !== b.rejectedCallHash,
-    'rejected args change → different rejected call hash',
-  );
+  expect(a.rejectedCallHash !== b.rejectedCallHash, 'rejected args change → different rejected call hash').toBeTruthy();
 });
 
 test('materialiseCapture trims transcripts to maxTranscriptMessages', () => {
@@ -250,12 +215,8 @@ test('materialiseCapture trims transcripts to maxTranscriptMessages', () => {
   const cap = materialiseCapture(
     baseInputs({ transcript: longTranscript, maxTranscriptMessages: 5 }),
   );
-  assertEqual(cap.inputContract.transcript.length, 5, 'trimmed to 5');
-  assertEqual(
-    cap.inputContract.transcript[0].content,
-    'msg-45',
-    'keeps the tail',
-  );
+  expect(cap.inputContract.transcript.length, 'trimmed to 5').toBe(5);
+  expect(cap.inputContract.transcript[0].content, 'keeps the tail').toBe('msg-45');
 });
 
 test('materialiseCapture default transcript cap is 25', () => {
@@ -264,7 +225,7 @@ test('materialiseCapture default transcript cap is 25', () => {
     content: `msg-${i}`,
   }));
   const cap = materialiseCapture(baseInputs({ transcript: longTranscript }));
-  assertEqual(cap.inputContract.transcript.length, 25, 'default 25');
+  expect(cap.inputContract.transcript.length, 'default 25').toBe(25);
 });
 
 test('materialiseCapture includes subaccountId: null for org-level runs', () => {
@@ -277,10 +238,7 @@ test('materialiseCapture includes subaccountId: null for org-level runs', () => 
       },
     }),
   );
-  assert(
-    cap.inputContract.runMetadata.subaccountId === null,
-    'null subaccountId preserved',
-  );
+  expect(cap.inputContract.runMetadata.subaccountId === null, 'null subaccountId preserved').toBeTruthy();
 });
 
 // ── Replay regression: input contract hash round-trip ──────────────
@@ -299,14 +257,8 @@ test('replay round-trip: rebuilt contract hashes identically', () => {
     runMetadata: original.inputContract.runMetadata,
   };
   const liveHash = fingerprint(rebuilt);
-  assertEqual(
-    liveHash,
-    original.inputContractHash,
-    'rebuilt contract matches stored hash',
-  );
+  expect(liveHash, 'rebuilt contract matches stored hash').toEqual(original.inputContractHash);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

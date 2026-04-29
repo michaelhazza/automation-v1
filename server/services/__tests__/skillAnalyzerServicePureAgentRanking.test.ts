@@ -9,6 +9,7 @@
  *   npx tsx server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   rankAgentsForCandidate,
   AGENT_PROPOSAL_THRESHOLD,
@@ -16,30 +17,9 @@ import {
   type RankableAgent,
 } from '../skillAnalyzerServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
     throw new Error(`${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
-function assertClose(actual: number, expected: number, eps: number, label: string) {
-  if (Math.abs(actual - expected) > eps) {
-    throw new Error(`${label} — expected ~${expected}, got ${actual}`);
   }
 }
 
@@ -144,7 +124,7 @@ test('preserves slug and name as snapshots', () => {
 test('score is the cosine similarity value', () => {
   const agents = [agent('a', [0.6, 0.8, 0])];
   const result = rankAgentsForCandidate(X_AXIS, agents);
-  assertClose(result[0].score, 0.6, 0.001, 'score');
+  expect(result[0].score).toBeCloseTo(0.6, 4)score');
 });
 
 test('custom threshold respected', () => {
@@ -187,5 +167,3 @@ test('tie scores: V8 sort is stable, original order preserved', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`skillAnalyzerServicePureAgentRanking: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

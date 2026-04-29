@@ -6,23 +6,9 @@
  * Runnable via:
  *   npx tsx server/services/__tests__/rateLimitKeysPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { rateLimitKeys } from '../../lib/rateLimitKeys.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.error(`  FAIL  ${name}`);
-    console.error(err);
-  }
-}
 
 // --- determinism ---
 test('determinism: authLogin is stable across calls', () => {
@@ -99,6 +85,3 @@ test('every builder emits the rl:v1 version prefix', () => {
     assert.ok(k.startsWith('rl:v1:'), `expected rl:v1: prefix on ${k}`);
   }
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

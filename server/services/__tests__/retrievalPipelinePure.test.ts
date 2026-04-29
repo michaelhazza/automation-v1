@@ -8,33 +8,11 @@
  * and intent classification integration.
  */
 
+import { expect, test } from 'vitest';
 import { classifyQueryIntent } from '../../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../../lib/queryIntent.js';
 import { sanitizeSearchQuery } from '../../lib/sanitizeSearchQuery.js';
 import { DOMINANCE_THRESHOLD, EXPANSION_MIN_SCORE } from '../../config/limits.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
-function assertClose(a: number, b: number, epsilon: number, label: string) {
-  if (Math.abs(a - b) > epsilon) throw new Error(`${label}: ${a} vs ${b}`);
-}
 
 // ---------------------------------------------------------------------------
 // Simulate the combined_score calculation from _hybridRetrieve
@@ -63,24 +41,24 @@ console.log('\nRetrieval pipeline — weight profiles');
 test('all profiles have weights summing to 1.0', () => {
   for (const [name, w] of Object.entries(RETRIEVAL_PROFILES)) {
     const sum = w.rrf + w.quality + w.recency;
-    assertClose(sum, 1.0, 0.001, `${name} weights sum to ${sum}`);
+    expect(sum).toBeCloseTo(1.0, 4)${name} weights sum to ${sum}`);
   }
 });
 
 test('temporal profile prioritises recency over rrf', () => {
   const w = RETRIEVAL_PROFILES.temporal;
-  assert(w.recency > w.rrf, 'expected recency > rrf for temporal');
+  expect(w.recency > w.rrf, 'expected recency > rrf for temporal').toBeTruthy();
 });
 
 test('factual profile prioritises rrf over recency', () => {
   const w = RETRIEVAL_PROFILES.factual;
-  assert(w.rrf > w.recency, 'expected rrf > recency for factual');
+  expect(w.rrf > w.recency, 'expected rrf > recency for factual').toBeTruthy();
 });
 
 test('general profile is balanced — rrf >= quality >= recency', () => {
   const w = RETRIEVAL_PROFILES.general;
-  assert(w.rrf >= w.quality, 'expected rrf >= quality');
-  assert(w.quality >= w.recency, 'expected quality >= recency');
+  expect(w.rrf >= w.quality, 'expected rrf >= quality').toBeTruthy();
+  expect(w.quality >= w.recency, 'expected quality >= recency').toBeTruthy();
 });
 
 console.log('\nRetrieval pipeline — combined scoring');
@@ -88,43 +66,43 @@ console.log('\nRetrieval pipeline — combined scoring');
 test('temporal query ranks recent high-quality result above stale high-rrf result', () => {
   const recentScore = computeCombinedScore(0.3, 0.8, 1.0, 'temporal');
   const staleScore = computeCombinedScore(0.9, 0.8, 0.1, 'temporal');
-  assert(recentScore > staleScore, `recent ${recentScore} should beat stale ${staleScore}`);
+  expect(recentScore > staleScore, `recent ${recentScore} should beat stale ${staleScore}`).toBeTruthy();
 });
 
 test('factual query ranks high-rrf result above recent low-rrf result', () => {
   const highRrf = computeCombinedScore(0.9, 0.5, 0.2, 'factual');
   const lowRrf = computeCombinedScore(0.2, 0.5, 0.9, 'factual');
-  assert(highRrf > lowRrf, `highRrf ${highRrf} should beat lowRrf ${lowRrf}`);
+  expect(highRrf > lowRrf, `highRrf ${highRrf} should beat lowRrf ${lowRrf}`).toBeTruthy();
 });
 
 test('same raw scores produce different rankings under temporal vs factual', () => {
   const temporalScore = computeCombinedScore(0.5, 0.5, 0.9, 'temporal');
   const factualScore = computeCombinedScore(0.5, 0.5, 0.9, 'factual');
-  assert(temporalScore > factualScore, 'temporal should weight recency higher');
+  expect(temporalScore > factualScore, 'temporal should weight recency higher').toBeTruthy();
 });
 
 console.log('\nRetrieval pipeline — dominance gating');
 
 test('DOMINANCE_THRESHOLD is exported from config', () => {
-  assert(typeof DOMINANCE_THRESHOLD === 'number', 'expected number');
-  assert(DOMINANCE_THRESHOLD > 1.0, 'threshold must be > 1.0');
+  expect(typeof DOMINANCE_THRESHOLD === 'number', 'expected number').toBeTruthy();
+  expect(DOMINANCE_THRESHOLD > 1.0, 'threshold must be > 1.0').toBeTruthy();
 });
 
 test('clear winner is not gated', () => {
-  assert(!isDominanceGated(0.9, 0.5), 'ratio 1.8 should not be gated');
+  expect(!isDominanceGated(0.9, 0.5), 'ratio 1.8 should not be gated').toBeTruthy();
 });
 
 test('close scores are gated', () => {
-  assert(isDominanceGated(0.51, 0.50), 'ratio 1.02 should be gated');
+  expect(isDominanceGated(0.51, 0.50), 'ratio 1.02 should be gated').toBeTruthy();
 });
 
 test('exactly at threshold is not gated', () => {
   // ratio = 1.2 exactly → not less than 1.2 → not gated
-  assert(!isDominanceGated(0.6, 0.5), 'ratio 1.2 should not be gated');
+  expect(!isDominanceGated(0.6, 0.5), 'ratio 1.2 should not be gated').toBeTruthy();
 });
 
 test('single result (secondScore=0) is not gated', () => {
-  assert(!isDominanceGated(0.9, 0), 'single result should not be gated');
+  expect(!isDominanceGated(0.9, 0), 'single result should not be gated').toBeTruthy();
 });
 
 console.log('\nRetrieval pipeline — sanitisation → classification integration');
@@ -169,9 +147,9 @@ for (const tc of goldenCases) {
   test(tc.name, () => {
     const sanitised = sanitizeSearchQuery(tc.query);
     const intent = classifyQueryIntent(sanitised);
-    assert(intent === tc.expectedIntent, `expected ${tc.expectedIntent}, got ${intent}`);
+    expect(intent === tc.expectedIntent, `expected ${tc.expectedIntent}, got ${intent}`).toBeTruthy();
     if (tc.sanitisedContains) {
-      assert(sanitised.includes(tc.sanitisedContains), `sanitised "${sanitised}" should contain "${tc.sanitisedContains}"`);
+      expect(sanitised.includes(tc.sanitisedContains), `sanitised "${sanitised}" should contain "${tc.sanitisedContains}"`).toBeTruthy();
     }
   });
 }
@@ -183,33 +161,30 @@ test('dominance-gated results should NOT trigger graph expansion', () => {
   // The actual gating is in _hybridRetrieve; here we verify the decision function.
   const ambiguousTop = 0.51;
   const ambiguousSecond = 0.50;
-  assert(isDominanceGated(ambiguousTop, ambiguousSecond), 'ambiguous results should be gated');
+  expect(isDominanceGated(ambiguousTop, ambiguousSecond), 'ambiguous results should be gated').toBeTruthy();
   // Confident results allow expansion
   const confidentTop = 0.8;
   const confidentSecond = 0.4;
-  assert(!isDominanceGated(confidentTop, confidentSecond), 'confident results should not be gated');
+  expect(!isDominanceGated(confidentTop, confidentSecond), 'confident results should not be gated').toBeTruthy();
 });
 
 console.log('\nRetrieval pipeline — absolute score floor for expansion');
 
 test('EXPANSION_MIN_SCORE is exported from config', () => {
-  assert(typeof EXPANSION_MIN_SCORE === 'number', 'expected number');
-  assert(EXPANSION_MIN_SCORE > 0, 'floor must be > 0');
+  expect(typeof EXPANSION_MIN_SCORE === 'number', 'expected number').toBeTruthy();
+  expect(EXPANSION_MIN_SCORE > 0, 'floor must be > 0').toBeTruthy();
 });
 
 test('strong result above floor allows expansion', () => {
-  assert(0.2 >= EXPANSION_MIN_SCORE, 'score 0.2 should clear the floor');
+  expect(0.2 >= EXPANSION_MIN_SCORE, 'score 0.2 should clear the floor').toBeTruthy();
 });
 
 test('weak result below floor blocks expansion', () => {
-  assert(0.01 < EXPANSION_MIN_SCORE, 'score 0.01 should NOT clear the floor');
+  expect(0.01 < EXPANSION_MIN_SCORE, 'score 0.01 should NOT clear the floor').toBeTruthy();
 });
 
 test('dominant but weak results should still block expansion', () => {
   // Top=0.02 is dominant over second=0.01 (ratio 2.0 > 1.2) but both are weak
-  assert(!isDominanceGated(0.02, 0.01), 'dominant ratio — not dominance-gated');
-  assert(0.02 < EXPANSION_MIN_SCORE, 'but top score is below absolute floor — expansion blocked');
+  expect(!isDominanceGated(0.02, 0.01), 'dominant ratio — not dominance-gated').toBeTruthy();
+  expect(0.02 < EXPANSION_MIN_SCORE, 'but top score is below absolute floor — expansion blocked').toBeTruthy();
 });
-
-console.log(`\n${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

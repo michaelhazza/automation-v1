@@ -227,3 +227,15 @@ server/services/__tests__/incidentIngestorPure.test.ts bash:pass vitest:pass mat
 server/services/__tests__/incidentIngestorThrottle.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/interventionActionMetadataPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/interventionIdempotencyKeysPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-11 (2026-04-29)
+server/services/__tests__/invalidationRacePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/invokeAutomationStepErrorShapePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/invokeAutomationStepF15Pure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/invokeAutomationStepPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterCostBreaker.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/llmRouterLaelIntegration.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/mcpToolInvocationsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryBlockServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryBlockSynthesisServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryBlockUpsertPure.test.ts bash:pass vitest:pass match:yes

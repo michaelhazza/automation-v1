@@ -6,23 +6,9 @@
  * Runnable via:
  *   npx tsx server/services/__tests__/scopeResolutionPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { shouldSearchEntityHint } from '../scopeResolutionPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.error(`  FAIL  ${name}`);
-    console.error(err);
-  }
-}
 
 test('empty string returns false', () => {
   assert.equal(shouldSearchEntityHint(''), false);
@@ -51,6 +37,3 @@ test('longer hint returns true', () => {
 test('two characters with surrounding whitespace returns true', () => {
   assert.equal(shouldSearchEntityHint('  ab  '), true);
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

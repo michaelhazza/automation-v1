@@ -33,6 +33,8 @@
 
 // Force this file to be treated as an ES module so top-level await below
 // is valid under the server tsconfig.
+import { expect, test } from 'vitest';
+
 export {};
 
 if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
@@ -49,28 +51,6 @@ const { client, db } = await import('../../db/index.js');
 const { withOrgTx } = await import('../../instrumentation.js');
 const { RLS_PROTECTED_TABLES } = await import('../../config/rlsProtectedTables.js');
 const { sql } = await import('drizzle-orm');
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-    if (err instanceof Error && err.stack) {
-      console.log(err.stack.split('\n').slice(1, 4).map((l) => `        ${l}`).join('\n'));
-    }
-  }
-}
-
-function assert(cond: unknown, message: string): void {
-  if (!cond) throw new Error(message);
-}
 
 // Tables that enforce org isolation via parent-EXISTS (no direct organisation_id
 // column). The generic Layer A and write-rejection tests use
@@ -138,10 +118,7 @@ async function assertLayerAVisibility(tableName: string): Promise<void> {
           sql.raw(`SELECT COUNT(*)::int AS c FROM ${tableName} WHERE organisation_id = '${ORG_B}'`),
         );
         const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-        assert(
-          count === 0,
-          `Layer A (orgA ctx) leaked ${count} rows belonging to orgB from ${tableName}`,
-        );
+        expect(count === 0, `Layer A (orgA ctx) leaked ${count} rows belonging to orgB from ${tableName}`).toBeTruthy();
       });
     },
   );
@@ -159,10 +136,7 @@ async function assertLayerBFailClosed(tableName: string): Promise<void> {
     sql.raw(`SELECT COUNT(*)::int AS c FROM ${tableName}`),
   );
   const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-  assert(
-    count === 0,
-    `Layer B (no ALS ctx) returned ${count} rows from ${tableName} — RLS is NOT fail-closed`,
-  );
+  expect(count === 0, `Layer B (no ALS ctx) returned ${count} rows from ${tableName} — RLS is NOT fail-closed`).toBeTruthy();
 }
 
 async function assertLayerBWriteRejected(tableName: string): Promise<void> {
@@ -181,10 +155,7 @@ async function assertLayerBWriteRejected(tableName: string): Promise<void> {
   } catch {
     rejected = true;
   }
-  assert(
-    rejected,
-    `Layer B (no ALS ctx) allowed an INSERT into ${tableName} — RLS WITH CHECK is NOT fail-closed`,
-  );
+  expect(rejected, `Layer B (no ALS ctx) allowed an INSERT into ${tableName} — RLS WITH CHECK is NOT fail-closed`).toBeTruthy();
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +231,7 @@ async function main(): Promise<void> {
               WHERE document_id = ${parentDocIdB}::uuid
             `);
             const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-            assert(
-              count === 0,
-              `Layer A (orgA ctx) leaked ${count} reference_document_versions belonging to orgB`,
-            );
+            expect(count === 0, `Layer A (orgA ctx) leaked ${count} reference_document_versions belonging to orgB`).toBeTruthy();
           });
         },
       );
@@ -282,10 +250,7 @@ async function main(): Promise<void> {
           } catch {
             rejected = true;
           }
-          assert(
-            rejected,
-            `Layer B (no ALS ctx) allowed an INSERT into reference_document_versions — RLS WITH CHECK is NOT fail-closed`,
-          );
+          expect(rejected, `Layer B (no ALS ctx) allowed an INSERT into reference_document_versions — RLS WITH CHECK is NOT fail-closed`).toBeTruthy();
         },
       );
     } finally {
@@ -305,9 +270,6 @@ async function main(): Promise<void> {
     await cleanupFixtures();
     await client.end({ timeout: 5 });
   }
-
-  console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
 }
 
 await main();
