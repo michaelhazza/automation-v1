@@ -1580,3 +1580,26 @@ production. On staging/prod with 5–20ms app→DB latency, expected speedup is 
 Action: re-run `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` after deploy to
 a staging environment with real app→DB network latency. Pass conditions remain:
 ≥5× speedup vs legacy advisory-lock path AND ≥200 rows/sec/org.
+
+---
+
+## Deferred from spec-conformance review — pre-prod-tenancy (2026-04-29)
+
+**Captured:** 2026-04-29T06:57:41Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-prod-tenancy-2026-04-29T06-57-41Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`
+
+- [ ] CONFORM-1: workflow_engines / workflow_runs manifest entries cite migrations that contain no `CREATE POLICY` block — `verify-rls-coverage.sh` will fail
+  - Spec section: §3.4.1 (sister-branch scope-out, registry-edit-only) vs §7.1 (verify-rls-coverage.sh CI invariant) — internal contradiction
+  - Gap: `server/config/rlsProtectedTables.ts` entry for `workflow_engines` cites `policyMigration: 'migrations/0000_wandering_firedrake.sql'` (no CREATE POLICY in that file); `workflow_runs` cites `policyMigration: 'migrations/0076_playbooks.sql'` (also no CREATE POLICY in that file). Both will trigger `verify-rls-coverage.sh` violations because the gate enforces "every manifest entry has a matching CREATE POLICY in some migration." Spec §3.4.1 explicitly requires registry-only edit (no policy migration in this branch) but spec §7.1 lists `verify-rls-coverage.sh` as a Phase 1 CI invariant — contradictory requirements.
+  - Suggested approach: (a) add `0000_wandering_firedrake.sql` and `0076_playbooks.sql` to `verify-rls-coverage.sh`'s `HISTORICAL_BASELINE_FILES` allow-list with an `@rls-baseline:` annotation noting "policy deferred to pre-prod-workflow-and-delegation"; OR (b) defer the manifest entries themselves to the sister branch (failing `verify-rls-protected-tables.sh` instead, which spec §3.6 lists as the explicit Phase 1 acceptance criterion); OR (c) ship a stub migration in this branch that adds the canonical policy for these two tables despite the §0.4 sister-branch scope-out (architectural decision required). Cannot be auto-fixed — requires human judgment on which spec section wins.
+
+- [ ] CONFORM-2: Nullable-aware RLS policy on `org_margin_configs` and `skills` allows tenant code paths to write `organisation_id = NULL` rows, contaminating the platform-global namespace
+  - Spec section: §2.1 (canonical org-isolation shape) — spec did not anticipate nullable-org tables
+  - Gap: `migrations/0245_all_tenant_tables_rls.sql` lines 449-465 (`org_margin_configs`) and 763-779 (`skills`) carry a nullable-aware policy of the form `USING (organisation_id IS NULL OR ...)` AND `WITH CHECK (organisation_id IS NULL OR ...)`. The `WITH CHECK` accepts NULL writes from tenant code paths — meaning a buggy or malicious tenant code path could insert/update a row with `organisation_id = NULL` and create a platform-global row visible to every tenant. Spec §2.1 canonical shape rejects all NULL writes; spec §3.3.1 mandates mixed-mode tables be tenant-private but does not specify the policy shape. The implementer documented the deviation in the migration header and progress.md, but the `WITH CHECK` permissive shape is not strictly compliant with spec §2.1.
+  - Suggested approach: tighten the `WITH CHECK` clause to require `organisation_id IS NOT NULL AND organisation_id = current_setting(...)` so tenant code can never write NULL rows; reserve NULL-write permission for an explicit admin path (e.g. SQL migration or admin-role connection only). The `USING` clause can remain nullable-aware so tenants can read platform-global rows. Schema audit required to verify no tenant-side write code path is currently relying on writing NULL rows.
+
+- [ ] CONFORM-3: Phase 3 §5.2.1 audit triplet has line-number drift for ruleAutoDeprecateJob between commit message and progress.md per-job audit paragraph
+  - Spec section: §5.2.1 (three-place audit-deliverable enforcement: commit message + PR description + progress.md must be byte-identical)
+  - Gap: For `ruleAutoDeprecateJob`, the commit message (`271567ef`) and the PR-description draft in `progress.md` cite `lines 134-148 (per-org writes); line 175 (lock acquisition)`. The per-job audit paragraph in `progress.md` (lines 262-273) cites the actual file structure: lines 132-136 and 140-143 (writes), line 169 (lock). Implementer added a reconciliation note (progress.md line 273) acknowledging the discrepancy and chose the commit-message values for the future PR description. Per spec §5.2.1's strict reading, "different line numbers ... the commit is rejected and the implementer reconciles before re-pushing."
+  - Suggested approach: amend the per-job paragraph in `progress.md` for ruleAutoDeprecateJob to use the commit-message line ranges (134-148, 175) so all three places agree byte-identically; OR amend the commit message to use the actual line numbers (132-136, 140-143, 169) — but `git commit --amend` after push requires a force-push that overwrites pushed history. Easier path: update progress.md to match commit message. The audit verdict (Pattern A) is already consistent across all three; only line numbers drift.
