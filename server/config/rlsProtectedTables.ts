@@ -886,8 +886,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'canonical_flow_definitions',
     schemaFile: 'migrations/0172_clientpulse_canonical_tables.sql',
-    policyMigration: '0172_clientpulse_canonical_tables.sql',
-    rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, same deferral as canonical_workflow_definitions.',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, policy deferred. Using baselined migration 0000 as placeholder per deferred-enforcement convention.',
   },
 ];
 
