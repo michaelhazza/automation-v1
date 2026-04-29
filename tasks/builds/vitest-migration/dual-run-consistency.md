@@ -239,3 +239,15 @@ server/services/__tests__/mcpToolInvocationsPure.test.ts bash:pass vitest:pass m
 server/services/__tests__/memoryBlockServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/memoryBlockSynthesisServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/memoryBlockUpsertPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-12 (2026-04-29)
+server/services/__tests__/memoryBlockVersionServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryCitationDetectorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/memoryEntryQualityServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/mergeFieldResolverPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/mutateActiveToolsPreservingUniversal.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/n8nImportServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/onboardingStateServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/operationalConfigSchemaPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/orgConfigServiceReadPathPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/orgOperationalConfigMigrationPure.test.ts bash:pass vitest:pass match:yes

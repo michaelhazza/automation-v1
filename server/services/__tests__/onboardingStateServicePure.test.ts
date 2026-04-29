@@ -36,15 +36,7 @@ const {
 // ---------------------------------------------------------------------------
 
 function syncTest(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
+  test(name, fn);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
