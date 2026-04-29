@@ -335,6 +335,10 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #232 — fix-logical-deletes (2026-04-29 — ChatGPT review round 2)
+
+- [ ] [user] **Soft-deleted agent placeholder: distinguishability** — When a delegation graph contains multiple soft-deleted agents, all render as `'(deleted agent)'` which is ambiguous when debugging historical traces. Consider `'(deleted agent #<short-id>)'` or similar to disambiguate. Priority: low — only relevant for graphs containing multiple deleted agents simultaneously, and ChatGPT itself classified the current behaviour as "acceptable for now, not PR-blocking." Source: ChatGPT PR review round 2; session log `tasks/review-logs/chatgpt-pr-review-fix-logical-deletes-2026-04-29T00-29-56Z.md`. PR #232 — https://github.com/michaelhazza/automation-v1/pull/232.
+
 ### PR #226 — claude-add-monitoring-logging-3xMKQ (2026-04-28 — ChatGPT review round 1)
 
 - [ ] [user] **Add `createWorker`-only tripwire (CI grep against raw `boss.work(`)** — Reviewer flagged that two new direct `boss.work(...)` registrations in this PR ([server/index.ts:462](server/index.ts#L462) async-ingest worker, [server/index.ts:499](server/index.ts#L499) skill-analyzer worker) plus pre-existing [agentScheduleService.ts:92,183](server/services/agentScheduleService.ts) bypass the `createWorker` wrapper's instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry). Both new workers are deliberate system-level exceptions (no org context) and could move to `createWorker` with `resolveOrgContext: () => null`, but migrating mid-merge expands scope. Add a CI tripwire script (`scripts/verify-no-raw-boss-work.sh`) that fails the build on any new `boss.work(` outside an allowlist of explicit system-level exceptions; pair with code comments at the exception sites pointing to the allowlist. Trigger to act: when adding the next pg-boss worker registration, OR when an instrumentation regression slips past review. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-claude-add-monitoring-logging-3xMKQ-2026-04-28T22-09-33Z.md`. PR #226 — https://github.com/michaelhazza/automation-v1/pull/226.
@@ -1491,3 +1495,37 @@ Follow-up: either find the missing worker registration site (audit log
 mentioned "Sprint 4 P3.1 bulk parent completion check"), or remove the
 `workflow-bulk-parent-check` entry from JOB_CONFIG if it's aspirational. Until
 then the DLQ subscription is harmless but noisy.
+
+
+---
+
+## Follow-up: Remaining soft-delete join gaps (fix-logical-deletes-2)
+
+**Source:** pr-reviewer on branch `fix-logical-deletes` (2026-04-29)
+
+The `fix-logical-deletes` branch fixed the 24 join sites listed in
+`docs/soft-delete-filter-gaps-spec.md`. The pr-reviewer found additional
+unguarded joins not covered by the spec. These should be fixed in a follow-up PR
+(`fix-logical-deletes-2`) to keep scope clean.
+
+### WHERE-clause only (functionally correct, convention-violating — isNull in WHERE, not join)
+- `server/tools/internal/assignTask.ts:55` — agents join
+- `server/services/agentExecutionService.ts:3057` — agents join
+- `server/services/agentScheduleService.ts:221` — agents join
+- `server/services/capabilityMapService.ts:203` — agents join
+- `server/services/scheduleCalendarService.ts:123` — agents join
+- `server/services/skillExecutor.ts:3375,3589,3839` — agents joins (3 sites)
+
+### No deletedAt filter at all (genuine Category A gaps)
+- `server/services/subaccountAgentService.ts:227` — `getLinkById` innerJoin agents (operational)
+- `server/services/subaccountAgentService.ts:390` — `getTree` innerJoin agents (org-chart, exact pattern that triggered the original bug)
+- `server/services/hierarchyRouteResolverService.ts:58` — agents join, runtime routing path
+- `server/services/workspaceHealth/workspaceHealthService.ts:266-267` — agents + subaccounts joins, no soft-delete filter
+- `server/services/workspaceHealth/workspaceHealthService.ts:317` — subaccounts join
+- `server/services/workspaceHealth/detectors/explicitDelegationSkillsWithoutChildren.ts:41` — agents join
+- `server/services/subaccountAgentService.ts:499` — leftJoin systemAgents, no isNull(systemAgents.deletedAt)
+- `server/jobs/proposeClientPulseInterventionsJob.ts:309` — innerJoin systemAgents
+- `server/services/clientPulseInterventionContextService.ts:366` — innerJoin systemAgents
+- `server/services/configUpdateOrganisationService.ts:59` — innerJoin systemAgents
+- `server/services/workflowActionCallExecutor.ts:74` — innerJoin systemAgents
+- `server/tools/config/configSkillHandlers.ts:34` — innerJoin systemAgents (same file as fix-logical-deletes)
