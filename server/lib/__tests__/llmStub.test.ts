@@ -11,38 +11,10 @@
  * lightweight pattern as server/services/__tests__/runContextLoader.test.ts.
  */
 
+import { expect, test } from 'vitest';
 import { createLLMStub, extractLastUserText, type LLMStubScenario } from './llmStub.js';
 import type { RouterCallParams } from '../../services/llmRouter.js';
 import type { ProviderMessage, ProviderResponse } from '../../services/providers/types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      result.then(
-        () => {
-          passed++;
-          console.log(`  PASS  ${name}`);
-        },
-        (err) => {
-          failed++;
-          console.log(`  FAIL  ${name}`);
-          console.log(`        ${err instanceof Error ? err.message : err}`);
-        },
-      );
-    } else {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    }
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 async function asyncTest(name: string, fn: () => Promise<void>) {
   try {
@@ -54,10 +26,6 @@ async function asyncTest(name: string, fn: () => Promise<void>) {
     console.log(`  FAIL  ${name}`);
     console.log(`        ${err instanceof Error ? err.message : err}`);
   }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -99,34 +67,25 @@ async function main() {
 
   // ── extractLastUserText ───────────────────────────────────────────
   test('empty messages → null', () => {
-    assertEqual(extractLastUserText([]), null, 'result');
+    expect(extractLastUserText([]), 'result').toBe(null);
   });
 
   test('last message is assistant → null', () => {
-    assertEqual(
-      extractLastUserText([
+    expect(extractLastUserText([
         { role: 'user', content: 'hello' },
         { role: 'assistant', content: 'hi' },
-      ]),
-      null,
-      'result',
-    );
+      ]), 'result').toBe(null);
   });
 
   test('last message is user string → returns string', () => {
-    assertEqual(
-      extractLastUserText([
+    expect(extractLastUserText([
         { role: 'assistant', content: 'previous' },
         { role: 'user', content: 'current message' },
-      ]),
-      'current message',
-      'result',
-    );
+      ]), 'result').toBe('current message');
   });
 
   test('last message is user with text blocks → concatenates texts', () => {
-    assertEqual(
-      extractLastUserText([
+    expect(extractLastUserText([
         {
           role: 'user',
           content: [
@@ -134,28 +93,20 @@ async function main() {
             { type: 'text', text: 'part B' },
           ],
         },
-      ]),
-      'part A\npart B',
-      'result',
-    );
+      ]), 'result').toBe('part A\npart B');
   });
 
   test('last message is user with only tool_result blocks → null', () => {
-    assertEqual(
-      extractLastUserText([
+    expect(extractLastUserText([
         {
           role: 'user',
           content: [{ type: 'tool_result', tool_use_id: 'tc-1', content: 'result text' }],
         },
-      ]),
-      null,
-      'result (no text blocks)',
-    );
+      ]), 'result (no text blocks)').toBe(null);
   });
 
   test('last message is user with mixed text + tool_result → only text blocks returned', () => {
-    assertEqual(
-      extractLastUserText([
+    expect(extractLastUserText([
         {
           role: 'user',
           content: [
@@ -163,10 +114,7 @@ async function main() {
             { type: 'text', text: 'kept' },
           ],
         },
-      ]),
-      'kept',
-      'result',
-    );
+      ]), 'result').toBe('kept');
   });
 
   console.log('');
@@ -179,8 +127,8 @@ async function main() {
       { response: makeResponse({ content: 'wildcarded' }) },
     ]);
     const result = await stub.routeCall(makeParams([{ role: 'user', content: 'anything' }]));
-    assertEqual(result.content, 'wildcarded', 'content');
-    assert(stub.callCount === 1, 'call recorded');
+    expect(result.content, 'content').toBe('wildcarded');
+    expect(stub.callCount === 1, 'call recorded').toBeTruthy();
   });
 
   await asyncTest('matchOnSystem matches when system regex matches', async () => {
@@ -194,7 +142,7 @@ async function main() {
     const result = await stub.routeCall(
       makeParams([{ role: 'user', content: 'hi' }], 'You are a helpful assistant'),
     );
-    assertEqual(result.content, 'matched system', 'content');
+    expect(result.content, 'content').toBe('matched system');
   });
 
   await asyncTest('matchOnSystem falls through when system does not match', async () => {
@@ -208,7 +156,7 @@ async function main() {
     const result = await stub.routeCall(
       makeParams([{ role: 'user', content: 'hi' }], 'Some other system'),
     );
-    assertEqual(result.content, 'fallback', 'content');
+    expect(result.content, 'content').toBe('fallback');
   });
 
   await asyncTest('matchOnLastUser matches when last user message regex matches', async () => {
@@ -222,7 +170,7 @@ async function main() {
     const result = await stub.routeCall(
       makeParams([{ role: 'user', content: 'please read the workspace' }]),
     );
-    assertEqual(result.content, 'read_workspace path', 'content');
+    expect(result.content, 'content').toBe('read_workspace path');
   });
 
   await asyncTest('both matchers must match when both are present', async () => {
@@ -238,12 +186,12 @@ async function main() {
     const r1 = await stub.routeCall(
       makeParams([{ role: 'user', content: 'write a patch' }], 'qa-agent'),
     );
-    assertEqual(r1.content, 'fallback', 'system mismatch → fallback');
+    expect(r1.content, 'system mismatch → fallback').toBe('fallback');
     // Both match → scenario fires.
     const r2 = await stub.routeCall(
       makeParams([{ role: 'user', content: 'write a patch now' }], 'dev-agent system prompt'),
     );
-    assertEqual(r2.content, 'both matched', 'both match → scenario');
+    expect(r2.content, 'both match → scenario').toBe('both matched');
   });
 
   await asyncTest('scenarios are evaluated in order; first match wins', async () => {
@@ -252,7 +200,7 @@ async function main() {
       { matchOnLastUser: /hello/, response: makeResponse({ content: 'second' }) },
     ]);
     const result = await stub.routeCall(makeParams([{ role: 'user', content: 'hello world' }]));
-    assertEqual(result.content, 'first', 'first scenario wins');
+    expect(result.content, 'first scenario wins').toBe('first');
   });
 
   await asyncTest('no scenario matches → routeCall throws with messages attached', async () => {
@@ -265,11 +213,11 @@ async function main() {
     } catch (err) {
       thrown = err;
     }
-    assert(thrown instanceof Error, 'an Error was thrown');
+    expect(thrown instanceof Error, 'an Error was thrown').toBeTruthy();
     const e = thrown as Error & { messages?: ProviderMessage[] };
-    assert(e.message.includes('no scenario matched'), 'error message mentions no match');
-    assert(Array.isArray(e.messages), 'messages attached');
-    assert(e.messages!.length === 1, 'messages has the one message');
+    expect(e.message.includes('no scenario matched'), 'error message mentions no match').toBeTruthy();
+    expect(Array.isArray(e.messages), 'messages attached').toBeTruthy();
+    expect(e.messages!.length === 1, 'messages has the one message').toBeTruthy();
   });
 
   // ── Call recording ─────────────────────────────────────────────
@@ -281,10 +229,10 @@ async function main() {
     await stub.routeCall(makeParams([{ role: 'user', content: 'alpha request' }]));
     await stub.routeCall(makeParams([{ role: 'user', content: 'beta request' }]));
 
-    assert(stub.calls.length === 2, 'two calls recorded');
-    assertEqual(stub.calls[0].scenarioIndex, 0, 'first call scenario index');
-    assertEqual(stub.calls[1].scenarioIndex, 1, 'second call scenario index');
-    assert(stub.calls[0].timestamp > 0, 'first timestamp > 0');
+    expect(stub.calls.length === 2, 'two calls recorded').toBeTruthy();
+    expect(stub.calls[0].scenarioIndex, 'first call scenario index').toBe(0);
+    expect(stub.calls[1].scenarioIndex, 'second call scenario index').toBe(1);
+    expect(stub.calls[0].timestamp > 0, 'first timestamp > 0').toBeTruthy();
   });
 
   await asyncTest('response returned is a deep clone, not the scenario reference', async () => {
@@ -295,7 +243,7 @@ async function main() {
     const r1 = await stub.routeCall(makeParams([{ role: 'user', content: 'x' }]));
     r1.content = 'mutated';
     const r2 = await stub.routeCall(makeParams([{ role: 'user', content: 'y' }]));
-    assertEqual(r2.content, 'original', 'second call unaffected by mutation of first result');
+    expect(r2.content, 'second call unaffected by mutation of first result').toBe('original');
   });
 
   // ── Reset ─────────────────────────────────────────────────────
@@ -304,23 +252,17 @@ async function main() {
       { response: makeResponse({ content: 'hi' }) },
     ]);
     await stub.routeCall(makeParams([{ role: 'user', content: 'test' }]));
-    assert(stub.callCount === 1, 'one call before reset');
+    expect(stub.callCount === 1, 'one call before reset').toBeTruthy();
 
     stub.reset();
-    assert(stub.callCount === 0, 'zero calls after reset');
+    expect(stub.callCount === 0, 'zero calls after reset').toBeTruthy();
 
     const result = await stub.routeCall(makeParams([{ role: 'user', content: 'test2' }]));
-    assertEqual(result.content, 'hi', 'scenario still works after reset');
-    assert(stub.callCount === 1, 'call count increments from 1 again');
+    expect(result.content, 'scenario still works after reset').toBe('hi');
+    expect(stub.callCount === 1, 'call count increments from 1 again').toBeTruthy();
   });
 
-  console.log('');
-  console.log(`${passed} passed, ${failed} failed`);
-  console.log('');
-  if (failed > 0) process.exit(1);
-}
+  console.log('');  console.log('');}
 
 main().catch((err) => {
-  console.error('Unhandled error in main():', err);
-  process.exit(1);
-});
+  console.error('Unhandled error in main():', err);});

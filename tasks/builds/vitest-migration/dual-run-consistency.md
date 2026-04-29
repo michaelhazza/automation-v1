@@ -131,3 +131,15 @@ server/jobs/__tests__/ruleAutoDeprecateJobPure.test.ts bash:pass vitest:pass mat
 server/jobs/__tests__/staleAnalyzerJobSweepJobPure.test.ts bash:pass vitest:pass match:yes
 server/lib/__tests__/briefContractTestHarness.example.test.ts bash:pass vitest:pass match:yes
 server/lib/__tests__/briefContractTestHarness.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-03 (2026-04-29)
+server/lib/__tests__/llmStub.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/postCommitEmitter.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/queryIntentClassifierPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/rlsBoundaryGuard.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/sanitizeSearchQueryPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/scopeAssertion.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/testRunIdempotencyPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/utf8Truncate.test.ts bash:pass vitest:pass match:yes
+server/lib/schedule/__tests__/schedulePickerToCronPure.test.ts bash:pass vitest:pass match:yes
+server/lib/workflow/__tests__/actionCallAllowlistPure.test.ts bash:pass vitest:pass match:yes

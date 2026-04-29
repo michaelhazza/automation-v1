@@ -7,26 +7,8 @@
  *   npx tsx server/lib/__tests__/utf8Truncate.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { truncateUtf8Safe } from '../utf8Truncate.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 function byteLen(s: string): number {
   return new TextEncoder().encode(s).length;
@@ -39,24 +21,24 @@ function isValidUtf8(s: string): boolean {
 }
 
 test('empty input → empty output', () => {
-  assert(truncateUtf8Safe('', 2048) === '', 'empty in empty out');
+  expect(truncateUtf8Safe('', 2048) === '', 'empty in empty out').toBeTruthy();
 });
 
 test('maxBytes 0 → empty string', () => {
-  assert(truncateUtf8Safe('hello', 0) === '', 'zero budget');
+  expect(truncateUtf8Safe('hello', 0) === '', 'zero budget').toBeTruthy();
 });
 
 test('input smaller than maxBytes → unchanged', () => {
   const s = 'hello world';
-  assert(truncateUtf8Safe(s, 2048) === s, 'no-op when small');
+  expect(truncateUtf8Safe(s, 2048) === s, 'no-op when small').toBeTruthy();
 });
 
 test('plain ASCII truncation', () => {
   const s = 'a'.repeat(3000);
   const out = truncateUtf8Safe(s, 2048);
-  assert(byteLen(out) <= 2048, `byte length ${byteLen(out)} should be ≤ 2048`);
-  assert(out.length === 2048, 'ASCII: 1 byte per char');
-  assert(isValidUtf8(out), 'no U+FFFD');
+  expect(byteLen(out) <= 2048, `byte length ${byteLen(out)} should be ≤ 2048`).toBeTruthy();
+  expect(out.length === 2048, 'ASCII: 1 byte per char').toBeTruthy();
+  expect(isValidUtf8(out), 'no U+FFFD').toBeTruthy();
 });
 
 test('multi-byte sequence: 2-byte (é)', () => {
@@ -64,10 +46,10 @@ test('multi-byte sequence: 2-byte (é)', () => {
   const s = 'aaa' + 'é'.repeat(1000);
   const maxBytes = 6;  // 'aaa' + 1 complete 'é' = 5 bytes; 6 would land mid-é
   const out = truncateUtf8Safe(s, maxBytes);
-  assert(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`);
-  assert(isValidUtf8(out), 'no U+FFFD');
+  expect(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`).toBeTruthy();
+  expect(isValidUtf8(out), 'no U+FFFD').toBeTruthy();
   // Should have the 3 a's + 1 complete é
-  assert(out === 'aaaé', `got "${out}"`);
+  expect(out === 'aaaé', `got "${out}"`).toBeTruthy();
 });
 
 test('multi-byte sequence: 3-byte (€)', () => {
@@ -75,9 +57,9 @@ test('multi-byte sequence: 3-byte (€)', () => {
   const s = 'x' + '€'.repeat(100);
   const maxBytes = 5;  // 'x' (1) + 1 full '€' (3) = 4; 5 would land 1 byte into the next
   const out = truncateUtf8Safe(s, maxBytes);
-  assert(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`);
-  assert(isValidUtf8(out), 'no U+FFFD');
-  assert(out === 'x€', `got "${out}"`);
+  expect(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`).toBeTruthy();
+  expect(isValidUtf8(out), 'no U+FFFD').toBeTruthy();
+  expect(out === 'x€', `got "${out}"`).toBeTruthy();
 });
 
 test('multi-byte sequence: 4-byte emoji (😀 U+1F600)', () => {
@@ -85,35 +67,33 @@ test('multi-byte sequence: 4-byte emoji (😀 U+1F600)', () => {
   const s = '😀'.repeat(10);
   const maxBytes = 6;  // 1 emoji = 4 bytes; budget 6 only fits 1 emoji
   const out = truncateUtf8Safe(s, maxBytes);
-  assert(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`);
-  assert(isValidUtf8(out), 'no U+FFFD');
-  assert(out === '😀', `got "${out}"`);
+  expect(byteLen(out) <= maxBytes, `byte length ${byteLen(out)} ≤ ${maxBytes}`).toBeTruthy();
+  expect(isValidUtf8(out), 'no U+FFFD').toBeTruthy();
+  expect(out === '😀', `got "${out}"`).toBeTruthy();
 });
 
 test('mixed script (English + CJK)', () => {
   // CJK chars are 3 bytes each in UTF-8.
   const s = 'Hello, 世界! '.repeat(200);
   const out = truncateUtf8Safe(s, 100);
-  assert(byteLen(out) <= 100, `byte length ${byteLen(out)} ≤ 100`);
-  assert(isValidUtf8(out), 'no U+FFFD');
+  expect(byteLen(out) <= 100, `byte length ${byteLen(out)} ≤ 100`).toBeTruthy();
+  expect(isValidUtf8(out), 'no U+FFFD').toBeTruthy();
 });
 
 test('truncation on exact boundary (no backtracking needed)', () => {
   // 'abc' + 'é' = 3 + 2 = 5 bytes. Truncate to 5 — should be unchanged.
   const s = 'abcé';
   const out = truncateUtf8Safe(s, 5);
-  assert(out === 'abcé', `got "${out}"`);
+  expect(out === 'abcé', `got "${out}"`).toBeTruthy();
 });
 
 test('2 KB realistic JSON-ish payload stays valid', () => {
   const raw = '{"x":"' + 'éこんにちは😀'.repeat(500) + '"}';
   const out = truncateUtf8Safe(raw, 2048);
-  assert(byteLen(out) <= 2048, 'byte budget respected');
-  assert(isValidUtf8(out), 'no replacement characters in output');
+  expect(byteLen(out) <= 2048, 'byte budget respected').toBeTruthy();
+  expect(isValidUtf8(out), 'no replacement characters in output').toBeTruthy();
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────
 
-console.log('');
-console.log(`[utf8Truncate] ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+console.log('');

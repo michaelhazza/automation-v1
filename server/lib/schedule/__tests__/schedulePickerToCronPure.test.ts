@@ -6,6 +6,7 @@
  * docs/onboarding-playbooks-spec.md §5.3.
  */
 
+import { expect, test } from 'vitest';
 import {
   schedulePickerValueToCron,
   defaultSchedulePickerValue,
@@ -13,25 +14,6 @@ import {
   SchedulePickerError,
   type SchedulePickerValue,
 } from '../schedulePickerToCron.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -49,8 +31,8 @@ test('daily — emits "M H * * *" cron', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 9 * * *', 'daily cron');
-  assertEqual(out.firstRunAtTz, 'UTC', 'tz preserved');
+  expect(out.cron, 'daily cron').toBe('0 9 * * *');
+  expect(out.firstRunAtTz, 'tz preserved').toBe('UTC');
 });
 
 test('daily — non-UTC tz converts wall-clock correctly (EST -05:00 in Jan)', () => {
@@ -62,7 +44,7 @@ test('daily — non-UTC tz converts wall-clock correctly (EST -05:00 in Jan)', (
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'America/New_York');
-  assertEqual(out.firstRunAt.toISOString(), '2026-01-15T14:00:00.000Z', 'EST offset');
+  expect(out.firstRunAt.toISOString(), 'EST offset').toBe('2026-01-15T14:00:00.000Z');
 });
 
 test('daily — non-UTC tz converts wall-clock correctly (EDT -04:00 in Jul)', () => {
@@ -74,7 +56,7 @@ test('daily — non-UTC tz converts wall-clock correctly (EDT -04:00 in Jul)', (
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'America/New_York');
-  assertEqual(out.firstRunAt.toISOString(), '2026-07-15T13:00:00.000Z', 'EDT offset');
+  expect(out.firstRunAt.toISOString(), 'EDT offset').toBe('2026-07-15T13:00:00.000Z');
 });
 
 test('daily — DST transition day (Mar 8 2026 NY): 09:00 local is 13:00 UTC', () => {
@@ -86,7 +68,7 @@ test('daily — DST transition day (Mar 8 2026 NY): 09:00 local is 13:00 UTC', (
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'America/New_York');
-  assertEqual(out.firstRunAt.toISOString(), '2026-03-08T13:00:00.000Z', 'DST forward');
+  expect(out.firstRunAt.toISOString(), 'DST forward').toBe('2026-03-08T13:00:00.000Z');
 });
 
 // ─── Weekly ─────────────────────────────────────────────────────────────────
@@ -100,7 +82,7 @@ test('weekly — emits "M H * * D" cron for Monday 9am', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 9 * * 1', 'weekly Monday cron');
+  expect(out.cron, 'weekly Monday cron').toBe('0 9 * * 1');
 });
 
 test('weekly — Sunday = 0', () => {
@@ -112,7 +94,7 @@ test('weekly — Sunday = 0', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '30 10 * * 0', 'weekly Sunday cron');
+  expect(out.cron, 'weekly Sunday cron').toBe('30 10 * * 0');
 });
 
 test('weekly — rejects invalid dayOfWeek', () => {
@@ -129,7 +111,7 @@ test('weekly — rejects invalid dayOfWeek', () => {
   } catch (err) {
     threw = err instanceof SchedulePickerError && err.code === 'invalid_day_of_week';
   }
-  assert(threw, 'dayOfWeek=7 must throw invalid_day_of_week');
+  expect(threw, 'dayOfWeek=7 must throw invalid_day_of_week').toBeTruthy();
 });
 
 // ─── Monthly ────────────────────────────────────────────────────────────────
@@ -143,7 +125,7 @@ test('monthly — emits "M H D * *" cron', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 9 15 * *', 'monthly cron');
+  expect(out.cron, 'monthly cron').toBe('0 9 15 * *');
 });
 
 test('monthly — day 29+ clamps to 28 (spec fallback for short months)', () => {
@@ -155,7 +137,7 @@ test('monthly — day 29+ clamps to 28 (spec fallback for short months)', () => 
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 9 28 * *', 'monthly cron clamped at 28');
+  expect(out.cron, 'monthly cron clamped at 28').toBe('0 9 28 * *');
 });
 
 test('monthly — rejects invalid dayOfMonth=0', () => {
@@ -172,7 +154,7 @@ test('monthly — rejects invalid dayOfMonth=0', () => {
   } catch (err) {
     threw = err instanceof SchedulePickerError && err.code === 'invalid_day_of_month';
   }
-  assert(threw, 'dayOfMonth=0 must throw invalid_day_of_month');
+  expect(threw, 'dayOfMonth=0 must throw invalid_day_of_month').toBeTruthy();
 });
 
 // ─── Quarterly ──────────────────────────────────────────────────────────────
@@ -185,7 +167,7 @@ test('quarterly — emits 4-month list starting from first-run month', () => {
   };
   const out = schedulePickerValueToCron(v, 'UTC');
   // Jan start → Jan, Apr, Jul, Oct
-  assertEqual(out.cron, '0 9 15 1,4,7,10 *', 'quarterly from Jan');
+  expect(out.cron, 'quarterly from Jan').toBe('0 9 15 1,4,7,10 *');
 });
 
 test('quarterly — Feb start wraps to May/Aug/Nov/Feb', () => {
@@ -195,7 +177,7 @@ test('quarterly — Feb start wraps to May/Aug/Nov/Feb', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '30 8 10 2,5,8,11 *', 'quarterly from Feb');
+  expect(out.cron, 'quarterly from Feb').toBe('30 8 10 2,5,8,11 *');
 });
 
 // ─── Half-yearly ────────────────────────────────────────────────────────────
@@ -207,7 +189,7 @@ test('half_yearly — emits 2-month list 6 apart', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 14 20 3,9 *', 'half-yearly Mar/Sep');
+  expect(out.cron, 'half-yearly Mar/Sep').toBe('0 14 20 3,9 *');
 });
 
 test('half_yearly — December wraps to June', () => {
@@ -217,7 +199,7 @@ test('half_yearly — December wraps to June', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 12 5 6,12 *', 'half-yearly Jun/Dec');
+  expect(out.cron, 'half-yearly Jun/Dec').toBe('0 12 5 6,12 *');
 });
 
 // ─── Annually ───────────────────────────────────────────────────────────────
@@ -229,7 +211,7 @@ test('annually — emits single-month cron', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '15 11 10 5 *', 'annually cron');
+  expect(out.cron, 'annually cron').toBe('15 11 10 5 *');
 });
 
 test('annually — day 31 clamps to 28', () => {
@@ -239,7 +221,7 @@ test('annually — day 31 clamps to 28', () => {
     runNow: false,
   };
   const out = schedulePickerValueToCron(v, 'UTC');
-  assertEqual(out.cron, '0 9 28 3 *', 'annual clamp');
+  expect(out.cron, 'annual clamp').toBe('0 9 28 3 *');
 });
 
 // ─── Input validation ──────────────────────────────────────────────────────
@@ -257,7 +239,7 @@ test('rejects malformed firstRunAt', () => {
   } catch (err) {
     threw = err instanceof SchedulePickerError && err.code === 'invalid_first_run_at';
   }
-  assert(threw, 'bad firstRunAt must throw');
+  expect(threw, 'bad firstRunAt must throw').toBeTruthy();
 });
 
 test('rejects malformed timeOfDay', () => {
@@ -273,7 +255,7 @@ test('rejects malformed timeOfDay', () => {
   } catch (err) {
     threw = err instanceof SchedulePickerError && err.code === 'invalid_time_of_day';
   }
-  assert(threw, 'bad timeOfDay must throw');
+  expect(threw, 'bad timeOfDay must throw').toBeTruthy();
 });
 
 test('rejects empty timezone', () => {
@@ -289,7 +271,7 @@ test('rejects empty timezone', () => {
   } catch (err) {
     threw = err instanceof SchedulePickerError && err.code === 'invalid_timezone';
   }
-  assert(threw, 'empty tz must throw');
+  expect(threw, 'empty tz must throw').toBeTruthy();
 });
 
 // ─── defaultSchedulePickerValue ─────────────────────────────────────────────
@@ -298,17 +280,17 @@ test('defaultSchedulePickerValue seeds daily 09:00 — today when before 9am loc
   // 06:00 UTC on 2026-04-15 is 02:00 NY — well before 9am NY.
   const now = new Date('2026-04-15T06:00:00Z');
   const v = defaultSchedulePickerValue(now, 'America/New_York');
-  assertEqual(v.interval, 'daily', 'default interval');
-  assertEqual(v.timeOfDay, '09:00', 'default time');
-  assertEqual(v.runNow, false, 'default runNow');
-  assertEqual(v.firstRunAt, '2026-04-15T09:00', 'first run today');
+  expect(v.interval, 'default interval').toBe('daily');
+  expect(v.timeOfDay, 'default time').toBe('09:00');
+  expect(v.runNow, 'default runNow').toBe(false);
+  expect(v.firstRunAt, 'first run today').toBe('2026-04-15T09:00');
 });
 
 test('defaultSchedulePickerValue rolls to tomorrow when after 9am local', () => {
   // 18:00 UTC on 2026-04-15 is 14:00 NY — past 09:00.
   const now = new Date('2026-04-15T18:00:00Z');
   const v = defaultSchedulePickerValue(now, 'America/New_York');
-  assertEqual(v.firstRunAt, '2026-04-16T09:00', 'rolls to tomorrow');
+  expect(v.firstRunAt, 'rolls to tomorrow').toBe('2026-04-16T09:00');
 });
 
 // ─── describeSchedulePickerValue ────────────────────────────────────────────
@@ -321,9 +303,9 @@ test('describe — daily with runNow', () => {
     runNow: true,
   };
   const s = describeSchedulePickerValue(v, 'America/New_York');
-  assert(s.includes('Every day at 09:00'), `summary mentions schedule: ${s}`);
-  assert(s.includes('America/New_York'), `summary mentions tz: ${s}`);
-  assert(s.includes('immediately'), `summary mentions runNow: ${s}`);
+  expect(s.includes('Every day at 09:00'), `summary mentions schedule: ${s}`).toBeTruthy();
+  expect(s.includes('America/New_York'), `summary mentions tz: ${s}`).toBeTruthy();
+  expect(s.includes('immediately'), `summary mentions runNow: ${s}`).toBeTruthy();
 });
 
 test('describe — weekly without runNow', () => {
@@ -335,11 +317,8 @@ test('describe — weekly without runNow', () => {
     runNow: false,
   };
   const s = describeSchedulePickerValue(v, 'UTC');
-  assert(s.includes('Monday'), `summary mentions weekday: ${s}`);
-  assert(!s.includes('immediately'), `no runNow phrasing when off: ${s}`);
+  expect(s.includes('Monday'), `summary mentions weekday: ${s}`).toBeTruthy();
+  expect(!s.includes('immediately'), `no runNow phrasing when off: ${s}`).toBeTruthy();
 });
 
-// ─── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// ─── Summary ────────────────────────────────────────────────────────────────
