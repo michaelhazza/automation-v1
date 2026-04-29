@@ -577,6 +577,13 @@ async function start() {
     throw err;
   }
 
+  // Phase 3: webhook secret boot assertion (spec §6.3.1).
+  if (env.NODE_ENV === 'production' && !env.WEBHOOK_SECRET) {
+    throw new Error(
+      '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
+    );
+  }
+
   initWebSocket(httpServer);
 
   // Start the LLM in-flight registry's deadline-based sweep + (optional)
