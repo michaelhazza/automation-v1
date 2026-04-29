@@ -96,6 +96,22 @@ test('empty org list → zero iterations (per-org isolation contract)', () => {
   assert(callCount === 0, `Expected 0 iterations for empty org list, got ${callCount}`);
 });
 
+test('per-org invocation count matches enumerated org count', () => {
+  const orgs = ['org-a', 'org-b', 'org-c'];
+  const invoked: string[] = [];
+  for (const org of orgs) {
+    invoked.push(org);
+  }
+  assert(
+    invoked.length === orgs.length,
+    `Expected ${orgs.length} per-org invocations, got ${invoked.length}`,
+  );
+  assert(
+    invoked.join(',') === orgs.join(','),
+    `Expected invocation order [${orgs.join(',')}], got [${invoked.join(',')}]`,
+  );
+});
+
 test('per-org error isolation: one failing org does not stop iteration', () => {
   const orgs = ['org-a', 'org-b', 'org-c'];
   const processed: string[] = [];

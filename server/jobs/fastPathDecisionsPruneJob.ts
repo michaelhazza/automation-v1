@@ -4,16 +4,11 @@
  * Scheduled daily at 03:30 UTC in queueService.ts.
  *
  * Execution contract (Phase 3 — B10-MAINT-RLS):
- *   - withAdminConnection + SET LOCAL ROLE admin_role to bypass RLS for the
- *     cross-org prune sweep (no app.organisation_id → fail-closed otherwise).
+ *   - Org enumeration in a short-lived withAdminConnection + SET LOCAL ROLE admin_role.
  *   - Sequential per-org processing; no parallel fan-out in v1.
- *   - One admin transaction PER ORG. The org-list enumeration runs in its own
- *     short-lived admin tx; each per-org DELETE runs in a fresh admin tx so
- *     a Postgres statement error in one org does not abort the surrounding
- *     transaction and poison every later org's work. Without this split,
- *     "partial" status is unachievable: after one tx.execute throws, every
- *     subsequent tx.execute in the same tx fails with "current transaction
- *     is aborted".
+ *   - Per-org DELETE runs in a fresh db.transaction + withOrgTx so that
+ *     app.organisation_id is set and RLS policies engage for each org's work.
+ *     A per-org error does not abort the surrounding sweep.
  *   - Per-org try/catch: one org failure is logged; iteration continues.
  *   - Terminal event emitted with outcome counters regardless of mixed results.
  *
@@ -23,6 +18,8 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
 
@@ -81,22 +78,24 @@ export async function pruneFastPathDecisions(): Promise<FastPathDecisionsPruneRe
   let orgsFailed = 0;
   let rowsDeleted = 0;
 
-  // Phase 2 — per-org work, each in its own admin tx so a per-org failure
-  // does not abort the surrounding transaction.
+  // Phase 2 — per-org work, each in a fresh tenant-scoped tx so RLS policies
+  // are engaged for every DELETE. A per-org failure does not abort the sweep.
   for (const org of orgs) {
     logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
     const orgStart = Date.now();
     try {
-      const deletedCount = await withAdminConnection(
-        { source: SOURCE, reason: `Daily prune for org ${org.id}`, skipAudit: true },
-        async (tx) => {
-          await tx.execute(sql`SET LOCAL ROLE admin_role`);
-          const deleted = (await tx.execute(
-            sql`DELETE FROM fast_path_decisions WHERE organisation_id = ${org.id}::uuid AND decided_at < ${cutoff} RETURNING id`,
-          )) as unknown as Array<{ id: string }>;
-          return deleted.length;
-        },
-      );
+      const deletedCount = await db.transaction(async (orgTx) => {
+        await orgTx.execute(sql`SELECT set_config('app.organisation_id', ${org.id}, true)`);
+        return withOrgTx(
+          { tx: orgTx, organisationId: org.id, source: `${SOURCE}:per-org` },
+          async () => {
+            const deleted = (await orgTx.execute(
+              sql`DELETE FROM fast_path_decisions WHERE organisation_id = ${org.id}::uuid AND decided_at < ${cutoff} RETURNING id`,
+            )) as unknown as Array<{ id: string }>;
+            return deleted.length;
+          },
+        );
+      });
       rowsDeleted += deletedCount;
       orgsSucceeded++;
       logger.info(`${SOURCE}.org_completed`, {
