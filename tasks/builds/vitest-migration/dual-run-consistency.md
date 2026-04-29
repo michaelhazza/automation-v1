@@ -155,3 +155,15 @@ server/routes/__tests__/llmUsage.test.ts bash:pass vitest:pass match:yes
 server/routes/__tests__/reviewItems.test.ts bash:pass vitest:pass match:yes
 server/routes/__tests__/sessionMessage.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/activityService.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-05 (2026-04-29)
+server/services/__tests__/agentActivityService.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentBeliefServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecution.smoke.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionService.middlewareContext.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionService.phase.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionService.validateToolCalls.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionServicePure.plan.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/agentExecutionServicePure.toolIntent.test.ts bash:pass vitest:pass match:yes

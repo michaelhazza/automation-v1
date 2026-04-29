@@ -6,26 +6,8 @@
  * docs/improvements-roadmap-spec.md.
  */
 
+import { expect, test } from 'vitest';
 import { parsePlan, isComplexRun } from '../agentExecutionServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -43,9 +25,9 @@ test('parsePlan: parses a valid plan with actions', () => {
     ],
   });
   const plan = parsePlan(input);
-  assert(plan !== null, 'should not be null');
-  assertEqual(plan!.actions.length, 2, 'should have 2 actions');
-  assertEqual(plan!.actions[0].tool, 'read_inbox', 'first action tool');
+  expect(plan !== null, 'should not be null').toBeTruthy();
+  expect(plan!.actions.length, 'should have 2 actions').toBe(2);
+  expect(plan!.actions[0].tool, 'first action tool').toBe('read_inbox');
 });
 
 test('parsePlan: parses a plan wrapped in { plan: { actions: [...] } }', () => {
@@ -55,71 +37,69 @@ test('parsePlan: parses a plan wrapped in { plan: { actions: [...] } }', () => {
     },
   });
   const plan = parsePlan(input);
-  assert(plan !== null, 'should not be null');
-  assertEqual(plan!.actions[0].tool, 'send_email', 'tool from wrapped plan');
+  expect(plan !== null, 'should not be null').toBeTruthy();
+  expect(plan!.actions[0].tool, 'tool from wrapped plan').toBe('send_email');
 });
 
 test('parsePlan: parses markdown-fenced JSON', () => {
   const input = '```json\n{"actions": [{"tool": "web_search", "reason": "Look up info"}]}\n```';
   const plan = parsePlan(input);
-  assert(plan !== null, 'should not be null');
-  assertEqual(plan!.actions[0].tool, 'web_search', 'tool from fenced JSON');
+  expect(plan !== null, 'should not be null').toBeTruthy();
+  expect(plan!.actions[0].tool, 'tool from fenced JSON').toBe('web_search');
 });
 
 test('parsePlan: returns null for null/undefined input', () => {
-  assertEqual(parsePlan(null), null, 'null input');
-  assertEqual(parsePlan(undefined), null, 'undefined input');
+  expect(parsePlan(null), 'null input').toBe(null);
+  expect(parsePlan(undefined), 'undefined input').toBe(null);
 });
 
 test('parsePlan: returns null for empty actions', () => {
-  assertEqual(parsePlan('{"actions": []}'), null, 'empty actions');
+  expect(parsePlan('{"actions": []}'), 'empty actions').toBe(null);
 });
 
 test('parsePlan: returns null for malformed JSON', () => {
-  assertEqual(parsePlan('not json'), null, 'malformed JSON');
+  expect(parsePlan('not json'), 'malformed JSON').toBe(null);
 });
 
 test('parsePlan: extracts JSON from surrounding text', () => {
   const input = 'Here is my plan:\n{"actions": [{"tool": "fetch_url", "reason": "Get data"}]}\nEnd.';
   const plan = parsePlan(input);
-  assert(plan !== null, 'should not be null');
-  assertEqual(plan!.actions[0].tool, 'fetch_url', 'tool from extracted JSON');
+  expect(plan !== null, 'should not be null').toBeTruthy();
+  expect(plan!.actions[0].tool, 'tool from extracted JSON').toBe('fetch_url');
 });
 
 // ── isComplexRun ───────────────────────────────────────────────────
 
 test('isComplexRun: returns true for explicit complex hint', () => {
-  assertEqual(isComplexRun({ complexityHint: 'complex', messageWordCount: 10, skillCount: 5 }), true, 'complex hint');
+  expect(isComplexRun({ complexityHint: 'complex', messageWordCount: 10, skillCount: 5 }), 'complex hint').toBe(true);
 });
 
 test('isComplexRun: returns true for high word count', () => {
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 350, skillCount: 5 }), true, 'high word count');
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 350, skillCount: 5 }), 'high word count').toBe(true);
 });
 
 test('isComplexRun: returns true for high skill count', () => {
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 20 }), true, 'high skill count');
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 20 }), 'high skill count').toBe(true);
 });
 
 test('isComplexRun: returns false for simple runs', () => {
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 50, skillCount: 5 }), false, 'simple run');
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 50, skillCount: 5 }), 'simple run').toBe(false);
 });
 
 test('isComplexRun: simple hint suppresses planning even with high word count', () => {
-  assertEqual(isComplexRun({ complexityHint: 'simple', messageWordCount: 350, skillCount: 5 }), false, 'simple hint overrides high words');
-  assertEqual(isComplexRun({ complexityHint: 'simple', messageWordCount: 10, skillCount: 20 }), false, 'simple hint overrides high skills');
+  expect(isComplexRun({ complexityHint: 'simple', messageWordCount: 350, skillCount: 5 }), 'simple hint overrides high words').toBe(false);
+  expect(isComplexRun({ complexityHint: 'simple', messageWordCount: 10, skillCount: 20 }), 'simple hint overrides high skills').toBe(false);
 });
 
 test('isComplexRun: respects word count threshold boundary', () => {
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 300, skillCount: 5 }), false, 'at boundary');
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 301, skillCount: 5 }), true, 'above boundary');
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 300, skillCount: 5 }), 'at boundary').toBe(false);
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 301, skillCount: 5 }), 'above boundary').toBe(true);
 });
 
 test('isComplexRun: respects skill count threshold boundary', () => {
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 15 }), false, 'at skill boundary');
-  assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 16 }), true, 'above skill boundary');
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 15 }), 'at skill boundary').toBe(false);
+  expect(isComplexRun({ complexityHint: null, messageWordCount: 10, skillCount: 16 }), 'above skill boundary').toBe(true);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

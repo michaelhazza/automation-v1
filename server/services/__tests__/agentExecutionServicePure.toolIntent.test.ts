@@ -9,40 +9,22 @@
  * every tool call. Pure: no DB, no env, no LLM, just string → number.
  */
 
+import { expect, test } from 'vitest';
 import { extractToolIntentConfidence } from '../agentExecutionServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  if (a !== b) throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-}
 
 console.log('');
 console.log('agentExecutionServicePure.extractToolIntentConfidence — Sprint 3 P2.3');
 console.log('');
 
 test('returns null for null / undefined / empty input', () => {
-  assertEqual(extractToolIntentConfidence(null, 'send_email'), null, 'null');
-  assertEqual(extractToolIntentConfidence(undefined, 'send_email'), null, 'undefined');
-  assertEqual(extractToolIntentConfidence('', 'send_email'), null, 'empty');
+  expect(extractToolIntentConfidence(null, 'send_email'), 'null').toBe(null);
+  expect(extractToolIntentConfidence(undefined, 'send_email'), 'undefined').toBe(null);
+  expect(extractToolIntentConfidence('', 'send_email'), 'empty').toBe(null);
 });
 
 test('returns null when no tool_intent block is present', () => {
   const text = 'I will now call the send_email tool to notify the user.';
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), null, 'no block');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'no block').toBe(null);
 });
 
 test('extracts confidence from single-object block', () => {
@@ -52,7 +34,7 @@ test('extracts confidence from single-object block', () => {
     { "tool": "send_email", "confidence": 0.82, "reason": "template verified" }
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.82, 'single');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'single').toBe(0.82);
 });
 
 test('extracts confidence from array block', () => {
@@ -64,8 +46,8 @@ test('extracts confidence from array block', () => {
     ]
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.9, 'array send');
-  assertEqual(extractToolIntentConfidence(text, 'create_deal'), 0.4, 'array deal');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'array send').toBe(0.9);
+  expect(extractToolIntentConfidence(text, 'create_deal'), 'array deal').toBe(0.4);
 });
 
 test('returns null when tool is not in the block', () => {
@@ -74,7 +56,7 @@ test('returns null when tool is not in the block', () => {
     { "tool": "send_email", "confidence": 0.9 }
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'create_deal'), null, 'missing tool');
+  expect(extractToolIntentConfidence(text, 'create_deal'), 'missing tool').toBe(null);
 });
 
 test('last tool_intent block wins when multiple are present', () => {
@@ -87,7 +69,7 @@ test('last tool_intent block wins when multiple are present', () => {
     { "tool": "send_email", "confidence": 0.95 }
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.95, 'last wins');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'last wins').toBe(0.95);
 });
 
 test('accepts \\`\\`\\`json fenced JSON inside the block', () => {
@@ -98,7 +80,7 @@ test('accepts \\`\\`\\`json fenced JSON inside the block', () => {
     \`\`\`
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.77, 'fenced json');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'fenced json').toBe(0.77);
 });
 
 test('accepts plain \\`\\`\\` fenced block (no json language tag)', () => {
@@ -109,7 +91,7 @@ test('accepts plain \\`\\`\\` fenced block (no json language tag)', () => {
     \`\`\`
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.55, 'plain fence');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'plain fence').toBe(0.55);
 });
 
 test('returns null on malformed JSON', () => {
@@ -118,19 +100,19 @@ test('returns null on malformed JSON', () => {
     { "tool": "send_email", "confidence": 0.9  // oops missing brace
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), null, 'malformed');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'malformed').toBe(null);
 });
 
 test('returns null when confidence is out of [0, 1]', () => {
   const neg = `<tool_intent>{ "tool": "send_email", "confidence": -0.1 }</tool_intent>`;
   const over = `<tool_intent>{ "tool": "send_email", "confidence": 1.5 }</tool_intent>`;
-  assertEqual(extractToolIntentConfidence(neg, 'send_email'), null, 'negative');
-  assertEqual(extractToolIntentConfidence(over, 'send_email'), null, 'over one');
+  expect(extractToolIntentConfidence(neg, 'send_email'), 'negative').toBe(null);
+  expect(extractToolIntentConfidence(over, 'send_email'), 'over one').toBe(null);
 });
 
 test('returns null when confidence is not a number', () => {
   const text = `<tool_intent>{ "tool": "send_email", "confidence": "high" }</tool_intent>`;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), null, 'string confidence');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'string confidence').toBe(null);
 });
 
 test('returns null when confidence is NaN / Infinity', () => {
@@ -148,27 +130,27 @@ test('returns null when confidence is NaN / Infinity', () => {
   `;
   // The out-of-range entry is rejected, the next valid entry (0.4)
   // wins — confirms invalid entries don't poison the result.
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.4, 'array fallback');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'array fallback').toBe(0.4);
 });
 
 test('0 is a valid confidence (fail closed will still kick in)', () => {
   const text = `<tool_intent>{ "tool": "send_email", "confidence": 0 }</tool_intent>`;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0, 'zero');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'zero').toBe(0);
 });
 
 test('1 is a valid confidence', () => {
   const text = `<tool_intent>{ "tool": "send_email", "confidence": 1 }</tool_intent>`;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 1, 'one');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'one').toBe(1);
 });
 
 test('case-insensitive tag match', () => {
   const text = `<Tool_Intent>{ "tool": "send_email", "confidence": 0.6 }</Tool_Intent>`;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.6, 'case insensitive');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'case insensitive').toBe(0.6);
 });
 
 test('tool slug comparison is case-sensitive', () => {
   const text = `<tool_intent>{ "tool": "Send_Email", "confidence": 0.9 }</tool_intent>`;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), null, 'mismatched case');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'mismatched case').toBe(null);
 });
 
 test('ignores array entries with non-string tool fields', () => {
@@ -180,10 +162,8 @@ test('ignores array entries with non-string tool fields', () => {
     ]
     </tool_intent>
   `;
-  assertEqual(extractToolIntentConfidence(text, 'send_email'), 0.5, 'tolerant array');
+  expect(extractToolIntentConfidence(text, 'send_email'), 'tolerant array').toBe(0.5);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);
