@@ -35,9 +35,9 @@
 // is valid under the server tsconfig.
 export {};
 
-if (!process.env.DATABASE_URL) {
+if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
   console.log('\nRLS context-propagation test\n');
-  console.log('  SKIP  DATABASE_URL not set — integration test cannot run without Postgres');
+  console.log('  SKIP  requires DATABASE_URL and NODE_ENV=integration');
   console.log('\n  Skipped (not a failure).\n');
   process.exit(0);
 }
