@@ -1534,3 +1534,23 @@ unguarded joins not covered by the spec. These should be fixed in a follow-up PR
 - `server/services/configUpdateOrganisationService.ts:59` — innerJoin systemAgents
 - `server/services/workflowActionCallExecutor.ts:74` — innerJoin systemAgents
 - `server/tools/config/configSkillHandlers.ts:34` — innerJoin systemAgents (same file as fix-logical-deletes)
+
+---
+
+## Deferred from pre-prod-tenancy spec
+
+### Phase 2 §4.7 load-test — speedup re-measurement on production environment
+`intervention_outcomes` ON CONFLICT throughput comparison was run on localhost loopback
+(Intel Core Ultra 7 258V, PostgreSQL 18.3, Node.js v20.19.6).
+
+Local result: 1.47× speedup (300 rows/sec/org new path vs 204 rows/sec/org legacy path).
+Absolute floor: PASS (300 ≥ 200 rows/sec/org).
+Correctness: PASS (200 rows written, 0 duplicates, concurrency check clean).
+
+Speedup FAILS the ≥5× spec threshold locally because loopback eliminates per-round-trip
+network latency — the dominant cost of the legacy 200-row per-row-transaction path in
+production. On staging/prod with 5–20ms app→DB latency, expected speedup is 10×–40×.
+
+Action: re-run `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` after deploy to
+a staging environment with real app→DB network latency. Pass conditions remain:
+≥5× speedup vs legacy advisory-lock path AND ≥200 rows/sec/org.

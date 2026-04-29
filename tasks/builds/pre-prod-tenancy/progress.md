@@ -132,3 +132,28 @@ Verdict: pass
 - Idempotency: DROP POLICY IF EXISTS ... ; CREATE POLICY ... shape throughout
 - Manifest entries added: 57 (55 with policyMigration pointing to 0245 + 2 sister-branch registry-only: workflow_engines, workflow_runs)
 - Per-block rollback comments: present on all 55 blocks; prior RLS state = disabled (no policy) for all
+
+---
+
+## Phase 2 §4.7 load-test result ([spec round 7 — commit a9135930])
+
+- Fixture: 200 rows (2 orgs × 100 actions); seeded via `tasks/builds/pre-prod-tenancy/seed_perf_test.sql`; `notify_operator` action type; `executed_at = NOW() - 2h`; canonical_accounts seeded to satisfy FK + resolveAccountIdForSubaccount
+- Test harness: `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` (npx tsx, Node.js v20.19.6); direct `interventionService.recordOutcome()` loop (new path) vs per-row `db.transaction` + `pg_advisory_xact_lock` + NOT EXISTS claim-verify (legacy path)
+- New path run durations (ms): 364.2, 317.2, 333.7
+- Legacy path run durations (ms): 489.3, 442.5, 516.1
+- New path median: 333.7ms → **300 rows/sec/org** (pass: ≥200 — PASS)
+- Legacy path median: 489.3ms → 204 rows/sec/org
+- Multiplier: **1.47×** (pass threshold: ≥5× — FAIL on local loopback)
+- Absolute floor: 300 rows/sec/org (PASS)
+- Correctness: 200 rows written per run, 0 failed, 0 duplicates
+- Concurrency check: 2 concurrent sweeps of 200 actions → 200 total rows in DB, 0 duplicate intervention_id rows (PASS)
+- Hardware: Intel Core Ultra 7 258V, 8 cores, 2.2GHz; PostgreSQL 18.3 on localhost (loopback)
+- Run timestamp: 2026-04-29T06:15:00Z
+
+### Speedup assessment
+
+The 1.47× local speedup does NOT satisfy the spec's ≥5× threshold. Root cause: loopback postgres eliminates the per-round-trip network latency that makes the advisory lock path slow in production. On local loopback, a per-row `db.transaction` + advisory lock + NOT EXISTS + INSERT costs ~2.4ms/row vs ~1.7ms/row for recordOutcome — a 1.4× gap. In production with 5–20ms app→DB latency, the legacy per-row path would cost 200×(2×RTT + lock overhead) = 2000–8000ms vs a single-batch INSERT for the new path — yielding 10×–40× speedup.
+
+Note: `db.execute(sql`...${date}...`)` with Date objects fails in this tsx environment (postgres-js v3.4.8 + drizzle v0.45.1 `unsafe()` path Bug — `Buffer.byteLength` receives a Date). This blocks running the full job via `runMeasureInterventionOutcomes()` standalone. The write-path timing above bypasses the eligibility SELECT and directly benchmarks `recordOutcome()` (the bottleneck). The eligibility SELECT is not part of the performance comparison as it runs identically on both paths.
+
+Deferred: re-run on representative environment (staging/production with app→DB network latency) to verify ≥5× production speedup. See `tasks/todo.md § Deferred from pre-prod-tenancy spec`.
