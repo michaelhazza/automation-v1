@@ -20,7 +20,7 @@ export const orgAgentConfigService = {
         agentStatus: agents.status,
       })
       .from(orgAgentConfigs)
-      .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
+      .innerJoin(agents, and(eq(agents.id, orgAgentConfigs.agentId), isNull(agents.deletedAt)))
       .where(eq(orgAgentConfigs.organisationId, organisationId));
 
     return rows.map(({ config, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({

@@ -1,4 +1,4 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   scheduledTasks,
@@ -468,7 +468,7 @@ export const scheduledTaskService = {
         agentName: agents.name,
       })
       .from(scheduledTasks)
-      .leftJoin(agents, eq(agents.id, scheduledTasks.assignedAgentId))
+      .leftJoin(agents, and(eq(agents.id, scheduledTasks.assignedAgentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(scheduledTasks.organisationId, organisationId),
@@ -490,7 +490,7 @@ export const scheduledTaskService = {
         agentName: agents.name,
       })
       .from(scheduledTasks)
-      .leftJoin(agents, eq(agents.id, scheduledTasks.assignedAgentId))
+      .leftJoin(agents, and(eq(agents.id, scheduledTasks.assignedAgentId), isNull(agents.deletedAt)))
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
 
     if (!st) throw { statusCode: 404, message: 'Scheduled task not found' };

@@ -1529,9 +1529,40 @@ When a service does SELECT → UPDATE and a concurrent path can write a column b
 
 **Do not add `'cancelling'` to terminal checks.** It is in `IN_FLIGHT_RUN_STATUSES`. The cancel button hides on `isTerminalRunStatus || status === 'cancelling'` — that guard is UI-only and does not make `cancelling` semantically terminal.
 
+### [2026-04-29] Pattern — Join conditions on soft-deletable tables must always include the deletedAt guard
+
+Any `innerJoin` or `leftJoin` on `agents`, `subaccounts`, or `systemAgents` must include `isNull(X.deletedAt)` directly in the join condition — not just in the WHERE clause. Joins on `subaccountAgents` that return current operational state must include `eq(subaccountAgents.isActive, true)` in the join condition.
+
+**Wrong:**
+```ts
+.innerJoin(agents, eq(agents.id, someTable.agentId))
+```
+**Correct:**
+```ts
+.innerJoin(agents, and(eq(agents.id, someTable.agentId), isNull(agents.deletedAt)))
+```
+
+**Historical/audit contexts:** convert `innerJoin → leftJoin` with the same guard so that records referencing a subsequently-deleted entity are preserved in history but the deleted entity's metadata resolves to null rather than leaking stale data. Never use a bare `innerJoin` on these tables in historical queries — a hard-deleted row would silently drop the entire history record.
+
+Enforced in branch `fix-logical-deletes` (2026-04-29): 11 files, 24 join sites fixed (12 Category A unconditional, 12 Category B historical).
+
+### [2026-04-29] Pattern — Server typecheck requires `-p server/tsconfig.json`; root `tsc` only covers `client/src`
+
+Running `npx tsc --noEmit` from the project root silently checks only `client/src` — it does NOT typecheck `server/`. To catch server-side type errors, run `npx tsc --noEmit -p server/tsconfig.json`. Discovered during dual-review of `fix-logical-deletes`: root tsc showed 63 errors (all client), while `server/tsconfig.json` exposed 2 additional real errors in `delegationGraphService.ts` that the root check missed entirely.
+
+**Implication for verification:** the CLAUDE.md "Verification Commands" table uses `npm run typecheck` — confirm that script invokes `server/tsconfig.json` (or both tsconfigs). If it only wraps root tsc, the gate is incomplete.
+
 ### [2026-04-29] Correction — Persistent context switcher already exists in the UI
 
 The leftmost sidebar already implements a persistent org/subaccount context switcher (visible in the layout screenshot). Do not recommend building this as if it were missing. When discussing scope/routing architecture, treat the active org/subaccount in the sidebar as the resolved session context that the ask bar and New Brief modal should read from — it is already the source of truth for "where the user is."
+
+### [2026-04-29] Correction — ChatGPT (and likely other LLMs) frequently misread unified diff format in PR review
+
+ChatGPT routinely treats both `-` (removed) and `+` (added) lines in a unified diff as if both are present in the final source. When ChatGPT claims a "double join", "duplicate assignment", "redundant innerJoin + leftJoin", or any other "two near-identical statements coexist" pattern in code review of a diff, **verify by reading the actual file (or `git show origin/<branch>:file`) before accepting the finding**. The `-` line was removed; only the `+` line exists in HEAD.
+
+Both Round 1 and Round 2 of the `fix-logical-deletes` ChatGPT review (PR #232, 2026-04-29) made this exact error on the same code (`server/services/delegationGraphService.ts` lines 50 and 98 — single `.leftJoin` per query, no `.innerJoin`). Round 1 framed it as "Critical — incorrect join structure"; Round 2 framed it as "Double-join pattern (minor observation)" and "Normalize join pattern for soft-deleted relations" follow-up. Same hallucination, different severity framing. Reviewer-self-correction does not happen across rounds — the agent did not recognise it had already raised the same false claim.
+
+Operational rule: when an LLM reviewer cites a diff hunk verbatim and reasons about both `-` and `+` lines as if both ship, treat the finding as suspect-by-default. Read the file. The shorter the cited hunk and the closer the two lines are textually, the higher the prior on misread. Builds on the 2026-04-17 entry "GitHub unified diff format is commonly misread as 'both lines present'" — that earlier entry was about human reviewers; this one extends the pattern to LLM reviewers (seen 2 times in PR #232 review alone). Session log: `tasks/review-logs/chatgpt-pr-review-fix-logical-deletes-2026-04-29T00-29-56Z.md`.
 
 ### [2026-04-29] Pattern — Server-authoritative context updates: id is source of truth, name falls back to stored value
 
