@@ -144,13 +144,18 @@ res.on('close', () => {
   const files = (req.files as Express.Multer.File[]) ?? [];
   for (const file of files) {
     fs.unlink(file.path, (err) => {
-      if (err && err.code !== 'ENOENT') logger.debug('multer.cleanup_failed', { path: file.path, err: err.message });
+      if (!err || err.code === 'ENOENT') return;
+      // Unlink failed for a reason other than "already gone" — surface it.
+      // Common shapes: EACCES (perm drift), ENOSPC (tmpdir full), EBUSY (FS lock).
+      // Each one indicates a real operational problem that would otherwise hide
+      // until the tmpdir bloats; warn so the signal is visible to log aggregation.
+      logger.warn('multer.cleanup_failed', { path: file.path, code: err.code, err: err.message });
     });
   }
 });
 ```
 
-Middleware-level keeps the cleanup contract in one place — no route-level audit surface — and §10.6 covers the per-request safety semantics. `ENOENT` is treated as success (the file was already cleaned, e.g. by the consuming route).
+Middleware-level keeps the cleanup contract in one place — no route-level audit surface — and §10.6 covers the per-request safety semantics. `ENOENT` is treated as success (the file was already cleaned, e.g. by the consuming route). Every other unlink failure logs at **warn** so a recurring leak surfaces in log aggregation rather than disappearing into debug noise.
 
 **Out of scope:** changing the `validateMultipart` export signature. Existing callers (`upload.any()`) keep working unchanged.
 
@@ -193,37 +198,74 @@ Mirrors the SQL. Exported from `server/db/schema/index.ts`. No relations; no `or
 
 See §7.1 for the contract. Implementation invariants:
 
-- **Window alignment:** `window_start = floor(now / windowSec) * windowSec`. Two callers within the same window write to the same row.
-- **UPSERT-and-read in a single CTE round-trip.** The primitive issues exactly one statement per `check()` — a CTE that increments the current window via UPSERT and reads the previous window's row in the same query:
+- **Window alignment uses DB time, not application time.** `window_start` is computed inside the SQL CTE from `extract(epoch from now())`, never from `Date.now()`. Multi-instance deployments must agree on bucket boundaries — application-side clock skew across two app servers would fragment the bucket and inflate the effective limit. The DB is the canonical clock for this primitive even when the application is single-instance today, so the multi-instance-safety property is preserved by construction.
+- **UPSERT-and-read in a single CTE round-trip.** The primitive issues exactly one statement per `check()` — a CTE that derives the window boundaries from DB time, increments the current window via UPSERT, and reads the previous window's row in the same query:
 
   ```sql
-  -- Positional bind parameters: $1 = key, $2 = current_window_start, $3 = previous_window_start.
-  WITH upserted AS (
+  -- Positional bind parameters: $1 = key (text), $2 = windowSec (integer).
+  WITH bounds AS (
+    SELECT
+      to_timestamp(floor(extract(epoch from now()) / $2) * $2)            AS curr_start,
+      to_timestamp((floor(extract(epoch from now()) / $2) - 1) * $2)      AS prev_start,
+      extract(epoch from now())                                            AS now_epoch,
+      floor(extract(epoch from now()) / $2) * $2                           AS curr_epoch
+  ),
+  upserted AS (
     INSERT INTO rate_limit_buckets (key, window_start, count)
-    VALUES ($1, $2, 1)
+    SELECT $1, curr_start, 1 FROM bounds
     ON CONFLICT (key, window_start) DO UPDATE
       SET count = rate_limit_buckets.count + 1
-    RETURNING count AS current_count
+    RETURNING count AS current_count, window_start AS curr_window_start
   ),
   prev AS (
-    SELECT count AS prev_count FROM rate_limit_buckets
-    WHERE key = $1 AND window_start = $3
+    SELECT count AS prev_count
+    FROM rate_limit_buckets, bounds
+    WHERE key = $1 AND window_start = bounds.prev_start
   )
   SELECT
     upserted.current_count,
-    COALESCE(prev.prev_count, 0) AS prev_count
-  FROM upserted LEFT JOIN prev ON true;
+    upserted.curr_window_start,
+    COALESCE(prev.prev_count, 0) AS prev_count,
+    bounds.now_epoch,
+    bounds.curr_epoch
+  FROM upserted CROSS JOIN bounds LEFT JOIN prev ON true;
   ```
 
-  The increment and the previous-window read are a single round-trip; PostgreSQL's `INSERT ... ON CONFLICT DO UPDATE` is per-row atomic at any isolation level (no explicit locking required, no SERIALIZABLE needed). The race-claim ordering (§ 8.10) is satisfied: the count increment is the state claim; if `effectiveCount > limit` the caller is rejected before any side effect.
+  The increment and the previous-window read are a single round-trip; PostgreSQL's `INSERT ... ON CONFLICT DO UPDATE` is per-row atomic at any isolation level (no explicit locking required, no SERIALIZABLE needed). The race-claim ordering (§8.10) is satisfied: the count increment is the state claim; if `effectiveCount > limit` the caller is rejected before any side effect. All three calls to `now()` inside a single statement return the same value (PostgreSQL `now()` is `transaction_timestamp()`, fixed for the duration of the statement), so `curr_start`, `prev_start`, and `now_epoch` are mutually consistent.
 
-- **Sliding window math.** After the round-trip returns `current_count` and `prev_count`, the primitive computes `effectiveCount = prev_count * (1 - elapsedFractionOfCurrentWindow) + current_count` — the standard sliding-log approximation that avoids O(N) timestamp storage. The pure helper `computeEffectiveCount(prevCount, currentCount, elapsedFractionOfCurrentWindow)` is unit-tested at edges (boundary moment, mid-window, full-window). Architect to confirm the approximation is acceptable vs a hard fixed-window (default recommendation: weighted, since fixed-window allows 2x burst at window boundaries).
+- **Sliding window math.** After the round-trip returns `current_count`, `prev_count`, `now_epoch`, and `curr_epoch`, the primitive computes `elapsedFractionOfCurrentWindow = Math.min(1, Math.max(0, (now_epoch - curr_epoch) / windowSec))` — the clamp is **mandatory**, not advisory. Leap-second adjustments and float rounding drift between `floor()` and `extract(epoch from now())` can produce values fractionally outside `[0, 1)` (e.g. `-1e-9` or `1.0000001`); without the clamp those propagate into `effectiveCount` as a negative weight or an over-100% weight, breaking both the "remaining ≥ 0" invariant and the limit-comparison semantics. The pure helper `computeEffectiveCount(prevCount, currentCount, elapsedFractionOfCurrentWindow)` performs the clamp internally and is unit-tested at edges (boundary moment, mid-window, full-window) plus the two slightly-out-of-range inputs (`-1e-9`, `1 + 1e-9`). Once clamped, `effectiveCount = prev_count * (1 - elapsedFractionOfCurrentWindow) + current_count` — the standard sliding-log approximation that avoids O(N) timestamp storage. Architect to confirm the approximation is acceptable vs a hard fixed-window (default recommendation: weighted, since fixed-window allows 2x burst at window boundaries).
 
-- **No in-process caching:** every `check()` does the single CTE round-trip described above. For our traffic profile this is acceptable.
+- **Single logical timestamp per statement (invariant).** All time values consumed by the primitive's CTE — `curr_start`, `prev_start`, `now_epoch`, `curr_epoch` — MUST derive from a single logical instant per statement execution. PostgreSQL's `now()` is `transaction_timestamp()` and is stable across all references inside a single statement; this is the only timestamp source the CTE may read. Introducing `clock_timestamp()` (which advances within the statement) or any application-supplied timestamp parameter is a spec-conformance violation. Future maintainers MUST NOT "optimise" the CTE by hoisting time computation to the application layer — the multi-instance-safety property in the prior bullet depends on this invariant.
+
+- **No in-process caching, no in-process pre-check.** Every `check()` does the single CTE round-trip described above. The earlier in-process Map limiters (§4) were removed because they fragment under multi-process / multi-instance topologies; reintroducing an in-process pre-check (even framed as "DB protection") brings the same fragmentation back. If pre-production testing surfaces DB amplification under spray, the mitigation is upstream — load-balancer / CDN rate limiting, or a measured `statement_timeout` (deferred, §13) — not another in-process layer. The §10.5 *No-shim rationale* binds here as well: the only operationally accessible mitigation is the per-call-site `limit` constant.
 
 #### 2.4 Cleanup job `server/lib/rateLimitCleanupJob.ts`
 
-`DELETE FROM rate_limit_buckets WHERE window_start < now() - interval '2 hours'`. Frequency: once every 5 minutes.
+Cleanup MUST run in **bounded batches** so a long-deferred run (worker crash, deploy gap) cannot lock the table or trigger vacuum pressure under a single large DELETE. The batched pattern:
+
+```sql
+-- Cutoff is computed inline from DB time to stay consistent with the
+-- bucket-alignment invariant (§6.2.3): the limiter and its janitor read
+-- the same clock. No application-supplied cutoff parameter.
+WITH victims AS (
+  SELECT key, window_start
+  FROM rate_limit_buckets
+  WHERE window_start < now() - interval '2 hours'
+  ORDER BY window_start
+  LIMIT 5000
+  FOR UPDATE SKIP LOCKED
+)
+DELETE FROM rate_limit_buckets r
+USING victims v
+WHERE r.key = v.key AND r.window_start = v.window_start
+RETURNING 1;
+```
+
+The job loops the batched DELETE until either the returned row count is `< 5000` (caught up) or a hard iteration cap of `20` batches per run is reached (i.e. ≤ 100 000 rows per scheduled run). Reaching the cap emits a `logger.warn('rate_limit.cleanup_capped', { rowsDeleted, iterations })` so an outsized backlog surfaces rather than silently extending. The `FOR UPDATE SKIP LOCKED` lets concurrent worker invocations make progress without serialising on the same victim set.
+
+**Ordering-bias note.** The `ORDER BY window_start` victim selection deletes the oldest expired rows first, so under a backlog scenario the cleanup is biased towards the oldest tail rather than achieving per-key fairness. This is intentional — old rows are equally expired regardless of which key they belong to, and the bias is harmless given the 2-hour TTL is purely a cleanup boundary, not a correctness threshold. Recording the bias here so future maintainers don't read it as an oversight.
+
+Frequency: once every 5 minutes.
 
 **TTL retention rationale.** The sliding-window read in §7.1 needs the *previous* window's row, not just the current one. The longest `windowSec` in the call-site set is `3600` (the test-run hourly limiter, §6.2.5). The cleanup cutoff therefore must be at least `2 * max(windowSec)` = 2 hours so the previous-window row is still present at the moment the current window rolls over. A 1-hour cutoff would race the test-run limiter's window boundary and silently degrade the sliding-window approximation back to a fixed-window. The `2 hours` value is conservative for the current call-site set; if a longer-window call site is ever added, this constant is updated in the same PR.
 
@@ -248,7 +290,7 @@ After migration, the following are deleted:
 - The local Maps + `checkRateLimit` helpers in both public routes.
 - `import rateLimit from 'express-rate-limit'` at `server/routes/auth.ts:2`. The package itself is reached via a transitive dependency in root `package-lock.json`, not a direct entry in root `package.json`; removing the import drops the only reference but no manifest line needs to change.
 
-**On-failure behaviour:** when `rateLimiter.check` returns `allowed: false`, the route responds with **429** + a body matching the existing route's response shape (so existing client UX is preserved) AND a `Retry-After: <secondsUntilResetAt>` header derived from `result.resetAt`. The `Retry-After` header is mandatory across every 429 path the new primitive emits (auth, public form, public track, test-run, sessionMessage); the §7.1 contract carries the canonical formula.
+**On-failure behaviour:** when `rateLimiter.check` returns `allowed: false`, the route responds with **429** + a body matching the existing route's response shape (so existing client UX is preserved) AND a `Retry-After: <secondsUntilResetAt>` header derived via the exported `getRetryAfterSeconds(result.resetAt)` helper (§7.1). The `Retry-After` header is mandatory across every 429 path the new primitive emits (auth, public form, public track, test-run, sessionMessage); routes MUST call the helper rather than re-deriving the formula inline.
 
 **No env-flag rollback shim** (per `DEVELOPMENT_GUIDELINES § 8.6`). The new primitive replaces three structurally-broken implementations; rolling back to "in-process Map limiter" is not a credible recovery path. If the new primitive misbehaves under load in pre-production testing, the recovery is to fix forward — a two-line PR that raises the per-call-site `limit` constants (effectively disabling the gate) or reverts the commit. No env-flag knob is introduced.
 
@@ -347,11 +389,21 @@ export async function findEntitiesMatching(input: EntitySearchInput): Promise<Sc
 
 `POST /api/session/message` is gated through `requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE)` already; add `rateLimiter.check` immediately after authentication:
 
-- **Key shape:** `'session:message:user:' + req.user.id` — per-user. Architect to confirm: per-user vs per-user+org. Default recommendation: per-user (the limit is on a logged-in user's typing rate, not on a tenant; user IDs are globally unique).
+- **Key shape:** `'session:message:user:' + req.user.id` — per-user. Architect to confirm: per-user vs per-user+org. Default recommendation: per-user (the limit is on a logged-in user's typing rate, not on a tenant; user IDs are globally unique). A user toggling between orgs in the same minute is still the same human typing — a per-user+org key would let the same human exceed the per-org limit by switching tenants, which is exactly what the limit is meant to bound.
 - **Limit:** 30 / minute. Architect to confirm. Default recommendation: 30/minute is generous for human typing and conservative against scripted abuse.
 - **Failure mode:** 429 + `{ type: 'error', message: 'Too many requests, please slow down.' }` — keeps the existing `SessionMessageResponse` `error` arm shape so GlobalAskBar's existing error handler renders correctly. `Retry-After` header is set per Phase 2's mandatory standard.
 
 The limit applies to **all paths** (A/B/C). A user hammering the disambiguation Path A is just as abusive as one hammering Path C; one limit covers all.
+
+**Middleware ordering invariant (audit semantics).** The route's middleware chain is `[global express.json() body-parser] → authenticate → rateLimiter.check → requireOrgPermission(BRIEFS_WRITE) → handler`. Body parsing happens at the global Express level (mounted in `server/index.ts` ahead of any route), so the body is already parsed by the time the rate-limit middleware fires; this is intentional — the limiter keys on the authenticated `req.user.id`, which depends on `authenticate`, which itself does not need a parsed body. The limiter therefore charges authenticated users for spammy POSTs even when the body is malformed (the malformed body fails the route handler with a 400 *after* the limiter charge), which is the desired behaviour against scripted abuse. The ordering of the three named middlewares is deliberate so the response code distinguishes the three failure classes:
+
+| Caller state | Failing middleware | HTTP response |
+|---|---|---|
+| Unauthenticated request | `authenticate` | **401** — no rate-limit charge for the request (the bucket is per-user-id, which the unauthenticated request cannot supply) |
+| Authenticated, exceeded limit | `rateLimiter.check` | **429** + `Retry-After` |
+| Authenticated, within limit, lacks `BRIEFS_WRITE` | `requireOrgPermission` | **403** |
+
+This ordering applies to **every** rate-limited authenticated route added by this spec (currently `/api/session/message`; Phase 2 auth routes are unauthenticated and so the matrix collapses to "no auth check before the limiter — IP-keyed limiter runs first"). Reviewers MUST confirm new authenticated routes added in follow-up specs preserve `auth → rateLimit → permission` to keep the response-code semantics consistent across the boundary.
 
 #### 6.2 Integration tests `server/routes/__tests__/sessionMessage.test.ts`
 
@@ -427,17 +479,44 @@ export interface RateLimitCheckResult {
    * Number of remaining calls in the current effective window after this one is counted.
    * Computed as `Math.max(0, Math.floor(limit - effectiveCount))`. Always clamped at 0
    * (so a denied call returns `0`, not a negative number).
+   *
+   * **Instantaneous estimate, not a monotonic sequence.** `remaining` may *increase* between
+   * two successive `check()` calls for the same key — sliding-window weighting deweights the
+   * prior window's contribution as time elapses, so a quiet caller can observe the
+   * estimate recover. Treat `remaining` as a hint for client UX (e.g. progress bars), never
+   * as a counter the client decrements locally. Operational reports of "remaining went up,
+   * is this a bug?" are expected behaviour, not regressions.
    */
   remaining: number;
   /**
-   * Earliest moment after which a fresh request would succeed if no further calls land.
-   * Computed as the end of the current window: `new Date((window_start_seconds + windowSec) * 1000)`,
-   * where `window_start_seconds = Math.floor(Date.now() / 1000 / windowSec) * windowSec`.
-   * The `Retry-After` header is derived as `Math.max(1, Math.ceil((resetAt.getTime() - Date.now()) / 1000))`
-   * — `Math.ceil` rounds partial seconds up so the caller never re-fires inside the same window;
-   * `Math.max(1, …)` guarantees the header is never `0` or negative.
+   * End of the current FIXED window: `new Date(curr_window_start.getTime() + windowSec * 1000)`,
+   * where `curr_window_start` is the DB-computed window-start timestamp returned by the CTE
+   * (§6.2.3). The application MUST NOT recompute `window_start` from `Date.now()` — window
+   * alignment is anchored on DB time so multi-instance deployments cannot fragment buckets
+   * via clock skew.
+   *
+   * **Approximation, not a guaranteed-acceptance moment.** Under the sliding-window math
+   * (§6.2.3), residual weight from the prior window may continue to deny up to one full
+   * window beyond this instant. Treat `resetAt` as a **minimum** retry time the client
+   * MUST wait; a request fired exactly at `resetAt` may still receive `allowed: false`.
+   * Clients SHOULD layer exponential backoff on top of `Retry-After` rather than retrying
+   * exactly at the header's instant — see §7.1 *Client retry guidance*.
+   *
+   * The downstream `Retry-After` header is derived from `resetAt` via `getRetryAfterSeconds`
+   * (helper exported alongside this interface) and inherits the same approximation.
    */
   resetAt: Date;
+}
+
+/**
+ * Derives the `Retry-After` header value (whole seconds) from a `resetAt` instant.
+ * Centralised so every 429 emission shares the same rounding rule.
+ *
+ * - `Math.ceil` rounds partial seconds up so the caller never re-fires inside the same window.
+ * - `Math.max(1, …)` guarantees the header is never `0` or negative (per RFC 7231).
+ */
+export function getRetryAfterSeconds(resetAt: Date): number {
+  return Math.max(1, Math.ceil((resetAt.getTime() - Date.now()) / 1000));
 }
 
 /**
@@ -445,11 +524,26 @@ export interface RateLimitCheckResult {
  * regardless of allowed; allowed=false means the count is over the limit
  * for the effective window. The caller MUST reject on allowed=false.
  *
+ * **Non-leaky: denied calls still increment the bucket.** Each invocation
+ * unconditionally performs the UPSERT before evaluating the limit, so a
+ * caller that retries a denied request will deepen the denial — the next
+ * call sees a higher `current_count` and produces the same `allowed: false`
+ * with one fewer notional slot remaining. This is the intended behaviour
+ * (it punishes scripted retry loops) but is the explicit reason §10.1's
+ * retry classification is `unsafe`.
+ *
  * The primitive does NOT throw for denial outcomes — denial is `allowed: false`,
- * not an exception. Operational failures (DB connection drop, query error)
- * propagate as a rejected promise; the caller's existing error-handling path
- * maps these to a 500. Per §10.1, the caller MUST NOT retry — a transparent
- * retry could double-count if the first call's UPSERT actually committed.
+ * not an exception. Operational failures (DB connection drop, query error,
+ * query-pool timeout) propagate as a rejected promise — see §10.1 *Failure mode*
+ * for the fail-closed posture and the no-retry contract.
+ *
+ * **Denial observability:** when this function returns `allowed: false`, it
+ * emits `logger.info('rate_limit.denied', { key, limit, windowSec, currentCount,
+ * effectiveCount, remaining, resetAt: resetAt.toISOString() })` exactly once per
+ * denial. Routes do not need to log denial themselves; one canonical signal lives
+ * in the primitive (`DEVELOPMENT_GUIDELINES § 8.20`). `key` is the caller-supplied
+ * string verbatim — see §7.2 *Key cardinality* for the bounded-cardinality
+ * invariant attacker-controlled keys must satisfy before reaching this function.
  *
  * @param key Caller-defined key. Conventional shape: `{namespace}:{kind}:{value}`
  *            e.g. `auth:login:1.2.3.4:user@example.com`. The primitive treats
@@ -457,7 +551,7 @@ export interface RateLimitCheckResult {
  * @param limit Maximum allowed calls per window.
  * @param windowSec Window size in seconds. Used for window alignment.
  * @returns Decision + remaining-budget metadata for the response.
- * @throws Operational DB errors (connection drop, query failure) only — never throws to signal denial.
+ * @throws Operational DB errors (connection drop, query failure, pool timeout) only — never throws to signal denial.
  */
 export function check(key: string, limit: number, windowSec: number): Promise<RateLimitCheckResult>;
 ```
@@ -470,7 +564,7 @@ export function check(key: string, limit: number, windowSec: number): Promise<Ra
 ```ts
 const result = await rateLimiter.check(`auth:login:${req.ip}:${email.toLowerCase()}`, 10, 900);
 if (!result.allowed) {
-  res.set('Retry-After', String(Math.ceil((result.resetAt.getTime() - Date.now()) / 1000)));
+  res.set('Retry-After', String(getRetryAfterSeconds(result.resetAt)));
   res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
   return;
 }
@@ -488,17 +582,42 @@ After the cleanup interval (window_start older than `now - 2h`, see §6.2.4 for 
 
 **Source-of-truth precedence:** the `rate_limit_buckets` table is the single representation. There is no in-memory cache; every check is a round-trip. If a future implementation introduces an LRU cache (out of scope), the table remains canonical and the cache is best-effort.
 
+**Client retry guidance.** Because `Retry-After` reflects the *fixed* window boundary while the limiter math is sliding (see `resetAt` doc), a client that retries exactly at the header value can still receive `allowed: false`. Server-side mitigation (e.g. inflating the header by one window) would be cosmetic; the correct posture is a client-side jittered exponential backoff seeded with `Retry-After` as the first interval. Internal client surfaces (Layout New-Brief modal, GlobalAskBar, public form / track pages) inherit their existing `fetch` retry posture; this spec does not introduce new retry logic. If a future client surface DOES retry on 429, the spec author MUST verify it backs off rather than spinning at `Retry-After`.
+
 ### 7.2 `rate_limit_buckets` schema contract
 
 | Column | Type | Nullability | Default | Notes |
 |---|---|---|---|---|
-| `key` | `text` | NOT NULL | — | Opaque caller-defined string. Length unbounded but conventionally < 256 chars. |
+| `key` | `text` | NOT NULL | — | Opaque caller-defined string. Documented expectation: ≤ 256 chars; callers MUST keep keys within this bound (no DB-side `CHECK` constraint — pathological keys are a caller bug, not a DB-enforced invariant). |
 | `window_start` | `timestamptz` | NOT NULL | — | Aligned to `floor(now / windowSec) * windowSec`. UTC. |
 | `count` | `integer` | NOT NULL | `0` | Incremented atomically via UPSERT. |
 | **PRIMARY KEY** | `(key, window_start)` | — | — | Single index supports both UPSERT conflict target and window-pair reads. |
 | **INDEX** `rate_limit_buckets_window_start_idx` | `(window_start)` | — | — | Cleanup-job range delete. |
 
 **No `organisation_id`.** Keys may include user IDs across orgs but the bucket itself is system-wide infrastructure. The `scripts/rls-not-applicable-allowlist.txt` entry carries the rationale "system-wide rate-limit infrastructure; key strings opaque, never tenant-private."
+
+**No separate `(key)` index.** The composite `PRIMARY KEY (key, window_start)` is a B-tree that supports leftmost-prefix lookups (`WHERE key = $1` alone), so the runtime path's query (`WHERE key = $1 AND window_start = $X`) is fully indexed. A standalone `(key)` index would double per-UPSERT index maintenance on the hot write path with zero query benefit. If a future ad-hoc query (debugging, analytics) wanted to scan all rows for a given `key`, the composite PK already serves it.
+
+**Future-trigger condition.** If pre-production (or production) observability surfaces sustained `>50 ms` latencies on key-level lookups (e.g. a debugging query that filters `WHERE key = $1` without a `window_start` predicate), the trigger to add a covering `(key)` index fires despite the write-path cost. Recording the trigger here so the next reviewer doesn't re-litigate the decision in the abstract.
+
+**Key cardinality (hardening invariant).** The bucket table grows linearly with `count(distinct key)`. The TTL cleanup job (§6.2.4) bounds rows to a 2-hour window, but unbounded key cardinality within a single window can still bloat the table — particularly under attack where an adversary may inject randomised tokens (e.g. spoofed emails) that each create a new row. Callers MUST therefore satisfy:
+
+1. **Bounded-shape inputs.** IDs (user, org, page) and IPs are bounded by upstream issuance — accepted as-is. Free-form attacker-controlled tokens (notably the email component of `auth:login:<ip>:<email>`) MUST be normalised (`toLowerCase`, `trim`) and length-capped at the route boundary before being concatenated into the key. The existing login route already lowercases the email; the spec inherits that and adds the explicit invariant.
+2. **No raw user input in keys outside this list.** Adding a new call site that includes free-form text (search query, brief title, etc.) requires either (a) hashing the offending component or (b) replacing it with an upstream-bounded ID. New free-form-keyed call sites without one of these treatments are a spec-conformance violation.
+
+   Hashing pattern (when option (a) applies):
+
+   ```ts
+   import { createHash } from 'node:crypto';
+   const safeComponent = createHash('sha256').update(rawValue).digest('hex').slice(0, 16);
+   const key = `mynamespace:mykind:${safeComponent}`;
+   ```
+
+   The 16-char hex prefix (64 bits of hash output) keeps the key short while making cardinality bounded by `2^64` worst-case — vastly larger than realistic per-tenant lifetime traffic, but still fixed-width. Use the full 64-char hex digest only when collision resistance under adversarial input is the explicit goal.
+
+The current Phase 2 + Phase 6 call-site set (§6.2.5) is compliant: every key component is either an IP, an integer/UUID ID, or a normalised email. No additional hashing is shipped in this spec; the invariant is recorded so future call sites declare their compliance up front.
+
+**Within-window adversarial cardinality (airtight rule).** TTL cleanup bounds inter-window growth; it does NOT bound the number of unique rows an attacker can create *inside a single active window* (e.g. by rotating the email component on every login attempt). If a call site permits a high-cardinality attacker-controlled component, the caller MUST either (a) hash that component into a fixed-width digest per the snippet above or (b) enforce an upstream cap (e.g. a coarser per-IP rate-limit *outside* this primitive — typically at the LB / edge — that fires before the attacker can rotate the inner component). The current call-site set is judged compliant under (b): the existing IP-based normalisation + per-IP forgot/reset/login limits cap the rotation rate, so the email component cannot be rotated faster than the IP allows. Future call sites that loosen this implicit cap (e.g. by removing the IP component) MUST add explicit hashing or an explicit secondary limiter; otherwise they regress this invariant.
 
 ### 7.3 Webhook open-mode warning contract
 
@@ -619,6 +738,8 @@ Per [docs/spec-authoring-checklist.md § 10](../../spec-authoring-checklist.md),
 - **Retry classification:** `unsafe`. The DB call itself can fail (connection drop), and a transparent retry would double-count if the first call's UPSERT actually committed. The caller should treat a failed `check()` as a 500 — the route's existing error handling already maps `db.transaction` failures to 500.
 - **Concurrency guard:** `optimistic — UPSERT atomicity`. Two concurrent `check()` calls for the same `(key, window_start)` race on the row, but PostgreSQL `INSERT ... ON CONFLICT DO UPDATE RETURNING` is atomic per-row. Both calls receive a returned `count`; the larger one wins. The losing caller's count is still incremented (correct — both calls did happen).
 - **Unique-constraint-to-HTTP mapping:** N/A. The PRIMARY KEY violation is consumed by `ON CONFLICT DO UPDATE`; no `23505` ever bubbles.
+- **Failure mode (fail closed).** A rejected `check()` promise — connection drop, query error, or `pg` pool acquisition timeout — propagates to the route's existing error-handling path and emerges as **HTTP 500**. The request is **not** allowed through; rate-limit unavailability never permits an unchecked write. This is the deliberate posture across every call site in §6.2.5, including unauthenticated public routes (form submission, page tracking) where "fail open" would otherwise be an availability win — pre-production framing prefers correctness over availability, and there are no live users to hold harmless.
+- **Per-call timeout.** The primitive does not configure its own statement timeout. The single-CTE round-trip executes against the existing `pg` pool, which inherits the project-wide `statement_timeout`/pool-acquisition timeout. A timeout therefore manifests as a rejected promise and follows the fail-closed path above. A measured cost regression in pre-production testing is the trigger for tightening this further (see §13 *Deferred items* for the per-call timeout follow-up).
 
 ### 10.2 Rate-limit cleanup job
 
@@ -657,9 +778,10 @@ This decision is recorded inline so future readers do not interpret the missing 
 ### 10.6 Multer disk-storage tempfile cleanup
 
 - **Operation:** `fs.unlink(file.path)` on `res.on('close')`.
-- **Idempotency posture:** `safe`. A second unlink against an already-deleted file is harmless (caught and logged at debug level).
-- **Retry classification:** `safe`. Failure to clean (e.g. tmpdir full, permissions) is a degraded-state log, not an error response. Tempfiles linger but the request completes.
+- **Idempotency posture:** `safe`. A second unlink against an already-deleted file is `ENOENT` and is silently ignored.
+- **Retry classification:** `safe`. Failure to clean for any other reason (e.g. tmpdir full, permissions, FS lock) is a degraded-state warn-log (`multer.cleanup_failed` with `err.code`) — not an error response. Tempfiles linger but the request completes; recurring failures surface via the warn signal in log aggregation.
 - **Concurrency guard:** none — cleanup is per-request, scoped to the request's own file.
+- **Crash-recovery & secondary safety net.** `res.on('close')` fires on both success and client-abort, but **not** when the process itself crashes mid-request — those tempfiles linger until OS tmpdir reaping (Linux `systemd-tmpfiles` defaults to 10 days for `/tmp`). The OS-level reaper is the only safety net in scope; this spec does not add a periodic in-process tmp-sweep job. If pre-production testing surfaces tmpdir bloat from a pathological crash loop, the follow-up is a small `setInterval` sweep keyed on file mtime (deferred, not shipped here).
 
 ### 10.7 Reseed transaction
 
@@ -709,6 +831,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary; runtime_test
 - Frontend unit tests for `Layout.tsx` / `GlobalAskBar.tsx` envelope changes (per spec-context).
 - E2E flow tests of the New Brief modal end-to-end (per spec-context).
 - Multer upload-flow tests beyond a manual PR smoke that a sizeable upload (e.g. ~20 MB, well under the 50 MB cap) survives a round-trip via the new `multer.diskStorage` configuration without OOM (recorded in the PR description, not as a test file).
+- **Route-level 429 path on `/api/session/message` is not integration-tested** — T1–T8 cover the 200/401/error arms but deliberately stop short of "fire 31 requests, expect the 31st to 429". Correctness of the 429 path relies on (a) the primitive's pure-unit test of `computeEffectiveCount` at the over-limit edge and (b) static inspection that `rateLimiter.check` is invoked before the route handler in the middleware chain (§6.1). The same coverage shape applies to every other 429-bearing route in §6.2.5; per-route 429 integration tests are intentionally not added.
 
 **Static gates that must continue to pass:**
 
@@ -728,6 +851,9 @@ Items mentioned in spec prose but intentionally deferred to a future PR or sprin
 - **Centralising the integration-test skip helper** (`shouldSkipIntegration()` per `tasks/todo.md` PR #226 deferred entry). The new `sessionMessage.test.ts` uses the existing per-file `process.env.DATABASE_URL` check; centralising is a separate refactor.
 - **#27 Centralised auth/permission audit trail.** Out of scope per brief; broader follow-up.
 - **Multer disk-storage hybrid (memory below 5 MB, disk above).** Architect-decision section in Phase 1 recommends pure disk-storage for simplicity; the hybrid approach is the deferred fallback if pure-disk turns out to have a measured cost.
+- **Per-call `statement_timeout` for `rateLimiter.check`.** Phase 2 inherits the project-wide pool/statement timeouts (§10.1 *Per-call timeout*). A tighter explicit timeout (e.g. 50 ms) is a deferred follow-up — only ship if pre-production testing surfaces a measured tail-latency cost on the rate-limit path.
+- **Circuit breaker on rate-limit DB unavailability.** Current posture is fail-closed (§10.1) — a DB hiccup turns into request-wide 500s. A future enhancement is a circuit breaker that selectively relaxes per-route limits (or fails open on lower-criticality public routes only) when DB writes are timing out, accepting a brief amplification window in exchange for availability. Out of scope here: we have no live users to protect, and the kill-switch (raise per-call-site `limit` constants) covers the manual recovery path. Spec entry exists so the next reviewer doesn't propose an in-process backstop as a substitute (see §6.2.3 *No in-process pre-check*).
+- **`rate_limit.near_capacity` early-warning emission.** Today the primitive only emits `rate_limit.denied` (§7.1 *Denial observability*) — operators see a saturation only once denial begins. A future enhancement is an additional `logger.info('rate_limit.near_capacity', { key, limit, effectiveCount, threshold })` emitted when `effectiveCount / limit ≥ configured_threshold` (e.g. 0.8). Out of scope here — pre-production has no live traffic to surface a near-saturation signal; recording the hook so the next reviewer doesn't re-propose it as if it were missing.
 <!-- Retry-After header standardisation: NOT deferred. Phase 2 / 6 mandate it on every 429 emitted by the new primitive (see §6.2.5 on-failure behaviour and §7.1 contract). -->
 
 
