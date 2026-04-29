@@ -5,6 +5,7 @@
 - PR: #233 — https://github.com/michaelhazza/automation-v1/pull/233
 - Mode: manual
 - Started: 2026-04-29T01:05:59Z
+- **Verdict:** APPROVED (3 rounds, 7 implement / 2 reject / 6 defer / 1 reinforces-deferred)
 
 ---
 
@@ -139,5 +140,72 @@ security, error_handling, other (hallucinated finding), test_coverage
 - Imports verified: `requireOrgPermission` exported from [server/middleware/auth.ts:260](server/middleware/auth.ts#L260); `ORG_PERMISSIONS.BRIEFS_WRITE = 'org.briefs.write'` defined at [server/lib/permissions.ts:85](server/lib/permissions.ts#L85).
 
 ---
+
+## Round 3 — 2026-04-29T01:35:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary
+F10 and F11 are both correctly implemented and the core risks from earlier rounds are now closed. The PR is functionally sound and close to merge. There are no new critical or blocking issues, but there are two small correctness gaps and one low-risk consistency issue worth tightening if you want this to be production-clean.
+
+Validation of Round 2 fixes
+✅ F10 — auth bypass (requireOrgPermission(BRIEFS_WRITE) applied; matches /api/briefs; placement correct).
+✅ F11 — stale subaccount (client clears subaccount unconditionally; aligns with server-authoritative model).
+
+🟡 Non-blocking findings
+1. GlobalAskBar potential partial state update edge — `if (data.subaccountId && data.subaccountName)` allows inconsistent state where subaccountId exists but subaccountName is null. Recommendation: treat subaccountId as source of truth (mirror F4/F11 philosophy): `if (data.subaccountId) { setActiveClient(data.subaccountId, data.subaccountName ?? '') }`.
+2. /api/session/message always returns organisationName: null in Path C — client tolerates it, but other consumers may not; creates divergence vs Path A/B. Optional: return org name when available.
+3. createBrief dual text handling subtlety — classification uses combined text, persistence sometimes uses original text. Intentional but reinforces why F5 (refactor) is the right next step. No change needed in this PR.
+
+Final verdict: APPROVED. Optional pre-merge polish: make subaccountId authoritative client-side; optionally return organisationName in Path C. Otherwise safe to merge as-is.
+```
+
+### Verdict (parsed)
+APPROVED
+
+### Top themes (finding_type vocabulary)
+naming (state-shape consistency), other (server-response cleanliness), architecture (reinforces F5)
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F14 — GlobalAskBar `subaccountId` should be authoritative; mirror F4 pattern with name fallback | user-facing (state behaviour) | implement | implement | low | 3-line client mirror of the F4 pattern we already shipped; symmetry is cheap and avoids hypothetical stale-name case. |
+| F15 — `/api/session/message` Path C should return real `organisationName` (and `subaccountName`) instead of null | technical (server response shape) | defer | defer | low | Server-side cleanup with broader impact (touches all consumers of the endpoint, requires DB lookups for names that the client already has cached); F14 covers the client-side robustness need; F15 is purely "tighten contract for future consumers" — better as a follow-up. |
+| F16 — `createBrief` dual text handling reinforces F5 refactor | technical | reject (no change needed) | auto (reject — reinforces deferred F5) | low | ChatGPT explicitly said "no change needed in this PR"; F5 (createBrief refactor) is already deferred to a follow-up PR. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+- [user, F14] Mirrored the F4 pattern in [client/src/components/global-ask-bar/GlobalAskBar.tsx](client/src/components/global-ask-bar/GlobalAskBar.tsx): dropped the `subaccountName` gate; `setActiveClient` now uses `data.subaccountName ?? getActiveClientName() ?? ''` so a path-C `brief_created` response (which returns `subaccountName: null`) does not silently skip the id/name update. Added `getActiveClientName` to the imports.
+
+### Verification
+
+- `npx tsc -p client/tsconfig.json --noEmit` — clean.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 0 implemented | 2 rejected (F12 hallucinated, F13 misplaced) | 0 deferred
+- User-decided: 7 implemented (F2, F3, F4, F9, F10, F11, F14) | 0 rejected | 6 deferred (F1, F5, F6, F7, F8, F15) | 1 reinforces-deferred (F16 → F5)
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #233:
+  - [user] F1 — Unify `/api/briefs` and `/api/session/message` contract — architectural refactor, focused PR
+  - [user] F5 — Refactor `createBrief` into normalize + classify + persist — architectural, focused PR
+  - [user] F6 — Rate limiting on `/api/session/message` — needs design
+  - [user] F7 — Bound `findEntitiesMatching` ILIKE search — needs perf measurement
+  - [user] F8 — Tests for sessionMessage Path A/B/C / cross-tenant rejection / stale-subaccount — focused test-coverage PR
+  - [user] F15 — Return real org/subaccount names from `/api/session/message` Path C — server-response cleanup
+- Architectural items surfaced to screen (user decisions):
+  - F1 — defer (recommended): API contract divergence; deferred to focused refactor PR
+  - F5 — defer (recommended): `createBrief` overload; deferred to focused refactor PR
+  - F10 — implement (user-approved): critical auth bypass on `/api/session/message`; mechanical fix landed Round 2
+- KNOWLEDGE.md updated: yes (2 entries — server-authoritative client-state pattern; brief-creation-route permission gate)
+- architecture.md updated: no (no structural change)
+- PR: #233 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/233
+
+
 
 

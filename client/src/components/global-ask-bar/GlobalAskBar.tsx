@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api.js';
 import { isValidBriefText, type ScopeCandidate, type SessionMessageResponse } from './GlobalAskBarPure.js';
-import { getActiveOrgId, getActiveOrgName, getActiveClientId, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
+import { getActiveOrgId, getActiveOrgName, getActiveClientId, getActiveClientName, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
 
 type DisambiguationState = {
   candidates: ScopeCandidate[];
@@ -49,8 +49,12 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
         removeActiveClient();
       }
     }
-    if (data.subaccountId && data.subaccountName) {
-      setActiveClient(data.subaccountId, data.subaccountName);
+    // Mirror the org pattern: subaccountId is source of truth, name falls back to
+    // the stored value so a path-C brief_created (which currently returns
+    // subaccountName=null even when subaccountId is preserved) does not silently
+    // skip the update and leave a stale id/name pair in localStorage.
+    if (data.subaccountId) {
+      setActiveClient(data.subaccountId, data.subaccountName ?? getActiveClientName() ?? '');
     }
     setText('');
     setDisambiguation(null);
