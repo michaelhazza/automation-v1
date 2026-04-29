@@ -179,3 +179,15 @@ server/services/__tests__/assertSingleWebhookPure.test.ts bash:pass vitest:pass 
 server/services/__tests__/beliefConflictServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/briefApprovalServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/briefArtefactBackstopPure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-07 (2026-04-29)
+server/services/__tests__/briefArtefactCursorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefArtefactPaginationPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefArtefactValidatorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefMessageHandlerPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/briefVisibilityServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/bundleSuggestionDismissalsPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/canonicalDictionaryRendererPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/canonicalDictionaryValidatorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/canonicalRegistryDriftPure.test.ts bash:pass vitest:pass match:yes

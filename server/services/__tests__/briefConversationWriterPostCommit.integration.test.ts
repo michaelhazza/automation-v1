@@ -23,33 +23,23 @@ import {
   runWithPostCommitStore,
 } from '../../lib/postCommitEmitter.js';
 
-// --- Case 1: 2xx path — emits fire after flushAll ---
-{
+test('case 1: 2xx path — emits fire after flushAll', async () => {
   const store = createPostCommitStore('test-req-2xx');
   const fired: string[] = [];
 
-  // Simulate what briefConversationWriter does inside a route handler:
   await runWithPostCommitStore(store, async () => {
     const s = getPostCommitStore()!;
     s.enqueue(() => fired.push('conversation-update'));
     s.enqueue(() => fired.push('artefact-new'));
   });
 
-  assert.deepStrictEqual(fired, [], '2xx: emits not fired before res.finish');
-
-  // Simulate middleware res.on('finish') with 2xx status
+  assert.deepStrictEqual(fired, []);
   store.flushAll();
+  assert.deepStrictEqual(fired, ['conversation-update', 'artefact-new']);
+  assert.ok(store.isClosed);
+});
 
-  assert.deepStrictEqual(
-    fired,
-    ['conversation-update', 'artefact-new'],
-    '2xx: both emits fire after flushAll (res.finish 200)',
-  );
-  assert.ok(store.isClosed, '2xx: store closed after flushAll');
-}
-
-// --- Case 2: 5xx path — emits dropped on reset ---
-{
+test('case 2: 5xx path — emits dropped on reset', async () => {
   const store = createPostCommitStore('test-req-5xx');
   const fired: string[] = [];
 
@@ -59,13 +49,10 @@ import {
     s.enqueue(() => fired.push('artefact-new'));
   });
 
-  assert.deepStrictEqual(fired, [], '5xx: emits not fired before res.finish');
-  assert.strictEqual(store.pendingCount, 2, '5xx: 2 emits pending before reset');
-
-  // Simulate middleware res.on('finish') with 5xx status — calls reset()
+  assert.deepStrictEqual(fired, []);
+  assert.strictEqual(store.pendingCount, 2);
   store.reset();
-
-  assert.deepStrictEqual(fired, [], '5xx: NO emits fired after reset (ghost-emit prevention)');
-  assert.ok(store.isClosed, '5xx: store closed after reset');
-  assert.strictEqual(store.pendingCount, 0, '5xx: queue cleared by reset');
-}
+  assert.deepStrictEqual(fired, []);
+  assert.ok(store.isClosed);
+  assert.strictEqual(store.pendingCount, 0);
+});
