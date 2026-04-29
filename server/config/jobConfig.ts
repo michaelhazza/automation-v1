@@ -436,6 +436,19 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const,
   },
 
+  // ── Workspace seat rollup (agents-as-employees D9) ──────────────
+  // Hourly sweep: counts active workspace identities per org and writes
+  // the result to org_subscriptions.consumed_seats. Each tick re-reads
+  // the current DB state so duplicate deliveries are a no-op.
+  'seat-rollup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'seat-rollup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
   'system-monitor-ingest': {
     retryLimit: 3,

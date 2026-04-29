@@ -1121,6 +1121,20 @@ export const queueService = {
         }
       });
 
+      // Workspace seat rollup (agents-as-employees D9) — hourly billing snapshot
+      await boss.schedule('seat-rollup', '0 * * * *', {});
+      await (boss as any).work('seat-rollup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+          await withTimeout(runSeatRollup().then(() => undefined), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'seat-rollup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
       await (boss as any).work('slack-inbound', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 2 }, async (job: any) => {
         try {
@@ -1233,6 +1247,14 @@ export const queueService = {
           console.error(JSON.stringify({ event: 'maintenance:memory_dedup_error', ...serializeError(err) }));
         });
       }, 24 * 60 * 60 * 1000); // daily
+
+      // Workspace seat rollup — hourly billing snapshot (in-memory fallback)
+      setInterval(async () => {
+        const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+        runSeatRollup().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'seat-rollup:error', ...serializeError(err) }));
+        });
+      }, 60 * 60 * 1000); // hourly
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
     }

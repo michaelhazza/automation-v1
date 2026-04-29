@@ -7,6 +7,7 @@ import { agents, subaccountAgents, users } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
 import { eq, and, isNull } from 'drizzle-orm';
+import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { workspaceIdentityService } from '../services/workspace/workspaceIdentityService.js';
@@ -210,6 +211,20 @@ router.get(
     const suspended = identities.filter((i) => i.status === 'suspended').length;
     const total = identities.length;
 
+    // Fetch billing snapshot from org_subscriptions for this org
+    const scopedDb = getOrgScopedDb('workspace.getConfig');
+    const [orgSub] = await scopedDb
+      .select({
+        consumedSeats: orgSubscriptions.consumedSeats,
+        updatedAt: orgSubscriptions.updatedAt,
+      })
+      .from(orgSubscriptions)
+      .where(eq(orgSubscriptions.organisationId, req.orgId!))
+      .limit(1);
+
+    const billingSnapshot = orgSub?.consumedSeats ?? null;
+    const lastSnapshotAt = orgSub?.updatedAt?.toISOString() ?? null;
+
     // Surface the effective email domain so the UI can render
     // `<localPart>@<domain>` previews without hardcoding a literal.
     const configDomain = (connectorConfig?.configJson as Record<string, unknown> | undefined)?.domain;
@@ -221,7 +236,7 @@ router.get(
       backend: connectorConfig?.connectorType ?? null,
       connectorConfigId: connectorConfig?.id ?? null,
       emailDomain,
-      seatUsage: { active, suspended, total },
+      seatUsage: { active, suspended, total, billingSnapshot, lastSnapshotAt },
     });
   }),
 );
