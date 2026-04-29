@@ -1,6 +1,6 @@
 # Vitest Migration — Session Progress
 
-Current phase: Phase 3 — handwritten harness migration. Batch 0/22 done.
+Current phase: Phase 6 complete. PR #238 open — awaiting CI green.
 
 Spec: docs/test-migration-spec.md
 Plan: docs/superpowers/plans/2026-04-29-vitest-migration.md
@@ -33,4 +33,7 @@ Key learnings:
 - Files with top-level blocks (no function test harness): wrapped in test('assertions', () => {...})
 - node:assert imports (not /strict): handled by hasNodeAssertImport flag
 - if(failed>0){} without process.exit: left by boilerplate removal, needs manual cleanup
-Next: Batches 1-22 via parallel subagents, then outlier wrap (Task 3.N).
+- 2026-04-30: Phase 4 complete. 10 consecutive clean runs in parallel threads mode (3 shuffle, 7 default). maxThreads=cores-1. Quarantines added: none. Env vars added: SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS, SYSTEM_INCIDENT_THROTTLE_MS.
+- 2026-04-30: Phase 5 cutover: bash runner deleted, test:unit → vitest run, CI timeout 45→15min, vitest-pre-cutover tag pushed. PR #238 open.
+- 2026-04-30: Phase 6 complete: testing-conventions.md updated, .nvmrc added.
+- CI unit-layer runtime baseline: pending CI run on PR #238.
