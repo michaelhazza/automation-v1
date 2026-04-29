@@ -166,6 +166,7 @@ import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNot
 import workspaceRouter from './routes/workspace.js';
 import workspaceMailRouter from './routes/workspaceMail.js';
 import workspaceCalendarRouter from './routes/workspaceCalendar.js';
+import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -371,6 +372,7 @@ app.use(systemIncidentsRouter);
 app.use(workspaceRouter);
 app.use(workspaceMailRouter);
 app.use(workspaceCalendarRouter);
+app.use(workspaceInboundWebhookRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
