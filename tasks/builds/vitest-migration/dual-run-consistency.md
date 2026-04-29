@@ -119,3 +119,15 @@ server/config/__tests__/actionSlugAliasesPure.test.ts bash:pass vitest:pass matc
 server/config/__tests__/sensitiveConfigPathsRegistryPure.test.ts bash:pass vitest:pass match:yes
 server/jobs/__tests__/bundleUtilizationJob.idempotency.test.ts bash:pass vitest:pass match:yes
 server/jobs/__tests__/connectorPollingSync.idempotency.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-02 (2026-04-29)
+server/jobs/__tests__/fastPathDecisionsPruneJobPure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/fastPathRecalibrateJobPure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/ledgerArchivePure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/measureInterventionOutcomeJob.idempotency.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/measureInterventionOutcomeJobPure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/ruleAutoDeprecateJob.idempotency.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/ruleAutoDeprecateJobPure.test.ts bash:pass vitest:pass match:yes
+server/jobs/__tests__/staleAnalyzerJobSweepJobPure.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/briefContractTestHarness.example.test.ts bash:pass vitest:pass match:yes
+server/lib/__tests__/briefContractTestHarness.test.ts bash:pass vitest:pass match:yes

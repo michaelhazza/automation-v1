@@ -12,6 +12,7 @@
  *   npx tsx server/lib/__tests__/briefContractTestHarness.example.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   assertValidArtefact,
   assertValidChain,
@@ -26,19 +27,6 @@ import type {
   BriefApprovalCard,
 } from '../../../shared/types/briefResultContract.js';
 import { randomUUID } from 'crypto';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => Promise<void>) {
-  return fn()
-    .then(() => { passed++; console.log(`  PASS  ${name}`); })
-    .catch((err: unknown) => {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message.split('\n')[0] : err}`);
-    });
-}
 
 // ---------------------------------------------------------------------------
 // Synthetic capability: emits a realistic read_refinement chain
@@ -215,6 +203,4 @@ await test('assertRlsScope: correctly catches a row ID outside the scope', async
 
 // ══════════════════════════════════════════════════════════════════════════════
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+console.log('');
