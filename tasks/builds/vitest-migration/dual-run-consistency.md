@@ -311,3 +311,15 @@ server/services/__tests__/toolCallsLogProjectionServicePure.test.ts bash:pass vi
 server/services/__tests__/topicClassifierPure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/trajectoryServicePure.test.ts bash:pass vitest:pass match:yes
 server/services/__tests__/trustCalibrationServicePure.test.ts bash:pass vitest:pass match:yes
+
+### phase3 phase3-batch-18 (2026-04-29)
+server/services/__tests__/visibilityPredicatePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/workflowActionCallExecutorPure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/workspaceHealthServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/__tests__/workspaceMemoryService.test.ts bash:pass vitest:skip match:expected-skip
+server/services/__tests__/workspaceMemoryServicePure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/approvalCardGeneratorPure.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/canonicalQueryRegistry.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/hybridExecutor.test.ts bash:pass vitest:pass match:yes
+server/services/crmQueryPlanner/__tests__/integration.test.ts bash:pass vitest:skip match:expected-skip

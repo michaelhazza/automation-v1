@@ -25,16 +25,17 @@ import { expect, test } from 'vitest';
 
 export {};
 
-if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
+const SKIP_CRM = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
+if (SKIP_CRM) {
   console.log('\nCRM Query Planner RLS isolation integration test\n');
   console.log('  SKIP  requires DATABASE_URL and NODE_ENV=integration');
   console.log('\n  Skipped (not a failure).\n');
-  process.exit(0);
 }
 
 // Dynamic imports only after we confirm DATABASE_URL exists so the skip path
 // above does not transitively load drizzle / postgres-js (which would error
 // on missing env vars during module evaluation).
+if (!SKIP_CRM) {
 const { db } = await import('../../../db/index.js');
 const { withOrgTx } = await import('../../../instrumentation.js');
 const { sql } = await import('drizzle-orm');
@@ -213,4 +214,7 @@ try {
   });
 } finally {
   await cleanupFixtures();
+}
+} else {
+  test.skip('crmQueryPlanner integration (requires DATABASE_URL and NODE_ENV=integration)', () => {});
 }
