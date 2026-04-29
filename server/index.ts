@@ -237,6 +237,7 @@ app.use(cors({
 app.use(ghlWebhookRouter);
 app.use(teamworkWebhookRouter);
 app.use(slackWebhookRouter);
+app.use(workspaceInboundWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -372,7 +373,6 @@ app.use(systemIncidentsRouter);
 app.use(workspaceRouter);
 app.use(workspaceMailRouter);
 app.use(workspaceCalendarRouter);
-app.use(workspaceInboundWebhookRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

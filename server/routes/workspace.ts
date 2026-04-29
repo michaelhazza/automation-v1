@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireSubaccountPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents, subaccountAgents } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
@@ -12,13 +12,19 @@ import { connectorConfigService } from '../services/connectorConfigService.js';
 import { workspaceIdentityService } from '../services/workspace/workspaceIdentityService.js';
 import * as workspaceOnboardingService from '../services/workspace/workspaceOnboardingService.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
+import { googleWorkspaceAdapter } from '../adapters/workspace/googleWorkspaceAdapter.js';
+import { auditEvents } from '../db/schema/auditEvents.js';
+
+function resolveAdapter(backend: string) {
+  return backend === 'google_workspace' ? googleWorkspaceAdapter : nativeWorkspaceAdapter;
+}
 
 const router = Router();
 
 // ─── Helper: resolve agent's active workspace identity ────────────────────────
 
 async function resolveAgentIdentity(agentId: string, organisationId: string) {
-  const [agent] = await db
+  const [agent] = await getOrgScopedDb('workspace.resolveAgentIdentity')
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
@@ -42,7 +48,7 @@ async function resolveAgentIdentity(agentId: string, organisationId: string) {
 // ─── Helper: resolve agent's subaccountId ─────────────────────────────────────
 
 async function resolveAgentSubaccountId(agentId: string, organisationId: string): Promise<string> {
-  const [link] = await db
+  const [link] = await getOrgScopedDb('workspace.resolveAgentSubaccountId')
     .select({ subaccountId: subaccountAgents.subaccountId })
     .from(subaccountAgents)
     .where(
@@ -240,7 +246,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'suspend', req.userId!);
-    await nativeWorkspaceAdapter.suspendIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).suspendIdentity(identity.id);
+      await getOrgScopedDb('workspace.suspend').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.suspended',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -261,7 +277,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'resume', req.userId!);
-    await nativeWorkspaceAdapter.resumeIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).resumeIdentity(identity.id);
+      await getOrgScopedDb('workspace.resume').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.resumed',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -284,19 +310,29 @@ router.post(
     const { agent, identity } = await resolveAgentIdentity(agentId, req.orgId!);
 
     // Resolve the workspace actor's display name for confirmation
-    const [actorRow] = await db
+    const [actorRow] = await getOrgScopedDb('workspace.revokeIdentity')
       .select()
       .from(workspaceActors)
       .where(eq(workspaceActors.id, identity.actorId));
 
     const displayName = actorRow?.displayName ?? agent.name;
-    if (confirmName !== displayName) {
+    if (confirmName !== displayName && confirmName !== agent.name) {
       res.status(400).json({ error: 'confirmName does not match agent display name', expected: displayName });
       return;
     }
 
     const result = await workspaceIdentityService.transition(identity.id, 'revoke', req.userId!);
-    await nativeWorkspaceAdapter.revokeIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).revokeIdentity(identity.id);
+      await getOrgScopedDb('workspace.revoke').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.revoked',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -317,7 +353,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'archive', req.userId!);
-    await nativeWorkspaceAdapter.archiveIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).archiveIdentity(identity.id);
+      await getOrgScopedDb('workspace.archive').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.archived',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -339,6 +385,14 @@ router.patch(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     await workspaceIdentityService.setEmailSending(identity.id, enabled, req.userId!);
+    await getOrgScopedDb('workspace.emailSending').insert(auditEvents).values({
+      organisationId: req.orgId!,
+      actorType: 'agent',
+      workspaceActorId: identity.actorId,
+      action: enabled ? 'identity.email_sending_enabled' : 'identity.email_sending_disabled',
+      entityType: 'workspace_identity',
+      metadata: { identityId: identity.id, enabled },
+    });
     res.json({ identityId: identity.id, emailSendingEnabled: enabled });
   }),
 );

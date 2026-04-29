@@ -7,6 +7,7 @@
 **Scope:** Phases A, B, C only — per caller. Phases D and E NOT yet implemented and explicitly out of scope.
 **Changed-code set:** 8 modified files since previous re-run log (`6fa7e473`), all uncommitted in working tree.
 **Run at:** 2026-04-29T20:02:16Z
+**Commit at finish:** `c47ed3b0`
 **Previous logs:**
 - Initial: `tasks/review-logs/spec-conformance-log-agent-as-employee-2026-04-29T11-58-52Z.md` (18 directional gaps)
 - First re-run: `tasks/review-logs/spec-conformance-log-agent-as-employee-2026-04-29T12-45-59Z.md` (5 remaining: D11, D15, D17, D19, D20)

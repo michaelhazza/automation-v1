@@ -6,11 +6,40 @@
 
 ## Status
 
-- [x] Phase A — schema + manifest + permissions + system-agent rename (PR open, pending review)
-- [ ] Phase B — native adapter + canonical pipeline + onboard flow
-- [ ] Phase C — Google adapter
-- [ ] Phase D — org chart + activity + seats
-- [ ] Phase E — migration runbook
+- [x] Phase A — schema + manifest + permissions + system-agent rename
+- [x] Phase B — native adapter + canonical pipeline + onboard flow
+- [x] Phase C — Google adapter
+- [x] Spec-conformance + PR-reviewer fixes (D-series + blocking issues) — 2026-04-30
+- [ ] Phase D — org chart + activity + seats (separate session)
+- [ ] Phase E — migration runbook (separate session)
+
+## Spec-conformance + review fixes (2026-04-30)
+
+All Phase A–C spec-conformance gaps fixed in this session:
+
+| Fix | File(s) |
+|---|---|
+| D1/D13: getOrgScopedDb + identity.provisioned audit | workspaceOnboardingService.ts |
+| D1/D18: TX1/TX2 withOrgTx, rateLimitKey in log | workspaceEmailPipeline.ts |
+| D2: All routes use getOrgScopedDb | workspace.ts, workspaceMail.ts, workspaceCalendar.ts |
+| D2: Webhook uses withAdminConnection + withOrgTx | workspaceInboundWebhook.ts |
+| D3: All adapters use getOrgScopedDb | nativeWorkspaceAdapter.ts, googleWorkspaceAdapter.ts |
+| D4: Attachments forwarded | transactionalEmailProvider.ts |
+| D5: Three-window rate limiting | workspaceEmailRateLimit.ts |
+| D7/D8: Field name fixes | AgentMailboxPage.tsx, AgentCalendarPage.tsx |
+| D10: CTA gated on workspaceIdentityStatus | SubaccountAgentsPage.tsx, subaccountAgentService.ts |
+| D12: actor_id trigger migration | 0258_workspace_message_actor_id_invariant.sql |
+| D14: revoke confirmName accepts either name | workspace.ts |
+| D17: test fixture signature/photoUrl types | canonicalAdapterContract.test.ts |
+| D19: withAdminConnection for cross-org lookup | workspaceInboundWebhook.ts |
+| D20: withOrgTx inside TX1/TX2 | workspaceEmailPipeline.ts |
+| B1: Lifecycle audit events | workspace.ts |
+| B2: Adapter dispatch by identity.backend | workspace.ts |
+| B3: Mailbox compose body normalization | workspaceMail.ts |
+| B4: HMAC rawBody via raw() + early mount | workspaceInboundWebhook.ts, index.ts |
+| B5: Filter archivedAt in identity resolver | workspaceMail.ts, workspaceCalendar.ts |
+
+Remaining deferred (tasks/todo.md): D11, D15, S1 (workspaceIdentityService/ActorService raw-db), S2 (onboard race), S3 (rate-limit tie-break), S4 (seat counting deriveSeatConsumption)
 
 ## Migration numbering
 

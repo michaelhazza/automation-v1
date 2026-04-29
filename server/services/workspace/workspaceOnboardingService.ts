@@ -1,4 +1,4 @@
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents } from '../../db/schema/agents.js';
 import { workspaceActors } from '../../db/schema/workspaceActors.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
@@ -45,6 +45,8 @@ export async function onboard(
     requestId: params.onboardingRequestId,
   });
 
+  const db = getOrgScopedDb('workspaceOnboardingService');
+
   // (1) Resolve agent → workspace actor
   const [agent] = await db.select().from(agents).where(eq(agents.id, params.agentId));
   if (!agent || !agent.workspaceActorId) {
@@ -87,10 +89,20 @@ export async function onboard(
     return failure('workspace_identity_provisioning_failed', msg);
   }
 
-  // (7) Transition identity to 'active'
+  // (7) Write identity.provisioned audit event (before transition so provisioned moment is visible)
+  await db.insert(auditEvents).values({
+    organisationId: params.organisationId,
+    actorType: 'agent' as const,
+    workspaceActorId: actorRow.id,
+    action: 'identity.provisioned',
+    entityType: 'workspace_identity',
+    metadata: { identityId: provisionResult.identityId },
+  });
+
+  // (8) Transition identity to 'active'
   await workspaceIdentityService.transition(provisionResult.identityId, 'activate', params.initiatedByUserId);
 
-  // (8) Write audit events
+  // (9) Write remaining audit events
   await db.insert(auditEvents).values([
     {
       organisationId: params.organisationId,

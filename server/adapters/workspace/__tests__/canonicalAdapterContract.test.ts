@@ -22,8 +22,8 @@ const BASE_PROVISION: Parameters<WorkspaceAdapter['provisionIdentity']>[0] = {
   emailLocalPart: 'alex',
   emailSendingEnabled: true,
   provisioningRequestId: 'req-contract-test-1',
-  signature: null,
-  photoUrl: null,
+  signature: '',
+  photoUrl: undefined,
 };
 
 const adapters: Array<[string, WorkspaceAdapter, () => void]> = [
