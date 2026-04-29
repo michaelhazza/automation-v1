@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { BriefCreationEnvelope } from '../../../shared/types/briefFastPath.js';
 import CommandPalette from './CommandPalette';
 import GlobalAskBar from './global-ask-bar/GlobalAskBar';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -542,7 +543,7 @@ export default function Layout({ user, children }: LayoutProps) {
         briefSubaccountOverride?.id ?? (orgChanged ? undefined : activeClientId ?? undefined);
 
       const description = newBriefDesc.trim();
-      const res = await api.post<{ briefId: string; conversationId: string }>(
+      const res = await api.post<BriefCreationEnvelope>(
         '/api/briefs',
         {
           text: [newBriefTitle.trim(), description].filter(Boolean).join('\n\n'),

@@ -9,7 +9,10 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
 import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
 import { createBrief } from '../services/briefCreationService.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
+import type { BriefCreatedResponse } from '../../shared/types/briefFastPath.js';
 import type { Request } from 'express';
 
 const router = Router();
@@ -22,12 +25,22 @@ interface SessionContext {
 type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
   | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
-  | { type: 'brief_created'; briefId: string; conversationId: string; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
+  | BriefCreatedResponse
   | { type: 'error'; message: string };
 
 router.post(
   '/api/session/message',
   authenticate,
+  // Rate-limit BEFORE permission check: 401 → 429 → 403 ordering invariant (spec §6.1)
+  asyncHandler(async (req, res, next) => {
+    const limitResult = await rateLimitCheck(rateLimitKeys.sessionMessage(req.user!.id), 30, 60);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+      res.status(429).json({ type: 'error', message: 'Too many requests, please slow down.' });
+      return;
+    }
+    next();
+  }),
   // Path B (with remainder) and Path C both call createBrief; gate the route on the
   // same BRIEFS_WRITE permission /api/briefs enforces so read-only users cannot
   // create briefs through GlobalAskBar.
@@ -154,7 +167,9 @@ router.post(
     if (subaccountId) {
       try {
         await resolveSubaccount(subaccountId, organisationId);
-      } catch {
+      } catch (err) {
+        const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+        if (statusCode !== 404) throw err;
         logger.warn('session.message.stale_subaccount_dropped', {
           userId: req.user!.id,
           organisationId,
@@ -182,6 +197,7 @@ router.post(
       type: 'brief_created',
       briefId: result.briefId,
       conversationId: result.conversationId,
+      fastPathDecision: result.fastPathDecision,
       organisationId,
       organisationName: null,
       subaccountId: subaccountId ?? null,
@@ -246,6 +262,7 @@ async function resolveAndCreate(opts: {
     type: 'brief_created',
     briefId: result.briefId,
     conversationId: result.conversationId,
+    fastPathDecision: result.fastPathDecision,
     organisationId: resolvedOrgId,
     organisationName: resolvedOrgName,
     subaccountId: resolvedSubaccountId,

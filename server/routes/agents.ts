@@ -8,7 +8,9 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateMultipart, validateBody } from '../middleware/validate.js';
 import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 
 const router = Router();
@@ -164,7 +166,12 @@ router.post('/api/agents/:id/test-run',
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    checkTestRunRateLimit(req.user!.id);
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+      res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
+      return;
+    }
     const { prompt, inputJson, idempotencyKey } = req.body as {
       prompt?: string;
       inputJson?: Record<string, unknown>;
