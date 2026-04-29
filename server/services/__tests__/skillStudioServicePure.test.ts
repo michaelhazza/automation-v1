@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
 // guard-ignore-file: pure-helper-convention reason="Inline pure simulation — orgId-guard logic inlined to avoid db/drizzle transitive imports; no sibling import needed"
+import { expect, test } from 'vitest';
 /**
  * skillStudioServicePure unit tests — runnable via:
  *   npx tsx server/services/__tests__/skillStudioServicePure.test.ts

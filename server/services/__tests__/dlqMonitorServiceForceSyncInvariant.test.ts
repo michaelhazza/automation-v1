@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
 // guard-ignore-file: pure-helper-convention reason="uses dynamic imports to set stub env vars before module load; no static sibling import is possible for this pattern"
+import { expect, test } from 'vitest';
 /**
  * dlqMonitorServiceForceSyncInvariant.test.ts
  *

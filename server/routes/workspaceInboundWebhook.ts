@@ -21,7 +21,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D19 deferred — email→identity bootstrap lookup; withAdminConnection wrap tracked in tasks/todo.md"
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import { ingest } from '../services/workspace/workspaceEmailPipeline.js';

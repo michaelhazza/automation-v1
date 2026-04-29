@@ -17,7 +17,7 @@ import { google } from 'googleapis';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { eq, and, gte } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { db } from '../../db/index.js'; // guard-ignore: rls-contract-compliance reason="D3 deferred — adapter writes use caller-supplied organisationId; withOrgTx wrap tracked in tasks/todo.md"
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceCalendarEvents } from '../../db/schema/workspaceCalendarEvents.js';
 import { env } from '../../lib/env.js';

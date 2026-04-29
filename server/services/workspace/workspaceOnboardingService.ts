@@ -3,7 +3,7 @@ import { agents } from '../../db/schema/agents.js';
 import { workspaceActors } from '../../db/schema/workspaceActors.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { auditEvents } from '../../db/schema/auditEvents.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { failure } from '../../../shared/iee/failure.js';
 import type { FailureObject } from '../../../shared/iee/failureReason.js';
 import { logger } from '../../lib/logger.js';
@@ -46,7 +46,7 @@ export async function onboard(
   });
 
   // (1) Resolve agent → workspace actor
-  const [agent] = await db.select().from(agents).where(eq(agents.id, params.agentId));
+  const [agent] = await db.select().from(agents).where(and(eq(agents.id, params.agentId), eq(agents.organisationId, params.organisationId)));
   if (!agent || !agent.workspaceActorId) {
     return failure('workspace_identity_provisioning_failed', 'agent has no workspace_actor_id — backfill required');
   }

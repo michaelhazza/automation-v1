@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
 // guard-ignore-file: pure-helper-convention reason="Inline mock simulation — DB module replaced with in-memory stub; no .js extension on import due to tsx convention"
+import { expect, test } from 'vitest';
 /**
  * canonicalDataService.findAccountBySubaccountId unit tests — runnable via:
  *   npx tsx --test server/services/__tests__/canonicalDataService.findAccountBySubaccountId.test.ts

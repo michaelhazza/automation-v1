@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
 // guard-ignore-file: pure-helper-convention reason="integration test uses conditional lazy imports for NODE_ENV gating; no static sibling module import is applicable"
+import { expect, test } from 'vitest';
 const SKIP = process.env.NODE_ENV !== 'integration';
 
 let db: typeof import('../../db/index.js')['db'];
