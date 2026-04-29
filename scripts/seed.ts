@@ -44,7 +44,7 @@
  *         - seeds the portfolio-health-sweep template directly (non-standard
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
- *   [6/7] Dev fixtures (skipped in production)
+ *   [6/8] Dev fixtures (skipped in production)
  *         - Synthetos organisation + org admin user
  *         - Synthetos Workspace subaccount (16 system agents activated here)
  *         - Breakout Solutions subaccount (reporting agent only — for testing)
@@ -52,9 +52,15 @@
  *         - subaccount_agent link
  *         - integration_connection placeholders (web_login + slack, status=error)
  *
- *   [7/7] Configuration Assistant guidelines block
+ *   [7/8] Configuration Assistant guidelines block
  *         - seeds the runtime guidelines memory block for every org with
  *           the Configuration Assistant agent activated
+ *
+ *   [8/8] Workspace actor backfill
+ *         - creates workspace_actors rows for every active subaccount agent
+ *           and every subaccount user assignment (idempotent no-op on fresh DBs)
+ *         - wires agents.workspace_actor_id, users.workspace_actor_id,
+ *           agent_runs.actor_id, and audit_events.workspace_actor_id
  *
  *
  * Usage:
@@ -101,6 +107,7 @@ import { WorkflowTemplateService } from '../server/services/workflowTemplateServ
 import type { WorkflowDefinition } from '../server/lib/workflow/types.js';
 import { seedConfigAgentGuidelinesAll } from './seedConfigAgentGuidelines.js';
 import { runSystemSkillsBackfill } from './backfill-system-skills.js';
+import { seedWorkspaceActors } from './seed-workspace-actors.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -182,7 +189,7 @@ async function preflightVerifySkillVisibility(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase1_systemBootstrap(): Promise<string> {
-  logPhase(1, 7, 'System bootstrap');
+  logPhase(1, 8, 'System bootstrap');
 
   // 1a. System organisation — upsert
   const systemOrgId = await upsertOrganisation({
@@ -372,7 +379,7 @@ async function upsertSubaccount(values: {
 // skipped with a warning — see runSystemSkillsBackfill for the contract.
 
 async function phase2_systemSkills(): Promise<void> {
-  logPhase(2, 7, 'System skills');
+  logPhase(2, 8, 'System skills');
 
   const result = await runSystemSkillsBackfill({
     log: (msg) => log(`  ${msg}`),
@@ -391,7 +398,7 @@ async function phase2_systemSkills(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase3_systemAgents(): Promise<void> {
-  logPhase(3, 7, 'System agents (Automation OS company)');
+  logPhase(3, 8, 'System agents (Automation OS company)');
 
   const companyDir = resolve('companies/automation-os');
   let parsed: ParsedCompany;
@@ -482,7 +489,7 @@ async function phase3_systemAgents(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase4_workflowAuthor(): Promise<void> {
-  logPhase(4, 7, 'Workflow Author system agent');
+  logPhase(4, 8, 'Workflow Author system agent');
 
   const SLUG = 'workflow-author';
   const PROMPT_PATH = resolve(process.cwd(), 'server/agents/workflow-author/master-prompt.md');
@@ -558,7 +565,7 @@ async function phase4_workflowAuthor(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase5_workflowTemplates(): Promise<void> {
-  logPhase(5, 7, 'Workflow templates');
+  logPhase(5, 8, 'Workflow templates');
 
   await seedPlaybookFiles();
   await seedPortfolioHealthPlaybook();
@@ -771,7 +778,7 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase6_devFixtures(): Promise<void> {
-  logPhase(6, 7, 'Dev fixtures (Synthetos demo org)');
+  logPhase(6, 8, 'Dev fixtures (Synthetos demo org)');
 
   const ORG_NAME = 'Synthetos';
   const ORG_SLUG = 'synthetos';
@@ -1500,6 +1507,15 @@ async function activateBaselineSystemAgents(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 8 — Workspace actor backfill
+// ---------------------------------------------------------------------------
+
+async function phase8_workspaceActors(): Promise<void> {
+  logPhase(8, 8, 'Workspace actor backfill');
+  await seedWorkspaceActors(db, log);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -1521,14 +1537,18 @@ async function main(): Promise<void> {
   if (!IS_PRODUCTION) {
     await phase6_devFixtures();
   } else {
-    console.log('\n[6/7] Dev fixtures — skipped (production mode)\n');
+    console.log('\n[6/8] Dev fixtures — skipped (production mode)\n');
   }
 
   // Phase 7 — Configuration Assistant runtime guidelines memory block.
   // Runs in both production and dev. Seeds the guidelines block for every
   // org that has the Configuration Assistant agent activated. Idempotent.
-  logPhase(7, 7, 'Configuration Assistant guidelines block');
+  logPhase(7, 8, 'Configuration Assistant guidelines block');
   await seedConfigAgentGuidelinesAll(db, log);
+
+  // Phase 8 — Workspace actor backfill. Idempotent: no-op on fresh DBs
+  // (nothing to backfill), re-runs only process rows with NULL FKs.
+  await phase8_workspaceActors();
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n✓ Seed complete in ${elapsed}s.`);

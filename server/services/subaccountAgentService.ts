@@ -1,6 +1,7 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
+import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
@@ -55,9 +56,17 @@ export const subaccountAgentService = {
         agentDescription: agents.description,
         agentIcon: agents.icon,
         agentStatus: agents.status,
+        workspaceIdentityStatus: workspaceIdentities.status,
       })
       .from(subaccountAgents)
       .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .leftJoin(
+        workspaceIdentities,
+        and(
+          eq(workspaceIdentities.actorId, agents.workspaceActorId),
+          isNull(workspaceIdentities.archivedAt),
+        ),
+      )
       .where(
         and(
           eq(subaccountAgents.organisationId, organisationId),
@@ -66,7 +75,7 @@ export const subaccountAgentService = {
         ),
       );
 
-    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({
+    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, workspaceIdentityStatus }) => ({
       id: link.id,
       agentId: link.agentId,
       subaccountId: link.subaccountId,
@@ -95,6 +104,7 @@ export const subaccountAgentService = {
       nextRunAt: link.nextRunAt,
       createdAt: link.createdAt,
       updatedAt: link.updatedAt,
+      workspaceIdentityStatus: workspaceIdentityStatus ?? null,
       agent: {
         id: link.agentId,
         name: agentName,

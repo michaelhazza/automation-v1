@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -7,6 +7,17 @@ import TestPanel from '../components/runs/TestPanel';
 import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
+import { IdentityCard } from '../components/workspace/IdentityCard';
+import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDialog';
+import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
+import {
+  getAgentIdentity,
+  suspendAgentIdentity,
+  resumeAgentIdentity,
+  revokeAgentIdentity,
+  archiveAgentIdentity,
+  toggleAgentEmailSending,
+} from '../lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,7 +56,15 @@ interface LinkDetail {
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity';
+
+interface AgentIdentity {
+  identityId: string;
+  emailAddress: string;
+  emailSendingEnabled: boolean;
+  status: string;
+  displayName: string;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,12 +87,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function SubaccountAgentEditPage({ user: _user }: { user: User }) {
   const { subaccountId, linkId } = useParams<{ subaccountId: string; linkId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [link, setLink] = useState<LinkDetail | null>(null);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('skills');
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'skills';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+
+  // Identity tab state
+  const [identity, setIdentity] = useState<AgentIdentity | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
 
   // Per-section form state
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
@@ -125,6 +152,15 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     }
     load();
   }, [subaccountId, linkId]);
+
+  useEffect(() => {
+    if (activeTab !== 'identity' || !link) return;
+    setIdentityLoading(true);
+    getAgentIdentity(link.agentId)
+      .then((data: AgentIdentity) => setIdentity(data))
+      .catch(() => setIdentity(null))
+      .finally(() => setIdentityLoading(false));
+  }, [activeTab, link]);
 
   async function patch(tab: Tab, payload: Record<string, unknown>) {
     setSaving(tab);
@@ -180,6 +216,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'budget', label: 'Budget' },
     { id: 'scheduling', label: 'Scheduling' },
     { id: 'beliefs', label: 'Beliefs' },
+    { id: 'identity', label: 'Identity' },
   ];
 
   return (
@@ -475,6 +512,62 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       {/* ── Beliefs tab ── */}
       {activeTab === 'beliefs' && subaccountId && linkId && (
         <BeliefsTab subaccountId={subaccountId} linkId={linkId} />
+      )}
+
+      {/* ── Identity tab ── */}
+      {activeTab === 'identity' && (
+        <>
+          {identityLoading && <div className="text-[13px] text-slate-400">Loading…</div>}
+          {!identityLoading && !identity && (
+            <div className="text-[13px] text-slate-500">
+              This agent has not been onboarded to the workplace yet.
+            </div>
+          )}
+          {!identityLoading && identity && link && (
+            <>
+              <IdentityCard
+                identity={{ ...identity, id: identity.identityId }}
+                actor={{ displayName: link.agent.name, agentRole: null }}
+                onSuspend={() => setSuspendOpen(true)}
+                onResume={async () => {
+                  await resumeAgentIdentity(link.agentId);
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+                onRevoke={() => setRevokeOpen(true)}
+                onArchive={async () => {
+                  await archiveAgentIdentity(link.agentId);
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+                onToggleEmail={async (enabled) => {
+                  await toggleAgentEmailSending(link.agentId, enabled);
+                  setIdentity((prev) => prev ? { ...prev, emailSendingEnabled: enabled } : prev);
+                }}
+              />
+              <SuspendIdentityDialog
+                open={suspendOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setSuspendOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+              <RevokeIdentityDialog
+                open={revokeOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setRevokeOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+            </>
+          )}
+        </>
       )}
     </div>{/* end main content */}
 

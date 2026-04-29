@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
+import { OnboardAgentModal } from '../components/workspace/OnboardAgentModal';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ interface AgentLink {
   parentSubaccountAgentId: string | null;
   agentRole: string | null;
   agentTitle: string | null;
+  workspaceIdentityStatus: string | null;
   agent: { id: string; name: string; slug: string; status: string };
 }
 
@@ -134,7 +136,9 @@ function SubaccountTreeRow({ node, depth }: { node: TreeNode; depth: number }) {
 
 export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
+  const navigate = useNavigate();
   const [agentLinks, setAgentLinks] = useState<AgentLink[]>([]);
+  const [onboardLink, setOnboardLink] = useState<AgentLink | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [pageTab, setPageTab] = useState<PageTab>('list');
   const [loading, setLoading] = useState(true);
@@ -418,6 +422,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Active</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -440,6 +445,31 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                     <td className="px-4 py-3"><RoleBadge role={link.agentRole} /></td>
                     <td className="px-4 py-3">
                       <span className={`inline-block w-2 h-2 rounded-full ${link.isActive ? 'bg-green-500' : 'bg-slate-300'}`} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/admin/subaccounts/${subaccountId}/agents/${link.id}/manage`}
+                          className="text-[12px] text-indigo-500 hover:underline no-underline"
+                        >
+                          Manage
+                        </Link>
+                        {link.workspaceIdentityStatus == null ? (
+                          <button
+                            onClick={() => setOnboardLink(link)}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0"
+                          >
+                            Onboard to workplace
+                          </button>
+                        ) : (
+                          <Link
+                            to={`/admin/subaccounts/${subaccountId}/agents/${link.id}/manage?tab=identity`}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 no-underline"
+                          >
+                            Identity
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -674,6 +704,19 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
             </button>
           </div>
         </Modal>
+      )}
+      {onboardLink && subaccountId && (
+        <OnboardAgentModal
+          open={!!onboardLink}
+          subaccountId={subaccountId}
+          agentId={onboardLink.agentId}
+          agentDisplayName={onboardLink.agent.name}
+          onClose={() => setOnboardLink(null)}
+          onSuccess={(_identityId) => {
+            setOnboardLink(null);
+            navigate(`/admin/subaccounts/${subaccountId}/agents/${onboardLink.id}/manage?tab=identity`);
+          }}
+        />
       )}
     </div>
   );

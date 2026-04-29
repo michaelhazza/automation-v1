@@ -38,10 +38,32 @@ export const connectorConfigService = {
   },
 
   async getByType(organisationId: string, connectorType: string) {
+    // Workspace connector types (synthetos_native, google_workspace) are
+    // subaccount-scoped after migration 0254 — the unique index is
+    // (org_id, connector_type) WHERE connector_type IN ('crm', ...) only.
+    // Callers that need a workspace connector must use getBySubaccountAndType.
+    if (connectorType === 'synthetos_native' || connectorType === 'google_workspace') {
+      throw new Error(
+        `getByType does not support workspace connector type '${connectorType}'. ` +
+        'Use getBySubaccountAndType(organisationId, subaccountId, connectorType) instead.',
+      );
+    }
     const [config] = await db
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType as ConnectorType)));
+    return config ?? null;
+  },
+
+  async getBySubaccountAndType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ));
     return config ?? null;
   },
 
