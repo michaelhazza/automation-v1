@@ -847,6 +847,31 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Individual subaccount-scoped memory entries extracted from agent runs — contain observations, decisions, and patterns with PII risk.',
   },
+  // Workspace canonical layer (migration 0254 — agents-are-employees feature).
+  {
+    tableName: 'workspace_actors',
+    schemaFile: 'workspaceActors.ts',
+    policyMigration: '0254_workspace_canonical_layer.sql',
+    rationale: 'Canonical actor identity rows for agents and humans — links identities to org-chart hierarchy. Leak exposes org structure and agent roster.',
+  },
+  {
+    tableName: 'workspace_identities',
+    schemaFile: 'workspaceIdentities.ts',
+    policyMigration: '0254_workspace_canonical_layer.sql',
+    rationale: 'Provider-scoped email identities for agents — email addresses, lifecycle status, and provisioning metadata. Leak exposes agent email infrastructure.',
+  },
+  {
+    tableName: 'workspace_messages',
+    schemaFile: 'workspaceMessages.ts',
+    policyMigration: '0254_workspace_canonical_layer.sql',
+    rationale: 'Canonical inbound + outbound email store for agent identities — message bodies, addresses, metadata. High PII risk.',
+  },
+  {
+    tableName: 'workspace_calendar_events',
+    schemaFile: 'workspaceCalendarEvents.ts',
+    policyMigration: '0254_workspace_canonical_layer.sql',
+    rationale: 'Canonical calendar event store for agent identities — meeting titles, attendees, times. PII and business-sensitive.',
+  },
   // Sister-branch tables (workflow_engines owned by pre-prod-workflow-and-delegation — §0.4).
   // Registry-only entries: no policy migration is being authored here.
   // The owning branch is responsible for the CREATE POLICY statements.

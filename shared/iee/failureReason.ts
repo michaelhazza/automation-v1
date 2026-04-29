@@ -46,6 +46,15 @@ export const FailureReason = z.enum([
   'decision_cancelled',             // run cancelled while decision step was in running/awaiting state
   'decision_invalid_edit',          // mid-run editor provided a chosenBranchId that is not valid
   'decision_skip_set_collision',    // downstream step found in running/completed state when it should be skipped (DAG bug)
+  // Workspace identity / email / calendar additions (agents-as-employees spec).
+  'workspace_identity_provisioning_failed',
+  'workspace_email_rate_limited',
+  'workspace_email_sending_disabled',
+  'workspace_provider_acl_denied',
+  'workspace_idempotency_collision',
+  // Workspace actor hierarchy additions (agents-as-employees spec §6.1).
+  'parent_actor_cycle_detected',
+  'workspace_mirror_write_failed',
   'unknown',
 ]);
 

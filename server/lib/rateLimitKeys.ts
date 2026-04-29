@@ -44,4 +44,10 @@ export const rateLimitKeys = {
   // ---------------- session message (Phase 6) ----------------
   sessionMessage: (userId: string): string =>
     `rl:${KEY_VERSION}:session:message:user:${userId}`,
+
+  // ---------------- workspace email ----------------
+  workspaceEmailIdentity: (identityId: string): string =>
+    `rl:${KEY_VERSION}:workspace:email:identity:${identityId}`,
+  workspaceEmailOrg: (organisationId: string): string =>
+    `rl:${KEY_VERSION}:workspace:email:org:${organisationId}`,
 };

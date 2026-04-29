@@ -7,6 +7,7 @@ import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 import { users } from './users';
+import { workspaceActors } from './workspaceActors';
 
 // ---------------------------------------------------------------------------
 // Agent Runs — logs of autonomous agent executions
@@ -230,6 +231,7 @@ export const agentRuns = pgTable(
     // System monitoring — carries a request/job tracing ID into incident events
     // so a system incident can be correlated back to the agent run that caused it.
     correlationId: text('correlation_id'),
+    actorId: uuid('actor_id').references(() => workspaceActors.id),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
