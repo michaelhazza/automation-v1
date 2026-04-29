@@ -41,7 +41,6 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions } from '../db/schema/actions.js';
-import { interventionOutcomes } from '../db/schema/interventionOutcomes.js';
 import {
   clientPulseHealthSnapshots,
   clientPulseChurnAssessments,
@@ -247,24 +246,9 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
         continue;
       }
 
-      // Per-org advisory lock + claim-verify: hold the lock for this org,
-      // re-check NOT EXISTS to defend against a sibling worker that wrote
-      // the outcome row between the eligibility SELECT and now, then write.
-      // The advisory lock is released when the transaction commits.
-      const wrote = await db.transaction(async (tx) => {
-        const lockKey = `${row.organisation_id}::measureInterventionOutcomes`;
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
-
-        const [existing] = await tx
-          .select({ id: interventionOutcomes.interventionId })
-          .from(interventionOutcomes)
-          .where(eq(interventionOutcomes.interventionId, row.id))
-          .limit(1);
-        if (existing) return false;
-
-        await interventionService.recordOutcome(decision.recordArgs!);
-        return true;
-      });
+      // recordOutcome internally INSERTs with ON CONFLICT (intervention_id) DO NOTHING.
+      // Returns true iff a new row was inserted; false on the no-op conflict path.
+      const wrote = await interventionService.recordOutcome(decision.recordArgs!);
 
       if (wrote) summary.written += 1;
     } catch (err) {
