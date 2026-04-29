@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
+import { workspaceActors } from './workspaceActors';
 
 // ---------------------------------------------------------------------------
 // Audit Events — lightweight security audit log for compliance & debugging
@@ -19,6 +20,7 @@ export const auditEvents = pgTable(
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     correlationId: text('correlation_id'), // end-to-end flow tracing (runId, requestId, etc.)
     ipAddress: text('ip_address'),
+    workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
