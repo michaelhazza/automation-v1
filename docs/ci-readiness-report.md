@@ -165,3 +165,60 @@ There is no `.github/workflows/` directory. There are no workflow files. There i
 There are no existing CI processes that would conflict with or overlap the planned workflow. The implementation can create `.github/workflows/ci.yml` cleanly.
 
 The planned workflow will be the first CI configured for this repo.
+
+---
+
+## 4. Required environment variables for CI
+
+`.env.example` declares around 50 variables. The vast majority are runtime-only and not consumed by any test file. The only env vars actually referenced by `**/*.test.ts` (via `grep -oE 'process\.env\.[A-Z_]+'`) are:
+
+```
+DATABASE_URL
+EMAIL_FROM
+JWT_SECRET
+NODE_ENV
+ROUTER_FORCE_FRONTIER
+SECRET
+SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS
+SYSTEM_INCIDENT_INGEST_ENABLED
+SYSTEM_INCIDENT_THROTTLE_MS
+SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS
+SYSTEM_MONITOR_COVERAGE_THRESHOLD
+SYSTEM_MONITOR_ENABLED
+SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT
+```
+
+### Definitely needed in CI
+
+| Variable | Why |
+|----------|-----|
+| `DATABASE_URL` | Required by `npm run migrate` (the runner exits 1 if absent). Also probed by every integration test as their skip-gate. |
+| `NODE_ENV` | Set to `integration` to opt the integration tests in, or leave unset to make them self-skip. Recommendation: leave unset on PR runs so the suite stays fast and deterministic. The integration tests check `process.env.NODE_ENV !== 'integration'` and skip. |
+| `JWT_SECRET` | Some unit tests (e.g. tests touching auth helpers) import modules that read this at module-load time. A throwaway value is fine. |
+| `EMAIL_FROM` | Same shape: imported transitively by some tests via the email service. A throwaway value is fine. |
+
+### Probably mockable / safe defaults
+
+The `SYSTEM_MONITOR_*` and `SYSTEM_INCIDENT_*` flags have defaults baked into their consumers and only need to be set if a specific test wants to override them. The tests that read them set them inside the test body, so CI does not need to provide values.
+
+`ROUTER_FORCE_FRONTIER` and `SECRET` are similarly test-local overrides, set inside the test that needs them. CI does not need to provide values.
+
+### Definitely needs mocking (or skipping in CI)
+
+There are no env vars in this category. No test reads provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `STRIPE_KEY`, `HUBSPOT_*`, `GHL_*`, `SENDGRID_API_KEY`, `RESEND_API_KEY`). The provider-facing code lives behind adapters that are stubbed at the module boundary in tests (see `server/services/__tests__/fixtures/fakeProviderAdapter.ts`).
+
+### Minimum CI env block
+
+```yaml
+env:
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/automation_os_test
+  JWT_SECRET: ci-throwaway-jwt-secret
+  EMAIL_FROM: ci@automation-os.local
+  NODE_ENV: test
+```
+
+`NODE_ENV: test` (or leaving it unset) keeps the 10 `*.integration.test.ts` files in skip mode. Do NOT set `NODE_ENV=integration` on the PR-gating job: those tests boot pg-boss queues, take longer, and add flake risk.
+
+### Variables NOT needed by tests but read at module-load time
+
+Some service modules read env vars at import time. If a test transitively imports such a module, CI may need a placeholder so the import does not throw. Searching `**/*.test.ts` for direct `process.env.X` access produced the list above; the four "definitely needed" entries cover the import-time reads observed across the suite. If a CI run surfaces a `Missing required env: FOO` error from `server/lib/env.ts`, add `FOO` to the env block with a throwaway value (the validation runs at module-load, not at request time).
