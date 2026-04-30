@@ -1689,3 +1689,7 @@ The `chatgpt-pr-review` agent previously used `git diff main...HEAD` to generate
 **Fix:** always use `origin/main` (the remote tracking ref, which is updated on every `git fetch`) as the diff base: `git diff origin/main...HEAD`. The remote tracking ref matches what GitHub computes for the PR diff, giving the correct scope.
 
 **Rule:** any script or agent that generates a diff for PR review must use `origin/<base-branch>`, not the local branch pointer. Applied to all 8 occurrences in `.claude/agents/chatgpt-pr-review.md`.
+
+### [2026-05-01] Correction — async handlers passed as effect deps need useCallback
+
+In React, a plain `async function` declared inside a component body creates a new function reference on every render. If that function is passed as a prop to a child component and the child's `useEffect` lists it as a dependency, the effect re-fires on every parent rerender. This pattern bit `handlePick` in `TaskModal.tsx` — passed as `onPick` to `DriveFilePicker`, whose effect called `openPicker(...)` whenever `onPick` changed reference, reopening the Google Picker SDK on rerenders while the picker was already open. **Rule:** any callback passed as a prop into a child component that has a `useEffect` depending on it must be wrapped in `useCallback` with stable dependencies. Caught in ChatGPT PR #242 review Round 1 F2.
