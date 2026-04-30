@@ -150,7 +150,11 @@ export async function applyPatch(
     throw err;
   }
 
-  const { decisions, tasks, approach, createdIds, opsApplied, noOpRemovedIds } = pureResult;
+  // finalPureResult tracks which pure result's IDs/ops were actually persisted.
+  // In the happy path this is pureResult; in the race-retry path it is retryResult.
+  let finalPureResult = pureResult;
+
+  const { decisions, tasks, approach } = pureResult;
 
   const nextVersion = (current?.version ?? 0) + 1;
   const now = new Date();
@@ -199,6 +203,8 @@ export async function applyPatch(
         approach: reloaded[0].approach ?? '',
       };
       const retryResult = applyPatchToPureState(concurrentState, patch);
+      // Use retryResult's IDs/ops — pureResult's UUIDs were never persisted
+      finalPureResult = retryResult;
       const retryVersion = reloaded[0].version + 1;
 
       const updated = await db
@@ -242,15 +248,15 @@ export async function applyPatch(
     runId,
     version: updatedRow.version,
     action: 'thread_context_patched',
-    opsApplied,
+    opsApplied: finalPureResult.opsApplied,
   });
 
   // Log no-op removes (spec: silent no-op + structured log)
-  if (noOpRemovedIds.length > 0) {
+  if (finalPureResult.noOpRemovedIds.length > 0) {
     logger.info('thread_context_noop_remove', {
       conversationId,
       runId,
-      noOpRemovedIds,
+      noOpRemovedIds: finalPureResult.noOpRemovedIds,
       action: 'thread_context_noop_remove',
     });
   }
@@ -264,12 +270,17 @@ export async function applyPatch(
 
   const result: ThreadContextPatchResult = {
     version: updatedRow.version,
-    createdIds,
+    createdIds: finalPureResult.createdIds,
     readModel,
   };
 
   // Store in idempotency cache for future duplicate calls
   if (idempotencyKey) {
+    // Evict oldest entry when at capacity to prevent unbounded memory growth
+    if (processedIdempotencyKeys.size >= 10_000) {
+      const oldestKey = processedIdempotencyKeys.keys().next().value;
+      if (oldestKey !== undefined) processedIdempotencyKeys.delete(oldestKey);
+    }
     processedIdempotencyKeys.set(idempotencyKey, result);
   }
 
