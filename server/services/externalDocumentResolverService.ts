@@ -24,6 +24,14 @@ import type { ResolveParams, ResolvedDocument } from './externalDocumentResolver
 
 const singleFlight = new SingleFlightGuard<ResolvedDocument>(EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES);
 
+// hashtext returns int4; widen to bigint for pg_advisory_xact_lock(bigint).
+// Lock auto-releases on transaction commit/rollback.
+// Caller MUST be inside a Drizzle transaction (tx).
+async function withAdvisoryLock<T>(tx: any, key: string, fn: () => Promise<T>): Promise<T> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
+  return fn();
+}
+
 export const externalDocumentResolverService = {
   async resolve(params: ResolveParams): Promise<ResolvedDocument> {
     const key = `google_drive:${params.fileId}:${params.connectionId}`;
@@ -61,7 +69,7 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     eq(documentCache.fileId, p.fileId),
     eq(documentCache.connectionId, p.connectionId),
   )).limit(1);
-  const cacheRow = cached[0];
+  let cacheRow = cached[0];
 
   // 3. Resolver-version check
   const versionStale = cacheRow ? isResolverVersionStale(cacheRow.resolverVersion, resolver.resolverVersion) : true;
@@ -134,32 +142,56 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
   const tokensUsed = countTokensApprox(truncation.content);
   const tokensBeforeTruncation = truncation.truncated ? rawTokens : null;
 
-  // 8. Cache upsert (atomic — invariant #1)
+  // 8. Cache upsert inside advisory lock (fetch-outside-lock, write-inside-lock)
   const contentHash = createHash('sha256').update(truncation.content).digest('hex');
-  const fetchedAt = new Date();
-  await db.insert(documentCache).values({
-    organisationId: p.organisationId,
-    subaccountId: p.subaccountId,
-    provider: 'google_drive',
-    fileId: p.fileId,
-    connectionId: p.connectionId,
-    content: truncation.content,
-    revisionId: providerRevisionId,
-    fetchedAt,
-    contentSizeTokens: tokensUsed,
-    contentHash,
-    resolverVersion: resolver.resolverVersion,
-  }).onConflictDoUpdate({
-    target: [documentCache.provider, documentCache.fileId, documentCache.connectionId],
-    set: {
-      content: truncation.content,
-      revisionId: providerRevisionId,
-      fetchedAt,
-      contentSizeTokens: tokensUsed,
-      contentHash,
-      resolverVersion: resolver.resolverVersion,
-      updatedAt: sql`now()`,
-    },
+  let fetchedAt = new Date();
+  await db.transaction(async (tx) => {
+    await withAdvisoryLock(tx, `external_doc:google_drive:${p.fileId}:${p.connectionId}`, async () => {
+      // Double-check: did a peer worker write a matching row while we were fetching?
+      const peer = await tx.select().from(documentCache).where(and(
+        eq(documentCache.provider, 'google_drive'),
+        eq(documentCache.fileId, p.fileId),
+        eq(documentCache.connectionId, p.connectionId),
+      )).limit(1);
+      const peerRow = peer[0];
+      if (
+        peerRow &&
+        peerRow.resolverVersion === resolver.resolverVersion &&
+        peerRow.revisionId !== null &&
+        peerRow.revisionId === providerRevisionId &&
+        peerRow.fetchedAt >= fetchStart
+      ) {
+        // Peer beat us; discard our fetch and use their row
+        cacheRow = peerRow;
+        fetchedAt = peerRow.fetchedAt;
+        return;
+      }
+      // No matching peer row — write our content
+      await tx.insert(documentCache).values({
+        organisationId: p.organisationId,
+        subaccountId: p.subaccountId,
+        provider: 'google_drive',
+        fileId: p.fileId,
+        connectionId: p.connectionId,
+        content: truncation.content,
+        revisionId: providerRevisionId,
+        fetchedAt,
+        contentSizeTokens: tokensUsed,
+        contentHash,
+        resolverVersion: resolver.resolverVersion,
+      }).onConflictDoUpdate({
+        target: [documentCache.provider, documentCache.fileId, documentCache.connectionId],
+        set: {
+          content: truncation.content,
+          revisionId: providerRevisionId,
+          fetchedAt,
+          contentSizeTokens: tokensUsed,
+          contentHash,
+          resolverVersion: resolver.resolverVersion,
+          updatedAt: sql`now()`,
+        },
+      });
+    });
   });
 
   // 9. State transition
