@@ -144,6 +144,7 @@ Authoring tests and gates is encouraged — running the full battery of them loc
 - Not later. Not "I'll come back to it." Right now, as part of the task.
 - Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
 - Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+- **Canonical checklist:** `docs/doc-sync.md` — lists every reference doc with its update trigger. Enforced at finalisation by `chatgpt-pr-review`, `chatgpt-spec-review`, and `feature-coordinator`.
 
 ---
 

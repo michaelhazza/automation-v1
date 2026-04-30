@@ -266,7 +266,7 @@ Auto-commit/push: not allowed for the main session. The user reviews and commits
 
 Phase 1:
 - Both ChatGPT review agent files have the new Doc Sync sweep step at the right position in their Finalization section.
-- Both Final Summary templates list the seven (PR) / six (spec) reference doc fields.
+- Both Final Summary templates list the six (PR) / seven (spec) reference doc fields.
 - Both Rules sections have the new bullet.
 - `feature-coordinator.md` references the sweep before declaring the pipeline complete.
 - `tasks/review-logs/README.md` documents the new fields.

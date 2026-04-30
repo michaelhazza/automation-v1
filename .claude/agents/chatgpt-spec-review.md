@@ -483,7 +483,19 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
      dedup and silent-failure handling (same rules as PR agent — increment
      session-level `index_write_failures` counter on each failed write)
    - Enum enforcement: finding_type / category / severity must use predefined values
-5. Deferred backlog: append all deferred items to tasks/todo.md. This includes
+5. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, diff against
+   the change-set shipped this session and update IN THE SAME finalisation commit
+   if its scope is touched. Scope definitions and update triggers live in that
+   file — read it before starting this step. All entries apply to spec-review
+   sessions, including `docs/spec-context.md`.
+
+   Failure to update a relevant doc is a blocker — escalate to the user, do not
+   auto-defer.
+
+   For each doc, log one of: yes (sections X, Y) | no (scope touched but already
+   accurate) | n/a (scope not touched). "no" requires the rationale line.
+
+6. Deferred backlog: append all deferred items to tasks/todo.md. This includes
    BOTH user-decided defers (from step 3b) AND auto-applied technical defers
    (from step 3a) — the user should see a complete list of what's been held
    back regardless of who made the call. Create the top-level heading if it
@@ -502,7 +514,7 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    same leading ~5 words) — skip if already present.
    Do NOT write to tasks/review-logs/_deferred.md.
 
-6. Print the deferred items summary so the user can review what was held back
+7. Print the deferred items summary so the user can review what was held back
    and why, plus the auto-vs-user breakdown:
 
      Deferred to tasks/todo.md § Spec Review deferred items / <spec-slug>:
@@ -515,21 +527,24 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    If index_write_failures > 0, print:
      ⚠ Index write failures: <N> — pattern tracking may be incomplete for this session.
 
-7. Auto-commit-and-push finalization artifacts. Same override of the
+8. Auto-commit-and-push finalization artifacts. Same override of the
    CLAUDE.md "no auto-commits" default as per-round commits. Stage any of
    the following that changed during finalization:
    - tasks/review-logs/<session log>.md (Final Summary block)
    - tasks/review-logs/_index.jsonl
    - tasks/todo.md (deferred items)
    - KNOWLEDGE.md (if new/updated entries)
-   - CLAUDE.md / architecture.md (if [missing-doc] >2 triggered an update)
+   - CLAUDE.md / architecture.md / docs/capabilities.md /
+     docs/integration-reference.md / docs/spec-context.md /
+     DEVELOPMENT_GUIDELINES.md / docs/frontend-design-principles.md
+     (if Doc sync sweep triggered updates)
 
    Commit message: `docs(<spec-slug>): finalize ChatGPT spec review session`
    followed by a short body summarising rounds + final counts (auto vs user)
    + deferred count + KNOWLEDGE.md entry count. Push after commit. If nothing
    changed (rare — only if finalize produced zero edits), skip.
 
-8. Print: "Spec review complete. PR #<N>: <url>. Auto-accepted: <A_apply>/<A_rej>/<A_def>. User-decided: <U_apply>/<U_rej>/<U_def>. Hand off to architect or invoke writing-plans when ready to implement."
+9. Print: "Spec review complete. PR #<N>: <url>. Auto-accepted: <A_apply>/<A_rej>/<A_def>. User-decided: <U_apply>/<U_rej>/<U_def>. Hand off to architect or invoke writing-plans when ready to implement."
 
 ---
 
@@ -581,6 +596,12 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   - Deferred to tasks/todo.md § Spec Review deferred items / <spec-slug>:
     - [auto|user] <item> — <reason>
   - KNOWLEDGE.md updated: yes (<N> entries) | no
+  - architecture.md updated: yes (sections X, Y) | no | n/a
+  - capabilities.md updated: yes (sections X) | no | n/a
+  - integration-reference.md updated: yes (slug X) | no | n/a
+  - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no | n/a
+  - spec-context.md updated: yes | no | n/a
+  - frontend-design-principles.md updated: yes | no | n/a
   - PR: #<N> — spec changes ready at <url>
 
 ---
@@ -635,3 +656,7 @@ File: tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md
   run locally*; specs must NOT instruct implementers to run gate suites
   locally". Specs may name targeted unit tests an implementer should
   author; running the broader suite is CI's job, not the spec's.
+- **Doc sync is mandatory at finalisation.** Every reference doc listed in the
+  Doc sync sweep step must have a yes / no / n/a verdict in the Final Summary.
+  A missing field blocks finalisation; a `no` verdict requires a one-line
+  rationale. Stale docs are a blocking issue per `CLAUDE.md § 11`.

@@ -128,6 +128,34 @@ Once all chunks are implemented and reviewed:
 - Ask the user to perform manual verification
 - Provide specific scenarios to test, derived from the original feature description
 
+### D.5) Doc Sync gate
+
+Before declaring the feature complete, run the Doc Sync sweep against the
+cumulative change-set across ALL chunks. Reference doc list and per-doc update
+triggers are in `docs/doc-sync.md` — read it before starting this step. The
+`docs/spec-context.md` entry does not apply to feature pipelines; skip it.
+
+For each reference doc, log one of:
+  yes (sections X, Y) | no (scope touched but already accurate) | n/a
+
+Record the verdicts in `tasks/builds/{slug}/progress.md` under a
+`## Doc Sync gate` heading using this format:
+
+```markdown
+## Doc Sync gate
+- architecture.md updated: yes (sections X, Y) | no | n/a
+- capabilities.md updated: yes (sections X) | no | n/a
+- integration-reference.md updated: yes (slug X) | no | n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no | n/a
+- frontend-design-principles.md updated: yes | no | n/a
+- KNOWLEDGE.md updated: yes (N entries) | no
+```
+
+A `no` verdict requires a one-line rationale. A missing verdict is a blocker — do not proceed to the final summary.
+
+Failure to update a relevant doc is a blocking issue. Escalate to the user;
+do not auto-defer.
+
 ---
 
 ## progress.md Format
