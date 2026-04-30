@@ -29,7 +29,7 @@
 export {};
 
 import { expect, test } from 'vitest';
-await import('dotenv/config');
+import 'dotenv/config';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';

@@ -18,9 +18,9 @@ import { expect, test } from 'vitest';
 process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://stub:stub@localhost/stub';
 process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'stub-secret-at-least-32-chars-long!!';
 process.env.EMAIL_FROM = process.env.EMAIL_FROM ?? 'stub@example.com';
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV ??= 'test';
 // Disable actual ingest so no DB writes occur if recordIncident leaks through.
-process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'false';
+process.env.SYSTEM_INCIDENT_INGEST_ENABLED ??= 'false';
 
 test('dlqMonitorService passes forceSync: true to recordIncident', async () => {
   const { startDlqMonitor } = await import('../dlqMonitorService.js');

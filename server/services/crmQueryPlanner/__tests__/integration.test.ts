@@ -1,3 +1,4 @@
+// guard-ignore-file: test-quality reason="Integration test using legacy if/else module-level pattern for tsx-runnable compat. Skipped under NODE_ENV=test. Refactor follow-up: TI-005."
 // guard-ignore-file: pure-helper-convention reason="Integration test — dynamic imports required so npm run test:unit can skip without DATABASE_URL"
 /**
  * CRM Query Planner — RLS isolation integration test (spec §20.2).

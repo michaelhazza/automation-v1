@@ -32,7 +32,7 @@ console.log('');
 console.log('FakeProviderAdapter self-test:');
 
 // ─── Case 1: default response is returned and call is recorded ──────────────
-await test('default response path records the invocation and returns the default', async () => {
+test('default response path records the invocation and returns the default', async () => {
   const adapter = createFakeProviderAdapter();
   const out = await adapter.call({
     model: 'fake-model',
@@ -45,7 +45,7 @@ await test('default response path records the invocation and returns the default
 });
 
 // ─── Case 2: setResponse override ───────────────────────────────────────────
-await test('setResponse override is returned on subsequent calls', async () => {
+test('setResponse override is returned on subsequent calls', async () => {
   const adapter = createFakeProviderAdapter();
   adapter.setResponse({
     content: 'custom',
@@ -59,7 +59,7 @@ await test('setResponse override is returned on subsequent calls', async () => {
 });
 
 // ─── Case 3: setError rejects the next call (one-shot), then default returns
-await test('setError rejects exactly one call, then defaults again', async () => {
+test('setError rejects exactly one call, then defaults again', async () => {
   const adapter = createFakeProviderAdapter();
   adapter.setError(new Error('boom'));
   let threw = false;
@@ -76,7 +76,7 @@ await test('setError rejects exactly one call, then defaults again', async () =>
 });
 
 // ─── Case 4: setLatencyMs delays the success path ──────────────────────────
-await test('setLatencyMs(60) delays the success path by >= 60ms', async () => {
+test('setLatencyMs(60) delays the success path by >= 60ms', async () => {
   const adapter = createFakeProviderAdapter();
   adapter.setLatencyMs(60);
   const start = Date.now();
@@ -86,7 +86,7 @@ await test('setLatencyMs(60) delays the success path by >= 60ms', async () => {
 });
 
 // ─── Case 5: setError + setLatencyMs — latency applies to error path too ───
-await test('setError + setLatencyMs delays the rejection AND records on entry', async () => {
+test('setError + setLatencyMs delays the rejection AND records on entry', async () => {
   const adapter = createFakeProviderAdapter();
   adapter.setError(new Error('delayed-boom'));
   adapter.setLatencyMs(60);
@@ -108,7 +108,7 @@ await test('setError + setLatencyMs delays the rejection AND records on entry', 
 });
 
 // ─── Case 5b: setResponse + setLatencyMs — latency applies on success path ─
-await test('setResponse + setLatencyMs delays the override response AND records on entry', async () => {
+test('setResponse + setLatencyMs delays the override response AND records on entry', async () => {
   const adapter = createFakeProviderAdapter();
   adapter.setResponse({
     content: 'overridden-with-latency',
@@ -132,7 +132,7 @@ await test('setResponse + setLatencyMs delays the override response AND records 
 });
 
 // ─── Case 6: reset() clears calls and overrides ─────────────────────────────
-await test('reset() clears calls + cancels pending error/latency/response overrides', async () => {
+test('reset() clears calls + cancels pending error/latency/response overrides', async () => {
   const adapter = createFakeProviderAdapter();
   await adapter.call({ model: 'fake-model', messages: [] });
   await adapter.call({ model: 'fake-model', messages: [] });

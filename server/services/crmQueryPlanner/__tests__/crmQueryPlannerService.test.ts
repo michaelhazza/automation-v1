@@ -12,7 +12,7 @@
 // placeholder values — this test never hits the DB or signs a JWT.
 // ESM static imports are hoisted before any code runs, so we use dynamic imports
 // to guarantee env vars are seeded before the service module initialises.
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
@@ -24,13 +24,6 @@ import type { ExecutorContext, CanonicalQueryRegistry } from '../../../../shared
 
 const { runQuery } = await import('../crmQueryPlannerService.js');
 
-const promises: Promise<void>[] = [];
-
-function assertEqual<T>(a: T, b: T, label = '') {
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
 
 // ── Stub registry (no DB) ─────────────────────────────────────────────────────
 
@@ -324,6 +317,3 @@ test('cache: Stage 1 hits do NOT populate the plan cache', async () => {
   expect(planCache._size(), 'Stage 1 hits MUST NOT populate the plan cache (spec §9.3)').toBe(0);
 });
 
-// ── Wait for all async tests ──────────────────────────────────────────────────
-
-await Promise.all(promises);

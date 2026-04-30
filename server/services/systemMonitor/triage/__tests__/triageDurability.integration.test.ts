@@ -20,14 +20,14 @@ import { expect, test } from 'vitest';
 
 export {};
 
-await import('dotenv/config');
+import 'dotenv/config';
 
 // Set before any module imports so module-level consts pick up the overrides.
-process.env.NODE_ENV     = 'test'; // required for __testHooks NODE_ENV guard in triageHandler
+process.env.NODE_ENV ??= 'test'; // required for __testHooks NODE_ENV guard in triageHandler
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 // Raise rate-limit cap so the test can call runTriage multiple times without hitting it.
-process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT = '10';
+process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT ??= '10';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SKIP_TRIAGE_DUR = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';

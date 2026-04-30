@@ -73,9 +73,9 @@ while IFS= read -r test_file; do
 
   rel_path="${test_file#$ROOT_DIR/}"
 
-  # File-level suppression on the first line.
-  first_line=$(sed -n '1p' "$test_file" 2>/dev/null || echo "")
-  if echo "$first_line" | grep -qE "guard-ignore-file:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
+  # File-level suppression on any of the first 10 lines (allows stacking
+  # multiple guard-ignore-file directives, e.g. pure-helper + test-quality).
+  if head -10 "$test_file" | grep -qE "guard-ignore-file:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
     continue
   fi
 
@@ -106,6 +106,9 @@ while IFS= read -r test_file; do
   fi
 
   # ── Rule 3: handwritten-harness leftovers ──────────────────────────────
+  # The Promise<T>[] declaration + Promise.all + tests.push patterns are the
+  # exact shapes that surfaced under different variable names (pendingTests,
+  # promises, tests) during cleanup. Match the shape, not just the name.
   for pattern in \
     "function asyncTest" \
     "pendingTests" \
@@ -113,7 +116,9 @@ while IFS= read -r test_file; do
     "let failed = 0" \
     "passed\+\+" \
     "failed\+\+" \
-    "Promise\.all\(pendingTests\)"
+    "Promise\.all\(pendingTests\)" \
+    ":\s*Promise<[^>]+>\[\]\s*=\s*\[\]" \
+    "\.push\(async\s*\(\s*\)\s*=>\s*test\("
   do
     if grep -nE "$pattern" "$test_file" >/dev/null 2>&1; then
       line=$(grep -nE "$pattern" "$test_file" | head -1 | cut -d: -f1)
@@ -124,6 +129,34 @@ while IFS= read -r test_file; do
       break  # One harness violation per file is enough — caller will see them all on rerun.
     fi
   done
+
+  # ── Rule 3b: bare top-level await ──────────────────────────────────────
+  # Bare \`await\` at column 0 in a test file is the exact shape that caused
+  # the PR #238 hang (await Promise.all(pendingTests) blocked module load
+  # forever). Allowed exceptions: \`import 'dotenv/config'\` is sync, so use
+  # that instead of \`await import('dotenv/config')\`. For conditional
+  # dynamic imports, indent them inside an if/else block (column > 0).
+  if grep -nE "^await " "$test_file" >/dev/null 2>&1; then
+    line=$(grep -nE "^await " "$test_file" | head -1 | cut -d: -f1)
+    snippet=$(sed -n "${line}p" "$test_file" | head -c 60)
+    emit_violation "$GUARD_ID" "error" "$rel_path" "$line" \
+      "Bare top-level await: ${snippet}..." \
+      "Use a synchronous import or move the await inside a test() / beforeAll() / inside an indented if-block. Bare module-level await runs on import and can deadlock the worker."
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
+
+  # ── Rule 3c: module-level env mutation without restore ─────────────────
+  # \`process.env.FOO = 'bar'\` at column 0 mutates global state for every
+  # subsequent test in the worker. Allowed: \`??=\` (only assigns if unset)
+  # and assignments inside hooks (beforeEach / afterEach / beforeAll /
+  # afterAll) where the value gets restored.
+  if grep -nE "^process\.env\.[A-Z_]+\s*=\s*['\"]" "$test_file" >/dev/null 2>&1; then
+    line=$(grep -nE "^process\.env\.[A-Z_]+\s*=\s*['\"]" "$test_file" | head -1 | cut -d: -f1)
+    emit_violation "$GUARD_ID" "error" "$rel_path" "$line" \
+      "Module-level process.env assignment leaks state across tests" \
+      "Use \`process.env.X ??= 'val'\` (idempotent) or wrap the assignment in beforeEach/afterEach with a restore. See docs/testing-conventions.md § Env mutation."
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
 
   # ── Rule 4: process.exit in tests ──────────────────────────────────────
   # Skip lines that are part of the suppression comment itself.

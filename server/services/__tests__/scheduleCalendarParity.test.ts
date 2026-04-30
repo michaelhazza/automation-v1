@@ -42,7 +42,7 @@ const BASE = { subaccountId: 'sa-1', subaccountName: 'sa', scopeTag: 'subaccount
 
 console.log('\nscheduleCalendarParity — Cron parity with cron-parser\n');
 
-await test('projectCronOccurrences: matches cron-parser output exactly (UTC)', async () => {
+test('projectCronOccurrences: matches cron-parser output exactly (UTC)', async () => {
   const expression = '*/15 * * * *'; // every 15 min
   const tz = 'UTC';
   const start = Date.UTC(2026, 6, 1, 0, 0, 0);
@@ -75,7 +75,7 @@ await test('projectCronOccurrences: matches cron-parser output exactly (UTC)', a
   expect(projected.map((o) => o.scheduledAt.toISOString()), 'timestamps').toEqual(golden);
 });
 
-await test('projectCronOccurrences: matches cron-parser across DST boundary (America/New_York)', async () => {
+test('projectCronOccurrences: matches cron-parser across DST boundary (America/New_York)', async () => {
   const expression = '0 10 * * *';
   const tz = 'America/New_York';
   // Window spans the 2026-03-08 spring-forward boundary.
@@ -115,7 +115,7 @@ await test('projectCronOccurrences: matches cron-parser across DST boundary (Ame
 
 console.log('\nscheduleCalendarParity — Heartbeat contract parity\n');
 
-await test('computeNextHeartbeatAt: next fire is strictly after afterMs', () => {
+test('computeNextHeartbeatAt: next fire is strictly after afterMs', () => {
   // Contract: returns smallest k*interval+offset > afterMs for integer k >= 0.
   const interval = 3;
   const offH = 1;
@@ -131,7 +131,7 @@ await test('computeNextHeartbeatAt: next fire is strictly after afterMs', () => 
   }
 });
 
-await test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces constant UTC interval', () => {
+test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces constant UTC interval', () => {
   // Cross the 2026-03-08 NY spring-forward boundary with a 1h heartbeat.
   // Heartbeat contract (§3.9): constant UTC interval, DST-invariant.
   const boundary = Date.UTC(2026, 2, 8, 6, 0, 0); // 06:00 UTC = 01:00 EST
@@ -144,7 +144,7 @@ await test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces const
   expect(next3 - next2, 'third interval').toEqual(HOUR);
 });
 
-await test('projectHeartbeatOccurrences: projection cadence is uniform across DST', () => {
+test('projectHeartbeatOccurrences: projection cadence is uniform across DST', () => {
   // Project across a DST boundary and assert uniform interval spacing.
   const start = Date.UTC(2026, 2, 7, 0, 0, 0);
   const end = Date.UTC(2026, 2, 10, 0, 0, 0); // 3 days

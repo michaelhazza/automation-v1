@@ -42,7 +42,7 @@ import { FailureError } from '../../../shared/iee/failure.js';
 
 console.log('\n--- llmRouterCostBreaker (pure) ---');
 
-await test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on null id', async () => {
+test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on null id', async () => {
   let caught: unknown = null;
   try {
     await assertWithinRunBudgetFromLedger({

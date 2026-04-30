@@ -2898,7 +2898,28 @@ git add tasks/builds/vitest-migration/progress.md tasks/todo.md
 git commit -m "test(vitest-migration): Phase 6 complete — conventions, footguns, coverage, deferred follow-ups (Phase 6)"
 ```
 
-### Phase 6 exit gate
+### Phase 6 status — DONE (2026-04-30)
+
+Phase 6 (and subsequent post-merge hardening) shipped on PR #238, branch
+`claude/vitest-migration-2026-04-29`. Summary of what landed across multiple
+commits after the initial Phase 6 work:
+
+- All 6 phases of the Vitest migration complete; bash unit runner deleted.
+- 4 orphan-pattern test files (outside `__tests__/` or with zero `test()` blocks) found and migrated.
+- 6 half-migrated test files repaired (handwritten harness leftovers — `asyncTest`, `pendingTests`, `passed++`, `Promise.all(pendingTests)`); these caused a 13-min CI hang on the first PR #238 CI run before the fix.
+- 22 files converted from `node:assert` to `expect()`.
+- 2 outlier files relocated under `__tests__/`; the include allow-list in `vitest.config.ts` removed.
+- 3 files with `process.exit` in tests rewritten to use `test.skipIf` / proper test() blocks.
+- 16 files: `await import('dotenv/config')` → `import 'dotenv/config'`.
+- 18 files: pointless `await` before `test()` removed.
+- Module-level env mutations (9 files) converted to `??=` (idempotent).
+- 3 more handwritten-harness leftovers found post-CI-hang and fixed: `agentExecution.smoke.test.ts` (run() wrapper), `alertFatigueGuard.regression.test.ts` (tests.push pattern), `crmQueryPlannerService.test.ts` (dead `Promise<void>[]`).
+- Unified test-quality gate: `scripts/verify-test-quality.sh` enforces 7 rules — file location under `__tests__/`, no `node:test`/`node:assert`, no handwritten-harness leftovers, no `process.exit`, has at least one `test()/describe()/it()` block, no bare top-level `await`, no module-level env assignment without `??=`. Currently 282 files scanned, 0 violations.
+- New `integration` CI job runs the previously-dead 36 `*.integration.test.ts` cases under `NODE_ENV=integration` (currently `continue-on-error: true` while TI-005 audits per-file lifecycle).
+- Test count: 4,440 → 4,555 (+115 previously hidden `asyncTest` assertions now actually run).
+- Wall clock: 15-min CI hang → 40s clean.
+
+Original exit-gate items below — historical reference.
 
 - Both outlier files moved under `__tests__/` and discoverable by the `**/__tests__/**/*.test.ts` glob without explicit path entries in `vitest.config.ts`.
 - `docs/testing-conventions.md` describes Vitest as the single permitted runner and codifies I-7..I-10.

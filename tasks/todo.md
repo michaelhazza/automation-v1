@@ -1759,8 +1759,28 @@ The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-v
 ### TI-002 + TI-003: [DONE 2026-04-30] verify-test-quality.sh
 Discovery guard + harness-leftover guard merged into a single gate at
 `scripts/verify-test-quality.sh` (wired into `scripts/run-all-gates.sh`).
-Enforces five rules: file location under `__tests__/`, no `node:test` /
+Enforces seven rules: file location under `__tests__/`, no `node:test` /
 `node:assert` imports, no handwritten-harness leftovers (`asyncTest`,
-`pendingTests`, `passed++`, `failed++`, `Promise.all(pendingTests)`), no
-`process.exit` in tests, every file has at least one `test()` / `describe()`
-/ `it()` block. Currently 282 files scanned, 0 violations.
+`pendingTests`, `passed++`, `failed++`, `Promise.all(pendingTests)`,
+`Promise<T>[] = []`, `tests.push(async () => test(...))`), no `process.exit`
+in tests, every file has at least one `test()` / `describe()` / `it()`
+block, no bare top-level `await`, no module-level `process.env.X = '...'`
+without `??=` or restore hook. Currently 282 files scanned, 0 violations.
+
+### TI-005: Refactor 2 legacy integration tests to vitest-idiomatic structure
+- Captured: 2026-04-30
+- Files:
+  - `server/services/crmQueryPlanner/__tests__/integration.test.ts`
+  - `server/services/__tests__/workspaceMemoryService.test.ts`
+- Reason: Both use a flat `if (!SKIP) { ... } else { test.skip(...) }` module-
+  level structure with column-0 `await` for tsx-runnable compatibility. Both
+  carry `// guard-ignore-file: test-quality reason="..."` to bypass the
+  test-quality gate. Concrete bug in workspaceMemoryService: `await
+  client.end()` runs at module load — closes the DB before the registered
+  test() blocks run. Currently masked because CI uses `NODE_ENV=test` and
+  the entire file skips.
+- Goal: convert each to `describe.skipIf(SKIP)('...', () => { beforeAll(...);
+  afterAll(...); test(...); })`. Remove the guard-ignore directives. Verify
+  by running with `NODE_ENV=integration` against the integration CI job.
+- Linked: blocks flipping `.github/workflows/ci.yml` integration job from
+  `continue-on-error: true` → `false`.

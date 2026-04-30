@@ -38,13 +38,13 @@ const child1: RosterEntry = { subaccountAgentId: 'sa-child1', agentId: 'a-child1
 const child2: RosterEntry = { subaccountAgentId: 'sa-child2', agentId: 'a-child2', parentSubaccountAgentId: 'sa-gp' };
 const grandparent: RosterEntry = { subaccountAgentId: 'sa-gp', agentId: 'a-gp', parentSubaccountAgentId: null };
 
-await test('computeDescendantIds: caller is leaf → empty result', () => {
+test('computeDescendantIds: caller is leaf → empty result', () => {
   const roster = [leaf, parent, root];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-leaf', roster });
   expect(result, 'leaf has no children').toStrictEqual([]);
 });
 
-await test('computeDescendantIds: caller is parent of 2 children → returns 2 children', () => {
+test('computeDescendantIds: caller is parent of 2 children → returns 2 children', () => {
   const c1: RosterEntry = { subaccountAgentId: 'sa-c1', agentId: 'a-c1', parentSubaccountAgentId: 'sa-p' };
   const c2: RosterEntry = { subaccountAgentId: 'sa-c2', agentId: 'a-c2', parentSubaccountAgentId: 'sa-p' };
   const p: RosterEntry = { subaccountAgentId: 'sa-p', agentId: 'a-p', parentSubaccountAgentId: null };
@@ -55,7 +55,7 @@ await test('computeDescendantIds: caller is parent of 2 children → returns 2 c
   expect(result.includes('sa-c2'), 'should include sa-c2').toBeTruthy();
 });
 
-await test('computeDescendantIds: grandparent → returns children + grandchildren (4 total)', () => {
+test('computeDescendantIds: grandparent → returns children + grandchildren (4 total)', () => {
   const roster = [grandparent, child1, child2, grandchild1, grandchild2];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-gp', roster });
   expect(result.length === 4, `should have 4 descendants, got ${result.length}`).toBeTruthy();
@@ -65,7 +65,7 @@ await test('computeDescendantIds: grandparent → returns children + grandchildr
   expect(result.includes('sa-gc2'), 'should include sa-gc2').toBeTruthy();
 });
 
-await test('computeDescendantIds: cycle-safe (roster has a cycle → terminates without infinite loop)', () => {
+test('computeDescendantIds: cycle-safe (roster has a cycle → terminates without infinite loop)', () => {
   // Introduce a cycle: sa-a → sa-b → sa-c → sa-a
   const cycleRoster: RosterEntry[] = [
     { subaccountAgentId: 'sa-a', agentId: 'a-a', parentSubaccountAgentId: 'sa-c' },
@@ -82,7 +82,7 @@ await test('computeDescendantIds: cycle-safe (roster has a cycle → terminates 
   expect(!result.includes('sa-a'), 'caller must not appear in descendants').toBeTruthy();
 });
 
-await test('computeDescendantIds: caller not found in roster → empty result', () => {
+test('computeDescendantIds: caller not found in roster → empty result', () => {
   const roster = [root, leaf];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-nonexistent', roster });
   expect(result, 'nonexistent caller has no children').toStrictEqual([]);
@@ -92,7 +92,7 @@ await test('computeDescendantIds: caller not found in roster → empty result', 
 // mapSubaccountAgentIdsToAgentIds tests
 // ---------------------------------------------------------------------------
 
-await test('mapSubaccountAgentIdsToAgentIds: maps correctly', () => {
+test('mapSubaccountAgentIdsToAgentIds: maps correctly', () => {
   const roster: RosterEntry[] = [
     { subaccountAgentId: 'sa-1', agentId: 'agent-1', parentSubaccountAgentId: null },
     { subaccountAgentId: 'sa-2', agentId: 'agent-2', parentSubaccountAgentId: 'sa-1' },
@@ -105,7 +105,7 @@ await test('mapSubaccountAgentIdsToAgentIds: maps correctly', () => {
   expect(!result.includes('agent-2'), 'should not include agent-2').toBeTruthy();
 });
 
-await test('mapSubaccountAgentIdsToAgentIds: unmapped ids are dropped', () => {
+test('mapSubaccountAgentIdsToAgentIds: unmapped ids are dropped', () => {
   const roster: RosterEntry[] = [
     { subaccountAgentId: 'sa-1', agentId: 'agent-1', parentSubaccountAgentId: null },
   ];
@@ -117,7 +117,7 @@ await test('mapSubaccountAgentIdsToAgentIds: unmapped ids are dropped', () => {
   expect(result[0] === 'agent-1', 'should be agent-1').toBeTruthy();
 });
 
-await test('mapSubaccountAgentIdsToAgentIds: empty input → empty result', () => {
+test('mapSubaccountAgentIdsToAgentIds: empty input → empty result', () => {
   const roster: RosterEntry[] = [
     { subaccountAgentId: 'sa-1', agentId: 'agent-1', parentSubaccountAgentId: null },
   ];
@@ -145,39 +145,39 @@ const hierarchyWithChildren: HierarchyContext = {
   depth: 1,
 };
 
-await test('resolveEffectiveScope: explicit override — children scope (beats adaptive)', () => {
+test('resolveEffectiveScope: explicit override — children scope (beats adaptive)', () => {
   // rawScope = 'children', hierarchy has no children → override wins
   const result = resolveEffectiveScope({ rawScope: 'children', hierarchy: hierarchyNoChildren });
   expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: explicit override — descendants scope', () => {
+test('resolveEffectiveScope: explicit override — descendants scope', () => {
   const result = resolveEffectiveScope({ rawScope: 'descendants', hierarchy: hierarchyWithChildren });
   expect(result === 'descendants', `expected 'descendants', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: explicit override — subaccount scope (beats adaptive with children)', () => {
+test('resolveEffectiveScope: explicit override — subaccount scope (beats adaptive with children)', () => {
   // hierarchy has children but explicit override is 'subaccount'
   const result = resolveEffectiveScope({ rawScope: 'subaccount', hierarchy: hierarchyWithChildren });
   expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: adaptive default — has children → returns children', () => {
+test('resolveEffectiveScope: adaptive default — has children → returns children', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyWithChildren });
   expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: adaptive default — no children → returns subaccount', () => {
+test('resolveEffectiveScope: adaptive default — no children → returns subaccount', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyNoChildren });
   expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: fallthrough — missing hierarchy → returns subaccount', () => {
+test('resolveEffectiveScope: fallthrough — missing hierarchy → returns subaccount', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: undefined });
   expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
-await test('resolveEffectiveScope: invalid rawScope treated as no scope → adaptive (children present → children)', () => {
+test('resolveEffectiveScope: invalid rawScope treated as no scope → adaptive (children present → children)', () => {
   const result = resolveEffectiveScope({ rawScope: 'invalid-value', hierarchy: hierarchyWithChildren });
   expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });

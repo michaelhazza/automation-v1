@@ -20,7 +20,7 @@ import { expect, test } from 'vitest';
 
 export {}; // force module scope so top-level await and local declarations don't collide
 
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
@@ -31,7 +31,7 @@ function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
 }
 
-await test('bundleUtilizationJob: __testHooks is exported with canonical shape', () => {
+test('bundleUtilizationJob: __testHooks is exported with canonical shape', () => {
   check(typeof __testHooks === 'object' && __testHooks !== null, '__testHooks must be an object');
   check(
     __testHooks.pauseBetweenClaimAndCommit === undefined,
@@ -39,7 +39,7 @@ await test('bundleUtilizationJob: __testHooks is exported with canonical shape',
   );
 });
 
-await test('bundleUtilizationJob: __testHooks override is invokable', async () => {
+test('bundleUtilizationJob: __testHooks override is invokable', async () => {
   let called = 0;
   __testHooks.pauseBetweenClaimAndCommit = async () => {
     called += 1;
@@ -49,7 +49,7 @@ await test('bundleUtilizationJob: __testHooks override is invokable', async () =
   check(called === 2, 'override is invokable repeatedly');
 });
 
-await test('bundleUtilizationJob: __testHooks reset clears override to undefined', () => {
+test('bundleUtilizationJob: __testHooks reset clears override to undefined', () => {
   __testHooks.pauseBetweenClaimAndCommit = async () => {};
   __testHooks.pauseBetweenClaimAndCommit = undefined;
   check(__testHooks.pauseBetweenClaimAndCommit === undefined, 'reset clears the override');

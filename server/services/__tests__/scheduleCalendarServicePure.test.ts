@@ -45,22 +45,22 @@ const BASE = {
 
 console.log('\nscheduleCalendarServicePure — Heartbeat\n');
 
-await test('computeNextHeartbeatAt: base interval, no offset', () => {
+test('computeNextHeartbeatAt: base interval, no offset', () => {
   const next = computeNextHeartbeatAt(0, 1, 0, 0);
   expect(next, 'next').toEqual(ONE_HOUR);
 });
 
-await test('computeNextHeartbeatAt: mid-interval produces next multiple', () => {
+test('computeNextHeartbeatAt: mid-interval produces next multiple', () => {
   const next = computeNextHeartbeatAt(90 * 60 * 1000, 1, 0, 0);
   expect(next, 'next').toEqual(2 * ONE_HOUR);
 });
 
-await test('computeNextHeartbeatAt: offset shifts the lattice', () => {
+test('computeNextHeartbeatAt: offset shifts the lattice', () => {
   expect(computeNextHeartbeatAt(0, 6, 2, 0), '2h').toEqual(2 * ONE_HOUR);
   expect(computeNextHeartbeatAt(3 * ONE_HOUR, 6, 2, 0), '8h after 3h').toEqual(8 * ONE_HOUR);
 });
 
-await test('computeNextHeartbeatAt: DST invariance — constant interval in UTC', () => {
+test('computeNextHeartbeatAt: DST invariance — constant interval in UTC', () => {
   const start = Date.UTC(2026, 2, 8, 6, 0, 0);
   const a = computeNextHeartbeatAt(start, 1, 0, 0);
   const b = computeNextHeartbeatAt(a, 1, 0, 0);
@@ -70,7 +70,7 @@ await test('computeNextHeartbeatAt: DST invariance — constant interval in UTC'
   expect(c - b, 'third interval').toEqual(ONE_HOUR);
 });
 
-await test('projectHeartbeatOccurrences: produces list in window, bounded', () => {
+test('projectHeartbeatOccurrences: produces list in window, bounded', () => {
   const start = 0;
   const end = 10 * ONE_HOUR;
   const out = projectHeartbeatOccurrences(
@@ -93,7 +93,7 @@ await test('projectHeartbeatOccurrences: produces list in window, bounded', () =
   expect(out[4].scheduledAt.getTime(), 'last fire').toEqual(8 * ONE_HOUR);
 });
 
-await test('projectHeartbeatOccurrences: empty window returns []', () => {
+test('projectHeartbeatOccurrences: empty window returns []', () => {
   const out = projectHeartbeatOccurrences(
     {
       ...BASE,
@@ -109,7 +109,7 @@ await test('projectHeartbeatOccurrences: empty window returns []', () => {
   expect(out.length, 'empty').toBe(0);
 });
 
-await test('projectHeartbeatOccurrences: start > end returns []', () => {
+test('projectHeartbeatOccurrences: start > end returns []', () => {
   const out = projectHeartbeatOccurrences(
     {
       ...BASE,
@@ -127,7 +127,7 @@ await test('projectHeartbeatOccurrences: start > end returns []', () => {
 
 console.log('\nscheduleCalendarServicePure — Cron\n');
 
-await test('projectCronOccurrences: daily at 12:00 UTC — three fires in 3-day window', async () => {
+test('projectCronOccurrences: daily at 12:00 UTC — three fires in 3-day window', async () => {
   const start = Date.UTC(2026, 4, 1, 0, 0, 0);
   const end = Date.UTC(2026, 4, 4, 0, 0, 0);
   const out = await projectCronOccurrences(
@@ -146,7 +146,7 @@ await test('projectCronOccurrences: daily at 12:00 UTC — three fires in 3-day 
   expect(out[2].scheduledAt.getTime(), 'fire 3').toEqual(Date.UTC(2026, 4, 3, 12, 0, 0));
 });
 
-await test('projectCronOccurrences: malformed cron returns [] without throwing', async () => {
+test('projectCronOccurrences: malformed cron returns [] without throwing', async () => {
   const out = await projectCronOccurrences(
     {
       ...BASE,
@@ -161,7 +161,7 @@ await test('projectCronOccurrences: malformed cron returns [] without throwing',
   expect(out.length, 'empty').toBe(0);
 });
 
-await test('projectCronOccurrences: wall-clock DST — UTC hour shifts across DST boundary', async () => {
+test('projectCronOccurrences: wall-clock DST — UTC hour shifts across DST boundary', async () => {
   // America/New_York DST begins Sunday 2026-03-08 at 02:00 local (→ 03:00).
   // For cron "30 2 * * *" with tz=America/New_York:
   //   Pre-DST (Mar 7, EST, UTC-5): 02:30 NY → 07:30 UTC.
@@ -191,17 +191,17 @@ await test('projectCronOccurrences: wall-clock DST — UTC hour shifts across DS
 
 console.log('\nscheduleCalendarServicePure — RRULE\n');
 
-await test('zonedWallClockToUtc: UTC round-trip', () => {
+test('zonedWallClockToUtc: UTC round-trip', () => {
   const d = zonedWallClockToUtc(2026, 5, 1, 9, 0, 'UTC');
   expect(d.getTime(), 'UTC midnight').toEqual(Date.UTC(2026, 4, 1, 9, 0, 0));
 });
 
-await test('zonedWallClockToUtc: America/Los_Angeles PDT', () => {
+test('zonedWallClockToUtc: America/Los_Angeles PDT', () => {
   const d = zonedWallClockToUtc(2026, 6, 1, 9, 0, 'America/Los_Angeles');
   expect(d.getTime(), 'PDT').toEqual(Date.UTC(2026, 5, 1, 16, 0, 0));
 });
 
-await test('projectRRuleOccurrences: daily at 09:00 in UTC', async () => {
+test('projectRRuleOccurrences: daily at 09:00 in UTC', async () => {
   const start = Date.UTC(2026, 5, 1, 0, 0, 0);
   const end = Date.UTC(2026, 5, 4, 0, 0, 0);
   const out = await projectRRuleOccurrences(
@@ -223,7 +223,7 @@ await test('projectRRuleOccurrences: daily at 09:00 in UTC', async () => {
 
 console.log('\nscheduleCalendarServicePure — occurrenceId\n');
 
-await test('computeOccurrenceId: 128-bit hex, deterministic, source-sensitive', () => {
+test('computeOccurrenceId: 128-bit hex, deterministic, source-sensitive', () => {
   const a = computeOccurrenceId('cron', 'c-1', '2026-05-01T12:00:00.000Z');
   const b = computeOccurrenceId('cron', 'c-1', '2026-05-01T12:00:00.000Z');
   const c = computeOccurrenceId('heartbeat', 'c-1', '2026-05-01T12:00:00.000Z');
@@ -251,7 +251,7 @@ function mkOcc(o: Partial<ScheduleOccurrence>): ScheduleOccurrence {
   };
 }
 
-await test('sortOccurrences: time asc, then source priority, then sourceId lex', () => {
+test('sortOccurrences: time asc, then source priority, then sourceId lex', () => {
   const items: ScheduleOccurrence[] = [
     mkOcc({ occurrenceId: 'a', scheduledAt: '2026-05-01T10:00:00Z', source: 'cron', sourceId: 'z' }),
     mkOcc({ occurrenceId: 'b', scheduledAt: '2026-05-01T10:00:00Z', source: 'heartbeat', sourceId: 'y' }),
@@ -262,7 +262,7 @@ await test('sortOccurrences: time asc, then source priority, then sourceId lex',
   expect(sorted.map((o) => o.occurrenceId), 'order').toEqual(['c', 'b', 'd', 'a']);
 });
 
-await test('SOURCE_PRIORITY has unique numeric values per source', () => {
+test('SOURCE_PRIORITY has unique numeric values per source', () => {
   const vals = Object.values(SOURCE_PRIORITY);
   expect(new Set(vals).size, 'unique').toEqual(vals.length);
   expect(vals.every((v) => typeof v === 'number'), 'numeric').toBeTruthy();
@@ -270,7 +270,7 @@ await test('SOURCE_PRIORITY has unique numeric values per source', () => {
 
 console.log('\nscheduleCalendarServicePure — Cost estimator\n');
 
-await test('estimateTokensPerRun: <3 samples returns null', () => {
+test('estimateTokensPerRun: <3 samples returns null', () => {
   expect(estimateTokensPerRun([]), 'empty').toBe(null);
   expect(estimateTokensPerRun([
       { promptTokens: 100, completionTokens: 50 },
@@ -278,7 +278,7 @@ await test('estimateTokensPerRun: <3 samples returns null', () => {
     ]), '2 samples').toBe(null);
 });
 
-await test('estimateTokensPerRun: averages across min(10, N) samples', () => {
+test('estimateTokensPerRun: averages across min(10, N) samples', () => {
   const samples = Array.from({ length: 5 }, (_, i) => ({
     promptTokens: 100 + i * 10,
     completionTokens: 50,
@@ -287,14 +287,14 @@ await test('estimateTokensPerRun: averages across min(10, N) samples', () => {
   expect(estimateTokensPerRun(samples), 'avg').toBe(170);
 });
 
-await test('estimateTokensPerRun: caps window at 10 samples', () => {
+test('estimateTokensPerRun: caps window at 10 samples', () => {
   const samples = Array.from({ length: 20 }, () => ({ promptTokens: 100, completionTokens: 50 }));
   expect(estimateTokensPerRun(samples), 'avg is 150').toBe(150);
 });
 
 console.log('\nscheduleCalendarServicePure — validateWindow\n');
 
-await test('validateWindow: valid ISO, 7-day span passes', () => {
+test('validateWindow: valid ISO, 7-day span passes', () => {
   const r = validateWindow('2026-05-01T00:00:00Z', '2026-05-08T00:00:00Z');
   expect(r.ok, 'ok').toBeTruthy();
   if (r.ok) {
@@ -302,17 +302,17 @@ await test('validateWindow: valid ISO, 7-day span passes', () => {
   }
 });
 
-await test('validateWindow: invalid ISO rejected', () => {
+test('validateWindow: invalid ISO rejected', () => {
   const r = validateWindow('not-a-date', '2026-05-08T00:00:00Z');
   expect(!r.ok && r.reason === 'invalid_iso', 'invalid').toBeTruthy();
 });
 
-await test('validateWindow: start >= end rejected', () => {
+test('validateWindow: start >= end rejected', () => {
   const r = validateWindow('2026-05-08T00:00:00Z', '2026-05-01T00:00:00Z');
   expect(!r.ok && r.reason === 'start_not_before_end', 'invalid').toBeTruthy();
 });
 
-await test('validateWindow: > 30-day span rejected', () => {
+test('validateWindow: > 30-day span rejected', () => {
   const r = validateWindow('2026-05-01T00:00:00Z', '2026-06-10T00:00:00Z');
   expect(!r.ok && r.reason === 'window_too_large', 'invalid').toBeTruthy();
   expect(MAX_WINDOW_DAYS, 'ceiling').toBe(30);

@@ -18,7 +18,7 @@ console.log('');
 console.log('FakeWebhookReceiver self-test:');
 
 // ─── Case 1: basic POST records method, path, headers, body ─────────────────
-await test('records POST with normalised lowercase headers', async () => {
+test('records POST with normalised lowercase headers', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     const body = { hello: 'world', n: 42 };
@@ -45,7 +45,7 @@ await test('records POST with normalised lowercase headers', async () => {
 });
 
 // ─── Case 2: body-fully-read invariant — recorded body matches sent bytes ───
-await test('records the fully-read body (no truncation)', async () => {
+test('records the fully-read body (no truncation)', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     // Use a payload large enough to span multiple chunks on the wire.
@@ -64,7 +64,7 @@ await test('records the fully-read body (no truncation)', async () => {
 });
 
 // ─── Case 2b: malformed JSON under application/json falls back to raw buffer
-await test('malformed JSON body with application/json content-type is recorded as raw bytes (no harness mask)', async () => {
+test('malformed JSON body with application/json content-type is recorded as raw bytes (no harness mask)', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     // Deliberately malformed JSON. The harness must NOT throw or skip
@@ -88,7 +88,7 @@ await test('malformed JSON body with application/json content-type is recorded a
 });
 
 // ─── Case 3: setStatusCode causes subsequent responses to use that status ───
-await test('setStatusCode(500) makes the next response 500', async () => {
+test('setStatusCode(500) makes the next response 500', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setStatusCode(500);
@@ -100,7 +100,7 @@ await test('setStatusCode(500) makes the next response 500', async () => {
 });
 
 // ─── Case 4: setLatencyMs delays responses ──────────────────────────────────
-await test('setLatencyMs(150) causes the response to take >= 150ms', async () => {
+test('setLatencyMs(150) causes the response to take >= 150ms', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setLatencyMs(150);
@@ -114,7 +114,7 @@ await test('setLatencyMs(150) causes the response to take >= 150ms', async () =>
 });
 
 // ─── Case 5: setDropConnection records the call but rejects fetch ───────────
-await test('setDropConnection(true) records the call AND rejects the client', async () => {
+test('setDropConnection(true) records the call AND rejects the client', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setDropConnection(true);
@@ -144,7 +144,7 @@ await test('setDropConnection(true) records the call AND rejects the client', as
 });
 
 // ─── Case 6: reset() clears calls AND drop flag ─────────────────────────────
-await test('reset() clears calls and reverts overrides', async () => {
+test('reset() clears calls and reverts overrides', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     await fetch(`${receiver.url}/a`, { method: 'POST', body: '{}' });
@@ -168,7 +168,7 @@ await test('reset() clears calls and reverts overrides', async () => {
 });
 
 // ─── Case 7: concurrent receivers each get a different OS-assigned port ────
-await test('multiple concurrent receivers get distinct ports', async () => {
+test('multiple concurrent receivers get distinct ports', async () => {
   const a = await startFakeWebhookReceiver();
   const b = await startFakeWebhookReceiver();
   try {
@@ -186,7 +186,7 @@ await test('multiple concurrent receivers get distinct ports', async () => {
 });
 
 // ─── Case 8: close() resolves without unhandled-promise warnings ────────────
-await test('close() releases the port', async () => {
+test('close() releases the port', async () => {
   const receiver = await startFakeWebhookReceiver();
   await fetch(`${receiver.url}/once`, { method: 'POST', body: '{}' });
   await receiver.close();

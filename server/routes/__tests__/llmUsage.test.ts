@@ -27,7 +27,7 @@ import type { RunCostResponse } from '../../../shared/types/runCost.js';
 
 console.log('\n--- RunCostResponse shape (pure) ---');
 
-await test('RunCostResponse zero-default shape type-checks end to end', () => {
+test('RunCostResponse zero-default shape type-checks end to end', () => {
   const zeroShape: RunCostResponse = {
     entityId:       'run-uuid',
     totalCostCents: 0,

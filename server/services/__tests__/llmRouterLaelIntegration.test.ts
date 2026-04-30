@@ -37,14 +37,14 @@ import * as crypto from 'node:crypto';
 // Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-await import('dotenv/config');
+import 'dotenv/config';
 
 process.env.NODE_ENV ??= 'test';
 process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 // Force ceiling routing so the test asserts a deterministic provider/model
 // pair regardless of the resolveLLM heuristic state in the test DB.
-process.env.ROUTER_FORCE_FRONTIER = '1';
+process.env.ROUTER_FORCE_FRONTIER ??= '1';
 
 // Heavy DB modules are imported conditionally — when SKIP is true the dynamic
 // imports are not reached, so env.ts validation and DB connection setup are

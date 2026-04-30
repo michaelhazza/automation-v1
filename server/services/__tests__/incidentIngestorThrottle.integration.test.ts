@@ -15,9 +15,9 @@
  */
 
 // Must be set before any module imports so env-based config is picked up.
-process.env.NODE_ENV = 'test';
-process.env.SYSTEM_INCIDENT_THROTTLE_MS = '1000';
-process.env.SYSTEM_INCIDENT_INGEST_ENABLED = 'true';
+process.env.NODE_ENV ??= 'test';
+process.env.SYSTEM_INCIDENT_THROTTLE_MS ??= '1000';
+process.env.SYSTEM_INCIDENT_INGEST_ENABLED ??= 'true';
 
 // Skip all tests when DATABASE_URL is absent. The test body never touches a
 // real DB (the db module is mocked below), but env.ts validates DATABASE_URL

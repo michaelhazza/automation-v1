@@ -26,7 +26,7 @@
 // a dynamic import pulls skillExecutor through the env-validated db module.
 import { expect, test } from 'vitest';
 
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
