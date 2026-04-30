@@ -20,7 +20,7 @@ if (!SKIP) {
 
 test.skipIf(SKIP)('skill-analyzer wrapper re-throws + writes incident on TERMINAL attempt', async () => {
   resetThrottle();
-  const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
+  const fingerprint = hashFingerprint('job:skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
   const fakeJobId = 'test-job-' + Date.now();
@@ -50,7 +50,7 @@ test.skipIf(SKIP)('skill-analyzer wrapper re-throws + writes incident on TERMINA
 });
 
 test.skipIf(SKIP)('skill-analyzer wrapper RE-THROWS but does NOT emit on non-terminal (retryCount < retryLimit)', async () => {
-  const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
+  const fingerprint = hashFingerprint('job:skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
   const fakeJobId = 'test-job-pre-terminal-' + Date.now();
@@ -77,7 +77,7 @@ test.skipIf(SKIP)('skill-analyzer wrapper RE-THROWS but does NOT emit on non-ter
 });
 
 test.skipIf(SKIP)('skill-analyzer dedup: 5 terminal failures collapse to one row with occurrenceCount=5', async () => {
-  const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
+  const fingerprint = hashFingerprint('job:skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
   for (let i = 0; i < 5; i++) {
