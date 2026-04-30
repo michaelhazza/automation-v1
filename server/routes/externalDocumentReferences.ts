@@ -109,7 +109,7 @@ router.post(
       );
 
     if ((subaccountCount?.value ?? 0) >= EXTERNAL_DOC_MAX_REFS_PER_SUBACCOUNT) {
-      return res.status(422).json({ error: 'subaccount_quota_exceeded' });
+      return res.status(422).json({ error: 'per_subaccount_quota_exceeded', limit: EXTERNAL_DOC_MAX_REFS_PER_SUBACCOUNT });
     }
 
     // Per-task quota check
@@ -127,7 +127,7 @@ router.post(
           (m) => m.document.sourceType === 'google_drive' && !m.document.deletedAt,
         ).length;
         if (driveCount >= EXTERNAL_DOC_MAX_REFS_PER_TASK) {
-          return res.status(422).json({ error: 'task_quota_exceeded' });
+          return res.status(422).json({ error: 'per_task_quota_exceeded', limit: EXTERNAL_DOC_MAX_REFS_PER_TASK });
         }
       }
     }
