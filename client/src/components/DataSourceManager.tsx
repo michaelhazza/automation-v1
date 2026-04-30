@@ -193,13 +193,17 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
           setError('Pick a file from Google Drive');
           return;
         }
+        // The resolver's expectedMimeType is read from agentDataSources.contentType.
+        // For Drive sources, that must be the picked file's MIME (Doc/Sheet/PDF),
+        // not the form's `contentType` (which defaults to `auto` and is rejected
+        // by the resolver as unsupported).
         await api.post(baseUrl, {
           name: form.name,
           description: form.description || undefined,
           sourceType: form.sourceType,
           sourcePath: pickedFile.id,
           connectionId: pickedFile.connectionId,
-          contentType: form.contentType,
+          contentType: pickedFile.mimeType,
           priority: form.priority,
           maxTokenBudget: form.maxTokenBudget,
           cacheMinutes: form.cacheMinutes,

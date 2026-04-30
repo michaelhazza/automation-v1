@@ -40,6 +40,18 @@ export function DriveFilePicker({ connections, isOpen, onClose, onPick }: DriveF
   );
   const [scriptLoaded, setScriptLoaded] = useState(false);
 
+  // The lazy initializer above only runs at first mount. Parents typically
+  // load `connections` asynchronously from an empty array, so re-evaluate
+  // whenever the connections list changes: auto-select if exactly one is
+  // available, clear selection if it disappears.
+  useEffect(() => {
+    if (connections.length === 1) {
+      setSelectedConnectionId((prev) => prev ?? connections[0].id);
+    } else if (connections.length === 0) {
+      setSelectedConnectionId(null);
+    }
+  }, [connections]);
+
   useEffect(() => {
     if (!isOpen || scriptLoaded) return;
     loadPickerScript().then(() => setScriptLoaded(true));

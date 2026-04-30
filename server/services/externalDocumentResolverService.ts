@@ -52,13 +52,25 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
   const fetchStart = new Date();
 
   // 1. Token refresh
+  // The connection may be subaccount-scoped (matching p.subaccountId) or
+  // org-level (subaccount_id IS NULL). Look up its actual scope first so the
+  // decryption lookup uses the correct subaccountId predicate. Without this,
+  // org-level connections always resolve as 'auth_revoked' even though the
+  // attach/picker routes accept them.
   let accessToken: string;
   try {
     if (p.accessToken) {
       accessToken = p.accessToken;
     } else {
+      const connRow = await integrationConnectionService.getConnectionWithToken(
+        p.connectionId,
+        p.organisationId,
+      );
+      if (!connRow || connRow.providerType !== 'google_drive') {
+        return emitFailure(db, p, resolver.resolverVersion, 'auth_revoked', null, startedAt);
+      }
       const conn = await integrationConnectionService.getDecryptedConnection(
-        p.subaccountId,
+        connRow.subaccountId,
         'google_drive',
         p.organisationId,
         p.connectionId,

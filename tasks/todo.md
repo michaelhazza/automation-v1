@@ -1933,3 +1933,12 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
   - Spec section: §13.7 — file inventory
   - Gap: user's invocation listed expected files including `client/src/lib/externalDocumentReferences.ts` (api client) and `client/src/components/GoogleDrivePickerButton.tsx`. Actual files are `client/src/api/externalDocumentReferences.ts` and `client/src/components/DriveFilePicker.tsx`. The actual paths are consistent with the spec (§13.9 names `DriveFilePicker.tsx`); the user's invocation message had stale names. Informational only — not a code gap.
   - Suggested approach: no action; flagged so future readers of this log can reconcile the user's invocation text with the actual file paths.
+
+- [ ] PDF support requires `pdf-parse` dependency declaration (dual-reviewer 2026-04-30)
+  - Source: dual-reviewer Codex P2 finding on `client/src/components/DriveFilePicker.tsx:4-7`
+  - Spec section: §9.3 "MIME types" — PDF (`application/pdf`) is listed as Supported (line 384)
+  - Gap: `server/services/resolvers/googleDriveResolver.ts` PDF branch dynamically imports `pdf-parse`, but the package is not declared in `package.json` dependencies. Every PDF picked through `DriveFilePicker.tsx` will fetch bytes and then fall into `unsupported_content` at run time, marking the reference `broken`.
+  - Why deferred: dual-reviewer cannot edit `package.json` without explicit human approval (config-protection hook). Two fixes are possible:
+    - **Preferred (spec-aligned):** add `"pdf-parse": "^1.1.1"` to `package.json` dependencies. Verify the dynamic import path matches the package's main export. This requires HITL approval to edit `package.json`.
+    - **Alternative (capability-aligned):** drop `'application/pdf'` from `SUPPORTED_MIME_TYPES` in `client/src/components/DriveFilePicker.tsx` and from the resolver's `SUPPORTED_MIME_TYPES` set, plus update spec §9.3 to mark PDF as deferred to a follow-up.
+  - Recommended action: take the preferred fix (add pdf-parse to package.json) on the next manual session; spec already promises PDF support.

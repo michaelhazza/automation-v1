@@ -6,7 +6,7 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { externalDocFlags } from '../lib/featureFlags.js';
 import { toExternalDocumentViewModel } from '../api/types/externalDocumentViewModel.js';
-import { referenceDocuments, documentBundleAttachments, documentFetchEvents } from '../db/schema/index.js';
+import { referenceDocuments, documentBundleAttachments, documentFetchEvents, tasks } from '../db/schema/index.js';
 import { eq, and, isNull, desc, count } from 'drizzle-orm';
 import * as documentBundleService from '../services/documentBundleService.js';
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
@@ -17,6 +17,29 @@ import {
 import type { FetchFailurePolicy } from '../db/schema/documentBundleAttachments.js';
 
 const router = Router();
+
+/**
+ * Verify the task at `:taskId` belongs to the caller's `:subaccountId` (within
+ * `req.orgId`). Without this, a caller in subaccount A could pass a taskId
+ * from subaccount B and read or mutate references under the wrong subaccount,
+ * since bundle lookups are org-scoped, not subaccount-scoped.
+ *
+ * Returns true if validated, false if the task is missing or in a different
+ * subaccount. The handler is responsible for sending the 404 response.
+ */
+async function isTaskInSubaccount(
+  taskId: string,
+  organisationId: string,
+  subaccountId: string,
+): Promise<boolean> {
+  const db = getOrgScopedDb('externalDocumentReferences.isTaskInSubaccount');
+  const [row] = await db
+    .select({ subaccountId: tasks.subaccountId })
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId)))
+    .limit(1);
+  return !!row && row.subaccountId === subaccountId;
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/subaccounts/:subaccountId/tasks/:taskId/external-references
@@ -29,7 +52,11 @@ router.get(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
-    const { taskId } = req.params;
+    const { subaccountId, taskId } = req.params;
+
+    if (!(await isTaskInSubaccount(taskId, req.orgId!, subaccountId))) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
 
     const attachments = await documentBundleService.listAttachmentsForSubject({
       organisationId: req.orgId!,
@@ -100,8 +127,14 @@ router.post(
       return res.status(400).json({ error: 'connectionId, fileId, fileName, and mimeType are required' });
     }
 
-    // Validate connection belongs to org and is google_drive + active
-    const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+    if (!(await isTaskInSubaccount(taskId, req.orgId!, subaccountId))) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+
+    // Validate connection belongs to org and is google_drive + active.
+    // Spec §5.3: Drive connections are subaccount-scoped, but we accept org-level
+    // rows too and enforce the subaccount-membership check explicitly below.
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
     if (!conn || conn.providerType !== 'google_drive') {
       return res.status(404).json({ error: 'connection_not_found' });
     }
@@ -221,6 +254,11 @@ router.delete(
     if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
     const { subaccountId, taskId, referenceId } = req.params;
+
+    if (!(await isTaskInSubaccount(taskId, req.orgId!, subaccountId))) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+
     const db = getOrgScopedDb('externalDocumentReferences.delete');
 
     // Verify reference belongs to this org + subaccount + is google_drive
@@ -242,21 +280,33 @@ router.delete(
       return res.status(404).json({ error: 'reference_not_found' });
     }
 
-    // Find the bundle attachment for this task
+    // Find the bundle attachment for this task and verify the reference is a
+    // member of that bundle. Without this check, any reference in the same
+    // subaccount could be soft-deleted via any task URL (cross-task tampering).
     const attachments = await documentBundleService.listAttachmentsForSubject({
       organisationId: req.orgId!,
       subjectType: 'task',
       subjectId: taskId,
     });
 
-    if (attachments.length > 0) {
-      const bundleId = attachments[0].bundleId;
-      await documentBundleService.removeMember({
-        bundleId,
-        organisationId: req.orgId!,
-        documentId: referenceId,
-      });
+    if (attachments.length === 0) {
+      return res.status(404).json({ error: 'reference_not_found' });
     }
+
+    const bundleId = attachments[0].bundleId;
+    const bundleResult = await documentBundleService.getBundleWithMembers(bundleId, req.orgId!);
+    const isMember = bundleResult?.members.some(
+      (m) => m.document.id === referenceId && !m.document.deletedAt,
+    );
+    if (!isMember) {
+      return res.status(404).json({ error: 'reference_not_found' });
+    }
+
+    await documentBundleService.removeMember({
+      bundleId,
+      organisationId: req.orgId!,
+      documentId: referenceId,
+    });
 
     // Soft-delete the reference_documents row
     await db
@@ -285,15 +335,19 @@ router.patch(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
-    const { subaccountId, referenceId } = req.params;
+    const { subaccountId, taskId, referenceId } = req.params;
     const { connectionId } = req.body as { connectionId?: string };
 
     if (!connectionId) {
       return res.status(400).json({ error: 'connectionId is required' });
     }
 
-    // Validate new connection
-    const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+    if (!(await isTaskInSubaccount(taskId, req.orgId!, subaccountId))) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+
+    // Validate new connection. Spec §5.3 — Drive connections are subaccount-scoped.
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
     if (!conn || conn.providerType !== 'google_drive') {
       return res.status(404).json({ error: 'connection_not_found' });
     }
@@ -302,6 +356,27 @@ router.patch(
     }
     if (conn.subaccountId !== null && conn.subaccountId !== subaccountId) {
       return res.status(403).json({ error: 'connection_not_accessible' });
+    }
+
+    // Verify the reference is a member of this task's bundle — prevents
+    // cross-task rebind via a referenceId guess.
+    const taskAttachments = await documentBundleService.listAttachmentsForSubject({
+      organisationId: req.orgId!,
+      subjectType: 'task',
+      subjectId: taskId,
+    });
+    if (taskAttachments.length === 0) {
+      return res.status(404).json({ error: 'reference_not_found' });
+    }
+    const taskBundleResult = await documentBundleService.getBundleWithMembers(
+      taskAttachments[0].bundleId,
+      req.orgId!,
+    );
+    const isTaskMember = taskBundleResult?.members.some(
+      (m) => m.document.id === referenceId && !m.document.deletedAt,
+    );
+    if (!isTaskMember) {
+      return res.status(404).json({ error: 'reference_not_found' });
     }
 
     const db = getOrgScopedDb('externalDocumentReferences.rebind');
@@ -328,7 +403,23 @@ router.patch(
       return res.status(404).json({ error: 'reference_not_found' });
     }
 
-    return res.json(updated);
+    // Return the view-model shape the client consumes (matches GET /external-references).
+    const [latestEvent] = await db
+      .select()
+      .from(documentFetchEvents)
+      .where(eq(documentFetchEvents.referenceId, updated.id))
+      .orderBy(desc(documentFetchEvents.fetchedAt))
+      .limit(1);
+
+    const viewModel = toExternalDocumentViewModel({
+      id: updated.id,
+      externalFileName: updated.externalFileName,
+      attachmentState: updated.attachmentState,
+      lastFetchEvent: latestEvent
+        ? { fetchedAt: latestEvent.fetchedAt, failureReason: latestEvent.failureReason ?? null }
+        : null,
+    });
+    return res.json(viewModel);
   }),
 );
 
@@ -344,8 +435,12 @@ router.patch(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
-    const { taskId } = req.params;
+    const { subaccountId, taskId } = req.params;
     const { fetchFailurePolicy } = req.body as { fetchFailurePolicy?: FetchFailurePolicy };
+
+    if (!(await isTaskInSubaccount(taskId, req.orgId!, subaccountId))) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
 
     const validPolicies: FetchFailurePolicy[] = ['tolerant', 'strict', 'best_effort'];
     if (!fetchFailurePolicy || !validPolicies.includes(fetchFailurePolicy)) {

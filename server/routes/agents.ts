@@ -97,7 +97,8 @@ router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(O
       return;
     }
     const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
-    const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+    // Spec §5.3 — Drive connections are subaccount-scoped (also accept org-level rows).
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
     if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
       res.status(422).json({ error: 'invalid_connection_id' });
       return;

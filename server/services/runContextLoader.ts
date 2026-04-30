@@ -299,6 +299,10 @@ async function loadExternalDocumentBlocks(
 
   const blocks: string[] = [];
   const resolvedLite: { id: string; tokensUsed: number; failureReason: null }[] = [];
+  // Track which block index each successfully-injected ref produced, so the
+  // run-budget pass below can replace over-budget blocks with placeholders.
+  const successBlockIndexById = new Map<string, number>();
+  const successMetaById = new Map<string, GDriveRefRow>();
   const wallClockStart = Date.now();
 
   for (const ref of withinQuota) {
@@ -396,7 +400,9 @@ async function loadExternalDocumentBlocks(
       isStale: isStaleForHeader,
     });
 
-    blocks.push(`${header}\n${content}`);
+    const blockIndex = blocks.push(`${header}\n${content}`) - 1;
+    successBlockIndexById.set(meta.id, blockIndex);
+    successMetaById.set(meta.id, meta);
     resolvedLite.push({ id: meta.id, tokensUsed: countTokensApprox(content), failureReason: null });
   }
 
@@ -405,9 +411,36 @@ async function loadExternalDocumentBlocks(
     blocks.push(`[External document "${ref.meta.name}" skipped: quota exceeded (max ${EXTERNAL_DOC_MAX_REFS_PER_RUN} per run)]`);
   }
 
-  // Informational run-budget enforcement (does not mutate blocks)
+  // Run-budget enforcement: replace over-budget blocks with placeholder lines and
+  // write a budget_exceeded audit row for each, matching spec §9.4 / §17.5
+  // (no-silent-partial-success).
   if (request.tokenBudget != null) {
-    enforceRunBudget(resolvedLite, request.tokenBudget);
+    const budgetResult = enforceRunBudget(resolvedLite, request.tokenBudget);
+    for (const skipped of budgetResult.skipped) {
+      const idx = successBlockIndexById.get(skipped.id);
+      const meta = successMetaById.get(skipped.id);
+      if (idx == null || meta == null) continue;
+      blocks[idx] = `[External reference unavailable — budget_exceeded. This document was attached but could not be fetched.]`;
+      if (request.subaccountId) {
+        getOrgScopedDb('runContextLoader.loadExternalDocumentBlocks.runBudgetExceeded')
+          .insert(documentFetchEvents).values({
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId,
+            referenceId: meta.id,
+            referenceType: meta.kind === 'reference_document' ? 'reference_document' : 'agent_data_source',
+            runId: request.runId ?? null,
+            cacheHit: false,
+            provider: 'google_drive',
+            docName: meta.name,
+            revisionId: null,
+            tokensUsed: 0,
+            failureReason: 'budget_exceeded',
+            resolverVersion: 1,
+          }).catch((err: unknown) => {
+            console.error('[runContextLoader] Failed to write run-budget budget_exceeded fetch event', err);
+          });
+      }
+    }
   }
 
   // Fragmentation warning

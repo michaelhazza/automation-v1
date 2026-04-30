@@ -19,13 +19,15 @@ router.get(
     const { connectionId } = req.query as { connectionId?: string };
     if (!connectionId) return res.status(400).json({ error: 'connectionId_required' });
 
-    const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+    // Spec §5.3 — Drive connections are subaccount-scoped. Look up by org without
+    // the subaccount-IS-NULL filter so subaccount-scoped rows are accepted.
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
     if (!conn || conn.providerType !== 'google_drive') {
       return res.status(404).json({ error: 'connection_not_found' });
     }
 
     const decrypted = await integrationConnectionService.getDecryptedConnection(
-      null,
+      conn.subaccountId,
       'google_drive',
       req.orgId!,
       connectionId,
@@ -52,13 +54,14 @@ router.get(
       return res.status(400).json({ error: 'connectionId_and_fileId_required' });
     }
 
-    const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+    // Spec §5.3 — Drive connections are subaccount-scoped.
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
     if (!conn || conn.providerType !== 'google_drive') {
       return res.status(404).json({ error: 'connection_not_found' });
     }
 
     const decrypted = await integrationConnectionService.getDecryptedConnection(
-      null,
+      conn.subaccountId,
       'google_drive',
       req.orgId!,
       connectionId,
