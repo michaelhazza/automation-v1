@@ -385,11 +385,15 @@ async function loadExternalDocumentBlocks(
       }
     }
 
+    // serve_stale_silent: inject without the staleness warning line
+    const isStaleForHeader = policyAction.action === 'serve_stale_silent'
+      ? false
+      : resolved.provenance.isStale;
     const header = buildProvenanceHeader({
       docName: resolved.provenance.docName,
       fetchedAt: resolved.provenance.fetchedAt,
       revisionId: resolved.provenance.revisionId,
-      isStale: resolved.provenance.isStale,
+      isStale: isStaleForHeader,
     });
 
     blocks.push(`${header}\n${content}`);
