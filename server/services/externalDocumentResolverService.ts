@@ -6,6 +6,7 @@ import {
   EXTERNAL_DOC_HARD_TOKEN_LIMIT,
   EXTERNAL_DOC_MAX_STALENESS_MINUTES,
   EXTERNAL_DOC_MIN_CONTENT_TOKENS,
+  EXTERNAL_DOC_NULL_REVISION_TTL_MINUTES,
   EXTERNAL_DOC_RETRY_SUPPRESSION_WINDOW_MS,
   EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES,
 } from '../lib/constants.js';
@@ -112,6 +113,16 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
           });
         }
         revisionMatches = !mimeMismatch && meta.revisionId !== null && meta.revisionId === cacheRow.revisionId;
+        // Null-revisionId TTL fallback: if provider exposes no revision ID, treat
+        // cache as fresh if fetched within the null-revision TTL window.
+        if (!revisionMatches && !mimeMismatch && meta.revisionId === null) {
+          const nullRevisionStale = isPastStalenessBoundary(
+            cacheRow.fetchedAt,
+            fetchStart,
+            EXTERNAL_DOC_NULL_REVISION_TTL_MINUTES,
+          );
+          if (!nullRevisionStale) revisionMatches = true;
+        }
       }
     } catch (err) {
       if (cacheRow) {
