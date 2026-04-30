@@ -237,3 +237,7 @@ export * from './systemIncidentSuppressions.js';
 
 // Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
 export * from './rateLimitBuckets';
+
+// Live External Document References — document cache + fetch audit log (migration 0262)
+export * from './documentCache';
+export * from './documentFetchEvents';
