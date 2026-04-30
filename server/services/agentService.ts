@@ -1026,8 +1026,8 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
@@ -1035,6 +1035,7 @@ export const agentService = {
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     }
   ) {
     const [agent] = await db
@@ -1053,7 +1054,7 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
@@ -1061,6 +1062,7 @@ export const agentService = {
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1310,8 +1312,8 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
@@ -1319,6 +1321,7 @@ export const agentService = {
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     },
     actorUserId?: string
   ) {
@@ -1335,7 +1338,7 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
@@ -1343,6 +1346,7 @@ export const agentService = {
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })

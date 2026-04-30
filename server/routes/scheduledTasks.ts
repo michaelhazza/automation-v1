@@ -215,9 +215,25 @@ router.post(
     const {
       name, description, sourceType, sourcePath, sourceHeaders,
       contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+      connectionId,
     } = req.body;
-    if (!name || !sourceType || !sourcePath) {
-      res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+    if (!name || !sourceType) {
+      res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });
+      return;
+    }
+    if (sourceType === 'google_drive') {
+      if (!connectionId) {
+        res.status(400).json({ error: 'Validation failed', details: 'connectionId is required for google_drive sources' });
+        return;
+      }
+      const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
+      const conn = await integrationConnectionService.getOrgConnectionWithToken(connectionId, req.orgId!);
+      if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
+        res.status(422).json({ error: 'invalid_connection_id' });
+        return;
+      }
+    } else if (!sourcePath) {
+      res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
       return;
     }
     const result = await agentService.addScheduledTaskDataSource(
@@ -226,6 +242,7 @@ router.post(
       {
         name, description, sourceType, sourcePath, sourceHeaders,
         contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+        connectionId,
       },
       req.user?.id,
     );
