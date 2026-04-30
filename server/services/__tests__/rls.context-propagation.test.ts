@@ -42,9 +42,9 @@ describe.skipIf(SKIP_RLS)('RLS context-propagation', () => {
   let sql: Awaited<typeof import('drizzle-orm')>['sql'];
   // Set to true in beforeAll if the connecting role is a Postgres superuser.
   // Superusers bypass RLS unconditionally — the entire fail-closed contract
-  // this file exercises evaporates. We surface that environment limitation
-  // by short-circuiting per-test bodies with a clear console note rather
-  // than asserting a tautology and pretending it tested anything. The CI
+  // this file exercises evaporates. Each test calls `ctx.skip()` in that case
+  // so the case is reported as SKIPPED (not PASSED) — we never want a green
+  // tick on a tenant-isolation contract that didn't actually run. The CI
   // job currently connects as the `postgres` superuser; flipping to a
   // dedicated app role with INHERIT (no BYPASSRLS) is tracked separately.
   let runningAsSuperuser = false;
@@ -152,8 +152,8 @@ describe.skipIf(SKIP_RLS)('RLS context-propagation', () => {
     expect(RLS_PROTECTED_TABLES.length).toBeGreaterThan(0);
   });
 
-  test('per-table Layer A + Layer B contracts hold for all RLS-protected tables', async () => {
-    if (runningAsSuperuser) return;
+  test('per-table Layer A + Layer B contracts hold for all RLS-protected tables', async (ctx) => {
+    if (runningAsSuperuser) ctx.skip();
     for (const entry of RLS_PROTECTED_TABLES) {
       if (!PARENT_EXISTS_TABLES.has(entry.tableName)) {
         await assertLayerAVisibility(entry.tableName);
@@ -165,8 +165,8 @@ describe.skipIf(SKIP_RLS)('RLS context-propagation', () => {
     }
   });
 
-  test('reference_document_versions: org-scoped context sees own versions, not other org\'s', async () => {
-    if (runningAsSuperuser) return;
+  test('reference_document_versions: org-scoped context sees own versions, not other org\'s', async (ctx) => {
+    if (runningAsSuperuser) ctx.skip();
     let parentDocIdA: string | null = null;
     let parentDocIdB: string | null = null;
     try {

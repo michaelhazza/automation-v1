@@ -33,7 +33,7 @@
 - `workflowEngineApprovalResumeDispatch.integration.test.ts`: set `scope: 'org'` on the `workflow_runs` insert. The default `'subaccount'` violated `playbook_runs_scope_subaccount_consistency_chk` because no subaccountId is provided in this test path.
 - `llmRouterLaelIntegration.test.ts`: set `executionScope: 'org'` on both `agent_runs` inserts. Same root cause: `agent_runs_scope_check` requires either (`'org'` AND no subaccount) or (`'subaccount'` AND non-null subaccount).
 - `incidentIngestor.ingestInline`: branched the suppression-check `WHERE` clause so we never bind `null` to a `$N::uuid` parameter. When the input has no organisationId we want global-scope suppressions only — `WHERE organisation_id IS NULL`. The previous form cast a null parameter to uuid; under integration env the postgres-js parameter binding surfaced as an "invalid uuid" error, the ingest path threw `incident_ingest_failed`, and the skill-analyzer wrapper test asserted on a missing system_incidents row.
-- `rls.context-propagation` + `crmQueryPlanner` integration: short-circuit per-test bodies when the connecting role is a Postgres superuser. `setupFixtures` uses `SET LOCAL ROLE admin_role` + INSERT; `admin_role` lacks INSERT privileges on `organisations`, and the CI job currently connects as the `postgres` superuser. Superusers also bypass RLS unconditionally, so the Layer-A/Layer-B assertions would be tautologies. Tracked as a follow-up: configure CI with a non-superuser app role, then drop the guard.
+- `rls.context-propagation` + `crmQueryPlanner` integration: skip per-test bodies via `ctx.skip()` when the connecting role is a Postgres superuser. `setupFixtures` uses `SET LOCAL ROLE admin_role` + INSERT; `admin_role` lacks INSERT privileges on `organisations`, and the CI job currently connects as the `postgres` superuser. Superusers also bypass RLS unconditionally, so the Layer-A/Layer-B assertions would be tautologies. Tests are reported as SKIPPED (not PASSED) so the report never shows a green tick on a contract that did not run. Tracked as a follow-up: configure CI with a non-superuser app role, then drop the guard.
 - `dlqMonitorRoundTrip`: converted to `test.todo`. The body never enqueued a poison job (the pg-boss `boss.send` line is commented out as "implementer-supplied"), so under integration env it polled for 30 s and timed out. Mark pending until the enqueue side is filled in.
 - Commit: `fix(integration tests): scope-check, suppression-null, RLS-superuser guards (phase 4/5)`.
 
@@ -80,3 +80,8 @@
 - `server/services/systemMonitor/triage/__tests__/triageDurability.integration.test.ts`
 - `tasks/todo.md` (TI-005 closeout)
 - `tasks/builds/integration-tests-fix/progress.md` (this file)
+
+## ChatGPT PR review
+
+- Session log: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](../../review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
+- Round 1 (Codex): one P1 finding accepted — convert `if (runningAsSuperuser) return;` to `ctx.skip()` in the four affected test bodies so superuser short-circuits report as SKIPPED, not PASSED. Applied in commit on top of phase 5.

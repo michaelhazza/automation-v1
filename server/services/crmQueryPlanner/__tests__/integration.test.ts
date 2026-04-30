@@ -26,8 +26,10 @@ describe.skipIf(SKIP_CRM)('CRM Query Planner — RLS isolation', () => {
   let runQuery: Awaited<typeof import('../crmQueryPlannerService.js')>['runQuery'];
   // Superusers bypass RLS unconditionally; setupFixtures uses SET LOCAL ROLE
   // admin_role + INSERT, which fails because admin_role lacks INSERT perms
-  // on organisations. Short-circuit the per-test bodies in that case rather
-  // than asserting tautologies. Tracked: configure CI with a non-superuser app role.
+  // on organisations. Each test calls `ctx.skip()` in that case so the case is
+  // reported as SKIPPED (not PASSED) — a green tick on a tenant-isolation
+  // contract that didn't actually run would be a false-negative trap.
+  // Tracked: configure CI with a non-superuser app role.
   let runningAsSuperuser = false;
 
   beforeAll(async () => {
@@ -148,8 +150,8 @@ describe.skipIf(SKIP_CRM)('CRM Query Planner — RLS isolation', () => {
     };
   }
 
-  test('subaccount-A caller sees subaccount-A session vars inside canonical dispatch', async () => {
-    if (runningAsSuperuser) return;
+  test('subaccount-A caller sees subaccount-A session vars inside canonical dispatch', async (ctx) => {
+    if (runningAsSuperuser) ctx.skip();
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${ORG_ID}, true)`);
       await withOrgTx(
@@ -173,8 +175,8 @@ describe.skipIf(SKIP_CRM)('CRM Query Planner — RLS isolation', () => {
     });
   });
 
-  test('subaccount-B caller sees subaccount-B session vars (cross-tenant isolation)', async () => {
-    if (runningAsSuperuser) return;
+  test('subaccount-B caller sees subaccount-B session vars (cross-tenant isolation)', async (ctx) => {
+    if (runningAsSuperuser) ctx.skip();
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${ORG_ID}, true)`);
       await withOrgTx(
