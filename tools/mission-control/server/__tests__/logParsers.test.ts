@@ -90,6 +90,7 @@ test('parseReviewLogFilename parses adversarial-review log with hyphenated slug'
   assert(m !== null, 'not null');
   eq(m!.kind, 'adversarial-review', 'kind');
   eq(m!.slug, 'agentic-engineering-notes', 'slug');
+  eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso');
 });
 
 test('parseReviewLogFilename returns null for non-conforming names', () => {

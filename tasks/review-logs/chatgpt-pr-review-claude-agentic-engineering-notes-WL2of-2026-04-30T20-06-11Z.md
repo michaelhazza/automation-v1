@@ -6,7 +6,7 @@
 - Mode: automated
 - HUMAN_IN_LOOP: yes
 - Started: 2026-04-30T20:06:11Z
-- **Verdict:** APPROVED (3 rounds, 1 implement / 6 reject / 0 defer)
+- **Verdict:** APPROVED (4 rounds, 2 implement / 9 reject / 0 defer / 1 verified-as-correct)
 
 ---
 
@@ -160,32 +160,60 @@ None.
 
 ---
 
-## Final Summary
+## Round 4 — 2026-05-01T (manual post-automated-finalization)
 
-- Rounds: 3
-- Auto-accepted (technical): 0 implemented | 2 rejected | 0 deferred
-- User-decided:              1 implemented | 4 rejected | 0 deferred
+**Top themes:** architecture, test_coverage, idempotency
+
+### ChatGPT Feedback (raw)
+
+User-pasted manual review verdict: APPROVED — merge-ready with optional refinements.
+
+5 findings: 1 high-leverage improvement (F1 model-collapse enforcement in architect), 3 callouts confirming prior correct decisions (F2 log schema, F3 idempotency, F4 verdict semantics), 1 test gap (F5 missing `timestampIso` assertion).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1: Enforce model-collapse check in architect execution sequence | technical-escalated (architectural + consistency with R1 f-003 rejection) | implement | verified-as-correct (user: as recommended → no action) | medium | Reading `architect.md`: model-collapse pre-check is already item 2 of the minimum TodoWrite skeleton (line 31). The exact fix ChatGPT proposed is verbatim present. Third "missing X that exists" finding across this PR's review arc (R1 f-004, R2 f-003, R4 F1). |
+| F2: Formalise log schema direction (future risk) | technical | reject | auto (reject) | low | ChatGPT explicitly says "do nothing now." Already deferred. Callout confirms deferral was correct. |
+| F3: Idempotency invariant (deferred but important) | technical | reject | auto (reject) | low | ChatGPT says "nothing to change now." Deferral confirmed correct. |
+| F4: Minor consistency check — verdict semantics | technical | reject | auto (reject) | medium | Verified clean twice in automated rounds (R1 f-001, R2 f-002). No new evidence of drift. |
+| F5: Missing `timestampIso` assertion in second adversarial-review parser test | technical | implement | auto (implement) | low | Simple one-liner. Added `eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso')` to `logParsers.test.ts`. 24/24 tests pass. |
+
+### Implemented (auto-applied technical)
+
+- [auto] Added `eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso')` to the second adversarial-review parser test — `tools/mission-control/server/__tests__/logParsers.test.ts`. 24/24 tests pass.
+
+### Verified-as-already-correct (no action needed)
+
+- F1: Model-collapse pre-check already present as item 2 of the minimum TodoWrite skeleton in `.claude/agents/architect.md:31`. No code change.
+
+---
+
+## Final Summary (updated post-round-4)
+
+- Rounds: 4 (Rounds 1–3: automated; Round 4: manual)
+- Auto-accepted (technical): 1 implemented (R4 F5) | 5 rejected (R1 f-001, R1 f-004, R4 F2, R4 F3, R4 F4) | 0 deferred
+- User-decided: 1 implemented (R2 f-001) | 4 rejected (R1 f-002, R1 f-003, R2 f-002, R2 f-003) | 0 deferred
+- Verified-as-correct (no action): 1 (R4 F1 — model-collapse check already in architect skeleton)
 - Index write failures: 0
 - Deferred to tasks/todo.md § PR Review deferred items / PR #243: none
 - Architectural items surfaced to screen (user decisions):
   - R1 f-002 Incorrect mapping of adversarial verdict in dashboard phase — reject (mapping matches spec semantics)
-  - R1 f-003 Model-collapse check not enforced — reject (prompt sequencing IS the enforcement)
+  - R1 f-003 Model-collapse check not enforced — reject (prompt sequencing IS the enforcement; automated round)
   - R2 f-001 Inconsistent detection logic for adversarial-reviewer inputs — implement (spec § 4.2 line 113 rewrite + agent drift-note cleanup)
   - R2 f-002 Verdict semantics conflict — reject (repeat of Round 1 f-001; texts already agree)
   - R2 f-003 Missing parser extensions — reject (regex already includes adversarial-review)
-- Consistency warnings: none — Round 1 f-001 and Round 2 f-002 surfaced the same finding twice with the same rejection rationale; not a contradiction.
-- KNOWLEDGE.md updated: yes (1 entry — drift-acknowledgment notes go stale once the underlying drift is fixed)
+  - R4 F1 Model-collapse check enforcement — verified-as-correct (user said "as recommended → implement" but reading found it already present in skeleton)
+- Consistency warnings: none — R1 f-001 and R2 f-002 surfaced the same finding twice with the same rejection rationale; not a contradiction. R4 F1 user-approved "implement" reversed to verified-as-correct on inspection; no contradiction (the finding was valid in premise, wrong in assuming the fix was absent).
+- KNOWLEDGE.md updated: yes (1 entry from automated session — drift-acknowledgment notes go stale once underlying drift is fixed)
 - architecture.md updated: no
 - PR: #243 — APPROVED at https://github.com/michaelhazza/automation-v1/pull/243
 
-### Session signal-quality observations
+### Session signal-quality observations (final)
 
-- 7 findings across 3 rounds; 1 valid (~14%), 6 false positives (~86%). Two false-positive shapes:
-  - "Missing X that exists" — Round 1 f-004 (tests already at inFlight.test.ts:73-78) and Round 2 f-003 (parser already includes adversarial-review at logParsers.ts:64). Already documented at KNOWLEDGE.md line 1212.
-  - Repeat of rejected finding — Round 2 f-002 was effectively the same as Round 1 f-001 (worth-confirming verdict semantics). Already documented at KNOWLEDGE.md line 299.
-- High false-positive rate is consistent with the existing pattern at KNOWLEDGE.md line 316: prior reviewers (`pr-reviewer`, `dual-reviewer`) had already run, narrowing the structural-criticism surface available to ChatGPT.
-- Session-specific note: ChatGPT model is `gpt-4o` per CLI metadata. Round 3 returned APPROVED with zero findings — natural exit signal.
-
-### Note on `ready-to-merge` label
-
-User explicitly opted to skip the `gh pr edit --add-label "ready-to-merge"` step (finalisation step 10) so they can run a manual ChatGPT review pass on the same PR before triggering CI. The PR is functionally APPROVED but will not auto-fire CI from this session. Apply the label manually after the manual pass concludes.
+- 12 findings across 4 rounds (7 automated + 5 manual); 2 valid (~17%), 10 false positives (~83%). Three false-positive shapes:
+  - "Missing X that exists" — R1 f-004 (tests already at `inFlight.test.ts:73-78`), R2 f-003 (parser already includes `adversarial-review` at `logParsers.ts:64`), R4 F1 (model-collapse check already in architect skeleton at line 31). ChatGPT could not see the existing implementation in the diff.
+  - Repeat of rejected finding — R2 f-002 was the same as R1 f-001 (worth-confirming verdict semantics).
+  - Correctly-deferred callouts — R4 F2, F3, F4: valid observations ChatGPT explicitly acknowledged as "do nothing now."
+- High false-positive rate consistent with KNOWLEDGE.md line 316: prior reviewers (`pr-reviewer`, `dual-reviewer`) had already run, narrowing the structural-criticism surface available to ChatGPT.
