@@ -110,7 +110,7 @@ New agent definition `.claude/agents/adversarial-reviewer.md`. Read-only (Read, 
 
 **Failure-mode posture.** Adversarial-reviewer is non-blocking in Phase 1. Findings are advisory and do NOT block PRs unless the user explicitly escalates a specific finding. Prevents accidental coupling to CI before the agent's signal-to-noise ratio is established.
 
-**Input:** The branch diff. Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked). Detection inputs (committed + staged + unstaged + untracked) are sampled once at invocation start; the agent does not re-poll git state during the review pass.
+**Input:** The branch diff — **the caller provides the changed-file set** (committed + staged + unstaged + untracked, sampled once at invocation start), same posture as `pr-reviewer`. The agent's declared tools (`Read, Glob, Grep`) do not include shell access, so it cannot run `git diff` / `git status` itself; the caller pastes the relevant diff context into the invocation prompt and the agent does not re-poll git state during the review pass. (The earlier draft of this section referred to "same auto-detection logic as `spec-conformance`" — that wording is retired: `spec-conformance` has `Bash`, this agent does not, by design (read-only, least-privilege).)
 
 **Threat model checklist** (seeded from our actual surface, expanded as findings accumulate):
 

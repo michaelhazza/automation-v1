@@ -17,7 +17,7 @@ Phase 1 is advisory. Findings do NOT block PRs unless the user explicitly escala
 
 ## Input
 
-The branch diff — **the caller provides the changed-file set**, same posture as `pr-reviewer`. The agent's declared tools (`Read, Glob, Grep`) do not include shell access, so the agent cannot run `git diff` / `git status` itself. The caller must list the changed files (committed + staged + unstaged + untracked, sampled once at invocation start) and paste the relevant diff context into the invocation prompt. The spec § 4.2 wording referring to "same auto-detection logic as `spec-conformance`" is a known drift — `spec-conformance` has `Bash`; this agent does not, by design (read-only, least-privilege).
+The branch diff — **the caller provides the changed-file set**, same posture as `pr-reviewer`. The agent's declared tools (`Read, Glob, Grep`) do not include shell access, so the agent cannot run `git diff` / `git status` itself (by design — read-only, least-privilege). The caller must list the changed files (committed + staged + unstaged + untracked, sampled once at invocation start) and paste the relevant diff context into the invocation prompt.
 
 ## Context Loading
 
