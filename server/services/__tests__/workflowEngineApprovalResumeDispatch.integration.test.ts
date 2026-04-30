@@ -301,6 +301,9 @@ async function seedRunWithAwaitingStep(opts: {
     organisationId: opts.orgId,
     templateVersionId: opts.templateVersionId,
     runMode: 'supervised',
+    // Org-scope run — no subaccountId. Required by playbook_runs_scope_subaccount_consistency_chk
+    // (the constraint name still references the pre-rename table).
+    scope: 'org',
     status: 'awaiting_approval',
     contextJson: {
       input: {},

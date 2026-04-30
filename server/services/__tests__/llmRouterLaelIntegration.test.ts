@@ -287,6 +287,9 @@ test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with
     organisationId: orgId,
     agentId,
     runType: 'manual',
+    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+    // (executionScope='subaccount' demands a non-null subaccount_id).
+    executionScope: 'org',
     principalType: 'service',
     principalId: 'lael-int-test',
     status: 'running',
@@ -437,6 +440,9 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
     organisationId: orgId,
     agentId,
     runType: 'manual',
+    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+    // (executionScope='subaccount' demands a non-null subaccount_id).
+    executionScope: 'org',
     principalType: 'service',
     principalId: 'lael-int-test',
     status: 'running',

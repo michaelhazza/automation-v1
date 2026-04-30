@@ -165,13 +165,16 @@ export async function ingestInline(
 
   // 1. Suppression check
   const now = new Date();
+  const orgClause = input.organisationId
+    ? sql`(${systemIncidentSuppressions.organisationId} = ${input.organisationId}::uuid
+        OR ${systemIncidentSuppressions.organisationId} IS NULL)`
+    : sql`${systemIncidentSuppressions.organisationId} IS NULL`;
   const suppression = await db
     .select()
     .from(systemIncidentSuppressions)
     .where(
       sql`${systemIncidentSuppressions.fingerprint} = ${fingerprint}
-        AND (${systemIncidentSuppressions.organisationId} = ${input.organisationId ?? null}::uuid
-          OR ${systemIncidentSuppressions.organisationId} IS NULL)
+        AND ${orgClause}
         AND (${systemIncidentSuppressions.expiresAt} IS NULL
           OR ${systemIncidentSuppressions.expiresAt} > ${now})`
     )
