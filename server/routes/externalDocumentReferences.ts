@@ -92,6 +92,9 @@ router.post(
     if (conn.connectionStatus !== 'active') {
       return res.status(422).json({ error: 'connection_not_active' });
     }
+    if (conn.subaccountId !== null && conn.subaccountId !== subaccountId) {
+      return res.status(403).json({ error: 'connection_not_accessible' });
+    }
 
     const db = getOrgScopedDb('externalDocumentReferences.create');
 
@@ -274,6 +277,9 @@ router.patch(
     }
     if (conn.connectionStatus !== 'active') {
       return res.status(422).json({ error: 'connection_not_active' });
+    }
+    if (conn.subaccountId !== null && conn.subaccountId !== subaccountId) {
+      return res.status(403).json({ error: 'connection_not_accessible' });
     }
 
     const db = getOrgScopedDb('externalDocumentReferences.rebind');
