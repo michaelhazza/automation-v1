@@ -59,6 +59,7 @@ export function InlineIntegrationCard({
     return (
       <div className="self-start max-w-[70%] mt-0.5">
         <button
+          type="button"
           onClick={() => setExpanded(true)}
           className="text-[12px] text-slate-400 hover:text-slate-600 transition-colors bg-transparent border-0 p-0 cursor-pointer"
         >
@@ -92,6 +93,7 @@ export function InlineIntegrationCard({
             </p>
             {expanded && (
               <button
+                type="button"
                 onClick={() => setExpanded(false)}
                 className="text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer text-[18px] leading-none mt-[-2px] shrink-0"
                 aria-label="Collapse"
@@ -107,6 +109,7 @@ export function InlineIntegrationCard({
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleConnect}
               disabled={popup.status === 'pending'}
               className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-[12.5px] font-semibold px-3.5 py-2 rounded-lg transition-colors cursor-pointer border-0"
@@ -124,6 +127,7 @@ export function InlineIntegrationCard({
             </button>
             {state !== 'dismissed' && (
               <button
+                type="button"
                 onClick={handleDismiss}
                 className="text-[12px] text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer px-2 py-2 transition-colors"
               >
@@ -151,6 +155,7 @@ export function InlineIntegrationCard({
           <p className="text-sm text-gray-500">Integration connection expired after 24 hours.</p>
           {onRetry && (
             <button
+              type="button"
               onClick={onRetry}
               className="mt-2 px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 text-gray-700"
             >

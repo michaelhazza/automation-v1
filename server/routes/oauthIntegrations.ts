@@ -275,6 +275,7 @@ router.get(
         await resumeFromIntegrationConnect({
           resumeToken: payload.resumeToken,
           organisationId,
+          conversationId: payload.conversationId,
         });
       } catch (err) {
         // Non-fatal — the integration is connected, even if the run resume

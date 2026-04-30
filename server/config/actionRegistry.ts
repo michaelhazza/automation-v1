@@ -2938,7 +2938,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       approach: z
         .object({
           replace: z.string().max(10000).optional().describe('Replace approach with this text (≤ 10,000 chars)'),
-          appendNote: z.string().optional().describe('Append a note to the existing approach'),
+          appendNote: z.string().max(10000).optional().describe('Append a note to the existing approach (≤ 10,000 chars)'),
         })
         .optional(),
     }),

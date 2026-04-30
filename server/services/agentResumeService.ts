@@ -79,33 +79,38 @@ export async function resumeFromIntegrationConnect(params: {
     return { status: 'already_resumed', runId: candidateRun.id };
   }
 
-  // Step 2: optimistic UPDATE with explicit id predicate (GAP 8).
-  // Conditions: correct run id, same org, currently blocked with 'integration_required',
-  // token hash matches, and expiry has not passed.
-  const updated = await db
-    .update(agentRuns)
-    .set({
-      blockedReason: null,
-      blockedExpiresAt: null,
-      integrationResumeToken: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(agentRuns.id, candidateRun.id),
-        eq(agentRuns.organisationId, organisationId),
-        eq(agentRuns.blockedReason, 'integration_required'),
-        eq(agentRuns.integrationResumeToken, tokenHash),
-        gt(agentRuns.blockedExpiresAt, new Date()),
-      ),
-    )
-    .returning({
-      id: agentRuns.id,
-      runMetadata: agentRuns.runMetadata,
-    });
+  // Step 2: optimistic UPDATE + metadata write inside one transaction so a
+  // parallel scheduler write cannot clobber `runMetadata` between the two
+  // statements (the first UPDATE clears blocked_reason; the second writes
+  // resume bookkeeping). Either both happen or neither.
+  const txResult = await db.transaction(async (tx) => {
+    // Conditions: correct run id, same org, currently blocked with 'integration_required',
+    // token hash matches, and expiry has not passed.
+    const updatedInner = await tx
+      .update(agentRuns)
+      .set({
+        blockedReason: null,
+        blockedExpiresAt: null,
+        integrationResumeToken: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(agentRuns.id, candidateRun.id),
+          eq(agentRuns.organisationId, organisationId),
+          eq(agentRuns.blockedReason, 'integration_required'),
+          eq(agentRuns.integrationResumeToken, tokenHash),
+          gt(agentRuns.blockedExpiresAt, new Date()),
+        ),
+      )
+      .returning({
+        id: agentRuns.id,
+        runMetadata: agentRuns.runMetadata,
+      });
 
-  if (updated.length === 1) {
-    const run = updated[0];
+    if (updatedInner.length !== 1) return null;
+
+    const run = updatedInner[0];
     const meta = (run.runMetadata as Record<string, unknown>) ?? {};
     const currentSeq = (meta.currentBlockSequence as number) ?? 1;
     const completedSeqs: number[] = Array.isArray(meta.completedBlockSequences)
@@ -116,8 +121,7 @@ export async function resumeFromIntegrationConnect(params: {
       completedSeqs.push(currentSeq);
     }
 
-    // Write resume tracking fields into runMetadata
-    await db
+    await tx
       .update(agentRuns)
       .set({
         runMetadata: {
@@ -131,8 +135,12 @@ export async function resumeFromIntegrationConnect(params: {
       })
       .where(eq(agentRuns.id, run.id));
 
+    return { runId: run.id };
+  });
+
+  if (txResult !== null) {
     logger.info('run_resumed', {
-      runId: run.id,
+      runId: txResult.runId,
       conversationId: '', // not available without conversation_id on agent_runs
       blockedReason: 'integration_required',
       integrationId: '', // not stored on run — TODO(v2): store integrationId in runMetadata at block time
@@ -140,7 +148,7 @@ export async function resumeFromIntegrationConnect(params: {
       action: 'run_resumed',
     });
 
-    return { status: 'resumed', runId: run.id };
+    return { status: 'resumed', runId: txResult.runId };
   }
 
   // 0 rows updated — token is expired or in an unrecognised state → 410.

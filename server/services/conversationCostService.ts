@@ -52,6 +52,9 @@ export async function getConversationCost(
 
   // Aggregate cost/token data grouped by model_id — only assistant messages
   // carry cost data. NULLs are excluded by SUM/COUNT naturally.
+  // Defence-in-depth: explicit `organisationId` filter via inner-join to
+  // `agent_conversations` per §1 ("filter by organisationId in application
+  // code, even with RLS"). agent_messages has no organisation_id column.
   const rows = await db
     .select({
       modelId:      agentMessages.modelId,
@@ -61,10 +64,12 @@ export async function getConversationCost(
       messageCount: sql<number>`COUNT(*)`,
     })
     .from(agentMessages)
+    .innerJoin(agentConversations, eq(agentMessages.conversationId, agentConversations.id))
     .where(
       and(
         eq(agentMessages.conversationId, conversationId),
         eq(agentMessages.role, 'assistant'),
+        eq(agentConversations.organisationId, organisationId),
       ),
     )
     .groupBy(agentMessages.modelId);

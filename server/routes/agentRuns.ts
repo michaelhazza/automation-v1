@@ -498,7 +498,10 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
   asyncHandler(async (req, res) => {
     const { resumeToken, conversationId } = req.body as { resumeToken?: string; conversationId?: string };
-    if (!resumeToken || typeof resumeToken !== 'string') {
+    if (!resumeToken || typeof resumeToken !== 'string' || !/^[a-f0-9]{64}$/.test(resumeToken)) {
+      // Mirror the validation applied at the OAuth callback path: tokens are
+      // 32-byte hex (64 chars). Anything else is a forged or malformed token —
+      // reject with 400 before hashing so we never store partial state.
       throw Object.assign(new Error('resumeToken required'), { statusCode: 400, errorCode: 'INVALID_TOKEN' });
     }
     const result = await resumeFromIntegrationConnect({

@@ -40,6 +40,7 @@ export default function CostMeterPill({ cost }: CostMeterPillProps) {
   return (
     <div ref={containerRef} className="relative shrink-0">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         title="Conversation cost breakdown"
         className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-100 border border-slate-200 text-[11.5px] font-mono text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition-colors cursor-pointer"

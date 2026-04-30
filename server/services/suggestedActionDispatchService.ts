@@ -10,7 +10,7 @@ export async function dispatchSuggestedAction(params: {
 }): Promise<{ success: true; redirectUrl?: string }> {
   const { actionKey, conversationId, agentId, userId } = params;
 
-  logger.info({
+  logger.info('suggested_action_dispatched', {
     conversationId,
     actionKey,
     userId,

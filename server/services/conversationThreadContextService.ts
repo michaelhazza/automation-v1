@@ -224,7 +224,9 @@ export async function applyPatch(
       updatedRow = inserted[0];
     }
   } else {
-    // UPDATE existing row
+    // UPDATE existing row with optimistic-concurrency predicate (§6.5: WHERE id = ? AND version = ?).
+    // If 0 rows updated, another writer bumped the version between our read and write —
+    // reload the row, re-apply the patch on top of the concurrent state, and retry once.
     const updated = await db
       .update(conversationThreadContext)
       .set({
@@ -234,10 +236,60 @@ export async function applyPatch(
         version: nextVersion,
         updatedAt: now,
       })
-      .where(eq(conversationThreadContext.id, current.id))
+      .where(
+        and(
+          eq(conversationThreadContext.id, current.id),
+          eq(conversationThreadContext.version, current.version),
+        ),
+      )
       .returning();
 
-    updatedRow = updated[0];
+    if (updated.length === 1) {
+      updatedRow = updated[0];
+    } else {
+      // Lost the race — reload the row, re-apply patch on the concurrent state,
+      // and retry the versioned UPDATE once.
+      const reloaded = await db
+        .select()
+        .from(conversationThreadContext)
+        .where(eq(conversationThreadContext.id, current.id))
+        .limit(1);
+
+      if (reloaded.length === 0) {
+        throw new Error(`thread_context: row ${current.id} disappeared mid-update`);
+      }
+
+      const concurrentState = {
+        decisions: reloaded[0].decisions ?? [],
+        tasks: reloaded[0].tasks ?? [],
+        approach: reloaded[0].approach ?? '',
+      };
+      const retryResult = applyPatchToPureState(concurrentState, patch);
+      finalPureResult = retryResult;
+      const retryVersion = reloaded[0].version + 1;
+
+      const retried = await db
+        .update(conversationThreadContext)
+        .set({
+          decisions: retryResult.decisions,
+          tasks: retryResult.tasks,
+          approach: retryResult.approach,
+          version: retryVersion,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(conversationThreadContext.id, reloaded[0].id),
+            eq(conversationThreadContext.version, reloaded[0].version),
+          ),
+        )
+        .returning();
+
+      if (retried.length === 0) {
+        throw new Error(`thread_context: optimistic-concurrency retry failed for row ${current.id}`);
+      }
+      updatedRow = retried[0];
+    }
   }
 
   const readModel = buildReadModel(updatedRow);
