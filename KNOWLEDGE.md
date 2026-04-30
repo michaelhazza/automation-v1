@@ -1681,3 +1681,11 @@ When a content resolver can change its normalisation logic between versions (e.g
 ### [2026-05-01] Gotcha — verify-integration-reference gate requires primary slugs, not taxonomy aliases
 
 `scripts/verify-integration-reference.mjs` validates that capability slugs in each integration block's `capabilities:` list appear in the taxonomy's primary slug column — not in any alias array. A slug that exists only as an alias is treated as "unknown capability" and fails the gate. In practice: `document_read` is an alias for `page_read` in the capabilities taxonomy — using `document_read` in the Google Drive integration block fails the gate even though the alias is legitimate. **Fix:** use the primary slug (`page_read`), and add any genuinely new capabilities (e.g. `spreadsheet_read`) to the taxonomy's `read_capabilities` section with their own primary slug before adding them to the integration block. **Rule:** before adding a capability slug to an integration block, confirm it is a primary slug in the taxonomy, not just an alias. Source: gate fix session during PR #242.
+
+### [2026-05-01] Gotcha — chatgpt-pr-review diff must use `origin/main`, not local `main`
+
+The `chatgpt-pr-review` agent previously used `git diff main...HEAD` to generate diffs. The local `main` pointer only advances when you explicitly `git pull` or `git fetch && merge` — it can be stale by many commits. Using stale `main` as the diff base produces a bloated diff (1,283 files vs the real 67 in PR #242) because the merge-base is computed against an old commit, dragging in work that is already on the real main.
+
+**Fix:** always use `origin/main` (the remote tracking ref, which is updated on every `git fetch`) as the diff base: `git diff origin/main...HEAD`. The remote tracking ref matches what GitHub computes for the PR diff, giving the correct scope.
+
+**Rule:** any script or agent that generates a diff for PR review must use `origin/<base-branch>`, not the local branch pointer. Applied to all 8 occurrences in `.claude/agents/chatgpt-pr-review.md`.
