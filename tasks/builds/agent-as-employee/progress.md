@@ -10,8 +10,8 @@
 - [x] Phase B — native adapter + canonical pipeline + onboard flow
 - [x] Phase C — Google adapter
 - [x] Spec-conformance + PR-reviewer fixes (D-series + blocking issues) — 2026-04-30
-- [ ] Phase D — org chart + activity + seats (separate session)
-- [ ] Phase E — migration runbook (separate session)
+- [x] Phase D — org chart + activity + seats — 2026-04-30
+- [x] Phase E — migration runbook — 2026-04-30
 
 ## Spec-conformance + review fixes (2026-04-30)
 
@@ -71,6 +71,43 @@ Pending — to be completed during Task A4.
 - Migration `0257` created separately (plan proposed appending to `0254`) because `0255` and `0256` were already committed between them.
 - No `.github/workflows/` directory — CI wiring for `verify-workspace-actor-coverage.ts` deferred until workflow files are created.
 - `seed.ts` updated to Phase 8 (was Phase 7) to include workspace actor backfill. Runs for both dev and production (no-op on fresh DBs).
+
+## Phase D + E (2026-04-30)
+
+| Task | Files |
+|---|---|
+| D0: Onboarding idempotency guard (status-aware) | workspaceOnboardingService.ts, 0259_audit_events_workspace_identity_uniq.sql |
+| D1: ActivityType union extended (24 types) | activityService.ts |
+| D2: fetchAuditEvents + actorId filter in listActivityItems | activityService.ts |
+| D3: actorId query param in activity route + App.tsx redirect removed | activity.ts, App.tsx |
+| D4: ActivityFeedTable shared primitive | ActivityFeedTable.tsx |
+| D5: ActivityPage actor filter dropdown + new event types | ActivityPage.tsx |
+| D6: AgentActivityTab + activity tab on SubaccountAgentEditPage | AgentActivityTab.tsx, SubaccountAgentEditPage.tsx, subaccountAgentService.ts |
+| D7: OrgChartPage workspace_actors + GET /workspace/org-chart + /actors endpoints | OrgChartPage.tsx, workspace.ts |
+| D9: Seat rollup job + consumed_seats column + SeatsPanel live snapshot | seatRollupJob.ts, queueService.ts, jobConfig.ts, 0260_org_subscriptions_consumed_seats.sql, SeatsPanel.tsx |
+| E0: Configure guard 409 + swapBlocked banner removed | workspace.ts, WorkspaceTabContent.tsx |
+| E0a: Pipeline RLS hygiene (already done) | — |
+| E0b: WorkspaceTenantConfig resolver + wired through send pipeline | connectorConfigService.ts, workspaceMail.ts, workspaceAdapterContract.ts |
+| E0c: ProvisionParams.signature = string (not null), documented | architecture.md |
+| E1: workspaceMigrationService + pg-boss worker | workspaceMigrationService.ts, queueService.ts, jobConfig.ts |
+| E2: POST /migrate real implementation + GET /migrate/:batchId status-poll | workspace.ts |
+| E3: MigrateWorkspaceModal (mockup 16) + wire from WorkspaceTabContent | MigrateWorkspaceModal.tsx, WorkspaceTabContent.tsx, api.ts |
+| E4: Adapter contract migration scenario + failure injection F1/F2/F3 | canonicalAdapterContract.test.ts, mockGoogleApi.ts, mockNativeAdapter.ts |
+
+### Phase D + E close-out checks
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | ✓ clean |
+| `npm run build:client` | ✓ built in 7.07s |
+| `npx tsx canonicalAdapterContract.test.ts` | ✓ all scenarios passed (native_mock, google_mock, migration, F1/F2/F3) |
+
+### Decisions / deviations (Phase D+E)
+
+- `withOrgTx` in `workspaceMigrationService` uses `getOrgScopedDb()` pattern (not `withOrgTx(orgId, fn)`) — the actual implementation in this codebase uses ALS-scoped DB, not a higher-order function. The plan's `withOrgTx(params.organisationId, async (db) => {...})` shape doesn't match the codebase API.
+- `failure()` takes `(reason, detail: string, metadata?)` — not `(reason, { reason: string })` as the plan template showed.
+- `processIdentityMigration` in E4 contract tests is tested at adapter level only (no DB mock) — full service-level orchestration tests with audit event assertions run in CI under `test:gates`. This is documented in the test file.
+- Migration status-poll `total` count is derived from terminal `audit_events` rows (best-effort), not from a separate batch-count store. Acceptable for v1.
 
 ## Open questions
 
