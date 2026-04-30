@@ -1,12 +1,13 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, isNull } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
-import { scheduledTasks } from '../db/schema/index.js';
+import { scheduledTasks, referenceDocuments, documentBundleAttachments, documentBundleMembers, agentDataSources } from '../db/schema/index.js';
 import {
   fetchDataSourcesByScope,
   type LoadedDataSource,
+  type DataSourceScope,
 } from './agentService.js';
 import { loadTaskAttachmentsAsContext } from './taskAttachmentContextService.js';
 import { assertScopeSingle } from '../lib/scopeAssertion.js';
@@ -15,8 +16,18 @@ import {
   rankContextPoolByRelevance,
   resolveScheduledTaskId as resolveScheduledTaskIdPure,
   type ProcessedContextPool,
+  mergeAndOrderReferences,
+  enforceRunBudget,
+  applyFailurePolicy,
+  smallDocumentFragmentationWarning,
+  type MergedReference,
 } from './runContextLoaderPure.js';
 import { generateEmbedding } from '../lib/embeddings.js';
+import { externalDocumentResolverService } from './externalDocumentResolverService.js';
+import { buildProvenanceHeader, countTokensApprox, truncateContentToTokenBudget } from './externalDocumentResolverPure.js';
+import { externalDocFlags } from '../lib/featureFlags.js';
+import { EXTERNAL_DOC_MAX_REFS_PER_RUN, EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS } from '../lib/constants.js';
+import type { ResolvedDocument } from './externalDocumentResolverTypes.js';
 
 // Re-export the pure helpers for callers and tests
 export { processContextPool };
@@ -87,6 +98,9 @@ export interface RunContextLoadRequest {
   subaccountAgentId?: string | null;
   taskId?: string | null;
   triggerContext?: unknown;
+  runId?: string | null;
+  subaccountId?: string | null;
+  tokenBudget?: number;
 }
 
 export interface RunContextData {
@@ -102,6 +116,280 @@ export interface RunContextData {
   suppressed: LoadedDataSource[];
   /** Scheduled task description, when the run was fired by a scheduled task. */
   taskInstructions: string | null;
+  /** Assembled external document blocks for injection into the prompt. */
+  externalDocumentBlocks: string[];
+}
+
+// ---------------------------------------------------------------------------
+// External document reference helpers — private to this module
+// ---------------------------------------------------------------------------
+
+interface GDriveRefRow {
+  kind: 'reference_document' | 'agent_data_source';
+  id: string;
+  attachmentOrder: number;
+  createdAt: string;
+  connectionId: string;
+  fileId: string;
+  mimeType: string;
+  name: string;
+  fetchFailurePolicy: 'tolerant' | 'strict' | 'best_effort';
+}
+
+/**
+ * Query agent_data_sources for google_drive source_type rows matching the
+ * same scope conditions as fetchDataSourcesByScope. Returns GDriveRefRow[]
+ * so they can be merged with reference_documents in loadExternalDocumentBlocks.
+ */
+async function queryGoogleDriveAgentSources(scope: DataSourceScope): Promise<GDriveRefRow[]> {
+  const scopeConditions = [
+    and(
+      eq(agentDataSources.agentId, scope.agentId),
+      isNull(agentDataSources.subaccountAgentId),
+      isNull(agentDataSources.scheduledTaskId),
+    ),
+  ];
+  if (scope.subaccountAgentId) {
+    scopeConditions.push(
+      and(
+        eq(agentDataSources.agentId, scope.agentId),
+        eq(agentDataSources.subaccountAgentId, scope.subaccountAgentId),
+      )
+    );
+  }
+  if (scope.scheduledTaskId) {
+    scopeConditions.push(eq(agentDataSources.scheduledTaskId, scope.scheduledTaskId));
+  }
+
+  const rows = await db
+    .select({
+      id: agentDataSources.id,
+      connectionId: agentDataSources.connectionId,
+      fileId: agentDataSources.sourcePath,
+      mimeType: agentDataSources.contentType,
+      name: agentDataSources.name,
+      priority: agentDataSources.priority,
+      createdAt: agentDataSources.createdAt,
+    })
+    .from(agentDataSources)
+    .where(and(eq(agentDataSources.sourceType, 'google_drive'), or(...scopeConditions)));
+
+  return rows.map((r) => ({
+    kind: 'agent_data_source' as const,
+    id: r.id,
+    attachmentOrder: r.priority,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+    connectionId: r.connectionId ?? '',
+    fileId: r.fileId ?? '',
+    mimeType: r.mimeType ?? '',
+    name: r.name ?? '',
+    fetchFailurePolicy: 'tolerant' as const,
+  }));
+}
+
+/**
+ * Load task-scoped external document references from reference_documents
+ * via bundle joins for a specific task id.
+ */
+async function loadTaskExternalRefs(taskId: string): Promise<GDriveRefRow[]> {
+  const rows = await db
+    .select({
+      id: referenceDocuments.id,
+      connectionId: referenceDocuments.externalConnectionId,
+      fileId: referenceDocuments.externalFileId,
+      mimeType: referenceDocuments.externalFileMimeType,
+      name: referenceDocuments.externalFileName,
+      attachmentOrder: referenceDocuments.attachmentOrder,
+      createdAt: referenceDocuments.createdAt,
+      fetchFailurePolicy: documentBundleAttachments.fetchFailurePolicy,
+    })
+    .from(documentBundleAttachments)
+    .innerJoin(
+      documentBundleMembers,
+      and(
+        eq(documentBundleMembers.bundleId, documentBundleAttachments.bundleId),
+        isNull(documentBundleMembers.deletedAt),
+      ),
+    )
+    .innerJoin(
+      referenceDocuments,
+      and(
+        eq(referenceDocuments.id, documentBundleMembers.documentId),
+        eq(referenceDocuments.sourceType, 'google_drive'),
+        isNull(referenceDocuments.deletedAt),
+      ),
+    )
+    .where(
+      and(
+        eq(documentBundleAttachments.subjectType, 'task'),
+        eq(documentBundleAttachments.subjectId, taskId),
+        isNull(documentBundleAttachments.deletedAt),
+      ),
+    );
+
+  return rows.map((r) => ({
+    kind: 'reference_document' as const,
+    id: r.id,
+    attachmentOrder: r.attachmentOrder ?? 0,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+    connectionId: r.connectionId ?? '',
+    fileId: r.fileId ?? '',
+    mimeType: r.mimeType ?? '',
+    name: r.name ?? '',
+    fetchFailurePolicy: (r.fetchFailurePolicy ?? 'tolerant') as 'tolerant' | 'strict' | 'best_effort',
+  }));
+}
+
+/**
+ * Resolve external document blocks for injection into the agent run prompt.
+ * Implements kill-switch, resolution flag, dedup, quota cap, wall-clock
+ * budget enforcement, per-doc token cap, and failure policy routing.
+ */
+async function loadExternalDocumentBlocks(
+  agentSourceRows: GDriveRefRow[],
+  request: RunContextLoadRequest,
+): Promise<string[]> {
+  // Kill switch
+  if (externalDocFlags.systemDisabled) return [];
+  // Resolution flag
+  if (!externalDocFlags.resolutionEnabled) return [];
+  // Subaccount guard — document_cache requires non-null subaccount_id
+  if (!request.subaccountId) return [];
+
+  // Merge agent sources with task-scoped reference docs
+  let allRefs: GDriveRefRow[] = [...agentSourceRows];
+  if (request.taskId) {
+    const taskRefs = await loadTaskExternalRefs(request.taskId);
+    allRefs = [...allRefs, ...taskRefs];
+  }
+
+  // Combine into MergedReference list and sort
+  const mergedInput: (MergedReference & { meta: GDriveRefRow })[] = allRefs.map((r) => ({
+    kind: r.kind,
+    id: r.id,
+    attachmentOrder: r.attachmentOrder,
+    createdAt: r.createdAt,
+    meta: r,
+  }));
+
+  const ordered = mergeAndOrderReferences(mergedInput) as (MergedReference & { meta: GDriveRefRow })[];
+
+  if (ordered.length === 0) return [];
+
+  // Dedup on google_drive:fileId:connectionId
+  const seen = new Map<string, true>();
+  const deduped: (MergedReference & { meta: GDriveRefRow })[] = [];
+  for (const ref of ordered) {
+    const key = `google_drive:${ref.meta.fileId}:${ref.meta.connectionId}`;
+    if (seen.has(key)) continue;
+    seen.set(key, true);
+    deduped.push(ref);
+  }
+
+  // Cap at EXTERNAL_DOC_MAX_REFS_PER_RUN
+  const withinQuota = deduped.slice(0, EXTERNAL_DOC_MAX_REFS_PER_RUN);
+  const overQuota = deduped.slice(EXTERNAL_DOC_MAX_REFS_PER_RUN);
+
+  const perDocTokenBudget = request.tokenBudget != null
+    ? Math.floor(request.tokenBudget * 0.3)
+    : undefined;
+
+  const blocks: string[] = [];
+  const resolvedLite: { id: string; tokensUsed: number; failureReason: null }[] = [];
+  const wallClockStart = Date.now();
+
+  for (const ref of withinQuota) {
+    const meta = ref.meta;
+
+    // Wall-clock budget check
+    if (Date.now() - wallClockStart >= EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS) {
+      blocks.push(`[External document "${meta.name}" skipped: resolver time budget exceeded]`);
+      continue;
+    }
+
+    let resolved: ResolvedDocument;
+    try {
+      resolved = await externalDocumentResolverService.resolve({
+        referenceId: meta.id,
+        referenceType: meta.kind,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId,
+        connectionId: meta.connectionId,
+        fileId: meta.fileId,
+        expectedMimeType: meta.mimeType,
+        docName: meta.name,
+        runId: request.runId ?? null,
+        db,
+      });
+    } catch {
+      blocks.push(`[External document "${meta.name}" could not be resolved]`);
+      continue;
+    }
+
+    // Determine effective failure policy
+    const effectivePolicy: 'tolerant' | 'strict' | 'best_effort' =
+      externalDocFlags.failurePoliciesEnabled ? meta.fetchFailurePolicy : 'tolerant';
+
+    // Derive state from resolved document
+    const state: 'active' | 'degraded' | 'broken' =
+      resolved.failureReason === null
+        ? 'active'
+        : resolved.content.length > 0
+          ? 'degraded'
+          : 'broken';
+
+    const policyAction = applyFailurePolicy(effectivePolicy, { state });
+
+    if (policyAction.action === 'block_run') {
+      throw new Error(
+        `External document "${meta.name}" fetch failed with policy "${effectivePolicy}": ${resolved.failureReason}`
+      );
+    }
+
+    if (policyAction.action === 'skip_reference') {
+      blocks.push(`[External document "${meta.name}" skipped: ${resolved.failureReason}]`);
+      continue;
+    }
+
+    // inject_active, serve_stale_with_warning, serve_stale_silent — inject content
+    let content = resolved.content;
+
+    // Per-doc token cap (30% of tokenBudget)
+    if (perDocTokenBudget != null) {
+      const tokens = countTokensApprox(content);
+      if (tokens > perDocTokenBudget) {
+        content = truncateContentToTokenBudget(content, perDocTokenBudget).content;
+      }
+    }
+
+    const header = buildProvenanceHeader({
+      docName: resolved.provenance.docName,
+      fetchedAt: resolved.provenance.fetchedAt,
+      revisionId: resolved.provenance.revisionId,
+      isStale: resolved.provenance.isStale,
+    });
+
+    blocks.push(`${header}\n${content}`);
+    resolvedLite.push({ id: meta.id, tokensUsed: countTokensApprox(content), failureReason: null });
+  }
+
+  // Quota-exceeded placeholder blocks
+  for (const ref of overQuota) {
+    blocks.push(`[External document "${ref.meta.name}" skipped: quota exceeded (max ${EXTERNAL_DOC_MAX_REFS_PER_RUN} per run)]`);
+  }
+
+  // Informational run-budget enforcement (does not mutate blocks)
+  if (request.tokenBudget != null) {
+    enforceRunBudget(resolvedLite, request.tokenBudget);
+  }
+
+  // Fragmentation warning
+  const warning = smallDocumentFragmentationWarning(resolvedLite);
+  if (warning) {
+    console.warn(`[runContextLoader] External doc fragmentation: ${warning.message}`);
+  }
+
+  return blocks;
 }
 
 export async function loadRunContextData(
@@ -111,12 +399,20 @@ export async function loadRunContextData(
 
   // 1. Load agent_data_sources across all applicable scopes
   const triggerScheduledTaskId = resolveScheduledTaskIdPure(request.triggerContext);
-  const scopedSources = await fetchDataSourcesByScope({
+  const scope: DataSourceScope = {
     agentId: request.agentId,
     subaccountAgentId: request.subaccountAgentId ?? null,
     scheduledTaskId: triggerScheduledTaskId,
-  });
-  pool.push(...scopedSources);
+  };
+
+  // Pre-load google_drive agent sources — these are handled by the external
+  // document resolver pipeline and must be excluded from the regular pool.
+  const googleDriveSourceRows = await queryGoogleDriveAgentSources(scope);
+  const googleDriveIds = new Set(googleDriveSourceRows.map((r) => r.id));
+
+  const scopedSources = await fetchDataSourcesByScope(scope);
+  // Filter out google_drive sources — they flow through the resolver pipeline
+  pool.push(...scopedSources.filter((s) => !googleDriveIds.has(s.id)));
 
   // 2. Load task instance attachments if the run targets a specific task
   if (request.taskId) {
@@ -205,8 +501,12 @@ export async function loadRunContextData(
   // Steps 4-9 — pure post-fetch processing
   const processed: ProcessedContextPool = processContextPool(pool);
 
+  // Phase 5: Resolve external document references
+  const externalDocumentBlocks = await loadExternalDocumentBlocks(googleDriveSourceRows, request);
+
   return {
     ...processed,
     taskInstructions,
+    externalDocumentBlocks,
   };
 }

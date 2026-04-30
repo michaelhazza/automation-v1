@@ -113,7 +113,28 @@ function extractGoogleDocText(doc: GoogleDocsContent): string {
 // Fetch raw content from a data source
 // ---------------------------------------------------------------------------
 
+/**
+ * Thrown by fetchSourceContent when a source has sourceType === 'google_drive'.
+ * These sources are handled exclusively by the external document resolver
+ * pipeline in loadRunContextData and must not flow through the regular
+ * fetch / cache / error-status path.
+ */
+class ExternalDocSourceError extends Error {
+  constructor(sourceName: string) {
+    super(`google_drive source "${sourceName}" is handled by the external document resolver pipeline`);
+    this.name = 'ExternalDocSourceError';
+  }
+}
+
 async function fetchSourceContent(source: typeof agentDataSources.$inferSelect): Promise<string> {
+  if (source.sourceType === 'google_drive') {
+    // google_drive sources are resolved through externalDocumentResolverService
+    // in loadRunContextData and are filtered from the regular pool.
+    // Returning empty here prevents false lastFetchStatus='error' DB writes
+    // for sources that will be handled separately.
+    throw new ExternalDocSourceError(source.name);
+  }
+
   if (source.sourceType === 'http_url') {
     const headers: Record<string, string> = { Accept: 'text/plain, application/json, text/csv, */*' };
     if (source.sourceHeaders) {
@@ -350,6 +371,12 @@ export async function loadSourceContent(
         .where(eq(agentDataSources.id, source.id))
         .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
     } catch (err) {
+      if (err instanceof ExternalDocSourceError) {
+        // This source is handled by the external doc resolver pipeline.
+        // Return empty without marking the source as failed or sending admin alerts.
+        return { content: '', fetchOk: false, tokenCount: 0 };
+      }
+
       fetchOk = false;
       const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
 
