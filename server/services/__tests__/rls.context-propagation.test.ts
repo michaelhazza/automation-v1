@@ -33,43 +33,28 @@
 
 // Force this file to be treated as an ES module so top-level await below
 // is valid under the server tsconfig.
+import { expect, test } from 'vitest';
+
 export {};
 
-if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
-  console.log('\nRLS context-propagation test\n');
-  console.log('  SKIP  requires DATABASE_URL and NODE_ENV=integration');
-  console.log('\n  Skipped (not a failure).\n');
-  process.exit(0);
+const SKIP_RLS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
+if (SKIP_RLS) {
+  console.log('\nRLS context-propagation test — SKIP (requires DATABASE_URL and NODE_ENV=integration)\n');
 }
 
-// Dynamic imports only when we have a DATABASE_URL, so the skip path above
-// doesn't transitively load the drizzle / postgres-js modules (which would
-// crash on missing env vars during module evaluation).
-const { client, db } = await import('../../db/index.js');
-const { withOrgTx } = await import('../../instrumentation.js');
-const { RLS_PROTECTED_TABLES } = await import('../../config/rlsProtectedTables.js');
-const { sql } = await import('drizzle-orm');
+// Dynamic imports only when we have a DATABASE_URL + integration env.
+// When SKIP_RLS is true, none of these are reached.
+let client: Awaited<typeof import('../../db/index.js')>['client'] | undefined;
+let db: Awaited<typeof import('../../db/index.js')>['db'] | undefined;
+let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'] | undefined;
+let RLS_PROTECTED_TABLES: Awaited<typeof import('../../config/rlsProtectedTables.js')>['RLS_PROTECTED_TABLES'] = [];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'] | undefined;
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-    if (err instanceof Error && err.stack) {
-      console.log(err.stack.split('\n').slice(1, 4).map((l) => `        ${l}`).join('\n'));
-    }
-  }
-}
-
-function assert(cond: unknown, message: string): void {
-  if (!cond) throw new Error(message);
+if (!SKIP_RLS) {
+  ({ client, db } = await import('../../db/index.js'));
+  ({ withOrgTx } = await import('../../instrumentation.js'));
+  ({ RLS_PROTECTED_TABLES } = await import('../../config/rlsProtectedTables.js'));
+  ({ sql } = await import('drizzle-orm'));
 }
 
 // Tables that enforce org isolation via parent-EXISTS (no direct organisation_id
@@ -138,10 +123,7 @@ async function assertLayerAVisibility(tableName: string): Promise<void> {
           sql.raw(`SELECT COUNT(*)::int AS c FROM ${tableName} WHERE organisation_id = '${ORG_B}'`),
         );
         const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-        assert(
-          count === 0,
-          `Layer A (orgA ctx) leaked ${count} rows belonging to orgB from ${tableName}`,
-        );
+        expect(count === 0, `Layer A (orgA ctx) leaked ${count} rows belonging to orgB from ${tableName}`).toBeTruthy();
       });
     },
   );
@@ -159,10 +141,7 @@ async function assertLayerBFailClosed(tableName: string): Promise<void> {
     sql.raw(`SELECT COUNT(*)::int AS c FROM ${tableName}`),
   );
   const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-  assert(
-    count === 0,
-    `Layer B (no ALS ctx) returned ${count} rows from ${tableName} — RLS is NOT fail-closed`,
-  );
+  expect(count === 0, `Layer B (no ALS ctx) returned ${count} rows from ${tableName} — RLS is NOT fail-closed`).toBeTruthy();
 }
 
 async function assertLayerBWriteRejected(tableName: string): Promise<void> {
@@ -181,10 +160,7 @@ async function assertLayerBWriteRejected(tableName: string): Promise<void> {
   } catch {
     rejected = true;
   }
-  assert(
-    rejected,
-    `Layer B (no ALS ctx) allowed an INSERT into ${tableName} — RLS WITH CHECK is NOT fail-closed`,
-  );
+  expect(rejected, `Layer B (no ALS ctx) allowed an INSERT into ${tableName} — RLS WITH CHECK is NOT fail-closed`).toBeTruthy();
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +236,7 @@ async function main(): Promise<void> {
               WHERE document_id = ${parentDocIdB}::uuid
             `);
             const count = Number((rows as unknown as Array<{ c: number }>)[0]?.c ?? 0);
-            assert(
-              count === 0,
-              `Layer A (orgA ctx) leaked ${count} reference_document_versions belonging to orgB`,
-            );
+            expect(count === 0, `Layer A (orgA ctx) leaked ${count} reference_document_versions belonging to orgB`).toBeTruthy();
           });
         },
       );
@@ -282,10 +255,7 @@ async function main(): Promise<void> {
           } catch {
             rejected = true;
           }
-          assert(
-            rejected,
-            `Layer B (no ALS ctx) allowed an INSERT into reference_document_versions — RLS WITH CHECK is NOT fail-closed`,
-          );
+          expect(rejected, `Layer B (no ALS ctx) allowed an INSERT into reference_document_versions — RLS WITH CHECK is NOT fail-closed`).toBeTruthy();
         },
       );
     } finally {
@@ -305,9 +275,10 @@ async function main(): Promise<void> {
     await cleanupFixtures();
     await client.end({ timeout: 5 });
   }
-
-  console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
 }
 
-await main();
+if (!SKIP_RLS) {
+  await main();
+} else {
+  test.skip('rls.context-propagation (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+}

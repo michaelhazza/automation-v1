@@ -3,8 +3,7 @@
  * Run via: npx tsx server/services/__tests__/memoryBlockRetrievalServicePure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   rankByPrecedencePure,
   deriveRuleStatus,
@@ -35,17 +34,17 @@ function makeRow(overrides: Partial<MemoryBlockRow> & { id: string }): MemoryBlo
 
 test('deriveRuleStatus returns active for clean row', () => {
   const row = makeRow({ id: 'r1' });
-  assert.equal(deriveRuleStatus(row), 'active');
+  expect(deriveRuleStatus(row)).toBe('active');
 });
 
 test('deriveRuleStatus returns paused when pausedAt set', () => {
   const row = makeRow({ id: 'r1', pausedAt: now });
-  assert.equal(deriveRuleStatus(row), 'paused');
+  expect(deriveRuleStatus(row)).toBe('paused');
 });
 
 test('deriveRuleStatus returns deprecated when deprecatedAt set', () => {
   const row = makeRow({ id: 'r1', deprecatedAt: now });
-  assert.equal(deriveRuleStatus(row), 'deprecated');
+  expect(deriveRuleStatus(row)).toBe('deprecated');
 });
 
 test('excludes paused rows', () => {
@@ -56,8 +55,8 @@ test('excludes paused rows', () => {
     candidates: [active, paused],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].id, 'active');
+  expect(result.length).toBe(1);
+  expect(result[0].id).toBe('active');
 });
 
 test('excludes deprecated rows', () => {
@@ -68,8 +67,8 @@ test('excludes deprecated rows', () => {
     candidates: [active, deprecated],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].id, 'active');
+  expect(result.length).toBe(1);
+  expect(result[0].id).toBe('active');
 });
 
 test('authoritative tier wins over non-authoritative', () => {
@@ -80,7 +79,7 @@ test('authoritative tier wins over non-authoritative', () => {
     candidates: [normal, auth],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result[0].id, 'auth');
+  expect(result[0].id).toBe('auth');
 });
 
 test('subaccount scope outranks org scope within same priority', () => {
@@ -92,7 +91,7 @@ test('subaccount scope outranks org scope within same priority', () => {
     candidates: [org, sub],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result[0].id, 'sub');
+  expect(result[0].id).toBe('sub');
 });
 
 test('high priority outranks medium within same scope', () => {
@@ -103,7 +102,7 @@ test('high priority outranks medium within same scope', () => {
     candidates: [medium, high],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result[0].id, 'high');
+  expect(result[0].id).toBe('high');
 });
 
 test('recency wins as final tiebreaker', () => {
@@ -114,10 +113,10 @@ test('recency wins as final tiebreaker', () => {
     candidates: [old, recent],
   };
   const result = rankByPrecedencePure(input);
-  assert.equal(result[0].id, 'recent');
+  expect(result[0].id).toBe('recent');
 });
 
 test('empty candidates returns empty result', () => {
   const result = rankByPrecedencePure({ organisationId: ORG_ID, candidates: [] });
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });

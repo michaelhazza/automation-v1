@@ -28,6 +28,7 @@
  * server/services/__tests__/runContextLoader.test.ts — no framework.
  */
 
+import { expect, test } from 'vitest';
 import {
   loadFixtures,
   FIXTURE_ORG_ID,
@@ -43,25 +44,6 @@ import {
 import { ACTION_REGISTRY } from '../../config/actionRegistry.js';
 import type { ProviderResponse } from '../providers/types.js';
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
-
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -76,34 +58,28 @@ async function run() {
 // ── Fixtures load and have the expected shape ─────────────────────
 await test('loadFixtures returns the org with the canonical UUID', () => {
   const f = loadFixtures();
-  assertEqual(f.org.id, FIXTURE_ORG_ID, 'org.id');
+  expect(f.org.id, 'org.id').toEqual(FIXTURE_ORG_ID);
 });
 
 await test('loadFixtures returns exactly 2 subaccounts (cross-tenant test capability)', () => {
   const f = loadFixtures();
-  assertEqual(f.subaccounts.length, 2, 'subaccounts.length');
-  assertEqual(f.subaccounts[0].id, FIXTURE_SUBACCOUNT_1_ID, 'sub1.id');
+  expect(f.subaccounts.length, 'subaccounts.length').toBe(2);
+  expect(f.subaccounts[0].id, 'sub1.id').toEqual(FIXTURE_SUBACCOUNT_1_ID);
 });
 
 await test('loadFixtures returns one agent linked to both subaccounts', () => {
   const f = loadFixtures();
-  assertEqual(f.agent.id, FIXTURE_AGENT_ID, 'agent.id');
-  assertEqual(f.links.length, 2, 'two links to the same agent');
-  assert(
-    f.links.every((l) => l.agentId === FIXTURE_AGENT_ID),
-    'both links point to the fixture agent',
-  );
+  expect(f.agent.id, 'agent.id').toEqual(FIXTURE_AGENT_ID);
+  expect(f.links.length, 'two links to the same agent').toBe(2);
+  expect(f.links.every((l) => l.agentId === FIXTURE_AGENT_ID), 'both links point to the fixture agent').toBeTruthy();
 });
 
 await test('loadFixtures returns three review_code outputs (APPROVE / BLOCKED / malformed)', () => {
   const f = loadFixtures();
-  assert(f.reviewCodeOutputs.approve.includes('APPROVE'), 'approve sample contains APPROVE');
-  assert(f.reviewCodeOutputs.blocked.includes('BLOCKED'), 'blocked sample contains BLOCKED');
-  assert(
-    !f.reviewCodeOutputs.malformed.includes('APPROVE') &&
-      !f.reviewCodeOutputs.malformed.includes('BLOCKED'),
-    'malformed sample has no Verdict line',
-  );
+  expect(f.reviewCodeOutputs.approve.includes('APPROVE'), 'approve sample contains APPROVE').toBeTruthy();
+  expect(f.reviewCodeOutputs.blocked.includes('BLOCKED'), 'blocked sample contains BLOCKED').toBeTruthy();
+  expect(!f.reviewCodeOutputs.malformed.includes('APPROVE') &&
+      !f.reviewCodeOutputs.malformed.includes('BLOCKED'), 'malformed sample has no Verdict line').toBeTruthy();
 });
 
 // ── LLM stub composes with the fixture set ────────────────────────
@@ -123,19 +99,19 @@ await test('createLLMStub returns a stub bound to a single canned response', asy
       },
     },
   ]);
-  assert(stub.callCount === 0, 'fresh stub has zero calls');
-  assert(typeof stub.routeCall === 'function', 'routeCall is a function');
+  expect(stub.callCount === 0, 'fresh stub has zero calls').toBeTruthy();
+  expect(typeof stub.routeCall === 'function', 'routeCall is a function').toBeTruthy();
   // Use the fixtures to confirm they integrate with downstream layers
   // — even though we do not call routeCall here, this asserts the fixture
   // shape feeds into the same surface a real test would use.
-  assert(fixtures.agent.modelId.startsWith('claude-'), 'fixture agent has a Claude model id');
+  expect(fixtures.agent.modelId.startsWith('claude-'), 'fixture agent has a Claude model id').toBeTruthy();
 });
 
 // ── Pure helpers compose against fixture-style inputs ─────────────
 await test('selectExecutionPhase classifies the first iteration of a fixture run as planning', () => {
   // First iteration of any fresh agent run is always planning, regardless
   // of fixture configuration.
-  assertEqual(selectExecutionPhase(0, false, 0), 'planning', 'phase');
+  expect(selectExecutionPhase(0, false, 0), 'phase').toBe('planning');
 });
 
 await test('validateToolCalls accepts a fixture-shaped create_task call', () => {
@@ -158,7 +134,7 @@ await test('validateToolCalls accepts a fixture-shaped create_task call', () => 
       },
     ],
   );
-  assertEqual(result.valid, true, 'valid');
+  expect(result.valid, 'valid').toBe(true);
 });
 
 await test('buildMiddlewareContext constructs an initial context from fixture-shaped params', () => {
@@ -190,9 +166,9 @@ await test('buildMiddlewareContext constructs an initial context from fixture-sh
     maxToolCalls: 25,
     timeoutMs: 300000,
   });
-  assertEqual(ctx.iteration, 0, 'iteration starts at 0');
-  assertEqual(ctx.tokensUsed, 0, 'tokensUsed starts at 0');
-  assertEqual(ctx.toolCallsCount, 0, 'toolCallsCount starts at 0');
+  expect(ctx.iteration, 'iteration starts at 0').toBe(0);
+  expect(ctx.tokensUsed, 'tokensUsed starts at 0').toBe(0);
+  expect(ctx.toolCallsCount, 'toolCallsCount starts at 0').toBe(0);
 });
 
 // ── Action registry sanity (post-Zod conversion) ──────────────────
@@ -200,19 +176,13 @@ await test('action registry contains the skills referenced by the fixture link',
   const fixtures = loadFixtures();
   const requiredSkills = fixtures.links[0].skillSlugs ?? [];
   for (const slug of requiredSkills) {
-    assert(
-      ACTION_REGISTRY[slug] !== undefined,
-      `fixture references skill '${slug}' but ACTION_REGISTRY has no such entry`,
-    );
+    expect(ACTION_REGISTRY[slug] !== undefined, `fixture references skill '${slug}' but ACTION_REGISTRY has no such entry`).toBeTruthy();
   }
 });
 
 await test('every action registry entry has the new idempotencyStrategy field (Slice B contract)', () => {
   for (const [slug, def] of Object.entries(ACTION_REGISTRY)) {
-    assert(
-      def.idempotencyStrategy !== undefined,
-      `${slug} is missing idempotencyStrategy`,
-    );
+    expect(def.idempotencyStrategy !== undefined, `${slug} is missing idempotencyStrategy`).toBeTruthy();
   }
 });
 
@@ -225,6 +195,4 @@ void _typecheckOnly;
 await run();
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

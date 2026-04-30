@@ -1,0 +1,10 @@
+server/services/__tests__/staleConnectorDetectorPure.test.ts
+server/services/__tests__/subaccountOnboardingServicePure.test.ts
+server/services/__tests__/systemIncidentServicePure.test.ts
+server/services/__tests__/systemPnlServicePure.test.ts
+server/services/__tests__/systemSkillHandlerValidatorPure.test.ts
+server/services/__tests__/systemSkillServicePure.test.ts
+server/services/__tests__/toolCallsLogProjectionServicePure.test.ts
+server/services/__tests__/topicClassifierPure.test.ts
+server/services/__tests__/trajectoryServicePure.test.ts
+server/services/__tests__/trustCalibrationServicePure.test.ts

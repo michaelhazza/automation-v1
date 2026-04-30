@@ -7,26 +7,8 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/canonicalQueryRegistry.test.ts
  */
+import { expect, test } from 'vitest';
 import { REGISTRY_META } from '../executors/canonicalQueryRegistryMeta.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -48,12 +30,12 @@ const EXPECTED_KEYS = [
 // ── Structural ────────────────────────────────────────────────────────────
 
 test('REGISTRY_META has exactly 8 v1 entries', () => {
-  assertEqual(Object.keys(REGISTRY_META).length, 8, 'entry count');
+  expect(Object.keys(REGISTRY_META).length, 'entry count').toBe(8);
 });
 
 test('all expected keys are present', () => {
   for (const key of EXPECTED_KEYS) {
-    assert(key in REGISTRY_META, `missing key: ${key}`);
+    expect(key in REGISTRY_META, `missing key: ${key}`).toBeTruthy();
   }
 });
 
@@ -61,32 +43,29 @@ test('all expected keys are present', () => {
 
 for (const key of EXPECTED_KEYS) {
   test(`${key}: entry.key matches object key`, () => {
-    assertEqual(REGISTRY_META[key]!.key, key, 'key consistency');
+    expect(REGISTRY_META[key]!.key, 'key consistency').toEqual(key);
   });
 
   test(`${key}: has at least one alias`, () => {
-    assert((REGISTRY_META[key]!.aliases.length) > 0, 'aliases must not be empty');
+    expect((REGISTRY_META[key]!.aliases.length) > 0, 'aliases must not be empty').toBeTruthy();
   });
 
   test(`${key}: requiredCapabilities is an array`, () => {
-    assert(Array.isArray(REGISTRY_META[key]!.requiredCapabilities), 'requiredCapabilities must be array');
+    expect(Array.isArray(REGISTRY_META[key]!.requiredCapabilities), 'requiredCapabilities must be array').toBeTruthy();
   });
 
   test(`${key}: allowedFields is an object with at least one field`, () => {
-    assert(Object.keys(REGISTRY_META[key]!.allowedFields).length > 0, 'allowedFields must not be empty');
+    expect(Object.keys(REGISTRY_META[key]!.allowedFields).length > 0, 'allowedFields must not be empty').toBeTruthy();
   });
 
   test(`${key}: description is non-empty string`, () => {
-    assert(typeof REGISTRY_META[key]!.description === 'string' && REGISTRY_META[key]!.description.length > 0, 'description must be non-empty string');
+    expect(typeof REGISTRY_META[key]!.description === 'string' && REGISTRY_META[key]!.description.length > 0, 'description must be non-empty string').toBeTruthy();
   });
 
   test(`${key}: primaryEntity is a valid entity`, () => {
     const validEntities = ['contacts', 'opportunities', 'appointments', 'conversations', 'revenue', 'tasks'];
-    assert(validEntities.includes(REGISTRY_META[key]!.primaryEntity), `primaryEntity must be one of ${validEntities.join(', ')}`);
+    expect(validEntities.includes(REGISTRY_META[key]!.primaryEntity), `primaryEntity must be one of ${validEntities.join(', ')}`).toBeTruthy();
   });
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

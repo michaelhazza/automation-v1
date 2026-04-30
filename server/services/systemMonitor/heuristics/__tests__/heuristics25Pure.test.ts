@@ -1,9 +1,8 @@
 /**
  * heuristics25Pure.test.ts — Tests for Phase 2.5 heuristic modules.
- *
- * Run: npx tsx server/services/systemMonitor/heuristics/__tests__/heuristics25Pure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import type { HeuristicContext, Baseline, BaselineEntityKind, Candidate } from '../types.js';
 import type { AgentRunEntity } from '../candidateTypes.js';
 
@@ -16,24 +15,6 @@ import { successRateDegradationTrend } from '../systemic/successRateDegradationT
 import { outputEntropyCollapse } from '../systemic/outputEntropyCollapse.js';
 import { toolSelectionDrift } from '../systemic/toolSelectionDrift.js';
 import { costPerOutcomeIncreasing } from '../systemic/costPerOutcomeIncreasing.js';
-
-const pendingTests: Array<Promise<void>> = [];
-let passed = 0;
-let failed = 0;
-
-function asyncTest(name: string, fn: () => Promise<void>) {
-  const p = new Promise<void>((resolve) => {
-    fn().then(
-      () => { passed++; console.log(`  PASS  ${name}`); resolve(); },
-      (err: unknown) => { failed++; console.log(`  FAIL  ${name}: ${err instanceof Error ? err.message : err}`); resolve(); },
-    );
-  });
-  pendingTests.push(p);
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 const NOW = new Date('2026-04-25T14:00:00.000Z');
 
@@ -75,64 +56,58 @@ function makeAgent(entity: Partial<AgentRunEntity>): Candidate {
   return { entityKind: 'agent_run', entityId: 'run-1', entity: { ...defaults, ...entity } };
 }
 
-// ── cacheHitRateDegradation ────────────────────────────────────────────────────
+// ── cacheHitRateDegradation ─────────────────────────────────────────────────
 
-console.log('\n--- cacheHitRateDegradation ---');
-
-asyncTest('fires when hit rate p50 drops below historical mean by >0.20', async () => {
+test('cacheHitRateDegradation: fires when hit rate p50 drops below historical mean by >0.20', async () => {
   const bm = new Map([
     ['agent:test-agent:cache_hit_rate', makeBaseline({ metric: 'cache_hit_rate', p50: 0.40, mean: 0.80 })],
   ]);
   const result = await cacheHitRateDegradation.evaluate(makeCtx(bm), makeAgent({}));
-  assert(result.fired === true, 'should fire on degraded hit rate');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire when hit rate is within threshold', async () => {
+test('cacheHitRateDegradation: does not fire when hit rate is within threshold', async () => {
   const bm = new Map([
     ['agent:test-agent:cache_hit_rate', makeBaseline({ metric: 'cache_hit_rate', p50: 0.75, mean: 0.80 })],
   ]);
   const result = await cacheHitRateDegradation.evaluate(makeCtx(bm), makeAgent({}));
-  assert(result.fired === false, 'should not fire when within threshold');
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('returns insufficient_data when no baseline', async () => {
+test('cacheHitRateDegradation: returns insufficient_data when no baseline', async () => {
   const result = await cacheHitRateDegradation.evaluate(makeCtx(), makeAgent({}));
-  assert(!result.fired && 'reason' in result && result.reason === 'insufficient_data', 'insufficient_data');
+  expect(!result.fired && 'reason' in result && result.reason === 'insufficient_data').toBe(true);
 });
 
-// ── latencyCreep ───────────────────────────────────────────────────────────────
+// ── latencyCreep ────────────────────────────────────────────────────────────
 
-console.log('--- latencyCreep ---');
-
-asyncTest('fires when duration > 1.5x baseline p95 AND >500ms delta', async () => {
+test('latencyCreep: fires when duration > 1.5x baseline p95 AND >500ms delta', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ metric: 'runtime_ms', p95: 2000 })],
   ]);
-  const result = await latencyCreep.evaluate(makeCtx(bm), makeAgent({ durationMs: 3200 })); // 3200 > 3000 AND +1200ms
-  assert(result.fired === true, 'should fire on creep');
+  const result = await latencyCreep.evaluate(makeCtx(bm), makeAgent({ durationMs: 3200 }));
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire when duration is just above p95 but below absolute threshold', async () => {
+test('latencyCreep: does not fire when duration is just above p95 but below absolute threshold', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ metric: 'runtime_ms', p95: 2000 })],
   ]);
-  const result = await latencyCreep.evaluate(makeCtx(bm), makeAgent({ durationMs: 2100 })); // below 1.5x
-  assert(result.fired === false, 'should not fire on small latency');
+  const result = await latencyCreep.evaluate(makeCtx(bm), makeAgent({ durationMs: 2100 }));
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('does not fire when no durationMs', async () => {
+test('latencyCreep: does not fire when no durationMs', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ metric: 'runtime_ms', p95: 2000 })],
   ]);
   const result = await latencyCreep.evaluate(makeCtx(bm), makeAgent({ durationMs: null }));
-  assert(result.fired === false, 'no duration → no fire');
+  expect(result.fired).toBe(false);
 });
 
-// ── retryRateIncrease ─────────────────────────────────────────────────────────
+// ── retryRateIncrease ──────────────────────────────────────────────────────
 
-console.log('--- retryRateIncrease ---');
-
-asyncTest('fires for failed run with error message and baseline present', async () => {
+test('retryRateIncrease: fires for failed run with error message and baseline present', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_input', makeBaseline({ metric: 'token_count_input', sampleCount: 20 })],
   ]);
@@ -140,10 +115,10 @@ asyncTest('fires for failed run with error message and baseline present', async 
     makeCtx(bm),
     makeAgent({ runResultStatus: 'failed', errorMessage: 'Service unavailable — retry exhausted' }),
   );
-  assert(result.fired === true, 'should fire for failed run with error');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire for successful run', async () => {
+test('retryRateIncrease: does not fire for successful run', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_input', makeBaseline({ metric: 'token_count_input', sampleCount: 20 })],
   ]);
@@ -151,14 +126,12 @@ asyncTest('does not fire for successful run', async () => {
     makeCtx(bm),
     makeAgent({ runResultStatus: 'success', errorMessage: null }),
   );
-  assert(result.fired === false, 'success → no fire');
+  expect(result.fired).toBe(false);
 });
 
-// ── authRefreshSpike ───────────────────────────────────────────────────────────
+// ── authRefreshSpike ───────────────────────────────────────────────────────
 
-console.log('--- authRefreshSpike ---');
-
-asyncTest('fires when error message contains auth-refresh pattern', async () => {
+test('authRefreshSpike: fires when error message contains auth-refresh pattern', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ sampleCount: 15 })],
   ]);
@@ -166,10 +139,10 @@ asyncTest('fires when error message contains auth-refresh pattern', async () => 
     makeCtx(bm),
     makeAgent({ runResultStatus: 'failed', errorMessage: 'Credential expired — auth refresh required' }),
   );
-  assert(result.fired === true, 'should fire on auth refresh error');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire for unrelated error message', async () => {
+test('authRefreshSpike: does not fire for unrelated error message', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ sampleCount: 15 })],
   ]);
@@ -177,22 +150,20 @@ asyncTest('does not fire for unrelated error message', async () => {
     makeCtx(bm),
     makeAgent({ runResultStatus: 'failed', errorMessage: 'Database connection timeout' }),
   );
-  assert(result.fired === false, 'unrelated error → no fire');
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('does not fire when no error message', async () => {
+test('authRefreshSpike: does not fire when no error message', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ sampleCount: 15 })],
   ]);
   const result = await authRefreshSpike.evaluate(makeCtx(bm), makeAgent({ errorMessage: null }));
-  assert(result.fired === false, 'no error → no fire');
+  expect(result.fired).toBe(false);
 });
 
-// ── llmFallbackUnexpected ─────────────────────────────────────────────────────
+// ── llmFallbackUnexpected ──────────────────────────────────────────────────
 
-console.log('--- llmFallbackUnexpected ---');
-
-asyncTest('fires when error contains fallback pattern with sufficient baseline', async () => {
+test('llmFallbackUnexpected: fires when error contains fallback pattern with sufficient baseline', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_input', makeBaseline({ metric: 'token_count_input', sampleCount: 15 })],
   ]);
@@ -200,10 +171,10 @@ asyncTest('fires when error contains fallback pattern with sufficient baseline',
     makeCtx(bm),
     makeAgent({ runResultStatus: 'failed', errorMessage: 'Primary model unavailable — fallback model invoked' }),
   );
-  assert(result.fired === true, 'should fire on fallback pattern');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire when error is unrelated to fallback', async () => {
+test('llmFallbackUnexpected: does not fire when error is unrelated to fallback', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_input', makeBaseline({ metric: 'token_count_input', sampleCount: 15 })],
   ]);
@@ -211,52 +182,47 @@ asyncTest('does not fire when error is unrelated to fallback', async () => {
     makeCtx(bm),
     makeAgent({ errorMessage: 'Network timeout after 30s' }),
   );
-  assert(result.fired === false, 'no fallback pattern → no fire');
+  expect(result.fired).toBe(false);
 });
 
-// ── successRateDegradationTrend ────────────────────────────────────────────────
+// ── successRateDegradationTrend ────────────────────────────────────────────
 
-console.log('--- successRateDegradationTrend ---');
-
-asyncTest('fires when success rate p50 drops >10pp below historical mean', async () => {
+test('successRateDegradationTrend: fires when success rate p50 drops >10pp below historical mean', async () => {
   const bm = new Map([
     ['agent:test-agent:success_rate', makeBaseline({ metric: 'success_rate', p50: 0.60, mean: 0.85, sampleCount: 25 })],
   ]);
   const result = await successRateDegradationTrend.evaluate(makeCtx(bm), makeAgent({}));
-  assert(result.fired === true, 'should fire on degraded success rate');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire when success rate is within threshold', async () => {
+test('successRateDegradationTrend: does not fire when success rate is within threshold', async () => {
   const bm = new Map([
     ['agent:test-agent:success_rate', makeBaseline({ metric: 'success_rate', p50: 0.80, mean: 0.85, sampleCount: 25 })],
   ]);
   const result = await successRateDegradationTrend.evaluate(makeCtx(bm), makeAgent({}));
-  assert(result.fired === false, 'within threshold → no fire');
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('returns insufficient_data when no baseline', async () => {
+test('successRateDegradationTrend: returns insufficient_data when no baseline', async () => {
   const result = await successRateDegradationTrend.evaluate(makeCtx(), makeAgent({}));
-  assert(!result.fired && 'reason' in result && result.reason === 'insufficient_data', 'insufficient_data');
+  expect(!result.fired && 'reason' in result && result.reason === 'insufficient_data').toBe(true);
 });
 
-// ── outputEntropyCollapse ──────────────────────────────────────────────────────
+// ── outputEntropyCollapse ──────────────────────────────────────────────────
 
-console.log('--- outputEntropyCollapse ---');
-
-asyncTest('fires on degenerate output (two chars only) with sufficient baseline', async () => {
+test('outputEntropyCollapse: fires on degenerate output (two chars only) with sufficient baseline', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_output', makeBaseline({ metric: 'token_count_output', p50: 200, sampleCount: 20 })],
   ]);
-  // Two-character output has entropy = 1.0 bit, well below the 2.5-bit threshold
-  const degenerate = 'ab'.repeat(100); // entropy = 1.0 bit
+  const degenerate = 'ab'.repeat(100);
   const result = await outputEntropyCollapse.evaluate(
     makeCtx(bm),
     makeAgent({ finalMessageContent: degenerate, finalMessageLengthChars: degenerate.length }),
   );
-  assert(result.fired === true, 'two-char degenerate output should fire');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire on diverse natural language output', async () => {
+test('outputEntropyCollapse: does not fire on diverse natural language output', async () => {
   const bm = new Map([
     ['agent:test-agent:token_count_output', makeBaseline({ metric: 'token_count_output', p50: 200, sampleCount: 20 })],
   ]);
@@ -265,52 +231,47 @@ asyncTest('does not fire on diverse natural language output', async () => {
     makeCtx(bm),
     makeAgent({ finalMessageContent: diverse, finalMessageLengthChars: diverse.length }),
   );
-  assert(result.fired === false, 'diverse output should not fire');
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('returns insufficient_data when no baseline', async () => {
+test('outputEntropyCollapse: returns insufficient_data when no baseline', async () => {
   const result = await outputEntropyCollapse.evaluate(makeCtx(), makeAgent({ finalMessageContent: 'a'.repeat(100) }));
-  assert(!result.fired && 'reason' in result && result.reason === 'insufficient_data', 'insufficient_data');
+  expect(!result.fired && 'reason' in result && result.reason === 'insufficient_data').toBe(true);
 });
 
-// ── toolSelectionDrift ────────────────────────────────────────────────────────
+// ── toolSelectionDrift ─────────────────────────────────────────────────────
 
-console.log('--- toolSelectionDrift ---');
-
-asyncTest('returns insufficient_data when no skill invocations', async () => {
+test('toolSelectionDrift: returns insufficient_data when no skill invocations', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ sampleCount: 25 })],
   ]);
   const result = await toolSelectionDrift.evaluate(makeCtx(bm), makeAgent({ skillInvocationCounts: {} }));
-  assert(!result.fired && 'reason' in result && result.reason === 'insufficient_data', 'no invocations → insufficient_data');
+  expect(!result.fired && 'reason' in result && result.reason === 'insufficient_data').toBe(true);
 });
 
-asyncTest('does not fire when invocations are balanced', async () => {
+test('toolSelectionDrift: does not fire when invocations are balanced', async () => {
   const bm = new Map([
     ['agent:test-agent:runtime_ms', makeBaseline({ sampleCount: 25 })],
   ]);
   const counts = { read_agent_run: 5, write_diagnosis: 5 };
   const result = await toolSelectionDrift.evaluate(makeCtx(bm), makeAgent({ skillInvocationCounts: counts }));
-  // With balanced distribution, KL divergence vs uniform prior is 0
-  assert(result.fired === false, 'balanced tools → no drift');
+  expect(result.fired).toBe(false);
 });
 
-// ── costPerOutcomeIncreasing ───────────────────────────────────────────────────
+// ── costPerOutcomeIncreasing ───────────────────────────────────────────────
 
-console.log('--- costPerOutcomeIncreasing ---');
-
-asyncTest('fires when successful run uses tokens > 1.5x baseline p95', async () => {
+test('costPerOutcomeIncreasing: fires when successful run uses tokens > 1.5x baseline p95', async () => {
   const bm = new Map([
     ['agent:test-agent:cost_per_outcome', makeBaseline({ metric: 'cost_per_outcome', p95: 500, sampleCount: 20 })],
   ]);
   const result = await costPerOutcomeIncreasing.evaluate(
     makeCtx(bm),
-    makeAgent({ runResultStatus: 'success', inputTokens: 400, outputTokens: 450 }), // 850 > 750 (500*1.5)
+    makeAgent({ runResultStatus: 'success', inputTokens: 400, outputTokens: 450 }),
   );
-  assert(result.fired === true, 'should fire on high token cost');
+  expect(result.fired).toBe(true);
 });
 
-asyncTest('does not fire for failed run', async () => {
+test('costPerOutcomeIncreasing: does not fire for failed run', async () => {
   const bm = new Map([
     ['agent:test-agent:cost_per_outcome', makeBaseline({ metric: 'cost_per_outcome', p95: 500, sampleCount: 20 })],
   ]);
@@ -318,24 +279,16 @@ asyncTest('does not fire for failed run', async () => {
     makeCtx(bm),
     makeAgent({ runResultStatus: 'failed', inputTokens: 1000, outputTokens: 1000 }),
   );
-  assert(result.fired === false, 'failed run → not counted for cost_per_outcome');
+  expect(result.fired).toBe(false);
 });
 
-asyncTest('does not fire when cost is within baseline', async () => {
+test('costPerOutcomeIncreasing: does not fire when cost is within baseline', async () => {
   const bm = new Map([
     ['agent:test-agent:cost_per_outcome', makeBaseline({ metric: 'cost_per_outcome', p95: 500, sampleCount: 20 })],
   ]);
   const result = await costPerOutcomeIncreasing.evaluate(
     makeCtx(bm),
-    makeAgent({ runResultStatus: 'success', inputTokens: 100, outputTokens: 200 }), // 300 < 750
+    makeAgent({ runResultStatus: 'success', inputTokens: 100, outputTokens: 200 }),
   );
-  assert(result.fired === false, 'within threshold → no fire');
-});
-
-// ── Summary ────────────────────────────────────────────────────────────────────
-
-Promise.all(pendingTests).then(() => {
-  console.log('');
-  console.log(`\nResult: ${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
+  expect(result.fired).toBe(false);
 });

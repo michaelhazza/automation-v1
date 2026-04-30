@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { deriveDlqQueueNames } from '../dlqMonitorServicePure.js';
 
 test('returns DLQ names for every entry that declares deadLetter', () => {
@@ -7,7 +6,7 @@ test('returns DLQ names for every entry that declares deadLetter', () => {
     'a': { deadLetter: 'a__dlq' },
     'b': { deadLetter: 'b__dlq' },
   } as unknown as Parameters<typeof deriveDlqQueueNames>[0];
-  assert.deepEqual(deriveDlqQueueNames(config), ['a__dlq', 'b__dlq']);
+  expect(deriveDlqQueueNames(config)).toEqual(['a__dlq', 'b__dlq']);
 });
 
 test('skips entries without deadLetter', () => {
@@ -15,7 +14,7 @@ test('skips entries without deadLetter', () => {
     'a': { deadLetter: 'a__dlq' },
     'b': {},
   } as unknown as Parameters<typeof deriveDlqQueueNames>[0];
-  assert.deepEqual(deriveDlqQueueNames(config), ['a__dlq']);
+  expect(deriveDlqQueueNames(config)).toEqual(['a__dlq']);
 });
 
 // Dedup is unreachable under the convention check (every entry's deadLetter
@@ -30,8 +29,5 @@ test('throws when deadLetter does not match <queue>__dlq', () => {
     'workflow-run-tick': { deadLetter: 'wrong-name' },
   } as unknown as Parameters<typeof deriveDlqQueueNames>[0];
 
-  assert.throws(
-    () => deriveDlqQueueNames(config),
-    /JOB_CONFIG\['workflow-run-tick'\]\.deadLetter must equal 'workflow-run-tick__dlq', got 'wrong-name'/,
-  );
+  expect(() => deriveDlqQueueNames(config)).toThrow(/JOB_CONFIG\['workflow-run-tick'\]\.deadLetter must equal 'workflow-run-tick__dlq', got 'wrong-name'/);
 });

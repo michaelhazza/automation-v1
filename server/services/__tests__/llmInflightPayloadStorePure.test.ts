@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   MAX_PAYLOAD_SNAPSHOTS,
   MAX_PAYLOAD_BYTES,
@@ -25,23 +24,23 @@ test('payload store — set + get round-trip', () => {
   _resetForTests();
   set('rt_1', { messages: tinyMessages('a') });
   const snap = get('rt_1');
-  assert.ok(snap);
-  assert.equal(snap.truncated, false);
-  assert.deepEqual(snap.messages, tinyMessages('a'));
-  assert.match(snap.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
+  expect(snap).toBeTruthy();
+  expect(snap.truncated).toBe(false);
+  expect(snap.messages).toEqual(tinyMessages('a'));
+  expect(snap.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 });
 
 test('payload store — get returns null when missing', () => {
   _resetForTests();
-  assert.equal(get('rt_missing'), null);
+  expect(get('rt_missing')).toBe(null);
 });
 
 test('payload store — remove clears the entry', () => {
   _resetForTests();
   set('rt_1', { messages: tinyMessages('a') });
-  assert.ok(get('rt_1'));
+  expect(get('rt_1')).toBeTruthy();
   remove('rt_1');
-  assert.equal(get('rt_1'), null);
+  expect(get('rt_1')).toBe(null);
 });
 
 test('payload store — LRU eviction when above MAX_PAYLOAD_SNAPSHOTS', () => {
@@ -50,12 +49,12 @@ test('payload store — LRU eviction when above MAX_PAYLOAD_SNAPSHOTS', () => {
   for (let i = 0; i < MAX_PAYLOAD_SNAPSHOTS; i++) {
     set(`rt_${i}`, { messages: tinyMessages(String(i)) });
   }
-  assert.equal(_size(), MAX_PAYLOAD_SNAPSHOTS);
+  expect(_size()).toBe(MAX_PAYLOAD_SNAPSHOTS);
   // Adding one more evicts the oldest (rt_0).
   set('rt_new', { messages: tinyMessages('new') });
-  assert.equal(_size(), MAX_PAYLOAD_SNAPSHOTS);
-  assert.equal(get('rt_0'), null, 'oldest entry should have been evicted');
-  assert.ok(get('rt_new'));
+  expect(_size()).toBe(MAX_PAYLOAD_SNAPSHOTS);
+  expect(get('rt_0'), 'oldest entry should have been evicted').toBe(null);
+  expect(get('rt_new')).toBeTruthy();
 });
 
 test('payload store — touching via get refreshes LRU position', () => {
@@ -67,8 +66,8 @@ test('payload store — touching via get refreshes LRU position', () => {
   get('rt_0');
   // Next set evicts rt_1 (now oldest) instead of rt_0.
   set('rt_new', { messages: tinyMessages('new') });
-  assert.ok(get('rt_0'), 'touched entry should survive eviction');
-  assert.equal(get('rt_1'), null, 'next-oldest should have been evicted');
+  expect(get('rt_0')).toBeTruthy();
+  expect(get('rt_1'), 'next-oldest should have been evicted').toBe(null);
 });
 
 test('payload store — truncates oversized payloads', () => {
@@ -77,9 +76,9 @@ test('payload store — truncates oversized payloads', () => {
   const huge = 'x'.repeat(MAX_PAYLOAD_BYTES + 1000);
   set('rt_huge', { messages: [{ role: 'user', content: huge }] });
   const snap = get('rt_huge');
-  assert.ok(snap);
-  assert.equal(snap.truncated, true, 'oversized payload should be truncated');
-  assert.equal(snap.messages, null, 'messages dropped on truncation');
+  expect(snap).toBeTruthy();
+  expect(snap.truncated, 'oversized payload should be truncated').toBe(true);
+  expect(snap.messages, 'messages dropped on truncation').toBe(null);
 });
 
 test('payload store — truncation surfaces originalSizeBytes', () => {
@@ -92,21 +91,19 @@ test('payload store — truncation surfaces originalSizeBytes', () => {
   const huge = 'x'.repeat(MAX_PAYLOAD_BYTES + 1000);
   set('rt_huge', { messages: [{ role: 'user', content: huge }] });
   const snap = get('rt_huge');
-  assert.ok(snap);
-  assert.equal(snap.truncated, true);
-  assert.equal(typeof snap.originalSizeBytes, 'number');
-  assert.ok(snap.originalSizeBytes! > MAX_PAYLOAD_BYTES,
-    `originalSizeBytes ${snap.originalSizeBytes} should exceed the cap ${MAX_PAYLOAD_BYTES}`);
+  expect(snap).toBeTruthy();
+  expect(snap.truncated).toBe(true);
+  expect(typeof snap.originalSizeBytes).toBe('number');
+  expect(snap.originalSizeBytes! > MAX_PAYLOAD_BYTES).toBeTruthy();
 });
 
 test('payload store — non-truncated payloads carry originalSizeBytes: null', () => {
   _resetForTests();
   set('rt_small', { messages: tinyMessages('a') });
   const snap = get('rt_small');
-  assert.ok(snap);
-  assert.equal(snap.truncated, false);
-  assert.equal(snap.originalSizeBytes, null,
-    'originalSizeBytes is null when truncated=false — the payload itself is the truth');
+  expect(snap).toBeTruthy();
+  expect(snap.truncated).toBe(false);
+  expect(snap.originalSizeBytes, 'originalSizeBytes is null when truncated=false — the payload itself is the truth').toBe(null);
 });
 
 test('payload store — set never throws on bad input', () => {
@@ -114,5 +111,5 @@ test('payload store — set never throws on bad input', () => {
   // Circular reference would break JSON.stringify — should be caught.
   const circular: Record<string, unknown> = { self: null };
   circular.self = circular;
-  assert.doesNotThrow(() => set('rt_circular', { messages: circular }));
+  expect(() => set('rt_circular', { messages: circular })).not.toThrow();
 });

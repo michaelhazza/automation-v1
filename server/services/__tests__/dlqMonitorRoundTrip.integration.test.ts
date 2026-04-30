@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { db } from '../../db/index.js';
 import { systemIncidents } from '../../db/schema/index.js';
 import { eq } from 'drizzle-orm';
@@ -7,7 +6,7 @@ import { hashFingerprint } from '../incidentIngestorPure.js';
 
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-test('DLQ round-trip: poison job → __dlq → system_incidents row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('DLQ round-trip: poison job → __dlq → system_incidents row', async () => {
   const queue = 'workflow-run-tick';
   const fingerprint = hashFingerprint(`job:${queue}:dlq`);
 
@@ -27,9 +26,9 @@ test('DLQ round-trip: poison job → __dlq → system_incidents row', { skip: SK
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  assert.ok(row, 'expected a system_incidents row within 30s');
-  assert.equal(row.source, 'job');
-  assert.equal(row.severity, 'high');
-  assert.equal(row.errorCode, 'job_dlq');
-  assert.equal(row.occurrenceCount, 1);
+  expect(row).toBeTruthy();
+  expect(row.source).toBe('job');
+  expect(row.severity).toBe('high');
+  expect(row.errorCode).toBe('job_dlq');
+  expect(row.occurrenceCount).toBe(1);
 });

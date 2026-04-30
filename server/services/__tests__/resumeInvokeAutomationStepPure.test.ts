@@ -8,26 +8,9 @@
  * Run via: npx tsx server/services/__tests__/resumeInvokeAutomationStepPure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {};
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 console.log('\nC4a-REVIEWED-DISP — resumeInvokeAutomationStep pure tests\n');
 
@@ -37,14 +20,14 @@ test('UPDATE returns row → proceed with resume (guard passes)', () => {
   // Simulate: UPDATE WHERE status = 'awaiting_approval' RETURNING * → row returned
   const updatedRows = [{ id: 'step-1', status: 'running' }];
   const alreadyResumed = updatedRows.length === 0;
-  assert(!alreadyResumed, 'row returned → must NOT be alreadyResumed');
+  expect(!alreadyResumed, 'row returned → must NOT be alreadyResumed').toBeTruthy();
 });
 
 test('UPDATE returns empty → alreadyResumed: true (concurrent winner took it)', () => {
   // Simulate: UPDATE WHERE status = 'awaiting_approval' RETURNING * → no rows (status was not awaiting_approval)
   const updatedRows: unknown[] = [];
   const alreadyResumed = updatedRows.length === 0;
-  assert(alreadyResumed, 'zero rows → must be alreadyResumed');
+  expect(alreadyResumed, 'zero rows → must be alreadyResumed').toBeTruthy();
 });
 
 // ── Guard is the only lock (per spec §4.5.2: "No advisory locks needed") ──────
@@ -59,11 +42,11 @@ test('concurrent call 1 wins UPDATE, call 2 gets zero rows → exactly one resum
   const call1AlreadyResumed = call1Rows.length === 0;
   const call2AlreadyResumed = call2Rows.length === 0;
 
-  assert(!call1AlreadyResumed, 'winner must proceed');
-  assert(call2AlreadyResumed, 'loser must exit with alreadyResumed');
+  expect(!call1AlreadyResumed, 'winner must proceed').toBeTruthy();
+  expect(call2AlreadyResumed, 'loser must exit with alreadyResumed').toBeTruthy();
   // One and only one resume invoked
   const resumeCount = [call1AlreadyResumed, call2AlreadyResumed].filter(v => !v).length;
-  assert(resumeCount === 1, 'exactly one resume must proceed');
+  expect(resumeCount === 1, 'exactly one resume must proceed').toBeTruthy();
 });
 
 // ── Step type guard ───────────────────────────────────────────────────────────
@@ -71,13 +54,13 @@ test('concurrent call 1 wins UPDATE, call 2 gets zero rows → exactly one resum
 test('step.type === invoke_automation → resume path valid', () => {
   const step = { type: 'invoke_automation', id: 'step-1' };
   const isValid = step.type === 'invoke_automation';
-  assert(isValid, 'invoke_automation step type must pass guard');
+  expect(isValid, 'invoke_automation step type must pass guard').toBeTruthy();
 });
 
 test('step.type !== invoke_automation → resume must fail gracefully', () => {
   const step = { type: 'agent_call', id: 'step-1' };
   const isValid = step.type === 'invoke_automation';
-  assert(!isValid, 'non-invoke_automation step must not pass guard');
+  expect(!isValid, 'non-invoke_automation step must not pass guard').toBeTruthy();
 });
 
 // ── invalidation guard discard ────────────────────────────────────────────────
@@ -85,13 +68,13 @@ test('step.type !== invoke_automation → resume must fail gracefully', () => {
 test('withInvalidationGuard: invalidated status → discard result', () => {
   const stepStatus = 'invalidated';
   const shouldDiscard = stepStatus === 'invalidated';
-  assert(shouldDiscard, 'invalidated step must be discarded');
+  expect(shouldDiscard, 'invalidated step must be discarded').toBeTruthy();
 });
 
 test('withInvalidationGuard: running status → keep result', () => {
   const stepStatus = 'running' as string;
   const shouldDiscard = stepStatus === 'invalidated';
-  assert(!shouldDiscard, 'running step must not be discarded');
+  expect(!shouldDiscard, 'running step must not be discarded').toBeTruthy();
 });
 
 // ── invoke result routing ─────────────────────────────────────────────────────
@@ -99,22 +82,19 @@ test('withInvalidationGuard: running status → keep result', () => {
 test('invokeAutomationStep status ok → completeStepRunInternal', () => {
   const result = { status: 'ok', output: { webhook: 'done' } };
   const shouldComplete = result.status === 'ok';
-  assert(shouldComplete, 'ok result must lead to complete');
+  expect(shouldComplete, 'ok result must lead to complete').toBeTruthy();
 });
 
 test('invokeAutomationStep status error + failurePolicy continue → completeStepRunInternal with error output', () => {
   const result = { status: 'error', error: { code: 'webhook_timeout', message: 'timed out' } };
   const step = { failurePolicy: 'continue' as const };
   const shouldCompleteWithError = result.status !== 'ok' && step.failurePolicy === 'continue';
-  assert(shouldCompleteWithError, 'error + continue must complete with error output');
+  expect(shouldCompleteWithError, 'error + continue must complete with error output').toBeTruthy();
 });
 
 test('invokeAutomationStep status error + failurePolicy fail → failStepRunInternal', () => {
   const result = { status: 'error' as string, error: { code: 'webhook_timeout', message: 'timed out' } };
   const step = { failurePolicy: 'fail' as string };
   const shouldFail = result.status !== 'ok' && step.failurePolicy !== 'continue';
-  assert(shouldFail, 'error + fail must trigger failStepRunInternal');
+  expect(shouldFail, 'error + fail must trigger failStepRunInternal').toBeTruthy();
 });
-
-console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

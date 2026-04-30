@@ -16,23 +16,9 @@
  *   npx tsx server/routes/__tests__/reviewItems.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { checkIdempotency } from '../../services/reviewServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('reviewItems route — idempotent-replay contract (spec §6.2.1)');
@@ -111,6 +97,4 @@ test('already-rejected item + reject: checkIdempotency returns idempotent (200)'
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

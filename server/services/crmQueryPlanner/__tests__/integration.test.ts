@@ -21,18 +21,21 @@
  */
 
 // Force ES module treatment for top-level await.
+import { expect, test } from 'vitest';
+
 export {};
 
-if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
+const SKIP_CRM = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
+if (SKIP_CRM) {
   console.log('\nCRM Query Planner RLS isolation integration test\n');
   console.log('  SKIP  requires DATABASE_URL and NODE_ENV=integration');
   console.log('\n  Skipped (not a failure).\n');
-  process.exit(0);
 }
 
 // Dynamic imports only after we confirm DATABASE_URL exists so the skip path
 // above does not transitively load drizzle / postgres-js (which would error
 // on missing env vars during module evaluation).
+if (!SKIP_CRM) {
 const { db } = await import('../../../db/index.js');
 const { withOrgTx } = await import('../../../instrumentation.js');
 const { sql } = await import('drizzle-orm');
@@ -43,25 +46,6 @@ const SUB_A_ID = '00000000-0000-0000-0000-00000000c0a1';
 const SUB_B_ID = '00000000-0000-0000-0000-00000000c0a2';
 const USER_A_ID = '00000000-0000-0000-0000-00000000c0b1';
 const USER_B_ID = '00000000-0000-0000-0000-00000000c0b2';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string): void {
-  if (!cond) throw new Error(message);
-}
 
 // ---------------------------------------------------------------------------
 // Fixtures — a throwaway org with two subaccounts.
@@ -199,7 +183,7 @@ try {
             makeContext(SUB_A_ID, USER_A_ID),
             deps,
           );
-          assert(result.stageResolved === 1, 'Stage 1 canonical match expected');
+          expect(result.stageResolved === 1, 'Stage 1 canonical match expected').toBeTruthy();
         },
       );
     });
@@ -223,7 +207,7 @@ try {
             makeContext(SUB_B_ID, USER_B_ID),
             deps,
           );
-          assert(result.stageResolved === 1, 'Stage 1 canonical match expected');
+          expect(result.stageResolved === 1, 'Stage 1 canonical match expected').toBeTruthy();
         },
       );
     });
@@ -231,6 +215,6 @@ try {
 } finally {
   await cleanupFixtures();
 }
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+} else {
+  test.skip('crmQueryPlanner integration (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+}

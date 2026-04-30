@@ -3,8 +3,7 @@
  * Run via: npx tsx client/src/components/brief-artefacts/__tests__/StructuredResultCardPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { deriveColumns, deriveTruncationNotice } from '../StructuredResultCardPure.js';
 
 // ---------------------------------------------------------------------------
@@ -16,9 +15,9 @@ test('returns explicit columns when provided', () => {
     columns: [{ key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }],
     rows: [{ name: 'Alice', email: 'alice@example.com' }],
   });
-  assert.equal(result.length, 2);
-  assert.equal(result[0].key, 'name');
-  assert.equal(result[0].label, 'Name');
+  expect(result.length).toBe(2);
+  expect(result[0].key).toBe('name');
+  expect(result[0].label).toBe('Name');
 });
 
 test('falls back to row keys when columns is empty and rows exist', () => {
@@ -26,9 +25,9 @@ test('falls back to row keys when columns is empty and rows exist', () => {
     columns: [],
     rows: [{ id: '1', title: 'Task A', status: 'open' }],
   });
-  assert.equal(result.length, 3);
-  assert.deepEqual(result.map((c) => c.key), ['id', 'title', 'status']);
-  assert.deepEqual(result.map((c) => c.label), ['id', 'title', 'status']);
+  expect(result.length).toBe(3);
+  expect(result.map((c) => c.key)).toEqual(['id', 'title', 'status']);
+  expect(result.map((c) => c.label)).toEqual(['id', 'title', 'status']);
 });
 
 test('falls back to row keys when columns is undefined and rows exist', () => {
@@ -36,17 +35,17 @@ test('falls back to row keys when columns is undefined and rows exist', () => {
     columns: undefined,
     rows: [{ foo: 1, bar: 2 }],
   } as Parameters<typeof deriveColumns>[0]);
-  assert.equal(result.length, 2);
+  expect(result.length).toBe(2);
 });
 
 test('returns empty array when both columns and rows are empty', () => {
   const result = deriveColumns({ columns: [], rows: [] });
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('returns empty array when columns is undefined and rows is empty', () => {
   const result = deriveColumns({ columns: undefined, rows: [] } as Parameters<typeof deriveColumns>[0]);
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -55,15 +54,15 @@ test('returns empty array when columns is undefined and rows is empty', () => {
 
 test('returns null when not truncated', () => {
   const notice = deriveTruncationNotice({ truncated: false, rows: Array(5), rowCount: 5 });
-  assert.equal(notice, null);
+  expect(notice).toBe(null);
 });
 
 test('returns notice string when truncated', () => {
   const notice = deriveTruncationNotice({ truncated: true, rows: Array(10), rowCount: 100 });
-  assert.equal(notice, 'Showing 10 of 100 results');
+  expect(notice).toBe('Showing 10 of 100 results');
 });
 
 test('returns null when truncated is undefined', () => {
   const notice = deriveTruncationNotice({ truncated: undefined, rows: [], rowCount: 0 } as unknown as Parameters<typeof deriveTruncationNotice>[0]);
-  assert.equal(notice, null);
+  expect(notice).toBe(null);
 });

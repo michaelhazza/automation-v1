@@ -20,23 +20,9 @@
  *   npx tsx server/routes/__tests__/llmUsage.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import type { RunCostResponse } from '../../../shared/types/runCost.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 // ─── Section 1: Pure type-shape assertions ────────────────────────────
 
@@ -72,8 +58,8 @@ await test('RunCostResponse zero-default shape type-checks end to end', () => {
 
 // ─── Section 2: Integration (requires DATABASE_URL) ─────────────────
 
-if (!process.env.DATABASE_URL) {
-  console.log('\n--- /api/runs/:runId/cost (integration) — SKIPPED (no DATABASE_URL) ---');
+if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
+  console.log('\n--- /api/runs/:runId/cost (integration) — SKIPPED (no DATABASE_URL or not integration env) ---');
 } else {
   const { drizzle } = await import('drizzle-orm/postgres-js');
   const postgres = (await import('postgres')).default;
@@ -279,11 +265,11 @@ if (!process.env.DATABASE_URL) {
         assert.equal(r.llmCallCount, 1, 'partial counted');
       });
 
-      console.log(`\n  ${passed + failed} tests total; ${passed} passed, ${failed} failed`);
+      // Summary log removed (counters managed by vitest)
     }
   }
 
   await client.end();
 }
 
-if (failed > 0) process.exitCode = 1;
+

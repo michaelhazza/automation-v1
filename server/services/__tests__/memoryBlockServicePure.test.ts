@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/memoryBlockServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   rankBlocksForInjection,
   dedupeCandidates,
@@ -15,29 +16,10 @@ import {
   type CandidateBlock,
 } from '../memoryBlockServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
 }
 
 function mkBlock(id: string, score: number, source: 'explicit' | 'relevance', contentChars = 400, protectedBlock = false): CandidateBlock {
@@ -61,9 +43,9 @@ console.log('');
 
 console.log('approxTokenCount:');
 
-test('empty → 0', () => assertEqual(approxTokenCount(''), 0, 'empty'));
-test('400 chars → 100 tokens', () => assertEqual(approxTokenCount('x'.repeat(400)), 100, '400 chars'));
-test('1 char → 1 token (ceil)', () => assertEqual(approxTokenCount('a'), 1, '1 char'));
+test('empty → 0', () => expect(approxTokenCount(''), 'empty').toBe(0));
+test('400 chars → 100 tokens', () => expect(approxTokenCount('x'.repeat(400)), '400 chars').toBe(100));
+test('1 char → 1 token (ceil)', () => expect(approxTokenCount('a'), '1 char').toBe(1));
 
 // ---------------------------------------------------------------------------
 // cosineSimilarity
@@ -73,23 +55,23 @@ console.log('cosineSimilarity:');
 
 test('identical vectors → 1', () => {
   const v = [1, 0, 0];
-  assertEqual(cosineSimilarity(v, v), 1, 'identical');
+  expect(cosineSimilarity(v, v), 'identical').toBe(1);
 });
 
 test('orthogonal vectors → 0', () => {
-  assertEqual(cosineSimilarity([1, 0], [0, 1]), 0, 'orthogonal');
+  expect(cosineSimilarity([1, 0], [0, 1]), 'orthogonal').toBe(0);
 });
 
 test('opposite vectors → -1', () => {
-  assertEqual(cosineSimilarity([1, 0], [-1, 0]), -1, 'opposite');
+  expect(cosineSimilarity([1, 0], [-1, 0]), 'opposite').toBe(-1);
 });
 
 test('mismatched lengths → 0', () => {
-  assertEqual(cosineSimilarity([1, 2], [1]), 0, 'mismatched');
+  expect(cosineSimilarity([1, 2], [1]), 'mismatched').toBe(0);
 });
 
 test('zero vector → 0', () => {
-  assertEqual(cosineSimilarity([0, 0], [1, 0]), 0, 'zero magnitude');
+  expect(cosineSimilarity([0, 0], [1, 0]), 'zero magnitude').toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -103,8 +85,8 @@ test('explicit wins over relevance for same id', () => {
     mkBlock('a', 0.9, 'relevance'),
     mkBlock('a', 1.0, 'explicit'),
   ]);
-  assertEqual(result.length, 1, 'one block');
-  assertEqual(result[0].source, 'explicit', 'explicit kept');
+  expect(result.length, 'one block').toBe(1);
+  expect(result[0].source, 'explicit kept').toBe('explicit');
 });
 
 test('different ids preserved', () => {
@@ -112,7 +94,7 @@ test('different ids preserved', () => {
     mkBlock('a', 0.9, 'relevance'),
     mkBlock('b', 0.85, 'relevance'),
   ]);
-  assertEqual(result.length, 2, 'two blocks');
+  expect(result.length, 'two blocks').toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -129,8 +111,8 @@ test('threshold floor drops below-threshold relevance blocks', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 10000 },
   );
-  assertEqual(result.length, 1, 'only one above threshold');
-  assertEqual(result[0].id, 'a', 'high-score kept');
+  expect(result.length, 'only one above threshold').toBe(1);
+  expect(result[0].id, 'high-score kept').toBe('a');
 });
 
 test('top-K caps relevance results', () => {
@@ -144,12 +126,8 @@ test('top-K caps relevance results', () => {
     ],
     { threshold: 0.65, topK: 3, tokenBudget: 100000 },
   );
-  assertEqual(result.length, 3, 'top-K = 3');
-  assertEqual(
-    result.map((b) => b.id),
-    ['a', 'b', 'c'],
-    'sorted desc by score',
-  );
+  expect(result.length, 'top-K = 3').toBe(3);
+  expect(result.map((b) => b.id), 'sorted desc by score').toEqual(['a', 'b', 'c']);
 });
 
 test('relevance blocks sorted by score descending', () => {
@@ -161,11 +139,7 @@ test('relevance blocks sorted by score descending', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 100000 },
   );
-  assertEqual(
-    result.map((b) => b.id),
-    ['b', 'c', 'a'],
-    'descending order',
-  );
+  expect(result.map((b) => b.id), 'descending order').toEqual(['b', 'c', 'a']);
 });
 
 test('token budget evicts relevance blocks in reverse order', () => {
@@ -178,9 +152,9 @@ test('token budget evicts relevance blocks in reverse order', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 250 },
   );
-  assertEqual(result.length, 2, '2 blocks fit in 250 token budget');
-  assertEqual(result[0].id, 'a', 'highest score kept first');
-  assertEqual(result[1].id, 'b', 'second highest kept');
+  expect(result.length, '2 blocks fit in 250 token budget').toBe(2);
+  expect(result[0].id, 'highest score kept first').toBe('a');
+  expect(result[1].id, 'second highest kept').toBe('b');
 });
 
 test('explicit blocks always pass through (bypass threshold + budget)', () => {
@@ -190,8 +164,8 @@ test('explicit blocks always pass through (bypass threshold + budget)', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 100 },
   );
-  assertEqual(result.length, 1, 'explicit bypasses');
-  assertEqual(result[0].source, 'explicit', 'explicit preserved');
+  expect(result.length, 'explicit bypasses').toBe(1);
+  expect(result[0].source, 'explicit preserved').toBe('explicit');
 });
 
 test('protected blocks always pass through regardless of score', () => {
@@ -201,8 +175,8 @@ test('protected blocks always pass through regardless of score', () => {
     ],
     { threshold: 0.65, topK: 0, tokenBudget: 1 }, // topK=0, tiny budget
   );
-  assertEqual(result.length, 1, 'protected bypasses');
-  assertTrue(result[0].protected === true, 'protected flag preserved');
+  expect(result.length, 'protected bypasses').toBe(1);
+  expect(result[0].protected === true, 'protected flag preserved').toBe(true);
 });
 
 test('order: protected → explicit → relevance', () => {
@@ -214,11 +188,7 @@ test('order: protected → explicit → relevance', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 100000 },
   );
-  assertEqual(
-    result.map((b) => b.id),
-    ['a', 'b', 'c'],
-    'protected first, explicit next, relevance last',
-  );
+  expect(result.map((b) => b.id), 'protected first, explicit next, relevance last').toEqual(['a', 'b', 'c']);
 });
 
 test('smaller block fits after larger is skipped (non-greedy fill)', () => {
@@ -230,8 +200,8 @@ test('smaller block fits after larger is skipped (non-greedy fill)', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 50 },
   );
-  assertEqual(result.length, 1, 'smaller block fits');
-  assertEqual(result[0].id, 'b', 'smaller block kept');
+  expect(result.length, 'smaller block fits').toBe(1);
+  expect(result[0].id, 'smaller block kept').toBe('b');
 });
 
 test('dedup applied before ranking (explicit + relevance same id)', () => {
@@ -242,16 +212,14 @@ test('dedup applied before ranking (explicit + relevance same id)', () => {
     ],
     { threshold: 0.65, topK: 5, tokenBudget: 100000 },
   );
-  assertEqual(result.length, 1, 'deduplicated');
-  assertEqual(result[0].source, 'explicit', 'explicit survives dedup');
+  expect(result.length, 'deduplicated').toBe(1);
+  expect(result[0].source, 'explicit survives dedup').toBe('explicit');
 });
 
 test('empty candidate list → empty result', () => {
   const result = rankBlocksForInjection([], { threshold: 0.65, topK: 5, tokenBudget: 100 });
-  assertEqual(result.length, 0, 'empty');
+  expect(result.length, 'empty').toBe(0);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

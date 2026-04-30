@@ -9,6 +9,7 @@
 // Session 1: side-effect import populates the sensitive-paths registry with
 // ClientPulse's paths before any isSensitiveConfigPath assertion runs. See
 // spec §3.6 + the module-composable registry pattern.
+import { expect, test } from 'vitest';
 import '../../modules/clientpulse/registerSensitivePaths.js';
 
 import {
@@ -19,25 +20,6 @@ import {
   churnBandsSchema,
   interventionDefaultsSchema,
 } from '../operationalConfigSchema.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -71,12 +53,12 @@ const validInterventionDefaults = {
 
 test('staffActivityDefinitionSchema accepts the seeded default', () => {
   const r = staffActivityDefinitionSchema.safeParse(validStaffActivity);
-  assert(r.success, `expected success, got ${JSON.stringify(r)}`);
+  expect(r.success, `expected success, got ${JSON.stringify(r)}`).toBeTruthy();
 });
 
 test('staffActivityDefinitionSchema rejects empty countedMutationTypes', () => {
   const r = staffActivityDefinitionSchema.safeParse({ ...validStaffActivity, countedMutationTypes: [] });
-  assert(!r.success, 'expected failure');
+  expect(!r.success, 'expected failure').toBeTruthy();
 });
 
 test('staffActivityDefinitionSchema rejects threshold > 1', () => {
@@ -84,27 +66,27 @@ test('staffActivityDefinitionSchema rejects threshold > 1', () => {
     ...validStaffActivity,
     automationUserResolution: { strategy: 'outlier_by_volume', threshold: 1.5, cacheMonths: 1 },
   });
-  assert(!r.success, 'expected failure');
+  expect(!r.success, 'expected failure').toBeTruthy();
 });
 
 test('churnBandsSchema accepts valid bands', () => {
   const r = churnBandsSchema.safeParse(validChurnBands);
-  assert(r.success, 'expected success');
+  expect(r.success, 'expected success').toBeTruthy();
 });
 
 test('churnBandsSchema rejects inverted band (low > high)', () => {
   const r = churnBandsSchema.safeParse({ ...validChurnBands, watch: [69, 40] });
-  assert(!r.success, 'expected failure — watch band is inverted');
+  expect(!r.success, 'expected failure — watch band is inverted').toBeTruthy();
 });
 
 test('interventionDefaultsSchema accepts seeded default', () => {
   const r = interventionDefaultsSchema.safeParse(validInterventionDefaults);
-  assert(r.success, 'expected success');
+  expect(r.success, 'expected success').toBeTruthy();
 });
 
 test('interventionDefaultsSchema rejects unknown cooldownScope', () => {
   const r = interventionDefaultsSchema.safeParse({ ...validInterventionDefaults, cooldownScope: 'bogus' });
-  assert(!r.success, 'expected failure');
+  expect(!r.success, 'expected failure').toBeTruthy();
 });
 
 // ── Tests: full operational_config + sum constraint ────────────────────────
@@ -115,12 +97,12 @@ test('validateOperationalConfig accepts minimal config with ClientPulse keys', (
     churnBands: validChurnBands,
     interventionDefaults: validInterventionDefaults,
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('validateOperationalConfig accepts empty config (all keys optional)', () => {
   const r = validateOperationalConfig({});
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('validateOperationalConfig enforces healthScoreFactors weights sum to 1.0', () => {
@@ -130,7 +112,7 @@ test('validateOperationalConfig enforces healthScoreFactors weights sum to 1.0',
       { metricSlug: 'b', weight: 0.3, label: 'B', normalisation: { type: 'linear', minValue: 0, maxValue: 1 } },
     ],
   });
-  assert(!r.ok, 'expected failure on weight sum 0.6');
+  expect(!r.ok, 'expected failure on weight sum 0.6').toBeTruthy();
 });
 
 test('validateOperationalConfig accepts weights that sum exactly to 1.0', () => {
@@ -140,12 +122,12 @@ test('validateOperationalConfig accepts weights that sum exactly to 1.0', () => 
       { metricSlug: 'b', weight: 0.5, label: 'B', normalisation: { type: 'linear', minValue: 0, maxValue: 1 } },
     ],
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('validateOperationalConfig passes through unknown top-level keys (loose base)', () => {
   const r = validateOperationalConfig({ scanFrequencyHours: 4, maxAccountsPerRun: 50 });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 // ── Tests: sensitive paths registry ────────────────────────────────────────
@@ -156,37 +138,32 @@ test('validateOperationalConfig passes through unknown top-level keys (loose bas
 // snapshot of the current registry state).
 
 test('getSensitiveConfigPaths includes interventionDefaults.defaultGateLevel', () => {
-  assert(
-    getSensitiveConfigPaths().includes('interventionDefaults.defaultGateLevel'),
-    'missing path',
-  );
+  expect(getSensitiveConfigPaths().includes('interventionDefaults.defaultGateLevel'), 'missing path').toBeTruthy();
 });
 
 test('getSensitiveConfigPaths returns a snapshot (mutations do not leak into registry)', () => {
   const snapshot = getSensitiveConfigPaths() as unknown as string[];
   snapshot.push('bogus-caller-mutation');
   const fresh = getSensitiveConfigPaths();
-  assert(!fresh.includes('bogus-caller-mutation'), 'caller mutation leaked into registry');
+  expect(!fresh.includes('bogus-caller-mutation'), 'caller mutation leaked into registry').toBeTruthy();
 });
 
 test('isSensitiveConfigPath matches exact sensitive path', () => {
-  assert(isSensitiveConfigPath('interventionDefaults.defaultGateLevel'), 'should match');
+  expect(isSensitiveConfigPath('interventionDefaults.defaultGateLevel'), 'should match').toBeTruthy();
 });
 
 test('isSensitiveConfigPath matches deeper sub-path of a sensitive prefix', () => {
-  assert(isSensitiveConfigPath('healthScoreFactors.0.weight'), 'should match under healthScoreFactors prefix');
+  expect(isSensitiveConfigPath('healthScoreFactors.0.weight'), 'should match under healthScoreFactors prefix').toBeTruthy();
 });
 
 test('isSensitiveConfigPath rejects non-sensitive path', () => {
-  assert(!isSensitiveConfigPath('scanFrequencyHours'), 'should not match');
+  expect(!isSensitiveConfigPath('scanFrequencyHours'), 'should not match').toBeTruthy();
 });
 
 test('isSensitiveConfigPath rejects sibling prefix not in list', () => {
-  assert(!isSensitiveConfigPath('interventionDefaults'), 'exact prefix without dot should not match');
+  expect(!isSensitiveConfigPath('interventionDefaults'), 'exact prefix without dot should not match').toBeTruthy();
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`operationalConfigSchemaPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

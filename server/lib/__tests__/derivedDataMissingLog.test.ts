@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { afterEach, beforeEach, mock, test } from 'node:test';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { logger } from '../logger.js';
 import {
   _resetWarnedKeysForTesting,
@@ -22,24 +21,24 @@ import {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  mock.method(logger, 'warn', () => {});
-  mock.method(logger, 'debug', () => {});
+  vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  vi.spyOn(logger, 'debug').mockImplementation(() => {});
   _resetWarnedKeysForTesting();
 });
 
 afterEach(() => {
-  mock.restoreAll();
+  vi.restoreAllMocks();
 });
 
 test('first emit per key calls logger.warn with the data_dependency_missing event', () => {
   logDataDependencyMissing('documentBundleService', 'utilizationByModelFamily', 'org_a');
 
-  const warnCalls = (logger.warn as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
-  const debugCalls = (logger.debug as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
+  const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  const debugCalls = (logger.debug as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  assert.equal(warnCalls.length, 1);
-  assert.equal(debugCalls.length, 0);
-  assert.deepEqual(warnCalls[0].arguments, [
+  expect(warnCalls.length).toBe(1);
+  expect(debugCalls.length).toBe(0);
+  expect(warnCalls[0]).toEqual([
     'data_dependency_missing',
     { service: 'documentBundleService', field: 'utilizationByModelFamily', orgId: 'org_a' },
   ]);
@@ -49,12 +48,12 @@ test('repeat emit for the same key calls logger.debug with repeated=true (not lo
   logDataDependencyMissing('documentBundleService', 'utilizationByModelFamily', 'org_a');
   logDataDependencyMissing('documentBundleService', 'utilizationByModelFamily', 'org_a');
 
-  const warnCalls = (logger.warn as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
-  const debugCalls = (logger.debug as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
+  const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  const debugCalls = (logger.debug as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  assert.equal(warnCalls.length, 1, 'WARN fires only on the first call');
-  assert.equal(debugCalls.length, 1, 'DEBUG fires on the repeat');
-  assert.deepEqual(debugCalls[0].arguments, [
+  expect(warnCalls.length).toBe(1, 'WARN fires only on the first call');
+  expect(debugCalls.length).toBe(1, 'DEBUG fires on the repeat');
+  expect(debugCalls[0]).toEqual([
     'data_dependency_missing',
     {
       service: 'documentBundleService',
@@ -69,37 +68,37 @@ test('different orgIds for the same field both emit WARN (key includes orgId)', 
   logDataDependencyMissing('documentBundleService', 'utilizationByModelFamily', 'org_a');
   logDataDependencyMissing('documentBundleService', 'utilizationByModelFamily', 'org_b');
 
-  const warnCalls = (logger.warn as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
-  const debugCalls = (logger.debug as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
+  const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  const debugCalls = (logger.debug as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  assert.equal(warnCalls.length, 2);
-  assert.equal(debugCalls.length, 0);
-  assert.equal((warnCalls[0].arguments[1] as { orgId: string }).orgId, 'org_a');
-  assert.equal((warnCalls[1].arguments[1] as { orgId: string }).orgId, 'org_b');
+  expect(warnCalls.length).toBe(2);
+  expect(debugCalls.length).toBe(0);
+  expect((warnCalls[0][1] as { orgId: string }).orgId).toBe('org_a');
+  expect((warnCalls[1][1] as { orgId: string }).orgId).toBe('org_b');
 });
 
 test('different fields for the same orgId both emit WARN (key includes field)', () => {
   logDataDependencyMissing('connectorPollingSync', 'lastSuccessfulSyncAt', 'org_a');
   logDataDependencyMissing('connectorPollingSync', 'lastSyncError', 'org_a');
 
-  const warnCalls = (logger.warn as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
-  const debugCalls = (logger.debug as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
+  const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  const debugCalls = (logger.debug as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  assert.equal(warnCalls.length, 2);
-  assert.equal(debugCalls.length, 0);
-  assert.equal((warnCalls[0].arguments[1] as { field: string }).field, 'lastSuccessfulSyncAt');
-  assert.equal((warnCalls[1].arguments[1] as { field: string }).field, 'lastSyncError');
+  expect(warnCalls.length).toBe(2);
+  expect(debugCalls.length).toBe(0);
+  expect((warnCalls[0][1] as { field: string }).field).toBe('lastSuccessfulSyncAt');
+  expect((warnCalls[1][1] as { field: string }).field).toBe('lastSyncError');
 });
 
 test('different services for the same field+orgId both emit WARN (key includes service)', () => {
   logDataDependencyMissing('serviceA', 'utilizationByModelFamily', 'org_a');
   logDataDependencyMissing('serviceB', 'utilizationByModelFamily', 'org_a');
 
-  const warnCalls = (logger.warn as unknown as { mock: { calls: { arguments: unknown[] }[] } }).mock.calls;
+  const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  assert.equal(warnCalls.length, 2);
-  assert.equal((warnCalls[0].arguments[1] as { service: string }).service, 'serviceA');
-  assert.equal((warnCalls[1].arguments[1] as { service: string }).service, 'serviceB');
+  expect(warnCalls.length).toBe(2);
+  expect((warnCalls[0][1] as { service: string }).service).toBe('serviceA');
+  expect((warnCalls[1][1] as { service: string }).service).toBe('serviceB');
 });
 
 test('_resetWarnedKeysForTesting clears state so the next call is WARN again', () => {
@@ -108,8 +107,8 @@ test('_resetWarnedKeysForTesting clears state so the next call is WARN again', (
 
   const warnCallsBefore = (logger.warn as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
   const debugCallsBefore = (logger.debug as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
-  assert.equal(warnCallsBefore, 1);
-  assert.equal(debugCallsBefore, 1);
+  expect(warnCallsBefore).toBe(1);
+  expect(debugCallsBefore).toBe(1);
 
   _resetWarnedKeysForTesting();
 
@@ -117,6 +116,6 @@ test('_resetWarnedKeysForTesting clears state so the next call is WARN again', (
 
   const warnCallsAfter = (logger.warn as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
   const debugCallsAfter = (logger.debug as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
-  assert.equal(warnCallsAfter, 2, 'first call after reset is WARN');
-  assert.equal(debugCallsAfter, 1, 'no extra DEBUG after reset');
+  expect(warnCallsAfter).toBe(2, 'first call after reset is WARN');
+  expect(debugCallsAfter).toBe(1, 'no extra DEBUG after reset');
 });

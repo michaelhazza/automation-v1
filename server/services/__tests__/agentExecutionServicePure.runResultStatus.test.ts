@@ -10,22 +10,8 @@
  *   npx tsx server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -38,54 +24,52 @@ console.log('Phase B §6.3 — computeRunResultStatus truth table (H3: hasSummar
 
 // ── completed + no error + no uncertainty → success (summary absence no longer demotes)
 test('completed + clean signals → success', () => {
-  assertEqual(computeRunResultStatus('completed', false, false), 'success', 'status');
+  expect(computeRunResultStatus('completed', false, false), 'status').toBe('success');
 });
 
 // ── completed + error → partial
 test('completed + error → partial', () => {
-  assertEqual(computeRunResultStatus('completed', true, false), 'partial', 'status');
+  expect(computeRunResultStatus('completed', true, false), 'status').toBe('partial');
 });
 test('completed + hadUncertainty → partial', () => {
-  assertEqual(computeRunResultStatus('completed', false, true), 'partial', 'status');
+  expect(computeRunResultStatus('completed', false, true), 'status').toBe('partial');
 });
 // H3: summary absence no longer demotes to partial — it's a side-channel signal
 test('completed + clean signals (no summary) → success (H3: summary absence does NOT demote)', () => {
-  assertEqual(computeRunResultStatus('completed', false, false), 'success', 'status');
+  expect(computeRunResultStatus('completed', false, false), 'status').toBe('success');
 });
 test('completed + error + hadUncertainty → partial', () => {
-  assertEqual(computeRunResultStatus('completed', true, true), 'partial', 'status');
+  expect(computeRunResultStatus('completed', true, true), 'status').toBe('partial');
 });
 
 // ── completed_with_uncertainty → partial (always)
 test('completed_with_uncertainty (clean signals) → partial', () => {
-  assertEqual(computeRunResultStatus('completed_with_uncertainty', false, false), 'partial', 'status');
+  expect(computeRunResultStatus('completed_with_uncertainty', false, false), 'status').toBe('partial');
 });
 test('completed_with_uncertainty (demotion signals) → partial', () => {
-  assertEqual(computeRunResultStatus('completed_with_uncertainty', true, true), 'partial', 'status');
+  expect(computeRunResultStatus('completed_with_uncertainty', true, true), 'status').toBe('partial');
 });
 
 // ── failure statuses → failed
 for (const s of ['failed', 'timeout', 'loop_detected', 'budget_exceeded', 'cancelled']) {
   test(`${s} → failed (regardless of other signals)`, () => {
-    assertEqual(computeRunResultStatus(s, false, false), 'failed', 'status');
-    assertEqual(computeRunResultStatus(s, true, true), 'failed', 'status-inverted');
+    expect(computeRunResultStatus(s, false, false), 'status').toBe('failed');
+    expect(computeRunResultStatus(s, true, true), 'status-inverted').toBe('failed');
   });
 }
 
 // ── non-terminal statuses → null
 for (const s of ['pending', 'running', 'delegated', 'awaiting_clarification', 'waiting_on_clarification']) {
   test(`${s} → null (non-terminal, caller must not write)`, () => {
-    assertEqual(computeRunResultStatus(s, false, false), null, 'status');
-    assertEqual(computeRunResultStatus(s, true, true), null, 'status-inverted');
+    expect(computeRunResultStatus(s, false, false), 'status').toBe(null);
+    expect(computeRunResultStatus(s, true, true), 'status-inverted').toBe(null);
   });
 }
 
 // ── unknown status → null (defensive)
 test('unknown status → null', () => {
-  assertEqual(computeRunResultStatus('future_status', false, false), null, 'status');
+  expect(computeRunResultStatus('future_status', false, false), 'status').toBe(null);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

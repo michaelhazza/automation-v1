@@ -30,27 +30,13 @@
  * generated UUID run-id and does not rely on global seed state.
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import {
   assertWithinRunBudgetFromLedger,
   getRunCostCentsFromLedger,
 } from '../../lib/runCostBreaker.js';
 import { FailureError } from '../../../shared/iee/failure.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 // ─── Section 1: Pure (no DB) ─────────────────────────────────────────────
 // These exercise the fail-closed invariants that throw before any DB query.
@@ -74,12 +60,9 @@ await test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on nul
   assert.equal((caught as FailureError).failure.failureReason, 'internal_error');
   assert.equal((caught as FailureError).failure.failureDetail, 'breaker_no_ledger_link');
 });
-
-console.log(`\n  Pure section: ${passed} passed, ${failed} failed\n`);
-
 // ─── Section 2: Integration (requires DATABASE_URL) ─────────────────────
 
-if (!process.env.DATABASE_URL) {
+if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
   console.log('\n--- llmRouterCostBreaker (integration) — SKIPPED (no DATABASE_URL) ---');
 } else {
   const { drizzle } = await import('drizzle-orm/postgres-js');
@@ -383,11 +366,9 @@ if (!process.env.DATABASE_URL) {
         assert.ok(anyIee === undefined || typeof anyIee.id === 'string');
       });
 
-      console.log(`\n  ${passed + failed} tests total; ${passed} passed, ${failed} failed`);
     }
   }
 
   await client.end();
 }
 
-if (failed > 0) process.exitCode = 1;

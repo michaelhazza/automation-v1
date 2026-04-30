@@ -3,8 +3,7 @@
  * Run via: npx tsx server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   validateClarifyingQuestionsOutput,
   parseClarifyingQuestionsOutput,
@@ -26,8 +25,8 @@ const VALID_PAYLOAD = {
 
 test('valid payload passes validation', () => {
   const r = validateClarifyingQuestionsOutput(VALID_PAYLOAD);
-  assert.equal(r.valid, true);
-  assert.deepEqual(r.errors, []);
+  expect(r.valid).toBe(true);
+  expect(r.errors).toEqual([]);
 });
 
 test('rejects payload with more than 5 questions', () => {
@@ -36,8 +35,8 @@ test('rejects payload with more than 5 questions', () => {
     questions: Array(6).fill(VALID_PAYLOAD.questions[0]),
   };
   const r = validateClarifyingQuestionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('≤ 5')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('≤ 5'))).toBeTruthy();
 });
 
 test('rejects question longer than 140 chars', () => {
@@ -46,8 +45,8 @@ test('rejects question longer than 140 chars', () => {
     questions: [{ ...VALID_PAYLOAD.questions[0], question: 'x'.repeat(141) }],
   };
   const r = validateClarifyingQuestionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('≤ 140')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('≤ 140'))).toBeTruthy();
 });
 
 test('rejects invalid ambiguityDimension', () => {
@@ -56,30 +55,30 @@ test('rejects invalid ambiguityDimension', () => {
     questions: [{ ...VALID_PAYLOAD.questions[0], ambiguityDimension: 'invalid_dim' }],
   };
   const r = validateClarifyingQuestionsOutput(payload);
-  assert.equal(r.valid, false);
+  expect(r.valid).toBe(false);
 });
 
 test('rejects expectedConfidenceAfter <= confidenceBefore', () => {
   const payload = { ...VALID_PAYLOAD, confidenceBefore: 0.9, expectedConfidenceAfter: 0.8 };
   const r = validateClarifyingQuestionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('expectedConfidenceAfter must be > confidenceBefore')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('expectedConfidenceAfter must be > confidenceBefore'))).toBeTruthy();
 });
 
 test('rejects non-object payload', () => {
   const r = validateClarifyingQuestionsOutput('not an object');
-  assert.equal(r.valid, false);
+  expect(r.valid).toBe(false);
 });
 
 test('parseClarifyingQuestionsOutput parses valid JSON', () => {
   const payload = parseClarifyingQuestionsOutput(JSON.stringify(VALID_PAYLOAD));
-  assert.equal(payload.questions.length, 1);
-  assert.equal(payload.confidenceBefore, 0.55);
-  assert.equal(payload.expectedConfidenceAfter, 0.92);
+  expect(payload.questions.length).toBe(1);
+  expect(payload.confidenceBefore).toBe(0.55);
+  expect(payload.expectedConfidenceAfter).toBe(0.92);
 });
 
 test('parseClarifyingQuestionsOutput throws on invalid JSON', () => {
-  assert.throws(() => parseClarifyingQuestionsOutput('not json'));
+  expect(() => parseClarifyingQuestionsOutput('not json')).toThrow();
 });
 
 test('assembleClarifyingQuestionsPrompt includes briefText and confidence', () => {
@@ -88,9 +87,9 @@ test('assembleClarifyingQuestionsPrompt includes briefText and confidence', () =
     orchestratorConfidence: 0.6,
     ambiguityDimensions: ['scope', 'target'],
   });
-  assert.ok(prompt.includes('Show VIP contacts'));
-  assert.ok(prompt.includes('60%'));
-  assert.ok(prompt.includes('scope'));
+  expect(prompt.includes('Show VIP contacts')).toBeTruthy();
+  expect(prompt.includes('60%')).toBeTruthy();
+  expect(prompt.includes('scope')).toBeTruthy();
 });
 
 test('assembleClarifyingQuestionsPrompt includes prior conversation turns', () => {
@@ -100,5 +99,5 @@ test('assembleClarifyingQuestionsPrompt includes prior conversation turns', () =
     ambiguityDimensions: ['timing'],
     conversationContext: [{ role: 'user', content: 'For which contact?' }],
   });
-  assert.ok(prompt.includes('For which contact?'));
+  expect(prompt.includes('For which contact?')).toBeTruthy();
 });

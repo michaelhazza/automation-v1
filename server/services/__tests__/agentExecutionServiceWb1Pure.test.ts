@@ -9,26 +9,9 @@
  * Run via: npx tsx server/services/__tests__/agentExecutionServiceWb1Pure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {}; // make this a module (avoids global-scope redeclaration in tsc)
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 // ---------------------------------------------------------------------------
 // Pure helper: mirrors the agentExecutionService INSERT mapping for WB-1.
@@ -62,8 +45,8 @@ test('handoff run: both parentRunId and handoffSourceRunId are set to sourceRunI
     handoffSourceRunId: sourceRunId,
   };
   const values = mapRequestToInsert(request);
-  assert(values.parentRunId === sourceRunId, `parentRunId should be ${sourceRunId}, got ${values.parentRunId}`);
-  assert(values.handoffSourceRunId === sourceRunId, `handoffSourceRunId should be ${sourceRunId}, got ${values.handoffSourceRunId}`);
+  expect(values.parentRunId === sourceRunId, `parentRunId should be ${sourceRunId}, got ${values.parentRunId}`).toBeTruthy();
+  expect(values.handoffSourceRunId === sourceRunId, `handoffSourceRunId should be ${sourceRunId}, got ${values.handoffSourceRunId}`).toBeTruthy();
 });
 
 test('spawn run: parentRunId set, handoffSourceRunId null', () => {
@@ -74,15 +57,15 @@ test('spawn run: parentRunId set, handoffSourceRunId null', () => {
     // handoffSourceRunId intentionally omitted for spawn runs
   };
   const values = mapRequestToInsert(request);
-  assert(values.parentRunId === parentId, `parentRunId should be ${parentId}`);
-  assert(values.handoffSourceRunId === null, `handoffSourceRunId should be null for spawn run, got ${values.handoffSourceRunId}`);
+  expect(values.parentRunId === parentId, `parentRunId should be ${parentId}`).toBeTruthy();
+  expect(values.handoffSourceRunId === null, `handoffSourceRunId should be null for spawn run, got ${values.handoffSourceRunId}`).toBeTruthy();
 });
 
 test('scheduled run: both null', () => {
   const request: RunRequest = { runSource: 'scheduler' };
   const values = mapRequestToInsert(request);
-  assert(values.parentRunId === null, 'parentRunId should be null for scheduled run');
-  assert(values.handoffSourceRunId === null, 'handoffSourceRunId should be null for scheduled run');
+  expect(values.parentRunId === null, 'parentRunId should be null for scheduled run').toBeTruthy();
+  expect(values.handoffSourceRunId === null, 'handoffSourceRunId should be null for scheduled run').toBeTruthy();
 });
 
 test('handoff: parentRunId and handoffSourceRunId are equal for same-source handoff', () => {
@@ -93,8 +76,5 @@ test('handoff: parentRunId and handoffSourceRunId are equal for same-source hand
     handoffSourceRunId: sourceId,
   };
   const values = mapRequestToInsert(request);
-  assert(values.parentRunId === values.handoffSourceRunId, 'parentRunId and handoffSourceRunId must be equal on a standard handoff run');
+  expect(values.parentRunId === values.handoffSourceRunId, 'parentRunId and handoffSourceRunId must be equal on a standard handoff run').toBeTruthy();
 });
-
-console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

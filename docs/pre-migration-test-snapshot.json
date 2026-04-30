@@ -1,0 +1,1387 @@
+[
+  {
+    "file": "client/src/components/agentRunLog/__tests__/eventRowPure.test.ts",
+    "outcome": "pass",
+    "testCount": 32
+  },
+  {
+    "file": "client/src/components/brief-artefacts/__tests__/ApprovalCardPure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "client/src/components/brief-artefacts/__tests__/StructuredResultCardPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "client/src/components/clientpulse/__tests__/SparklineChart.test.ts",
+    "outcome": "pass",
+    "testCount": 22
+  },
+  {
+    "file": "client/src/components/dashboard/__tests__/freshnessIndicator.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "client/src/components/run-cost/__tests__/RunCostPanel.test.ts",
+    "outcome": "pass",
+    "testCount": 37
+  },
+  {
+    "file": "client/src/components/__tests__/activityFeedMerge.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "client/src/components/__tests__/dashboardErrorBannerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "client/src/components/__tests__/DeliveryChannels.test.ts",
+    "outcome": "pass",
+    "testCount": 26
+  },
+  {
+    "file": "client/src/hooks/__tests__/usePendingIntervention.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "client/src/lib/__tests__/briefArtefactLifecyclePure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "client/src/lib/__tests__/formatDuration.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "client/src/lib/__tests__/resolvePulseDetailUrl.test.ts",
+    "outcome": "pass",
+    "testCount": 22
+  },
+  {
+    "file": "client/src/pages/__tests__/dashboardVersioning.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "scripts/__tests__/auditSubaccountRootsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "scripts/__tests__/build-code-graph-watcher.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "scripts/__tests__/chatgpt-reviewPure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "scripts/__tests__/rlsContractImportTypePure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/config/__tests__/actionRegistry.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/config/__tests__/actionSlugAliasesPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/config/__tests__/jobConfigInvariant.test.ts",
+    "outcome": "pass",
+    "testCount": 2
+  },
+  {
+    "file": "server/config/__tests__/sensitiveConfigPathsRegistryPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/jobs/__tests__/bundleUtilizationJob.idempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/jobs/__tests__/connectorPollingSync.idempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/jobs/__tests__/fastPathDecisionsPruneJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/jobs/__tests__/fastPathRecalibrateJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/jobs/__tests__/ledgerArchivePure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/jobs/__tests__/llmInflightHistoryCleanupJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 2
+  },
+  {
+    "file": "server/jobs/__tests__/llmStartedRowSweepJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/jobs/__tests__/measureInterventionOutcomeJob.idempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/jobs/__tests__/measureInterventionOutcomeJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/jobs/__tests__/ruleAutoDeprecateJob.idempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/jobs/__tests__/ruleAutoDeprecateJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/jobs/__tests__/staleAnalyzerJobSweepJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/lib/schedule/__tests__/schedulePickerToCronPure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/lib/workflow/__tests__/actionCallAllowlistPure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/lib/workflow/__tests__/actionCallValidatorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/lib/workflow/__tests__/agentDecisionEnvelope.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/lib/workflow/__tests__/agentDecisionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 52
+  },
+  {
+    "file": "server/lib/workflow/__tests__/workflow.test.ts",
+    "outcome": "pass",
+    "testCount": 41
+  },
+  {
+    "file": "server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/lib/__tests__/agentRunVisibilityPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/lib/__tests__/briefContractTestHarness.example.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/lib/__tests__/briefContractTestHarness.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/lib/__tests__/derivedDataMissingLog.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/lib/__tests__/idempotencyVersionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/lib/__tests__/llmStub.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/lib/__tests__/logger.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 2
+  },
+  {
+    "file": "server/lib/__tests__/loggerBufferAdapterPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/lib/__tests__/postCommitEmitter.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/lib/__tests__/queryIntentClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/lib/__tests__/reconciliationRequiredErrorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/lib/__tests__/redactionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/lib/__tests__/rlsBoundaryGuard.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/lib/__tests__/sanitizeSearchQueryPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/lib/__tests__/scopeAssertion.test.ts",
+    "outcome": "pass",
+    "testCount": 18
+  },
+  {
+    "file": "server/lib/__tests__/softBreakerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/lib/__tests__/testRunIdempotencyPure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/lib/__tests__/utf8Truncate.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/routes/__tests__/briefsArtefactsPagination.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/routes/__tests__/conversationsRouteFollowUp.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/routes/__tests__/llmUsage.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/routes/__tests__/reviewItems.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/routes/__tests__/sessionMessage.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/approvalCardGeneratorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/canonicalQueryRegistry.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/hybridExecutor.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/integration.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/liveExecutor.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/llmPlannerPromptPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/normaliseIntentPure.test.ts",
+    "outcome": "pass",
+    "testCount": 18
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/planCachePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/plannerCostPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/registryMatcherPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/resultNormaliserPure.test.ts",
+    "outcome": "pass",
+    "testCount": 27
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/schemaContextPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts",
+    "outcome": "pass",
+    "testCount": 31
+  },
+  {
+    "file": "server/services/middleware/__tests__/errorHandling.failureError.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/middleware/__tests__/reflectionLoopPure.test.ts",
+    "outcome": "pass",
+    "testCount": 20
+  },
+  {
+    "file": "server/services/scopeResolutionService.test.ts",
+    "outcome": "not-discovered",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/systemMonitor/baselines/__tests__/computeKLDivergencePure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/systemMonitor/baselines/__tests__/computeOutputEntropyPure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/systemMonitor/heuristics/__tests__/heuristics25Pure.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/systemMonitor/heuristics/__tests__/heuristicsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 18
+  },
+  {
+    "file": "server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/systemMonitor/synthetic/__tests__/sweepCoverageDegraded.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/systemMonitor/synthetic/__tests__/syntheticChecksPure.test.ts",
+    "outcome": "pass",
+    "testCount": 25
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/clusterAndSelect.test.ts",
+    "outcome": "pass",
+    "testCount": 17
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/promptValidation.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/rateLimitPure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/triageAdmit.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/triageDurability.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/systemMonitor/triage/__tests__/triageIdempotencyPure.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/services/workspaceHealth/detectors/__tests__/explicitDelegationSkillsWithoutChildren.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/workspaceHealth/detectors/__tests__/subaccountMultipleRoots.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/workspaceHealth/detectors/__tests__/subaccountNoRoot.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/actionServiceCanonicalisationPure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/activityService.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/agentActivityService.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/agentBeliefServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 60
+  },
+  {
+    "file": "server/services/__tests__/agentExecution.smoke.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionEventServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 29
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionService.middlewareContext.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionService.phase.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionService.validateToolCalls.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionServicePure.plan.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionServicePure.toolIntent.test.ts",
+    "outcome": "pass",
+    "testCount": 18
+  },
+  {
+    "file": "server/services/__tests__/agentExecutionServiceWb1Pure.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/agentRunCleanupJobPure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/agentRunFinalizationServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/agentRunHandoffServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 23
+  },
+  {
+    "file": "server/services/__tests__/agentRunMessageServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/agentRunPayloadWriterFailurePathPure.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/services/__tests__/agentRunPayloadWriterPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/alertFatigueGuard.regression.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/assertSingleWebhookPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/beliefConflictServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/briefApprovalServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/briefArtefactBackstopPure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/briefArtefactCursorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/__tests__/briefArtefactPaginationPure.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/__tests__/briefArtefactValidatorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 45
+  },
+  {
+    "file": "server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/__tests__/briefMessageHandlerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/briefVisibilityServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/bundleSuggestionDismissalsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/canonicalDataService.findAccountBySubaccountId.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/canonicalDataService.principalContext.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/canonicalDictionaryRendererPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/canonicalDictionaryValidatorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/canonicalRegistryDriftPure.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/chatTriageClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/clarificationServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 25
+  },
+  {
+    "file": "server/services/__tests__/clientPulseHighRiskPure.test.ts",
+    "outcome": "pass",
+    "testCount": 34
+  },
+  {
+    "file": "server/services/__tests__/clientPulseIngestionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/clientPulseInterventionProposerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/computeMeaningfulOutputPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/computeRunResultStatusPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/computeStaffActivityPulsePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/configAgentGuidelinesInjection.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/configDocumentParserServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/configHistoryServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/configUpdateOrganisationConfigPure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/connectorPollingSchedulerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/contextAssemblyEnginePure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/conversationsRoutePure.test.ts",
+    "outcome": "pass",
+    "testCount": 0
+  },
+  {
+    "file": "server/services/__tests__/critiqueGatePure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/decideApprovalStepTypePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/delegationGrantValidatorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/delegationGraphServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/delegationOutcomeServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/services/__tests__/deliveryServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 43
+  },
+  {
+    "file": "server/services/__tests__/dlqMonitorRoundTrip.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/services/__tests__/dlqMonitorServiceForceSyncInvariant.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/services/__tests__/dlqMonitorServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/services/__tests__/drilldownOutcomeBadgePure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/drilldownPendingInterventionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/extractRunInsightsErrorMessagePure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/fixtures/__tests__/fakeProviderAdapter.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/fixtures/__tests__/fakeWebhookReceiver.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/ghlWebhookMutationsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 26
+  },
+  {
+    "file": "server/services/__tests__/hermesTier1Integration.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/hierarchyContextBuilderServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 23
+  },
+  {
+    "file": "server/services/__tests__/hierarchyRouteResolverServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/incidentIngestorIdempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/incidentIngestorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 49
+  },
+  {
+    "file": "server/services/__tests__/incidentIngestorThrottle.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 2
+  },
+  {
+    "file": "server/services/__tests__/incidentIngestorThrottle.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/interventionActionMetadataPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/interventionIdempotencyKeysPure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/invalidationRacePure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/invokeAutomationStepErrorShapePure.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/invokeAutomationStepF15Pure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/invokeAutomationStepPure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/services/__tests__/llmInflightPayloadStorePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/llmInflightRegistryPure.test.ts",
+    "outcome": "pass",
+    "testCount": 32
+  },
+  {
+    "file": "server/services/__tests__/llmRouterCostBreaker.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/llmRouterErrorMappingPure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/llmRouterIdempotencyPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/llmRouterLaelIntegration.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/llmRouterPayloadEmissionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 1
+  },
+  {
+    "file": "server/services/__tests__/llmRouterTimeoutPure.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/managerGuardPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/mcpToolInvocationsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockCitationDetectorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockRetrievalServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockSynthesisServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockUpsertPure.test.ts",
+    "outcome": "pass",
+    "testCount": 28
+  },
+  {
+    "file": "server/services/__tests__/memoryBlockVersionServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/memoryCitationDetectorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 33
+  },
+  {
+    "file": "server/services/__tests__/memoryEntryQualityServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 33
+  },
+  {
+    "file": "server/services/__tests__/mergeFieldResolverPure.test.ts",
+    "outcome": "pass",
+    "testCount": 25
+  },
+  {
+    "file": "server/services/__tests__/mutateActiveToolsPreservingUniversal.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/services/__tests__/n8nImportServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 34
+  },
+  {
+    "file": "server/services/__tests__/notifyOperatorFanoutServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/onboardingStateServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/operationalConfigSchemaPure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/orgConfigServiceReadPathPure.test.ts",
+    "outcome": "pass",
+    "testCount": 4
+  },
+  {
+    "file": "server/services/__tests__/orgOperationalConfigMigrationPure.test.ts",
+    "outcome": "pass",
+    "testCount": 7
+  },
+  {
+    "file": "server/services/__tests__/policyEngineService.scopeValidation.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/policyEngineServicePure.confidence.test.ts",
+    "outcome": "pass",
+    "testCount": 22
+  },
+  {
+    "file": "server/services/__tests__/portfolioRollupServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/services/__tests__/principalContextConstructorsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 23
+  },
+  {
+    "file": "server/services/__tests__/priorityFeedServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/pulseConfigServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/pulseLaneClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 27
+  },
+  {
+    "file": "server/services/__tests__/pulseServiceResolvedUrl.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/rateLimiterPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/rateLimitKeysPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/readPathResolutionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/recommendedInterventionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/referenceDocumentServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/regressionCaptureServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/services/__tests__/resolveRequiredConnectionsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/resumeInvokeAutomationStepPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/retrievalPipelinePure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/reviewServiceIdempotency.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/reviewServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/rls.context-propagation.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/rlsPredicateSqlBuilderPure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/services/__tests__/ruleCapturePolicyPure.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/ruleConflictDetectorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/ruleDraftCandidatesPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/ruleTeachabilityClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/runContextLoader.test.ts",
+    "outcome": "pass",
+    "testCount": 20
+  },
+  {
+    "file": "server/services/__tests__/runStatusDriftPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/scanIntegrationFingerprintsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/services/__tests__/scheduleCalendarParity.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/scheduleCalendarServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/services/__tests__/scopeResolutionPure.test.ts",
+    "outcome": "pass",
+    "testCount": 8
+  },
+  {
+    "file": "server/services/__tests__/seedConfigAgentGuidelinesPure.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 30
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureDiffRows.test.ts",
+    "outcome": "pass",
+    "testCount": 11
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts",
+    "outcome": "pass",
+    "testCount": 22
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureMergePrompt.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureV6.test.ts",
+    "outcome": "pass",
+    "testCount": 53
+  },
+  {
+    "file": "server/services/__tests__/skillAnalyzerServicePureValidation.test.ts",
+    "outcome": "pass",
+    "testCount": 30
+  },
+  {
+    "file": "server/services/__tests__/skillExecutor.reassignTask.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/skillExecutor.spawnSubAgents.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/skillExecutorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 14
+  },
+  {
+    "file": "server/services/__tests__/skillHandlerRegistryEquivalence.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/skillIdempotencyKeysPure.test.ts",
+    "outcome": "pass",
+    "testCount": 21
+  },
+  {
+    "file": "server/services/__tests__/skillParserServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 23
+  },
+  {
+    "file": "server/services/__tests__/skillService.resolver.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/skillStudioServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 3
+  },
+  {
+    "file": "server/services/__tests__/staleConnectorDetectorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 9
+  },
+  {
+    "file": "server/services/__tests__/subaccountOnboardingServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "server/services/__tests__/systemIncidentServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/systemPnlServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 30
+  },
+  {
+    "file": "server/services/__tests__/systemSkillHandlerValidatorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/systemSkillServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/toolCallsLogProjectionServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/services/__tests__/topicClassifierPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/services/__tests__/trajectoryServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 15
+  },
+  {
+    "file": "server/services/__tests__/trustCalibrationServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/visibilityPredicatePure.test.ts",
+    "outcome": "pass",
+    "testCount": 52
+  },
+  {
+    "file": "server/services/__tests__/workflowActionCallExecutorPure.test.ts",
+    "outcome": "pass",
+    "testCount": 12
+  },
+  {
+    "file": "server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts",
+    "outcome": "pass",
+    "testCount": 6
+  },
+  {
+    "file": "server/services/__tests__/workspaceHealthServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  },
+  {
+    "file": "server/services/__tests__/workspaceMemoryService.test.ts",
+    "outcome": "pass",
+    "testCount": 5
+  },
+  {
+    "file": "server/services/__tests__/workspaceMemoryServicePure.test.ts",
+    "outcome": "pass",
+    "testCount": 59
+  },
+  {
+    "file": "server/skills/__tests__/clientPulseInterventionPrimitivesPure.test.ts",
+    "outcome": "pass",
+    "testCount": 24
+  },
+  {
+    "file": "server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 10
+  },
+  {
+    "file": "server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts",
+    "outcome": "pass",
+    "testCount": 13
+  },
+  {
+    "file": "server/tools/config/__tests__/configSkillHandlersPure.test.ts",
+    "outcome": "pass",
+    "testCount": 16
+  },
+  {
+    "file": "shared/lib/parseContextSwitchCommand.test.ts",
+    "outcome": "not-discovered",
+    "testCount": 0
+  },
+  {
+    "file": "shared/__tests__/errorCodePure.test.ts",
+    "outcome": "pass",
+    "testCount": 18
+  },
+  {
+    "file": "shared/__tests__/stateMachineGuardsPure.test.ts",
+    "outcome": "pass",
+    "testCount": 19
+  }
+]

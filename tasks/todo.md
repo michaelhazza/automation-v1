@@ -1739,3 +1739,62 @@ The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-v
   - Spec section: §10.5; `DEVELOPMENT_GUIDELINES.md` §1.
   - Gap: `workspaceEmailPipeline.ts:71,124` opens `db.transaction(async (tx) => { … })` and issues `set_config('app.organisation_id', orgId, true)` directly, but does NOT wrap with `withOrgTx({tx, organisationId, source: ...})`. The RLS session var IS set, so writes are protected — but the AsyncLocalStorage org context is not extended. Any code inside the tx that tried `getOrgScopedDb()` would resolve to the OUTER tx, not this inner one.
   - Suggested approach: wrap each `db.transaction` block in `withOrgTx({tx, organisationId: orgId, source: 'workspaceEmailPipeline.send'}, ...)` matching the inbound-webhook pattern; preserve the `set_config` call.
+
+## Test infrastructure hygiene
+
+### TI-001: Make build-code-graph-watcher.test.ts parallel-safe
+- File: scripts/__tests__/build-code-graph-watcher.test.ts
+- Quarantine date: 2026-04-29
+- Owner: unowned
+- Reason: spawns `tsx scripts/build-code-graph.ts` subprocesses, holds the
+  singleton lock at `references/.watcher.lock`, takes up to 120 s, and is
+  destructive of in-flight watcher state. Pinned to single-fork to prevent
+  collisions with any other test that touches the same lock or filesystem
+  paths.
+- Goal: refactor the test so its filesystem and subprocess effects are
+  scoped to a temp directory + injected lock path, then remove the
+  `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
+- Linked invariant: I-6 (quarantine contract with expiry pressure).
+
+### TI-003: Add a "no-handwritten-harness-leftovers" gate
+- Captured: 2026-04-30 (after diagnosing the CI hang on PR #238)
+- Owner: unowned
+- Reason: Phase 2/3 conversion scripts left some files in a half-converted
+  state — they imported `test`/`expect` from vitest but kept a custom
+  `function asyncTest()` helper, an unawaited `pendingTests` array, top-level
+  `await Promise.all(pendingTests)`, references to undeclared `passed`/
+  `failed` counters, and a final `if (failed > 0) process.exit(1)`. Symptom
+  on PR #238: vitest worker hung for 13+ minutes after all tests appeared
+  to complete because `await Promise.all(pendingTests)` waited on promises
+  that never resolved (the resolver path threw `passed is not defined`).
+  Fixed in commit on this branch — but a guard prevents the next regression.
+- Goal: a `scripts/verify-no-harness-leftovers.sh` gate that fails if any
+  `*.test.ts` contains any of: `function asyncTest`, `let passed = 0`,
+  `let failed = 0`, `pendingTests`, `if (failed > 0) process.exit`,
+  `Promise.all(pendingTests)`, `passed++`, `failed++`. Wire into
+  `scripts/run-all-gates.sh`.
+- Linked invariant: I-7b (no module-load side effects in tests) and the
+  testing-conventions.md "Forbidden patterns" list (which already names
+  these patterns but is not enforced).
+
+### TI-002: Add a test-discovery guard to prevent orphan `*.test.ts` files
+- Captured: 2026-04-30 (after fixing two orphan tests on the vitest-migration branch)
+- Owner: unowned
+- Reason: Vitest's `include` glob is `**/__tests__/**/*.test.ts` plus two
+  explicitly-listed outliers. Test files placed outside `__tests__/` and not
+  added to the explicit list silently provide zero coverage. This has now
+  bitten the codebase three times: `canonicalAdapterContract.test.ts`
+  (commit 4d0cef9f), `shared/types/workspace.test.ts`, and
+  `shared/billing/seatDerivation.test.ts` (both fixed on the
+  vitest-migration branch).
+- Blocking dependency: the two outliers explicitly listed in
+  `vitest.config.ts` (`shared/lib/parseContextSwitchCommand.test.ts`,
+  `server/services/scopeResolutionService.test.ts`) are scheduled for
+  relocation to `__tests__/` per the migration plan's Phase 6 "Moved"
+  section. The guard will false-positive on those two until they move.
+- Goal: after the two outliers are relocated, add
+  `scripts/verify-test-discovery.sh` that fails if any `*.test.ts` exists
+  outside `**/__tests__/**`. Wire it into `scripts/run-all-gates.sh` and
+  remove the `include` allow-list entries from `vitest.config.ts`.
+- Linked invariant: I-3 (parity — every test file the bash runner ran must
+  also be discovered by Vitest).

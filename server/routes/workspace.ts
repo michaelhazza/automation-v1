@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireSubaccountPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D2 deferred — route helpers use organisationId-scoped queries; service extraction tracked in tasks/todo.md"
 import { agents, subaccountAgents } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';

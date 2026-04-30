@@ -22,6 +22,8 @@
  * Runnable via:
  *   npx tsx server/jobs/__tests__/connectorPollingSync.idempotency.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
 // connectorPollingSync transitively pulls in server/lib/env.ts which validates
@@ -34,24 +36,6 @@ process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { __testHooks } = await import('../connectorPollingSync.js');
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  // Reset-on-import enforcement (spec §B2 production-safety invariant #3): a
-  // forgotten override in one test must not leak into the next.
-  __testHooks.pauseBetweenClaimAndCommit = undefined;
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -79,7 +63,4 @@ await test('connectorPollingSync: __testHooks reset returns to undefined default
   __testHooks.pauseBetweenClaimAndCommit = async () => {};
   __testHooks.pauseBetweenClaimAndCommit = undefined;
   check(__testHooks.pauseBetweenClaimAndCommit === undefined, 'reset clears the override');
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+});

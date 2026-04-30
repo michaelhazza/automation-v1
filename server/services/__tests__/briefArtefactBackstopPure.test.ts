@@ -8,30 +8,12 @@
  *   npx tsx server/services/__tests__/briefArtefactBackstopPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   runBackstopChecksPure,
   type BackstopPureInput,
 } from '../briefArtefactBackstopPure.js';
 import type { BriefChatArtefact } from '../../../shared/types/briefResultContract.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -99,8 +81,8 @@ function makeInput(artefact: BriefChatArtefact, overrides: Partial<BackstopPureI
 
 test('structured result, no idScopeCheck, no scopedTotals → passes', () => {
   const result = runBackstopChecksPure(makeInput(makeStructured(['id-1', 'id-2'])));
-  assert(result.passed, 'expected passed: true');
-  assertEqual(result.violations, [], 'no violations');
+  expect(result.passed, 'expected passed: true').toBeTruthy();
+  expect(result.violations, 'no violations').toEqual([]);
 });
 
 test('structured result, idScopeCheck all in scope → passes', () => {
@@ -111,7 +93,7 @@ test('structured result, idScopeCheck all in scope → passes', () => {
       idsOutOfScope: new Set(),
     },
   }));
-  assert(result.passed, 'expected passed: true');
+  expect(result.passed, 'expected passed: true').toBeTruthy();
 });
 
 test('structured result, one row ID out of scope → id_scope_leak', () => {
@@ -122,11 +104,11 @@ test('structured result, one row ID out of scope → id_scope_leak', () => {
       idsOutOfScope: new Set(['id-2']),
     },
   }));
-  assert(!result.passed, 'expected failed');
-  assert(result.violations.length === 1, 'one violation');
-  assertEqual(result.violations[0]!.kind, 'id_scope_leak', 'violation kind');
+  expect(!result.passed, 'expected failed').toBeTruthy();
+  expect(result.violations.length === 1, 'one violation').toBeTruthy();
+  expect(result.violations[0]!.kind, 'violation kind').toBe('id_scope_leak');
   const v = result.violations[0] as Extract<typeof result.violations[0], { kind: 'id_scope_leak' }>;
-  assertEqual(v.offendingIds, ['id-2'], 'offending ID is id-2');
+  expect(v.offendingIds, 'offending ID is id-2').toEqual(['id-2']);
 });
 
 test('approval card, all affectedRecordIds in scope → passes', () => {
@@ -137,7 +119,7 @@ test('approval card, all affectedRecordIds in scope → passes', () => {
       idsOutOfScope: new Set(),
     },
   }));
-  assert(result.passed, 'expected passed: true');
+  expect(result.passed, 'expected passed: true').toBeTruthy();
 });
 
 test('approval card, both affectedRecordIds out of scope → id_scope_leak', () => {
@@ -148,31 +130,31 @@ test('approval card, both affectedRecordIds out of scope → id_scope_leak', () 
       idsOutOfScope: new Set(['c-1', 'c-2']),
     },
   }));
-  assert(!result.passed, 'expected failed');
+  expect(!result.passed, 'expected failed').toBeTruthy();
   const v = result.violations[0] as Extract<typeof result.violations[0], { kind: 'id_scope_leak' }>;
-  assert(v.offendingIds.includes('c-1') && v.offendingIds.includes('c-2'), 'both IDs offending');
+  expect(v.offendingIds.includes('c-1') && v.offendingIds.includes('c-2'), 'both IDs offending').toBeTruthy();
 });
 
 test('structured result rowCount > scopedTotal → aggregate_invariant_violation', () => {
   const result = runBackstopChecksPure(makeInput(makeStructured(['id-1'], 20), {
     scopedTotals: { entityType: 'contacts', scopedTotal: 10 },
   }));
-  assert(!result.passed, 'expected failed');
-  assertEqual(result.violations[0]!.kind, 'aggregate_invariant_violation', 'violation kind');
+  expect(!result.passed, 'expected failed').toBeTruthy();
+  expect(result.violations[0]!.kind, 'violation kind').toBe('aggregate_invariant_violation');
 });
 
 test('structured result rowCount === scopedTotal → passes', () => {
   const result = runBackstopChecksPure(makeInput(makeStructured(['id-1'], 10), {
     scopedTotals: { entityType: 'contacts', scopedTotal: 10 },
   }));
-  assert(result.passed, 'expected passed: true');
+  expect(result.passed, 'expected passed: true').toBeTruthy();
 });
 
 test('structured result rowCount < scopedTotal → passes', () => {
   const result = runBackstopChecksPure(makeInput(makeStructured(['id-1'], 5), {
     scopedTotals: { entityType: 'contacts', scopedTotal: 10 },
   }));
-  assert(result.passed, 'expected passed: true');
+  expect(result.passed, 'expected passed: true').toBeTruthy();
 });
 
 test('error artefact → passes trivially (no scope-sensitive content)', () => {
@@ -184,15 +166,15 @@ test('error artefact → passes trivially (no scope-sensitive content)', () => {
     },
     scopedTotals: { entityType: 'contacts', scopedTotal: 0 },
   }));
-  assert(result.passed, 'expected passed: true for error artefact');
-  assertEqual(result.violations, [], 'no violations');
+  expect(result.passed, 'expected passed: true for error artefact').toBeTruthy();
+  expect(result.violations, 'no violations').toEqual([]);
 });
 
 test('empty row set (rows: [], rowCount: 0) with scopedTotals → passes', () => {
   const result = runBackstopChecksPure(makeInput(makeStructured([], 0), {
     scopedTotals: { entityType: 'contacts', scopedTotal: 5 },
   }));
-  assert(result.passed, 'expected passed: true for empty result set');
+  expect(result.passed, 'expected passed: true for empty result set').toBeTruthy();
 });
 
 test('combined violations: scope leak + aggregate violation on same artefact → both reported', () => {
@@ -204,14 +186,12 @@ test('combined violations: scope leak + aggregate violation on same artefact →
     },
     scopedTotals: { entityType: 'contacts', scopedTotal: 10 },
   }));
-  assert(!result.passed, 'expected failed');
-  assert(result.violations.length === 2, `expected 2 violations, got ${result.violations.length}`);
+  expect(!result.passed, 'expected failed').toBeTruthy();
+  expect(result.violations.length === 2, `expected 2 violations, got ${result.violations.length}`).toBeTruthy();
   const kinds = result.violations.map(v => v.kind).sort();
-  assertEqual(kinds, ['aggregate_invariant_violation', 'id_scope_leak'], 'both violation kinds present');
+  expect(kinds, 'both violation kinds present').toEqual(['aggregate_invariant_violation', 'id_scope_leak']);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

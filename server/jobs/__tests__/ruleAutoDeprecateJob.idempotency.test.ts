@@ -16,6 +16,8 @@
  * Runnable via:
  *   npx tsx server/jobs/__tests__/ruleAutoDeprecateJob.idempotency.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
 await import('dotenv/config');
@@ -24,22 +26,6 @@ process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { __testHooks } = await import('../ruleAutoDeprecateJob.js');
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  __testHooks.pauseBetweenClaimAndCommit = undefined;
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -66,7 +52,4 @@ await test('ruleAutoDeprecateJob: __testHooks reset clears override', () => {
   __testHooks.pauseBetweenClaimAndCommit = async () => {};
   __testHooks.pauseBetweenClaimAndCommit = undefined;
   check(__testHooks.pauseBetweenClaimAndCommit === undefined, 'reset clears the override');
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+});
