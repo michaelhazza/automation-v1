@@ -914,6 +914,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0000_wandering_firedrake.sql',
     rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, policy deferred. Using baselined migration 0000 as placeholder per deferred-enforcement convention.',
   },
+  // 0262 — Live external document references: document cache and fetch audit log
+  {
+    tableName: 'document_cache',
+    schemaFile: 'documentCache.ts',
+    policyMigration: '0262_external_doc_refs_google_drive.sql',
+    rationale: 'Per-subaccount document cache; content may include confidential business documents fetched from Drive.',
+  },
+  {
+    tableName: 'document_fetch_events',
+    schemaFile: 'documentFetchEvents.ts',
+    policyMigration: '0262_external_doc_refs_google_drive.sql',
+    rationale: 'Per-subaccount fetch audit log; records which documents were accessed in which runs.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
