@@ -118,6 +118,26 @@ Self-writes its log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>
 
 Self-write session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md` and `tasks/review-logs/chatgpt-spec-review-<slug>-<timestamp>.md` respectively.
 
+**Final Summary fields** — every finalised log must include all of these in its
+`## Final Summary` block. A missing field blocks finalisation; `no` requires a
+one-line rationale written on the same line (`no — <rationale>`); a bare `no` with
+no rationale is treated as a missing verdict. `n/a` = doc scope not touched by
+this session.
+
+| Field | PR agent | Spec agent |
+|---|---|---|
+| `KNOWLEDGE.md updated: yes (N entries) \| no` | required | required |
+| `architecture.md updated: yes (sections X, Y) \| no \| n/a` | required | required |
+| `capabilities.md updated: yes (sections X) \| no \| n/a` | required | required |
+| `integration-reference.md updated: yes (slug X) \| no \| n/a` | required | required |
+| `CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes \| no \| n/a` | required | required |
+| `spec-context.md updated: yes \| no \| n/a` | omit | required |
+| `frontend-design-principles.md updated: yes \| no \| n/a` | required | required |
+
+The Doc sync sweep step in each agent's Finalization section drives these verdicts.
+Scope definitions (reference doc list, per-doc update triggers, verdict rule) live in
+`docs/doc-sync.md` — the canonical single source of truth.
+
 ---
 
 ## Deferred actions route to `tasks/todo.md`

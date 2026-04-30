@@ -21,6 +21,7 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 - [Complexity budget per screen](#complexity-budget-per-screen)
 - [Progressive disclosure patterns](#progressive-disclosure-patterns)
 - [Worked example — cached-context infrastructure](#worked-example--cached-context-infrastructure)
+- [Worked example — ClientPulse health monitoring](#worked-example--clientpulse-health-monitoring)
 - [Re-check before delivery](#re-check-before-delivery)
 - [When to break these rules](#when-to-break-these-rules)
 
@@ -174,6 +175,38 @@ The five mockups in [`prototypes/cached-context/`](../prototypes/cached-context/
 - **`mockup-usage-explorer-packs.html`** — delete from v1. The observability story is a valid admin concern but not a v1 deliverable.
 
 Build the replacement v1 mockup set focused on the attach workflow before implementation begins.
+
+---
+
+## Worked example — ClientPulse health monitoring
+
+The ClientPulse backend computes eight signals per subaccount, a composite health score, a churn band (healthy / watch / at-risk), churn assessments, intervention proposals, and a configuration model with 14 sensitive paths. The operator's task is: **assess a client's health and decide whether to intervene**. That is one task — not "monitor signals," not "configure the scoring model," not "review interventions and analytics."
+
+### What the v1 UI should ship
+
+- **Dashboard row** — one band pill (`healthy` / `watch` / `at-risk`) inline next to the client name. A count of high-risk clients at the top of the list as a single integer — not a KPI tile, not a chart. One action: click a high-risk row to drill down.
+- **Drilldown page** — the minimum surface for "assess and decide": header (name, band, last-assessed timestamp), signal panel (eight signals as compact rows with current value and trend direction), 90-day band-transition table (when the band changed and why), intervention history with outcome badges (applied / no change / not measured). One contextual action: "Open Configuration Assistant" to adjust scoring weights.
+- **Intervention proposal modal** — complex form contained in a modal: template picker with recommendation badge, merge-field editor, approval flow. Not inline on the drilldown page. The operator confirms before anything is proposed.
+- **Settings page** — ten blocks, each scoped to one aspect of the configuration model. Each block shows where its value came from (org default / overridden / manually set) with a reset-to-default button. An operator changing one signal's weight sees only that signal's block — not a monolithic JSON editor for the entire config.
+
+That's it: one drilldown, one modal, one settings page with per-block scope, two inline signals on the dashboard row. No new top-level nav items, no analytics explorer.
+
+### What the v1 UI should NOT ship
+
+- Health-score analytics dashboard — trend charts for score over time, per-signal weight breakdowns, cohort comparison views.
+- Per-client 7/30/90-day churn risk trend deck.
+- Signal correlation explorer ("which signals predict which bands").
+- Intervention success-rate dashboard (outcome data renders as badges on existing history rows, not a reporting surface).
+- A monolithic configuration form exposing the full 14-signal config object — the per-block settings pattern avoids this.
+- Any exposure of internal IDs (organisation_id, subaccount_id, assessment_id) on the drilldown page.
+
+All of these are real backend outputs the system computes. They belong on an admin or analytics surface reached via explicit navigation — not on the primary operator journey.
+
+### The re-check
+
+A non-technical operator opening the drilldown for a high-risk client sees: the band, the signals driving it, and one button to adjust. They know what to do in under three seconds. The settings page is ten labelled blocks — each block is a self-contained decision, not a raw config dump. The intervention modal contains the complexity without letting it sprawl.
+
+**The principle this illustrates:** analytical complexity in the backend does not imply analytical complexity in the UI. The richer the data model, the stronger the editorial filter needs to be. The operator's task is always the entry point — not the schema.
 
 ---
 
