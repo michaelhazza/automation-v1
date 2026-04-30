@@ -915,16 +915,17 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, policy deferred. Using baselined migration 0000 as placeholder per deferred-enforcement convention.',
   },
   // 0262 — Live external document references: document cache and fetch audit log
+  // 0263 — Corrected RLS policies (canonical org_isolation shape, replacing wrong GUC from 0262)
   {
     tableName: 'document_cache',
     schemaFile: 'documentCache.ts',
-    policyMigration: '0262_external_doc_refs_google_drive.sql',
+    policyMigration: '0263_fix_external_doc_rls_and_uniq.sql',
     rationale: 'Per-subaccount document cache; content may include confidential business documents fetched from Drive.',
   },
   {
     tableName: 'document_fetch_events',
     schemaFile: 'documentFetchEvents.ts',
-    policyMigration: '0262_external_doc_refs_google_drive.sql',
+    policyMigration: '0263_fix_external_doc_rls_and_uniq.sql',
     rationale: 'Per-subaccount fetch audit log; records which documents were accessed in which runs.',
   },
 ];
