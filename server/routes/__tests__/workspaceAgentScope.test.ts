@@ -61,7 +61,7 @@ describe('resolveAgentSubaccountId scope invariant (pure)', () => {
 
 // ─── Section 2: Integration (requires DATABASE_URL) ──────────────────────────
 
-const SKIP_DB = !process.env.DATABASE_URL;
+const SKIP_DB = process.env.NODE_ENV !== 'integration';
 
 describe('resolveAgentSubaccountId scope invariant (integration)', () => {
   test.skipIf(SKIP_DB)(

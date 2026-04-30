@@ -45,7 +45,7 @@ describe('configure guard logic (pure)', () => {
 
 // ─── Section 2: Integration (requires DATABASE_URL) ──────────────────────────
 
-const SKIP_DB = !process.env.DATABASE_URL;
+const SKIP_DB = process.env.NODE_ENV !== 'integration';
 
 describe('configure guard integration', () => {
   test.skipIf(SKIP_DB)(
