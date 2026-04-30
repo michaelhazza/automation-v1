@@ -18,7 +18,18 @@ export type SystemIncidentEventType =
   | 'remediation_attempt'       // Phase 3: something tried to fix
   | 'remediation_outcome'       // Phase 3: result of the attempt
   | 'diagnosis'                 // Phase 2: agent annotated diagnosis
-  | 'note';                     // free-form human note
+  | 'note'                      // free-form human note
+  // Triage agent lifecycle events (system monitor triage + diagnosis flow)
+  | 'agent_triage_skipped'
+  | 'agent_triage_failed'
+  | 'agent_triage_timed_out'
+  | 'agent_auto_escalated'
+  | 'agent_diagnosis_added'
+  | 'heuristic_fired'
+  | 'heuristic_suppressed'
+  | 'sweep_completed'
+  | 'sweep_capped'
+  | 'prompt_generated';
 
 export type SystemIncidentActorKind = 'system' | 'user' | 'agent';
 

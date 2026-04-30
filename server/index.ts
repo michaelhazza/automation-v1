@@ -521,7 +521,7 @@ async function start() {
       // (terminal attempt). Earlier-attempt throws rethrow without emitting.
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        const retryCount = getRetryCount(job as { retrycount?: number } & Record<string, unknown>);
+        const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
         await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
       });
     } catch (err) {

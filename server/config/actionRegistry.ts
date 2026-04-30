@@ -52,6 +52,10 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
+export interface IdempotencyContract {
+  ttlClass: 'permanent' | 'long' | 'short';
+}
+
 export interface ActionDefinition {
   actionType: string;
   description: string;
@@ -70,6 +74,11 @@ export interface ActionDefinition {
    * Enforced by verify-idempotency-strategy-declared.sh.
    */
   idempotencyStrategy: IdempotencyStrategy;
+
+  // Manager-role guard — spec §9.4
+  managerAllowlistMember?: boolean;
+  directExternalSideEffect?: boolean;
+  sideEffectClass?: 'read' | 'write' | 'none';
 
   /**
    * P1.1 Layer 3 — declarative scope metadata consumed by the before-tool

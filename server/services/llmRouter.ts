@@ -1286,9 +1286,14 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // payloadInsertStatus='failed' fallback in the catch handler.
     terminalStatus = callStatus;
     if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
+      // Cast widens from null (narrowed by the outer !providerResponse guard) back to
+      // ProviderResponse | null — adapters can set providerResponse to a partial
+      // result before throwing, so the guard can be false at the TS-narrowing level
+      // while providerResponse is actually non-null at runtime (streaming abort path).
+      const capturedProviderResponse = providerResponse as import('./providers/types.js').ProviderResponse | null;
       const partialResponse: Record<string, unknown> | null =
-        providerResponse !== null
-          ? (providerResponse as unknown as Record<string, unknown>)
+        capturedProviderResponse !== null
+          ? (capturedProviderResponse as unknown as Record<string, unknown>)
           : null;
 
       // Token counts + cost on the failure path. When the adapter surfaced a
@@ -1299,9 +1304,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       let failureTokensIn = 0;
       let failureTokensOut = 0;
       let failureCostCents = 0;
-      if (providerResponse !== null) {
-        failureTokensIn = providerResponse.tokensIn ?? 0;
-        failureTokensOut = providerResponse.tokensOut ?? 0;
+      if (capturedProviderResponse !== null) {
+        failureTokensIn = capturedProviderResponse.tokensIn ?? 0;
+        failureTokensOut = capturedProviderResponse.tokensOut ?? 0;
         if (failureTokensIn > 0 || failureTokensOut > 0) {
           try {
             const failureCostResult = await pricingService.calculateCost(
@@ -1310,7 +1315,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
               failureTokensIn,
               failureTokensOut,
               ctx.organisationId,
-              providerResponse.cachedPromptTokens ?? 0,
+              capturedProviderResponse.cachedPromptTokens ?? 0,
               ctx.sourceType,
             );
             failureCostCents = failureCostResult.costWithMarginCents;

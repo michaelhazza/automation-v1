@@ -193,6 +193,7 @@ export async function finaliseAgentRunFromIeeRun(
   let parentSubaccountId: string | null = null;
   let parentIsSubAgent = false;
   let parentAgentId: string | null = null;
+  let parentOrganisationId: string | null = null;
 
   await db.transaction(async (tx) => {
     // IMPORTANT: this transaction deliberately does NOT invoke the normal
@@ -273,6 +274,7 @@ export async function finaliseAgentRunFromIeeRun(
     parentSubaccountId = parent.subaccountId ?? null;
     parentIsSubAgent = parent.isSubAgent ?? false;
     parentAgentId = parent.agentId ?? null;
+    parentOrganisationId = parent.organisationId ?? null;
     const summary = buildSummaryFromIeeRun(ieeRun);
     const startedAt = parent.startedAt ?? ieeRun.startedAt ?? parent.createdAt;
     const completedAt = ieeRun.completedAt ?? new Date();
@@ -394,7 +396,7 @@ export async function finaliseAgentRunFromIeeRun(
     });
 
     if (!parentIsSubAgent) {
-      emitOrgUpdate(parent.organisationId, 'dashboard.activity.updated', {
+      emitOrgUpdate(parentOrganisationId!, 'dashboard.activity.updated', {
         source: 'agent_run',
         runId: ieeRun.agentRunId,
         finalStatus: resolvedStatus,

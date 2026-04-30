@@ -173,7 +173,7 @@ test('cancellable status set matches in-flight non-cancelling statuses', () => {
       IN_FLIGHT_RUN_STATUSES.includes(s as any),
       `${s} must be in IN_FLIGHT_RUN_STATUSES`,
     );
-    assert(s !== 'cancelling', `${s} must not be 'cancelling'`);
+    assert((s as string) !== 'cancelling', `${s} must not be 'cancelling'`);
   }
 });
 

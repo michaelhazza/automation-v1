@@ -42,7 +42,7 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 // and DB connection setup are bypassed entirely. Type-cast placeholders satisfy
 // TypeScript while dead code under SKIP is never reached.
 let db: Awaited<typeof import('../../db/index.js')>['db'];
-let client: Awaited<typeof import('../../db/index.js')>['client'];
+let client: Awaited<typeof import('../../db/index.js')>['client'] | undefined;
 let sql: Awaited<typeof import('drizzle-orm')>['sql'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
@@ -503,7 +503,7 @@ if (!SKIP) {
     console.warn('WARN: cleanup of shared fixture failed:', err);
   } finally {
     try {
-      await client.end();
+      await client?.end();
     } catch {
       // best-effort
     }
