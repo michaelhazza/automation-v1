@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SeatsPanel } from './SeatsPanel';
 import { getSubaccountWorkspaceConfig, configureWorkspace } from '../../lib/api';
+import { MigrateWorkspaceModal } from './MigrateWorkspaceModal';
 
 type Backend = 'synthetos_native' | 'google_workspace' | null;
 
@@ -17,6 +18,7 @@ export function WorkspaceTabContent({ subaccountId }: { subaccountId: string }) 
   const [googleDomain, setGoogleDomain] = useState('');
   const [showGoogleForm, setShowGoogleForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [migrateOpen, setMigrateOpen] = useState(false);
 
   useEffect(() => {
     getSubaccountWorkspaceConfig(subaccountId)
@@ -182,7 +184,28 @@ export function WorkspaceTabContent({ subaccountId }: { subaccountId: string }) 
         </div>
       )}
 
+      {activeBackend && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setMigrateOpen(true)}
+            className="px-4 py-2 text-[13px] border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50"
+          >
+            Migrate to {activeBackend === 'synthetos_native' ? 'Google Workspace' : 'Synthetos native'}…
+          </button>
+        </div>
+      )}
+
       <SeatsPanel subaccountId={subaccountId} />
+
+      {migrateOpen && config && activeBackend && (
+        <MigrateWorkspaceModal
+          subaccountId={subaccountId}
+          currentBackend={activeBackend as 'synthetos_native' | 'google_workspace'}
+          targetBackend={activeBackend === 'synthetos_native' ? 'google_workspace' : 'synthetos_native'}
+          targetConnectorConfigId={config.connectorConfigId ?? ''}
+          onClose={() => setMigrateOpen(false)}
+        />
+      )}
     </div>
   );
 }
