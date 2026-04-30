@@ -793,6 +793,8 @@ export const agentExecutionService = {
         effectiveMasterPrompt,
         dataSourceContents,
         orgProcesses,
+        undefined,
+        runContextData.externalDocumentBlocks,
       );
 
       const systemPromptParts = [basePrompt];
