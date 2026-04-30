@@ -88,6 +88,36 @@ const CTX = { conversationId: 'test-conv-id' };
   console.log('PASS: malformed JSON block');
 }
 
+// 9. Mid-content block is ignored (regex anchors to end of string)
+{
+  const content = 'Some response\n<suggested_actions>[{"kind":"prompt","label":"Click me","prompt":"Do something"}]</suggested_actions>\nMore text after';
+  const { chips, strippedContent } = parseSuggestedActions(content, CTX);
+  assert.equal(chips.length, 0, 'mid-content block returns no chips');
+  assert.equal(strippedContent, content, 'strippedContent unchanged when block is not at end');
+  console.log('PASS: mid-content block is ignored');
+}
+
+// 10. Field-length overflow chips are dropped; valid sibling is kept
+{
+  const longLabel = 'A'.repeat(81);       // exceeds max 80
+  const longPrompt = 'B'.repeat(2001);    // exceeds max 2000
+  const validChip = { kind: 'prompt', label: 'Valid', prompt: 'Do something' };
+  const overflowLabelChip = { kind: 'prompt', label: longLabel, prompt: 'short prompt' };
+  const overflowPromptChip = { kind: 'prompt', label: 'Short label', prompt: longPrompt };
+
+  const contentLabel = `Text\n<suggested_actions>\n${JSON.stringify([overflowLabelChip, validChip])}\n</suggested_actions>`;
+  const { chips: chipsLabel } = parseSuggestedActions(contentLabel, CTX);
+  assert.equal(chipsLabel.length, 1, 'chip with label > 80 chars is dropped');
+  assert.equal(chipsLabel[0].label, 'Valid', 'valid sibling kept after oversized-label drop');
+  console.log('PASS: chip with label > 80 chars is dropped, valid sibling kept');
+
+  const contentPrompt = `Text\n<suggested_actions>\n${JSON.stringify([overflowPromptChip, validChip])}\n</suggested_actions>`;
+  const { chips: chipsPrompt } = parseSuggestedActions(contentPrompt, CTX);
+  assert.equal(chipsPrompt.length, 1, 'chip with prompt > 2000 chars is dropped');
+  assert.equal(chipsPrompt[0].label, 'Valid', 'valid sibling kept after oversized-prompt drop');
+  console.log('PASS: chip with prompt > 2000 chars is dropped, valid sibling kept');
+}
+
 // ── dispatchSuggestedAction routing ──────────────────────────────────────────
 
 const DISPATCH_PARAMS = {
@@ -97,7 +127,7 @@ const DISPATCH_PARAMS = {
   organisationId: 'org-abc',
 };
 
-// 9. save_thread_as_agent → redirectUrl with conversationId
+// 11. save_thread_as_agent → redirectUrl with conversationId
 {
   const result = await dispatchSuggestedAction({ ...DISPATCH_PARAMS, actionKey: 'save_thread_as_agent' });
   assert.equal(result.success, true);
@@ -105,7 +135,7 @@ const DISPATCH_PARAMS = {
   console.log('PASS: save_thread_as_agent redirectUrl');
 }
 
-// 10. schedule_daily → redirectUrl with agentId + tab=scheduling
+// 12. schedule_daily → redirectUrl with agentId + tab=scheduling
 {
   const result = await dispatchSuggestedAction({ ...DISPATCH_PARAMS, actionKey: 'schedule_daily' });
   assert.equal(result.success, true);
@@ -113,7 +143,7 @@ const DISPATCH_PARAMS = {
   console.log('PASS: schedule_daily redirectUrl');
 }
 
-// 11. pin_skill → redirectUrl with agentId + tab=skills
+// 13. pin_skill → redirectUrl with agentId + tab=skills
 {
   const result = await dispatchSuggestedAction({ ...DISPATCH_PARAMS, actionKey: 'pin_skill' });
   assert.equal(result.success, true);

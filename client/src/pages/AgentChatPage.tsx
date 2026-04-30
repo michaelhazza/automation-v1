@@ -8,7 +8,7 @@ import CostMeterPill from '../components/CostMeterPill';
 import SuggestedActionChips from '../components/SuggestedActionChips';
 import { relativeTime } from '../lib/relativeTime';
 import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
-import type { SuggestedAction, SuggestedActionKey } from '../../../shared/types/messageSuggestedActions';
+import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions';
 
 interface AgentRunHandoff {
   version: 1;
@@ -369,21 +369,6 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, []);
 
-  const handleSystemAction = useCallback(async (actionKey: SuggestedActionKey) => {
-    if (!agentId || !activeConvId) return;
-    const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant');
-    if (!lastAssistantMsg) return;
-    const { data } = await api.post(
-      `/api/agents/${agentId}/conversations/${activeConvId}/messages/${lastAssistantMsg.id}/dispatch-action`,
-      { actionKey },
-    );
-    if (data.redirectUrl) {
-      navigate(data.redirectUrl);
-    }
-    // If no redirect, the chip component shows a brief "Done" state.
-    // Errors propagate as thrown exceptions so the chip shows inline error state.
-  }, [agentId, activeConvId, messages, navigate]);
-
   if (loading) {
     return (
       <div className="flex flex-col h-[calc(100vh-64px)]">
@@ -641,11 +626,13 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
               if (visibleMessages[i].role === 'assistant') { lastAssistantMsg = visibleMessages[i]; break; }
             }
             const chips = lastAssistantMsg?.suggestedActions ?? [];
-            return chips.length > 0 && !sending ? (
+            return chips.length > 0 && !sending && agentId && activeConvId ? (
               <SuggestedActionChips
+                messageId={lastAssistantMsg!.id}
+                agentId={agentId}
+                convId={activeConvId}
                 chips={chips}
                 onPromptFill={handlePromptFill}
-                onSystemAction={handleSystemAction}
                 disabledKeys={[]}
               />
             ) : null;

@@ -1,14 +1,22 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import api from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 import type { SuggestedAction, SuggestedActionKey } from '../../../shared/types/messageSuggestedActions';
 
 interface Props {
+  messageId: string;
+  agentId: string;
+  convId: string;
   chips: SuggestedAction[];
   onPromptFill: (prompt: string) => void;
-  onSystemAction: (actionKey: SuggestedActionKey) => Promise<void>;
   disabledKeys?: SuggestedActionKey[];
 }
 
-export default function SuggestedActionChips({ chips, onPromptFill, onSystemAction, disabledKeys = [] }: Props) {
+export default function SuggestedActionChips({ messageId, agentId, convId, chips, onPromptFill, disabledKeys = [] }: Props) {
+  const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   const [pendingKey, setPendingKey] = useState<SuggestedActionKey | null>(null);
   const [doneKey, setDoneKey] = useState<SuggestedActionKey | null>(null);
   const [errorKey, setErrorKey] = useState<SuggestedActionKey | null>(null);
@@ -19,17 +27,25 @@ export default function SuggestedActionChips({ chips, onPromptFill, onSystemActi
     setErrorKey(null);
     setDoneKey(null);
     try {
-      await onSystemAction(actionKey);
-      // If onSystemAction navigates away the component unmounts — this branch
-      // only runs when it resolves without a redirect (e.g. a no-redirect action).
-      setDoneKey(actionKey);
-      setTimeout(() => setDoneKey(null), 1500);
+      const { data } = await api.post(
+        `/api/agents/${agentId}/conversations/${convId}/messages/${messageId}/dispatch-action`,
+        { actionKey },
+      );
+      if (data.redirectUrl) {
+        navigate(data.redirectUrl);
+        return;
+      }
+      // No redirect — show brief "Done" state, guarded against unmount.
+      if (mountedRef.current) {
+        setDoneKey(actionKey);
+        setTimeout(() => { if (mountedRef.current) setDoneKey(null); }, 1500);
+      }
     } catch {
-      setErrorKey(actionKey);
+      if (mountedRef.current) setErrorKey(actionKey);
     } finally {
-      setPendingKey(null);
+      if (mountedRef.current) setPendingKey(null);
     }
-  }, [pendingKey, onSystemAction]);
+  }, [pendingKey, agentId, convId, messageId, navigate]);
 
   if (chips.length === 0) return null;
 

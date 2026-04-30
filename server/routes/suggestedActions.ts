@@ -51,7 +51,12 @@ router.post(
       return;
     }
 
-    // Verify message exists in this conversation
+    // Verify message exists in this conversation.
+    // Safety by transitivity: the conversation check above already confirmed
+    // that convId belongs to this orgId + agentId + userId, so any message
+    // row with conversationId === convId is implicitly within scope. The
+    // conversationId predicate here is therefore both a functional lookup
+    // filter and a belt-and-suspenders ownership assertion.
     const [msg] = await db
       .select()
       .from(agentMessages)
