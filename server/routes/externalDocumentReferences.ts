@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { referenceDocuments, documentBundleAttachments, documentFetchEvents } from '../db/schema/index.js';
 import { eq, and, isNull, desc, count } from 'drizzle-orm';
 import * as documentBundleService from '../services/documentBundleService.js';
@@ -24,6 +25,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { taskId } = req.params;
 
     const attachments = await documentBundleService.listAttachmentsForSubject({
@@ -72,6 +74,7 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { subaccountId, taskId } = req.params;
     const { connectionId, fileId, fileName, mimeType } = req.body as {
       connectionId?: string;
@@ -201,6 +204,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { subaccountId, taskId, referenceId } = req.params;
     const db = getOrgScopedDb('externalDocumentReferences.delete');
 
@@ -263,6 +267,7 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { subaccountId, referenceId } = req.params;
     const { connectionId } = req.body as { connectionId?: string };
 
@@ -319,6 +324,7 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { taskId } = req.params;
     const { fetchFailurePolicy } = req.body as { fetchFailurePolicy?: FetchFailurePolicy };
 
