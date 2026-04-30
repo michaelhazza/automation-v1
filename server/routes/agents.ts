@@ -87,13 +87,29 @@ router.post('/api/agents/:id/data-sources/upload', authenticate, requireOrgPermi
 }));
 
 router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(createDataSourceBody, 'warn'), asyncHandler(async (req, res) => {
-  const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes } = req.body;
-  if (!name || !sourceType || !sourcePath) {
-    res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+  const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, connectionId } = req.body;
+  if (!name || !sourceType) {
+    res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });
+    return;
+  }
+  if (sourceType === 'google_drive') {
+    if (!connectionId) {
+      res.status(400).json({ error: 'Validation failed', details: 'connectionId is required for google_drive sources' });
+      return;
+    }
+    const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
+    // Spec §5.3 — Drive connections are subaccount-scoped (also accept org-level rows).
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
+    if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
+      res.status(422).json({ error: 'invalid_connection_id' });
+      return;
+    }
+  } else if (!sourcePath) {
+    res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
     return;
   }
   const result = await agentService.addDataSource(req.params.id, req.orgId!, {
-    name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes,
+    name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, connectionId,
   });
   res.status(201).json(result);
 }));

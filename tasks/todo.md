@@ -1987,6 +1987,83 @@ These are directional gaps where the implementation diverges from the plan in wa
 
 ---
 
+## Deferred from spec-conformance review — external-doc-references (2026-04-30)
+
+**Captured:** 2026-04-30T11:21:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-external-doc-references-2026-04-30T11-21-30Z.md`
+**Spec:** `docs/external-document-references-spec.md`
+
+- [ ] REQ #C1 — `runContextData.externalDocumentBlocks` is computed but never injected into the system prompt
+  - Spec section: §9.1 "Where external references inject" + §13.6 "agentExecutionService.ts add 'google_drive' branch"
+  - Gap: `loadExternalDocumentBlocks` returns assembled provenance+content blocks on `runContextData.externalDocumentBlocks`, but `agentExecutionService.executeRun()` never reads or appends them. The Knowledge Base block in `buildSystemPrompt` only consumes `runContextData.eager`. As a result, attached Drive references resolve, write `document_fetch_events` rows, and update `attachment_state` — but their content never reaches the LLM.
+  - Suggested approach: extend `agentExecutionService` to merge `externalDocumentBlocks` into the prompt (either folded into `dataSourceContents` as pseudo-sources, or as a sibling section after the Knowledge Base block). Decide whether the existing 60K-token Knowledge-Base budget governs the merged set or only the eager sources. Document the choice in the spec or an addendum.
+
+- [ ] REQ #C2 — Resolver write atomicity contract not honoured
+  - Spec section: §17.8 "Resolver write atomicity"
+  - Gap: spec mandates the cache upsert + `document_fetch_events` append + `reference_documents.attachment_state` update execute in a single transaction using the caller's scoped DB client. Implementation in `externalDocumentResolverService.ts` opens its own `db.transaction(...)` only around the cache upsert; the audit-log insert and `transitionState` happen on module-level `db` outside any transaction. `params.db` is accepted but unused.
+  - Suggested approach: thread the caller's scoped DB client through every write, or document an explicit deviation from §17.8 in the spec. The current single-flight + advisory-lock arrangement is intentional per plan invariant #1, so the deviation may be defensible — but it must be made explicit and the log/audit-row consistency surfaced (e.g., what happens if cache upsert succeeds and audit insert fails).
+
+- [ ] REQ #C3 — Route paths and permission keys diverge from spec §10.2 / §12.2
+  - Spec section: §10.2, §12.2, §13.7
+  - Gap: spec lists routes as `POST /api/tasks/:taskId/external-references` etc. with permission `org.tasks.manage`. Implementation registers `POST /api/subaccounts/:subaccountId/tasks/:taskId/external-references` etc. with `WORKSPACE_MANAGE`. The route shape is consistent with the broader codebase's subaccount-scoped convention, and `WORKSPACE_MANAGE` may be the correct local equivalent of `org.tasks.manage`. Both need an explicit decision.
+  - Suggested approach: amend the spec to acknowledge the codebase's actual `/api/subaccounts/:subaccountId/...` convention, or migrate the routes to match the spec verbatim. Either way, document the permission-key mapping (`org.tasks.manage` → `WORKSPACE_MANAGE`?) in `architecture.md` so the next reviewer doesn't re-flag it.
+
+- [ ] REQ #C4 — Picker-token and verify-access routes lack permission guard
+  - Spec section: §12.2 "Route guards"
+  - Gap: spec requires `requirePermission('org.integrations.manage')` on `GET /api/integrations/google-drive/picker-token` and `GET /api/integrations/google-drive/verify-access`. Implementation only has `authenticate` — anyone authenticated against the org can mint a picker token or probe Drive metadata for any connection in the org.
+  - Suggested approach: add the missing permission middleware. Verify the equivalent local permission key (likely `INTEGRATIONS_MANAGE` or similar) and apply it to both routes.
+
+- [ ] REQ #C5 — Per-task connection_id validation does not check subaccount scope
+  - Spec section: §10.4, §12.2
+  - Gap: attach + scheduledTasks + agents data-source routes call `getOrgConnectionWithToken(connectionId, req.orgId!)` and check `providerType === 'google_drive'` and `connectionStatus === 'active'`. They do not verify that the connection belongs to the *caller's subaccount*. A user attaching to subaccount A could supply a connection_id that belongs to subaccount B in the same org.
+  - Suggested approach: add a subaccount equality check (`conn.subaccountId === subaccountId`) on every attach path. Return `422 invalid_connection_id` per spec §17.6 when the check fails.
+
+- [ ] REQ #C6 — `invalid_connection_id` error code not used
+  - Spec section: §17.6 "Unique constraint HTTP mapping"
+  - Gap: spec mandates `{ "error": "invalid_connection_id" }` for invalid-connection cases. Implementation returns `connection_not_found` (404) or `connection_not_active` (422) instead. Splitting into two error codes loses information for the client and diverges from the contract.
+  - Suggested approach: either adopt the spec's single `invalid_connection_id` code (matching §17.6 verbatim) or amend the spec to allow the more granular pair. Pick one and align both server + client.
+
+- [ ] REQ #C7 — `ExternalDocumentRebindModal` missing "Remove reference instead" button
+  - Spec section: §10.5 "Re-attach modal"
+  - Gap: spec lists five elements of the modal, including a "Remove reference instead" text button. Implementation has Cancel + Re-attach only. A user who realises mid-rebind that they don't want the reference at all has to close, scroll back to the broken row, and click delete.
+  - Suggested approach: add a tertiary "Remove reference instead" button in the modal footer that calls `removeExternalReference(...)` and closes both the modal and (if applicable) refreshes the parent's reference list.
+
+- [ ] REQ #C8 — `cache_minutes` / TTL fallback path for null-revisionId not exercised
+  - Spec section: §7.2 "Null revisionId path"
+  - Gap: spec defines a TTL-based freshness fallback when `checkRevision()` returns null (provider offered no revision token). Implementation in `externalDocumentResolverService.doResolve` treats null revisionId the same as a mismatched revision (always refetches), with no TTL check. This produces a permanent cache-miss loop for any provider/file that has no revisionId — the exact failure mode §7.2 was written to prevent.
+  - Suggested approach: add the spec's null-revisionId branch — if `meta.revisionId === null` and the cache row's `revision_id` is also null, compare `cacheRow.fetchedAt` against `now() - cache_ttl_minutes` (default 60 minutes per §7.2) and serve cached content if within TTL. Otherwise refetch. Pull the TTL value from the spec's named constant (add it to `server/lib/constants.ts` if not present).
+
+- [ ] REQ #C9 — `EXTERNAL_DOC_RESOLVER_VERSION` constant referenced by plan but absent
+  - Spec section: §13.6 implementation notes; plan Phase 2 task list
+  - Gap: plan Phase 2 task list (line 1113) names `EXTERNAL_DOC_RESOLVER_VERSION` as a constant to add to `server/lib/constants.ts`. Spec §6.3 explicitly says "no separate global constant" — the resolver's own `resolverVersion` property is the source of truth. Implementation matches the spec (no global constant, resolver carries `resolverVersion: 1`). The plan disagrees with the spec.
+  - Suggested approach: spec is authoritative; this is informational. Update the plan to remove the misleading line so future contributors don't add a redundant constant.
+
+- [ ] REQ #C10 — `loadExternalDocumentBlocks` injects placeholder lines that are not part of the spec's provenance contract
+  - Spec section: §9.3 "Provenance metadata", invariant #10 "Deterministic ordering under failure"
+  - Gap: implementation emits `[External document "{name}" skipped: {reason}]` for skipped/over-quota/budget-blown references. Plan invariant #10 specifies a specific shape: `--- Document: <name>\nStatus: skipped (reason: <reason>)\n---`. Current placeholders use a different format that mixes square brackets and colon-separated reasons rather than the document-block shape that mirrors the success case.
+  - Suggested approach: align the placeholder format with invariant #10's prescribed shape. Reuse `buildProvenanceHeader` or extract a sibling helper so a future schema change to the header propagates uniformly.
+
+- [ ] REQ #C11 — Wall-clock budget enforcement does not write `document_fetch_events` rows
+  - Spec section: §6.5 "Provider call timeouts" / plan invariant #2 "Hard-fail timeout"
+  - Gap: when `EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS` is exceeded mid-loop, `loadExternalDocumentBlocks` pushes a placeholder string into `blocks` and continues. No `document_fetch_events` row with `failure_reason = 'budget_exceeded'` is written for the skipped reference. Spec §17.5 ("no-silent-partial-success") requires every failure path to produce a visible audit trace.
+  - Suggested approach: when the wall-clock budget is exceeded, write a `document_fetch_events` row directly (or call a helper on the resolver) with `failure_reason = 'budget_exceeded'`, `cache_hit = false`, `tokens_used = 0` for each skipped reference. Same treatment for the over-quota loop at the bottom of the function.
+
+- [ ] REQ #C12 — Spec authoritative path mismatch with user invocation
+  - Spec section: §13.7 — file inventory
+  - Gap: user's invocation listed expected files including `client/src/lib/externalDocumentReferences.ts` (api client) and `client/src/components/GoogleDrivePickerButton.tsx`. Actual files are `client/src/api/externalDocumentReferences.ts` and `client/src/components/DriveFilePicker.tsx`. The actual paths are consistent with the spec (§13.9 names `DriveFilePicker.tsx`); the user's invocation message had stale names. Informational only — not a code gap.
+  - Suggested approach: no action; flagged so future readers of this log can reconcile the user's invocation text with the actual file paths.
+
+- [ ] PDF support requires `pdf-parse` dependency declaration (dual-reviewer 2026-04-30)
+  - Source: dual-reviewer Codex P2 finding on `client/src/components/DriveFilePicker.tsx:4-7`
+  - Spec section: §9.3 "MIME types" — PDF (`application/pdf`) is listed as Supported (line 384)
+  - Gap: `server/services/resolvers/googleDriveResolver.ts` PDF branch dynamically imports `pdf-parse`, but the package is not declared in `package.json` dependencies. Every PDF picked through `DriveFilePicker.tsx` will fetch bytes and then fall into `unsupported_content` at run time, marking the reference `broken`.
+  - Why deferred: dual-reviewer cannot edit `package.json` without explicit human approval (config-protection hook). Two fixes are possible:
+    - **Preferred (spec-aligned):** add `"pdf-parse": "^1.1.1"` to `package.json` dependencies. Verify the dynamic import path matches the package's main export. This requires HITL approval to edit `package.json`.
+    - **Alternative (capability-aligned):** drop `'application/pdf'` from `SUPPORTED_MIME_TYPES` in `client/src/components/DriveFilePicker.tsx` and from the resolver's `SUPPORTED_MIME_TYPES` set, plus update spec §9.3 to mark PDF as deferred to a follow-up.
+  - Recommended action: take the preferred fix (add pdf-parse to package.json) on the next manual session; spec already promises PDF support.
+
+---
+
 ## Deferred: agentic-engineering-notes follow-ups (2026-04-30)
 
 **Branch:** `claude/agentic-engineering-notes-WL2of`
@@ -2009,6 +2086,49 @@ These are directional gaps where the implementation diverges from the plan in wa
 
 ---
 
+## Deferred from ChatGPT PR review — external-doc-references (2026-05-01)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review
+
+### D-GPT-1: Retry suppression is process-local — multi-instance stampede risk
+
+`server/services/externalDocumentRetrySuppression.ts` — `RetrySuppressor` uses an in-memory `Map`. Under multi-node deployment each instance suppresses independently; a failing document gets hammered once per instance per suppression window instead of once globally.
+
+Options:
+- Lightweight: read `document_fetch_events` for the reference and check `fetched_at > now() - suppression_window` before retrying. Adds one DB read per resolve call on the hot path.
+- Preferred: persist `suppressUntil` to a shared cache (Redis or a `document_suppression` table). Requires infra decision.
+- Minimum viable: note the single-node assumption in a code comment so future multi-node work doesn't miss this.
+
+### D-GPT-2: Token counting uses character-approximation throughout
+
+`server/services/externalDocumentResolverPure.ts` — `countTokensApprox` uses `Math.ceil(charCount / 4)`. Final prompt assembly re-uses the same approximation, so in theory the assembled prompt could exceed a model's true token limit by the approximation error margin (typically ±5–10% for structured data).
+
+Fix when real token budget accuracy matters: add `tiktoken` or `@anthropic-ai/tokenizer` for a final boundary check after prompt assembly. Keep the approximation for all pre-checks (it's fast and conservative enough there).
+
+### D-GPT-3: attachment_order defaults to 0 — ordering relies on created_at tiebreaker
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `attachment_order DEFAULT 0`. All newly attached references land at order 0, so ordering falls back to `created_at` ascending. This is deterministic but not semantically meaningful.
+
+Address when a reordering UI is added: expose explicit `attachment_order` assignment on insert (e.g., `MAX(attachment_order) + 1` per bundle) and add an API endpoint for reorder operations.
+
+### D-GPT-4: Additional observability signals missing
+
+The `document_fetch_events` table is well-designed but the following runtime signals are not emitted:
+- Retry suppression hits (when `shouldSuppress` returns true — currently silent)
+- Single-flight collisions (when a duplicate key is already in-flight)
+- Resolver timeout vs. failure distinction (network timeout vs. provider error)
+
+Add structured log lines for each when the observability layer is extended.
+
+### D-GPT-5: failure_reason is untyped at DB level
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `failure_reason varchar(64)` with no CHECK constraint. TypeScript `FetchFailureReason` union provides compile-time safety, but nothing prevents invalid strings via direct SQL.
+
+Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','network_error','quota_exceeded','budget_exceeded','unsupported_content'))` in a future migration. Low urgency — TS types already enforce this on all code paths.
+
+---
+
 ## Doc drift backlog (audit 2026-05-01)
 
 - [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
@@ -2027,3 +2147,14 @@ These are directional gaps where the implementation diverges from the plan in wa
 
 - [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
 - [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
+
+## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review — 2026-05-01
+
+### D-R1-F5: Rebind modal does not verify access before confirm
+
+`RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
+
+Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.

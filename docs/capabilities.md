@@ -969,7 +969,7 @@ Complete list of all 112 skills.
 | **Cloudflare R2** | JSON, CSV, Markdown, Text | Eager or lazy |
 | **AWS S3** | JSON, CSV, Markdown, Text | Eager or lazy |
 | **HTTP URL** | Auto-detected | Eager or lazy, with encrypted headers |
-| **Google Docs** | Auto-detected | OAuth-authenticated |
+| **Google Drive (live)** | Google Docs (text), Google Sheets (CSV), PDF | OAuth-authenticated, live — fetched at run time, cached, always current |
 | **Dropbox** | Auto-detected | OAuth-authenticated |
 | **File Upload** | Any supported format | Direct upload to R2/S3 |
 
