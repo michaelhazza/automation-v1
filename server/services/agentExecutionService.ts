@@ -264,6 +264,12 @@ export interface AgentRunRequest {
    */
   delegationScope?: DelegationScope;
   delegationDirection?: DelegationDirection;
+  /**
+   * When the run is triggered from a conversation context (e.g. chat panel
+   * test-run), the caller passes the conversationId here so that integration
+   * card messages can be persisted to agent_messages.
+   */
+  conversationId?: string;
 }
 
 export interface AgentRunResult {
@@ -274,7 +280,9 @@ export interface AgentRunResult {
   // iee-run-completed event handler. Callers that need a terminal result
   // must subscribe to WebSocket `agent:run:completed` or poll the agent
   // run status until it leaves 'delegated'.
-  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'blocked_awaiting_integration' — run is paused waiting for the user to
+  // connect an OAuth integration. Not terminal; completedAt is NOT written.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'blocked_awaiting_integration';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -1363,6 +1371,22 @@ export const agentExecutionService = {
       const durationMs = Date.now() - startTime;
       let finalStatus = (loopResult.finalStatus ?? 'completed') as
         'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'cancelled';
+
+      if (loopResult.finalStatus === 'blocked_awaiting_integration') {
+        // Run is paused — do NOT write completedAt or trigger finalisation.
+        // The blocked state has already been persisted inside the loop.
+        return {
+          runId: run.id,
+          status: 'blocked_awaiting_integration' as AgentRunResult['status'],
+          summary: null,
+          totalToolCalls: loopResult.totalToolCalls,
+          totalTokens: loopResult.totalTokens,
+          durationMs,
+          tasksCreated: loopResult.tasksCreated,
+          tasksUpdated: loopResult.tasksUpdated,
+          deliverablesCreated: loopResult.deliverablesCreated,
+        };
+      }
 
       // Pre-fetch runMetadata once — consumed by both the Reporting Agent
       // finalize hook and Phase B's runResultStatus derivation (which reads
@@ -2693,7 +2717,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             {
               organisationId: request.organisationId,
               subaccountId: request.subaccountId ?? null,
-              conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
               runId,
               agentId: request.agentId,
               currentBlockSequence: newBlockSeq,
@@ -2715,7 +2739,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
             logger.error('tool_not_resumable', {
               runId,
-              conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
               blockedReason: 'integration_required',
               toolName: toolCall.name,
               action: 'tool_not_resumable',
@@ -2762,7 +2786,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
           logger.info('run_blocked', {
             runId,
-            conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
             blockedReason: 'integration_required',
             integrationId: blockDecision.integrationId,
             blockSequence: newBlockSeq,
@@ -2770,10 +2794,11 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           });
 
           // Persist the integration card as an assistant message in the conversation.
-          // NOTE: conversationId is '' for now — will be threaded through when agent_runs gets conversation_id.
-          // Skip insert if conversationId is empty (v1 limitation).
-          // ctx.conversationId is the value passed into checkRequiredIntegration above.
-          const _integrationConvId = ''; // TODO(v2): use ctx.conversationId once threaded via AgentRunRequest
+          // Skip insert if conversationId is empty — guard prevents a DB error when no conversation is associated.
+          const _integrationConvId =
+            request.conversationId ??
+            (request.triggerContext?.conversationId as string | undefined) ??
+            '';
           if (_integrationConvId) {
             await db.insert(agentMessages).values({
               conversationId: _integrationConvId,
