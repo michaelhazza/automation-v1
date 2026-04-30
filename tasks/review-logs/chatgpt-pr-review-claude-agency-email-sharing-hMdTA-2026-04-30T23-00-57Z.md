@@ -5,8 +5,8 @@
 - PR: #242 — https://github.com/michaelhazza/automation-v1/pull/242
 - Mode: manual
 - Started: 2026-04-30T23:00:57Z
-- Status: IN_PROGRESS
-- Verdict: —
+- Status: FINALISED
+- Verdict: APPROVED
 
 ### Context
 Previous attempt (2026-04-30T21-14-17Z) was ABORTED — full diff (~7.68M tokens) exceeded gpt-4.1 rate limit.
@@ -40,4 +40,23 @@ This session uses corrected diff base (`origin/main`, not local `main`) → 460K
 ### Round 2 commit
 `3fde398e` — fix(external-doc-refs): ChatGPT round-2 — memoize onClose, rebind access verification
 
+| 3 | C1 | Ordering determinism | technical | verified | covered | `mergeAndOrderReferences` sorts by `attachmentOrder` then `createdAt` — deterministic, no insertion-order fallback |
+| 3 | C2 | Idempotency of cache/event writes | technical | verified | covered | Cache uses `onConflictDoUpdate` on 4-col key; fetch events use `onConflictDoNothing` (invariant #12) |
+| 3 | C3 | Degraded→broken staleness boundary | technical | verified | covered | Every stale-serve path calls `isPastStalenessBoundary` first; past boundary → `emitFailure`, not stale serve |
+| 3 | C4 | Resolver version drift within a run | technical | verified | covered | `googleDriveResolver` is a module-level singleton; all refs in a run bind to the same instance |
+| 3 | C5 | Budget starvation (per-doc cap + global cap) | technical | verified | covered | `enforceRunBudget` applies global hard cap AFTER per-doc 30% truncation |
+| 3 | C6 | `serve_stale_silent` observability | technical | implement | implemented | `emitStructuredLog` now includes `stalenessSecs`; `serveCacheAsDegraded` computes and passes it |
+
+### Round 3 commit
+`d09066d5` — fix(external-doc-refs): log staleness duration on serve_stale_silent path
+
 ---
+
+## Final Summary
+- KNOWLEDGE.md updated: yes (3 entries: resolver version in cache key, CRLF fixture gate, integration-reference primary slug; + 1 entry useCallback for effect deps)
+- architecture.md updated: yes (External Document References section + Key files row)
+- capabilities.md updated: yes (Data Sources — Google Drive row updated to live/OAuth)
+- integration-reference.md updated: yes (Google Drive block — applied in gate-fix commit)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — no new build discipline or conventions introduced
+- frontend-design-principles.md updated: no — no new UI patterns in this PR
+- Verdict: APPROVED — all ChatGPT blockers resolved across 3 rounds; 6 final-pass checks all covered or fixed
