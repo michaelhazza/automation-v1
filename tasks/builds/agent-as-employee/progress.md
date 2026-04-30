@@ -109,6 +109,24 @@ Pending — to be completed during Task A4.
 - `processIdentityMigration` in E4 contract tests is tested at adapter level only (no DB mock) — full service-level orchestration tests with audit event assertions run in CI under `test:gates`. This is documented in the test file.
 - Migration status-poll `total` count is derived from terminal `audit_events` rows (best-effort), not from a separate batch-count store. Acceptable for v1.
 
+## PR Reviewer findings (2026-04-30)
+
+**B1 (blocking):** `WorkspaceTabContent.tsx` passes `config.connectorConfigId` (the **source** backend's connector ID) as `targetConnectorConfigId` to the migrate modal. The modal forwards it to `POST /workspace/migrate`, which then provisions the new identity under the wrong connector config. Migration flow is unreachable/broken for non-trivial cases. Fix requires:
+  1. Server-side validation in `POST /workspace/migrate` that the `targetConnectorConfigId` belongs to a connector with `connectorType === targetBackend` and `organisationId === req.orgId`
+  2. UI needs a way to select or create the target connector config before opening the modal
+
+**S1:** `workspace.migrate-identity` enqueue site uses `(boss as any).send()` with `satisfies` only — no Zod validation per `pgboss-zod-hardening-spec.md`.
+
+**S2:** `targetConnectorConfigId` not validated server-side (type, org scope, subaccount scope).
+
+**S3:** Org-chart endpoint can emit duplicate actor rows during migration window (actor briefly has 2 non-archived identities).
+
+**S4:** `MigrateWorkspaceModal.handleMigrate` should defensively clear any existing poll interval before starting a new one.
+
+**S5:** `workspaceOnboardingService.test.ts` `WorkspaceAdapter` type extraction resolves to `never` — NOOP_ADAPTER shape is unchecked.
+
+**N1–N4:** Minor non-blocking improvements (see full review log in review-logs/).
+
 ## Open questions
 
 (none)
