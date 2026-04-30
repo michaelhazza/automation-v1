@@ -26,6 +26,7 @@ export const documentFetchEvents = pgTable(
     subaccountIdx: index('document_fetch_events_subaccount_idx').on(t.subaccountId),
     referenceIdx:  index('document_fetch_events_reference_idx').on(t.referenceId, t.referenceType),
     runIdx:        index('document_fetch_events_run_idx').on(t.runId),
+    fetchedAtIdx:  index('document_fetch_events_fetched_at_idx').on(t.fetchedAt),
   })
 );
 

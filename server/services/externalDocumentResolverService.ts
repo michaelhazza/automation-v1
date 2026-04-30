@@ -81,12 +81,14 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     return emitFailure(db, p, resolver.resolverVersion, 'auth_revoked', null, startedAt);
   }
 
-  // 2. Cache lookup
+  // 2. Cache lookup — scoped to current resolver version so a stale version's
+  // row is invisible to this version (prevents cross-version overwrites).
   const cached = await db.select().from(documentCache).where(and(
     eq(documentCache.organisationId, p.organisationId),
     eq(documentCache.provider, 'google_drive'),
     eq(documentCache.fileId, p.fileId),
     eq(documentCache.connectionId, p.connectionId),
+    eq(documentCache.resolverVersion, resolver.resolverVersion),
   )).limit(1);
   let cacheRow = cached[0];
 
@@ -197,6 +199,7 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
         eq(documentCache.provider, 'google_drive'),
         eq(documentCache.fileId, p.fileId),
         eq(documentCache.connectionId, p.connectionId),
+        eq(documentCache.resolverVersion, resolver.resolverVersion),
       )).limit(1);
       const peerRow = peer[0];
       if (
@@ -227,7 +230,7 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
         contentHash,
         resolverVersion: resolver.resolverVersion,
       }).onConflictDoUpdate({
-        target: [documentCache.provider, documentCache.fileId, documentCache.connectionId],
+        target: [documentCache.provider, documentCache.fileId, documentCache.connectionId, documentCache.resolverVersion],
         set: {
           content: truncation.content,
           revisionId: providerRevisionId,

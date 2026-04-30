@@ -1999,3 +1999,46 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 ### D4. Spec § 4.2 input-detection wording contradicts § 4.1 tools list
 
 `docs/agentic-engineering-notes-dev-spec.md` § 4.1 declares the agent has tools `Read, Glob, Grep` (no Bash); § 4.2 instructs "Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked)" — which requires shell access `spec-conformance` has but this agent does not. `dual-reviewer` (Codex pass) flagged this as `[P2] Give the agent a way to detect the diff` (`tasks/review-logs/dual-review-log-agentic-engineering-notes-*.md`). The agent definition has been updated in-branch to make the contract self-consistent (caller provides the changed-file set, mirroring `pr-reviewer`'s posture). The spec § 4.2 wording should be aligned in a follow-up commit — drop the "auto-detection" clause and replace with "caller provides the changed-file set, same posture as `pr-reviewer`." Same wording symmetry applies to whatever invocation snippets exist for `adversarial-reviewer`.
+
+---
+
+## Deferred from ChatGPT PR review — external-doc-references (2026-05-01)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review
+
+### D-GPT-1: Retry suppression is process-local — multi-instance stampede risk
+
+`server/services/externalDocumentRetrySuppression.ts` — `RetrySuppressor` uses an in-memory `Map`. Under multi-node deployment each instance suppresses independently; a failing document gets hammered once per instance per suppression window instead of once globally.
+
+Options:
+- Lightweight: read `document_fetch_events` for the reference and check `fetched_at > now() - suppression_window` before retrying. Adds one DB read per resolve call on the hot path.
+- Preferred: persist `suppressUntil` to a shared cache (Redis or a `document_suppression` table). Requires infra decision.
+- Minimum viable: note the single-node assumption in a code comment so future multi-node work doesn't miss this.
+
+### D-GPT-2: Token counting uses character-approximation throughout
+
+`server/services/externalDocumentResolverPure.ts` — `countTokensApprox` uses `Math.ceil(charCount / 4)`. Final prompt assembly re-uses the same approximation, so in theory the assembled prompt could exceed a model's true token limit by the approximation error margin (typically ±5–10% for structured data).
+
+Fix when real token budget accuracy matters: add `tiktoken` or `@anthropic-ai/tokenizer` for a final boundary check after prompt assembly. Keep the approximation for all pre-checks (it's fast and conservative enough there).
+
+### D-GPT-3: attachment_order defaults to 0 — ordering relies on created_at tiebreaker
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `attachment_order DEFAULT 0`. All newly attached references land at order 0, so ordering falls back to `created_at` ascending. This is deterministic but not semantically meaningful.
+
+Address when a reordering UI is added: expose explicit `attachment_order` assignment on insert (e.g., `MAX(attachment_order) + 1` per bundle) and add an API endpoint for reorder operations.
+
+### D-GPT-4: Additional observability signals missing
+
+The `document_fetch_events` table is well-designed but the following runtime signals are not emitted:
+- Retry suppression hits (when `shouldSuppress` returns true — currently silent)
+- Single-flight collisions (when a duplicate key is already in-flight)
+- Resolver timeout vs. failure distinction (network timeout vs. provider error)
+
+Add structured log lines for each when the observability layer is extended.
+
+### D-GPT-5: failure_reason is untyped at DB level
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `failure_reason varchar(64)` with no CHECK constraint. TypeScript `FetchFailureReason` union provides compile-time safety, but nothing prevents invalid strings via direct SQL.
+
+Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','network_error','quota_exceeded','budget_exceeded','unsupported_content'))` in a future migration. Low urgency — TS types already enforce this on all code paths.

@@ -22,7 +22,7 @@ export const documentCache = pgTable(
     updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    providerFileConnUniq: uniqueIndex('document_cache_provider_file_connection_uniq').on(t.provider, t.fileId, t.connectionId),
+    providerFileConnVersionUniq: uniqueIndex('document_cache_provider_file_conn_version_uniq').on(t.provider, t.fileId, t.connectionId, t.resolverVersion),
   })
 );
 
