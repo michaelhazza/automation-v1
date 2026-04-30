@@ -2,6 +2,9 @@
 
 One-screen map from intent to script. For runtime/build conventions see [`../architecture.md`](../architecture.md); for the playbook see [`../CLAUDE.md`](../CLAUDE.md).
 
+`lib/` — shared helpers imported by multiple scripts; not runnable directly.
+`__tests__/` — unit tests for pure helpers in `lib/`; run via `npx tsx scripts/__tests__/<name>.test.ts`.
+
 ---
 
 ## Database & data
@@ -122,6 +125,8 @@ Run with `npx tsx scripts/<name>.ts`. Safe to run locally; these are targeted ch
 - `verify-visibility-parity.sh` — visibility parity across surfaces
 - `verify-workspace-actor-coverage.ts` — workspace actor coverage
 - `verify-workspace-rate-limit-wrapper.ts` — workspace rate-limit wrapper presence
+
+**Artifacts:** `guard-baselines.json` — baseline snapshots consumed by guard scripts; updated by `update-guard-baselines.sh`. `architect-context-expected.txt`, `derived-data-null-safety-fields.txt`, `rls-not-applicable-allowlist.txt` — static reference data consumed by specific verify scripts.
 
 ---
 
