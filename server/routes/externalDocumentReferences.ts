@@ -4,6 +4,7 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { externalDocFlags } from '../lib/featureFlags.js';
 import { referenceDocuments, documentBundleAttachments, documentFetchEvents } from '../db/schema/index.js';
 import { eq, and, isNull, desc, count } from 'drizzle-orm';
 import * as documentBundleService from '../services/documentBundleService.js';
@@ -26,6 +27,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     const { taskId } = req.params;
 
     const attachments = await documentBundleService.listAttachmentsForSubject({
@@ -75,6 +77,8 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
+    if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
     const { subaccountId, taskId } = req.params;
     const { connectionId, fileId, fileName, mimeType } = req.body as {
       connectionId?: string;
@@ -205,6 +209,8 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
+    if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
     const { subaccountId, taskId, referenceId } = req.params;
     const db = getOrgScopedDb('externalDocumentReferences.delete');
 
@@ -268,6 +274,8 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
+    if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
     const { subaccountId, referenceId } = req.params;
     const { connectionId } = req.body as { connectionId?: string };
 
@@ -325,6 +333,8 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
+    if (!externalDocFlags.attachEnabled) return res.status(503).json({ error: 'external_doc_attach_disabled' });
     const { taskId } = req.params;
     const { fetchFailurePolicy } = req.body as { fetchFailurePolicy?: FetchFailurePolicy };
 

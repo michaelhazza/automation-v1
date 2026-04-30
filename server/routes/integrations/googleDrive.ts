@@ -4,6 +4,7 @@ import { ORG_PERMISSIONS } from '../../lib/permissions.js';
 import { integrationConnectionService } from '../../services/integrationConnectionService.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { googleDriveResolver, ResolverError } from '../../services/resolvers/googleDriveResolver.js';
+import { externalDocFlags } from '../../lib/featureFlags.js';
 
 const router = Router();
 
@@ -14,6 +15,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     const { connectionId } = req.query as { connectionId?: string };
     if (!connectionId) return res.status(400).json({ error: 'connectionId_required' });
 
@@ -44,6 +46,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
+    if (externalDocFlags.systemDisabled) return res.status(503).json({ error: 'external_doc_system_disabled' });
     const { connectionId, fileId } = req.query as { connectionId?: string; fileId?: string };
     if (!connectionId || !fileId) {
       return res.status(400).json({ error: 'connectionId_and_fileId_required' });
