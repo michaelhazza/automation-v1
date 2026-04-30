@@ -1,5 +1,5 @@
 import { eq, and, gte } from 'drizzle-orm';
-import { db } from '../../db/index.js'; // guard-ignore: rls-contract-compliance reason="D3 deferred — adapter writes use caller-supplied organisationId; withOrgTx wrap tracked in tasks/todo.md"
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceCalendarEvents } from '../../db/schema/workspaceCalendarEvents.js';
 import { sendThroughProvider } from '../../lib/transactionalEmailProvider.js';
@@ -24,8 +24,9 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
   backend: 'synthetos_native',
 
   async provisionIdentity(params: ProvisionParams): Promise<ProvisionResult> {
+    const scopedDb = getOrgScopedDb('nativeAdapter.provisionIdentity');
     const emailAddress = `${params.emailLocalPart}@${getNativeDomain()}`;
-    const existing = await db
+    const existing = await scopedDb
       .select()
       .from(workspaceIdentities)
       .where(eq(workspaceIdentities.provisioningRequestId, params.provisioningRequestId));
@@ -36,7 +37,7 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
         externalUserId: null,
       };
     }
-    const [row] = await db
+    const [row] = await scopedDb
       .insert(workspaceIdentities)
       .values({
         organisationId: params.organisationId,
@@ -76,7 +77,7 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
   async sendEmail(
     params: SendEmailParams,
   ): Promise<{ externalMessageId: string | null; metadata?: Record<string, unknown> }> {
-    const [identity] = await db
+    const [identity] = await getOrgScopedDb('nativeAdapter.sendEmail')
       .select()
       .from(workspaceIdentities)
       .where(eq(workspaceIdentities.id, params.fromIdentityId));
@@ -99,7 +100,8 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
   },
 
   async createEvent(params: CreateEventParams): Promise<CreateEventResult> {
-    const [identity] = await db
+    const scopedDb = getOrgScopedDb('nativeAdapter.createEvent');
+    const [identity] = await scopedDb
       .select()
       .from(workspaceIdentities)
       .where(eq(workspaceIdentities.id, params.fromIdentityId));
@@ -119,7 +121,7 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
       bodyText: 'You have been invited to a calendar event.',
       attachments: [{ name: 'invite.ics', content: ical, contentType: 'text/calendar; method=REQUEST' }],
     });
-    const [evt] = await db
+    const [evt] = await scopedDb
       .insert(workspaceCalendarEvents)
       .values({
         organisationId: identity.organisationId,
@@ -140,17 +142,18 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
   },
 
   async respondToEvent(eventId: string, response: 'accepted' | 'declined' | 'tentative'): Promise<void> {
-    const [evt] = await db
+    const scopedDb = getOrgScopedDb('nativeAdapter.respondToEvent');
+    const [evt] = await scopedDb
       .select()
       .from(workspaceCalendarEvents)
       .where(eq(workspaceCalendarEvents.id, eventId));
     if (!evt) throw new Error(`Calendar event ${eventId} not found`);
-    const [identity] = await db
+    const [identity] = await scopedDb
       .select()
       .from(workspaceIdentities)
       .where(eq(workspaceIdentities.id, evt.identityId));
     if (!identity) throw new Error(`Identity ${evt.identityId} not found`);
-    await db
+    await scopedDb
       .update(workspaceCalendarEvents)
       .set({ responseStatus: response, updatedAt: new Date() })
       .where(eq(workspaceCalendarEvents.id, eventId));
@@ -174,7 +177,7 @@ export const nativeWorkspaceAdapter: WorkspaceAdapter = {
 
   async fetchUpcoming(identityId: string, until: Date): Promise<CalendarEvent[]> {
     const now = new Date();
-    const rows = await db
+    const rows = await getOrgScopedDb('nativeAdapter.fetchUpcoming')
       .select()
       .from(workspaceCalendarEvents)
       .where(

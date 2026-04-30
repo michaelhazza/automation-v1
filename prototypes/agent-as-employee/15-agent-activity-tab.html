@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>15 — Sarah · Activity tab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 15 / 16 · <span class="muted">SubaccountAgentEditPage — new Activity tab (no new page)</span> · <a href="14-subaccount-activity.html">← Subaccount Activity</a> · <a href="16-migration-modal.html">Next: Migration →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Subaccounts</a>
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><a href="#">Agents</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Sarah</span>
+  </span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim · Acme Agency</span></span></span>
+</div>
+
+<div class="tabs">
+  <a href="09-agent-identity-tab.html">Identity</a>
+  <a href="#">Skills</a>
+  <a href="#">Instructions</a>
+  <a href="#">Budget</a>
+  <a href="#">Scheduling</a>
+  <a href="#">Beliefs</a>
+  <a href="#" class="active">Activity</a>
+</div>
+
+<div class="page" style="max-width: 1080px;">
+  <div class="page-header">
+    <div style="display: flex; gap: 14px; align-items: center;">
+      <span class="avatar avatar-lg avatar-agent">SA</span>
+      <div>
+        <h1 class="page-title">Sarah</h1>
+        <p class="page-sub">Marketing analyst · Specialist · <span class="pill pill-active" style="margin-left: 4px;"><span class="dot"></span>Active</span></p>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border: 1px solid var(--sl-200); border-radius: 8px; margin-bottom: 14px;">
+    <strong class="text-sm">Filter</strong>
+
+    <select class="field-select btn-sm" style="width: auto; padding: 5px 24px 5px 8px; font-size: 12px;">
+      <option>Last 30 days</option>
+      <option>Last 7 days</option>
+      <option>Last 24 hours</option>
+      <option>Custom range</option>
+    </select>
+
+    <select class="field-select btn-sm" style="width: auto; padding: 5px 24px 5px 8px; font-size: 12px;">
+      <option>All actions</option>
+      <option>Email</option>
+      <option>Calendar</option>
+      <option>Agent runs</option>
+      <option>Identity lifecycle</option>
+    </select>
+
+    <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--indigo-50); color: var(--indigo-700); border-radius: 999px; font-size: 11px; font-weight: 500;">
+      <span class="avatar avatar-sm avatar-agent" style="width: 14px; height: 14px; font-size: 8px;">SA</span>
+      Sarah only
+      <span class="text-xs muted">(locked)</span>
+    </span>
+
+    <span style="margin-left: auto;" class="text-xs muted">127 events in selected range</span>
+  </div>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 130px;">Timestamp</th>
+          <th style="width: 200px;">Action</th>
+          <th>Subject</th>
+          <th style="width: 130px;">Initiated by</th>
+          <th style="width: 100px;">Run / context</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-xs muted">29 Apr · 14:18</td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.sent</span></td>
+          <td><strong>To Maya Lim</strong> · "Re: Q2 attribution dashboard"</td>
+          <td class="text-xs muted">self</td>
+          <td><code class="text-xs">run_01HZX5</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 11:30</td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">calendar.event_accept</span></td>
+          <td>Q2 attribution sync (cal.acme.com event)</td>
+          <td class="text-xs muted">self</td>
+          <td><code class="text-xs">run_01HZX1</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 09:14</td>
+          <td><span class="pill pill-active" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;"><span class="dot"></span>agent_run.completed</span></td>
+          <td>skill: marketing-analyst:cohort_analysis · 3 tool calls · 28s</td>
+          <td class="text-xs muted">scheduled</td>
+          <td><code class="text-xs">run_01HZWY</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 09:13</td>
+          <td><span class="pill" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; background: var(--indigo-100); color: var(--indigo-700);">agent_run.started</span></td>
+          <td>Heartbeat trigger · model claude-sonnet-4-6</td>
+          <td class="text-xs muted">scheduled</td>
+          <td><code class="text-xs">run_01HZWY</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 09:08</td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.received</span></td>
+          <td>From maya@acme.com · "Q2 attribution dashboard"</td>
+          <td class="text-xs muted">—</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">28 Apr · 17:02</td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.received</span></td>
+          <td>From johnny@acme.synthetos.io · "Lead enrichment hand-off"</td>
+          <td class="text-xs muted">—</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">28 Apr · 16:48</td>
+          <td><span class="pill" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; background: var(--amber-50); color: var(--amber-700);">workflow_run.completed</span></td>
+          <td>Weekly attribution roll-up · 12 steps · 4m 12s</td>
+          <td class="text-xs muted">scheduled</td>
+          <td><code class="text-xs">run_01HZWW</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 14:02</td>
+          <td><span class="pill pill-active" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;"><span class="dot"></span>identity.activated</span></td>
+          <td>Onboarded to workplace · sarah@acme.synthetos.io</td>
+          <td class="text-xs muted">maya@acme.com</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+    <span class="text-xs muted">Showing 8 of 127 events</span>
+    <div style="display: flex; gap: 6px;">
+      <button class="btn btn-secondary btn-sm" disabled>Previous</button>
+      <button class="btn btn-secondary btn-sm">Next →</button>
+    </div>
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 14px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div><strong>Focused inline view — not the subaccount Activity page in disguise.</strong> The two surfaces share the backend endpoint (with <code>actorId</code> locked here), but this tab renders its own lightweight component. Drops the actor selector, severity, assignee, and other filters that only make sense at client-wide scope. A small <code>&lt;ActivityFeedTable&gt;</code> primitive is shared between this tab and the subaccount page; the chrome around it is bespoke per surface.</div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -76,6 +76,20 @@ export interface CalendarEvent {
   responseStatus: 'needs_action' | 'accepted' | 'declined' | 'tentative';
 }
 
+export interface WorkspaceTenantConfig {
+  // Spec §12-named fields (`MigrateSubaccountResponse` peer contract).
+  backend: 'synthetos_native' | 'google_workspace' | null;  // null when no workspace configured
+  connectorConfigId: string | null;                         // null when no workspace configured
+  domain: string | null;                                    // resolved per-subaccount override → env default
+  defaultSignatureTemplate: string;                          // '' if not configured
+  discloseAsAgent: boolean;                                  // defaults to false
+  vanityDomain: string | null;                               // null if not set
+
+  // Additive helper — not part of spec §12, but required by the signature
+  // template renderer to resolve `{subaccount-name}` without a separate query.
+  subaccountName: string;
+}
+
 export interface WorkspaceAdapter {
   readonly backend: 'synthetos_native' | 'google_workspace';
   provisionIdentity(params: ProvisionParams): Promise<ProvisionResult>;

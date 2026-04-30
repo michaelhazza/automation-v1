@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, gte, lte, ilike } from 'drizzle-orm';
+import { eq, and, desc, asc, isNull, gte, lte, ilike, inArray, lt, gt, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   agentRuns,
@@ -9,8 +9,10 @@ import {
   actions,
   executions,
   workflowRuns,
+  auditEvents,
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
+import { workspaceActors } from '../db/schema/workspaceActors.js';
 import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
 import type { TriggerType } from './activityServicePure.js';
 
@@ -26,7 +28,25 @@ export type ActivityType =
   | 'health_finding'
   | 'inbox_item'
   | 'workflow_run'
-  | 'workflow_execution';
+  | 'workflow_execution'
+  | 'email.sent'
+  | 'email.received'
+  | 'calendar.event_created'
+  | 'calendar.event_accepted'
+  | 'calendar.event_declined'
+  | 'identity.provisioned'
+  | 'identity.activated'
+  | 'identity.suspended'
+  | 'identity.resumed'
+  | 'identity.revoked'
+  | 'identity.archived'
+  | 'identity.email_sending_enabled'
+  | 'identity.email_sending_disabled'
+  | 'identity.migrated'
+  | 'identity.migration_failed'
+  | 'identity.provisioning_failed'
+  | 'actor.onboarded'
+  | 'subaccount.migration_completed';
 
 export type NormalisedStatus =
   | 'active'
@@ -62,18 +82,31 @@ export type ActivityScope =
   | { type: 'org'; orgId: string; subaccountId?: string }
   | { type: 'system'; organisationId?: string };
 
+/**
+ * Cursor for the activity feed (DE-CR-7 / spec §12).
+ * Encodes the (createdAt, id) tuple of the LAST item in the previous page.
+ * Server filter: `(createdAt, id) "after" cursor` under `createdAt DESC, id ASC` ordering, i.e.
+ *   `createdAt < cursor.createdAt OR (createdAt = cursor.createdAt AND id > cursor.id)`.
+ */
+export interface ActivityCursor {
+  createdAt: string;  // ISO string
+  id: string;
+}
+
 export type ActivityFilters = {
   type?: string[];
   status?: string[];
   from?: string;
   to?: string;
   agentId?: string;
+  actorId?: string;  // workspace_actors.id — covers humans + agents; takes precedence over agentId for workspace events
   severity?: string[];
   assignee?: string;
   q?: string;
   sort?: 'newest' | 'oldest' | 'severity' | 'attention_first';
   limit?: number;
-  offset?: number;
+  /** DE-CR-7: cursor pagination only — offset is forbidden by spec §12. */
+  cursor?: ActivityCursor;
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +214,37 @@ function subaccountIdFromScope(scope: ActivityScope): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Cursor predicate helper — DE-CR-7
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the SQL predicate that walks PAST a cursor under `createdAt DESC, id ASC`
+ * ordering. Returns `undefined` when no cursor is present so the predicate can be
+ * omitted from `and(...)` without producing a `WHERE TRUE` no-op.
+ *
+ * For a cursor C = (createdAt_c, id_c), an item is "after" C in the feed if
+ * `createdAt < createdAt_c OR (createdAt = createdAt_c AND id > id_c)`.
+ *
+ * Each source applies this against its own canonical (createdAt, id) columns.
+ * After in-memory merge + sort, items remain in canonical order because the
+ * tiebreaker (id ASC) is consistent across sources.
+ */
+function buildCursorPredicate<C extends { name: string }, I extends { name: string }>(
+  createdAtCol: C,
+  idCol: I,
+  cursor: ActivityCursor | undefined,
+) {
+  if (!cursor) return undefined;
+  const cutoff = new Date(cursor.createdAt);
+  // Cast columns through `any` because drizzle's column type expressions are too
+  // loose to compose generically without a deep type-import dance — the runtime
+  // shape is just `Column` either way.
+  const c = createdAtCol as any;
+  const i = idCol as any;
+  return or(lt(c, cutoff), and(eq(c, cutoff), gt(i, cursor.id)));
+}
+
+// ---------------------------------------------------------------------------
 // Data source fetchers
 // ---------------------------------------------------------------------------
 
@@ -199,6 +263,9 @@ async function fetchAgentRuns(
   if (filters.to) conditions.push(lte(agentRuns.createdAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(agentRuns.summary, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(agentRuns.createdAt, agentRuns.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       run: agentRuns,
@@ -214,7 +281,7 @@ async function fetchAgentRuns(
     // LEFT JOIN users — deleted user yields null, does NOT drop the row
     .leftJoin(users, eq(users.id, agentRuns.actingAsUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(agentRuns.createdAt), desc(agentRuns.id))
+    .orderBy(desc(agentRuns.createdAt), asc(agentRuns.id))
     .limit(200);
 
   return rows.map(({ run, agentName, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
@@ -259,6 +326,9 @@ async function fetchReviewItems(
   if (filters.from) conditions.push(gte(reviewItems.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(reviewItems.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(reviewItems.createdAt, reviewItems.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       item: reviewItems,
@@ -271,7 +341,7 @@ async function fetchReviewItems(
     .leftJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, reviewItems.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(reviewItems.createdAt), desc(reviewItems.id))
+    .orderBy(desc(reviewItems.createdAt), asc(reviewItems.id))
     .limit(200);
 
   return rows.map(({ item, actionType, agentName, subaccountName }) => ({
@@ -307,11 +377,14 @@ async function fetchHealthFindings(
   if (filters.to) conditions.push(lte(workspaceHealthFindings.detectedAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(workspaceHealthFindings.message, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(workspaceHealthFindings.detectedAt, workspaceHealthFindings.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select()
     .from(workspaceHealthFindings)
     .where(and(...conditions))
-    .orderBy(desc(workspaceHealthFindings.detectedAt), desc(workspaceHealthFindings.id))
+    .orderBy(desc(workspaceHealthFindings.detectedAt), asc(workspaceHealthFindings.id))
     .limit(200);
 
   return rows.map((f) => ({
@@ -347,6 +420,9 @@ async function fetchInboxItems(
   if (filters.from) conditions.push(gte(actions.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(actions.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(actions.createdAt, actions.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       action: actions,
@@ -357,7 +433,7 @@ async function fetchInboxItems(
     .innerJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, actions.subaccountId), isNull(subaccounts.deletedAt)))
     .where(and(...conditions))
-    .orderBy(desc(actions.createdAt), desc(actions.id))
+    .orderBy(desc(actions.createdAt), asc(actions.id))
     .limit(200);
 
   return rows.map(({ action, agentName, subaccountName }) => ({
@@ -393,6 +469,9 @@ async function fetchWorkflowRuns(
   if (filters.from) conditions.push(gte(workflowRuns.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(workflowRuns.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(workflowRuns.createdAt, workflowRuns.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       run: workflowRuns,
@@ -401,7 +480,7 @@ async function fetchWorkflowRuns(
     .from(workflowRuns)
     .leftJoin(subaccounts, and(eq(subaccounts.id, workflowRuns.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
+    .orderBy(desc(workflowRuns.createdAt), asc(workflowRuns.id))
     .limit(200);
 
   return rows.map(({ run, subaccountName }) => ({
@@ -436,6 +515,9 @@ async function fetchWorkflowExecutions(
   if (filters.to) conditions.push(lte(executions.createdAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(executions.errorMessage, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(executions.createdAt, executions.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       exec: executions,
@@ -449,7 +531,7 @@ async function fetchWorkflowExecutions(
     // LEFT JOIN users — deleted user yields null, does NOT drop the row
     .leftJoin(users, eq(users.id, executions.triggeredByUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(executions.createdAt), desc(executions.id))
+    .orderBy(desc(executions.createdAt), asc(executions.id))
     .limit(200);
 
   return rows.map(({ exec, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
@@ -482,6 +564,142 @@ async function fetchWorkflowExecutions(
 }
 
 // ---------------------------------------------------------------------------
+// Workspace audit event fetcher
+// ---------------------------------------------------------------------------
+
+export const WORKSPACE_EVENT_TYPES = new Set<string>([
+  'email.sent',
+  'email.received',
+  'calendar.event_created',
+  'calendar.event_accepted',
+  'calendar.event_declined',
+  'identity.provisioned',
+  'identity.activated',
+  'identity.suspended',
+  'identity.resumed',
+  'identity.revoked',
+  'identity.archived',
+  'identity.email_sending_enabled',
+  'identity.email_sending_disabled',
+  'identity.migrated',
+  'identity.migration_failed',
+  'identity.provisioning_failed',
+  'actor.onboarded',
+  'subaccount.migration_completed',
+]);
+
+function formatAuditEventSubject(action: ActivityType, metadata: Record<string, unknown>): string {
+  switch (action) {
+    case 'email.sent': return `Email sent${metadata.to ? ` to ${metadata.to}` : ''}`;
+    case 'email.received': return `Email received${metadata.from ? ` from ${metadata.from}` : ''}`;
+    case 'calendar.event_created': return 'Calendar event created';
+    case 'calendar.event_accepted': return 'Calendar event accepted';
+    case 'calendar.event_declined': return 'Calendar event declined';
+    case 'identity.provisioned': return 'Identity provisioned';
+    case 'identity.activated': return 'Identity activated';
+    case 'identity.suspended': return 'Identity suspended';
+    case 'identity.resumed': return 'Identity resumed';
+    case 'identity.revoked': return 'Identity revoked';
+    case 'identity.archived': return 'Identity archived';
+    case 'identity.email_sending_enabled': return 'Email sending enabled';
+    case 'identity.email_sending_disabled': return 'Email sending disabled';
+    case 'identity.migrated': return 'Identity migrated';
+    case 'identity.migration_failed': return 'Identity migration failed';
+    case 'identity.provisioning_failed': return 'Identity provisioning failed';
+    case 'actor.onboarded': return 'Agent onboarded';
+    case 'subaccount.migration_completed': return 'Workspace migration completed';
+    default: return (action as string).replace(/\./g, ' ');
+  }
+}
+
+async function fetchAuditEvents(
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
+  const orgId = orgIdFromScope(scope);
+  const subId = subaccountIdFromScope(scope);
+  const conditions: ReturnType<typeof eq>[] = [];
+
+  if (orgId) conditions.push(eq(auditEvents.organisationId, orgId));
+  if (filters.actorId) conditions.push(eq(auditEvents.workspaceActorId, filters.actorId));
+  if (filters.from) conditions.push(gte(auditEvents.createdAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(auditEvents.createdAt, new Date(filters.to)));
+
+  // Determine which workspace event types to fetch
+  const typeFilter = filters.type ?? [];
+  const workspaceTypes = typeFilter.length > 0
+    ? typeFilter.filter((t) => WORKSPACE_EVENT_TYPES.has(t))
+    : [...WORKSPACE_EVENT_TYPES];
+  if (workspaceTypes.length === 0) return [];
+
+  conditions.push(inArray(auditEvents.action, workspaceTypes));
+
+  const cursorPredicate = buildCursorPredicate(auditEvents.createdAt, auditEvents.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
+  // B3: subaccount-scoped reads must include rows whose subaccount is identified
+  // via `entity_type='subaccount' AND entity_id=<saId>` — these rows have no
+  // `workspace_actor_id` (e.g. `subaccount.migration_completed`), so a strict
+  // join-keyed predicate would drop them silently.
+  const whereClause = subId
+    ? and(
+        ...conditions,
+        or(
+          eq(workspaceActors.subaccountId, subId),
+          and(eq(auditEvents.entityType, 'subaccount'), eq(auditEvents.entityId, subId)),
+        ),
+      )
+    : conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = await db
+    .select({
+      id: auditEvents.id,
+      action: auditEvents.action,
+      workspaceActorId: auditEvents.workspaceActorId,
+      entityType: auditEvents.entityType,
+      entityId: auditEvents.entityId,
+      metadata: auditEvents.metadata,
+      createdAt: auditEvents.createdAt,
+      actorDisplayName: workspaceActors.displayName,
+      actorSubaccountId: workspaceActors.subaccountId,
+    })
+    .from(auditEvents)
+    .leftJoin(workspaceActors, eq(workspaceActors.id, auditEvents.workspaceActorId))
+    .where(whereClause)
+    .orderBy(desc(auditEvents.createdAt), asc(auditEvents.id))
+    .limit(200);
+
+  return rows.map((row) => {
+    const action = row.action as ActivityType;
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    // B3: subaccount-scoped audit rows (entity_type='subaccount') carry their
+    // subaccount in `entity_id`, not via the actor join.
+    const resolvedSubaccountId = row.actorSubaccountId
+      ?? (row.entityType === 'subaccount' ? row.entityId : null);
+    return {
+      id: row.id,
+      type: action,
+      status: 'completed' as NormalisedStatus,
+      subject: formatAuditEventSubject(action, metadata),
+      actor: row.actorDisplayName ?? 'System',
+      subaccountId: resolvedSubaccountId,
+      subaccountName: null,
+      agentId: null,
+      agentName: null,
+      severity: (row.action.includes('failed') ? 'warning' : null) as 'warning' | null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.createdAt.toISOString(),
+      detailUrl: '',
+      triggeredByUserId: null,
+      triggeredByUserName: null,
+      triggerType: null,
+      durationMs: null,
+      runId: null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sort + filter
 // ---------------------------------------------------------------------------
 
@@ -508,11 +726,12 @@ function filterBySeverity(items: ActivityItem[], severities: string[]): Activity
 export async function listActivityItems(
   filters: ActivityFilters,
   scope: ActivityScope,
-): Promise<{ items: ActivityItem[]; total: number; hasMore: boolean }> {
+): Promise<{ items: ActivityItem[]; nextCursor: ActivityCursor | null }> {
   const typeFilter = filters.type ?? [];
   const shouldFetch = (t: ActivityType) => typeFilter.length === 0 || typeFilter.includes(t);
 
-  // Fan out to data sources in parallel
+  // Fan out to data sources in parallel. Each fetcher applies the cursor
+  // predicate at the SQL layer, so the merged set is already past the cursor.
   const [
     agentRunItems,
     reviewItemRows,
@@ -520,6 +739,7 @@ export async function listActivityItems(
     inboxItemRows,
     workflowRunRows,
     workflowExecRows,
+    auditEventItems,
   ] = await Promise.all([
     shouldFetch('agent_run') ? fetchAgentRuns(scope, filters) : [],
     shouldFetch('review_item') ? fetchReviewItems(scope, filters) : [],
@@ -527,6 +747,10 @@ export async function listActivityItems(
     shouldFetch('inbox_item') ? fetchInboxItems(scope, filters) : [],
     shouldFetch('workflow_run') ? fetchWorkflowRuns(scope, filters) : [],
     shouldFetch('workflow_execution') ? fetchWorkflowExecutions(scope, filters) : [],
+    // Fetch audit_events if any workspace type is requested (or if no type filter)
+    (typeFilter.length === 0 || typeFilter.some((t) => WORKSPACE_EVENT_TYPES.has(t)))
+      ? fetchAuditEvents(scope, filters)
+      : [],
   ]);
 
   // Merge all sources
@@ -537,6 +761,7 @@ export async function listActivityItems(
     ...inboxItemRows,
     ...workflowRunRows,
     ...workflowExecRows,
+    ...auditEventItems,
   ];
 
   // Apply post-merge filters
@@ -547,18 +772,51 @@ export async function listActivityItems(
     items = filterBySeverity(items, filters.severity);
   }
 
-  // Sort
-  items = sortItems(items, filters.sort ?? 'attention_first');
-
-  const total = items.length;
   const limit = Math.min(filters.limit ?? 50, 200);
-  const offset = filters.offset ?? 0;
+  const displaySort = filters.sort ?? 'attention_first';
 
-  const paged = items.slice(offset, offset + limit);
+  // Codex P2 (2026-04-30): cursor pagination MUST walk the canonical
+  // (createdAt DESC, id ASC) ordering mandated by spec §12. The per-source
+  // cursor predicate (`buildCursorPredicate`) is hard-coded to that ordering;
+  // if we slice the page under any other sort (`attention_first` / `severity`
+  // / `oldest`), the `nextCursor` would point at an item whose canonical
+  // position is NOT the page boundary, and rows with newer `createdAt` that
+  // weren't picked up under the alternative sort would be silently skipped
+  // on the next page (cursor predicate excludes them).
+  //
+  // Resolution: when the caller is paginating (a `cursor` is in play), we
+  // MUST slice in canonical order — anything else corrupts the walk. When
+  // no cursor is in use the caller is doing a single-page query and the
+  // requested ranking sort decides page membership. This preserves the
+  // legacy `attention_first` / `severity` / `oldest` ranking semantics for
+  // non-paginating callers (e.g. ActivityPage) while keeping the new
+  // cursor-paginating callers (AgentActivityTab) spec-compliant.
+  const isPaginating = filters.cursor !== undefined;
 
-  return {
-    items: paged,
-    total,
-    hasMore: offset + limit < total,
-  };
+  const sliceSort = isPaginating ? 'newest' : displaySort;
+  const sortedForSlice = sortItems(items, sliceSort);
+  const paged = sortedForSlice.slice(0, limit);
+
+  // DE-CR-7 / Codex P2: cursor is emitted from the slice's LAST item under
+  // canonical (newest) ordering when paginating, so subsequent pages walk
+  // past it under `(createdAt DESC, id ASC)` and never miss intervening
+  // rows. When not paginating, no cursor is emitted regardless of slice
+  // length — non-paginating callers MUST NOT consume `nextCursor`, since
+  // an alternative-sort slice's last item is not a valid cursor anchor.
+  const last = paged[paged.length - 1];
+  const nextCursor: ActivityCursor | null =
+    isPaginating && paged.length === limit && last
+      ? { createdAt: last.createdAt, id: last.id }
+      : null;
+
+  // Apply the requested display sort. When paginating the slice was taken in
+  // canonical order; we re-sort here so the operator sees their chosen
+  // ordering on each page (the slice membership is fixed by canonical
+  // ordering above, so this reorder does not change which rows are returned).
+  // When not paginating the slice was already taken under `displaySort`.
+  const display = isPaginating && displaySort !== 'newest'
+    ? sortItems(paged, displaySort)
+    : paged;
+
+  return { items: display, nextCursor };
 }

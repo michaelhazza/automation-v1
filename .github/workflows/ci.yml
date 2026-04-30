@@ -52,6 +52,9 @@ jobs:
       - name: Run migrations
         run: npm run migrate
 
+      - name: Verify workspace-actor coverage (Phase A gate)
+        run: npx tsx scripts/verify-workspace-actor-coverage.ts
+
       - name: Run tests
         run: npm test
 

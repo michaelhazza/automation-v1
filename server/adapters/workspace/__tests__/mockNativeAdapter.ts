@@ -37,17 +37,38 @@ const byRequestId = new Map<string, string>();
 const sentEmails: Array<{ identityId: string; params: SendEmailParams }> = [];
 const events = new Map<string, MockEvent>();
 
+// failNextCall state — makes the next call to a specific method throw, then resets
+let failNextCallMethod: string | null = null;
+let failNextCallError: Error | null = null;
+
+export function failNextCall(method: string | null, error?: Error | null) {
+  failNextCallMethod = method;
+  failNextCallError = error ?? null;
+}
+
+function consumeFailure(methodName: string): void {
+  if (failNextCallMethod === methodName) {
+    const err = failNextCallError ?? new Error(`mock_failure: ${methodName}`);
+    failNextCallMethod = null;
+    failNextCallError = null;
+    throw err;
+  }
+}
+
 export function resetMockNative() {
   identities.clear();
   byRequestId.clear();
   sentEmails.length = 0;
   events.clear();
+  failNextCallMethod = null;
+  failNextCallError = null;
 }
 
 export const mockNativeAdapter: WorkspaceAdapter = {
   backend: 'synthetos_native',
 
   async provisionIdentity(params: ProvisionParams): Promise<ProvisionResult> {
+    consumeFailure('provisionIdentity');
     if (byRequestId.has(params.provisioningRequestId)) {
       const existing = identities.get(byRequestId.get(params.provisioningRequestId)!)!;
       return { identityId: existing.id, emailAddress: existing.emailAddress, externalUserId: null };
@@ -60,36 +81,43 @@ export const mockNativeAdapter: WorkspaceAdapter = {
   },
 
   async suspendIdentity(identityId: string): Promise<void> {
+    consumeFailure('suspendIdentity');
     const identity = identities.get(identityId);
     if (identity) identity.suspended = true;
   },
 
   async resumeIdentity(identityId: string): Promise<void> {
+    consumeFailure('resumeIdentity');
     const identity = identities.get(identityId);
     if (identity) identity.suspended = false;
   },
 
   async revokeIdentity(identityId: string): Promise<void> {
+    consumeFailure('revokeIdentity');
     await mockNativeAdapter.suspendIdentity(identityId);
   },
 
   async archiveIdentity(_identityId: string): Promise<void> {
+    consumeFailure('archiveIdentity');
     // no-op
   },
 
   async sendEmail(
     params: SendEmailParams,
   ): Promise<{ externalMessageId: string | null; metadata?: Record<string, unknown> }> {
+    consumeFailure('sendEmail');
     const id = `native-msg-${crypto.randomUUID()}`;
     sentEmails.push({ identityId: params.fromIdentityId, params });
     return { externalMessageId: id };
   },
 
   async fetchInboundSince(_identityId: string, _since: Date): Promise<InboundMessage[]> {
+    consumeFailure('fetchInboundSince');
     return [];
   },
 
   async createEvent(params: CreateEventParams): Promise<CreateEventResult> {
+    consumeFailure('createEvent');
     const id = crypto.randomUUID();
     events.set(id, {
       id,
@@ -104,11 +132,13 @@ export const mockNativeAdapter: WorkspaceAdapter = {
   },
 
   async respondToEvent(eventId: string, response: 'accepted' | 'declined' | 'tentative'): Promise<void> {
+    consumeFailure('respondToEvent');
     const evt = events.get(eventId);
     if (evt) evt.responseStatus = response;
   },
 
   async fetchUpcoming(identityId: string, until: Date): Promise<CalendarEvent[]> {
+    consumeFailure('fetchUpcoming');
     const now = new Date();
     return Array.from(events.values())
       .filter((e) => e.fromIdentityId === identityId && e.endsAt >= now && e.startsAt <= until)

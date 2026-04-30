@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>02 — Workspace setup (Google Workspace) · Acme Client Co.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 02 / 16 · <span class="muted">AdminSubaccountDetailPage → Workspace tab (Google selected)</span> · <a href="01-workspace-setup-native.html">← Native</a> · <a href="03-subaccount-agents-list.html">Next: Agents list →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Subaccounts</a>
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Workspace</span>
+  </span>
+  <span class="right">
+    <span class="user-pill"><span class="avatar">M</span><span>Maya Lim · Acme Agency</span></span>
+  </span>
+</div>
+
+<div class="tabs">
+  <a href="#">Integrations</a>
+  <a href="#">Onboarding</a>
+  <a href="#">Engines</a>
+  <a href="#">Workflows</a>
+  <a href="#">Agents</a>
+  <a href="#">Beliefs</a>
+  <a href="#">Categories</a>
+  <a href="#">Tags</a>
+  <a href="#">Board</a>
+  <a href="#">Memory</a>
+  <a href="#">Usage</a>
+  <a href="#">Admin</a>
+  <a href="#" class="active">Workspace</a>
+</div>
+
+<div class="page" style="max-width: 1080px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Workspace</h1>
+      <p class="page-sub">The "workplace" your agents and humans live in: email, calendar, documents.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-primary">Save</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h2>Workspace backend</h2>
+        <div class="sub">Pick once — every agent and every human at this client uses this backend.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+
+        <div class="option-card">
+          <span class="radio"></span>
+          <h3>Synthetos-native</h3>
+          <p>Identities, mail, calendar, and documents inside Automation OS. No external setup. Demoable on day one.</p>
+          <div class="meta">
+            <div>Email format: <code>{name}@acme.synthetos.io</code></div>
+            <div>Setup time: <strong style="color: var(--green-700);">instant</strong></div>
+          </div>
+        </div>
+
+        <div class="option-card selected">
+          <span class="radio"></span>
+          <h3>Google Workspace</h3>
+          <p>Real Workspace users on the client's domain. Requires service-account + domain-wide delegation.</p>
+          <div class="meta">
+            <div>Email format: <code>{name}@clientco.com</code></div>
+            <div>Setup time: <strong>~5 min admin work</strong></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="display: grid; grid-template-columns: 200px 1fr; gap: 24px;">
+        <div>
+          <div class="field-label">Backend details</div>
+          <p class="text-xs muted">Service-account credentials with domain-wide delegation.</p>
+        </div>
+        <div>
+          <div class="field">
+            <label class="field-label">Domain</label>
+            <input class="field-input" value="clientco.com" style="max-width: 360px;" />
+            <div class="field-hint">The customer's primary Google Workspace domain.</div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Service account</label>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--green-50); border: 1px solid #a7f3d0; border-radius: 8px;">
+              <span style="width: 28px; height: 28px; border-radius: 999px; background: white; display: inline-flex; align-items: center; justify-content: center; color: var(--green-700);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </span>
+              <div style="flex: 1;">
+                <div style="font-size: 13px; font-weight: 500; color: var(--green-700);">Connected</div>
+                <div style="font-size: 11px; color: var(--sl-600); font-family: 'JetBrains Mono', monospace;">automation-os-svc@acme-agency.iam.gserviceaccount.com</div>
+              </div>
+              <button class="btn btn-secondary btn-sm">Disconnect</button>
+              <button class="btn btn-secondary btn-sm">Test</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Scopes granted via domain-wide delegation</label>
+            <div style="border: 1px solid var(--sl-200); border-radius: 8px; overflow: hidden;">
+              <div style="padding: 9px 12px; border-bottom: 1px solid var(--sl-100); display: flex; gap: 10px; align-items: center;">
+                <span class="pill pill-active"><span class="dot"></span>Granted</span>
+                <div style="flex: 1; font-size: 12px;"><strong>Admin SDK Directory</strong> — User read/write (provisioning, suspend, delete)</div>
+              </div>
+              <div style="padding: 9px 12px; border-bottom: 1px solid var(--sl-100); display: flex; gap: 10px; align-items: center;">
+                <span class="pill pill-active"><span class="dot"></span>Granted</span>
+                <div style="flex: 1; font-size: 12px;"><strong>Gmail API</strong> — Send / read on behalf of the agent identity</div>
+              </div>
+              <div style="padding: 9px 12px; border-bottom: 1px solid var(--sl-100); display: flex; gap: 10px; align-items: center;">
+                <span class="pill pill-active"><span class="dot"></span>Granted</span>
+                <div style="flex: 1; font-size: 12px;"><strong>Calendar API</strong> — Manage events on behalf of the agent identity</div>
+              </div>
+              <div style="padding: 9px 12px; display: flex; gap: 10px; align-items: center;">
+                <span class="pill pill-active"><span class="dot"></span>Granted</span>
+                <div style="flex: 1; font-size: 12px;"><strong>Drive API</strong> — Read / write / share on behalf of the agent identity</div>
+              </div>
+            </div>
+
+            <div class="callout callout-info" style="margin-top: 10px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <div>The service account never acts as a human user — only as the agent identity it provisioned. Drive / Gmail / Calendar ACLs are owned by Google. Automation OS does not re-implement them <span style="color: var(--sl-500);">(brief §5).</span></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Default signature</label>
+            <textarea class="field-input" rows="3" style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">{agent-name}
+{role} · {subaccount-name}</textarea>
+            <div class="field-hint">Agents look human externally. Disclosure can be enabled per-subaccount for compliance contexts (finance, legal, health).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h2>Seats</h2>
+        <div class="sub">Active identities consume seats. Suspended, revoked, and archived identities do not.</div>
+      </div>
+      <a href="#" class="btn btn-secondary btn-sm">Add 5 more seats →</a>
+    </div>
+    <div class="card-body">
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;">
+        <span class="num" style="font-size: 28px; font-weight: 600; color: var(--sl-900); letter-spacing: -0.02em;">4</span>
+        <span class="muted">of</span>
+        <span class="num" style="font-size: 16px; font-weight: 500; color: var(--sl-700);">25 seats</span>
+        <span class="muted">consumed</span>
+      </div>
+      <div style="height: 6px; background: var(--sl-100); border-radius: 999px; overflow: hidden;">
+        <div style="height: 100%; width: 16%; background: var(--indigo-500);"></div>
+      </div>
+
+      <table class="table" style="margin-top: 16px;">
+        <thead>
+          <tr>
+            <th>Identity</th>
+            <th>Email</th>
+            <th>Send mail</th>
+            <th>Status</th>
+            <th style="text-align: right;">Consuming</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div style="display: flex; align-items: center; gap: 8px;"><span class="avatar avatar-sm avatar-agent">SA</span><strong>Sarah</strong></div></td>
+            <td><code class="text-xs">sarah@clientco.com</code></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Enabled</span></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Active</span></td>
+            <td style="text-align: right;">1 seat</td>
+          </tr>
+          <tr>
+            <td><div style="display: flex; align-items: center; gap: 8px;"><span class="avatar avatar-sm avatar-agent">JO</span><strong>Johnny</strong></div></td>
+            <td><code class="text-xs">johnny@clientco.com</code></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Enabled</span></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Active</span></td>
+            <td style="text-align: right;">1 seat</td>
+          </tr>
+          <tr>
+            <td><div style="display: flex; align-items: center; gap: 8px;"><span class="avatar avatar-sm avatar-agent">HE</span><strong>Helena</strong></div></td>
+            <td><code class="text-xs">helena@clientco.com</code></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Enabled</span></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Active</span></td>
+            <td style="text-align: right;">1 seat</td>
+          </tr>
+          <tr>
+            <td><div style="display: flex; align-items: center; gap: 8px;"><span class="avatar avatar-sm avatar-agent">DA</span><strong>Dana</strong></div></td>
+            <td><code class="text-xs">dana@clientco.com</code></td>
+            <td><span class="pill pill-draft"><span class="dot"></span>Off</span> <span class="text-xs muted" style="margin-left: 4px;">Drive-only</span></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Active</span></td>
+            <td style="text-align: right;">1 seat</td>
+          </tr>
+          <tr>
+            <td><div style="display: flex; align-items: center; gap: 8px;"><span class="avatar avatar-sm avatar-agent">PA</span><strong>Patel</strong></div></td>
+            <td><code class="text-xs">patel@clientco.com</code></td>
+            <td><span class="pill pill-active"><span class="dot"></span>Enabled</span></td>
+            <td><span class="pill pill-suspend"><span class="dot"></span>Suspended</span></td>
+            <td style="text-align: right;" class="muted">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h2>Migration</h2>
+        <div class="sub">Switching workspace backends preserves audit history via canonical actor IDs.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="font-size: 13px; color: var(--sl-600);">This subaccount runs on Google Workspace. To switch backends, run a migration — new identities will be provisioned in the target backend; the actor IDs persist so historical mailbox / calendar / documents stay queryable.</div>
+        <a href="16-migration-modal.html" class="btn btn-secondary" style="white-space: nowrap;">Migrate to native →</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

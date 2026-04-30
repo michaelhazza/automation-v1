@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>13 — Suspend Sarah?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 12 / 16 · <span class="muted">Suspend confirmation — reversible</span> · <a href="11-agent-calendar.html">← Calendar</a> · <a href="13-revoke-dialog.html">Next: Revoke →</a></div>
+
+<div class="appbar" style="opacity: 0.55;">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Acme Client Co. / Sarah / Identity</span></span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+<div class="tabs" style="opacity: 0.55;"><a href="#" class="active">Identity</a></div>
+<div class="page" style="opacity: 0.55;"></div>
+
+<div class="modal-overlay">
+  <div class="modal" style="max-width: 540px;">
+
+    <div class="modal-head">
+      <div>
+        <h2 style="display: flex; align-items: center; gap: 8px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--orange-100); color: var(--orange-700); display: inline-flex; align-items: center; justify-content: center;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </span>
+          Suspend Sarah?
+        </h2>
+        <div class="step">Reversible · sarah@acme.synthetos.io</div>
+      </div>
+      <button class="modal-close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <p style="font-size: 13px; color: var(--sl-700); margin: 0 0 12px;">Suspending this identity will:</p>
+
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;">
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--orange-50); color: var(--orange-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Revoke active access</strong> — the agent will not receive new email, accept calendar invites, or perform automation runs.</div>
+        </li>
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--green-50); color: var(--green-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Free the seat immediately</strong> — billing for this identity stops the moment you click suspend.</div>
+        </li>
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--green-50); color: var(--green-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Preserve all history</strong> — mailbox, calendar, documents, and audit log remain queryable.</div>
+        </li>
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--indigo-50); color: var(--indigo-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Be reversible</strong> — clicking "Resume" returns the identity to Active. Mail addressed during suspension does NOT queue; senders see a bounce.</div>
+        </li>
+      </ul>
+
+      <div class="callout callout-info" style="margin-top: 16px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>On Google Workspace: the user's <code>suspended</code> flag is set via the Admin SDK. Mail addressed to <code>sarah@acme.synthetos.io</code> bounces while suspended.</div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-primary" style="background: var(--orange-700);">Suspend Sarah</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
