@@ -1,0 +1,20 @@
+// External document reference limits and timeouts
+
+export const EXTERNAL_DOC_MAX_STALENESS_MINUTES       = 10080; // 7 days
+export const EXTERNAL_DOC_HARD_TOKEN_LIMIT            = 100_000;
+export const EXTERNAL_DOC_SOFT_TOKEN_WARN             = 50_000;
+export const EXTERNAL_DOC_MIN_CONTENT_TOKENS          = 200;
+export const EXTERNAL_DOC_FRAGMENTATION_THRESHOLD     = 500;
+export const EXTERNAL_DOC_CHECK_REVISION_TIMEOUT_MS   = 2_000;
+export const EXTERNAL_DOC_FETCH_CONTENT_TIMEOUT_MS    = 5_000;
+export const EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS       = 30_000;
+export const EXTERNAL_DOC_MAX_REFS_PER_RUN            = 25;
+export const EXTERNAL_DOC_MAX_REFS_PER_TASK           = 20;
+export const EXTERNAL_DOC_MAX_REFS_PER_SUBACCOUNT     = 100;
+export const EXTERNAL_DOC_SHEETS_MAX_RAW_BYTES        = 5 * 1024 * 1024; // 5MB
+export const EXTERNAL_DOC_PDF_MAX_BYTES               = 10 * 1024 * 1024; // 10MB
+export const EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES   = 1000;
+export const EXTERNAL_DOC_TRUNCATION_HEAD_RATIO       = 0.7;
+export const EXTERNAL_DOC_RATE_LIMIT_RETRIES          = 2;
+export const EXTERNAL_DOC_RATE_LIMIT_INITIAL_BACKOFF_MS = 1_000;
+export const EXTERNAL_DOC_RETRY_SUPPRESSION_WINDOW_MS = 60_000;
