@@ -5,9 +5,9 @@
  *   NODE_ENV=test npx tsx server/services/__tests__/incidentIngestorThrottle.test.ts
  */
 
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV ??= 'test';
 // Set a short throttle window for tests (must be set before module import)
-process.env.SYSTEM_INCIDENT_THROTTLE_MS = '100';
+process.env.SYSTEM_INCIDENT_THROTTLE_MS ??= '100';
 
 import { expect, test } from 'vitest';
 import {
@@ -17,7 +17,6 @@ import {
   __resetForTest,
 } from '../incidentIngestorThrottle.js';
 
-const pending: Promise<void>[] = [];
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -80,7 +79,3 @@ test('reset clears state between runs', () => {
   expect(getThrottledCount(), 'throttled count reset to 0').toBe(0);
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-Promise.all(pending).then(() => {
-});

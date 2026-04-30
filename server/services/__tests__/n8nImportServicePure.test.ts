@@ -73,67 +73,67 @@ function conn(source: string, target: string): N8nConnection {
 
 // ─── normaliseNodeType ────────────────────────────────────────────────────────
 
-await test('normaliseNodeType strips n8n-nodes-base prefix', () => {
+test('normaliseNodeType strips n8n-nodes-base prefix', () => {
   expect(normaliseNodeType('n8n-nodes-base.httpRequest'), 'base prefix').toBe('httpRequest');
 });
 
-await test('normaliseNodeType strips n8n-nodes-langchain prefix', () => {
+test('normaliseNodeType strips n8n-nodes-langchain prefix', () => {
   expect(normaliseNodeType('n8n-nodes-langchain.openAi'), 'langchain prefix').toBe('openAi');
 });
 
-await test('normaliseNodeType strips @n8n/n8n-nodes-base prefix', () => {
+test('normaliseNodeType strips @n8n/n8n-nodes-base prefix', () => {
   expect(normaliseNodeType('@n8n/n8n-nodes-base.scheduleTrigger'), 'scoped package').toBe('scheduleTrigger');
 });
 
-await test('normaliseNodeType leaves unknown prefixes intact', () => {
+test('normaliseNodeType leaves unknown prefixes intact', () => {
   expect(normaliseNodeType('custom.MyNode'), 'unknown prefix unchanged').toBe('custom.MyNode');
 });
 
 // ─── inferSideEffectClass ─────────────────────────────────────────────────────
 
-await test('HTTP GET → sideEffectClass auto', () => {
+test('HTTP GET → sideEffectClass auto', () => {
   const n = node('1', 'GET node', 'n8n-nodes-base.httpRequest', { method: 'GET' });
   expect(inferSideEffectClass(n, 'httpRequest'), 'GET should be auto').toBe('auto');
 });
 
-await test('HTTP POST → sideEffectClass review', () => {
+test('HTTP POST → sideEffectClass review', () => {
   const n = node('1', 'POST node', 'n8n-nodes-base.httpRequest', { method: 'POST' });
   expect(inferSideEffectClass(n, 'httpRequest'), 'POST should be review').toBe('review');
 });
 
-await test('HTTP PATCH → sideEffectClass review', () => {
+test('HTTP PATCH → sideEffectClass review', () => {
   const n = node('1', 'PATCH node', 'n8n-nodes-base.httpRequest', { method: 'PATCH' });
   expect(inferSideEffectClass(n, 'httpRequest'), 'PATCH should be review').toBe('review');
 });
 
-await test('HTTP method is JS variable expression → sideEffectClass review', () => {
+test('HTTP method is JS variable expression → sideEffectClass review', () => {
   const n = node('1', 'Dynamic node', 'n8n-nodes-base.httpRequest', { method: '={{$json.method}}' });
   expect(inferSideEffectClass(n, 'httpRequest'), 'variable method should be review').toBe('review');
 });
 
-await test('HTTP method missing → sideEffectClass review (unknown scope)', () => {
+test('HTTP method missing → sideEffectClass review (unknown scope)', () => {
   const n = node('1', 'No method', 'n8n-nodes-base.httpRequest', {});
   expect(inferSideEffectClass(n, 'httpRequest'), 'missing method should be review').toBe('review');
 });
 
-await test('scheduleTrigger → sideEffectClass auto', () => {
+test('scheduleTrigger → sideEffectClass auto', () => {
   const n = node('1', 'Scheduler', 'n8n-nodes-base.scheduleTrigger');
   expect(inferSideEffectClass(n, 'scheduleTrigger'), 'trigger should be auto').toBe('auto');
 });
 
-await test('gmail → sideEffectClass review', () => {
+test('gmail → sideEffectClass review', () => {
   const n = node('1', 'Gmail', 'n8n-nodes-base.gmail');
   expect(inferSideEffectClass(n, 'gmail'), 'gmail should be review').toBe('review');
 });
 
 // ─── extractCredentialRefs ────────────────────────────────────────────────────
 
-await test('extractCredentialRefs returns empty array when no credentials', () => {
+test('extractCredentialRefs returns empty array when no credentials', () => {
   const n = node('1', 'No creds', 'n8n-nodes-base.httpRequest');
   expect(extractCredentialRefs(n), 'should be empty').toEqual([]);
 });
 
-await test('extractCredentialRefs returns provider/id/name for each credential', () => {
+test('extractCredentialRefs returns provider/id/name for each credential', () => {
   const n = node('1', 'Gmail node', 'n8n-nodes-base.gmail', {}, {
     gmailOAuth2: { id: 'cred-123', name: 'My Gmail' },
   });
@@ -144,14 +144,14 @@ await test('extractCredentialRefs returns provider/id/name for each credential',
 
 // ─── detectCycles ─────────────────────────────────────────────────────────────
 
-await test('detectCycles returns empty array for a DAG', () => {
+test('detectCycles returns empty array for a DAG', () => {
   const nodes = [node('a', 'A', 'x'), node('b', 'B', 'x'), node('c', 'C', 'x')];
   const conns = [conn('a', 'b'), conn('b', 'c')];
   const cycles = detectCycles(nodes, conns);
   expect(cycles, 'linear chain has no cycles').toEqual([]);
 });
 
-await test('detectCycles detects a simple A→B→C→A cycle', () => {
+test('detectCycles detects a simple A→B→C→A cycle', () => {
   const nodes = [node('a', 'A', 'x'), node('b', 'B', 'x'), node('c', 'C', 'x')];
   const conns = [conn('a', 'b'), conn('b', 'c'), conn('c', 'a')];
   const cycles = detectCycles(nodes, conns);
@@ -161,7 +161,7 @@ await test('detectCycles detects a simple A→B→C→A cycle', () => {
 
 // ─── topologicalSort ──────────────────────────────────────────────────────────
 
-await test('topologicalSort returns an error message for a cyclic workflow', () => {
+test('topologicalSort returns an error message for a cyclic workflow', () => {
   const nodes = [
     node('a', 'Node A', 'n8n-nodes-base.set'),
     node('b', 'Node B', 'n8n-nodes-base.set'),
@@ -174,7 +174,7 @@ await test('topologicalSort returns an error message for a cyclic workflow', () 
   expect((result as { error: string }).error.includes('directed cycle'), 'error mentions directed cycle').toBeTruthy();
 });
 
-await test('topologicalSort produces deterministic output (same on repeated calls)', () => {
+test('topologicalSort produces deterministic output (same on repeated calls)', () => {
   const nodes = [
     node('c', 'Zeta', 'n8n-nodes-base.set'),
     node('b', 'Alpha', 'n8n-nodes-base.set'),
@@ -188,7 +188,7 @@ await test('topologicalSort produces deterministic output (same on repeated call
   expect(ids1, 'both runs should produce same order').toEqual(ids2);
 });
 
-await test('topologicalSort puts sources before sinks', () => {
+test('topologicalSort puts sources before sinks', () => {
   const nodes = [
     node('trigger', 'Trigger', 'n8n-nodes-base.scheduleTrigger'),
     node('http', 'HTTP', 'n8n-nodes-base.httpRequest'),
@@ -207,17 +207,17 @@ await test('topologicalSort puts sources before sinks', () => {
 
 // ─── importN8nWorkflow ────────────────────────────────────────────────────────
 
-await test('rejects non-object workflow JSON', () => {
+test('rejects non-object workflow JSON', () => {
   const result = importN8nWorkflow('not an object');
   expect(!result.ok, 'should fail').toBeTruthy();
 });
 
-await test('rejects workflow missing nodes array', () => {
+test('rejects workflow missing nodes array', () => {
   const result = importN8nWorkflow({ name: 'Test' });
   expect(!result.ok, 'should fail for missing nodes').toBeTruthy();
 });
 
-await test('rejects workflow exceeding 100-node cap', () => {
+test('rejects workflow exceeding 100-node cap', () => {
   const nodes = Array.from({ length: MAX_N8N_NODES + 1 }, (_, i) =>
     node(`n${i}`, `Node ${i}`, 'n8n-nodes-base.set')
   );
@@ -226,7 +226,7 @@ await test('rejects workflow exceeding 100-node cap', () => {
   expect(result.ok === false && result.error.includes(String(MAX_N8N_NODES + 1)), 'error should mention node count').toBeTruthy();
 });
 
-await test('rejects workflow with a directed cycle', () => {
+test('rejects workflow with a directed cycle', () => {
   const nodes = [
     node('a', 'Node A', 'n8n-nodes-base.set'),
     node('b', 'Node B', 'n8n-nodes-base.set'),
@@ -240,7 +240,7 @@ await test('rejects workflow with a directed cycle', () => {
   expect(result.ok === false && (result.error.includes('Node A') || result.error.includes('Node B')), 'error cites node names').toBeTruthy();
 });
 
-await test('schedule trigger node maps to schedule step', () => {
+test('schedule trigger node maps to schedule step', () => {
   const nodes = [node('t', 'Cron', 'n8n-nodes-base.scheduleTrigger')];
   const result = importN8nWorkflow(makeWorkflow(nodes));
   expect(result.ok, 'should succeed').toBeTruthy();
@@ -251,7 +251,7 @@ await test('schedule trigger node maps to schedule step', () => {
   expect(step!.confidence, 'schedule trigger is high confidence').toBe('high');
 });
 
-await test('webhook trigger node maps to trigger step', () => {
+test('webhook trigger node maps to trigger step', () => {
   const nodes = [node('w', 'Webhook', 'n8n-nodes-base.webhook')];
   const result = importN8nWorkflow(makeWorkflow(nodes));
   expect(result.ok, 'should succeed').toBeTruthy();
@@ -261,7 +261,7 @@ await test('webhook trigger node maps to trigger step', () => {
   expect(step!.stepType, 'should be trigger step').toBe('trigger');
 });
 
-await test('if node maps to conditional step', () => {
+test('if node maps to conditional step', () => {
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const ifNode = node('i', 'Check Condition', 'n8n-nodes-base.if');
   const result = importN8nWorkflow(makeWorkflow([trigger, ifNode], [conn('t', 'i')]));
@@ -272,7 +272,7 @@ await test('if node maps to conditional step', () => {
   expect(step!.stepType, 'if node maps to conditional').toBe('conditional');
 });
 
-await test('unknown node type emits user_input step with TODO and low confidence', () => {
+test('unknown node type emits user_input step with TODO and low confidence', () => {
   // Connect from a trigger so the unknown node is not disconnected
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const nodes = [trigger, node('u', 'Mystery Node', 'n8n-nodes-base.unknownType42')];
@@ -289,7 +289,7 @@ await test('unknown node type emits user_input step with TODO and low confidence
   expect(reportRow!.actionRequired, 'unknown → rewrite action').toBe('rewrite');
 });
 
-await test('function node is emitted as user_input step with TODO (unconvertible)', () => {
+test('function node is emitted as user_input step with TODO (unconvertible)', () => {
   // Connect from a trigger so it is not treated as disconnected
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const nodes = [trigger, node('f', 'Transform Data', 'n8n-nodes-base.function')];
@@ -305,7 +305,7 @@ await test('function node is emitted as user_input step with TODO (unconvertible
   expect(reportRow!.actionRequired, 'function → rewrite').toBe('rewrite');
 });
 
-await test('disconnected non-trigger node is absent from steps and has high-severity warning in report', () => {
+test('disconnected non-trigger node is absent from steps and has high-severity warning in report', () => {
   // trigger connects to http; slack has NO connections
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const http = node('h', 'HTTP Call', 'n8n-nodes-base.httpRequest', { method: 'GET' });
@@ -325,7 +325,7 @@ await test('disconnected non-trigger node is absent from steps and has high-seve
   expect(reportRow!.warning!.severity, 'should be high severity').toBe('high');
 });
 
-await test('credential references extracted into checklist (no tokens)', () => {
+test('credential references extracted into checklist (no tokens)', () => {
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const gmail = node('g', 'Send Email', 'n8n-nodes-base.gmail', {}, {
     gmailOAuth2: { id: 'cred-abc', name: 'Client Gmail' },
@@ -339,7 +339,7 @@ await test('credential references extracted into checklist (no tokens)', () => {
   expect(result.credentialChecklist[0].name, 'name correct').toBe('Client Gmail');
 });
 
-await test('HTTP POST step has sideEffectClass review', () => {
+test('HTTP POST step has sideEffectClass review', () => {
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const http = node('h', 'POST to API', 'n8n-nodes-base.httpRequest', { method: 'POST', url: 'https://api.example.com/endpoint' });
   const result = importN8nWorkflow(makeWorkflow([trigger, http], [conn('t', 'h')]));
@@ -350,7 +350,7 @@ await test('HTTP POST step has sideEffectClass review', () => {
   expect(step!.sideEffectClass, 'POST → review').toBe('review');
 });
 
-await test('HTTP GET step has sideEffectClass auto', () => {
+test('HTTP GET step has sideEffectClass auto', () => {
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const http = node('h', 'GET Data', 'n8n-nodes-base.httpRequest', { method: 'GET', url: 'https://api.example.com/data' });
   const result = importN8nWorkflow(makeWorkflow([trigger, http], [conn('t', 'h')]));
@@ -361,7 +361,7 @@ await test('HTTP GET step has sideEffectClass auto', () => {
   expect(step!.sideEffectClass, 'GET → auto').toBe('auto');
 });
 
-await test('HTTP node with variable method expression has sideEffectClass review', () => {
+test('HTTP node with variable method expression has sideEffectClass review', () => {
   const trigger = node('t', 'Trigger', 'n8n-nodes-base.manualTrigger');
   const http = node('h', 'Dynamic HTTP', 'n8n-nodes-base.httpRequest', { method: '={{$json.httpMethod}}' });
   const result = importN8nWorkflow(makeWorkflow([trigger, http], [conn('t', 'h')]));
@@ -372,7 +372,7 @@ await test('HTTP node with variable method expression has sideEffectClass review
   expect(step!.sideEffectClass, 'variable method → review (unknown scope)').toBe('review');
 });
 
-await test('typical workflow: trigger → http → slack produces 3 steps in order', () => {
+test('typical workflow: trigger → http → slack produces 3 steps in order', () => {
   const trigger = node('t', 'Cron Trigger', 'n8n-nodes-base.scheduleTrigger');
   const http = node('h', 'Fetch Data', 'n8n-nodes-base.httpRequest', { method: 'GET' });
   const slack = node('s', 'Post to Slack', 'n8n-nodes-base.slack');

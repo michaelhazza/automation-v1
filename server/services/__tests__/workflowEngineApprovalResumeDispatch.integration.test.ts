@@ -47,7 +47,7 @@ import * as crypto from 'node:crypto';
 // Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-await import('dotenv/config');
+import 'dotenv/config';
 
 process.env.NODE_ENV ??= 'test';
 process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';

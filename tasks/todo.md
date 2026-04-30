@@ -335,6 +335,15 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #239 — vitest-migration-2026-04-29 (2026-04-30 — ChatGPT review round 1)
+
+All four items are technical and recommended for the TI-005 follow-up branch. The brief at `docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md` already scopes most of this work.
+
+- [ ] [user] **F1: Centralised `testBootstrap()` / `withTestDb()` integration harness** — Severity high, scope architectural. Failing integration tests (`briefsArtefactsPagination.integration.test.ts`, `conversationsRouteFollowUp.integration.test.ts`, `incidentIngestorThrottle.integration.test.ts`, `incidentIngestorIdempotency.test.ts`) hit FK violations because hardcoded `TEST_ORG_ID = '00000000-0000-0000-0000-000000000001'` is never seeded, plus `mock is not defined` errors because `mock.module(...)` (node:test API) was left in place after the Vitest cutover. Fix: a single bootstrap helper that seeds canonical org/subaccount/user before integration runs, plus systematic conversion of `mock.module(...)` → `vi.mock(...)`. Maps directly to TI-005 brief Phase 1 (`docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md`). Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`. PR #239 — https://github.com/michaelhazza/automation-v1/pull/239.
+- [ ] [user] **F3: Flip integration CI job `continue-on-error: true` → `false`** — Severity medium. Currently green CI is theatre — the integration job can fail silently. Flip the flag once F1 lands and the integration suite is genuinely passing. Pair with F1 in the same PR. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`. PR #239 — https://github.com/michaelhazza/automation-v1/pull/239.
+- [ ] [user] **F4: Centralised `isIntegrationEnv` helper + `test.skipIf(!isIntegrationEnv)`** — Severity low, scope standard. Replace ~36 ad-hoc `process.env.NODE_ENV === 'integration'` checks with a single exported boolean (e.g. `tests/utils/isIntegrationEnv.ts`) and use `test.skipIf(!isIntegrationEnv)(...)`. Aligns with the existing PR #226 deferred item ("Centralise integration-test skip pattern") — fold both into one cleanup pass. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`. PR #239 — https://github.com/michaelhazza/automation-v1/pull/239.
+- [ ] [user] **F6: Vitest workspace project split (`vitest run --project unit` / `--project integration`)** — Severity low, scope architectural. CI currently runs `npm test` (which calls test:gates + test:qa + test:unit) for the unit job and `npx vitest run` for the integration job — same vitest config, NODE_ENV switch is the only difference. Long-term cleaner: a `vitest.workspace.ts` declaring two projects with separate include/exclude globs, then CI invokes `--project unit` vs `--project integration`. Don't design pre-emptively — fold into the F1 harness PR so the harness wires up to the integration project directly. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`. PR #239 — https://github.com/michaelhazza/automation-v1/pull/239.
+
 ### PR #233 — brief-feature-updates (2026-04-29 — ChatGPT review round 1)
 
 - [ ] [user] **Unify `/api/briefs` and `/api/session/message` contract** — F1, severity high, scope architectural. **[PARTIAL 2026-04-29]** Service extraction shipped: both routes already call `createBrief()` from `server/services/briefCreationService.ts`. Response-envelope harmonisation remaining in `pre-prod-boundary-and-brief-api` branch (Phase 4) — define a unified `BriefCreationEnvelope` type both routes return on the brief-creation path. Original: Two parallel brief-creation entry points have diverged: `/api/briefs` returns `{ briefId, conversationId, fastPathDecision }` while `/api/session/message` returns `{ type: 'brief_created', ...context }` with context-switch side effects. Layout modal still posts to `/api/briefs`; GlobalAskBar uses `/api/session/message`. Risk: future bugs where one path bypasses logic added to the other. Recommended approach: make `/api/briefs` a thin wrapper over `/api/session/message`, or extract a shared service that both routes call and emit a consistent response envelope. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-brief-feature-updates-2026-04-29T01-05-59Z.md`. PR #233 — https://github.com/michaelhazza/automation-v1/pull/233.
@@ -1823,45 +1832,36 @@ Captured 2026-04-30 from ChatGPT review of [PR #237](https://github.com/michaelh
   `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
 - Linked invariant: I-6 (quarantine contract with expiry pressure).
 
-### TI-003: Add a "no-handwritten-harness-leftovers" gate
-- Captured: 2026-04-30 (after diagnosing the CI hang on PR #238)
-- Owner: unowned
-- Reason: Phase 2/3 conversion scripts left some files in a half-converted
-  state — they imported `test`/`expect` from vitest but kept a custom
-  `function asyncTest()` helper, an unawaited `pendingTests` array, top-level
-  `await Promise.all(pendingTests)`, references to undeclared `passed`/
-  `failed` counters, and a final `if (failed > 0) process.exit(1)`. Symptom
-  on PR #238: vitest worker hung for 13+ minutes after all tests appeared
-  to complete because `await Promise.all(pendingTests)` waited on promises
-  that never resolved (the resolver path threw `passed is not defined`).
-  Fixed in commit on this branch — but a guard prevents the next regression.
-- Goal: a `scripts/verify-no-harness-leftovers.sh` gate that fails if any
-  `*.test.ts` contains any of: `function asyncTest`, `let passed = 0`,
-  `let failed = 0`, `pendingTests`, `if (failed > 0) process.exit`,
-  `Promise.all(pendingTests)`, `passed++`, `failed++`. Wire into
-  `scripts/run-all-gates.sh`.
-- Linked invariant: I-7b (no module-load side effects in tests) and the
-  testing-conventions.md "Forbidden patterns" list (which already names
-  these patterns but is not enforced).
+### TI-002 + TI-003: [DONE 2026-04-30] verify-test-quality.sh
+Discovery guard + harness-leftover guard merged into a single gate at
+`scripts/verify-test-quality.sh` (wired into `scripts/run-all-gates.sh`).
+Enforces seven rules: file location under `__tests__/`, no `node:test` /
+`node:assert` imports, no handwritten-harness leftovers (`asyncTest`,
+`pendingTests`, `passed++`, `failed++`, `Promise.all(pendingTests)`,
+`Promise<T>[] = []`, `tests.push(async () => test(...))`), no `process.exit`
+in tests, every file has at least one `test()` / `describe()` / `it()`
+block, no bare top-level `await`, no module-level `process.env.X = '...'`
+without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
-### TI-002: Add a test-discovery guard to prevent orphan `*.test.ts` files
-- Captured: 2026-04-30 (after fixing two orphan tests on the vitest-migration branch)
-- Owner: unowned
-- Reason: Vitest's `include` glob is `**/__tests__/**/*.test.ts` plus two
-  explicitly-listed outliers. Test files placed outside `__tests__/` and not
-  added to the explicit list silently provide zero coverage. This has now
-  bitten the codebase three times: `canonicalAdapterContract.test.ts`
-  (commit 4d0cef9f), `shared/types/workspace.test.ts`, and
-  `shared/billing/seatDerivation.test.ts` (both fixed on the
-  vitest-migration branch).
-- Blocking dependency: the two outliers explicitly listed in
-  `vitest.config.ts` (`shared/lib/parseContextSwitchCommand.test.ts`,
-  `server/services/scopeResolutionService.test.ts`) are scheduled for
-  relocation to `__tests__/` per the migration plan's Phase 6 "Moved"
-  section. The guard will false-positive on those two until they move.
-- Goal: after the two outliers are relocated, add
-  `scripts/verify-test-discovery.sh` that fails if any `*.test.ts` exists
-  outside `**/__tests__/**`. Wire it into `scripts/run-all-gates.sh` and
-  remove the `include` allow-list entries from `vitest.config.ts`.
-- Linked invariant: I-3 (parity — every test file the bash runner ran must
-  also be discovered by Vitest).
+### TI-005: Fix all integration CI test failures (full execution brief)
+- Captured: 2026-04-30 (after PR #239 surfaced 24 failures across 14 files)
+- **Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md)** — 5-phase plan, 3–4h, ready to execute in a new branch.
+- Replaces the older 2-file scope; covers all 14 failing files plus the seed-fixture work and the gate flip from `continue-on-error: true` → `false`.
+
+### [DEPRECATED — see brief above] TI-005 (original): Refactor 2 legacy integration tests to vitest-idiomatic structure
+- Captured: 2026-04-30
+- Files:
+  - `server/services/crmQueryPlanner/__tests__/integration.test.ts`
+  - `server/services/__tests__/workspaceMemoryService.test.ts`
+- Reason: Both use a flat `if (!SKIP) { ... } else { test.skip(...) }` module-
+  level structure with column-0 `await` for tsx-runnable compatibility. Both
+  carry `// guard-ignore-file: test-quality reason="..."` to bypass the
+  test-quality gate. Concrete bug in workspaceMemoryService: `await
+  client.end()` runs at module load — closes the DB before the registered
+  test() blocks run. Currently masked because CI uses `NODE_ENV=test` and
+  the entire file skips.
+- Goal: convert each to `describe.skipIf(SKIP)('...', () => { beforeAll(...);
+  afterAll(...); test(...); })`. Remove the guard-ignore directives. Verify
+  by running with `NODE_ENV=integration` against the integration CI job.
+- Linked: blocks flipping `.github/workflows/ci.yml` integration job from
+  `continue-on-error: true` → `false`.

@@ -20,14 +20,14 @@ import { expect, test } from 'vitest';
 
 export {};
 
-await import('dotenv/config');
+import 'dotenv/config';
 
 // Set before any module imports so module-level consts pick up the overrides.
-process.env.NODE_ENV     = 'test'; // required for __testHooks NODE_ENV guard in triageHandler
+process.env.NODE_ENV ??= 'test'; // required for __testHooks NODE_ENV guard in triageHandler
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 // Raise rate-limit cap so the test can call runTriage multiple times without hitting it.
-process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT = '10';
+process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT ??= '10';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const SKIP_TRIAGE_DUR = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
@@ -45,13 +45,18 @@ const { runTriage, __testHooks } = await import('../triageHandler.js');
 const { runStaleTriageSweep } = await import('../staleTriageSweep.js');
 
 // Verify migration 0239 has been applied before running any test.
+let MIGRATION_OK = true;
 try {
   await db.execute(sql`SELECT last_triage_job_id FROM system_incidents LIMIT 0`);
 } catch {
   console.log('\nSKIP: migration 0239 not applied (column last_triage_job_id missing).');
   console.log('Apply the migration and re-run.\n');
-  process.exit(0);
+  MIGRATION_OK = false;
 }
+
+if (!MIGRATION_OK) {
+  test.skip('triageDurability integration (requires migration 0239 applied)', () => {});
+} else {
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -206,4 +211,5 @@ try {
     // best-effort
   }
 }
+} // end if (MIGRATION_OK)
 } // end if (!SKIP_TRIAGE_DUR)

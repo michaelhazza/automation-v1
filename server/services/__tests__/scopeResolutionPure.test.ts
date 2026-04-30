@@ -7,33 +7,32 @@
  *   npx tsx server/services/__tests__/scopeResolutionPure.test.ts
  */
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import { shouldSearchEntityHint } from '../scopeResolutionPure.js';
 
 test('empty string returns false', () => {
-  assert.equal(shouldSearchEntityHint(''), false);
+  expect(shouldSearchEntityHint('')).toBe(false);
 });
 
 test('whitespace-only returns false', () => {
-  assert.equal(shouldSearchEntityHint('   '), false);
+  expect(shouldSearchEntityHint('   ')).toBe(false);
 });
 
 test('single character returns false', () => {
-  assert.equal(shouldSearchEntityHint('a'), false);
+  expect(shouldSearchEntityHint('a')).toBe(false);
 });
 
 test('single character padded with whitespace returns false', () => {
-  assert.equal(shouldSearchEntityHint(' a '), false);
+  expect(shouldSearchEntityHint(' a ')).toBe(false);
 });
 
 test('two characters returns true', () => {
-  assert.equal(shouldSearchEntityHint('ab'), true);
+  expect(shouldSearchEntityHint('ab')).toBe(true);
 });
 
 test('longer hint returns true', () => {
-  assert.equal(shouldSearchEntityHint('Acme'), true);
+  expect(shouldSearchEntityHint('Acme')).toBe(true);
 });
 
 test('two characters with surrounding whitespace returns true', () => {
-  assert.equal(shouldSearchEntityHint('  ab  '), true);
+  expect(shouldSearchEntityHint('  ab  ')).toBe(true);
 });

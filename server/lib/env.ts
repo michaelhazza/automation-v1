@@ -5,7 +5,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   EMAIL_FROM: z.string(),
   PORT: z.coerce.number().optional().default(3000),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test', 'integration']).default('development'),
   FILE_STORAGE_BACKEND: z.enum(['r2', 's3']).default('r2'),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),

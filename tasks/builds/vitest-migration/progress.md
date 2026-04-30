@@ -69,4 +69,18 @@ Key learnings:
   hidden asyncTest assertions now actually run.
 - New follow-up TI-003: gate against handwritten-harness leftovers
   (asyncTest, pendingTests, passed++, etc.).
-- CI unit-layer runtime baseline: pending CI run on PR #238.
+- 2026-04-30 (final pass): post-CI-fix hardening sweep. TI-002 + TI-003 closed
+  (single `verify-test-quality.sh` gate covers both). 7 rules enforced by
+  the gate. Cleaned up 5 more handwritten-harness leftovers found during the
+  sweep (agentExecution.smoke run() wrapper, alertFatigueGuard tests.push
+  pattern, crmQueryPlannerService dead Promise<void>[], 2 incidentIngestor
+  files with dead pending arrays). Converted 16 files from
+  `await import('dotenv/config')` → sync. Removed 18 pointless `await test()`
+  no-ops. Converted 9 module-level env mutations to `??=`. Added a second
+  `integration` CI job in ci.yml under `NODE_ENV=integration` to surface the
+  36 previously-dead integration tests; running with `continue-on-error: true`
+  pending TI-005 (legacy if/else integration files need `describe.skipIf`
+  refactor — workspaceMemoryService closes DB before tests run).
+- Phase 6 marked DONE in the migration plan with closeout summary.
+- CI unit-layer runtime baseline: 40s on the unit job. Integration job
+  baseline: pending first run.

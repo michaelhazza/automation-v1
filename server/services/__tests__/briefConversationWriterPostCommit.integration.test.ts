@@ -16,7 +16,6 @@
  */
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import {
   createPostCommitStore,
   getPostCommitStore,
@@ -33,10 +32,10 @@ test('case 1: 2xx path — emits fire after flushAll', async () => {
     s.enqueue(() => fired.push('artefact-new'));
   });
 
-  assert.deepStrictEqual(fired, []);
+  expect(fired).toEqual([]);
   store.flushAll();
-  assert.deepStrictEqual(fired, ['conversation-update', 'artefact-new']);
-  assert.ok(store.isClosed);
+  expect(fired).toEqual(['conversation-update', 'artefact-new']);
+  expect(store.isClosed).toBeTruthy();
 });
 
 test('case 2: 5xx path — emits dropped on reset', async () => {
@@ -49,10 +48,10 @@ test('case 2: 5xx path — emits dropped on reset', async () => {
     s.enqueue(() => fired.push('artefact-new'));
   });
 
-  assert.deepStrictEqual(fired, []);
-  assert.strictEqual(store.pendingCount, 2);
+  expect(fired).toEqual([]);
+  expect(store.pendingCount).toBe(2);
   store.reset();
-  assert.deepStrictEqual(fired, []);
-  assert.ok(store.isClosed);
-  assert.strictEqual(store.pendingCount, 0);
+  expect(fired).toEqual([]);
+  expect(store.isClosed).toBeTruthy();
+  expect(store.pendingCount).toBe(0);
 });

@@ -31,7 +31,6 @@
  */
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import {
   assertWithinRunBudgetFromLedger,
   getRunCostCentsFromLedger,
@@ -43,7 +42,7 @@ import { FailureError } from '../../../shared/iee/failure.js';
 
 console.log('\n--- llmRouterCostBreaker (pure) ---');
 
-await test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on null id', async () => {
+test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on null id', async () => {
   let caught: unknown = null;
   try {
     await assertWithinRunBudgetFromLedger({
@@ -56,9 +55,9 @@ await test('assertWithinRunBudgetFromLedger throws breaker_no_ledger_link on nul
   } catch (err) {
     caught = err;
   }
-  assert.ok(caught instanceof FailureError, 'threw FailureError');
-  assert.equal((caught as FailureError).failure.failureReason, 'internal_error');
-  assert.equal((caught as FailureError).failure.failureDetail, 'breaker_no_ledger_link');
+  expect(caught instanceof FailureError).toBeTruthy();
+  expect((caught as FailureError).failure.failureReason).toBe('internal_error');
+  expect((caught as FailureError).failure.failureDetail).toBe('breaker_no_ledger_link');
 });
 // ─── Section 2: Integration (requires DATABASE_URL) ─────────────────────
 
@@ -207,7 +206,7 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         // Error row is excluded from the sum.
         await insertLedgerRow({ runId, costCents: 500, status: 'error' });
         const cents = await getRunCostCentsFromLedger(runId);
-        assert.equal(cents, 30, 'sum excludes error status');
+        expect(cents).toBe(30);
       });
 
       await test('assertWithinRunBudgetFromLedger: within budget → resolves', async () => {
@@ -238,16 +237,16 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         } catch (err) {
           caught = err;
         }
-        assert.ok(caught instanceof FailureError, 'threw FailureError');
-        assert.equal((caught as FailureError).failure.failureReason, 'internal_error');
-        assert.equal((caught as FailureError).failure.failureDetail, 'cost_limit_exceeded');
+        expect(caught instanceof FailureError).toBeTruthy();
+        expect((caught as FailureError).failure.failureReason).toBe('internal_error');
+        expect((caught as FailureError).failure.failureDetail).toBe('cost_limit_exceeded');
         // Ledger row was written BEFORE the throw — cost attribution intact.
         const [persisted] = await db
           .select({ id: llmRequests.id, status: llmRequests.status })
           .from(llmRequests)
           .where(eq(llmRequests.id, rowId));
-        assert.ok(persisted, 'ledger row persisted');
-        assert.equal(persisted.status, 'success', 'ledger status not downgraded to budget_blocked');
+        expect(persisted).toBeTruthy();
+        expect(persisted.status).toBe('success');
       });
 
       await test('assertWithinRunBudgetFromLedger: ledger row not visible → breaker_ledger_not_visible', async () => {
@@ -265,9 +264,9 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         } catch (err) {
           caught = err;
         }
-        assert.ok(caught instanceof FailureError, 'threw FailureError');
-        assert.equal((caught as FailureError).failure.failureReason, 'internal_error');
-        assert.equal((caught as FailureError).failure.failureDetail, 'breaker_ledger_not_visible');
+        expect(caught instanceof FailureError).toBeTruthy();
+        expect((caught as FailureError).failure.failureReason).toBe('internal_error');
+        expect((caught as FailureError).failure.failureDetail).toBe('breaker_ledger_not_visible');
       });
 
       await test('missing subaccountAgentId resolves via agent_runs → honors per-run ceiling', async () => {
@@ -287,8 +286,8 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         } catch (err) {
           caught = err;
         }
-        assert.ok(caught instanceof FailureError, 'threw FailureError');
-        assert.equal((caught as FailureError).failure.failureDetail, 'cost_limit_exceeded');
+        expect(caught instanceof FailureError).toBeTruthy();
+        expect((caught as FailureError).failure.failureDetail).toBe('cost_limit_exceeded');
       });
 
       await test('concurrent burst: subsequent serial call trips breaker; total cost does not drift unboundedly', async () => {
@@ -318,7 +317,7 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         // Collective spend is bounded by the batch × per-call cost, not
         // unboundedly growing — 120 cents total here.
         const spent = await getRunCostCentsFromLedger(runId);
-        assert.equal(spent, 120, 'collective spend matches inserted rows');
+        expect(spent).toBe(120);
         // At least one concurrent call observed the breach.
         const breached = results.some(
           (r) =>
@@ -326,7 +325,7 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
             r.reason instanceof FailureError &&
             r.reason.failure.failureDetail === 'cost_limit_exceeded',
         );
-        assert.ok(breached, 'at least one concurrent check tripped');
+        expect(breached).toBeTruthy();
         // Any serial follow-up call trips the breaker reliably.
         const serialRowId = await insertLedgerRow({ runId, costCents: 5 });
         let serialCaught: unknown = null;
@@ -341,12 +340,8 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         } catch (err) {
           serialCaught = err;
         }
-        assert.ok(serialCaught instanceof FailureError, 'serial follow-up throws');
-        assert.equal(
-          (serialCaught as FailureError).failure.failureDetail,
-          'cost_limit_exceeded',
-          'serial follow-up trips with cost_limit_exceeded',
-        );
+        expect(serialCaught instanceof FailureError).toBeTruthy();
+        expect((serialCaught as FailureError).failure.failureDetail).toBe('cost_limit_exceeded');
       });
 
       await test('IEE resolver query shape: select agent_run_id from iee_runs by id', async () => {
@@ -363,7 +358,7 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         // No assertion on presence (dev seed may not have iee_runs) —
         // executing the select without throwing confirms the column/index
         // shape the router helper depends on.
-        assert.ok(anyIee === undefined || typeof anyIee.id === 'string');
+        expect(anyIee === undefined || typeof anyIee.id === 'string').toBeTruthy();
       });
 
     }

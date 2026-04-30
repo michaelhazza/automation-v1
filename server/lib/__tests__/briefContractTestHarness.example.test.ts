@@ -143,42 +143,42 @@ const [INITIAL, UPDATED, APPROVAL] = ARTEFACTS as [BriefChatArtefact, BriefChatA
 // Phase 0 exit-gate assertions
 // ---------------------------------------------------------------------------
 
-await test('assertValidArtefact: initial structured result is valid', async () => {
+test('assertValidArtefact: initial structured result is valid', async () => {
   await assertValidArtefact(INITIAL);
 });
 
-await test('assertValidArtefact: updated structured result is valid', async () => {
+test('assertValidArtefact: updated structured result is valid', async () => {
   await assertValidArtefact(UPDATED);
 });
 
-await test('assertValidArtefact: approval card is valid', async () => {
+test('assertValidArtefact: approval card is valid', async () => {
   await assertValidArtefact(APPROVAL);
 });
 
-await test('assertValidChain: full chain [initial, updated, approval] is valid', async () => {
+test('assertValidChain: full chain [initial, updated, approval] is valid', async () => {
   // Chain: initial (root) → updated. Approval is independent (no parentArtefactId).
   // This tests that two chains co-existing in one array is accepted.
   await assertValidChain(ARTEFACTS);
 });
 
-await test('assertRlsScope: initial structured result — all row IDs in scope', async () => {
+test('assertRlsScope: initial structured result — all row IDs in scope', async () => {
   await assertRlsScope(INITIAL, CTX);
 });
 
-await test('assertRlsScope: updated structured result — all row IDs in scope', async () => {
+test('assertRlsScope: updated structured result — all row IDs in scope', async () => {
   await assertRlsScope(UPDATED, CTX);
 });
 
-await test('assertRlsScope: approval card — all affectedRecordIds in scope', async () => {
+test('assertRlsScope: approval card — all affectedRecordIds in scope', async () => {
   await assertRlsScope(APPROVAL, CTX);
 });
 
-await test('assertRelatedArtefactIntegrity: approval card relatedArtefactIds → updated result', async () => {
+test('assertRelatedArtefactIntegrity: approval card relatedArtefactIds → updated result', async () => {
   // approvalCard.relatedArtefactIds = [updatedId]; updatedResult.artefactId = updatedId
   await assertRelatedArtefactIntegrity(ARTEFACTS);
 });
 
-await test('assertCanonicalFlowCoverage(read_refinement): [initial, updated] matches flow', async () => {
+test('assertCanonicalFlowCoverage(read_refinement): [initial, updated] matches flow', async () => {
   await assertCanonicalFlowCoverage([INITIAL, UPDATED], 'read_refinement');
 });
 
@@ -186,7 +186,7 @@ await test('assertCanonicalFlowCoverage(read_refinement): [initial, updated] mat
 // Negative: out-of-scope ID is correctly caught
 // ---------------------------------------------------------------------------
 
-await test('assertRlsScope: correctly catches a row ID outside the scope', async () => {
+test('assertRlsScope: correctly catches a row ID outside the scope', async () => {
   const outsiderResult = synthesiseExampleCapabilityOutput({
     entityType: 'contacts',
     rowIds: ['c-001', 'c-OUTSIDER'], // c-OUTSIDER is not in CTX.scopedIds

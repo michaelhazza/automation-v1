@@ -1,6 +1,5 @@
+// guard-ignore-file: pure-helper-convention reason="Service test seeds env vars before importing the service module — must use dynamic import('../scopeResolutionService.js') so the seeding executes first."
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
-
 // Seed env vars before the service loads to prevent zod env parse failure.
 // Use ??= so we don't override a real DATABASE_URL if present.
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
@@ -9,32 +8,23 @@ process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 
 // Use dynamic import to run after env var seeding.
 const { disambiguationQuestion, deduplicateCandidates, rankCandidates, isTopCandidateDecisive } =
-  await import('./scopeResolutionService.js');
+  await import('../scopeResolutionService.js');
 
 export {};
 
 test('disambiguationQuestion returns correct prompt', () => {
-  assert.strictEqual(
-    disambiguationQuestion([
+  expect(disambiguationQuestion([
       { id: '1', name: 'Acme Pty Ltd', type: 'org' },
       { id: '2', name: 'Acme Holdings', type: 'org' },
-    ]),
-    'Which organisation did you mean?',
-  );
-  assert.strictEqual(
-    disambiguationQuestion([
+    ])).toBe('Which organisation did you mean?');
+  expect(disambiguationQuestion([
       { id: '1', name: 'Sales Team', type: 'subaccount' },
       { id: '2', name: 'Sales East', type: 'subaccount' },
-    ]),
-    'Which subaccount did you mean?',
-  );
-  assert.strictEqual(
-    disambiguationQuestion([
+    ])).toBe('Which subaccount did you mean?');
+  expect(disambiguationQuestion([
       { id: '1', name: 'Acme', type: 'org' },
       { id: '2', name: 'Acme Sales', type: 'subaccount' },
-    ]),
-    'Which organisation or subaccount did you mean?',
-  );
+    ])).toBe('Which organisation or subaccount did you mean?');
 });
 
 test('deduplicateCandidates removes duplicate IDs', () => {
@@ -43,7 +33,7 @@ test('deduplicateCandidates removes duplicate IDs', () => {
     { id: '1', name: 'Acme', type: 'org' as const },
     { id: '2', name: 'Sales', type: 'subaccount' as const },
   ];
-  assert.deepStrictEqual(deduplicateCandidates(dupes), [
+  expect(deduplicateCandidates(dupes)).toEqual([
     { id: '1', name: 'Acme', type: 'org' },
     { id: '2', name: 'Sales', type: 'subaccount' },
   ]);
@@ -56,9 +46,9 @@ test('rankCandidates: exact match floats to top; shorter name wins on tie', () =
     { id: '2', name: 'Acme Pty Ltd', type: 'org' as const },
   ];
   const ranked = rankCandidates(unranked, 'acme');
-  assert.strictEqual(ranked[0]!.name, 'Acme');
-  assert.strictEqual(ranked[1]!.name, 'Acme Holdings');
-  assert.strictEqual(ranked[2]!.name, 'Acme Pty Ltd');
+  expect(ranked[0]!.name).toBe('Acme');
+  expect(ranked[1]!.name).toBe('Acme Holdings');
+  expect(ranked[2]!.name).toBe('Acme Pty Ltd');
 });
 
 test('rankCandidates: org wins over subaccount on equal score', () => {
@@ -67,15 +57,12 @@ test('rankCandidates: org wins over subaccount on equal score', () => {
     { id: '11', name: 'Acme', type: 'org' as const },
   ];
   const mixedRanked = rankCandidates(mixed, 'acme');
-  assert.strictEqual(mixedRanked[0]!.type, 'org');
+  expect(mixedRanked[0]!.type).toBe('org');
 });
 
 test('isTopCandidateDecisive: various cases', () => {
-  assert.strictEqual(isTopCandidateDecisive([], 'acme'), false);
-  assert.strictEqual(
-    isTopCandidateDecisive([{ id: '1', name: 'Acme', type: 'org' }], 'acme'),
-    true,
-  );
+  expect(isTopCandidateDecisive([], 'acme')).toBe(false);
+  expect(isTopCandidateDecisive([{ id: '1', name: 'Acme', type: 'org' }], 'acme')).toBe(true);
 
   const strictScoreWin = rankCandidates(
     [
@@ -84,7 +71,7 @@ test('isTopCandidateDecisive: various cases', () => {
     ],
     'acme',
   );
-  assert.strictEqual(isTopCandidateDecisive(strictScoreWin, 'acme'), true);
+  expect(isTopCandidateDecisive(strictScoreWin, 'acme')).toBe(true);
 
   const tiedScoreDifferentType = rankCandidates(
     [
@@ -93,7 +80,7 @@ test('isTopCandidateDecisive: various cases', () => {
     ],
     'acme',
   );
-  assert.strictEqual(isTopCandidateDecisive(tiedScoreDifferentType, 'acme'), true);
+  expect(isTopCandidateDecisive(tiedScoreDifferentType, 'acme')).toBe(true);
 
   const lexTied = rankCandidates(
     [
@@ -102,5 +89,5 @@ test('isTopCandidateDecisive: various cases', () => {
     ],
     'acme',
   );
-  assert.strictEqual(isTopCandidateDecisive(lexTied, 'acme'), false);
+  expect(isTopCandidateDecisive(lexTied, 'acme')).toBe(false);
 });

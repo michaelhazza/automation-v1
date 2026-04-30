@@ -47,7 +47,7 @@ function assertThrows(fn: () => unknown, Ctor: abstract new (...args: never[]) =
 // ── Force NODE_ENV != 'production' for the dev-mode test cases ─────────────
 
 const originalNodeEnv = process.env.NODE_ENV;
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV ??= 'test';
 
 // Pin a known allowlist set for deterministic tests. `tasks` and other
 // rlsProtectedTables entries come from the actual registry import — the

@@ -12,8 +12,8 @@ import type { HeuristicContext } from '../../heuristics/types.js';
 
 // Six lookback ticks at 0.95 threshold ⇒ at most 0 ticks can be limit-reached
 // before the rate drops below 0.95 (5/6 ≈ 0.833 → fires).
-process.env.SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS = '6';
-process.env.SYSTEM_MONITOR_COVERAGE_THRESHOLD = '0.95';
+process.env.SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS ??= '6';
+process.env.SYSTEM_MONITOR_COVERAGE_THRESHOLD ??= '0.95';
 
 const NOW = new Date('2026-04-25T14:00:00.000Z');
 const stubCtx = (): HeuristicContext => ({

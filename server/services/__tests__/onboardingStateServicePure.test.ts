@@ -20,7 +20,7 @@ export {}; // force module scope so top-level await and local declarations don't
 // required env vars via zod. Seed placeholders before any dynamic import so the
 // zod parse does not throw. This test is purely structural — it never touches the
 // DB, signs a JWT, or sends email.
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
@@ -160,7 +160,7 @@ console.log('');
 console.log('onboardingStateServicePure — upsertSubaccountOnboardingState');
 console.log('');
 
-await test('uses org-scoped tx (insert called) for a valid onboarding run', async () => {
+test('uses org-scoped tx (insert called) for a valid onboarding run', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams()),
@@ -169,7 +169,7 @@ await test('uses org-scoped tx (insert called) for a valid onboarding run', asyn
   expect(tx.calls[0].method, 'first call should be insert').toBe('insert');
 });
 
-await test('returns early (no tx call) when isOnboardingRun is false', async () => {
+test('returns early (no tx call) when isOnboardingRun is false', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ isOnboardingRun: false })),
@@ -177,7 +177,7 @@ await test('returns early (no tx call) when isOnboardingRun is false', async () 
   expect(tx.calls.length, 'no db call expected when not an onboarding run').toBe(0);
 });
 
-await test('returns early (no tx call) when workflowSlug is null', async () => {
+test('returns early (no tx call) when workflowSlug is null', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ workflowSlug: null })),
@@ -185,7 +185,7 @@ await test('returns early (no tx call) when workflowSlug is null', async () => {
   expect(tx.calls.length, 'no db call expected when workflowSlug is null').toBe(0);
 });
 
-await test('returns early (no tx call) when subaccountId is null', async () => {
+test('returns early (no tx call) when subaccountId is null', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ subaccountId: null })),
@@ -193,7 +193,7 @@ await test('returns early (no tx call) when subaccountId is null', async () => {
   expect(tx.calls.length, 'no db call expected when subaccountId is null').toBe(0);
 });
 
-await test('swallows db errors and resolves (bookkeeping must not block execution)', async () => {
+test('swallows db errors and resolves (bookkeeping must not block execution)', async () => {
   const tx = makeFakeTx({ shouldThrow: true });
   // Should not throw — failures are logged and swallowed
   await withFakeTx(tx, () =>
@@ -202,7 +202,7 @@ await test('swallows db errors and resolves (bookkeeping must not block executio
   expect(true, 'no exception propagated').toBeTruthy();
 });
 
-await test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
+test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
   // Contract: onboarding-state persistence is bookkeeping — when callers reach
   // the service without an active org-scoped tx, getOrgScopedDb throws
   // missing_org_context, but that throw must be swallowed inside the try/catch

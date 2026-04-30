@@ -50,31 +50,26 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
   }
 }
 
-console.log('');
-console.log('agentExecution smoke test (Sprint 1 scaffold)');
-console.log('');
-
-async function run() {
 // ── Fixtures load and have the expected shape ─────────────────────
-await test('loadFixtures returns the org with the canonical UUID', () => {
+test('loadFixtures returns the org with the canonical UUID', () => {
   const f = loadFixtures();
   expect(f.org.id, 'org.id').toEqual(FIXTURE_ORG_ID);
 });
 
-await test('loadFixtures returns exactly 2 subaccounts (cross-tenant test capability)', () => {
+test('loadFixtures returns exactly 2 subaccounts (cross-tenant test capability)', () => {
   const f = loadFixtures();
   expect(f.subaccounts.length, 'subaccounts.length').toBe(2);
   expect(f.subaccounts[0].id, 'sub1.id').toEqual(FIXTURE_SUBACCOUNT_1_ID);
 });
 
-await test('loadFixtures returns one agent linked to both subaccounts', () => {
+test('loadFixtures returns one agent linked to both subaccounts', () => {
   const f = loadFixtures();
   expect(f.agent.id, 'agent.id').toEqual(FIXTURE_AGENT_ID);
   expect(f.links.length, 'two links to the same agent').toBe(2);
   expect(f.links.every((l) => l.agentId === FIXTURE_AGENT_ID), 'both links point to the fixture agent').toBeTruthy();
 });
 
-await test('loadFixtures returns three review_code outputs (APPROVE / BLOCKED / malformed)', () => {
+test('loadFixtures returns three review_code outputs (APPROVE / BLOCKED / malformed)', () => {
   const f = loadFixtures();
   expect(f.reviewCodeOutputs.approve.includes('APPROVE'), 'approve sample contains APPROVE').toBeTruthy();
   expect(f.reviewCodeOutputs.blocked.includes('BLOCKED'), 'blocked sample contains BLOCKED').toBeTruthy();
@@ -83,7 +78,7 @@ await test('loadFixtures returns three review_code outputs (APPROVE / BLOCKED / 
 });
 
 // ── LLM stub composes with the fixture set ────────────────────────
-await test('createLLMStub returns a stub bound to a single canned response', async () => {
+test('createLLMStub returns a stub bound to a single canned response', async () => {
   const fixtures = loadFixtures();
   const stub = createLLMStub([
     {
@@ -108,13 +103,13 @@ await test('createLLMStub returns a stub bound to a single canned response', asy
 });
 
 // ── Pure helpers compose against fixture-style inputs ─────────────
-await test('selectExecutionPhase classifies the first iteration of a fixture run as planning', () => {
+test('selectExecutionPhase classifies the first iteration of a fixture run as planning', () => {
   // First iteration of any fresh agent run is always planning, regardless
   // of fixture configuration.
   expect(selectExecutionPhase(0, false, 0), 'phase').toBe('planning');
 });
 
-await test('validateToolCalls accepts a fixture-shaped create_task call', () => {
+test('validateToolCalls accepts a fixture-shaped create_task call', () => {
   // The fixture link includes create_task in its allowlist (an ACTION_REGISTRY
   // entry).
   const result = validateToolCalls(
@@ -137,7 +132,7 @@ await test('validateToolCalls accepts a fixture-shaped create_task call', () => 
   expect(result.valid, 'valid').toBe(true);
 });
 
-await test('buildMiddlewareContext constructs an initial context from fixture-shaped params', () => {
+test('buildMiddlewareContext constructs an initial context from fixture-shaped params', () => {
   const fixtures = loadFixtures();
   const ctx = buildMiddlewareContext({
     runId: 'smoke-run-1',
@@ -172,7 +167,7 @@ await test('buildMiddlewareContext constructs an initial context from fixture-sh
 });
 
 // ── Action registry sanity (post-Zod conversion) ──────────────────
-await test('action registry contains the skills referenced by the fixture link', () => {
+test('action registry contains the skills referenced by the fixture link', () => {
   const fixtures = loadFixtures();
   const requiredSkills = fixtures.links[0].skillSlugs ?? [];
   for (const slug of requiredSkills) {
@@ -180,19 +175,12 @@ await test('action registry contains the skills referenced by the fixture link',
   }
 });
 
-await test('every action registry entry has the new idempotencyStrategy field (Slice B contract)', () => {
+test('every action registry entry has the new idempotencyStrategy field (Slice B contract)', () => {
   for (const [slug, def] of Object.entries(ACTION_REGISTRY)) {
     expect(def.idempotencyStrategy !== undefined, `${slug} is missing idempotencyStrategy`).toBeTruthy();
   }
 });
 
-}
-
 // Suppress unused-import lint by referencing the type once.
 const _typecheckOnly: ProviderResponse | undefined = undefined;
 void _typecheckOnly;
-
-await run();
-
-console.log('');
-console.log('');
