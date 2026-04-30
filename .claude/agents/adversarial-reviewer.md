@@ -17,7 +17,7 @@ Phase 1 is advisory. Findings do NOT block PRs unless the user explicitly escala
 
 ## Input
 
-The branch diff. Use the same auto-detection logic as `spec-conformance`: committed + staged + unstaged + untracked. Sample git state once at invocation start; do not re-poll during the review pass.
+The branch diff — **the caller provides the changed-file set**, same posture as `pr-reviewer`. The agent's declared tools (`Read, Glob, Grep`) do not include shell access, so the agent cannot run `git diff` / `git status` itself. The caller must list the changed files (committed + staged + unstaged + untracked, sampled once at invocation start) and paste the relevant diff context into the invocation prompt. The spec § 4.2 wording referring to "same auto-detection logic as `spec-conformance`" is a known drift — `spec-conformance` has `Bash`; this agent does not, by design (read-only, least-privilege).
 
 ## Context Loading
 
@@ -25,7 +25,7 @@ Before reviewing, read in order:
 1. `CLAUDE.md` — project principles and conventions.
 2. `architecture.md` — three-tier agent model, RLS, route conventions, permission system.
 3. `DEVELOPMENT_GUIDELINES.md` — read when changes touch `migrations/`, `server/db/schema/`, `server/services/`, `server/routes/`, `server/lib/`, RLS policies, or LLM-routing code. Skip when changes are pure frontend or pure docs.
-4. The specific files changed (auto-detected from git state).
+4. The specific files changed (provided by the caller).
 
 ## Threat model checklist
 

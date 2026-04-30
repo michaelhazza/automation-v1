@@ -95,7 +95,9 @@ Self-writes its log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md`
 
 Read-only. Emits its complete review inside a fenced markdown block tagged `adversarial-review-log` and prints it as the LAST content of its response — same pattern as `pr-reviewer`.
 
-**Caller responsibility:** before the user acts on any finding, extract the block verbatim and write it to `tasks/review-logs/adversarial-review-log-<slug>[-<chunk-slug>]-<timestamp>.md`. No edits, filtering, or interpretation before persistence — persist the raw block first, then triage.
+**Caller responsibility — input:** the agent's declared tools are `Read, Glob, Grep` (no shell access by design — least-privilege for an adversarial reviewer). The caller must provide the changed-file set in the invocation prompt — same posture as `pr-reviewer`. Sample git state once at invocation time (committed + staged + unstaged + untracked) and list the files. **Paste the diff/patch in the prompt** — `Read` only shows the post-state, so deletions and the old half of modifications are invisible to the agent without the patch. For changes where deletions are minimal and the new lines fully describe the intent, brief framing prose can substitute; default to pasting the patch.
+
+**Caller responsibility — persistence:** before the user acts on any finding, extract the block verbatim and write it to `tasks/review-logs/adversarial-review-log-<slug>[-<chunk-slug>]-<timestamp>.md`. No edits, filtering, or interpretation before persistence — persist the raw block first, then triage.
 
 **After persisting**, process findings:
 - `confirmed-hole` findings → route to `tasks/todo.md` under `## Adversarial review findings — <slug>` for the main session to fix.

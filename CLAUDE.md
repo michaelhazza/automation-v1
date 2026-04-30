@@ -264,7 +264,7 @@ Classify every task before starting:
 "feature-coordinator: implement [feature name]"
 "audit-runner: hotspot rls"              # see audit-runner.md for full mode list
 "dual-reviewer: [brief description]"     # local-only, user must explicitly ask
-"adversarial-reviewer: hunt holes in the auth changes I just made"  # read-only, user must explicitly ask
+"adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
 "spec-reviewer: review docs/path-to-spec.md"
 ```
 

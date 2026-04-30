@@ -1897,3 +1897,7 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 ### D3. logParsers.test.ts second adversarial test missing timestampIso assertion
 
 `tools/mission-control/server/__tests__/logParsers.test.ts` — the second adversarial-review test (`parses adversarial-review log with hyphenated slug`) does not assert `timestampIso`. Consider adding `eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso')` to lock the normalisation path for hyphenated slugs.
+
+### D4. Spec § 4.2 input-detection wording contradicts § 4.1 tools list
+
+`docs/agentic-engineering-notes-dev-spec.md` § 4.1 declares the agent has tools `Read, Glob, Grep` (no Bash); § 4.2 instructs "Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked)" — which requires shell access `spec-conformance` has but this agent does not. `dual-reviewer` (Codex pass) flagged this as `[P2] Give the agent a way to detect the diff` (`tasks/review-logs/dual-review-log-agentic-engineering-notes-*.md`). The agent definition has been updated in-branch to make the contract self-consistent (caller provides the changed-file set, mirroring `pr-reviewer`'s posture). The spec § 4.2 wording should be aligned in a follow-up commit — drop the "auto-detection" clause and replace with "caller provides the changed-file set, same posture as `pr-reviewer`." Same wording symmetry applies to whatever invocation snippets exist for `adversarial-reviewer`.
