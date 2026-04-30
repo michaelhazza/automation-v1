@@ -106,7 +106,11 @@ New agent definition `.claude/agents/adversarial-reviewer.md`. Read-only (Read, 
 
 **Trigger:** Manually invoked only — the user must explicitly ask, matching the `dual-reviewer` posture. Auto-invocation from `feature-coordinator` is deferred (see § 9). The intended auto-trigger surface, once auto-invocation lands, is any change under `server/db/schema/`, `server/routes/`, `server/services/auth*`, `server/middleware/`, or RLS-related migrations.
 
-**Input:** The branch diff. Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked).
+**Detection vs invocation.** Detection scope (what files the agent reads) is standardised across review agents; invocation mode (manual vs automatic) is an independent axis.
+
+**Failure-mode posture.** Adversarial-reviewer is non-blocking in Phase 1. Findings are advisory and do NOT block PRs unless the user explicitly escalates a specific finding. Prevents accidental coupling to CI before the agent's signal-to-noise ratio is established.
+
+**Input:** The branch diff. Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked). Detection inputs (committed + staged + unstaged + untracked) are sampled once at invocation start; the agent does not re-poll git state during the review pass.
 
 **Threat model checklist** (seeded from our actual surface, expanded as findings accumulate):
 
@@ -126,6 +130,12 @@ The log MUST include a verdict header per `tasks/review-logs/README.md § Verdic
 ```
 
 Allowed values for `adversarial-reviewer`: `NO_HOLES_FOUND` | `HOLES_FOUND` | `NEEDS_DISCUSSION`. The Mission Control dashboard parses this line — without it the log is treated as "review in progress."
+
+**Verdict semantics:**
+
+- `NO_HOLES_FOUND` — the agent ran the full threat-model checklist against the diff and surfaced no `confirmed-hole` or `likely-hole` findings. `worth-confirming`-only findings appear in the log but do not set `HOLES_FOUND` — the verdict stays `NO_HOLES_FOUND`.
+- `HOLES_FOUND` — at least one finding labelled `confirmed-hole` or `likely-hole`. `worth-confirming`-only results use `NO_HOLES_FOUND`.
+- `NEEDS_DISCUSSION` — the diff is ambiguous enough that the agent cannot decide between the two above without user input (e.g. unclear ownership of a new tenant boundary, missing context on an auth flow). Reserved for genuine uncertainty, not as a soft `HOLES_FOUND`.
 
 **Non-goals:** Does not fix anything. Does not run code. Does not create a runtime fuzzing harness — that is deferred (see § 9).
 
@@ -240,7 +250,7 @@ No code changes; no test gates required. `npm run lint` and the two-tsconfig typ
 | Runtime adversarial fuzzing harness (`scripts/adversarial/`) — N tenants, M users, scripted concurrent attack scenarios, CI-gateable | Higher build cost; static adversarial-reviewer agent (Item B) covers ~80% of the value at ~10% of the cost; build only if the static agent's findings plateau and we still see tenant-isolation bugs in production | `tasks/todo.md` — "Adversarial fuzzing harness — follow-up to agentic-engineering-notes-dev-spec § 9" |
 | Per-domain "how to extend" agent-shaped recipes (new skill, new agent, new permission group) | Out of scope for Item A; if gaps surface during the doc pass, capture them rather than expand spec scope | `tasks/todo.md` (created during Item A execution if gaps found) |
 | Rewriting `docs/` spec corpus to be agent-shaped | Spec authoring is already covered by `docs/spec-authoring-checklist.md`; rewriting historical specs is low-yield | Not pursued |
-| Auto-invocation of `adversarial-reviewer` from `feature-coordinator` | Start manual / opt-in (matches `dual-reviewer` posture); revisit after 5+ uses if the signal-to-noise ratio is high | Revisit after Item B has been used in anger |
+| Auto-invocation of `adversarial-reviewer` from `feature-coordinator` | Start manual / opt-in (matches `dual-reviewer` posture). Graduation criterion: introduce auto-invocation once manual usage shows ≥80% consistency in invocation patterns (i.e. the user reaches for it on the same change classes ≥80% of the time across ≥5 uses), confirming the auto-trigger surface in § 4.2 matches actual demand. | Revisit after Item B has been used in anger |
 
 ### Open questions
 
