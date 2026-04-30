@@ -383,6 +383,7 @@ async function serveCacheAsDegraded(
     resolverVersion,
     failureReason: reason,
   }).onConflictDoNothing();
+  const stalenessSecs = Math.round((Date.now() - cacheRow.fetchedAt.getTime()) / 1000);
   emitStructuredLog({
     runId: p.runId,
     referenceId: p.referenceId,
@@ -391,6 +392,7 @@ async function serveCacheAsDegraded(
     durationMs: Date.now() - startedAt,
     tokensUsed: cacheRow.contentSizeTokens,
     failureReason: reason,
+    stalenessSecs,
   });
   return {
     referenceId: p.referenceId,
@@ -495,6 +497,7 @@ function emitStructuredLog(entry: {
   durationMs: number;
   tokensUsed: number;
   failureReason: FetchFailureReason | null;
+  stalenessSecs?: number;
 }): void {
   logger.info('document_resolve', entry);
 }
