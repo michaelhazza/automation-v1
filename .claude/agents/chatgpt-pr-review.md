@@ -514,7 +514,16 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    + deferred count + KNOWLEDGE.md entry count. Push after commit. If nothing
    changed (rare — only if finalize produced zero edits), skip.
 
-10. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+10. Add the `ready-to-merge` label to trigger CI:
+    ```bash
+    gh pr edit <N> --add-label "ready-to-merge"
+    ```
+    This fires CI on the final committed state. If the label is already present
+    (e.g. re-running finalization), the command is a no-op — that is fine.
+    If the command fails (network, permissions), print a warning and the manual
+    equivalent so the user can run it themselves — do NOT block finalization.
+
+11. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
 
 ---
 
