@@ -2884,6 +2884,80 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Thread Context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: {
+    actionType: 'update_thread_context',
+    description:
+      'Update the conversation thread context: add/remove tasks, update task status, ' +
+      'set or append to the approach note, and add/remove decisions. ' +
+      'The thread context is a living document that persists across the conversation ' +
+      'and is visible to the user in the Context tab.',
+    actionCategory: 'worker',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['decisions', 'tasks', 'approach'],
+    parameterSchema: z.object({
+      decisions: z
+        .object({
+          add: z
+            .array(
+              z.object({
+                clientRefId: z.string().optional().describe('Caller-supplied dedup ref — returned in createdIds'),
+                decision: z.string().max(500).describe('Short decision statement (≤ 500 chars)'),
+                rationale: z.string().max(1500).describe('Rationale for the decision (≤ 1500 chars)'),
+              }),
+            )
+            .optional(),
+          remove: z.array(z.string()).optional().describe('IDs of decisions to remove'),
+        })
+        .optional(),
+      tasks: z
+        .object({
+          add: z
+            .array(
+              z.object({
+                clientRefId: z.string().optional().describe('Caller-supplied dedup ref — returned in createdIds'),
+                label: z.string().max(200).describe('Task description (≤ 200 chars)'),
+              }),
+            )
+            .optional(),
+          updateStatus: z
+            .array(
+              z.object({
+                id: z.string().describe('Task ID to update'),
+                status: z.enum(['pending', 'in_progress', 'done']),
+              }),
+            )
+            .optional(),
+          remove: z.array(z.string()).optional().describe('IDs of tasks to remove'),
+        })
+        .optional(),
+      approach: z
+        .object({
+          replace: z.string().max(10000).optional().describe('Replace approach with this text (≤ 10,000 chars)'),
+          appendNote: z.string().optional().describe('Append a note to the existing approach'),
+        })
+        .optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['DB_ERROR', 'NETWORK_ERROR'],
+      doNotRetryOn: ['TASK_CAP_REACHED', 'DECISION_CAP_REACHED', 'APPROACH_TOO_LONG'],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
 };
 
 /**

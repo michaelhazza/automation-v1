@@ -6,9 +6,11 @@ import { useSocketRoom } from '../hooks/useSocket';
 import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
 import CostMeterPill from '../components/CostMeterPill';
 import SuggestedActionChips from '../components/SuggestedActionChips';
+import ThreadContextPanel from '../components/ThreadContextPanel';
 import { relativeTime } from '../lib/relativeTime';
 import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
 import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions';
+import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext';
 
 interface AgentRunHandoff {
   version: 1;
@@ -180,6 +182,8 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [contextPanelVisible, setContextPanelVisible] = useState(false);
+  const [threadContext, setThreadContext] = useState<ThreadContextReadModel | null>(null);
   const [error, setError] = useState('');
   // Recent runs sidebar section
   const [recentRuns, setRecentRuns] = useState<SessionLogRun[]>([]);
@@ -189,6 +193,19 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [latestHandoff, setLatestHandoff] = useState<LatestHandoffResponse | null>(null);
   // Per-thread cost/token meter — refreshed after each new assistant message
   const [conversationCost, setConversationCost] = useState<ConversationCostResponse | null>(null);
+
+  // Fetch per-conversation thread context. Returns empty model if none exists yet.
+  const loadThreadContext = useCallback(async (convId: string | null) => {
+    if (!agentId || !convId) return;
+    try {
+      const res = await api.get<ThreadContextReadModel>(
+        `/api/agents/${agentId}/conversations/${convId}/thread-context`,
+      );
+      setThreadContext(res.data);
+    } catch {
+      // Non-critical — silently ignore
+    }
+  }, [agentId]);
 
   // Fetch per-thread cost from the cost endpoint. Silently no-ops when
   // agentId or convId is absent (e.g. before initial load).
@@ -268,6 +285,9 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     'conversation:tool_use': () => {
       // Keep the typing indicator visible during tool execution
     },
+    'conversation:thread_context_updated': (data: unknown) => {
+      setThreadContext(data as ThreadContextReadModel);
+    },
   });
 
   useEffect(() => {
@@ -302,12 +322,14 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     if (!agentId || !activeConvId) return;
     setLoadingMessages(true); setMessages([]);
     setConversationCost(null);
+    setThreadContext(null);
     api.get(`/api/agents/${agentId}/conversations/${activeConvId}`)
       .then((res) => { const data = res.data; setMessages(Array.isArray(data) ? data : (data.messages ?? [])); })
       .catch((err) => { console.error('[AgentChat] Failed to load conversation messages:', err); setMessages([]); })
       .finally(() => setLoadingMessages(false));
     void loadConversationCost(activeConvId);
-  }, [agentId, activeConvId, loadConversationCost]);
+    void loadThreadContext(activeConvId);
+  }, [agentId, activeConvId, loadConversationCost, loadThreadContext]);
 
   const handleNewConversation = async () => {
     if (!agentId) return;
@@ -431,6 +453,16 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
           </svg>
+        </button>
+        <button
+          onClick={() => setContextPanelVisible((v) => !v)}
+          title={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors text-[12.5px] font-semibold shrink-0 ${contextPanelVisible ? 'bg-violet-50 border-indigo-200 text-indigo-600' : 'bg-transparent border-slate-200 text-slate-400 hover:text-slate-600'}`}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
+          </svg>
+          Context
         </button>
       </div>
 
@@ -667,6 +699,19 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
             </div>
           </div>
         </div>
+
+        {/* Context panel — right pane */}
+        {contextPanelVisible && (
+          <div className="w-[280px] shrink-0 bg-slate-50 border-l border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+              <div className="text-[13px] font-bold text-slate-800">Context</div>
+            </div>
+            <ThreadContextPanel
+              readModel={threadContext}
+              isLive={sending || recentRuns.some((r) => (r as { status?: string }).status === 'running')}
+            />
+          </div>
+        )}
 
       </div>
     </div>
