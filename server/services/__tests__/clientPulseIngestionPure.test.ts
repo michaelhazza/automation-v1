@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/clientPulseIngestionPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   observationFromFunnels,
   observationFromCalendars,
@@ -14,25 +15,6 @@ import {
   CLIENT_PULSE_SIGNAL_SLUGS,
 } from '../clientPulseIngestionServicePure.js';
 import { assertCanonicalUniqueness, CANONICAL_UNIQUENESS_MODE } from '../../db/schema/clientPulseCanonicalTables.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 const base = {
   organisationId: 'org-1',
@@ -45,7 +27,7 @@ const base = {
 // ── Ship-gate sanity: all 8 signal slugs are declared ─────────────────────
 
 test('CLIENT_PULSE_SIGNAL_SLUGS includes all 8 signals from §2', () => {
-  assert(CLIENT_PULSE_SIGNAL_SLUGS.length === 8, `expected 8 signals, got ${CLIENT_PULSE_SIGNAL_SLUGS.length}`);
+  expect(CLIENT_PULSE_SIGNAL_SLUGS.length === 8, `expected 8 signals, got ${CLIENT_PULSE_SIGNAL_SLUGS.length}`).toBeTruthy();
   const expected = [
     'staff_activity_pulse',
     'funnel_count',
@@ -57,7 +39,7 @@ test('CLIENT_PULSE_SIGNAL_SLUGS includes all 8 signals from §2', () => {
     'opportunity_pipeline',
   ];
   for (const slug of expected) {
-    assert(CLIENT_PULSE_SIGNAL_SLUGS.includes(slug as never), `missing signal: ${slug}`);
+    expect(CLIENT_PULSE_SIGNAL_SLUGS.includes(slug as never), `missing signal: ${slug}`).toBeTruthy();
   }
 });
 
@@ -71,10 +53,10 @@ test('observationFromFunnels — available result writes count + funnelIds', () 
       { id: 'f2', name: 'Webinar' },
     ],
   });
-  assert(r.signalSlug === 'funnel_count', 'wrong slug');
-  assert(r.numericValue === 2, `expected 2, got ${r.numericValue}`);
-  assert(r.availability === 'available', 'wrong availability');
-  assert(Array.isArray((r.jsonPayload as { funnelIds: unknown[] }).funnelIds), 'funnelIds missing');
+  expect(r.signalSlug === 'funnel_count', 'wrong slug').toBeTruthy();
+  expect(r.numericValue === 2, `expected 2, got ${r.numericValue}`).toBeTruthy();
+  expect(r.availability === 'available', 'wrong availability').toBeTruthy();
+  expect(Array.isArray((r.jsonPayload as { funnelIds: unknown[] }).funnelIds), 'funnelIds missing').toBeTruthy();
 });
 
 test('observationFromFunnels — missing-scope result writes availability flag', () => {
@@ -83,9 +65,9 @@ test('observationFromFunnels — missing-scope result writes availability flag',
     data: null,
     errorCode: 'http_403',
   });
-  assert(r.signalSlug === 'funnel_count', 'wrong slug');
-  assert(r.numericValue === null, 'numericValue should be null');
-  assert(r.availability === 'unavailable_missing_scope', 'availability should be missing_scope');
+  expect(r.signalSlug === 'funnel_count', 'wrong slug').toBeTruthy();
+  expect(r.numericValue === null, 'numericValue should be null').toBeTruthy();
+  expect(r.availability === 'unavailable_missing_scope', 'availability should be missing_scope').toBeTruthy();
 });
 
 // ── calendar_quality observation shaping ──────────────────────────────────
@@ -104,14 +86,14 @@ test('observationFromCalendars — computes configured ratio as percentage', () 
     },
     { availability: 'available', data: [{ id: 'u1' }, { id: 'u2' }, { id: 'u3', deleted: true }] },
   );
-  assert(r.signalSlug === 'calendar_quality', 'wrong slug');
+  expect(r.signalSlug === 'calendar_quality', 'wrong slug').toBeTruthy();
   // 2 of 4 calendars have teamMembers → 50
-  assert(r.numericValue === 50, `expected 50, got ${r.numericValue}`);
+  expect(r.numericValue === 50, `expected 50, got ${r.numericValue}`).toBeTruthy();
   const payload = r.jsonPayload as { totalCalendars: number; configuredCalendars: number; teamMemberCount: number };
-  assert(payload.totalCalendars === 4, 'totalCalendars wrong');
-  assert(payload.configuredCalendars === 2, 'configuredCalendars wrong');
+  expect(payload.totalCalendars === 4, 'totalCalendars wrong').toBeTruthy();
+  expect(payload.configuredCalendars === 2, 'configuredCalendars wrong').toBeTruthy();
   // 2 of 3 users undeleted
-  assert(payload.teamMemberCount === 2, `teamMemberCount should be 2, got ${payload.teamMemberCount}`);
+  expect(payload.teamMemberCount === 2, `teamMemberCount should be 2, got ${payload.teamMemberCount}`).toBeTruthy();
 });
 
 test('observationFromCalendars — zero calendars returns 0 ratio, not NaN', () => {
@@ -120,7 +102,7 @@ test('observationFromCalendars — zero calendars returns 0 ratio, not NaN', () 
     { availability: 'available', data: [] },
     { availability: 'available', data: [] },
   );
-  assert(r.numericValue === 0, `expected 0, got ${r.numericValue}`);
+  expect(r.numericValue === 0, `expected 0, got ${r.numericValue}`).toBeTruthy();
 });
 
 test('observationFromCalendars — missing calendar scope returns unavailable', () => {
@@ -129,8 +111,8 @@ test('observationFromCalendars — missing calendar scope returns unavailable', 
     { availability: 'unavailable_missing_scope', data: null, errorCode: 'http_403' },
     { availability: 'available', data: [] },
   );
-  assert(r.availability === 'unavailable_missing_scope', 'availability should be missing_scope');
-  assert(r.numericValue === null, 'numericValue should be null');
+  expect(r.availability === 'unavailable_missing_scope', 'availability should be missing_scope').toBeTruthy();
+  expect(r.numericValue === null, 'numericValue should be null').toBeTruthy();
 });
 
 // ── subscription_tier observation shaping ─────────────────────────────────
@@ -146,11 +128,11 @@ test('observationFromSubscription — active plan writes numericValue=1', () => 
       raw: {},
     },
   });
-  assert(r.signalSlug === 'subscription_tier', 'wrong slug');
-  assert(r.numericValue === 1, 'numericValue should be 1 for active');
+  expect(r.signalSlug === 'subscription_tier', 'wrong slug').toBeTruthy();
+  expect(r.numericValue === 1, 'numericValue should be 1 for active').toBeTruthy();
   const payload = r.jsonPayload as { tier: string; active: boolean };
-  assert(payload.tier === 'premium', 'tier payload missing');
-  assert(payload.active === true, 'active payload wrong');
+  expect(payload.tier === 'premium', 'tier payload missing').toBeTruthy();
+  expect(payload.active === true, 'active payload wrong').toBeTruthy();
 });
 
 test('observationFromSubscription — tier-gated (non-SaaS agency) returns unavailable_tier_gated', () => {
@@ -159,8 +141,8 @@ test('observationFromSubscription — tier-gated (non-SaaS agency) returns unava
     data: null,
     errorCode: 'http_404',
   });
-  assert(r.availability === 'unavailable_tier_gated', 'availability wrong');
-  assert(r.numericValue === null, 'numericValue should be null');
+  expect(r.availability === 'unavailable_tier_gated', 'availability wrong').toBeTruthy();
+  expect(r.numericValue === null, 'numericValue should be null').toBeTruthy();
 });
 
 test('observationFromSubscription — inactive plan still writes numericValue=0', () => {
@@ -168,7 +150,7 @@ test('observationFromSubscription — inactive plan still writes numericValue=0'
     availability: 'available',
     data: { tier: 'basic', active: false, raw: {} },
   });
-  assert(r.numericValue === 0, 'numericValue should be 0 for inactive');
+  expect(r.numericValue === 0, 'numericValue should be 0 for inactive').toBeTruthy();
 });
 
 // ── assertCanonicalUniqueness — enforce scoped-mode requires subaccountId ──
@@ -185,7 +167,7 @@ test('assertCanonicalUniqueness throws on scoped table without subaccountId', ()
   } catch {
     threw = true;
   }
-  assert(threw, 'should throw when scoped table has null subaccountId');
+  expect(threw, 'should throw when scoped table has null subaccountId').toBeTruthy();
 });
 
 test('assertCanonicalUniqueness throws on scoped table with undefined subaccountId', () => {
@@ -195,7 +177,7 @@ test('assertCanonicalUniqueness throws on scoped table with undefined subaccount
   } catch {
     threw = true;
   }
-  assert(threw, 'should throw when scoped table has no subaccountId key');
+  expect(threw, 'should throw when scoped table has no subaccountId key').toBeTruthy();
 });
 
 test('assertCanonicalUniqueness allows global table with or without subaccountId', () => {
@@ -211,7 +193,7 @@ test('assertCanonicalUniqueness throws on unregistered table', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'should throw on unknown table');
+  expect(threw, 'should throw on unknown table').toBeTruthy();
 });
 
 test('CANONICAL_UNIQUENESS_MODE covers all 6 canonical tables from migration 0172', () => {
@@ -224,12 +206,10 @@ test('CANONICAL_UNIQUENESS_MODE covers all 6 canonical tables from migration 017
     'canonical_contact_sources',
   ];
   for (const t of expected) {
-    assert(CANONICAL_UNIQUENESS_MODE[t] !== undefined, `missing mode for ${t}`);
+    expect(CANONICAL_UNIQUENESS_MODE[t] !== undefined, `missing mode for ${t}`).toBeTruthy();
   }
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`clientPulseIngestionPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -11,24 +11,10 @@
  *   npx tsx server/services/__tests__/reviewServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { checkIdempotency } from '../reviewServicePure.js';
 import type { ReviewStatus, RequestedAction } from '../reviewServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('reviewServicePure — idempotency decision helper (spec §6.2.1)');
@@ -130,6 +116,4 @@ test('full status × action matrix', () => {
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

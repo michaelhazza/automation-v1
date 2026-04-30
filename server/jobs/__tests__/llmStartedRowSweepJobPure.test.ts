@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   STARTED_ROW_SWEEP_BUFFER_MS,
   computeStartedRowSweepCutoff,
@@ -14,7 +13,7 @@ import {
 // ---------------------------------------------------------------------------
 
 test('STARTED_ROW_SWEEP_BUFFER_MS is 60 seconds (telescopes with registry 30s)', () => {
-  assert.equal(STARTED_ROW_SWEEP_BUFFER_MS, 60_000);
+  expect(STARTED_ROW_SWEEP_BUFFER_MS).toBe(60_000);
 });
 
 test('computeStartedRowSweepCutoff = now - (providerTimeoutMs + buffer)', () => {
@@ -24,7 +23,7 @@ test('computeStartedRowSweepCutoff = now - (providerTimeoutMs + buffer)', () => 
     providerTimeoutMs: 600_000,   // 10 min
   });
   // 600_000 + 60_000 = 660_000 ms = 11 min before `now`
-  assert.equal(cutoff.toISOString(), '2026-04-21T11:49:00.000Z');
+  expect(cutoff.toISOString()).toBe('2026-04-21T11:49:00.000Z');
 });
 
 test('computeStartedRowSweepCutoff — variable providerTimeoutMs', () => {
@@ -36,6 +35,6 @@ test('computeStartedRowSweepCutoff — variable providerTimeoutMs', () => {
   ];
   for (const { providerTimeoutMs, expected } of cases) {
     const cutoff = computeStartedRowSweepCutoff({ nowMs: now, providerTimeoutMs });
-    assert.equal(cutoff.toISOString(), expected, `providerTimeoutMs=${providerTimeoutMs}`);
+    expect(cutoff.toISOString()).toBe(expected, `providerTimeoutMs=${providerTimeoutMs}`);
   }
 });

@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="integration test uses conditional lazy imports for NODE_ENV gating; no static sibling module import is applicable"
 /**
  * Integration test — exercises the LAEL lifecycle (`llm.requested` +
  * `llm.completed`) emission through `llmRouter.routeCall` against a real DB
@@ -29,6 +30,7 @@
 // function `asserts` overloads via TypeScript decorators. Dynamic-importing
 // it strips the narrowing and triggers TS2775. Heavy DB modules stay dynamic
 // so the no-DATABASE_URL skip path returns before they boot.
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import * as crypto from 'node:crypto';
 
@@ -261,30 +263,6 @@ async function seedTestFixture(): Promise<{ orgId: string; agentId: string }> {
   return { orgId, agentId };
 }
 
-let passed = 0;
-let failed = 0;
-let skipped = 0;
-
-async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
-  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
-  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
-  if (opts.skip) {
-    skipped++;
-    console.log(`# SKIP ${name}`);
-    return;
-  }
-  try {
-    await body();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('llmRouter — LAEL integration:');
@@ -296,7 +274,7 @@ if (!SKIP) {
 }
 
 // ─── Test 1: happy-path agent-run emission ──────────────────────────────────
-await test('test 1: happy-path agent-run emits requested→completed with one referenced payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with one referenced payload row', async () => {
   const runId = crypto.randomUUID();
   await assertNoRowsForRunId(runId, [
     'agent_execution_events',
@@ -390,7 +368,7 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
 });
 
 // ─── Test 2: budget_blocked silence ─────────────────────────────────────────
-await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', async () => {
   // Deterministically trip the budget breaker by saturating the org-monthly
   // cap. We seed BOTH `org_budgets.monthlyCostLimitCents` (a tight cap) AND
   // a `cost_aggregates` row showing the org has already exceeded the cap;
@@ -577,7 +555,7 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
 });
 
 // ─── Test 3: non-agent-run silence ──────────────────────────────────────────
-await test('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', async () => {
   // No agent_runs row needed — sourceType !== 'agent_run' means LAEL gating
   // returns false. The ledger row is written with `runId: null` for system-
   // source calls, so cleanup CANNOT scope by runId — we'd leak the row on
@@ -650,7 +628,4 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
   }
 });
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
-console.log('');
-if (failed > 0) process.exit(1);
+

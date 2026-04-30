@@ -29,7 +29,7 @@
     "verify:rls": "bash scripts/verify-rls-coverage.sh && bash scripts/verify-rls-contract-compliance.sh && bash scripts/verify-rls-session-var-canon.sh",
     "test:gates": "bash scripts/run-all-gates.sh",
     "test:qa": "bash scripts/run-all-qa-tests.sh",
-    "test:unit": "bash scripts/run-all-unit-tests.sh",
+    "test:unit": "vitest run",
     "test:trajectories": "tsx scripts/run-trajectory-tests.ts"
   },
   "dependencies": {
@@ -100,6 +100,7 @@
     "@types/uuid": "^9.0.7",
     "@types/yauzl": "^2.10.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.27",
     "concurrently": "^8.2.2",
     "drizzle-kit": "^0.31.10",
@@ -107,6 +108,7 @@
     "tailwindcss": "^4.2.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
   }
 }

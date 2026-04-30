@@ -11,6 +11,7 @@
 // Stub the action registry before importing the classifier.
 // This lets us control exactly which action types exist without
 // depending on the real registry or its transitive imports.
+import { expect, test } from 'vitest';
 import { createRequire } from 'node:module';
 
 const STUB_REGISTRY: Record<string, {
@@ -148,25 +149,6 @@ function buildAckText(
 
 // ── Test runner ───────────────────────────────────────────────────
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  if (a !== b) throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-}
-
 const DEFAULT_THRESHOLDS = { perActionMinor: 5000, perRunMinor: 50_000 };
 
 function draft(overrides: Partial<PulseItemDraft> = {}): PulseItemDraft {
@@ -191,126 +173,126 @@ console.log('── classify ──');
 
 test('External cheap email → major (irreversible — A2)', () => {
   const r = classify(draft({ actionType: 'send_email' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'irreversible', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('irreversible');
 });
 
 test('External cheap update (idempotent) → client', () => {
   const r = classify(draft({ actionType: 'update_record' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'client', 'lane');
-  assertEqual(r.majorReason, undefined, 'majorReason');
+  expect(r.lane, 'lane').toBe('client');
+  expect(r.majorReason, 'majorReason').toBe(undefined);
 });
 
 test('External expensive action → major (cost_per_action)', () => {
   const r = classify(draft({ actionType: 'post_social', estimatedCostMinor: 6000 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cost_per_action', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cost_per_action');
 });
 
 test('External cheap, cumulative over run → major (cost_per_run)', () => {
   const r = classify(draft({ actionType: 'update_record', estimatedCostMinor: 100, runTotalCostMinor: 51000 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cost_per_run', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cost_per_run');
 });
 
 test('External cheap multi-subaccount → major (cross_subaccount)', () => {
   const r = classify(draft({ actionType: 'broadcast_social', subaccountScope: 'multiple' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cross_subaccount', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cross_subaccount');
 });
 
 test('Internal cheap → internal', () => {
   const r = classify(draft({ actionType: 'create_task' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
-  assertEqual(r.majorReason, undefined, 'majorReason');
+  expect(r.lane, 'lane').toBe('internal');
+  expect(r.majorReason, 'majorReason').toBe(undefined);
 });
 
 test('Internal destructive (non-external) → internal', () => {
   const r = classify(draft({ actionType: 'delete_memory' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
+  expect(r.lane, 'lane').toBe('internal');
 });
 
 test('Destructive external → major (irreversible)', () => {
   const r = classify(draft({ actionType: 'delete_record' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'irreversible', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('irreversible');
 });
 
 test('NULL cost → major (irreversible via registry for send_email)', () => {
   const r = classify(draft({ actionType: 'send_email', estimatedCostMinor: null, runTotalCostMinor: null }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'irreversible', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('irreversible');
 });
 
 test('Task (non-review) → internal', () => {
   const r = classify(draft({ kind: 'task' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
+  expect(r.lane, 'lane').toBe('internal');
 });
 
 test('Failed run → internal', () => {
   const r = classify(draft({ kind: 'failed_run' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
+  expect(r.lane, 'lane').toBe('internal');
 });
 
 test('Health finding → internal', () => {
   const r = classify(draft({ kind: 'health_finding' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
+  expect(r.lane, 'lane').toBe('internal');
 });
 
 test('Priority: irreversible wins over cost_per_action', () => {
   const r = classify(draft({ actionType: 'send_email', estimatedCostMinor: 6000 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'irreversible', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('irreversible');
 });
 
 test('Priority: cross_subaccount wins over cost_per_action', () => {
   const r = classify(draft({ actionType: 'broadcast_social', estimatedCostMinor: 6000, subaccountScope: 'multiple' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cross_subaccount', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cross_subaccount');
 });
 
 test('Unknown action type → major (irreversible fail-safe)', () => {
   const r = classify(draft({ actionType: 'unknown_skill_xyz' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'irreversible', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('irreversible');
 });
 
 test('NULL action type → internal', () => {
   const r = classify(draft({ actionType: undefined }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'internal', 'lane');
+  expect(r.lane, 'lane').toBe('internal');
 });
 
 test('Cost exactly at threshold → not major (strict >)', () => {
   const r = classify(draft({ actionType: 'post_social', estimatedCostMinor: 5000 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'client', 'lane');
+  expect(r.lane, 'lane').toBe('client');
 });
 
 test('Cost 1 above threshold → major', () => {
   const r = classify(draft({ actionType: 'post_social', estimatedCostMinor: 5001 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cost_per_action', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cost_per_action');
 });
 
 test('Run cost exactly at threshold → not major', () => {
   const r = classify(draft({ actionType: 'update_record', runTotalCostMinor: 50000 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'client', 'lane');
+  expect(r.lane, 'lane').toBe('client');
 });
 
 test('Run cost 1 above threshold → major', () => {
   const r = classify(draft({ actionType: 'update_record', runTotalCostMinor: 50001 }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cost_per_run', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cost_per_run');
 });
 
 test('External read-only (no openWorld) → client (external flag)', () => {
   const r = classify(draft({ actionType: 'read_data' }), DEFAULT_THRESHOLDS);
-  assertEqual(r.lane, 'client', 'lane');
+  expect(r.lane, 'lane').toBe('client');
 });
 
 test('Custom thresholds respected', () => {
   const r = classify(draft({ actionType: 'post_social', estimatedCostMinor: 200 }), { perActionMinor: 100, perRunMinor: 1000 });
-  assertEqual(r.lane, 'major', 'lane');
-  assertEqual(r.majorReason, 'cost_per_action', 'majorReason');
+  expect(r.lane, 'lane').toBe('major');
+  expect(r.majorReason, 'majorReason').toBe('cost_per_action');
 });
 
 // ── buildAckText() ────────────────────────────────────────────────
@@ -325,7 +307,7 @@ test('cost_per_action produces amount and text', () => {
   );
   if (!r.text.includes('$50.00')) throw new Error(`Expected $50.00 in text, got: ${r.text}`);
   if (!r.text.includes('Acme Co')) throw new Error(`Expected subaccount name in text`);
-  assertEqual(r.amountMinor, 5000, 'amountMinor');
+  expect(r.amountMinor, 'amountMinor').toBe(5000);
 });
 
 test('cost_per_run produces threshold amount', () => {
@@ -334,7 +316,7 @@ test('cost_per_run produces threshold amount', () => {
     'cost_per_run', 'AUD', DEFAULT_THRESHOLDS,
   );
   if (!r.text.includes('$500.00')) throw new Error(`Expected $500.00 in text, got: ${r.text}`);
-  assertEqual(r.amountMinor, 60000, 'amountMinor');
+  expect(r.amountMinor, 'amountMinor').toBe(60000);
 });
 
 test('cross_subaccount text mentions multiple clients', () => {
@@ -343,7 +325,7 @@ test('cross_subaccount text mentions multiple clients', () => {
     'cross_subaccount', 'AUD', DEFAULT_THRESHOLDS,
   );
   if (!r.text.includes('more than one client')) throw new Error(`Expected multi-client text, got: ${r.text}`);
-  assertEqual(r.amountMinor, null, 'amountMinor');
+  expect(r.amountMinor, 'amountMinor').toBe(null);
 });
 
 test('irreversible text mentions not reversible', () => {
@@ -352,11 +334,9 @@ test('irreversible text mentions not reversible', () => {
     'irreversible', 'AUD', DEFAULT_THRESHOLDS,
   );
   if (!r.text.includes('not reversible')) throw new Error(`Expected irreversible text, got: ${r.text}`);
-  assertEqual(r.amountMinor, null, 'amountMinor');
+  expect(r.amountMinor, 'amountMinor').toBe(null);
 });
 
 // ── Report ────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`  ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -14,29 +14,11 @@
  *   npx tsx server/services/__tests__/orgOperationalConfigMigrationPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { resolveEffectiveOperationalConfig } from '../orgOperationalConfigMigrationPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
 }
 
 console.log('orgOperationalConfigMigrationPure');
@@ -45,7 +27,7 @@ console.log('orgOperationalConfigMigrationPure');
 test('null override returns systemDefaults untouched', () => {
   const systemDefaults = { a: 1, nested: { x: 'sys' } };
   const result = resolveEffectiveOperationalConfig(systemDefaults, null);
-  assert(deepEqual(result, systemDefaults), `expected systemDefaults, got ${JSON.stringify(result)}`);
+  expect(deepEqual(result, systemDefaults), `expected systemDefaults, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Case 2 — null systemDefaults + non-null override returns override as-is
@@ -53,13 +35,13 @@ test('null override returns systemDefaults untouched', () => {
 test('null systemDefaults + non-null override returns override as-is', () => {
   const overrides = { a: 2, nested: { x: 'override' } };
   const result = resolveEffectiveOperationalConfig(null, overrides);
-  assert(deepEqual(result, overrides), `expected overrides, got ${JSON.stringify(result)}`);
+  expect(deepEqual(result, overrides), `expected overrides, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Case 3 — both null returns empty object.
 test('both null returns {}', () => {
   const result = resolveEffectiveOperationalConfig(null, null);
-  assert(deepEqual(result, {}), `expected {}, got ${JSON.stringify(result)}`);
+  expect(deepEqual(result, {}), `expected {}, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Case 4 — deep-merge precedence: override wins on primitive leaves,
@@ -73,13 +55,10 @@ test('deep-merge: override wins on primitives; nested objects recurse; siblings 
     alertLimits: { maxPerRun: 50 },
   };
   const result = resolveEffectiveOperationalConfig(systemDefaults, overrides);
-  assert(
-    deepEqual(result, {
+  expect(deepEqual(result, {
       alertLimits: { maxPerRun: 50, batchLowPriority: false },
       healthScoreFactors: { stable: 'default' },
-    }),
-    `expected deep-merge, got ${JSON.stringify(result)}`,
-  );
+    }), `expected deep-merge, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Case 5 — array leaves replace wholesale (not concatenate).
@@ -87,21 +66,12 @@ test('array leaves replace wholesale', () => {
   const systemDefaults = { channels: ['in_app', 'email'] };
   const overrides = { channels: ['slack'] };
   const result = resolveEffectiveOperationalConfig(systemDefaults, overrides);
-  assert(
-    deepEqual(result, { channels: ['slack'] }),
-    `expected wholesale replace, got ${JSON.stringify(result)}`,
-  );
+  expect(deepEqual(result, { channels: ['slack'] }), `expected wholesale replace, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Case 6 — empty-object override returns systemDefaults (empty merge is a no-op).
 test('empty-object override is a no-op', () => {
   const systemDefaults = { a: 1, b: { c: 2 } };
   const result = resolveEffectiveOperationalConfig(systemDefaults, {});
-  assert(
-    deepEqual(result, systemDefaults),
-    `expected systemDefaults, got ${JSON.stringify(result)}`,
-  );
+  expect(deepEqual(result, systemDefaults), `expected systemDefaults, got ${JSON.stringify(result)}`).toBeTruthy();
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

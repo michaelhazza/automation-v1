@@ -14,27 +14,13 @@
  * validateReassignScope entirely and treats the target as valid unconditionally.
  */
 
+import { expect, test } from 'vitest';
 import {
   computeReassignDirection,
   validateReassignScope,
   evaluateReassignPreconditions,
 } from '../skillExecutorDelegationPure.js';
 import type { HierarchyContext } from '../../../shared/types/delegation.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -57,7 +43,7 @@ test('target === parentId → "up"', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result, 'up', 'direction');
+  expect(result, 'direction').toBe('up');
 });
 
 test('target in childIds → "down"', () => {
@@ -67,7 +53,7 @@ test('target in childIds → "down"', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result, 'down', 'direction');
+  expect(result, 'direction').toBe('down');
 });
 
 test('target in descendantIds but not childIds → "down"', () => {
@@ -77,7 +63,7 @@ test('target in descendantIds but not childIds → "down"', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result, 'down', 'direction');
+  expect(result, 'direction').toBe('down');
 });
 
 test('target is neither parent nor descendant → "lateral"', () => {
@@ -87,7 +73,7 @@ test('target is neither parent nor descendant → "lateral"', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result, 'lateral', 'direction');
+  expect(result, 'direction').toBe('lateral');
 });
 
 test('parentId is null and target is in childIds → "down" (not "up")', () => {
@@ -97,7 +83,7 @@ test('parentId is null and target is in childIds → "down" (not "up")', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2'],
   });
-  assertEqual(result, 'down', 'direction');
+  expect(result, 'direction').toBe('down');
 });
 
 test('parentId is null and target is unknown → "lateral"', () => {
@@ -107,7 +93,7 @@ test('parentId is null and target is unknown → "lateral"', () => {
     childIds: ['sa-child-1'],
     descendantIds: ['sa-child-1'],
   });
-  assertEqual(result, 'lateral', 'direction');
+  expect(result, 'direction').toBe('lateral');
 });
 
 // ---------------------------------------------------------------------------
@@ -126,7 +112,7 @@ test('"children" + in childIds → valid', () => {
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
     isCallerRoot: false,
   });
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 test('"children" + NOT in childIds → delegation_out_of_scope', () => {
@@ -137,7 +123,7 @@ test('"children" + NOT in childIds → delegation_out_of_scope', () => {
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
     isCallerRoot: false,
   });
-  assertEqual(result, { valid: false, errorCode: 'delegation_out_of_scope' }, 'result');
+  expect(result, 'result').toEqual({ valid: false, errorCode: 'delegation_out_of_scope' });
 });
 
 test('"subaccount" + caller is root → valid', () => {
@@ -148,7 +134,7 @@ test('"subaccount" + caller is root → valid', () => {
     descendantIds: [],
     isCallerRoot: true,
   });
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 test('"subaccount" + caller is NOT root → cross_subtree_not_permitted', () => {
@@ -159,7 +145,7 @@ test('"subaccount" + caller is NOT root → cross_subtree_not_permitted', () => 
     descendantIds: ['sa-child-1'],
     isCallerRoot: false,
   });
-  assertEqual(result, { valid: false, errorCode: 'cross_subtree_not_permitted' }, 'result');
+  expect(result, 'result').toEqual({ valid: false, errorCode: 'cross_subtree_not_permitted' });
 });
 
 test('"descendants" + in descendantIds → valid', () => {
@@ -170,7 +156,7 @@ test('"descendants" + in descendantIds → valid', () => {
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
     isCallerRoot: false,
   });
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 test('"descendants" + not in descendantIds → delegation_out_of_scope', () => {
@@ -181,7 +167,7 @@ test('"descendants" + not in descendantIds → delegation_out_of_scope', () => {
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
     isCallerRoot: false,
   });
-  assertEqual(result, { valid: false, errorCode: 'delegation_out_of_scope' }, 'result');
+  expect(result, 'result').toEqual({ valid: false, errorCode: 'delegation_out_of_scope' });
 });
 
 test('upward escalation ordering — parentId target fails validateReassignScope "children"', () => {
@@ -196,7 +182,7 @@ test('upward escalation ordering — parentId target fails validateReassignScope
     childIds: ['sa-child-1'],
     descendantIds: ['sa-child-1'],
   });
-  assertEqual(directionResult, 'up', 'direction must be up');
+  expect(directionResult, 'direction must be up').toBe('up');
 
   // If the caller naively called validateReassignScope without the direction check:
   const scopeResult = validateReassignScope({
@@ -208,7 +194,7 @@ test('upward escalation ordering — parentId target fails validateReassignScope
   });
   // Expected: rejected — confirms that upward escalation MUST be short-circuited
   // by the caller before reaching validateReassignScope.
-  assertEqual(scopeResult.valid, false, 'scope-only check rejects parent → proves the caller must short-circuit on direction=up');
+  expect(scopeResult.valid, 'scope-only check rejects parent → proves the caller must short-circuit on direction=up').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -221,7 +207,7 @@ console.log('');
 
 test('hierarchy missing → hierarchy_context_missing', () => {
   const result = evaluateReassignPreconditions({ hierarchy: undefined });
-  assertEqual(result, { ok: false, errorCode: 'hierarchy_context_missing' }, 'result');
+  expect(result, 'result').toEqual({ ok: false, errorCode: 'hierarchy_context_missing' });
 });
 
 test('hierarchy present → ok', () => {
@@ -233,7 +219,7 @@ test('hierarchy present → ok', () => {
     depth: 0,
   };
   const result = evaluateReassignPreconditions({ hierarchy });
-  assertEqual(result, { ok: true }, 'result');
+  expect(result, 'result').toEqual({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,7 +227,4 @@ test('hierarchy present → ok', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log('');
-
-if (failed > 0) process.exit(1);

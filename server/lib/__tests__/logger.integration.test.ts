@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { logger } from '../logger.js';
 import { readLinesForCorrelationId, _resetBufferForTest } from '../../services/systemMonitor/logBuffer.js';
 
@@ -10,11 +9,11 @@ test('logger.info with correlationId populates the log buffer', async () => {
   await new Promise(r => setTimeout(r, 50));
 
   const lines = readLinesForCorrelationId('cid-42', 100);
-  assert.ok(lines.length >= 1, 'expected at least one buffered line');
+  expect(lines.length >= 1).toBeTruthy();
   const line = lines.find(l => l.event === 'test_event_42');
-  assert.ok(line, 'expected line with matching event name');
-  assert.equal(line.correlationId, 'cid-42');
-  assert.equal((line.meta as { foo?: string }).foo, 'bar');
+  expect(line).toBeTruthy();
+  expect(line.correlationId).toBe('cid-42');
+  expect((line.meta as { foo?: string }).foo).toBe('bar');
 });
 
 test('logger.info without correlationId does NOT populate the buffer', async () => {
@@ -25,6 +24,6 @@ test('logger.info without correlationId does NOT populate the buffer', async () 
   const allKeys = ['', 'undefined', 'null'];
   for (const k of allKeys) {
     const lines = readLinesForCorrelationId(k, 100);
-    assert.equal(lines.length, 0, `expected no lines for key '${k}'`);
+    expect(lines.length, `expected no lines for key '${k}'`).toBe(0);
   }
 });

@@ -9,27 +9,9 @@
  * lightweight pattern as server/services/__tests__/runContextLoader.test.ts.
  */
 
+import { expect, test } from 'vitest';
 import { validateToolCalls, type ToolCall } from '../agentExecutionServicePure.js';
 import type { ProviderTool } from '../providers/types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -65,7 +47,7 @@ console.log('');
 // ── Happy path ─────────────────────────────────────────────────────
 test('empty toolCalls array with any activeTools → valid', () => {
   const result = validateToolCalls([], [makeTool('foo')]);
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 test('single valid tool call with matching tool and no required fields → valid', () => {
@@ -73,7 +55,7 @@ test('single valid tool call with matching tool and no required fields → valid
     [makeToolCall('foo', {})],
     [makeTool('foo')],
   );
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 test('tool call with required fields all present → valid', () => {
@@ -81,7 +63,7 @@ test('tool call with required fields all present → valid', () => {
     [makeToolCall('send_email', { to: 'a@b.com', subject: 'hi', body: 'yo' })],
     [makeTool('send_email', ['to', 'subject', 'body'])],
   );
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 // ── Unknown tool ───────────────────────────────────────────────────
@@ -90,8 +72,8 @@ test('tool call with unknown tool name → invalid with unknown_tool reason', ()
     [makeToolCall('mystery_tool', {})],
     [makeTool('foo'), makeTool('bar')],
   );
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'unknown_tool:mystery_tool', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('unknown_tool:mystery_tool');
 });
 
 test('first valid then unknown → invalid on the unknown one', () => {
@@ -99,8 +81,8 @@ test('first valid then unknown → invalid on the unknown one', () => {
     [makeToolCall('foo', {}), makeToolCall('mystery', {}, 'tc-2')],
     [makeTool('foo')],
   );
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'unknown_tool:mystery', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('unknown_tool:mystery');
 });
 
 // ── Invalid input shape ────────────────────────────────────────────
@@ -109,8 +91,8 @@ test('tool call with null input → invalid with invalid_input reason', () => {
     [{ id: 'tc', name: 'foo', input: null as unknown as Record<string, unknown> }],
     [makeTool('foo')],
   );
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'invalid_input:foo', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('invalid_input:foo');
 });
 
 test('tool call with string input → invalid with invalid_input reason', () => {
@@ -118,8 +100,8 @@ test('tool call with string input → invalid with invalid_input reason', () => 
     [{ id: 'tc', name: 'foo', input: 'not an object' as unknown as Record<string, unknown> }],
     [makeTool('foo')],
   );
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'invalid_input:foo', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('invalid_input:foo');
 });
 
 // ── Missing required field ─────────────────────────────────────────
@@ -128,10 +110,10 @@ test('tool call missing a required field → invalid with missing_field reason',
     [makeToolCall('send_email', { to: 'a@b.com' })], // missing subject, body
     [makeTool('send_email', ['to', 'subject', 'body'])],
   );
-  assertEqual(result.valid, false, 'valid');
+  expect(result.valid, 'valid').toBe(false);
   // The function reports the FIRST missing field it encounters, which for
   // ['to', 'subject', 'body'] iteration order is 'subject'.
-  assertEqual(result.failureReason, 'missing_field:send_email.subject', 'failureReason');
+  expect(result.failureReason, 'failureReason').toBe('missing_field:send_email.subject');
 });
 
 test('tool call with all required fields plus unknown extras → valid (extras only warn)', () => {
@@ -146,7 +128,7 @@ test('tool call with all required fields plus unknown extras → valid (extras o
     ],
   );
   // Unknown fields are log-only; validation still passes.
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 // ── Multiple tool calls, mixed valid/invalid ──────────────────────
@@ -161,8 +143,8 @@ test('first tool call valid, second missing field → invalid on second', () => 
       makeTool('send_email', ['to', 'subject', 'body']),
     ],
   );
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'missing_field:send_email.subject', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('missing_field:send_email.subject');
 });
 
 test('all three tool calls valid → overall valid', () => {
@@ -178,14 +160,14 @@ test('all three tool calls valid → overall valid', () => {
       makeTool('c', ['z']),
     ],
   );
-  assertEqual(result, { valid: true }, 'result');
+  expect(result, 'result').toEqual({ valid: true });
 });
 
 // ── Empty activeTools with a tool call ─────────────────────────────
 test('tool call against empty activeTools → unknown_tool', () => {
   const result = validateToolCalls([makeToolCall('foo', {})], []);
-  assertEqual(result.valid, false, 'valid');
-  assertEqual(result.failureReason, 'unknown_tool:foo', 'failureReason');
+  expect(result.valid, 'valid').toBe(false);
+  expect(result.failureReason, 'failureReason').toBe('unknown_tool:foo');
 });
 
 // ── Determinism check ──────────────────────────────────────────────
@@ -195,12 +177,10 @@ test('same inputs produce same output across repeated calls (purity)', () => {
   const r1 = validateToolCalls(toolCalls, activeTools);
   const r2 = validateToolCalls(toolCalls, activeTools);
   const r3 = validateToolCalls(toolCalls, activeTools);
-  assertEqual(r1, r2, 'r1 === r2');
-  assertEqual(r2, r3, 'r2 === r3');
-  assert(r1.valid, 'r1 was valid');
+  expect(r1, 'r1 === r2').toEqual(r2);
+  expect(r2, 'r2 === r3').toEqual(r3);
+  expect(r1.valid, 'r1 was valid').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

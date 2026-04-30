@@ -9,34 +9,9 @@
  * subclass that returns controlled counts — making this a pure behaviour test.
  */
 
+import { expect, test } from 'vitest';
 import { AlertFatigueGuardBase } from '../alertFatigueGuardBase.js';
 import type { AlertLimits } from '../orgConfigService.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => Promise<void> | void) {
-  const result = fn();
-  const handle = (err?: unknown) => {
-    if (err) {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : err}`);
-    } else {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    }
-  };
-  if (result instanceof Promise) {
-    return result.then(() => handle(), handle);
-  }
-  handle();
-  return Promise.resolve();
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -80,15 +55,15 @@ const tests: Array<() => Promise<void>> = [];
 tests.push(async () => test('delivers first alert for high severity', async () => {
   const guard = new TestGuard(defaultLimits);
   const result = await guard.shouldDeliver('account-1', 'high');
-  assertEqual(result.deliver, true, 'should deliver');
-  assertEqual(result.reason, undefined, 'no suppress reason');
+  expect(result.deliver, 'should deliver').toBe(true);
+  expect(result.reason, 'no suppress reason').toBe(undefined);
 }));
 
 tests.push(async () => test('increments alertsThisRun counter', async () => {
   const guard = new TestGuard(defaultLimits);
   await guard.shouldDeliver('account-1', 'high');
   await guard.shouldDeliver('account-1', 'medium');
-  assertEqual(guard.alertCount, 2, 'counter should be 2');
+  expect(guard.alertCount, 'counter should be 2').toBe(2);
 }));
 
 tests.push(async () => test('blocks when per-run cap reached', async () => {
@@ -96,29 +71,29 @@ tests.push(async () => test('blocks when per-run cap reached', async () => {
   await guard.shouldDeliver('a', 'high');
   await guard.shouldDeliver('b', 'high');
   const third = await guard.shouldDeliver('c', 'high');
-  assertEqual(third.deliver, false, 'should block at cap');
-  assert(third.reason?.includes('run_cap') ?? false, 'reason should mention run_cap');
+  expect(third.deliver, 'should block at cap').toBe(false);
+  expect(third.reason?.includes('run_cap') ?? false, 'reason should mention run_cap').toBeTruthy();
 }));
 
 tests.push(async () => test('blocks when per-account per-day cap reached', async () => {
   const counts = new Map([['account-1', 10]]);
   const guard = new TestGuard(defaultLimits, counts);
   const result = await guard.shouldDeliver('account-1', 'high');
-  assertEqual(result.deliver, false, 'should block at day cap');
-  assert(result.reason?.includes('day_cap') ?? false, 'reason should mention day_cap');
+  expect(result.deliver, 'should block at day cap').toBe(false);
+  expect(result.reason?.includes('day_cap') ?? false, 'reason should mention day_cap').toBeTruthy();
 }));
 
 tests.push(async () => test('batches low-priority when batchLowPriority=true', async () => {
   const guard = new TestGuard({ ...defaultLimits, batchLowPriority: true });
   const result = await guard.shouldDeliver('account-1', 'low');
-  assertEqual(result.deliver, false, 'low priority should be batched');
-  assertEqual(result.reason, 'alert_batched_low_priority', 'reason');
+  expect(result.deliver, 'low priority should be batched').toBe(false);
+  expect(result.reason, 'reason').toBe('alert_batched_low_priority');
 }));
 
 tests.push(async () => test('delivers low-priority when batchLowPriority=false', async () => {
   const guard = new TestGuard({ ...defaultLimits, batchLowPriority: false });
   const result = await guard.shouldDeliver('account-1', 'low');
-  assertEqual(result.deliver, true, 'should deliver when not batching low priority');
+  expect(result.deliver, 'should deliver when not batching low priority').toBe(true);
 }));
 
 tests.push(async () => test('run cap and day cap are independent', async () => {
@@ -126,12 +101,12 @@ tests.push(async () => test('run cap and day cap are independent', async () => {
   const guard = new TestGuard({ ...defaultLimits, maxAlertsPerRun: 1 });
   await guard.shouldDeliver('account-1', 'high');
   const second = await guard.shouldDeliver('account-1', 'high');
-  assertEqual(second.deliver, false, 'blocked by run cap');
+  expect(second.deliver, 'blocked by run cap').toBe(false);
 
   // A fresh guard for same account — day cap not reached
   const guard2 = new TestGuard(defaultLimits);
   const result = await guard2.shouldDeliver('account-1', 'high');
-  assertEqual(result.deliver, true, 'fresh guard delivers');
+  expect(result.deliver, 'fresh guard delivers').toBe(true);
 }));
 
 tests.push(async () => test('alertCount matches delivered alerts', async () => {
@@ -139,11 +114,8 @@ tests.push(async () => test('alertCount matches delivered alerts', async () => {
   for (let i = 0; i < 5; i++) {
     await guard.shouldDeliver(`account-${i}`, 'medium');
   }
-  assertEqual(guard.alertCount, 5, 'alertCount should equal delivered');
+  expect(guard.alertCount, 'alertCount should equal delivered').toBe(5);
 }));
 
 // Run all tests
 await Promise.all(tests.map(t => t()));
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

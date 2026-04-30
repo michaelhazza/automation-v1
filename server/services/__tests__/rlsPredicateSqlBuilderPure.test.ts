@@ -9,30 +9,12 @@
  *   npx tsx server/services/__tests__/rlsPredicateSqlBuilderPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildReadPolicy,
   buildWriterBypassPolicy,
   type TableScopingDescriptor,
 } from '../principal/rlsPredicateSqlBuilderPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertIncludes(haystack: string, needle: string, label: string) {
   if (!haystack.includes(needle))
@@ -217,26 +199,24 @@ console.log('SQL output structure');
 
 test('buildReadPolicy returns non-empty string', () => {
   const sql = buildReadPolicy(oneToOneWithSub);
-  assert(sql.length > 0, 'should produce non-empty SQL');
+  expect(sql.length > 0, 'should produce non-empty SQL').toBeTruthy();
 });
 
 test('buildWriterBypassPolicy returns non-empty string', () => {
   const sql = buildWriterBypassPolicy('canonical_accounts');
-  assert(sql.length > 0, 'should produce non-empty SQL');
+  expect(sql.length > 0, 'should produce non-empty SQL').toBeTruthy();
 });
 
 test('buildReadPolicy output is deterministic', () => {
   const a = buildReadPolicy(oneToOneWithSub);
   const b = buildReadPolicy(oneToOneWithSub);
-  assert(a === b, 'same input should produce identical output');
+  expect(a === b, 'same input should produce identical output').toBeTruthy();
 });
 
 test('buildWriterBypassPolicy output is deterministic', () => {
   const a = buildWriterBypassPolicy('canonical_accounts');
   const b = buildWriterBypassPolicy('canonical_accounts');
-  assert(a === b, 'same input should produce identical output');
+  expect(a === b, 'same input should produce identical output').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

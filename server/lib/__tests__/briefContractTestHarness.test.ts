@@ -8,6 +8,7 @@
  *   npx tsx server/lib/__tests__/briefContractTestHarness.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   assertValidArtefact,
   assertValidChain,
@@ -17,29 +18,6 @@ import {
   type CapabilityTestContext,
 } from '../briefContractTestHarness.js';
 import type { BriefChatArtefact } from '../../../shared/types/briefResultContract.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => Promise<void>) {
-  return fn()
-    .then(() => { passed++; console.log(`  PASS  ${name}`); })
-    .catch((err: unknown) => {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message.split('\n')[0] : err}`);
-    });
-}
-
-async function assertThrows(fn: () => Promise<void>, label: string): Promise<void> {
-  try {
-    await fn();
-    throw new Error(`${label}: expected an error to be thrown but none was`);
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith(label + ': expected')) throw err;
-    // Any other error is the expected throw — pass
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -104,10 +82,7 @@ await test('assertValidArtefact: passes on valid structured result', async () =>
 });
 
 await test('assertValidArtefact: throws on malformed artefact', async () => {
-  await assertThrows(
-    () => assertValidArtefact({ kind: 'structured', artefactId: 'x' }), // missing required fields
-    'assertValidArtefact',
-  );
+  await expect(() => assertValidArtefact({ kind: 'structured', artefactId: 'x' })).rejects.toThrow();
 });
 
 // ---------------------------------------------------------------------------
@@ -125,10 +100,7 @@ await test('assertValidChain: throws on branching chain (duplicate tip)', async 
   const A = makeStructured({ artefactId: 'A' });
   const B = makeStructured({ artefactId: 'B', parentArtefactId: 'A', status: 'updated' });
   const C = makeStructured({ artefactId: 'C', parentArtefactId: 'A', status: 'updated' });
-  await assertThrows(
-    () => assertValidChain([A, B, C]),
-    'assertValidChain',
-  );
+  await expect(() => assertValidChain([A, B, C])).rejects.toThrow();
 });
 
 await test('assertValidChain: orphan parent is a warning not a throw', async () => {
@@ -149,10 +121,7 @@ await test('assertRelatedArtefactIntegrity: passes when all refs resolve', async
 
 await test('assertRelatedArtefactIntegrity: throws on dangling ref', async () => {
   const A = makeStructured({ artefactId: 'A', relatedArtefactIds: ['does-not-exist'] });
-  await assertThrows(
-    () => assertRelatedArtefactIntegrity([A]),
-    'assertRelatedArtefactIntegrity',
-  );
+  await expect(() => assertRelatedArtefactIntegrity([A])).rejects.toThrow();
 });
 
 // ---------------------------------------------------------------------------
@@ -179,10 +148,7 @@ await test('assertCanonicalFlowCoverage: passes for failure_retry', async () => 
 
 await test('assertCanonicalFlowCoverage: throws on mismatched flow', async () => {
   const A = makeApproval({ artefactId: 'A' }); // approval, not error — wrong for failure_retry
-  await assertThrows(
-    () => assertCanonicalFlowCoverage([A], 'failure_retry'),
-    'assertCanonicalFlowCoverage',
-  );
+  await expect(() => assertCanonicalFlowCoverage([A], 'failure_retry')).rejects.toThrow();
 });
 
 // ---------------------------------------------------------------------------
@@ -200,14 +166,9 @@ await test('assertRlsScope: throws when a row ID is out of scope', async () => {
     rows: [{ id: 'c-1' }, { id: 'c-OUTSIDER' }],
     rowCount: 2,
   });
-  await assertThrows(
-    () => assertRlsScope(A, CTX),
-    'assertRlsScope',
-  );
+  await expect(() => assertRlsScope(A, CTX)).rejects.toThrow();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+console.log('');

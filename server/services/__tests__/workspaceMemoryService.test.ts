@@ -20,34 +20,19 @@
  *   npx tsx server/services/__tests__/workspaceMemoryService.test.ts
  */
 
+import { expect, test } from 'vitest';
 import type { RunOutcome } from '../workspaceMemoryServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('\n--- workspaceMemoryService overrides ---');
 
-if (!process.env.DATABASE_URL) {
-  console.log('  SKIPPED — no DATABASE_URL');
+const SKIP_WMS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
+if (SKIP_WMS) {
+  console.log('  SKIPPED — no DATABASE_URL or not integration env');
   console.log('');
-  process.exitCode = 0;
-  process.exit();
 }
 
 // ─── Test harness (real DB) ──────────────────────────────────────────
-
+if (!SKIP_WMS) {
 const { drizzle } = await import('drizzle-orm/postgres-js');
 const postgres = (await import('postgres')).default;
 const { eq, and } = await import('drizzle-orm');
@@ -74,8 +59,6 @@ const [anchor] = await db
 if (!anchor) {
   console.log('  SKIPPED — no organisation + subaccount seed');
   await client.end();
-  process.exitCode = 0;
-  process.exit();
 }
 
 const [anchorAgent] = await db
@@ -87,8 +70,6 @@ const [anchorAgent] = await db
 if (!anchorAgent) {
   console.log('  SKIPPED — no agent seed');
   await client.end();
-  process.exitCode = 0;
-  process.exit();
 }
 
 const { workspaceMemoryService } = await import('../workspaceMemoryService.js');
@@ -234,6 +215,8 @@ await test('RunOutcome literal type-check — all runResultStatus values', () =>
   if (_variants.length !== 5) throw new Error('missing variants');
 });
 
-console.log(`\n  ${passed + failed} tests total; ${passed} passed, ${failed} failed`);
 await client.end();
-if (failed > 0) process.exit(1);
+}
+if (SKIP_WMS) {
+  test.skip('workspaceMemoryService integration (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+}

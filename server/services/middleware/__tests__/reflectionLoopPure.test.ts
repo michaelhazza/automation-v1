@@ -10,30 +10,12 @@
  * tested without booting the middleware pipeline.
  */
 
+import { expect, test } from 'vitest';
 import {
   parseVerdict,
   decideReflectionAction,
   type ReflectionDecisionInput,
 } from '../reflectionLoopPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -57,7 +39,7 @@ Everything looks good.
 ## Verdict
 APPROVE
 `;
-  assertEqual(parseVerdict(out), 'APPROVE', 'verdict mismatch');
+  expect(parseVerdict(out), 'verdict mismatch').toBe('APPROVE');
 });
 
 test('parses BLOCKED from a canonical review_code output', () => {
@@ -68,28 +50,28 @@ The patch leaks a secret.
 ## Verdict
 BLOCKED
 `;
-  assertEqual(parseVerdict(out), 'BLOCKED', 'verdict mismatch');
+  expect(parseVerdict(out), 'verdict mismatch').toBe('BLOCKED');
 });
 
 test('returns null for empty string', () => {
-  assertEqual(parseVerdict(''), null, 'expected null for empty');
+  expect(parseVerdict(''), 'expected null for empty').toBe(null);
 });
 
 test('returns null when no verdict keyword present', () => {
-  assertEqual(parseVerdict('just some text, no verdict here'), null, 'expected null');
+  expect(parseVerdict('just some text, no verdict here'), 'expected null').toBe(null);
 });
 
 test('returns null when verdict word is malformed', () => {
-  assertEqual(parseVerdict('Verdict: unknown'), null, 'expected null');
+  expect(parseVerdict('Verdict: unknown'), 'expected null').toBe(null);
 });
 
 test('is case-insensitive on the verdict keyword', () => {
-  assertEqual(parseVerdict('Verdict: approve'), 'APPROVE', 'lowercase approve');
-  assertEqual(parseVerdict('Verdict: Blocked'), 'BLOCKED', 'mixed case blocked');
+  expect(parseVerdict('Verdict: approve'), 'lowercase approve').toBe('APPROVE');
+  expect(parseVerdict('Verdict: Blocked'), 'mixed case blocked').toBe('BLOCKED');
 });
 
 test('handles verdict with trailing punctuation', () => {
-  assertEqual(parseVerdict('## Verdict\n**APPROVE**'), 'APPROVE', 'trailing punctuation');
+  expect(parseVerdict('## Verdict\n**APPROVE**'), 'trailing punctuation').toBe('APPROVE');
 });
 
 test('picks the LAST verdict when multiple appear', () => {
@@ -97,14 +79,14 @@ test('picks the LAST verdict when multiple appear', () => {
 First pass: Verdict BLOCKED
 Second pass: Verdict APPROVE
 `;
-  assertEqual(parseVerdict(out), 'APPROVE', 'expected last verdict to win');
+  expect(parseVerdict(out), 'expected last verdict to win').toBe('APPROVE');
 });
 
 test('ignores non-string input safely', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  assertEqual(parseVerdict(undefined as unknown as string), null, 'undefined');
+  expect(parseVerdict(undefined as unknown as string), 'undefined').toBe(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  assertEqual(parseVerdict(null as unknown as string), null, 'null');
+  expect(parseVerdict(null as unknown as string), 'null').toBe(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -128,22 +110,22 @@ test('review_code APPROVE → continue, count incremented, verdict recorded', ()
   const result = decideReflectionAction(
     base({ toolName: 'review_code', toolResult: '## Verdict\nAPPROVE' }),
   );
-  assertEqual(result.action.kind, 'continue', 'action kind');
-  assertEqual(result.stateDelta.lastReviewCodeVerdict, 'APPROVE', 'verdict delta');
-  assertEqual(result.stateDelta.reviewCodeIterations, 1, 'count delta');
+  expect(result.action.kind, 'action kind').toBe('continue');
+  expect(result.stateDelta.lastReviewCodeVerdict, 'verdict delta').toBe('APPROVE');
+  expect(result.stateDelta.reviewCodeIterations, 'count delta').toBe(1);
 });
 
 test('review_code BLOCKED with room left → inject_message, count incremented', () => {
   const result = decideReflectionAction(
     base({ toolName: 'review_code', toolResult: '## Verdict\nBLOCKED', reviewCodeIterations: 0 }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'action kind');
+  expect(result.action.kind, 'action kind').toBe('inject_message');
   if (result.action.kind === 'inject_message') {
-    assert(result.action.message.includes('1/3'), 'iteration counter in message');
-    assert(result.action.message.includes('BLOCKED'), 'verdict in message');
+    expect(result.action.message.includes('1/3'), 'iteration counter in message').toBeTruthy();
+    expect(result.action.message.includes('BLOCKED'), 'verdict in message').toBeTruthy();
   }
-  assertEqual(result.stateDelta.lastReviewCodeVerdict, 'BLOCKED', 'verdict delta');
-  assertEqual(result.stateDelta.reviewCodeIterations, 1, 'count delta');
+  expect(result.stateDelta.lastReviewCodeVerdict, 'verdict delta').toBe('BLOCKED');
+  expect(result.stateDelta.reviewCodeIterations, 'count delta').toBe(1);
 });
 
 test('review_code BLOCKED on final iteration → escalate', () => {
@@ -155,62 +137,48 @@ test('review_code BLOCKED on final iteration → escalate', () => {
       maxReflectionIterations: 3,
     }),
   );
-  assertEqual(result.action.kind, 'escalate_to_review', 'action kind');
+  expect(result.action.kind, 'action kind').toBe('escalate_to_review');
   if (result.action.kind === 'escalate_to_review') {
-    assertEqual(
-      result.action.reason,
-      'reflection_iterations_exhausted',
-      'reason',
-    );
+    expect(result.action.reason, 'reason').toBe('reflection_iterations_exhausted');
   }
-  assertEqual(result.stateDelta.reviewCodeIterations, 3, 'count delta');
+  expect(result.stateDelta.reviewCodeIterations, 'count delta').toBe(3);
 });
 
 test('review_code unparseable → treated as BLOCKED', () => {
   const result = decideReflectionAction(
     base({ toolName: 'review_code', toolResult: 'completely unrelated output' }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'malformed counts as blocked');
-  assertEqual(result.stateDelta.lastReviewCodeVerdict, 'BLOCKED', 'verdict delta');
+  expect(result.action.kind, 'malformed counts as blocked').toBe('inject_message');
+  expect(result.stateDelta.lastReviewCodeVerdict, 'verdict delta').toBe('BLOCKED');
 });
 
 test('write_patch without prior APPROVE → inject_message reminder', () => {
   const result = decideReflectionAction(
     base({ toolName: 'write_patch', lastReviewCodeVerdict: null }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'action kind');
+  expect(result.action.kind, 'action kind').toBe('inject_message');
   if (result.action.kind === 'inject_message') {
-    assert(
-      result.action.message.toLowerCase().includes('review_code'),
-      'message must mention review_code',
-    );
-    assert(
-      result.action.message.toLowerCase().includes('approve'),
-      'message must mention APPROVE requirement',
-    );
+    expect(result.action.message.toLowerCase().includes('review_code'), 'message must mention review_code').toBeTruthy();
+    expect(result.action.message.toLowerCase().includes('approve'), 'message must mention APPROVE requirement').toBeTruthy();
   }
   // Do NOT increment iteration counter — the agent has not actually
   // attempted reflection, it skipped it.
-  assertEqual(
-    result.stateDelta.reviewCodeIterations,
-    undefined,
-    'counter must not change',
-  );
+  expect(result.stateDelta.reviewCodeIterations, 'counter must not change').toBe(undefined);
 });
 
 test('write_patch after BLOCKED verdict → still blocked (reminder)', () => {
   const result = decideReflectionAction(
     base({ toolName: 'write_patch', lastReviewCodeVerdict: 'BLOCKED' }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'action kind');
+  expect(result.action.kind, 'action kind').toBe('inject_message');
 });
 
 test('write_patch after APPROVE → continue but consumes approval', () => {
   const result = decideReflectionAction(
     base({ toolName: 'write_patch', lastReviewCodeVerdict: 'APPROVE' }),
   );
-  assertEqual(result.action.kind, 'continue', 'action kind');
-  assertEqual(result.stateDelta.lastReviewCodeVerdict, null, 'approval consumed');
+  expect(result.action.kind, 'action kind').toBe('continue');
+  expect(result.stateDelta.lastReviewCodeVerdict, 'approval consumed').toBe(null);
 });
 
 test('second write_patch after consumed approval → blocked', () => {
@@ -218,7 +186,7 @@ test('second write_patch after consumed approval → blocked', () => {
   const result = decideReflectionAction(
     base({ toolName: 'write_patch', lastReviewCodeVerdict: null }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'must require fresh review');
+  expect(result.action.kind, 'must require fresh review').toBe('inject_message');
 });
 
 test('create_pr does not require its own approval (follows write_patch)', () => {
@@ -227,27 +195,16 @@ test('create_pr does not require its own approval (follows write_patch)', () => 
   const result = decideReflectionAction(
     base({ toolName: 'create_pr', lastReviewCodeVerdict: null }),
   );
-  assertEqual(result.action.kind, 'continue', 'create_pr should pass through');
+  expect(result.action.kind, 'create_pr should pass through').toBe('continue');
 });
 
 test('other tools pass through unchanged', () => {
   const result = decideReflectionAction(
     base({ toolName: 'read_file', lastReviewCodeVerdict: null }),
   );
-  assertEqual(result.action.kind, 'continue', 'action kind');
-  assertEqual(
-    result.stateDelta.reviewCodeIterations,
-    undefined,
-    'no state change',
-  );
-  assertEqual(
-    result.stateDelta.lastReviewCodeVerdict,
-    undefined,
-    'no state change',
-  );
+  expect(result.action.kind, 'action kind').toBe('continue');
+  expect(result.stateDelta.reviewCodeIterations, 'no state change').toBe(undefined);
+  expect(result.stateDelta.lastReviewCodeVerdict, 'no state change').toBe(undefined);
 });
 
 // ---------------------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -16,6 +16,8 @@
  * Uses __testHooks.stubSystemOpsContext + throwAfterIncrement to isolate the
  * increment / idempotency predicate without needing a full org/agent context seeded.
  */
+import { expect, test } from 'vitest';
+
 export {};
 
 await import('dotenv/config');
@@ -28,12 +30,14 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 process.env.SYSTEM_MONITOR_MAX_TRIAGE_PER_FINGERPRINT = '10';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL || DATABASE_URL.includes('placeholder')) {
-  console.log('\nSKIP: triageDurability.integration.test requires a real DATABASE_URL.');
-  console.log('Set DATABASE_URL to a live Postgres connection string to run this test.\n');
-  process.exit(0);
+const SKIP_TRIAGE_DUR = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
+if (SKIP_TRIAGE_DUR) {
+  console.log('\nSKIP: triageDurability.integration.test requires a real DATABASE_URL and NODE_ENV=integration.');
 }
 
+if (SKIP_TRIAGE_DUR) {
+  test.skip('triageDurability integration (requires DATABASE_URL and NODE_ENV=integration)', () => {});
+} else {
 const { db } = await import('../../../../db/index.js');
 const { systemIncidents, systemIncidentEvents } = await import('../../../../db/schema/index.js');
 const { eq, sql } = await import('drizzle-orm');
@@ -47,21 +51,6 @@ try {
   console.log('\nSKIP: migration 0239 not applied (column last_triage_job_id missing).');
   console.log('Apply the migration and re-run.\n');
   process.exit(0);
-}
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-  }
 }
 
 function check(condition: boolean, label: string): void {
@@ -217,6 +206,4 @@ try {
     // best-effort
   }
 }
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+} // end if (!SKIP_TRIAGE_DUR)

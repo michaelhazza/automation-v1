@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="pure logic is tested inline within this handwritten harness; parent-directory sibling import not applicable for this self-contained test pattern"
 /**
  * bundleSuggestionDismissalsPure.test.ts
  *
@@ -9,26 +10,9 @@
  * Run via: npx tsx server/services/__tests__/bundleSuggestionDismissalsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {}; // make this a module (avoids global-scope redeclaration in tsc)
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 // Pure model: the unique key is (organisation_id, user_id, doc_set_hash).
 // A collision requires ALL THREE to match. Matching only (user_id, doc_set_hash)
@@ -51,25 +35,25 @@ console.log('\nbundleSuggestionDismissals BUNDLE-DISMISS-RLS — 3-column unique
 test('same org, same user, same hash → collision (upsert fires)', () => {
   const existing: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-x' };
   const incoming: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-x' };
-  assert(keysCollide(existing, incoming), 'identical keys should collide');
+  expect(keysCollide(existing, incoming), 'identical keys should collide').toBeTruthy();
 });
 
 test('different org, same user, same hash → no collision', () => {
   const existing: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-x' };
   const incoming: DismissalKey = { organisationId: 'org-b', userId: 'user-1', docSetHash: 'hash-x' };
-  assert(!keysCollide(existing, incoming), 'different org should not collide even with same user+hash');
+  expect(!keysCollide(existing, incoming), 'different org should not collide even with same user+hash').toBeTruthy();
 });
 
 test('same org, different user, same hash → no collision', () => {
   const existing: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-x' };
   const incoming: DismissalKey = { organisationId: 'org-a', userId: 'user-2', docSetHash: 'hash-x' };
-  assert(!keysCollide(existing, incoming), 'different user should not collide');
+  expect(!keysCollide(existing, incoming), 'different user should not collide').toBeTruthy();
 });
 
 test('same org, same user, different hash → no collision', () => {
   const existing: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-x' };
   const incoming: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'hash-y' };
-  assert(!keysCollide(existing, incoming), 'different hash should not collide');
+  expect(!keysCollide(existing, incoming), 'different hash should not collide').toBeTruthy();
 });
 
 test('2-column match (user+hash) across orgs is not a conflict under 3-column key', () => {
@@ -77,8 +61,5 @@ test('2-column match (user+hash) across orgs is not a conflict under 3-column ke
   // conflict with org-b user-1 dismissal for the same doc set hash.
   const orgA: DismissalKey = { organisationId: 'org-a', userId: 'user-1', docSetHash: 'shared-hash' };
   const orgB: DismissalKey = { organisationId: 'org-b', userId: 'user-1', docSetHash: 'shared-hash' };
-  assert(!keysCollide(orgA, orgB), 'cross-org same user+hash must not collide with 3-column key');
+  expect(!keysCollide(orgA, orgB), 'cross-org same user+hash must not collide with 3-column key').toBeTruthy();
 });
-
-console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

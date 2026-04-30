@@ -7,8 +7,9 @@
 
 process.env.NODE_ENV = 'test';
 // Set a short TTL for the TTL-expiry test (must be set before module import)
-process.env.SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS = '0.05'; // 50ms
+process.env.SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS = '0.1'; // 100ms
 
+import { expect, test } from 'vitest';
 import {
   checkAndRecord,
   getIdempotentHitCount,
@@ -16,38 +17,7 @@ import {
   __resetForTest,
 } from '../incidentIngestorIdempotency.js';
 
-let passed = 0;
-let failed = 0;
 const pending: Promise<void>[] = [];
-
-function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      pending.push(
-        result.then(() => {
-          passed++;
-          console.log(`  PASS  ${name}`);
-        }).catch((err: unknown) => {
-          failed++;
-          console.log(`  FAIL  ${name}`);
-          console.log(`        ${err instanceof Error ? err.message : err}`);
-        })
-      );
-    } else {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    }
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -62,31 +32,31 @@ function sleep(ms: number): Promise<void> {
 test('returns false for a new key (miss)', () => {
   __resetForTest();
   const result = checkAndRecord('fp:idkey-1');
-  assertEqual(result, false, 'first call should be miss');
-  assertEqual(getIdempotentHitCount(), 0, 'hit count after miss');
+  expect(result, 'first call should be miss').toBe(false);
+  expect(getIdempotentHitCount(), 'hit count after miss').toBe(0);
 });
 
 test('returns true for duplicate key within TTL (hit)', () => {
   __resetForTest();
   checkAndRecord('fp:idkey-2');
   const result = checkAndRecord('fp:idkey-2');
-  assertEqual(result, true, 'second call should be hit');
-  assertEqual(getIdempotentHitCount(), 1, 'hit count after one hit');
+  expect(result, 'second call should be hit').toBe(true);
+  expect(getIdempotentHitCount(), 'hit count after one hit').toBe(1);
 });
 
 test('returns false for a key after TTL expires', async () => {
   __resetForTest();
   checkAndRecord('fp:ttl-test');
-  await sleep(70); // wait beyond the 50ms TTL
+  await sleep(150); // wait beyond the 100ms TTL
   const result = checkAndRecord('fp:ttl-test');
-  assertEqual(result, false, 'call after TTL expiry should be miss');
+  expect(result, 'call after TTL expiry should be miss').toBe(false);
 });
 
 test('returns false for different keys', () => {
   __resetForTest();
   checkAndRecord('fp:idkey-a');
   const result = checkAndRecord('fp:idkey-b');
-  assertEqual(result, false, 'different key should be miss');
+  expect(result, 'different key should be miss').toBe(false);
 });
 
 test('evicts oldest entry when cap is reached', () => {
@@ -97,10 +67,10 @@ test('evicts oldest entry when cap is reached', () => {
   }
   const evictionsBefore = getIdempotentEvictionCount();
   checkAndRecord('fp:overflow-key');
-  assert(getIdempotentEvictionCount() > evictionsBefore, 'at least one eviction should have occurred');
+  expect(getIdempotentEvictionCount() > evictionsBefore, 'at least one eviction should have occurred').toBeTruthy();
   // The oldest entry (fill-0) should have been evicted, so it's a miss now
   const result = checkAndRecord('fp:fill-0');
-  assertEqual(result, false, 'evicted entry should be miss on re-check');
+  expect(result, 'evicted entry should be miss on re-check').toBe(false);
 });
 
 test('hit count increments correctly across multiple hits', () => {
@@ -109,7 +79,7 @@ test('hit count increments correctly across multiple hits', () => {
   checkAndRecord('fp:multi-1');   // hit 1
   checkAndRecord('fp:multi-1');   // hit 2
   checkAndRecord('fp:multi-2');   // miss
-  assertEqual(getIdempotentHitCount(), 2, 'should have 2 hits');
+  expect(getIdempotentHitCount(), 'should have 2 hits').toBe(2);
 });
 
 test('reset clears state between runs', () => {
@@ -119,14 +89,12 @@ test('reset clears state between runs', () => {
 
   __resetForTest();
   const result = checkAndRecord('fp:reset-test'); // should be miss after reset
-  assertEqual(result, false, 'after reset, known key should be miss');
-  assertEqual(getIdempotentHitCount(), 0, 'hit count reset to 0');
-  assertEqual(getIdempotentEvictionCount(), 0, 'eviction count reset to 0');
+  expect(result, 'after reset, known key should be miss').toBe(false);
+  expect(getIdempotentHitCount(), 'hit count reset to 0').toBe(0);
+  expect(getIdempotentEvictionCount(), 'eviction count reset to 0').toBe(0);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 Promise.all(pending).then(() => {
-  console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
 });

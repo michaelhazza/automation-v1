@@ -6,32 +6,12 @@
  * in P0.2 Slice C of docs/improvements-roadmap-spec.md.
  */
 
+import { expect, test } from 'vitest';
 import {
   applyOnFailurePure,
   applyOnFailureForStructuredFailurePure,
 } from '../skillExecutorPure.js';
 import { FailureError } from '../../../shared/iee/failure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual<T>(actual: T, expected: T, label: string) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
 
 function assertThrows(fn: () => unknown, label: string): unknown {
   try {
@@ -40,6 +20,12 @@ function assertThrows(fn: () => unknown, label: string): unknown {
     return e;
   }
   throw new Error(`${label}: expected throw, but did not throw`);
+}
+
+function assertEqual<T>(actual: T, expected: T, label: string) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
 }
 
 console.log('');
@@ -51,12 +37,12 @@ const baseErr = new Error('boom');
 
 test("'skip' wraps an Error into a structured skip response", () => {
   const out = applyOnFailurePure(slug, 'skip', undefined, baseErr);
-  assertEqual(out, { success: false, skipped: true, reason: 'boom' }, 'skip result');
+  expect(out, 'skip result').toEqual({ success: false, skipped: true, reason: 'boom' });
 });
 
 test("'skip' coerces non-Error throwables to string", () => {
   const out = applyOnFailurePure(slug, 'skip', undefined, 'plain string');
-  assertEqual(out, { success: false, skipped: true, reason: 'plain string' }, 'skip non-error');
+  expect(out, 'skip non-error').toEqual({ success: false, skipped: true, reason: 'plain string' });
 });
 
 test("'fail_run' throws a FailureError tagged with execution_error", () => {
@@ -69,7 +55,7 @@ test("'fail_run' throws a FailureError tagged with execution_error", () => {
 
 test("'fallback' with a configured value returns it wrapped", () => {
   const out = applyOnFailurePure(slug, 'fallback', { items: [] }, baseErr);
-  assertEqual(out, { success: true, usedFallback: true, value: { items: [] } }, 'fallback wrap');
+  expect(out, 'fallback wrap').toEqual({ success: true, usedFallback: true, value: { items: [] } });
 });
 
 test("'fallback' with undefined fallbackValue re-throws (does NOT return undefined)", () => {
@@ -78,16 +64,8 @@ test("'fallback' with undefined fallbackValue re-throws (does NOT return undefin
 });
 
 test("'fallback' with a falsy-but-defined value (null, 0, '') returns it wrapped", () => {
-  assertEqual(
-    applyOnFailurePure(slug, 'fallback', null, baseErr),
-    { success: true, usedFallback: true, value: null },
-    'fallback null',
-  );
-  assertEqual(
-    applyOnFailurePure(slug, 'fallback', 0, baseErr),
-    { success: true, usedFallback: true, value: 0 },
-    'fallback 0',
-  );
+  expect(applyOnFailurePure(slug, 'fallback', null, baseErr), 'fallback null').toEqual({ success: true, usedFallback: true, value: null });
+  expect(applyOnFailurePure(slug, 'fallback', 0, baseErr), 'fallback 0').toEqual({ success: true, usedFallback: true, value: 0 });
 });
 
 test("'retry' re-throws the original error reference", () => {
@@ -103,16 +81,12 @@ const failResult = { success: false, error: 'quota exceeded' };
 
 test("'skip' wraps a structured failure into a skip response", () => {
   const out = applyOnFailureForStructuredFailurePure(slug, 'skip', undefined, failResult);
-  assertEqual(out, { success: false, skipped: true, reason: 'quota exceeded' }, 'skip structured');
+  expect(out, 'skip structured').toEqual({ success: false, skipped: true, reason: 'quota exceeded' });
 });
 
 test("'skip' falls back to a default reason when result.error is missing", () => {
   const out = applyOnFailureForStructuredFailurePure(slug, 'skip', undefined, { success: false });
-  assertEqual(
-    out,
-    { success: false, skipped: true, reason: 'skill returned success: false' },
-    'skip default reason',
-  );
+  expect(out, 'skip default reason').toEqual({ success: false, skipped: true, reason: 'skill returned success: false' });
 });
 
 test("'fail_run' throws FailureError carrying the structured error message", () => {
@@ -128,19 +102,17 @@ test("'fail_run' throws FailureError carrying the structured error message", () 
 
 test("'fallback' with configured value wraps it", () => {
   const out = applyOnFailureForStructuredFailurePure(slug, 'fallback', 'cached', failResult);
-  assertEqual(out, { success: true, usedFallback: true, value: 'cached' }, 'fallback structured');
+  expect(out, 'fallback structured').toEqual({ success: true, usedFallback: true, value: 'cached' });
 });
 
 test("'fallback' with undefined value passes the structured failure through unchanged", () => {
   const out = applyOnFailureForStructuredFailurePure(slug, 'fallback', undefined, failResult);
-  assertEqual(out, failResult, 'fallback passthrough');
+  expect(out, 'fallback passthrough').toEqual(failResult);
 });
 
 test("'retry' returns the structured failure unchanged", () => {
   const out = applyOnFailureForStructuredFailurePure(slug, 'retry', undefined, failResult);
-  assertEqual(out, failResult, 'retry passthrough');
+  expect(out, 'retry passthrough').toEqual(failResult);
 });
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -24,27 +24,14 @@
 // to placeholder values — this test is purely structural, it never hits the
 // DB or signs a JWT. ESM imports are hoisted, so we seed process.env *before*
 // a dynamic import pulls skillExecutor through the env-validated db module.
+import { expect, test } from 'vitest';
+
 await import('dotenv/config');
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { SKILL_HANDLERS } = await import('../skillExecutor.js');
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Canonical handler key set (177 entries)
@@ -295,9 +282,6 @@ test('Every SKILL_HANDLERS entry is a function', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`skillHandlerRegistryEquivalence: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
-
 // Make this file a module so the top-level `await import()` used above
 // satisfies TS1375 (top-level await requires ESM module semantics).
 export {};

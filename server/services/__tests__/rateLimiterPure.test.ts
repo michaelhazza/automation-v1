@@ -7,23 +7,9 @@
  * Runnable via:
  *   npx tsx server/services/__tests__/rateLimiterPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { strict as assert } from 'node:assert';
 import { computeEffectiveCount } from '../../lib/inboundRateLimiterPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.error(`  FAIL  ${name}`);
-    console.error(err);
-  }
-}
 
 // Boundary moment: elapsedFraction = 0 → previous window contributes fully.
 test('boundary: elapsed=0 — full prev contribution', () => {
@@ -63,6 +49,3 @@ test('empty curr at rollover: curr=0 — effective is weighted prev', () => {
   // 60 * (1 - 0.25) = 45
   assert.equal(computeEffectiveCount(60, 0, 0.25), 45);
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

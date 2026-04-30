@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/subaccountOnboardingServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   canMarkReady,
   nextStep,
@@ -17,33 +18,10 @@ import {
   type OnboardingStepId,
 } from '../subaccountOnboardingServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false`);
 }
 
 console.log('');
@@ -59,12 +37,8 @@ console.log('canMarkReady:');
 test('empty state → disallowed, all required missing', () => {
   const s = emptyOnboardingState();
   const r = canMarkReady(s);
-  assertFalse(r.allowed, 'empty state blocked');
-  assertEqual(
-    r.missing.sort(),
-    ['identity', 'intelligence_briefing_config', 'weekly_digest_config'].sort(),
-    '3 required missing',
-  );
+  expect(r.allowed, 'empty state blocked').toBe(false);
+  expect(r.missing.sort(), '3 required missing').toEqual(['identity', 'intelligence_briefing_config', 'weekly_digest_config'].sort());
 });
 
 test('only Step 1 completed → still blocked on 6 + 7', () => {
@@ -74,8 +48,8 @@ test('only Step 1 completed → still blocked on 6 + 7', () => {
     answers: { name: 'Acme' },
   });
   const r = canMarkReady(s);
-  assertFalse(r.allowed, 'still blocked');
-  assertEqual(r.missing.sort(), ['intelligence_briefing_config', 'weekly_digest_config'].sort(), '2 missing');
+  expect(r.allowed, 'still blocked').toBe(false);
+  expect(r.missing.sort(), '2 missing').toEqual(['intelligence_briefing_config', 'weekly_digest_config'].sort());
 });
 
 test('Steps 1 + 6 + 7 all completed → allowed', () => {
@@ -84,8 +58,8 @@ test('Steps 1 + 6 + 7 all completed → allowed', () => {
     s = recordStepAnswer({ state: s, stepId, answers: {} });
   }
   const r = canMarkReady(s);
-  assertTrue(r.allowed, 'minimum set satisfied');
-  assertEqual(r.missing.length, 0, 'no missing');
+  expect(r.allowed, 'minimum set satisfied').toBe(true);
+  expect(r.missing.length, 'no missing').toBe(0);
 });
 
 test('all 9 steps completed → allowed', () => {
@@ -94,7 +68,7 @@ test('all 9 steps completed → allowed', () => {
     s = recordStepAnswer({ state: s, stepId: step.id, answers: {} });
   }
   const r = canMarkReady(s);
-  assertTrue(r.allowed, 'all satisfied');
+  expect(r.allowed, 'all satisfied').toBe(true);
 });
 
 test('skip fulfilment satisfies optional steps but not required', () => {
@@ -102,8 +76,8 @@ test('skip fulfilment satisfies optional steps but not required', () => {
   s.skipFulfilled = { audience: true, voice: true };
   // Still missing identity + briefing + digest
   const r = canMarkReady(s);
-  assertFalse(r.allowed, 'skips cannot satisfy required steps');
-  assertEqual(r.missing.sort(), ['identity', 'intelligence_briefing_config', 'weekly_digest_config'].sort(), '3 missing');
+  expect(r.allowed, 'skips cannot satisfy required steps').toBe(false);
+  expect(r.missing.sort(), '3 missing').toEqual(['identity', 'intelligence_briefing_config', 'weekly_digest_config'].sort());
 });
 
 test('skip fulfilment of a required step counts as completion', () => {
@@ -113,7 +87,7 @@ test('skip fulfilment of a required step counts as completion', () => {
   // Smart-skip the briefing step (unusual, but the logic should still allow it)
   s.skipFulfilled = { intelligence_briefing_config: true };
   const r = canMarkReady(s);
-  assertTrue(r.allowed, 'skipFulfilled covers required');
+  expect(r.allowed, 'skipFulfilled covers required').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -124,18 +98,18 @@ console.log('nextStep:');
 
 test('empty state → returns identity (step 1)', () => {
   const next = nextStep(emptyOnboardingState());
-  assertEqual(next?.id, 'identity', 'first step');
+  expect(next?.id, 'first step').toBe('identity');
 });
 
 test('after Step 1 → next is audience (step 2)', () => {
   const s = recordStepAnswer({ state: emptyOnboardingState(), stepId: 'identity', answers: {} });
-  assertEqual(nextStep(s)?.id, 'audience', 'step 2');
+  expect(nextStep(s)?.id, 'step 2').toBe('audience');
 });
 
 test('skip-fulfilled steps are skipped', () => {
   let s = recordStepAnswer({ state: emptyOnboardingState(), stepId: 'identity', answers: {} });
   s.skipFulfilled = { audience: true, voice: true };
-  assertEqual(nextStep(s)?.id, 'integrations', 'jumps to 4');
+  expect(nextStep(s)?.id, 'jumps to 4').toBe('integrations');
 });
 
 test('all completed → nextStep returns null', () => {
@@ -143,7 +117,7 @@ test('all completed → nextStep returns null', () => {
   for (const step of ONBOARDING_STEPS) {
     s = recordStepAnswer({ state: s, stepId: step.id, answers: {} });
   }
-  assertEqual(nextStep(s), null, 'null after all');
+  expect(nextStep(s), 'null after all').toBe(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -159,9 +133,9 @@ test('merges answers without mutating input', () => {
     stepId: 'identity',
     answers: { name: 'Acme' },
   });
-  assertFalse(initial.completedStepIds.has('identity'), 'input not mutated');
-  assertTrue(s1.completedStepIds.has('identity'), 'next state has step');
-  assertEqual(s1.answers.name, 'Acme', 'answer recorded');
+  expect(initial.completedStepIds.has('identity'), 'input not mutated').toBe(false);
+  expect(s1.completedStepIds.has('identity'), 'next state has step').toBe(true);
+  expect(s1.answers.name, 'answer recorded').toBe('Acme');
 });
 
 // ---------------------------------------------------------------------------
@@ -171,7 +145,7 @@ test('merges answers without mutating input', () => {
 console.log('computeSmartSkips:');
 
 test('null scrape → no skips', () => {
-  assertEqual(computeSmartSkips(null), {}, 'null');
+  expect(computeSmartSkips(null), 'null').toEqual({});
 });
 
 test('rich scrape → audience + voice skipped', () => {
@@ -179,8 +153,8 @@ test('rich scrape → audience + voice skipped', () => {
     audienceSignal: 'Small-to-medium B2B SaaS companies, 50-500 employees',
     voiceSignal: 'Professional but warm, short-sentence, action-focused',
   });
-  assertTrue(skips.audience === true, 'audience skipped');
-  assertTrue(skips.voice === true, 'voice skipped');
+  expect(skips.audience === true, 'audience skipped').toBe(true);
+  expect(skips.voice === true, 'voice skipped').toBe(true);
 });
 
 test('short signals do not trigger smart-skip (conservative)', () => {
@@ -188,8 +162,8 @@ test('short signals do not trigger smart-skip (conservative)', () => {
     audienceSignal: 'SMB',  // too short
     voiceSignal: 'Warm',
   });
-  assertFalse(Boolean(skips.audience), 'short audience → no skip');
-  assertFalse(Boolean(skips.voice), 'short voice → no skip');
+  expect(Boolean(skips.audience), 'short audience → no skip').toBe(false);
+  expect(Boolean(skips.voice), 'short voice → no skip').toBe(false);
 });
 
 test('only audience signal → only audience skipped', () => {
@@ -197,11 +171,9 @@ test('only audience signal → only audience skipped', () => {
     audienceSignal: 'Enterprise IT decision makers at Fortune 500 companies',
     voiceSignal: null,
   });
-  assertTrue(skips.audience === true, 'audience');
-  assertFalse(Boolean(skips.voice), 'voice not skipped');
+  expect(skips.audience === true, 'audience').toBe(true);
+  expect(Boolean(skips.voice), 'voice not skipped').toBe(false);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

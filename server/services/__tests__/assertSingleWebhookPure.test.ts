@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="pure logic is tested inline within this handwritten harness; parent-directory sibling import not applicable for this self-contained test pattern"
 /**
  * assertSingleWebhookPure.test.ts
  *
@@ -9,26 +10,9 @@
  * Run via: npx tsx server/services/__tests__/assertSingleWebhookPure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {};
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 // Pure mirror of assertSingleWebhook from invokeAutomationStepService.ts
 function assertSingleWebhook(automation: { id: string; webhookPath: string | null }): { code: string; message: string } | null {
@@ -46,36 +30,33 @@ console.log('\nW1-43 — assertSingleWebhook pure tests\n');
 
 test('automation with valid webhookPath → no error (returns null)', () => {
   const err = assertSingleWebhook({ id: 'auto-1', webhookPath: '/webhook/path' });
-  assert(err === null, 'valid automation should return null');
+  expect(err === null, 'valid automation should return null').toBeTruthy();
 });
 
 test('automation with null webhookPath → automation_composition_invalid (0 webhooks)', () => {
   const err = assertSingleWebhook({ id: 'auto-2', webhookPath: null });
-  assert(err !== null, 'null webhookPath should return error');
-  assert(err!.code === 'automation_composition_invalid', `expected composition_invalid, got ${err!.code}`);
-  assert(err!.message.includes('found 0'), `message should say found 0, got: ${err!.message}`);
+  expect(err !== null, 'null webhookPath should return error').toBeTruthy();
+  expect(err!.code === 'automation_composition_invalid', `expected composition_invalid, got ${err!.code}`).toBeTruthy();
+  expect(err!.message.includes('found 0'), `message should say found 0, got: ${err!.message}`).toBeTruthy();
 });
 
 test('automation with empty string webhookPath → automation_composition_invalid (0 webhooks)', () => {
   const err = assertSingleWebhook({ id: 'auto-3', webhookPath: '' });
-  assert(err !== null, 'empty webhookPath should return error');
-  assert(err!.code === 'automation_composition_invalid', `expected composition_invalid, got ${err!.code}`);
-  assert(err!.message.includes('found 0'), `message should say found 0, got: ${err!.message}`);
+  expect(err !== null, 'empty webhookPath should return error').toBeTruthy();
+  expect(err!.code === 'automation_composition_invalid', `expected composition_invalid, got ${err!.code}`).toBeTruthy();
+  expect(err!.message.includes('found 0'), `message should say found 0, got: ${err!.message}`).toBeTruthy();
 });
 
 test('error message includes automation id for operator diagnostics', () => {
   const err = assertSingleWebhook({ id: 'auto-diagnostic-id', webhookPath: null });
-  assert(err !== null, 'should return error');
-  assert(err!.message.includes('auto-diagnostic-id'), 'error message must include automation id');
+  expect(err !== null, 'should return error').toBeTruthy();
+  expect(err!.message.includes('auto-diagnostic-id'), 'error message must include automation id').toBeTruthy();
 });
 
 test('non-empty webhookPath = exactly one webhook → valid', () => {
   const variants = ['/path', 'https://example.com/hook', '/a/b/c'];
   for (const path of variants) {
     const err = assertSingleWebhook({ id: 'auto-x', webhookPath: path });
-    assert(err === null, `webhookPath '${path}' should be valid`);
+    expect(err === null, `webhookPath '${path}' should be valid`).toBeTruthy();
   }
 });
-
-console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

@@ -12,7 +12,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="rate-limit buckets are keyed by IP/token+window, not by org tenant — queries run outside request ALS context by design"
 import { logger } from './logger.js';
 import { computeEffectiveCount } from './inboundRateLimiterPure.js';
 

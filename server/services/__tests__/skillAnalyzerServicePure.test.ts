@@ -2,6 +2,7 @@
  * Runnable via: npx tsx server/services/__tests__/skillAnalyzerServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   cosineSimilarity,
   classifyBand,
@@ -14,25 +15,6 @@ import {
 } from '../skillAnalyzerServicePure.js';
 import type { LibrarySkillSummary } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertNear(actual: number, expected: number, delta: number, label: string) {
   if (Math.abs(actual - expected) > delta) {
@@ -60,15 +42,15 @@ test('cosineSimilarity: opposite vectors → clamped to 0.0', () => {
   const a = [1, 0, 0];
   const b = [-1, 0, 0];
   const sim = cosineSimilarity(a, b);
-  assert(sim === 0, `Expected 0 (clamped), got ${sim}`);
+  expect(sim === 0, `Expected 0 (clamped), got ${sim}`).toBeTruthy();
 });
 
 test('cosineSimilarity: empty vectors → 0', () => {
-  assert(cosineSimilarity([], []) === 0, 'empty vectors should return 0');
+  expect(cosineSimilarity([], []) === 0, 'empty vectors should return 0').toBeTruthy();
 });
 
 test('cosineSimilarity: mismatched lengths → 0', () => {
-  assert(cosineSimilarity([1, 2], [1, 2, 3]) === 0, 'mismatched lengths should return 0');
+  expect(cosineSimilarity([1, 2], [1, 2, 3]) === 0, 'mismatched lengths should return 0').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -76,19 +58,19 @@ test('cosineSimilarity: mismatched lengths → 0', () => {
 // ---------------------------------------------------------------------------
 
 test('classifyBand: >0.92 → likely_duplicate', () => {
-  assert(classifyBand(0.95) === 'likely_duplicate', 'expected likely_duplicate');
-  assert(classifyBand(0.93) === 'likely_duplicate', 'expected likely_duplicate');
+  expect(classifyBand(0.95) === 'likely_duplicate', 'expected likely_duplicate').toBeTruthy();
+  expect(classifyBand(0.93) === 'likely_duplicate', 'expected likely_duplicate').toBeTruthy();
 });
 
 test('classifyBand: 0.60–0.92 → ambiguous', () => {
-  assert(classifyBand(0.75) === 'ambiguous', 'expected ambiguous');
-  assert(classifyBand(0.60) === 'ambiguous', 'expected ambiguous at boundary');
-  assert(classifyBand(0.92) === 'ambiguous', 'expected ambiguous at upper boundary');
+  expect(classifyBand(0.75) === 'ambiguous', 'expected ambiguous').toBeTruthy();
+  expect(classifyBand(0.60) === 'ambiguous', 'expected ambiguous at boundary').toBeTruthy();
+  expect(classifyBand(0.92) === 'ambiguous', 'expected ambiguous at upper boundary').toBeTruthy();
 });
 
 test('classifyBand: <0.60 → distinct', () => {
-  assert(classifyBand(0.3) === 'distinct', 'expected distinct');
-  assert(classifyBand(0.0) === 'distinct', 'expected distinct at zero');
+  expect(classifyBand(0.3) === 'distinct', 'expected distinct').toBeTruthy();
+  expect(classifyBand(0.0) === 'distinct', 'expected distinct at zero').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -106,23 +88,23 @@ test('computeBestMatches: returns best match per candidate', () => {
   ];
 
   const matches = computeBestMatches(candidates, library);
-  assert(matches.length === 2, `expected 2 matches, got ${matches.length}`);
-  assert(matches[0].librarySlug === 'lib-a', `candidate 0 should match lib-a`);
-  assert(matches[1].librarySlug === 'lib-b', `candidate 1 should match lib-b`);
+  expect(matches.length === 2, `expected 2 matches, got ${matches.length}`).toBeTruthy();
+  expect(matches[0].librarySlug === 'lib-a', `candidate 0 should match lib-a`).toBeTruthy();
+  expect(matches[1].librarySlug === 'lib-b', `candidate 1 should match lib-b`).toBeTruthy();
   assertNear(matches[0].similarity, 1.0, 0.0001, 'perfect match similarity');
 });
 
 test('computeBestMatches: empty candidates → empty result', () => {
   const result = computeBestMatches([], [{ id: null, slug: 'x', name: 'X', embedding: [1, 0, 0] }]);
-  assert(result.length === 0, 'expected empty result');
+  expect(result.length === 0, 'expected empty result').toBeTruthy();
 });
 
 test('computeBestMatches: empty library → similarity 0 for all', () => {
   const candidates = [{ index: 0, embedding: [1, 0, 0] }];
   const result = computeBestMatches(candidates, []);
-  assert(result.length === 1, 'expected 1 result');
-  assert(result[0].similarity === 0, `expected 0 similarity, got ${result[0].similarity}`);
-  assert(result[0].band === 'distinct', `expected distinct band`);
+  expect(result.length === 1, 'expected 1 result').toBeTruthy();
+  expect(result[0].similarity === 0, `expected 0 similarity, got ${result[0].similarity}`).toBeTruthy();
+  expect(result[0].band === 'distinct', `expected distinct band`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -136,27 +118,27 @@ test('parseClassificationResponse: valid JSON object', () => {
     reasoning: 'The incoming skill is more detailed.',
   });
   const result = parseClassificationResponse(response);
-  assert(result !== null, 'expected non-null result');
-  assert(result!.classification === 'IMPROVEMENT', `expected IMPROVEMENT, got ${result!.classification}`);
+  expect(result !== null, 'expected non-null result').toBeTruthy();
+  expect(result!.classification === 'IMPROVEMENT', `expected IMPROVEMENT, got ${result!.classification}`).toBeTruthy();
   assertNear(result!.confidence, 0.85, 0.001, 'confidence');
 });
 
 test('parseClassificationResponse: JSON in markdown code block', () => {
   const response = '```json\n{"classification":"DISTINCT","confidence":0.9,"reasoning":"Different purpose."}\n```';
   const result = parseClassificationResponse(response);
-  assert(result !== null, 'expected non-null result');
-  assert(result!.classification === 'DISTINCT', `expected DISTINCT`);
+  expect(result !== null, 'expected non-null result').toBeTruthy();
+  expect(result!.classification === 'DISTINCT', `expected DISTINCT`).toBeTruthy();
 });
 
 test('parseClassificationResponse: invalid JSON → null', () => {
   const result = parseClassificationResponse('not json at all');
-  assert(result === null, 'expected null for invalid JSON');
+  expect(result === null, 'expected null for invalid JSON').toBeTruthy();
 });
 
 test('parseClassificationResponse: missing required fields → null', () => {
   const result = parseClassificationResponse(JSON.stringify({ classification: 'DUPLICATE' }));
   // Missing confidence and reasoning → fails Zod validation
-  assert(result === null, 'expected null for missing fields');
+  expect(result === null, 'expected null for missing fields').toBeTruthy();
 });
 
 test('parseClassificationResponse: invalid classification enum → null', () => {
@@ -165,7 +147,7 @@ test('parseClassificationResponse: invalid classification enum → null', () => 
     confidence: 0.9,
     reasoning: 'Something.',
   }));
-  assert(result === null, 'expected null for invalid enum');
+  expect(result === null, 'expected null for invalid enum').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -196,7 +178,7 @@ const makeLibrary = (overrides: Partial<LibrarySkillSummary> = {}): LibrarySkill
 test('generateDiffSummary: identical skills → empty diff', () => {
   const diff = generateDiffSummary(makeCandidate(), makeLibrary());
   // name and description differ (candidate vs library names)
-  assert(diff.addedFields.length === 0 || diff.changedFields.includes('name'), 'name should be in changedFields');
+  expect(diff.addedFields.length === 0 || diff.changedFields.includes('name'), 'name should be in changedFields').toBeTruthy();
 });
 
 test('generateDiffSummary: candidate has instructions, library does not → added', () => {
@@ -204,7 +186,7 @@ test('generateDiffSummary: candidate has instructions, library does not → adde
     makeCandidate({ instructions: 'Phase 1: ...' }),
     makeLibrary({ instructions: null })
   );
-  assert(diff.addedFields.includes('instructions'), 'instructions should be in addedFields');
+  expect(diff.addedFields.includes('instructions'), 'instructions should be in addedFields').toBeTruthy();
 });
 
 test('generateDiffSummary: library has instructions, candidate does not → removed', () => {
@@ -212,7 +194,7 @@ test('generateDiffSummary: library has instructions, candidate does not → remo
     makeCandidate({ instructions: null }),
     makeLibrary({ instructions: 'Do this.' })
   );
-  assert(diff.removedFields.includes('instructions'), 'instructions should be in removedFields');
+  expect(diff.removedFields.includes('instructions'), 'instructions should be in removedFields').toBeTruthy();
 });
 
 test('generateDiffSummary: both have different definitions → changed', () => {
@@ -220,7 +202,7 @@ test('generateDiffSummary: both have different definitions → changed', () => {
     makeCandidate({ definition: { name: 'new_tool', input_schema: {} } }),
     makeLibrary({ definition: { name: 'old_tool', input_schema: {} } })
   );
-  assert(diff.changedFields.includes('definition'), 'definition should be in changedFields');
+  expect(diff.changedFields.includes('definition'), 'definition should be in changedFields').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -233,15 +215,15 @@ test('buildClassificationPrompt: returns system and userMessage strings', () => 
     makeLibrary(),
     'ambiguous'
   );
-  assert(typeof system === 'string' && system.length > 0, 'system prompt should be non-empty string');
-  assert(typeof userMessage === 'string' && userMessage.length > 0, 'userMessage should be non-empty string');
-  assert(userMessage.includes('Candidate Skill'), 'userMessage should include candidate name');
-  assert(userMessage.includes('Library Skill'), 'userMessage should include library name');
+  expect(typeof system === 'string' && system.length > 0, 'system prompt should be non-empty string').toBeTruthy();
+  expect(typeof userMessage === 'string' && userMessage.length > 0, 'userMessage should be non-empty string').toBeTruthy();
+  expect(userMessage.includes('Candidate Skill'), 'userMessage should include candidate name').toBeTruthy();
+  expect(userMessage.includes('Library Skill'), 'userMessage should include library name').toBeTruthy();
 });
 
 test('buildClassificationPrompt: likely_duplicate hint included', () => {
   const { userMessage } = buildClassificationPrompt(makeCandidate(), makeLibrary(), 'likely_duplicate');
-  assert(userMessage.includes('likely_duplicate') || userMessage.includes('very high'), 'hint should mention high similarity');
+  expect(userMessage.includes('likely_duplicate') || userMessage.includes('very high'), 'hint should mention high similarity').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -254,10 +236,7 @@ test('CLASSIFICATION_SYSTEM_PROMPT: DUPLICATE definition requires zero additive 
     { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
     'ambiguous',
   );
-  assert(
-    system.includes('zero additive value'),
-    'DUPLICATE definition should mention "zero additive value"',
-  );
+  expect(system.includes('zero additive value'), 'DUPLICATE definition should mention "zero additive value"').toBeTruthy();
 });
 
 test('CLASSIFICATION_SYSTEM_PROMPT: contains anti-bias instruction', () => {
@@ -266,10 +245,7 @@ test('CLASSIFICATION_SYSTEM_PROMPT: contains anti-bias instruction', () => {
     { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
     'ambiguous',
   );
-  assert(
-    system.includes('Do not rely solely on embedding similarity'),
-    'system prompt should contain anti-bias instruction',
-  );
+  expect(system.includes('Do not rely solely on embedding similarity'), 'system prompt should contain anti-bias instruction').toBeTruthy();
 });
 
 test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT', () => {
@@ -278,10 +254,7 @@ test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT'
     { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
     'likely_duplicate',
   );
-  assert(
-    userMessage.includes('Prefer IMPROVEMENT'),
-    'likely_duplicate hint should prefer IMPROVEMENT',
-  );
+  expect(userMessage.includes('Prefer IMPROVEMENT'), 'likely_duplicate hint should prefer IMPROVEMENT').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -289,15 +262,15 @@ test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT'
 // ---------------------------------------------------------------------------
 
 test('deriveClassificationFailureReason: null error → parse_error', () => {
-  assert(deriveClassificationFailureReason(null) === 'parse_error', 'null → parse_error');
+  expect(deriveClassificationFailureReason(null) === 'parse_error', 'null → parse_error').toBeTruthy();
 });
 
 test('deriveClassificationFailureReason: 429 status → rate_limit', () => {
-  assert(deriveClassificationFailureReason({ statusCode: 429 }) === 'rate_limit', '429 → rate_limit');
+  expect(deriveClassificationFailureReason({ statusCode: 429 }) === 'rate_limit', '429 → rate_limit').toBeTruthy();
 });
 
 test('deriveClassificationFailureReason: unknown error → unknown', () => {
-  assert(deriveClassificationFailureReason(new Error('boom')) === 'unknown', 'Error → unknown');
+  expect(deriveClassificationFailureReason(new Error('boom')) === 'unknown', 'Error → unknown').toBeTruthy();
 });
 
 test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEMENT', () => {
@@ -306,10 +279,7 @@ test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEME
     { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
     'likely_duplicate',
   );
-  assert(
-    userMessage.includes('Prefer IMPROVEMENT'),
-    'likely_duplicate hint should prefer IMPROVEMENT in merge path',
-  );
+  expect(userMessage.includes('Prefer IMPROVEMENT'), 'likely_duplicate hint should prefer IMPROVEMENT in merge path').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -317,5 +287,3 @@ test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEME
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

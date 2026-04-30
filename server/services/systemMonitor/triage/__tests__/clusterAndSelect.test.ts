@@ -1,29 +1,11 @@
 // Tests for clusterFires and selectTopForTriage — pure functions.
 // Run: npx tsx server/services/systemMonitor/triage/__tests__/clusterAndSelect.test.ts
 
+import { expect, test } from 'vitest';
 import { clusterFires, type HeuristicFireRecord } from '../clusterFires.js';
 import { selectTopForTriage } from '../selectTopForTriage.js';
 
-let passed = 0;
-let failed = 0;
 const failures: string[] = [];
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } catch (err) {
-    failed++;
-    const msg = err instanceof Error ? err.message : String(err);
-    failures.push(`  ✗ ${name}: ${msg}`);
-    console.log(`  ✗ ${name}: ${msg}`);
-  }
-}
-
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(message);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
@@ -49,35 +31,35 @@ console.log('\n--- clusterFires ---');
 
 test('empty fires returns empty clusters', () => {
   const clusters = clusterFires([]);
-  assertEqual(clusters.length, 0, 'cluster count');
+  expect(clusters.length, 'cluster count').toBe(0);
 });
 
 test('single fire produces one cluster with correct fields', () => {
   const fire = makeFireRecord({ heuristicId: 'h1', entityKind: 'agent_run', entityId: 'e1', confidence: 0.75 });
   const clusters = clusterFires([fire]);
-  assertEqual(clusters.length, 1, 'cluster count');
-  assertEqual(clusters[0]!.entityKind, 'agent_run', 'entityKind');
-  assertEqual(clusters[0]!.entityId, 'e1', 'entityId');
-  assertEqual(clusters[0]!.totalFires, 1, 'totalFires');
-  assertEqual(clusters[0]!.maxConfidence, 0.75, 'maxConfidence');
-  assertEqual(clusters[0]!.fires.length, 1, 'fires length');
+  expect(clusters.length, 'cluster count').toBe(1);
+  expect(clusters[0]!.entityKind, 'entityKind').toBe('agent_run');
+  expect(clusters[0]!.entityId, 'entityId').toBe('e1');
+  expect(clusters[0]!.totalFires, 'totalFires').toBe(1);
+  expect(clusters[0]!.maxConfidence, 'maxConfidence').toBe(0.75);
+  expect(clusters[0]!.fires.length, 'fires length').toBe(1);
 });
 
 test('two fires on same entity merge into one cluster', () => {
   const f1 = makeFireRecord({ fireRowId: 'r1', heuristicId: 'h1', entityId: 'e1', confidence: 0.6 });
   const f2 = makeFireRecord({ fireRowId: 'r2', heuristicId: 'h2', entityId: 'e1', confidence: 0.9 });
   const clusters = clusterFires([f1, f2]);
-  assertEqual(clusters.length, 1, 'cluster count');
-  assertEqual(clusters[0]!.totalFires, 2, 'totalFires');
-  assertEqual(clusters[0]!.maxConfidence, 0.9, 'maxConfidence is max of both');
-  assertEqual(clusters[0]!.fires.length, 2, 'fires array has both records');
+  expect(clusters.length, 'cluster count').toBe(1);
+  expect(clusters[0]!.totalFires, 'totalFires').toBe(2);
+  expect(clusters[0]!.maxConfidence, 'maxConfidence is max of both').toBe(0.9);
+  expect(clusters[0]!.fires.length, 'fires array has both records').toBe(2);
 });
 
 test('fires on different entities produce separate clusters', () => {
   const f1 = makeFireRecord({ entityId: 'e1', confidence: 0.5 });
   const f2 = makeFireRecord({ entityId: 'e2', confidence: 0.7 });
   const clusters = clusterFires([f1, f2]);
-  assertEqual(clusters.length, 2, 'cluster count');
+  expect(clusters.length, 'cluster count').toBe(2);
 });
 
 test('different entityKind produces separate clusters even with same entityId', () => {
@@ -85,7 +67,7 @@ test('different entityKind produces separate clusters even with same entityId', 
   const f2 = makeFireRecord({ entityKind: 'agent_run', entityId: 'e1', confidence: 0.8 });
   const f3 = makeFireRecord({ entityKind: 'agent_run', entityId: 'e2', confidence: 0.6 });
   const clusters = clusterFires([f1, f2, f3]);
-  assertEqual(clusters.length, 2, 'two distinct entities produce two clusters');
+  expect(clusters.length, 'two distinct entities produce two clusters').toBe(2);
 });
 
 test('maxConfidence is the highest across all fires in cluster', () => {
@@ -93,7 +75,7 @@ test('maxConfidence is the highest across all fires in cluster', () => {
     makeFireRecord({ fireRowId: `r${i}`, heuristicId: `h${i}`, entityId: 'e1', confidence: conf }),
   );
   const clusters = clusterFires(fires);
-  assertEqual(clusters[0]!.maxConfidence, 0.9, 'maxConfidence');
+  expect(clusters[0]!.maxConfidence, 'maxConfidence').toBe(0.9);
 });
 
 test('totalFires counts all fires including lower-confidence ones', () => {
@@ -101,7 +83,7 @@ test('totalFires counts all fires including lower-confidence ones', () => {
     makeFireRecord({ fireRowId: `r${i}`, heuristicId: `h${i}`, entityId: 'e1', confidence: 0.5 }),
   );
   const clusters = clusterFires(fires);
-  assertEqual(clusters[0]!.totalFires, 5, 'totalFires');
+  expect(clusters[0]!.totalFires, 'totalFires').toBe(5);
 });
 
 // ── selectTopForTriage ───────────────────────────────────────────────────────
@@ -120,15 +102,15 @@ function makeClusters(specs: Array<{ entityId: string; maxConfidence: number; to
 
 test('empty clusters returns empty selection with no cap', () => {
   const { selected, capped } = selectTopForTriage([]);
-  assertEqual(selected.length, 0, 'selected');
-  assert(capped === null, 'capped is null');
+  expect(selected.length, 'selected').toBe(0);
+  expect(capped === null, 'capped is null').toBeTruthy();
 });
 
 test('single cluster within caps is selected', () => {
   const [cluster] = makeClusters([{ entityId: 'e1', maxConfidence: 0.8 }]);
   const { selected, capped } = selectTopForTriage([cluster!]);
-  assertEqual(selected.length, 1, 'selected');
-  assert(capped === null, 'no cap');
+  expect(selected.length, 'selected').toBe(1);
+  expect(capped === null, 'no cap').toBeTruthy();
 });
 
 test('selected clusters are sorted by maxConfidence descending', () => {
@@ -138,9 +120,9 @@ test('selected clusters are sorted by maxConfidence descending', () => {
     { entityId: 'e3', maxConfidence: 0.6 },
   ]);
   const { selected } = selectTopForTriage(clusters);
-  assertEqual(selected[0]!.entityId, 'e2', 'first is highest confidence');
-  assertEqual(selected[1]!.entityId, 'e3', 'second is next');
-  assertEqual(selected[2]!.entityId, 'e1', 'third is lowest');
+  expect(selected[0]!.entityId, 'first is highest confidence').toBe('e2');
+  expect(selected[1]!.entityId, 'second is next').toBe('e3');
+  expect(selected[2]!.entityId, 'third is lowest').toBe('e1');
 });
 
 test('totalFires is tiebreaker when maxConfidence equal', () => {
@@ -149,7 +131,7 @@ test('totalFires is tiebreaker when maxConfidence equal', () => {
     { entityId: 'high-fires', maxConfidence: 0.8, totalFires: 5 },
   ]);
   const { selected } = selectTopForTriage(clusters);
-  assertEqual(selected[0]!.entityId, 'high-fires', 'higher totalFires wins tiebreak');
+  expect(selected[0]!.entityId, 'higher totalFires wins tiebreak').toBe('high-fires');
 });
 
 test('candidate cap at 50 produces capped result', () => {
@@ -158,10 +140,10 @@ test('candidate cap at 50 produces capped result', () => {
     Array.from({ length: 51 }, (_, i) => ({ entityId: `e${i}`, maxConfidence: 1 - i * 0.001 })),
   );
   const { selected, capped } = selectTopForTriage(clusters);
-  assertEqual(selected.length, 50, 'exactly 50 selected');
-  assert(capped !== null, 'capped is set');
-  assertEqual(capped!.capKind, 'candidate', 'capKind is candidate');
-  assertEqual(capped!.excessCount, 1, 'one excess');
+  expect(selected.length, 'exactly 50 selected').toBe(50);
+  expect(capped !== null, 'capped is set').toBeTruthy();
+  expect(capped!.capKind, 'capKind is candidate').toBe('candidate');
+  expect(capped!.excessCount, 'one excess').toBe(1);
 });
 
 test('excess count accumulates all clusters over cap', () => {
@@ -169,8 +151,8 @@ test('excess count accumulates all clusters over cap', () => {
     Array.from({ length: 55 }, (_, i) => ({ entityId: `e${i}`, maxConfidence: 0.5 })),
   );
   const { selected, capped } = selectTopForTriage(clusters);
-  assertEqual(selected.length, 50, 'selected at cap');
-  assertEqual(capped!.excessCount, 5, 'five excess');
+  expect(selected.length, 'selected at cap').toBe(50);
+  expect(capped!.excessCount, 'five excess').toBe(5);
 });
 
 test('payload cap skips cluster whose own JSON exceeds 200 KB', () => {
@@ -195,11 +177,11 @@ test('payload cap skips cluster whose own JSON exceeds 200 KB', () => {
 
   const { selected, capped } = selectTopForTriage([smallCluster, bigCluster]);
   // bigCluster is evaluated first (higher confidence) but its JSON alone exceeds payload cap → skipped
-  assert(!selected.some((c) => c.entityId === 'e1'), 'huge cluster is not selected');
-  assert(selected.some((c) => c.entityId === 'e2'), 'small cluster is selected after big is skipped');
-  assert(capped !== null, 'capped is set');
-  assertEqual(capped!.capKind, 'payload', 'capKind is payload');
-  assertEqual(capped!.excessCount, 1, 'one cluster was capped');
+  expect(!selected.some((c) => c.entityId === 'e1'), 'huge cluster is not selected').toBeTruthy();
+  expect(selected.some((c) => c.entityId === 'e2'), 'small cluster is selected after big is skipped').toBeTruthy();
+  expect(capped !== null, 'capped is set').toBeTruthy();
+  expect(capped!.capKind, 'capKind is payload').toBe('payload');
+  expect(capped!.excessCount, 'one cluster was capped').toBe(1);
 });
 
 test('payload cap stops accumulation when combined size exceeds limit', () => {
@@ -219,12 +201,12 @@ test('payload cap stops accumulation when combined size exceeds limit', () => {
   const c2 = makeCluster('c2', 0.5); // combined would exceed limit → capped
 
   const { selected, capped } = selectTopForTriage([c1, c2]);
-  assert(selected.some((c) => c.entityId === 'c1'), 'first cluster selected');
+  expect(selected.some((c) => c.entityId === 'c1'), 'first cluster selected').toBeTruthy();
   // c2 may or may not fit depending on exact JSON byte size — both outcomes are valid;
   // we just verify the function terminates and capped is consistent with selected
   const totalSelected = selected.length;
   const totalCapped = capped?.excessCount ?? 0;
-  assertEqual(totalSelected + totalCapped, 2, 'all clusters accounted for');
+  expect(totalSelected + totalCapped, 'all clusters accounted for').toBe(2);
 });
 
 test('capped null when all clusters fit within both caps', () => {
@@ -232,7 +214,7 @@ test('capped null when all clusters fit within both caps', () => {
     Array.from({ length: 5 }, (_, i) => ({ entityId: `e${i}`, maxConfidence: 0.5 })),
   );
   const { capped } = selectTopForTriage(clusters);
-  assert(capped === null, 'no cap when all fit');
+  expect(capped === null, 'no cap when all fit').toBeTruthy();
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────
@@ -242,5 +224,3 @@ if (failures.length > 0) {
   console.log('Failures:');
   failures.forEach((f) => console.log(f));
 }
-console.log(`\nResult: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

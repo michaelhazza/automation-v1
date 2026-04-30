@@ -3,6 +3,7 @@
  * Run with: npx tsx server/tools/config/__tests__/configSkillHandlersPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   computeDescendantIds,
   mapSubaccountAgentIdsToAgentIds,
@@ -15,32 +16,11 @@ import type { HierarchyContext } from '../../../../shared/types/delegation.js';
 // Minimal test harness
 // ---------------------------------------------------------------------------
 
-let passed = 0;
-let failed = 0;
-
-function assert(condition: boolean, message: string): void {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`);
-  }
-}
-
 function assertDeepEqual<T>(actual: T, expected: T, message: string): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
   if (a !== e) {
     throw new Error(`${message}\n  Expected: ${e}\n  Actual:   ${a}`);
-  }
-}
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn();
-    console.log(`  PASS  ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  FAIL  ${name}`);
-    console.error(`        ${(err as Error).message}`);
-    failed++;
   }
 }
 
@@ -61,7 +41,7 @@ const grandparent: RosterEntry = { subaccountAgentId: 'sa-gp', agentId: 'a-gp', 
 await test('computeDescendantIds: caller is leaf → empty result', () => {
   const roster = [leaf, parent, root];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-leaf', roster });
-  assertDeepEqual(result, [], 'leaf has no children');
+  expect(result, 'leaf has no children').toStrictEqual([]);
 });
 
 await test('computeDescendantIds: caller is parent of 2 children → returns 2 children', () => {
@@ -70,19 +50,19 @@ await test('computeDescendantIds: caller is parent of 2 children → returns 2 c
   const p: RosterEntry = { subaccountAgentId: 'sa-p', agentId: 'a-p', parentSubaccountAgentId: null };
   const roster = [p, c1, c2];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-p', roster });
-  assert(result.length === 2, 'should have 2 descendants');
-  assert(result.includes('sa-c1'), 'should include sa-c1');
-  assert(result.includes('sa-c2'), 'should include sa-c2');
+  expect(result.length === 2, 'should have 2 descendants').toBeTruthy();
+  expect(result.includes('sa-c1'), 'should include sa-c1').toBeTruthy();
+  expect(result.includes('sa-c2'), 'should include sa-c2').toBeTruthy();
 });
 
 await test('computeDescendantIds: grandparent → returns children + grandchildren (4 total)', () => {
   const roster = [grandparent, child1, child2, grandchild1, grandchild2];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-gp', roster });
-  assert(result.length === 4, `should have 4 descendants, got ${result.length}`);
-  assert(result.includes('sa-child1'), 'should include sa-child1');
-  assert(result.includes('sa-child2'), 'should include sa-child2');
-  assert(result.includes('sa-gc1'), 'should include sa-gc1');
-  assert(result.includes('sa-gc2'), 'should include sa-gc2');
+  expect(result.length === 4, `should have 4 descendants, got ${result.length}`).toBeTruthy();
+  expect(result.includes('sa-child1'), 'should include sa-child1').toBeTruthy();
+  expect(result.includes('sa-child2'), 'should include sa-child2').toBeTruthy();
+  expect(result.includes('sa-gc1'), 'should include sa-gc1').toBeTruthy();
+  expect(result.includes('sa-gc2'), 'should include sa-gc2').toBeTruthy();
 });
 
 await test('computeDescendantIds: cycle-safe (roster has a cycle → terminates without infinite loop)', () => {
@@ -95,17 +75,17 @@ await test('computeDescendantIds: cycle-safe (roster has a cycle → terminates 
   // Should not throw or loop forever; just return whatever descendants it finds before cycle detection
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-a', roster: cycleRoster });
   // sa-b and sa-c are reachable before the cycle is detected
-  assert(Array.isArray(result), 'result should be an array');
-  assert(result.includes('sa-b'), 'should include sa-b');
-  assert(result.includes('sa-c'), 'should include sa-c');
+  expect(Array.isArray(result), 'result should be an array').toBeTruthy();
+  expect(result.includes('sa-b'), 'should include sa-b').toBeTruthy();
+  expect(result.includes('sa-c'), 'should include sa-c').toBeTruthy();
   // caller sa-a must NOT appear in descendants
-  assert(!result.includes('sa-a'), 'caller must not appear in descendants');
+  expect(!result.includes('sa-a'), 'caller must not appear in descendants').toBeTruthy();
 });
 
 await test('computeDescendantIds: caller not found in roster → empty result', () => {
   const roster = [root, leaf];
   const result = computeDescendantIds({ callerSubaccountAgentId: 'sa-nonexistent', roster });
-  assertDeepEqual(result, [], 'nonexistent caller has no children');
+  expect(result, 'nonexistent caller has no children').toStrictEqual([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -119,10 +99,10 @@ await test('mapSubaccountAgentIdsToAgentIds: maps correctly', () => {
     { subaccountAgentId: 'sa-3', agentId: 'agent-3', parentSubaccountAgentId: 'sa-1' },
   ];
   const result = mapSubaccountAgentIdsToAgentIds({ subaccountAgentIds: ['sa-1', 'sa-3'], roster });
-  assert(result.length === 2, 'should return 2 agentIds');
-  assert(result.includes('agent-1'), 'should include agent-1');
-  assert(result.includes('agent-3'), 'should include agent-3');
-  assert(!result.includes('agent-2'), 'should not include agent-2');
+  expect(result.length === 2, 'should return 2 agentIds').toBeTruthy();
+  expect(result.includes('agent-1'), 'should include agent-1').toBeTruthy();
+  expect(result.includes('agent-3'), 'should include agent-3').toBeTruthy();
+  expect(!result.includes('agent-2'), 'should not include agent-2').toBeTruthy();
 });
 
 await test('mapSubaccountAgentIdsToAgentIds: unmapped ids are dropped', () => {
@@ -133,8 +113,8 @@ await test('mapSubaccountAgentIdsToAgentIds: unmapped ids are dropped', () => {
     subaccountAgentIds: ['sa-1', 'sa-unknown'],
     roster,
   });
-  assert(result.length === 1, 'should return only 1 agentId (unknown dropped)');
-  assert(result[0] === 'agent-1', 'should be agent-1');
+  expect(result.length === 1, 'should return only 1 agentId (unknown dropped)').toBeTruthy();
+  expect(result[0] === 'agent-1', 'should be agent-1').toBeTruthy();
 });
 
 await test('mapSubaccountAgentIdsToAgentIds: empty input → empty result', () => {
@@ -142,7 +122,7 @@ await test('mapSubaccountAgentIdsToAgentIds: empty input → empty result', () =
     { subaccountAgentId: 'sa-1', agentId: 'agent-1', parentSubaccountAgentId: null },
   ];
   const result = mapSubaccountAgentIdsToAgentIds({ subaccountAgentIds: [], roster });
-  assertDeepEqual(result, [], 'empty subaccountAgentIds → empty result');
+  expect(result, 'empty subaccountAgentIds → empty result').toStrictEqual([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -168,38 +148,38 @@ const hierarchyWithChildren: HierarchyContext = {
 await test('resolveEffectiveScope: explicit override — children scope (beats adaptive)', () => {
   // rawScope = 'children', hierarchy has no children → override wins
   const result = resolveEffectiveScope({ rawScope: 'children', hierarchy: hierarchyNoChildren });
-  assert(result === 'children', `expected 'children', got '${result}'`);
+  expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: explicit override — descendants scope', () => {
   const result = resolveEffectiveScope({ rawScope: 'descendants', hierarchy: hierarchyWithChildren });
-  assert(result === 'descendants', `expected 'descendants', got '${result}'`);
+  expect(result === 'descendants', `expected 'descendants', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: explicit override — subaccount scope (beats adaptive with children)', () => {
   // hierarchy has children but explicit override is 'subaccount'
   const result = resolveEffectiveScope({ rawScope: 'subaccount', hierarchy: hierarchyWithChildren });
-  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+  expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: adaptive default — has children → returns children', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyWithChildren });
-  assert(result === 'children', `expected 'children', got '${result}'`);
+  expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: adaptive default — no children → returns subaccount', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: hierarchyNoChildren });
-  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+  expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: fallthrough — missing hierarchy → returns subaccount', () => {
   const result = resolveEffectiveScope({ rawScope: undefined, hierarchy: undefined });
-  assert(result === 'subaccount', `expected 'subaccount', got '${result}'`);
+  expect(result === 'subaccount', `expected 'subaccount', got '${result}'`).toBeTruthy();
 });
 
 await test('resolveEffectiveScope: invalid rawScope treated as no scope → adaptive (children present → children)', () => {
   const result = resolveEffectiveScope({ rawScope: 'invalid-value', hierarchy: hierarchyWithChildren });
-  assert(result === 'children', `expected 'children', got '${result}'`);
+  expect(result === 'children', `expected 'children', got '${result}'`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -207,7 +187,3 @@ await test('resolveEffectiveScope: invalid rawScope treated as no scope → adap
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

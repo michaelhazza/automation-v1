@@ -12,6 +12,8 @@
  * Runnable via:
  *   npx tsx server/services/__tests__/briefVisibilityServicePure.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
 // briefVisibilityService transitively pulls in server/lib/env.ts which validates
@@ -32,25 +34,6 @@ const {
 // ---------------------------------------------------------------------------
 // Lightweight test runner (matches project tsx convention)
 // ---------------------------------------------------------------------------
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string): void {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
@@ -141,8 +124,8 @@ await test('resolveBriefVisibility uses org-scoped tx (select called)', async ()
   await withFakeTx(tx, () =>
     resolveBriefVisibility(makePrincipal(), 'brief-1'),
   );
-  assert(tx.calls.length >= 1, 'expected at least one select call on the fake tx');
-  assertEqual(tx.calls[0].method, 'select', 'first call should be select');
+  expect(tx.calls.length >= 1, 'expected at least one select call on the fake tx').toBeTruthy();
+  expect(tx.calls[0].method, 'first call should be select').toBe('select');
 });
 
 await test('resolveBriefVisibility returns canView/canWrite when task found and permissions present', async () => {
@@ -150,8 +133,8 @@ await test('resolveBriefVisibility returns canView/canWrite when task found and 
   const result = await withFakeTx(tx, () =>
     resolveBriefVisibility(makePrincipal(['briefs:read', 'briefs:write']), 'brief-1'),
   );
-  assert(typeof result.canView === 'boolean', 'canView should be boolean');
-  assert(typeof result.canWrite === 'boolean', 'canWrite should be boolean');
+  expect(typeof result.canView === 'boolean', 'canView should be boolean').toBeTruthy();
+  expect(typeof result.canWrite === 'boolean', 'canWrite should be boolean').toBeTruthy();
 });
 
 await test('resolveBriefVisibility returns { canView: false, canWrite: false } when no task row found', async () => {
@@ -159,8 +142,8 @@ await test('resolveBriefVisibility returns { canView: false, canWrite: false } w
   const result = await withFakeTx(tx, () =>
     resolveBriefVisibility(makePrincipal(), 'not-found'),
   );
-  assertEqual(result.canView, false, 'canView should be false when no row');
-  assertEqual(result.canWrite, false, 'canWrite should be false when no row');
+  expect(result.canView, 'canView should be false when no row').toBe(false);
+  expect(result.canWrite, 'canWrite should be false when no row').toBe(false);
 });
 
 await test('resolveBriefVisibility throws missing_org_context when called without withOrgTx', async () => {
@@ -170,7 +153,7 @@ await test('resolveBriefVisibility throws missing_org_context when called withou
   } catch {
     threw = true;
   }
-  assert(threw, 'expected failure when called outside org context');
+  expect(threw, 'expected failure when called outside org context').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -186,8 +169,8 @@ await test('resolveConversationVisibility uses org-scoped tx (select called)', a
   await withFakeTx(tx, () =>
     resolveConversationVisibility(makePrincipal(), 'conv-1'),
   );
-  assert(tx.calls.length >= 1, 'expected at least one select call on the fake tx');
-  assertEqual(tx.calls[0].method, 'select', 'first call should be select');
+  expect(tx.calls.length >= 1, 'expected at least one select call on the fake tx').toBeTruthy();
+  expect(tx.calls[0].method, 'first call should be select').toBe('select');
 });
 
 await test('resolveConversationVisibility returns canView/canWrite when conv found', async () => {
@@ -195,8 +178,8 @@ await test('resolveConversationVisibility returns canView/canWrite when conv fou
   const result = await withFakeTx(tx, () =>
     resolveConversationVisibility(makePrincipal(), 'conv-1'),
   );
-  assert(typeof result.canView === 'boolean', 'canView should be boolean');
-  assert(typeof result.canWrite === 'boolean', 'canWrite should be boolean');
+  expect(typeof result.canView === 'boolean', 'canView should be boolean').toBeTruthy();
+  expect(typeof result.canWrite === 'boolean', 'canWrite should be boolean').toBeTruthy();
 });
 
 await test('resolveConversationVisibility returns { canView: false, canWrite: false } when no conv row found', async () => {
@@ -204,8 +187,8 @@ await test('resolveConversationVisibility returns { canView: false, canWrite: fa
   const result = await withFakeTx(tx, () =>
     resolveConversationVisibility(makePrincipal(), 'not-found'),
   );
-  assertEqual(result.canView, false, 'canView should be false when no row');
-  assertEqual(result.canWrite, false, 'canWrite should be false when no row');
+  expect(result.canView, 'canView should be false when no row').toBe(false);
+  expect(result.canWrite, 'canWrite should be false when no row').toBe(false);
 });
 
 await test('resolveConversationVisibility throws missing_org_context when called without withOrgTx', async () => {
@@ -215,7 +198,7 @@ await test('resolveConversationVisibility throws missing_org_context when called
   } catch {
     threw = true;
   }
-  assert(threw, 'expected failure when called outside org context');
+  expect(threw, 'expected failure when called outside org context').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -223,6 +206,4 @@ await test('resolveConversationVisibility throws missing_org_context when called
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`  ${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

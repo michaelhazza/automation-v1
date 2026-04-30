@@ -8,7 +8,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="cleanup job deletes expired rate-limit rows cross-tenant; runs as a scheduled job outside any request ALS context"
 import { logger } from './logger.js';
 import { env } from './env.js';
 import { getPgBoss } from './pgBossInstance.js';

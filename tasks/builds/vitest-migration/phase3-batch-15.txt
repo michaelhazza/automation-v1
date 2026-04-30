@@ -1,0 +1,10 @@
+server/services/__tests__/runContextLoader.test.ts
+server/services/__tests__/runStatusDriftPure.test.ts
+server/services/__tests__/scanIntegrationFingerprintsPure.test.ts
+server/services/__tests__/scheduleCalendarParity.test.ts
+server/services/__tests__/scheduleCalendarServicePure.test.ts
+server/services/__tests__/scopeResolutionPure.test.ts
+server/services/__tests__/seedConfigAgentGuidelinesPure.test.ts
+server/services/__tests__/skillAnalyzerServicePure.test.ts
+server/services/__tests__/skillAnalyzerServicePureAgentRanking.test.ts
+server/services/__tests__/skillAnalyzerServicePureDiffRows.test.ts

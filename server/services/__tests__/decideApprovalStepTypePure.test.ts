@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import {
   resolveApprovalDispatchAction,
 } from '../resolveApprovalDispatchActionPure.js';
@@ -12,7 +11,7 @@ test('rejected × invoke_automation → complete_with_existing_output', () => {
     { stepType: 'invoke_automation' },
     'rejected',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 test('rejected × agent_call → complete_with_existing_output', () => {
@@ -20,7 +19,7 @@ test('rejected × agent_call → complete_with_existing_output', () => {
     { stepType: 'agent_call' },
     'rejected',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 test('rejected × prompt → complete_with_existing_output', () => {
@@ -28,7 +27,7 @@ test('rejected × prompt → complete_with_existing_output', () => {
     { stepType: 'prompt' },
     'rejected',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 test('rejected × action_call → complete_with_existing_output', () => {
@@ -36,7 +35,7 @@ test('rejected × action_call → complete_with_existing_output', () => {
     { stepType: 'action_call' },
     'rejected',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 // ─── decision='approved' × invoke_automation → redispatch ────────────────────
@@ -46,7 +45,7 @@ test('approved × invoke_automation → redispatch', () => {
     { stepType: 'invoke_automation' },
     'approved',
   );
-  assert.equal(result, 'redispatch');
+  expect(result).toBe('redispatch');
 });
 
 // ─── decision='approved' × non-invoke_automation → complete_with_existing_output ─
@@ -56,7 +55,7 @@ test('approved × agent_call → complete_with_existing_output', () => {
     { stepType: 'agent_call' },
     'approved',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 test('approved × prompt → complete_with_existing_output', () => {
@@ -64,7 +63,7 @@ test('approved × prompt → complete_with_existing_output', () => {
     { stepType: 'prompt' },
     'approved',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 test('approved × action_call → complete_with_existing_output', () => {
@@ -72,7 +71,7 @@ test('approved × action_call → complete_with_existing_output', () => {
     { stepType: 'action_call' },
     'approved',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });
 
 // ─── decision='edited' × invoke_automation → complete_with_existing_output ───
@@ -83,5 +82,5 @@ test('edited × invoke_automation → complete_with_existing_output', () => {
     { stepType: 'invoke_automation' },
     'edited',
   );
-  assert.equal(result, 'complete_with_existing_output');
+  expect(result).toBe('complete_with_existing_output');
 });

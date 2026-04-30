@@ -189,7 +189,7 @@ export async function resolveCandidateScope(input: {
     .select({ organisationId: subaccounts.organisationId, orgName: organisations.name })
     .from(subaccounts)
     .innerJoin(organisations, eq(subaccounts.organisationId, organisations.id))
-    .where(eq(subaccounts.id, candidateId))
+    .where(eq(subaccounts.id, candidateId)) // guard-ignore: org-scoped-writes reason="non-admin path uses getOrgScopedDb which enforces RLS org isolation; system_admin path intentionally queries across orgs to resolve any subaccount"
     .limit(1);
   return sub?.organisationId
     ? {

@@ -13,6 +13,7 @@
  *   - output mapping projection (§5.5)
  */
 
+import { expect, test } from 'vitest';
 import type { Automation } from '../../db/schema/automations.js';
 import type { InvokeAutomationStep } from '../../lib/workflow/types.js';
 import {
@@ -26,25 +27,6 @@ import {
   type RunScope,
   type TemplateCtx,
 } from '../invokeAutomationStepPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -102,31 +84,31 @@ const renderTemplate = (expr: string, _ctx: TemplateCtx) =>
 console.log('\n── §5.8 Scope matching ──');
 
 test('org-scope automation accessible from org run', () => {
-  assert(checkScope(orgRun, makeAutomation({ subaccountId: null })), 'org auto should be accessible from org run');
+  expect(checkScope(orgRun, makeAutomation({ subaccountId: null })), 'org auto should be accessible from org run').toBeTruthy();
 });
 
 test('org-scope automation accessible from subaccount run', () => {
-  assert(checkScope(subRun, makeAutomation({ subaccountId: null })), 'org auto should be accessible from subaccount run');
+  expect(checkScope(subRun, makeAutomation({ subaccountId: null })), 'org auto should be accessible from subaccount run').toBeTruthy();
 });
 
 test('subaccount-native automation accessible from matching subaccount run', () => {
-  assert(checkScope(subRun, makeAutomation({ subaccountId: 'sub-1' })), 'native auto accessible from matching subaccount');
+  expect(checkScope(subRun, makeAutomation({ subaccountId: 'sub-1' })), 'native auto accessible from matching subaccount').toBeTruthy();
 });
 
 test('subaccount-native automation not accessible from different subaccount run', () => {
   const otherRun: RunScope = { organisationId: 'org-1', subaccountId: 'sub-2' };
-  assert(!checkScope(otherRun, makeAutomation({ subaccountId: 'sub-1' })), 'native auto should not cross subaccounts');
+  expect(!checkScope(otherRun, makeAutomation({ subaccountId: 'sub-1' })), 'native auto should not cross subaccounts').toBeTruthy();
 });
 
 test('wrong org → scope mismatch', () => {
   const wrongOrgRun: RunScope = { organisationId: 'org-WRONG', subaccountId: null };
-  assert(!checkScope(wrongOrgRun, makeAutomation()), 'wrong org should fail scope check');
+  expect(!checkScope(wrongOrgRun, makeAutomation()), 'wrong org should fail scope check').toBeTruthy();
 });
 
 test('system-scoped automation (organisationId=null) accessible from any run', () => {
   const sysAuto = makeAutomation({ organisationId: null as unknown as string, subaccountId: null });
-  assert(checkScope(orgRun, sysAuto), 'system auto should be accessible from org run');
-  assert(checkScope(subRun, sysAuto), 'system auto should be accessible from subaccount run');
+  expect(checkScope(orgRun, sysAuto), 'system auto should be accessible from org run').toBeTruthy();
+  expect(checkScope(subRun, sysAuto), 'system auto should be accessible from subaccount run').toBeTruthy();
 });
 
 test('resolveDispatch emits automation_scope_mismatch error code', () => {
@@ -135,14 +117,14 @@ test('resolveDispatch emits automation_scope_mismatch error code', () => {
     step: makeStep(), run: wrongOrgRun, automation: makeAutomation(),
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'error', 'should be error');
+  expect(result.kind === 'error', 'should be error').toBeTruthy();
   if (result.kind === 'error') {
-    assertEqual(result.error.code, 'automation_scope_mismatch', 'error code');
+    expect(result.error.code, 'error code').toBe('automation_scope_mismatch');
     // §5.7: automation_scope_mismatch is a pre-dispatch resolution failure
     // → 'execution' bucket. The test previously asserted 'validation' —
     // that matched the dispatcher bug, not the spec. Updated per spec.
-    assertEqual(result.error.type, 'execution', 'error type');
-    assertEqual(result.error.retryable, false, 'not retryable');
+    expect(result.error.type, 'error type').toBe('execution');
+    expect(result.error.retryable, 'not retryable').toBe(false);
   }
 });
 
@@ -156,11 +138,11 @@ test('resolveDispatch rejects empty webhookPath', () => {
     step: makeStep(), run: orgRun, automation: auto,
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'error', 'should be error');
+  expect(result.kind === 'error', 'should be error').toBeTruthy();
   if (result.kind === 'error') {
-    assertEqual(result.error.code, 'automation_composition_invalid', 'error code');
-    assertEqual(result.error.type, 'validation', 'error type');
-    assertEqual(result.error.retryable, false, 'not retryable');
+    expect(result.error.code, 'error code').toBe('automation_composition_invalid');
+    expect(result.error.type, 'error type').toBe('validation');
+    expect(result.error.retryable, 'not retryable').toBe(false);
   }
 });
 
@@ -170,9 +152,9 @@ test('resolveDispatch rejects comma-separated webhookPath (multi-webhook)', () =
     step: makeStep(), run: orgRun, automation: auto,
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'error', 'should be error');
+  expect(result.kind === 'error', 'should be error').toBeTruthy();
   if (result.kind === 'error') {
-    assertEqual(result.error.code, 'automation_composition_invalid', 'error code');
+    expect(result.error.code, 'error code').toBe('automation_composition_invalid');
   }
 });
 
@@ -182,7 +164,7 @@ test('resolveDispatch accepts valid single webhookPath', () => {
     step: makeStep(), run: orgRun, automation: auto,
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'dispatch', 'should dispatch with valid path');
+  expect(result.kind === 'dispatch', 'should dispatch with valid path').toBeTruthy();
 });
 
 // ── §5.4a Retry guard and clamp ───────────────────────────────────────────────
@@ -190,30 +172,30 @@ test('resolveDispatch accepts valid single webhookPath', () => {
 console.log('\n── §5.4a Retry guard + clamp ──');
 
 test('clampMaxAttempts caps at 3', () => {
-  assertEqual(clampMaxAttempts(10), MAX_RETRY_ATTEMPTS, 'max 10 → 3');
-  assertEqual(clampMaxAttempts(4), MAX_RETRY_ATTEMPTS, 'max 4 → 3');
-  assertEqual(clampMaxAttempts(3), 3, 'max 3 → 3');
-  assertEqual(clampMaxAttempts(1), 1, 'max 1 → 1');
-  assertEqual(clampMaxAttempts(undefined), MAX_RETRY_ATTEMPTS, 'undefined → 3');
+  expect(clampMaxAttempts(10), 'max 10 → 3').toEqual(MAX_RETRY_ATTEMPTS);
+  expect(clampMaxAttempts(4), 'max 4 → 3').toEqual(MAX_RETRY_ATTEMPTS);
+  expect(clampMaxAttempts(3), 'max 3 → 3').toBe(3);
+  expect(clampMaxAttempts(1), 'max 1 → 1').toBe(1);
+  expect(clampMaxAttempts(undefined), 'undefined → 3').toEqual(MAX_RETRY_ATTEMPTS);
 });
 
 test('non-idempotent automation blocks retry on attempt 2', () => {
   const auto = makeAutomation({ idempotent: false });
   const step = makeStep();
-  assert(!shouldBlock_nonIdempotentGuard(auto, step, 1), 'attempt 1 should not block');
-  assert(shouldBlock_nonIdempotentGuard(auto, step, 2), 'attempt 2 should block');
+  expect(!shouldBlock_nonIdempotentGuard(auto, step, 1), 'attempt 1 should not block').toBeTruthy();
+  expect(shouldBlock_nonIdempotentGuard(auto, step, 2), 'attempt 2 should block').toBeTruthy();
 });
 
 test('idempotent automation allows retry on attempt 2', () => {
   const auto = makeAutomation({ idempotent: true });
   const step = makeStep();
-  assert(!shouldBlock_nonIdempotentGuard(auto, step, 2), 'idempotent should allow retry');
+  expect(!shouldBlock_nonIdempotentGuard(auto, step, 2), 'idempotent should allow retry').toBeTruthy();
 });
 
 test('overrideNonIdempotentGuard bypasses retry block', () => {
   const auto = makeAutomation({ idempotent: false });
   const step = makeStep({ automationRetryPolicy: { maxAttempts: 2, overrideNonIdempotentGuard: true } });
-  assert(!shouldBlock_nonIdempotentGuard(auto, step, 2), 'override should bypass block');
+  expect(!shouldBlock_nonIdempotentGuard(auto, step, 2), 'override should bypass block').toBeTruthy();
 });
 
 // ── §5.4a Gate resolution ─────────────────────────────────────────────────────
@@ -222,23 +204,23 @@ console.log('\n── §5.4a Gate resolution ──');
 
 test('read_only automation → auto gate', () => {
   const auto = makeAutomation({ sideEffects: 'read_only' });
-  assertEqual(resolveGateLevel(makeStep(), auto), 'auto', 'read_only → auto');
+  expect(resolveGateLevel(makeStep(), auto), 'read_only → auto').toBe('auto');
 });
 
 test('mutating automation → review gate', () => {
   const auto = makeAutomation({ sideEffects: 'mutating' });
-  assertEqual(resolveGateLevel(makeStep(), auto), 'review', 'mutating → review');
+  expect(resolveGateLevel(makeStep(), auto), 'mutating → review').toBe('review');
 });
 
 test('unknown automation → review gate (safe default)', () => {
   const auto = makeAutomation({ sideEffects: 'unknown' });
-  assertEqual(resolveGateLevel(makeStep(), auto), 'review', 'unknown → review');
+  expect(resolveGateLevel(makeStep(), auto), 'unknown → review').toBe('review');
 });
 
 test('explicit step gateLevel overrides automation side_effects', () => {
   const auto = makeAutomation({ sideEffects: 'mutating' });
   const step = makeStep({ gateLevel: 'auto' });
-  assertEqual(resolveGateLevel(step, auto), 'auto', 'explicit gateLevel: auto wins');
+  expect(resolveGateLevel(step, auto), 'explicit gateLevel: auto wins').toBe('auto');
 });
 
 // ── §5.4 Input mapping resolution ────────────────────────────────────────────
@@ -252,9 +234,9 @@ test('resolveDispatch resolves template expressions in inputMapping', () => {
     run: orgRun, automation: auto,
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'dispatch', 'should dispatch');
+  expect(result.kind === 'dispatch', 'should dispatch').toBeTruthy();
   if (result.kind === 'dispatch') {
-    assertEqual(result.body.email as string, 'test@example.com', 'resolved email');
+    expect(result.body.email as string, 'resolved email').toBe('test@example.com');
   }
 });
 
@@ -264,9 +246,9 @@ test('resolveDispatch constructs webhookUrl from engineBaseUrl + webhookPath', (
     step: makeStep(), run: orgRun, automation: auto,
     engineBaseUrl: 'https://engine.example.com', renderTemplate, templateCtx: ctx,
   });
-  assert(result.kind === 'dispatch', 'should dispatch');
+  expect(result.kind === 'dispatch', 'should dispatch').toBeTruthy();
   if (result.kind === 'dispatch') {
-    assertEqual(result.webhookUrl, 'https://engine.example.com/webhook/abc', 'webhook URL');
+    expect(result.webhookUrl, 'webhook URL').toBe('https://engine.example.com/webhook/abc');
   }
 });
 
@@ -276,13 +258,13 @@ console.log('\n── §5.5 Output mapping ──');
 
 test('projectOutputMapping without outputMapping returns { response: body }', () => {
   const result = projectOutputMapping({ status: 'ok' }, undefined, renderTemplate, ctx);
-  assertEqual(result, { response: { status: 'ok' } }, 'full response in .response');
+  expect(result, 'full response in .response').toEqual({ response: { status: 'ok' } });
 });
 
 test('projectOutputMapping with outputMapping projects fields', () => {
   const render = (_expr: string, _c: TemplateCtx) => 'projected-value';
   const result = projectOutputMapping({ id: '123' }, { contactId: '{{ response.id }}' }, render, ctx);
-  assertEqual(result, { contactId: 'projected-value' }, 'projected field');
+  expect(result, 'projected field').toEqual({ contactId: 'projected-value' });
 });
 
 test('projectOutputMapping resolves {{ response.* }} from responseBody', () => {
@@ -298,10 +280,7 @@ test('projectOutputMapping resolves {{ response.* }} from responseBody', () => {
     realRender,
     ctx,
   );
-  assertEqual(result, { contactId: 'contact-abc', contactName: 'Acme' }, 'response fields resolved');
+  expect(result, 'response fields resolved').toEqual({ contactId: 'contact-abc', contactName: 'Acme' });
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

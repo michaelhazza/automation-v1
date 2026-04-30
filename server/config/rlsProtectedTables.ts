@@ -461,10 +461,22 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'User-uploaded reference documents — content may contain confidential business knowledge, client data, or proprietary procedures. Cross-tenant leak exposes the entire document library.',
   },
   {
+    tableName: 'reference_document_versions',
+    schemaFile: 'referenceDocumentVersions.ts',
+    policyMigration: '0229_reference_documents_force_rls_parent_exists.sql',
+    rationale: 'Versioned snapshots of reference documents — reveal document edit history and content evolution; scoped via parent document\'s organisation_id.',
+  },
+  {
     tableName: 'document_bundles',
     schemaFile: 'documentBundles.ts',
     policyMigration: '0204_document_bundles.sql',
     rationale: 'Document bundle groupings — names and descriptions can reveal organisational intent; bundle composition reveals which documents are used together. Cross-tenant leak exposes the org\'s knowledge structure.',
+  },
+  {
+    tableName: 'document_bundle_members',
+    schemaFile: 'documentBundleMembers.ts',
+    policyMigration: '0205_document_bundle_members.sql',
+    rationale: 'Join table linking documents to bundles — scoped via parent bundle\'s organisation_id. Cross-tenant leak exposes which documents belong to which org\'s knowledge bundles.',
   },
   {
     tableName: 'document_bundle_attachments',
@@ -690,28 +702,16 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-scoped page project containers — reveal content creation activity and project metadata.',
   },
   {
-    tableName: 'permission_groups',
-    schemaFile: 'migrations/0000_wandering_firedrake.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org permission group definitions — cross-tenant leak exposes IAM grouping structure and access control topology.',
-  },
-  {
     tableName: 'permission_sets',
     schemaFile: 'permissionSets.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Named permission set definitions per org — reveal the org\'s role-based access control model and capability grants.',
   },
   {
-    tableName: 'playbook_runs',
-    schemaFile: 'migrations/0076_playbooks.sql',
+    tableName: 'workflow_templates',
+    schemaFile: 'workflowTemplates.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org playbook execution instances with context and status — reveal automation workflows and operational activity.',
-  },
-  {
-    tableName: 'playbook_templates',
-    schemaFile: 'migrations/0076_playbooks.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Org-owned playbook templates defining multi-step automation workflows — contain proprietary automation IP.',
+    rationale: 'Org-owned workflow templates defining multi-step automation workflows — contain proprietary automation IP.',
   },
   {
     tableName: 'policy_rules',
@@ -727,8 +727,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   },
   // Batch D — Data/Process domain
   {
-    tableName: 'process_connection_mappings',
-    schemaFile: 'migrations/0018_three_level_process_framework.sql',
+    tableName: 'automation_connection_mappings',
+    schemaFile: 'automationConnectionMappings.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Per-subaccount wiring of automation connection slots to integration connections — reveal integration topology and credential associations.',
   },
@@ -794,16 +794,28 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   },
   // Batch E — Tasks/Workspace/Sister-branch domain
   {
+    tableName: 'task_activities',
+    schemaFile: 'taskActivities.ts',
+    policyMigration: '0091_rls_task_activities_deliverables.sql',
+    rationale: 'Per-task activity log entries — reveal task lifecycle events and agent actions; cross-tenant leak exposes operational detail.',
+  },
+  {
+    tableName: 'task_deliverables',
+    schemaFile: 'taskDeliverables.ts',
+    policyMigration: '0091_rls_task_activities_deliverables.sql',
+    rationale: 'Task deliverable artefacts — may contain client-facing output, proprietary content, and PII; cross-tenant leak is a direct data breach.',
+  },
+  {
     tableName: 'task_attachments',
     schemaFile: 'taskAttachments.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'File attachments on tasks — may contain PII, client data, and confidential deliverables.',
   },
   {
-    tableName: 'task_categories',
-    schemaFile: 'migrations/0000_wandering_firedrake.sql',
+    tableName: 'automation_categories',
+    schemaFile: 'automationCategories.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Org-defined task taxonomy categories — reveal org workflow structure and operational categorisation.',
+    rationale: 'Org-defined automation taxonomy categories — reveal org workflow structure and operational categorisation.',
   },
   {
     tableName: 'users',
@@ -828,12 +840,6 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'workspaceHealthFindings.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Automated workspace health audit findings — reveal org operational issues and quality assessments.',
-  },
-  {
-    tableName: 'workspace_items',
-    schemaFile: 'migrations/0008_workspace_board.sql',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Board items in the org workspace — contain task-level data, assignments, and operational context.',
   },
   {
     tableName: 'workspace_memory_entries',
@@ -879,10 +885,34 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Legacy per-org workflow engine instances — reveal automation execution topology. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
   },
   {
+    tableName: 'automation_engines',
+    schemaFile: 'automationEngines.ts',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from workflow_engines (migration 0220) — same table, same deferral. RLS policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
     tableName: 'workflow_runs',
     schemaFile: 'workflowRuns.ts',
     policyMigration: '0076_playbooks.sql',
     rationale: 'Per-org workflow execution run records — reveal automation activity and execution history. Policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
+    tableName: 'flow_runs',
+    schemaFile: 'migrations/0037_phase1c_memory_and_workflows.sql',
+    policyMigration: '0076_playbooks.sql',
+    rationale: 'Renamed from workflow_runs (migration 0219) — org-scoped workflow execution instances. RLS policy deferred to pre-prod-workflow-and-delegation branch (spec §0.4). Baselined in scripts/verify-rls-coverage.sh until that branch lands.',
+  },
+  {
+    tableName: 'automations',
+    schemaFile: 'automations.ts',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from processes→tasks (migrations 0220/0010) — per-org automation definitions. RLS policy deferred; no CREATE POLICY exists yet across any migration. Baselined until policy migration is authored.',
+  },
+  {
+    tableName: 'canonical_flow_definitions',
+    schemaFile: 'migrations/0172_clientpulse_canonical_tables.sql',
+    policyMigration: '0000_wandering_firedrake.sql',
+    rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, policy deferred. Using baselined migration 0000 as placeholder per deferred-enforcement convention.',
   },
 ];
 

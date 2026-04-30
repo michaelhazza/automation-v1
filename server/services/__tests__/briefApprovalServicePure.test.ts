@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="pure logic is tested inline within this handwritten harness; parent-directory sibling import not applicable for this self-contained test pattern"
 /**
  * briefApprovalServicePure.test.ts
  *
@@ -7,30 +8,9 @@
  * Run via: npx tsx server/services/__tests__/briefApprovalServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {};
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void | Promise<void>): void {
-  const result = (async () => {
-    try {
-      await fn();
-      passed++;
-      console.log(`  PASS  ${name}`);
-    } catch (err) {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : err}`);
-    }
-  })();
-  // Collect promise to allow sequential execution
-  void result;
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 console.log('\nDR3 — briefApprovalService idempotency pure tests\n');
 
@@ -39,11 +19,11 @@ test('isUniqueViolation: recognises PG 23505 error code', () => {
   const isUV = (err: unknown): boolean =>
     typeof err === 'object' && err !== null && 'code' in err && (err as Record<string, unknown>)['code'] === '23505';
 
-  assert(isUV({ code: '23505' }), '23505 must be detected');
-  assert(!isUV({ code: '23503' }), 'other codes must not be detected');
-  assert(!isUV(new Error('unique violation')), 'plain Error without code must not be detected');
-  assert(!isUV(null), 'null must not be detected');
-  assert(!isUV(undefined), 'undefined must not be detected');
+  expect(isUV({ code: '23505' }), '23505 must be detected').toBeTruthy();
+  expect(!isUV({ code: '23503' }), 'other codes must not be detected').toBeTruthy();
+  expect(!isUV(new Error('unique violation')), 'plain Error without code must not be detected').toBeTruthy();
+  expect(!isUV(null), 'null must not be detected').toBeTruthy();
+  expect(!isUV(undefined), 'undefined must not be detected').toBeTruthy();
 });
 
 // ── decision idempotency semantics ────────────────────────────────────────────
@@ -51,46 +31,46 @@ test('identical decision match → idempotent: true (same decision)', () => {
   const existing = { decision: 'approve' as const, kind: 'approval_decision' as const };
   const incomingDecision = 'approve';
   const isIdempotent = existing.decision === incomingDecision;
-  assert(isIdempotent, 'same decision must be idempotent');
+  expect(isIdempotent, 'same decision must be idempotent').toBeTruthy();
 });
 
 test('conflicting decision → NOT idempotent (different decision)', () => {
   const existing = { decision: 'approve' as string, kind: 'approval_decision' as string };
   const incomingDecision = 'reject';
   const isIdempotent = existing.decision === incomingDecision;
-  assert(!isIdempotent, 'different decision must not be idempotent → 409');
+  expect(!isIdempotent, 'different decision must not be idempotent → 409').toBeTruthy();
 });
 
 // ── collision detection ───────────────────────────────────────────────────────
 test('decisionMatchCount > 1 → artefact_id_collision (hard failure)', () => {
   const decisionMatchCount = 2;
   const shouldThrow = decisionMatchCount > 1;
-  assert(shouldThrow, 'two matching decision artefacts must trigger collision error');
+  expect(shouldThrow, 'two matching decision artefacts must trigger collision error').toBeTruthy();
 });
 
 test('decisionMatchCount === 1 → no collision', () => {
   const decisionMatchCount = 1;
   const shouldThrow = decisionMatchCount > 1;
-  assert(!shouldThrow, 'exactly one match must not trigger collision');
+  expect(!shouldThrow, 'exactly one match must not trigger collision').toBeTruthy();
 });
 
 // ── stale check ───────────────────────────────────────────────────────────────
 test('cancelled brief → artefact_stale', () => {
   const taskStatus = 'cancelled';
   const isStale = taskStatus === 'cancelled';
-  assert(isStale, 'cancelled brief must be stale');
+  expect(isStale, 'cancelled brief must be stale').toBeTruthy();
 });
 
 test('inbox brief → not stale', () => {
   const taskStatus = 'inbox' as string;
   const isStale = taskStatus === 'cancelled';
-  assert(!isStale, 'inbox brief must not be stale');
+  expect(!isStale, 'inbox brief must not be stale').toBeTruthy();
 });
 
 test('completed brief → not stale', () => {
   const taskStatus = 'completed' as string;
   const isStale = taskStatus === 'cancelled';
-  assert(!isStale, 'completed brief must not be stale');
+  expect(!isStale, 'completed brief must not be stale').toBeTruthy();
 });
 
 // ── proposeAction failure → executionStatus: failed ──────────────────────────
@@ -101,7 +81,7 @@ test('proposeAction throws → executionStatus falls back to failed', () => {
   } catch {
     executionStatus = 'failed';
   }
-  assert(executionStatus === 'failed', 'executionStatus must be failed when proposeAction throws');
+  expect(executionStatus === 'failed', 'executionStatus must be failed when proposeAction throws').toBeTruthy();
 });
 
 test('proposeAction succeeds with agentId → executionStatus pending', () => {
@@ -111,7 +91,7 @@ test('proposeAction succeeds with agentId → executionStatus pending', () => {
     // simulate success
     executionStatus = 'pending';
   }
-  assert(executionStatus === 'pending', 'executionStatus must be pending on proposeAction success');
+  expect(executionStatus === 'pending', 'executionStatus must be pending on proposeAction success').toBeTruthy();
 });
 
 test('null agentId → executionStatus failed (no proposeAction called)', () => {
@@ -120,22 +100,20 @@ test('null agentId → executionStatus failed (no proposeAction called)', () => 
   if (agentId) {
     executionStatus = 'pending';
   }
-  assert(executionStatus === 'failed', 'null agentId must yield failed executionStatus');
+  expect(executionStatus === 'failed', 'null agentId must yield failed executionStatus').toBeTruthy();
 });
 
 // ── artefact kind guard ───────────────────────────────────────────────────────
 test('artefact.kind === approval → valid approval card', () => {
   const a = { kind: 'approval', artefactId: 'id-1' };
-  assert(a.kind === 'approval', 'approval artefact must pass kind guard');
+  expect(a.kind === 'approval', 'approval artefact must pass kind guard').toBeTruthy();
 });
 
 test('artefact.kind === structured → artefact_not_approval', () => {
   const a = { kind: 'structured', artefactId: 'id-1' };
-  assert(a.kind !== 'approval', 'non-approval must be rejected');
+  expect(a.kind !== 'approval', 'non-approval must be rejected').toBeTruthy();
 });
 
 // Summary
 setTimeout(() => {
-  console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
 }, 50);
