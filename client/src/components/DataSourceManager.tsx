@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api';
+import { DriveFilePicker } from './DriveFilePicker.js';
+import type { DriveFile } from './DriveFilePicker.js';
 
 // ---------------------------------------------------------------------------
 // DataSourceManager — reusable data source CRUD panel (spec §11.1)
@@ -23,7 +25,7 @@ export interface DataSource {
   id: string;
   name: string;
   description: string | null;
-  sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
+  sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'google_drive' | 'file_upload';
   sourcePath: string;
   contentType: 'auto' | 'json' | 'csv' | 'markdown' | 'text';
   syncMode: 'lazy' | 'proactive';
@@ -71,6 +73,7 @@ const SOURCE_TYPE_OPTIONS: Array<{ value: DataSource['sourceType']; label: strin
   { value: 'http_url', label: 'HTTP URL' },
   { value: 'google_docs', label: 'Google Docs' },
   { value: 'dropbox', label: 'Dropbox' },
+  { value: 'google_drive', label: 'Google Drive' },
   { value: 'r2', label: 'Cloudflare R2' },
   { value: 's3', label: 'AWS S3' },
   { value: 'file_upload', label: 'File Upload (static)' },
@@ -80,6 +83,12 @@ const CONTENT_TYPE_OPTIONS: Array<DataSource['contentType']> = ['auto', 'json', 
 
 const inputCls =
   'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+function dataSourceStatusBadge(status: string | null | undefined) {
+  if (status === 'ok')    return { label: 'active',  cls: 'bg-emerald-100 text-emerald-700' };
+  if (status === 'error') return { label: 'error',   cls: 'bg-red-100 text-red-700' };
+  return                   { label: 'pending', cls: 'bg-slate-100 text-slate-600' };
+}
 
 function baseUrlFor(scope: DataSourceScope): string {
   if (scope.type === 'agent') {
@@ -98,6 +107,9 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; tokenCount?: number; preview?: string; error?: string }>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedFile, setPickedFile] = useState<{ id: string; name: string; mimeType: string; connectionId: string } | null>(null);
+  const [driveConnections, setDriveConnections] = useState<Array<{ id: string; label?: string | null; ownerEmail?: string | null }>>([]);
 
   const baseUrl = baseUrlFor(scope);
 
@@ -117,6 +129,12 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    api.get('/api/org/connections', { params: { provider: 'google_drive' } })
+      .then((res) => setDriveConnections(res.data ?? []))
+      .catch(() => { /* non-fatal: picker will show no connections */ });
+  }, []);
 
   function openAdd() {
     setForm(EMPTY_FORM);
@@ -147,6 +165,7 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
     setEditingId(null);
     setForm(EMPTY_FORM);
     setPendingFile(null);
+    setPickedFile(null);
   }
 
   async function handleSave() {
@@ -163,6 +182,23 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
           name: form.name,
           description: form.description || null,
           sourcePath: form.sourcePath,
+          contentType: form.contentType,
+          priority: form.priority,
+          maxTokenBudget: form.maxTokenBudget,
+          cacheMinutes: form.cacheMinutes,
+          loadingMode: form.loadingMode,
+        });
+      } else if (form.sourceType === 'google_drive') {
+        if (!pickedFile) {
+          setError('Pick a file from Google Drive');
+          return;
+        }
+        await api.post(baseUrl, {
+          name: form.name,
+          description: form.description || undefined,
+          sourceType: form.sourceType,
+          sourcePath: pickedFile.id,
+          connectionId: pickedFile.connectionId,
           contentType: form.contentType,
           priority: form.priority,
           maxTokenBudget: form.maxTokenBudget,
@@ -330,7 +366,21 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
                 ))}
               </select>
             </div>
-            {form.sourceType === 'file_upload' && !editingId ? (
+            {form.sourceType === 'google_drive' && !editingId ? (
+              <div className="col-span-2">
+                <label className="block text-[12px] font-semibold text-slate-600 mb-1">File *</label>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
+                >
+                  Google Drive
+                </button>
+                {pickedFile && (
+                  <span className="ml-2 text-sm text-emerald-700">Selected: {pickedFile.name}</span>
+                )}
+              </div>
+            ) : form.sourceType === 'file_upload' && !editingId ? (
               <div className="col-span-2">
                 <label className="block text-[12px] font-semibold text-slate-600 mb-1">File *</label>
                 <input
@@ -444,7 +494,6 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Name</th>
               <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Type</th>
-              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Mode</th>
               <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Status</th>
               {canEdit && (
                 <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">
@@ -464,27 +513,14 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
                 </td>
                 <td className="px-3 py-2 text-[12px] text-slate-600">{ds.sourceType}</td>
                 <td className="px-3 py-2">
-                  <span
-                    className={`text-[11px] px-2 py-0.5 rounded font-semibold ${
-                      ds.loadingMode === 'eager'
-                        ? 'bg-indigo-100 text-indigo-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    {ds.loadingMode}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  {ds.lastFetchStatus === 'ok' && (
-                    <span className="text-green-700 text-[11px]">ok</span>
-                  )}
-                  {ds.lastFetchStatus === 'error' && (
-                    <span className="text-red-600 text-[11px]">error</span>
-                  )}
-                  {ds.lastFetchStatus === 'pending' && (
-                    <span className="text-slate-500 text-[11px]">pending</span>
-                  )}
-                  {!ds.lastFetchStatus && <span className="text-slate-400 text-[11px]">—</span>}
+                  {(() => {
+                    const badge = dataSourceStatusBadge(ds.lastFetchStatus);
+                    return (
+                      <span className={`text-[11px] px-2 py-0.5 rounded font-semibold ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    );
+                  })()}
                   {testResults[ds.id] && (
                     <div className="mt-0.5 text-[11px]">
                       {testResults[ds.id].ok ? (
@@ -527,6 +563,15 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
           </tbody>
         </table>
       )}
+      <DriveFilePicker
+        connections={driveConnections}
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(file: DriveFile, connectionId: string) => {
+          setPickedFile({ id: file.id, name: file.name, mimeType: file.mimeType, connectionId });
+          setPickerOpen(false);
+        }}
+      />
     </div>
   );
 }
