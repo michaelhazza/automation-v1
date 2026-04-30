@@ -670,6 +670,22 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
 
     [AUTOMATED] No-op (no diff files in automated mode).
 
+12. [MANUAL] Remove the per-round diff files generated during the session:
+
+    ```bash
+    rm -f .chatgpt-diffs/pr<N>-round*-code-diff.diff .chatgpt-diffs/pr<N>-round*-diff.diff
+    rmdir .chatgpt-diffs 2>/dev/null  # remove the dir if empty after cleanup
+    ```
+
+    These files are transient — the audit trail lives in the session log
+    (`tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md`), not the diff
+    bundles. The git history captures what changed; the diff files were only a
+    copy-paste convenience for ChatGPT input. Skip silently if the directory
+    or files do not exist (e.g. session finalised mid-bootstrap before the
+    first diff was written).
+
+    [AUTOMATED] No-op (no diff files in automated mode).
+
 ---
 
 ## Log Format

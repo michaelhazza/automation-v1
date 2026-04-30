@@ -29,7 +29,7 @@ import { generateIdempotencyKey } from './llmRouterIdempotencyPure.js';
 import { ReconciliationRequiredError } from '../lib/reconciliationRequiredError.js';
 import * as llmInflightPayloadStore from './llmInflightPayloadStore.js';
 import { logger } from '../lib/logger.js';
-import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
+import { tryEmitAgentEvent, emitAgentEvent } from './agentExecutionEventEmitter.js';
 import { buildPayloadRow } from './agentRunPayloadWriter.js';
 import { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
 export { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
@@ -1366,7 +1366,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       }
 
       laelCompletedEmitted = true;
-      tryEmitAgentEvent({
+      await emitAgentEvent({
         runId:          ctx.runId!,
         organisationId: ctx.organisationId,
         subaccountId:   ctx.subaccountId ?? null,
@@ -1754,7 +1754,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
 
     laelCompletedEmitted = true;
-    tryEmitAgentEvent({
+    await emitAgentEvent({
       runId:          ctx.runId!,
       organisationId: ctx.organisationId,
       subaccountId:   ctx.subaccountId ?? null,
@@ -1838,7 +1838,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       provisionalLedgerRowId &&
       shouldEmitLaelLifecycle(ctx, terminalStatus ?? 'failed')
     ) {
-      tryEmitAgentEvent({
+      await emitAgentEvent({
         runId:          ctx.runId,
         organisationId: ctx.organisationId,
         subaccountId:   ctx.subaccountId ?? null,

@@ -92,19 +92,24 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
         const orgId = anchorOrg.id;
         const uid   = () => crypto.randomUUID();
 
+        // Slug is NOT NULL in subaccounts and (org_id, slug) has a partial-unique
+        // index — randomise the slug per insert so reruns against the same
+        // anchor org don't collide with a prior pass's leftovers.
+        const slugSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
         const [subA] = await db
           .insert(subaccounts)
-          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subA' })
+          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subA', slug: `scope-test-suba-${slugSuffix}` })
           .returning({ id: subaccounts.id });
 
         const [subB] = await db
           .insert(subaccounts)
-          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subB' })
+          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subB', slug: `scope-test-subb-${slugSuffix}` })
           .returning({ id: subaccounts.id });
 
         const [actor] = await db
           .insert(workspaceActors)
-          .values({ id: uid(), organisationId: orgId, subaccountId: subA.id })
+          .values({ id: uid(), organisationId: orgId, subaccountId: subA.id, actorKind: 'agent', displayName: 'scope-test-actor' })
           .returning({ id: workspaceActors.id });
 
         const [agent] = await db
@@ -113,6 +118,7 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
             id:               uid(),
             organisationId:   orgId,
             name:             'scope-test-agent',
+            slug:             `scope-test-agent-${slugSuffix}`,
             workspaceActorId: actor.id,
           })
           .returning({ id: agents.id });

@@ -1857,10 +1857,31 @@ in tests, every file has at least one `test()` / `describe()` / `it()`
 block, no bare top-level `await`, no module-level `process.env.X = '...'`
 without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
-### TI-005: Fix all integration CI test failures (full execution brief)
+### TI-005: Fix all integration CI test failures (full execution brief) — DONE
 - Captured: 2026-04-30 (after PR #239 surfaced 24 failures across 14 files)
-- **Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md)** — 5-phase plan, 3–4h, ready to execute in a new branch.
-- Replaces the older 2-file scope; covers all 14 failing files plus the seed-fixture work and the gate flip from `continue-on-error: true` → `false`.
+- Closed: 2026-04-30 by branch `claude/integration-tests-fix-2026-04-30`. Closeout summary: [tasks/builds/integration-tests-fix/progress.md](./builds/integration-tests-fix/progress.md).
+- Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md).
+- Outcome: integration_tests CI job is now load-bearing (`continue-on-error` removed). Five phases shipped: seeder + CI wiring (1), incident-ingestor reset-guard relaxation + Vitest-mock rewrite of the throttle integration test (2), TI-005 lifecycle refactor of five files (3), constraint / suppression / RLS-superuser fixes (4), and the gate flip itself (5).
+- ChatGPT round 1 (Codex P1, accepted): superuser short-circuit reports SKIPPED, not PASSED — `ctx.skip()` in four test bodies.
+- ChatGPT round 2 (verdict APPROVED, three P2 follow-ups deferred — see TI-006 / TI-007 / TI-008 below).
+
+### TI-006: Canonical subaccount UUID for integration fixtures
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.2)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
+- Issue: `scripts/seed-integration-fixtures.ts` uses `gen_random_uuid()` for the seeded subaccount. Tests rely on the "anchor" pattern — `SELECT … FROM organisations JOIN subaccounts … LIMIT 1` — which works while the seeded org has only one subaccount but becomes ambiguous if a future seed (or test) inserts a second. Pin a canonical UUID like `00000000-0000-0000-0000-000000000010` so seed inserts and test references stay deterministic; document the anchor-selection contract.
+- Effort: 30 min. Touches `scripts/seed-integration-fixtures.ts` and the small handful of test files that read the anchor (currently only `workspaceMemoryService.test.ts`).
+
+### TI-007: Integration test conventions doc — real-DB vs mocked-DB rule
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.3)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
+- Issue: the `*.integration.test.ts` glob now contains a mix of real-DB tests and tests that mock the DB at the module boundary (e.g. `incidentIngestorThrottle.integration.test.ts` mocks `db`, `getPgBoss`, `logger`). Both shapes are intentional, but the convention is implicit; future contributors may misread the file naming as "always real DB". Write a short convention note ("integration tests may mock external boundaries but must preserve DB contract OR explicitly declare isolation in the file header") and link it from CLAUDE.md / `references/`.
+- Effort: 15 min.
+
+### TI-008: Configure CI with a non-superuser app role for RLS coverage
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.4 — also flagged in the closeout follow-ups)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md), [tasks/builds/integration-tests-fix/progress.md](./builds/integration-tests-fix/progress.md)
+- Issue: CI's integration_tests job connects as the `postgres` superuser. Superusers bypass RLS unconditionally, so `rls.context-propagation.test.ts` and `crmQueryPlanner/__tests__/integration.test.ts` skip themselves at runtime via `ctx.skip()` — the cases are reported as SKIPPED rather than asserting tenant isolation. Provision a non-superuser app role in CI (a Postgres init script or a setup step that `CREATE ROLE app_test WITH LOGIN INHERIT` and grants admin_role membership) and connect `DATABASE_URL` as that role; then drop the `runningAsSuperuser` short-circuits in both files.
+- Effort: 60 min. Touches `.github/workflows/ci.yml` plus the two test files (revert the runtime check + `ctx.skip()` once the role is in place).
 
 ### [DEPRECATED — see brief above] TI-005 (original): Refactor 2 legacy integration tests to vitest-idiomatic structure
 - Captured: 2026-04-30
