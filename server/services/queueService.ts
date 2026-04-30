@@ -1135,6 +1135,21 @@ export const queueService = {
         }
       });
 
+      // Workspace identity migration — per-identity job dispatched by workspaceMigrationService.start()
+      const migrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
+      await (boss as any).work('workspace.migrate-identity', { teamSize: migrationConcurrency, teamConcurrency: migrationConcurrency }, async (job: any) => {
+        try {
+          const { processIdentityMigration } = await import('./workspace/workspaceMigrationService.js');
+          const adapter = await resolveMigrationAdapter(job.data.targetBackend);
+          await withTimeout(processIdentityMigration(job.data, { adapter }), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'workspace.migrate-identity', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
       await (boss as any).work('slack-inbound', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 2 }, async (job: any) => {
         try {
@@ -1260,3 +1275,19 @@ export const queueService = {
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// resolveMigrationAdapter — inline helper for workspace.migrate-identity worker
+// ---------------------------------------------------------------------------
+
+async function resolveMigrationAdapter(backend: string) {
+  if (backend === 'synthetos_native') {
+    const { nativeWorkspaceAdapter } = await import('../adapters/workspace/nativeWorkspaceAdapter.js');
+    return nativeWorkspaceAdapter;
+  }
+  if (backend === 'google_workspace') {
+    const { googleWorkspaceAdapter } = await import('../adapters/workspace/googleWorkspaceAdapter.js');
+    return googleWorkspaceAdapter;
+  }
+  throw new Error(`unknown migration backend: ${backend}`);
+}

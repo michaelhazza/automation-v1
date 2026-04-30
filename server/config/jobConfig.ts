@@ -449,6 +449,22 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'fifo' as const,
   },
 
+  // ── Workspace identity migration (agents-as-employees E1) ────────
+  // Per-identity job dispatched by workspaceMigrationService.start().
+  // Provisions on the target backend, activates the new identity, then
+  // archives the source. retryLimit 5 with exponential backoff handles
+  // transient Google / SMTP failures. payload-key: migrationRequestId
+  // combined with actorId forms a deterministic idempotency token at
+  // the provisioning layer (provisioningRequestId = migrationRequestId:actorId).
+  'workspace.migrate-identity': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'workspace.migrate-identity__dlq',
+    idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
+  },
+
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
   'system-monitor-ingest': {
     retryLimit: 3,
