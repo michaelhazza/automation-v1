@@ -610,6 +610,9 @@ export const agentExecutionService = {
         subaccountAgentId: request.subaccountAgentId ?? null,
         taskId: request.taskId ?? null,
         triggerContext: request.triggerContext,
+        subaccountId: request.subaccountId ?? null,
+        runId: run.id,
+        tokenBudget,
       });
 
       // Only eager sources flagged includedInPrompt: true are rendered into
