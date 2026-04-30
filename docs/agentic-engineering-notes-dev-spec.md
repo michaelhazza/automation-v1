@@ -66,7 +66,7 @@ Three documents converted from human-shaped to agent-shaped.
 
 - Exact command to install and boot dev (`npm install && npm run dev`).
 - Required env vars (link to `docs/env-manifest.json`).
-- One-line verification command (`npx tsc --noEmit`).
+- One-line verification command. The repo has two tsconfigs; the root `tsconfig.json` covers `client/src` only and `server/tsconfig.json` covers `server/` + `shared/`. The quick-start should give a single command that exercises both: `npx tsc --noEmit && npx tsc -p server/tsconfig.json --noEmit`.
 - Pointer to `architecture.md` for code conventions, `scripts/README.md` for tooling, and `docs/README.md` for the spec-corpus index.
 
 Keep the existing stack-description content but demote it below the quick-start.
@@ -137,6 +137,7 @@ Allowed values for `adversarial-reviewer`: `NO_HOLES_FOUND` | `HOLES_FOUND` | `N
 | `CLAUDE.md` § "Local Dev Agent Fleet" table | Edit — add row |
 | `CLAUDE.md` § "Review pipeline (mandatory order)" | Edit — adversarial-reviewer is optional, post-`pr-reviewer`, user must explicitly ask (matches `dual-reviewer` posture) |
 | `tasks/review-logs/README.md` | Edit — add `adversarial-review-log` to the filename convention examples and add `adversarial-reviewer` row to the per-agent Verdict enum table (`NO_HOLES_FOUND` \| `HOLES_FOUND` \| `NEEDS_DISCUSSION`) |
+| `tools/mission-control/server/lib/logParsers.ts` | Edit — extend the `ReviewKind` union with `'adversarial-review'` and extend `FILENAME_REGEX_STD` to recognise the `adversarial-review` prefix. Without this, Mission Control's parser returns `null` for adversarial-review-log filenames and the dashboard never sees them. The verdict-line parser is already prefix-agnostic so no change there. |
 
 ### 4.4 Out of scope (deferred to § 9)
 
@@ -219,14 +220,14 @@ All four items are independent. Order is by ascending cost; ship the cheap edits
 
 | Item | Verification |
 |---|---|
-| A | Open a fresh Claude Code session, give it `replit.md` only, ask it to boot the dev env and run `npx tsc --noEmit`. It should succeed without asking for stack details. |
+| A | Open a fresh Claude Code session, give it `replit.md` only, ask it to boot the dev env and run the quick-start verification command (`npx tsc --noEmit && npx tsc -p server/tsconfig.json --noEmit`). Both invocations should succeed without asking for stack details. |
 | A | Ask the same session to "reseed the dev DB." It should locate the right script via `scripts/README.md` without grepping. |
 | B | Invoke `adversarial-reviewer` against a known-good past PR (e.g. a recent RLS migration). Confirm the log file lands in `tasks/review-logs/` with the expected filename pattern and produces zero false confirmed-holes. |
 | B | Invoke against a synthetic diff that intentionally drops a tenant filter. Confirm the agent flags it as a confirmed-hole with file:line reference. |
 | C | Run architect on a fresh feature ask ("add a CSV import for contacts"). Confirm the plan output includes a "Model-collapse check" heading with an explicit decision. |
 | D | After the heuristic ships, on the next non-verifiable task (e.g. a UI polish pass), confirm the main session does not subagent-drive it overnight and instead iterates inline with the user. |
 
-No code changes; no test gates required. `npm run lint` and `npx tsc --noEmit` are not affected.
+No code changes; no test gates required. `npm run lint` and the two-tsconfig typecheck (`npx tsc --noEmit && npx tsc -p server/tsconfig.json --noEmit`) are not affected.
 
 ---
 
