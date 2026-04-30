@@ -1,0 +1,392 @@
+import { eq, and, sql } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { db } from '../db/index.js';
+import { logger } from '../lib/logger.js';
+import {
+  EXTERNAL_DOC_HARD_TOKEN_LIMIT,
+  EXTERNAL_DOC_MAX_STALENESS_MINUTES,
+  EXTERNAL_DOC_MIN_CONTENT_TOKENS,
+  EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES,
+} from '../lib/constants.js';
+import { documentCache } from '../db/schema/documentCache.js';
+import { documentFetchEvents, type FetchFailureReason } from '../db/schema/documentFetchEvents.js';
+import { referenceDocuments } from '../db/schema/referenceDocuments.js';
+import { integrationConnectionService } from './integrationConnectionService.js';
+import { googleDriveResolver, ResolverError } from './resolvers/googleDriveResolver.js';
+import {
+  countTokensApprox,
+  isPastStalenessBoundary,
+  isResolverVersionStale,
+  truncateContentToTokenBudget,
+} from './externalDocumentResolverPure.js';
+import { SingleFlightGuard } from './externalDocumentSingleFlight.js';
+import type { ResolveParams, ResolvedDocument } from './externalDocumentResolverTypes.js';
+
+const singleFlight = new SingleFlightGuard<ResolvedDocument>(EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES);
+
+export const externalDocumentResolverService = {
+  async resolve(params: ResolveParams): Promise<ResolvedDocument> {
+    const key = `google_drive:${params.fileId}:${params.connectionId}`;
+    return singleFlight.run(key, () => doResolve(params));
+  },
+};
+
+async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
+  const resolver = googleDriveResolver;
+  const startedAt = Date.now();
+  // Invariant #11: TTL boundary uses fetch-start time. Captured ONCE at the top.
+  const fetchStart = new Date();
+
+  // 1. Token refresh
+  let accessToken: string;
+  try {
+    if (p.accessToken) {
+      accessToken = p.accessToken;
+    } else {
+      const conn = await integrationConnectionService.getDecryptedConnection(
+        p.subaccountId,
+        'google_drive',
+        p.organisationId,
+        p.connectionId,
+      );
+      accessToken = conn.accessToken;
+    }
+  } catch {
+    return emitFailure(p, resolver.resolverVersion, 'auth_revoked', null, startedAt);
+  }
+
+  // 2. Cache lookup
+  const cached = await db.select().from(documentCache).where(and(
+    eq(documentCache.provider, 'google_drive'),
+    eq(documentCache.fileId, p.fileId),
+    eq(documentCache.connectionId, p.connectionId),
+  )).limit(1);
+  const cacheRow = cached[0];
+
+  // 3. Resolver-version check
+  const versionStale = cacheRow ? isResolverVersionStale(cacheRow.resolverVersion, resolver.resolverVersion) : true;
+
+  // 4. Change detection
+  let revisionMatches = false;
+  let providerMimeType: string | null = null;
+  let providerName: string | null = null;
+  let providerRevisionId: string | null = null;
+  if (cacheRow && !versionStale) {
+    try {
+      const meta = await resolver.checkRevision(p.fileId, accessToken);
+      if (meta) {
+        providerMimeType = meta.mimeType;
+        providerName = meta.name;
+        providerRevisionId = meta.revisionId;
+        const mimeMismatch = meta.mimeType !== p.expectedMimeType;
+        if (mimeMismatch) {
+          logger.warn('document_resolve_mime_mismatch', {
+            referenceId: p.referenceId,
+            fileId: p.fileId,
+            expectedMimeType: p.expectedMimeType,
+            providerMimeType: meta.mimeType,
+            mimeMismatch: true,
+          });
+        }
+        revisionMatches = !mimeMismatch && meta.revisionId !== null && meta.revisionId === cacheRow.revisionId;
+      }
+    } catch (err) {
+      if (cacheRow) {
+        const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
+        if (!stale) {
+          return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, mapResolverError(err), startedAt);
+        }
+      }
+      return emitFailure(p, resolver.resolverVersion, mapResolverError(err), null, startedAt);
+    }
+  }
+
+  // 5a. Cache hit + revision match + version current — serve cache
+  if (cacheRow && !versionStale && revisionMatches) {
+    return serveCacheAsActive(p, resolver.resolverVersion, cacheRow, providerRevisionId, startedAt);
+  }
+
+  // 5b. Fetch
+  let rawContent: string;
+  try {
+    rawContent = await resolver.fetchContent(p.fileId, providerMimeType ?? p.expectedMimeType, accessToken);
+  } catch (err) {
+    const reason = mapResolverError(err);
+    if (cacheRow) {
+      const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
+      if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, reason, startedAt);
+    }
+    return emitFailure(p, resolver.resolverVersion, reason, null, startedAt);
+  }
+
+  // 6. Minimum-content check
+  const rawTokens = countTokensApprox(rawContent);
+  if (rawTokens < EXTERNAL_DOC_MIN_CONTENT_TOKENS) {
+    if (cacheRow) {
+      const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
+      if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, 'unsupported_content', startedAt);
+    }
+    return emitFailure(p, resolver.resolverVersion, 'unsupported_content', null, startedAt);
+  }
+
+  // 7. Truncate to per-document hard limit
+  const truncation = truncateContentToTokenBudget(rawContent, EXTERNAL_DOC_HARD_TOKEN_LIMIT);
+  const tokensUsed = countTokensApprox(truncation.content);
+  const tokensBeforeTruncation = truncation.truncated ? rawTokens : null;
+
+  // 8. Cache upsert (atomic — invariant #1)
+  const contentHash = createHash('sha256').update(truncation.content).digest('hex');
+  const fetchedAt = new Date();
+  await db.insert(documentCache).values({
+    organisationId: p.organisationId,
+    subaccountId: p.subaccountId,
+    provider: 'google_drive',
+    fileId: p.fileId,
+    connectionId: p.connectionId,
+    content: truncation.content,
+    revisionId: providerRevisionId,
+    fetchedAt,
+    contentSizeTokens: tokensUsed,
+    contentHash,
+    resolverVersion: resolver.resolverVersion,
+  }).onConflictDoUpdate({
+    target: [documentCache.provider, documentCache.fileId, documentCache.connectionId],
+    set: {
+      content: truncation.content,
+      revisionId: providerRevisionId,
+      fetchedAt,
+      contentSizeTokens: tokensUsed,
+      contentHash,
+      resolverVersion: resolver.resolverVersion,
+      updatedAt: sql`now()`,
+    },
+  });
+
+  // 9. State transition
+  await transitionState(p.referenceType, p.referenceId, 'active');
+
+  // 10. Audit-log write
+  await db.insert(documentFetchEvents).values({
+    organisationId: p.organisationId,
+    subaccountId: p.subaccountId,
+    referenceId: p.referenceId,
+    referenceType: p.referenceType,
+    runId: p.runId,
+    cacheHit: false,
+    provider: 'google_drive',
+    docName: providerName ?? p.docName,
+    revisionId: providerRevisionId,
+    tokensUsed,
+    tokensBeforeTruncation,
+    resolverVersion: resolver.resolverVersion,
+    failureReason: null,
+  });
+
+  emitStructuredLog({
+    runId: p.runId,
+    referenceId: p.referenceId,
+    provider: 'google_drive',
+    cacheHit: false,
+    durationMs: Date.now() - startedAt,
+    tokensUsed,
+    failureReason: null,
+  });
+
+  return {
+    referenceId: p.referenceId,
+    content: truncation.content,
+    provenance: {
+      provider: 'google_drive',
+      docName: providerName ?? p.docName,
+      fetchedAt: fetchedAt.toISOString(),
+      revisionId: providerRevisionId,
+      isStale: false,
+      truncated: truncation.truncated,
+      tokensRemovedByTruncation: truncation.truncated ? truncation.tokensRemoved : null,
+    },
+    tokensUsed,
+    cacheHit: false,
+    failureReason: null,
+  };
+}
+
+async function serveCacheAsActive(
+  p: ResolveParams,
+  resolverVersion: number,
+  cacheRow: typeof documentCache.$inferSelect,
+  revisionId: string | null,
+  startedAt: number,
+): Promise<ResolvedDocument> {
+  await transitionState(p.referenceType, p.referenceId, 'active');
+  await db.insert(documentFetchEvents).values({
+    organisationId: p.organisationId,
+    subaccountId: p.subaccountId,
+    referenceId: p.referenceId,
+    referenceType: p.referenceType,
+    runId: p.runId,
+    cacheHit: true,
+    provider: 'google_drive',
+    docName: p.docName,
+    revisionId: revisionId ?? cacheRow.revisionId,
+    tokensUsed: cacheRow.contentSizeTokens,
+    tokensBeforeTruncation: null,
+    resolverVersion,
+    failureReason: null,
+  });
+  emitStructuredLog({
+    runId: p.runId,
+    referenceId: p.referenceId,
+    provider: 'google_drive',
+    cacheHit: true,
+    durationMs: Date.now() - startedAt,
+    tokensUsed: cacheRow.contentSizeTokens,
+    failureReason: null,
+  });
+  return {
+    referenceId: p.referenceId,
+    content: cacheRow.content,
+    provenance: {
+      provider: 'google_drive',
+      docName: p.docName,
+      fetchedAt: cacheRow.fetchedAt.toISOString(),
+      revisionId: cacheRow.revisionId,
+      isStale: false,
+      truncated: false,
+      tokensRemovedByTruncation: null,
+    },
+    tokensUsed: cacheRow.contentSizeTokens,
+    cacheHit: true,
+    failureReason: null,
+  };
+}
+
+async function serveCacheAsDegraded(
+  p: ResolveParams,
+  resolverVersion: number,
+  cacheRow: typeof documentCache.$inferSelect,
+  reason: FetchFailureReason,
+  startedAt: number,
+): Promise<ResolvedDocument> {
+  await transitionState(p.referenceType, p.referenceId, 'degraded');
+  // Invariant #12: idempotent failure writes via onConflictDoNothing
+  await db.insert(documentFetchEvents).values({
+    organisationId: p.organisationId,
+    subaccountId: p.subaccountId,
+    referenceId: p.referenceId,
+    referenceType: p.referenceType,
+    runId: p.runId,
+    cacheHit: true,
+    provider: 'google_drive',
+    docName: p.docName,
+    revisionId: cacheRow.revisionId,
+    tokensUsed: cacheRow.contentSizeTokens,
+    tokensBeforeTruncation: null,
+    resolverVersion,
+    failureReason: reason,
+  }).onConflictDoNothing();
+  emitStructuredLog({
+    runId: p.runId,
+    referenceId: p.referenceId,
+    provider: 'google_drive',
+    cacheHit: true,
+    durationMs: Date.now() - startedAt,
+    tokensUsed: cacheRow.contentSizeTokens,
+    failureReason: reason,
+  });
+  return {
+    referenceId: p.referenceId,
+    content: cacheRow.content,
+    provenance: {
+      provider: 'google_drive',
+      docName: p.docName,
+      fetchedAt: cacheRow.fetchedAt.toISOString(),
+      revisionId: cacheRow.revisionId,
+      isStale: true,
+      truncated: false,
+      tokensRemovedByTruncation: null,
+    },
+    tokensUsed: cacheRow.contentSizeTokens,
+    cacheHit: true,
+    failureReason: reason,
+  };
+}
+
+async function emitFailure(
+  p: ResolveParams,
+  resolverVersion: number,
+  reason: FetchFailureReason,
+  revisionId: string | null,
+  startedAt: number,
+): Promise<ResolvedDocument> {
+  await transitionState(p.referenceType, p.referenceId, 'broken');
+  // Invariant #12: idempotent failure writes
+  await db.insert(documentFetchEvents).values({
+    organisationId: p.organisationId,
+    subaccountId: p.subaccountId,
+    referenceId: p.referenceId,
+    referenceType: p.referenceType,
+    runId: p.runId,
+    cacheHit: false,
+    provider: 'google_drive',
+    docName: p.docName,
+    revisionId,
+    tokensUsed: 0,
+    tokensBeforeTruncation: null,
+    resolverVersion,
+    failureReason: reason,
+  }).onConflictDoNothing();
+  emitStructuredLog({
+    runId: p.runId,
+    referenceId: p.referenceId,
+    provider: 'google_drive',
+    cacheHit: false,
+    durationMs: Date.now() - startedAt,
+    tokensUsed: 0,
+    failureReason: reason,
+  });
+  return {
+    referenceId: p.referenceId,
+    content: '',
+    provenance: {
+      provider: 'google_drive',
+      docName: p.docName,
+      fetchedAt: new Date().toISOString(),
+      revisionId,
+      isStale: false,
+      truncated: false,
+      tokensRemovedByTruncation: null,
+    },
+    tokensUsed: 0,
+    cacheHit: false,
+    failureReason: reason,
+  };
+}
+
+async function transitionState(
+  referenceType: 'reference_document' | 'agent_data_source',
+  referenceId: string,
+  newState: 'active' | 'degraded' | 'broken',
+): Promise<void> {
+  if (referenceType !== 'reference_document') return;
+  await db.update(referenceDocuments)
+    .set({ attachmentState: newState, updatedAt: sql`now()` })
+    .where(eq(referenceDocuments.id, referenceId));
+}
+
+function mapResolverError(err: unknown): FetchFailureReason {
+  if (err instanceof ResolverError) return err.reason as FetchFailureReason;
+  if (err instanceof Error && err.name === 'AbortError') return 'network_error';
+  return 'network_error';
+}
+
+function emitStructuredLog(entry: {
+  runId: string | null;
+  referenceId: string;
+  provider: string;
+  cacheHit: boolean;
+  durationMs: number;
+  tokensUsed: number;
+  failureReason: FetchFailureReason | null;
+}): void {
+  logger.info('document_resolve', entry);
+}
