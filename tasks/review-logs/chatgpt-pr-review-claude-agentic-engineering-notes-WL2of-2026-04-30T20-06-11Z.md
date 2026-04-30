@@ -6,6 +6,7 @@
 - Mode: automated
 - HUMAN_IN_LOOP: yes
 - Started: 2026-04-30T20:06:11Z
+- **Verdict:** APPROVED (3 rounds, 1 implement / 6 reject / 0 defer)
 
 ---
 
@@ -133,3 +134,58 @@ None — all four findings rejected.
 - `npm run lint` and `npm run typecheck` not present as scripts in package.json. CLAUDE.md offers `npx tsc --noEmit` as alternative, but this round's changes are pure markdown (no TypeScript). Verification commands skipped as not applicable.
 
 ---
+
+## Round 3 — 2026-04-30T20:18:00Z
+
+**Top themes:** none
+
+### ChatGPT Feedback (raw)
+
+```json
+{
+  "findings": [],
+  "verdict": "APPROVED"
+}
+```
+
+Round 3 — no findings; ChatGPT verdict: APPROVED.
+
+### Recommendations and Decisions
+
+No findings to triage.
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 0 implemented | 2 rejected | 0 deferred
+- User-decided:              1 implemented | 4 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #243: none
+- Architectural items surfaced to screen (user decisions):
+  - R1 f-002 Incorrect mapping of adversarial verdict in dashboard phase — reject (mapping matches spec semantics)
+  - R1 f-003 Model-collapse check not enforced — reject (prompt sequencing IS the enforcement)
+  - R2 f-001 Inconsistent detection logic for adversarial-reviewer inputs — implement (spec § 4.2 line 113 rewrite + agent drift-note cleanup)
+  - R2 f-002 Verdict semantics conflict — reject (repeat of Round 1 f-001; texts already agree)
+  - R2 f-003 Missing parser extensions — reject (regex already includes adversarial-review)
+- Consistency warnings: none — Round 1 f-001 and Round 2 f-002 surfaced the same finding twice with the same rejection rationale; not a contradiction.
+- KNOWLEDGE.md updated: yes (1 entry — drift-acknowledgment notes go stale once the underlying drift is fixed)
+- architecture.md updated: no
+- PR: #243 — APPROVED at https://github.com/michaelhazza/automation-v1/pull/243
+
+### Session signal-quality observations
+
+- 7 findings across 3 rounds; 1 valid (~14%), 6 false positives (~86%). Two false-positive shapes:
+  - "Missing X that exists" — Round 1 f-004 (tests already at inFlight.test.ts:73-78) and Round 2 f-003 (parser already includes adversarial-review at logParsers.ts:64). Already documented at KNOWLEDGE.md line 1212.
+  - Repeat of rejected finding — Round 2 f-002 was effectively the same as Round 1 f-001 (worth-confirming verdict semantics). Already documented at KNOWLEDGE.md line 299.
+- High false-positive rate is consistent with the existing pattern at KNOWLEDGE.md line 316: prior reviewers (`pr-reviewer`, `dual-reviewer`) had already run, narrowing the structural-criticism surface available to ChatGPT.
+- Session-specific note: ChatGPT model is `gpt-4o` per CLI metadata. Round 3 returned APPROVED with zero findings — natural exit signal.
+
+### Note on `ready-to-merge` label
+
+User explicitly opted to skip the `gh pr edit --add-label "ready-to-merge"` step (finalisation step 10) so they can run a manual ChatGPT review pass on the same PR before triggering CI. The PR is functionally APPROVED but will not auto-fire CI from this session. Apply the label manually after the manual pass concludes.
