@@ -14,7 +14,7 @@ All review-log filenames use the shape:
 tasks/review-logs/<agent>-log-<slug>[-<chunk-slug>]-<timestamp>.md
 ```
 
-- **`<agent>`** — fixed per agent: `pr-review`, `spec-conformance`, `dual-review`, `spec-review`, `codebase-audit`, `chatgpt-pr-review`, `chatgpt-spec-review`.
+- **`<agent>`** — fixed per agent: `pr-review`, `spec-conformance`, `dual-review`, `spec-review`, `codebase-audit`, `adversarial-review`, `chatgpt-pr-review`, `chatgpt-spec-review`.
 - **`<slug>`** — the feature/spec slug when working under `tasks/builds/<slug>/`, otherwise a short kebab-case name derived from the branch or spec path.
 - **`<chunk-slug>`** — present **only** when the review is scoped to a single plan chunk (e.g. `feature-coordinator` per-chunk invocations of `spec-conformance` or `pr-reviewer`); omitted for manual whole-branch invocations.
   - **Format:** kebab-case of the chunk name — lowercase, ASCII, hyphen-separated, no spaces or underscores, no duplicate hyphens.
@@ -51,6 +51,7 @@ Per-agent enum (locked):
 | `dual-reviewer` | `APPROVED` \| `CHANGES_REQUESTED` |
 | `spec-reviewer` (final report) | `READY_FOR_BUILD` \| `NEEDS_REVISION` |
 | `audit-runner` | `PASS` \| `PASS_WITH_DEFERRED` \| `FAIL` |
+| `adversarial-reviewer` | `NO_HOLES_FOUND` \| `HOLES_FOUND` \| `NEEDS_DISCUSSION` |
 | `chatgpt-pr-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
 | `chatgpt-spec-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
 
@@ -89,6 +90,21 @@ Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-sl
 ### `dual-reviewer`
 
 Self-writes its log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md`. **Local-development-only** — depends on the local Codex CLI; will not run in Claude Code on the web. Never auto-invoke; only when the user explicitly asks.
+
+### `adversarial-reviewer`
+
+Read-only. Emits its complete review inside a fenced markdown block tagged `adversarial-review-log` and prints it as the LAST content of its response — same pattern as `pr-reviewer`.
+
+**Caller responsibility — input:** the agent's declared tools are `Read, Glob, Grep` (no shell access by design — least-privilege for an adversarial reviewer). The caller must provide the changed-file set in the invocation prompt — same posture as `pr-reviewer`. Sample git state once at invocation time (committed + staged + unstaged + untracked) and list the files. **Paste the diff/patch in the prompt** — `Read` only shows the post-state, so deletions and the old half of modifications are invisible to the agent without the patch. For changes where deletions are minimal and the new lines fully describe the intent, brief framing prose can substitute; default to pasting the patch.
+
+**Caller responsibility — persistence:** before the user acts on any finding, extract the block verbatim and write it to `tasks/review-logs/adversarial-review-log-<slug>[-<chunk-slug>]-<timestamp>.md`. No edits, filtering, or interpretation before persistence — persist the raw block first, then triage.
+
+**After persisting**, process findings:
+- `confirmed-hole` findings → route to `tasks/todo.md` under `## Adversarial review findings — <slug>` for the main session to fix.
+- `likely-hole` findings → route to the same backlog with the agent's "what would confirm" note attached.
+- `worth-confirming` findings → keep in the log only; do not propagate to the backlog unless the user escalates.
+
+Manually invoked only — the user must explicitly ask. Phase 1 advisory; non-blocking.
 
 ### `spec-reviewer`
 

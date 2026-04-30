@@ -28,16 +28,17 @@ Every invocation runs in exactly this sequence. Do not reorder, do not merge ste
 Every session starts with this list. You can add more items in Step 3 but these must all be present:
 
 1. Load context — see [Context files](#context-files) below for the canonical list and order. Do not restate the list here; collapse all context loading into this single skeleton item.
-2. Primitives-reuse search — for every candidate new service / table / column, confirm no existing primitive to extend
-3. File inventory — cross-reference the spec's §File inventory (or derive from feature description if no spec)
-4. Contracts — TypeScript interfaces, Zod schemas, DB columns, route shapes, error codes
-5. Chunk decomposition — builder-session-sized chunks with clear boundaries and forward-only dependencies
-6. Per-chunk detail — files, contracts, error handling, tests, dependencies, acceptance criteria
-7. Risks & mitigations — rollout friction, split-brain windows, staleness, telemetry cascades, load-bearing assumptions
-8. Self-consistency pass — goals vs implementation, prose vs execution model, single-source-of-truth claims
-9. Write `plan.md` — assemble the final plan
+2. Model-collapse pre-check — answer the three questions (§ Pre-plan: model-collapse check); record the decision under "## Model-collapse check" in the plan output, even if the answer is "reject collapse, here is why."
+3. Primitives-reuse search — for every candidate new service / table / column, confirm no existing primitive to extend
+4. File inventory — cross-reference the spec's §File inventory (or derive from feature description if no spec)
+5. Contracts — TypeScript interfaces, Zod schemas, DB columns, route shapes, error codes
+6. Chunk decomposition — builder-session-sized chunks with clear boundaries and forward-only dependencies
+7. Per-chunk detail — files, contracts, error handling, tests, dependencies, acceptance criteria
+8. Risks & mitigations — rollout friction, split-brain windows, staleness, telemetry cascades, load-bearing assumptions
+9. Self-consistency pass — goals vs implementation, prose vs execution model, single-source-of-truth claims
+10. Write `plan.md` — assemble the final plan
 
-A Standard plan may compress 5–8 into one item. A Major spec-driven plan typically keeps all items separate and may add more (e.g. a dedicated "System Invariants block" item when the caller asks for one).
+A Standard plan may compress 6–9 into one item. A Major spec-driven plan typically keeps all items separate and may add more (e.g. a dedicated "System Invariants block" item when the caller asks for one).
 
 ---
 
@@ -63,6 +64,20 @@ For architecture-shaped questions (what calls X, what depends on Y, where does t
 You are invoked for **SIGNIFICANT** and **MAJOR** tasks — those with architectural decisions, new systems, or changes that touch multiple domains. For small changes (single-file patches, bug fixes with obvious solutions), the main session implements directly without a plan.
 
 You produce a plan the main Claude Code session will use as a build contract. Plans should be specific enough that implementation doesn't require guessing.
+
+---
+
+## Pre-plan: model-collapse check
+
+Before producing the implementation plan, ask:
+
+1. Does this feature decompose into ingest → extract → transform → render?
+2. Is each step doing something a frontier multimodal model could do in a single call?
+3. If yes: can the whole pipeline collapse into one model call with a structured-output schema?
+
+State the collapsed-call alternative explicitly in the plan, even if you reject it. If you reject, give the reason in one paragraph (latency, cost, determinism, audit trail, compliance, model jaggedness in this domain). Do NOT default to a multi-step pipeline because that is how it would have been built before frontier multimodal models existed.
+
+Record the decision under a heading "Model-collapse check" in the plan output.
 
 ---
 
