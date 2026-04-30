@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Service test seeds env vars before importing the service module — must use dynamic import('../scopeResolutionService.js') so the seeding executes first."
 import { expect, test } from 'vitest';
 // Seed env vars before the service loads to prevent zod env parse failure.
 // Use ??= so we don't override a real DATABASE_URL if present.

@@ -9,8 +9,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: test
+  unit_tests:
+    name: unit tests
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
     timeout-minutes: 15
@@ -55,13 +55,13 @@ jobs:
       - name: Run tests
         run: npm test
 
-  integration:
+  integration_tests:
     # Same image, same DB, NODE_ENV=integration. Surfaces the ~36 tests
     # gated on `process.env.NODE_ENV === 'integration'` (real-DB exactly-once,
     # idempotency races, RLS propagation). Currently runs with
     # continue-on-error: true while we audit individual integration tests
     # for vitest lifecycle compatibility (TI-005). Flip to false once green.
-    name: integration
+    name: integration tests
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
     timeout-minutes: 10
