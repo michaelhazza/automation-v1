@@ -9,46 +9,54 @@
  * Scheduled: every 60 minutes ('0 * * * *') via pg-boss in queueService.ts.
  */
 
-import { db } from '../db/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { subaccounts } from '../db/schema/subaccounts.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { countActiveIdentities } from '../../shared/billing/seatDerivation.js';
 import { logger } from '../lib/logger.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import type { WorkspaceIdentityStatus } from '../../shared/types/workspace.js';
 
 export async function runSeatRollup(): Promise<void> {
   logger.info('seatRollupJob.start', { operation: 'runSeatRollup' });
 
-  // Fetch all workspace identities joined to their org via subaccounts
-  const rows = await db
-    .select({
-      organisationId: subaccounts.organisationId,
-      status: workspaceIdentities.status,
-    })
-    .from(workspaceIdentities)
-    .innerJoin(subaccounts, eq(subaccounts.id, workspaceIdentities.subaccountId));
+  // Cross-org sweep — must bypass RLS via admin connection
+  await withAdminConnection(
+    { source: 'seat-rollup', reason: 'Hourly cross-org workspace seat count snapshot' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-  // Aggregate per org in memory
-  const perOrg = new Map<string, { status: WorkspaceIdentityStatus }[]>();
-  for (const row of rows) {
-    if (!perOrg.has(row.organisationId)) perOrg.set(row.organisationId, []);
-    perOrg.get(row.organisationId)!.push({ status: row.status as WorkspaceIdentityStatus });
-  }
+      // Fetch all workspace identities joined to their org via subaccounts
+      const rows = await tx
+        .select({
+          organisationId: subaccounts.organisationId,
+          status: workspaceIdentities.status,
+        })
+        .from(workspaceIdentities)
+        .innerJoin(subaccounts, eq(subaccounts.id, workspaceIdentities.subaccountId));
 
-  for (const [organisationId, identities] of perOrg) {
-    const count = countActiveIdentities(identities);
-    await db
-      .update(orgSubscriptions)
-      .set({ consumedSeats: count, updatedAt: new Date() })
-      .where(eq(orgSubscriptions.organisationId, organisationId));
-    logger.info('seatRollupJob.updated', {
-      operation: 'runSeatRollup',
-      organisationId,
-      consumedSeats: count,
-    });
-  }
+      // Aggregate per org in memory
+      const perOrg = new Map<string, { status: WorkspaceIdentityStatus }[]>();
+      for (const row of rows) {
+        if (!perOrg.has(row.organisationId)) perOrg.set(row.organisationId, []);
+        perOrg.get(row.organisationId)!.push({ status: row.status as WorkspaceIdentityStatus });
+      }
 
-  logger.info('seatRollupJob.done', { operation: 'runSeatRollup', orgCount: perOrg.size });
+      for (const [organisationId, identities] of perOrg) {
+        const count = countActiveIdentities(identities);
+        await tx
+          .update(orgSubscriptions)
+          .set({ consumedSeats: count, updatedAt: new Date() })
+          .where(eq(orgSubscriptions.organisationId, organisationId));
+        logger.info('seatRollupJob.updated', {
+          operation: 'runSeatRollup',
+          organisationId,
+          consumedSeats: count,
+        });
+      }
+
+      logger.info('seatRollupJob.done', { operation: 'runSeatRollup', orgCount: perOrg.size });
+    },
+  );
 }

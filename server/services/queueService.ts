@@ -1136,18 +1136,18 @@ export const queueService = {
       });
 
       // Workspace identity migration — per-identity job dispatched by workspaceMigrationService.start()
+      // Uses createWorker so the handler runs inside an org-scoped tx pulled from job.data.organisationId.
       const migrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
-      await (boss as any).work('workspace.migrate-identity', { teamSize: migrationConcurrency, teamConcurrency: migrationConcurrency }, async (job: any) => {
-        try {
+      await createWorker<import('./workspace/workspaceMigrationService.js').MigrateIdentityJob>({
+        queue: 'workspace.migrate-identity',
+        boss: boss as any,
+        concurrency: migrationConcurrency,
+        timeoutMs: 270_000,
+        handler: async (job) => {
           const { processIdentityMigration } = await import('./workspace/workspaceMigrationService.js');
           const adapter = await resolveMigrationAdapter(job.data.targetBackend);
-          await withTimeout(processIdentityMigration(job.data, { adapter }), 270_000);
-        } catch (err) {
-          if (isTimeoutError(err)) {
-            logger.error('job_timeout', { queue: 'workspace.migrate-identity', jobId: job.id });
-          }
-          throw err;
-        }
+          await processIdentityMigration(job.data, { adapter });
+        },
       });
 
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
