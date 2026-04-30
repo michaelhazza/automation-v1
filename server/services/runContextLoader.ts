@@ -24,6 +24,7 @@ import {
 } from './runContextLoaderPure.js';
 import { generateEmbedding } from '../lib/embeddings.js';
 import { externalDocumentResolverService } from './externalDocumentResolverService.js';
+import { googleDriveResolver } from './resolvers/googleDriveResolver.js';
 import { buildProvenanceHeader, countTokensApprox, truncateContentToTokenBudget } from './externalDocumentResolverPure.js';
 import { externalDocFlags } from '../lib/featureFlags.js';
 import { EXTERNAL_DOC_MAX_REFS_PER_RUN, EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS } from '../lib/constants.js';
@@ -327,7 +328,7 @@ async function loadExternalDocumentBlocks(
             revisionId: null,
             tokensUsed: 0,
             failureReason: 'budget_exceeded',
-            resolverVersion: 1,
+            resolverVersion: googleDriveResolver.resolverVersion,
           }).catch((err: unknown) => {
             console.error('[runContextLoader] Failed to write budget_exceeded fetch event', err);
           });
@@ -435,7 +436,7 @@ async function loadExternalDocumentBlocks(
             revisionId: null,
             tokensUsed: 0,
             failureReason: 'budget_exceeded',
-            resolverVersion: 1,
+            resolverVersion: googleDriveResolver.resolverVersion,
           }).catch((err: unknown) => {
             console.error('[runContextLoader] Failed to write run-budget budget_exceeded fetch event', err);
           });
