@@ -1,0 +1,10 @@
+server/lib/__tests__/idempotencyVersionPure.test.ts
+server/lib/__tests__/logger.integration.test.ts
+server/lib/__tests__/loggerBufferAdapterPure.test.ts
+server/lib/__tests__/reconciliationRequiredErrorPure.test.ts
+server/lib/__tests__/redactionPure.test.ts
+server/lib/__tests__/softBreakerPure.test.ts
+server/services/__tests__/actionServiceCanonicalisationPure.test.ts
+server/services/__tests__/agentExecutionEventServicePure.test.ts
+server/services/__tests__/agentRunPayloadWriterFailurePathPure.test.ts
+server/services/__tests__/agentRunPayloadWriterPure.test.ts

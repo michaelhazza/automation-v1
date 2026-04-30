@@ -12,39 +12,18 @@
 // placeholder values — this test never hits the DB or signs a JWT.
 // ESM static imports are hoisted before any code runs, so we use dynamic imports
 // to guarantee env vars are seeded before the service module initialises.
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
+import { expect, test } from 'vitest';
 import type { RunQueryDeps } from '../crmQueryPlannerService.js';
 import type { RunLlmStage3Output } from '../llmPlanner.js';
 import type { ExecutorContext, CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
 
 const { runQuery } = await import('../crmQueryPlannerService.js');
 
-let passed = 0;
-let failed = 0;
-const promises: Promise<void>[] = [];
-
-function test(name: string, fn: () => Promise<void>) {
-  promises.push(
-    fn().then(
-      () => { passed++; console.log(`  PASS  ${name}`); },
-      (err) => { failed++; console.log(`  FAIL  ${name}`); console.log(`        ${err instanceof Error ? err.message : err}`); },
-    )
-  );
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
-
-function assertEqual<T>(a: T, b: T, label = '') {
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
 
 // ── Stub registry (no DB) ─────────────────────────────────────────────────────
 
@@ -113,22 +92,22 @@ function stage3Returns(partial: Partial<RunLlmStage3Output>): RunQueryDeps['runL
 // Stage 1 hit → structured result
 test('registry-matched intent → stageResolved:1 + structured artefact', async () => {
   const output = await runQuery({ rawIntent: 'stale contacts', subaccountId: 'sub-1' }, makeContext(), deps);
-  assertEqual(output.stageResolved, 1, 'stageResolved');
-  assert(output.artefacts.length > 0, 'must have artefacts');
-  assertEqual(output.artefacts[0]!.kind, 'structured', 'first artefact kind');
+  expect(output.stageResolved, 'stageResolved').toBe(1);
+  expect(output.artefacts.length > 0, 'must have artefacts').toBeTruthy();
+  expect(output.artefacts[0]!.kind, 'first artefact kind').toBe('structured');
 });
 
 // intentHash populated
 test('output intentHash is a non-empty hex string', async () => {
   const output = await runQuery({ rawIntent: 'stale contacts', subaccountId: 'sub-1' }, makeContext(), deps);
-  assert(typeof output.intentHash === 'string' && output.intentHash.length === 16, 'intentHash is 16-char hex');
+  expect(typeof output.intentHash === 'string' && output.intentHash.length === 16, 'intentHash is 16-char hex').toBeTruthy();
 });
 
 // costPreview: Stage 1 canonical is free
 test('Stage 1 canonical hit → predictedCostCents:0', async () => {
   const output = await runQuery({ rawIntent: 'contacts no activity', subaccountId: 'sub-1' }, makeContext(), deps);
-  assertEqual(output.costPreview.predictedCostCents, 0, 'canonical reads cost 0');
-  assertEqual(output.costPreview.confidence, 'high', 'Stage 1 confidence is high');
+  expect(output.costPreview.predictedCostCents, 'canonical reads cost 0').toBe(0);
+  expect(output.costPreview.confidence, 'Stage 1 confidence is high').toBe('high');
 });
 
 // Stage 3 stub that returns intentClass: 'unsupported' → unsupported_query error
@@ -138,10 +117,10 @@ test('Stage 3 returns unsupported intentClass → unsupported_query artefact', a
     makeContext(),
     { ...deps, runLlmStage3: stage3Returns({}) },
   );
-  assert(output.artefacts.length > 0, 'must have artefacts');
-  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
-  assertEqual((output.artefacts[0] as any).errorCode, 'unsupported_query', 'errorCode');
-  assertEqual(output.stageResolved, 3, 'Stage 3 path');
+  expect(output.artefacts.length > 0, 'must have artefacts').toBeTruthy();
+  expect(output.artefacts[0]!.kind, 'artefact kind').toBe('error');
+  expect((output.artefacts[0] as any).errorCode, 'errorCode').toBe('unsupported_query');
+  expect(output.stageResolved, 'Stage 3 path').toBe(3);
 });
 
 // Stage 3 throws a plain parse error → ambiguous_intent
@@ -151,8 +130,8 @@ test('Stage 3 parse failure → ambiguous_intent artefact', async () => {
     makeContext(),
     { ...deps, runLlmStage3: stage3Throws(new Error('parse failed')) },
   );
-  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
-  assertEqual((output.artefacts[0] as any).errorCode, 'ambiguous_intent', 'errorCode');
+  expect(output.artefacts[0]!.kind, 'artefact kind').toBe('error');
+  expect((output.artefacts[0] as any).errorCode, 'errorCode').toBe('ambiguous_intent');
 });
 
 // Stage 3 throws plain object { statusCode: 402 } → cost_exceeded (B1 coverage)
@@ -163,8 +142,8 @@ test('Stage 3 budget exceeded (plain statusCode: 402) → cost_exceeded artefact
     makeContext(),
     { ...deps, runLlmStage3: stage3Throws(budgetErr) },
   );
-  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
-  assertEqual((output.artefacts[0] as any).errorCode, 'cost_exceeded', 'errorCode');
+  expect(output.artefacts[0]!.kind, 'artefact kind').toBe('error');
+  expect((output.artefacts[0] as any).errorCode, 'errorCode').toBe('cost_exceeded');
 });
 
 // Stage 3 throws FailureError with cost_limit_exceeded → cost_exceeded (B1 coverage)
@@ -179,8 +158,8 @@ test('Stage 3 budget exceeded (FailureError cost_limit_exceeded) → cost_exceed
     makeContext(),
     { ...deps, runLlmStage3: stage3Throws(failure) },
   );
-  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
-  assertEqual((output.artefacts[0] as any).errorCode, 'cost_exceeded', 'errorCode');
+  expect(output.artefacts[0]!.kind, 'artefact kind').toBe('error');
+  expect((output.artefacts[0] as any).errorCode, 'errorCode').toBe('cost_exceeded');
 });
 
 // llmRouter also throws `statusCode: 402` with `code: 'RATE_LIMITED'` for
@@ -196,8 +175,8 @@ test('Stage 3 rate-limited (statusCode: 402, code: RATE_LIMITED) → ambiguous_i
     makeContext(),
     { ...deps, runLlmStage3: stage3Throws(rateLimitErr) },
   );
-  assertEqual(output.artefacts[0]!.kind, 'error', 'artefact kind');
-  assertEqual((output.artefacts[0] as any).errorCode, 'ambiguous_intent', 'rate-limited must not map to cost_exceeded');
+  expect(output.artefacts[0]!.kind, 'artefact kind').toBe('error');
+  expect((output.artefacts[0] as any).errorCode, 'rate-limited must not map to cost_exceeded').toBe('ambiguous_intent');
 });
 
 // forward-looking canonical.* capabilities are skipped — no MissingPermissionError
@@ -205,16 +184,16 @@ test('caller without canonical.contacts.read → succeeds (forward-looking skip)
   const ctx = makeContext({ callerCapabilities: new Set(['crm.query']) });
   const output = await runQuery({ rawIntent: 'stale contacts', subaccountId: 'sub-1' }, ctx, deps);
   // canonical.contacts.read is forward-looking; executor skips it
-  assert(output.artefacts[0]?.kind !== 'error', 'forward-looking cap must not block canonical dispatch');
+  expect(output.artefacts[0]?.kind !== 'error', 'forward-looking cap must not block canonical dispatch').toBeTruthy();
 });
 
 // NotImplementedError is Error subclass (kept for P2/P3 use)
 test('NotImplementedError extends Error', async () => {
   const { NotImplementedError } = await import('../crmQueryPlannerService.js');
   const e = new NotImplementedError('test message');
-  assert(e instanceof Error, 'must be instanceof Error');
-  assertEqual(e.name, 'NotImplementedError', 'name');
-  assert(e.message.includes('test message'), 'message preserved');
+  expect(e instanceof Error, 'must be instanceof Error').toBeTruthy();
+  expect(e.name, 'name').toBe('NotImplementedError');
+  expect(e.message.includes('test message'), 'message preserved').toBeTruthy();
 });
 
 // ── Orchestration-level cache tests (round 2 finding #3) ──────────────────────
@@ -266,9 +245,9 @@ test('cache: Stage 3 validated plan is cached → second identical request hits 
     makeContext(),
     { ...deps, runLlmStage3: stub },
   );
-  assertEqual(first.stageResolved, 3, 'first request resolves at Stage 3');
-  assertEqual(calls(), 1, 'Stage 3 called exactly once on first request');
-  assert(planCache._size() >= 1, 'cache populated after Stage 3 success');
+  expect(first.stageResolved, 'first request resolves at Stage 3').toBe(3);
+  expect(calls(), 'Stage 3 called exactly once on first request').toBe(1);
+  expect(planCache._size() >= 1, 'cache populated after Stage 3 success').toBeTruthy();
 
   // Request 2: hit → Stage 2 cache → same stub must NOT be called again
   const second = await runQuery(
@@ -276,9 +255,9 @@ test('cache: Stage 3 validated plan is cached → second identical request hits 
     makeContext(),
     { ...deps, runLlmStage3: stub },
   );
-  assertEqual(second.stageResolved, 2, 'second request resolves at Stage 2 via cache');
-  assertEqual(calls(), 1, 'Stage 3 NOT called on second (cached) request');
-  assertEqual(second.intentHash, first.intentHash, 'same intentHash across both calls');
+  expect(second.stageResolved, 'second request resolves at Stage 2 via cache').toBe(2);
+  expect(calls(), 'Stage 3 NOT called on second (cached) request').toBe(1);
+  expect(second.intentHash, 'same intentHash across both calls').toEqual(first.intentHash);
 });
 
 test('cache: principal_mismatch falls back to Stage 3 (does not reuse cache for a different caller)', async () => {
@@ -309,8 +288,8 @@ test('cache: principal_mismatch falls back to Stage 3 (does not reuse cache for 
     ctx1,
     { ...guardedDeps, runLlmStage3: stub },
   );
-  assertEqual(first.stageResolved, 3, 'caller 1 resolves at Stage 3 and cache is populated');
-  assertEqual(calls(), 1, 'Stage 3 invoked for caller 1');
+  expect(first.stageResolved, 'caller 1 resolves at Stage 3 and cache is populated').toBe(3);
+  expect(calls(), 'Stage 3 invoked for caller 1').toBe(1);
 
   // Caller 2 lacks the capability → cache lookup hits key, but rule-10 rerun
   // rejects (principal_mismatch) → pipeline falls back to Stage 3 (invoking
@@ -321,8 +300,8 @@ test('cache: principal_mismatch falls back to Stage 3 (does not reuse cache for 
     ctx2,
     { ...guardedDeps, runLlmStage3: stub },
   );
-  assertEqual(second.stageResolved, 3, 'caller 2 falls back to Stage 3 (not Stage 2)');
-  assertEqual(calls(), 2, 'Stage 3 invoked again for caller 2, not cache-reused');
+  expect(second.stageResolved, 'caller 2 falls back to Stage 3 (not Stage 2)').toBe(3);
+  expect(calls(), 'Stage 3 invoked again for caller 2, not cache-reused').toBe(2);
 });
 
 test('cache: Stage 1 hits do NOT populate the plan cache', async () => {
@@ -334,12 +313,7 @@ test('cache: Stage 1 hits do NOT populate the plan cache', async () => {
     makeContext(),
     deps,
   );
-  assertEqual(output.stageResolved, 1, 'sanity — intent resolves at Stage 1');
-  assertEqual(planCache._size(), 0, 'Stage 1 hits MUST NOT populate the plan cache (spec §9.3)');
+  expect(output.stageResolved, 'sanity — intent resolves at Stage 1').toBe(1);
+  expect(planCache._size(), 'Stage 1 hits MUST NOT populate the plan cache (spec §9.3)').toBe(0);
 });
 
-// ── Wait for all async tests ──────────────────────────────────────────────────
-
-await Promise.all(promises);
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

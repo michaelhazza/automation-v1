@@ -5,6 +5,7 @@
  * Run via: npx tsx scripts/__tests__/chatgpt-reviewPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildInputSummary,
   countFilesChangedInDiff,
@@ -15,29 +16,10 @@ import {
   type Finding,
 } from '../chatgpt-reviewPure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(msg);
-}
-
 function eq<T>(actual: T, expected: T, label: string) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  assert(a === e, `${label}: expected ${e}, got ${a}`);
+  expect(a === e, `${label}: expected ${e}, got ${a}`).toBeTruthy();
 }
 
 // --- countFilesChangedInDiff ---
@@ -94,14 +76,14 @@ test('buildInputSummary defaults branch and spec_path to null when omitted', () 
 // --- normaliseFinding ---
 
 test('normaliseFinding returns null for non-objects', () => {
-  assert(normaliseFinding(null, 0) === null, 'null');
-  assert(normaliseFinding('string', 0) === null, 'string');
-  assert(normaliseFinding(42, 0) === null, 'number');
+  expect(normaliseFinding(null, 0) === null, 'null').toBeTruthy();
+  expect(normaliseFinding('string', 0) === null, 'string').toBeTruthy();
+  expect(normaliseFinding(42, 0) === null, 'number').toBeTruthy();
 });
 
 test('normaliseFinding drops findings without a title', () => {
-  assert(normaliseFinding({ title: '' }, 0) === null, 'empty title');
-  assert(normaliseFinding({}, 0) === null, 'no title');
+  expect(normaliseFinding({ title: '' }, 0) === null, 'empty title').toBeTruthy();
+  expect(normaliseFinding({}, 0) === null, 'no title').toBeTruthy();
 });
 
 test('normaliseFinding accepts a fully-valid finding verbatim', () => {
@@ -115,13 +97,13 @@ test('normaliseFinding accepts a fully-valid finding verbatim', () => {
     evidence: 'server/services/userService.ts:42',
   };
   const f = normaliseFinding(raw, 6);
-  assert(f !== null, 'not null');
+  expect(f !== null, 'not null').toBeTruthy();
   eq(f as Finding, raw as Finding, 'finding');
 });
 
 test('normaliseFinding regenerates id when missing', () => {
   const f = normaliseFinding({ title: 'x' }, 4);
-  assert(f !== null, 'not null');
+  expect(f !== null, 'not null').toBeTruthy();
   eq((f as Finding).id, 'f-005', 'id');
 });
 
@@ -137,7 +119,7 @@ test('normaliseFinding falls back unknown enums to safe defaults', () => {
     },
     0,
   );
-  assert(f !== null, 'not null');
+  expect(f !== null, 'not null').toBeTruthy();
   eq((f as Finding).severity, 'medium', 'severity default');
   eq((f as Finding).category, 'improvement', 'category default');
   eq((f as Finding).finding_type, 'other', 'finding_type default');
@@ -152,7 +134,7 @@ test('parseModelOutput throws on non-objects', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'should throw');
+  expect(threw, 'should throw').toBeTruthy();
 });
 
 test('parseModelOutput accepts well-formed model JSON', () => {
@@ -248,7 +230,4 @@ test('stripJsonFence trims surrounding whitespace', () => {
   eq(stripJsonFence('   \n```json\n{"a": 1}\n```\n  '), '{"a": 1}', 'trim');
 });
 
-// --- summary ---
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// --- summary ---

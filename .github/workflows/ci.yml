@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     types: [labeled, synchronize]
 
@@ -11,12 +9,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: test
+  unit_tests:
+    name: unit tests
     runs-on: ubuntu-latest
-    # Run on push to main, or on PRs that carry the ready-to-merge label.
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
-    timeout-minutes: 45
+    if: contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -38,6 +35,8 @@ jobs:
       JWT_SECRET: ci-throwaway-jwt-secret-at-least-32-chars
       EMAIL_FROM: ci@automation-os.local
       NODE_ENV: test
+      SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1'
+      SYSTEM_INCIDENT_THROTTLE_MS: '100'
 
     steps:
       - uses: actions/checkout@v4
@@ -53,5 +52,62 @@ jobs:
       - name: Run migrations
         run: npm run migrate
 
+      - name: Verify workspace-actor coverage (Phase A gate)
+        run: npx tsx scripts/verify-workspace-actor-coverage.ts
+
       - name: Run tests
         run: npm test
+
+  integration_tests:
+    # Same image, same DB, NODE_ENV=integration. Surfaces the ~36 tests
+    # gated on `process.env.NODE_ENV === 'integration'` (real-DB exactly-once,
+    # idempotency races, RLS propagation). Load-bearing — failures block
+    # merge on a `ready-to-merge` PR (TI-005 closeout, branch
+    # claude/integration-tests-fix-2026-04-30).
+    name: integration tests
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: automation_os_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/automation_os_test
+      JWT_SECRET: ci-throwaway-jwt-secret-at-least-32-chars
+      EMAIL_FROM: ci@automation-os.local
+      NODE_ENV: integration
+      SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1'
+      SYSTEM_INCIDENT_THROTTLE_MS: '100'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations
+        run: npm run migrate
+
+      - name: Seed integration fixtures
+        run: npx tsx scripts/seed-integration-fixtures.ts
+
+      - name: Run integration tests
+        run: npx vitest run

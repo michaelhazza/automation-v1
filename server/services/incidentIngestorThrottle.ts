@@ -28,7 +28,7 @@ export function getThrottledCount(): number { return throttledCount; }
 export function getMapEvictionCount(): number { return mapEvictionCount; }
 
 export function __resetForTest(): void {
-  if (process.env.NODE_ENV !== 'test') return;
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'integration') return;
   lastSeenByFingerprint.clear();
   throttledCount = 0;
   mapEvictionCount = 0;

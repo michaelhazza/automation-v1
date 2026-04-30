@@ -9,25 +9,11 @@
  *   npx tsx server/services/__tests__/systemSkillHandlerValidatorPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   findMissingHandlers,
   SystemSkillHandlerError,
 } from '../systemSkillHandlerValidatorPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -118,5 +104,3 @@ test('SystemSkillHandlerError: name is set for instanceof checks', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`systemSkillHandlerValidatorPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

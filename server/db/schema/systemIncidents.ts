@@ -13,7 +13,7 @@ export type SystemIncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type SystemIncidentClassification = 'user_fault' | 'system_fault' | 'persistent_defect';
 export type SystemIncidentStatus = 'open' | 'investigating' | 'remediating' | 'resolved' | 'suppressed' | 'escalated';
 export type SystemIncidentTriageStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type SystemIncidentDiagnosisStatus = 'none' | 'valid' | 'partial';
+export type SystemIncidentDiagnosisStatus = 'none' | 'valid' | 'partial' | 'invalid';
 
 export const systemIncidents = pgTable(
   'system_incidents',
@@ -66,18 +66,19 @@ export const systemIncidents = pgTable(
     // Test-incident flag — hidden from default list, never auto-escalates
     isTestIncident: boolean('is_test_incident').notNull().default(false),
 
-    // Triage agent lifecycle
-    triageStatus: text('triage_status').notNull().default('pending').$type<SystemIncidentTriageStatus>(),
+    // ── Agent triage columns (migrations 0233 / 0237 / 0239) ────────────────
+    // Added long after the schema file was authored — kept here so drizzle
+    // emits them on UPDATE / SELECT instead of silently stripping the field
+    // names (which produces empty SET clauses → SQL syntax errors).
+    investigatePrompt: text('investigate_prompt'),
     triageAttemptCount: integer('triage_attempt_count').notNull().default(0),
     lastTriageAttemptAt: timestamp('last_triage_attempt_at', { withTimezone: true }),
-    lastTriageJobId: text('last_triage_job_id'),
     sweepEvidenceRunIds: uuid('sweep_evidence_run_ids').array().notNull().default(sql`'{}'`),
-
-    // Diagnosis agent output
+    triageStatus: text('triage_status').notNull().default('pending').$type<SystemIncidentTriageStatus>(),
     diagnosisStatus: text('diagnosis_status').notNull().default('none').$type<SystemIncidentDiagnosisStatus>(),
+    lastTriageJobId: text('last_triage_job_id'),
     agentDiagnosisRunId: uuid('agent_diagnosis_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
     agentDiagnosis: jsonb('agent_diagnosis'),
-    investigatePrompt: text('investigate_prompt'),
     promptWasUseful: boolean('prompt_was_useful'),
     promptFeedbackText: text('prompt_feedback_text'),
 

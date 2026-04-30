@@ -1,0 +1,10 @@
+server/services/crmQueryPlanner/__tests__/liveExecutor.test.ts
+server/services/crmQueryPlanner/__tests__/llmPlannerPromptPure.test.ts
+server/services/crmQueryPlanner/__tests__/normaliseIntentPure.test.ts
+server/services/crmQueryPlanner/__tests__/planCachePure.test.ts
+server/services/crmQueryPlanner/__tests__/plannerCostPure.test.ts
+server/services/crmQueryPlanner/__tests__/registryMatcherPure.test.ts
+server/services/crmQueryPlanner/__tests__/resultNormaliserPure.test.ts
+server/services/crmQueryPlanner/__tests__/schemaContextPure.test.ts
+server/services/crmQueryPlanner/__tests__/validatePlanPure.test.ts
+server/services/middleware/__tests__/errorHandling.failureError.test.ts

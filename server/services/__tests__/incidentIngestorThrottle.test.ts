@@ -5,10 +5,11 @@
  *   NODE_ENV=test npx tsx server/services/__tests__/incidentIngestorThrottle.test.ts
  */
 
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV ??= 'test';
 // Set a short throttle window for tests (must be set before module import)
-process.env.SYSTEM_INCIDENT_THROTTLE_MS = '50';
+process.env.SYSTEM_INCIDENT_THROTTLE_MS ??= '100';
 
+import { expect, test } from 'vitest';
 import {
   checkThrottle,
   getThrottledCount,
@@ -16,38 +17,6 @@ import {
   __resetForTest,
 } from '../incidentIngestorThrottle.js';
 
-let passed = 0;
-let failed = 0;
-const pending: Promise<void>[] = [];
-
-function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      pending.push(
-        result.then(() => {
-          passed++;
-          console.log(`  PASS  ${name}`);
-        }).catch((err: unknown) => {
-          failed++;
-          console.log(`  FAIL  ${name}`);
-          console.log(`        ${err instanceof Error ? err.message : err}`);
-        })
-      );
-    } else {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    }
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -62,31 +31,31 @@ function sleep(ms: number): Promise<void> {
 test('returns false on first call (pass-through)', () => {
   __resetForTest();
   const result = checkThrottle('fp-a');
-  assertEqual(result, false, 'first call should not be throttled');
-  assertEqual(getThrottledCount(), 0, 'throttle count should be 0');
+  expect(result, 'first call should not be throttled').toBe(false);
+  expect(getThrottledCount(), 'throttle count should be 0').toBe(0);
 });
 
 test('returns true within throttle window (throttled)', () => {
   __resetForTest();
   checkThrottle('fp-b');
   const result = checkThrottle('fp-b');
-  assertEqual(result, true, 'second call within window should be throttled');
-  assertEqual(getThrottledCount(), 1, 'throttle count should be 1');
+  expect(result, 'second call within window should be throttled').toBe(true);
+  expect(getThrottledCount(), 'throttle count should be 1').toBe(1);
 });
 
 test('returns false after throttle window expires', async () => {
   __resetForTest();
   checkThrottle('fp-c');
-  await sleep(60);
+  await sleep(150);
   const result = checkThrottle('fp-c');
-  assertEqual(result, false, 'call after window should not be throttled');
+  expect(result, 'call after window should not be throttled').toBe(false);
 });
 
 test('different fingerprints are throttled independently', () => {
   __resetForTest();
   checkThrottle('fp-x');
   const result = checkThrottle('fp-y');
-  assertEqual(result, false, 'different fingerprint should not be throttled');
+  expect(result, 'different fingerprint should not be throttled').toBe(false);
 });
 
 test('evicts oldest entry when map is at capacity', () => {
@@ -96,7 +65,7 @@ test('evicts oldest entry when map is at capacity', () => {
   }
   const evictionsBefore = getMapEvictionCount();
   checkThrottle('overflow-fp');
-  assert(getMapEvictionCount() > evictionsBefore, 'eviction should have occurred at capacity');
+  expect(getMapEvictionCount() > evictionsBefore, 'eviction should have occurred at capacity').toBeTruthy();
 });
 
 test('reset clears state between runs', () => {
@@ -106,13 +75,7 @@ test('reset clears state between runs', () => {
 
   __resetForTest();
   const result = checkThrottle('fp-reset');
-  assertEqual(result, false, 'after reset, known fingerprint should pass');
-  assertEqual(getThrottledCount(), 0, 'throttled count reset to 0');
+  expect(result, 'after reset, known fingerprint should pass').toBe(false);
+  expect(getThrottledCount(), 'throttled count reset to 0').toBe(0);
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-Promise.all(pending).then(() => {
-  console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
-});

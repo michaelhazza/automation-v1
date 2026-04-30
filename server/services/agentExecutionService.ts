@@ -95,6 +95,9 @@ import {
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 // Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
 import { validateArtefactForPersistence } from './briefArtefactValidator.js';
+// Integration block service — pauses runs waiting for OAuth connections
+import { checkRequiredIntegration } from './integrationBlockService.js';
+import { agentMessages } from '../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -261,6 +264,12 @@ export interface AgentRunRequest {
    */
   delegationScope?: DelegationScope;
   delegationDirection?: DelegationDirection;
+  /**
+   * When the run is triggered from a conversation context (e.g. chat panel
+   * test-run), the caller passes the conversationId here so that integration
+   * card messages can be persisted to agent_messages.
+   */
+  conversationId?: string;
 }
 
 export interface AgentRunResult {
@@ -271,7 +280,9 @@ export interface AgentRunResult {
   // iee-run-completed event handler. Callers that need a terminal result
   // must subscribe to WebSocket `agent:run:completed` or poll the agent
   // run status until it leaves 'delegated'.
-  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'blocked_awaiting_integration' — run is paused waiting for the user to
+  // connect an OAuth integration. Not terminal; completedAt is NOT written.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'blocked_awaiting_integration';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -1361,6 +1372,22 @@ export const agentExecutionService = {
       let finalStatus = (loopResult.finalStatus ?? 'completed') as
         'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'cancelled';
 
+      if (loopResult.finalStatus === 'blocked_awaiting_integration') {
+        // Run is paused — do NOT write completedAt or trigger finalisation.
+        // The blocked state has already been persisted inside the loop.
+        return {
+          runId: run.id,
+          status: 'blocked_awaiting_integration' as AgentRunResult['status'],
+          summary: null,
+          totalToolCalls: loopResult.totalToolCalls,
+          totalTokens: loopResult.totalTokens,
+          durationMs,
+          tasksCreated: loopResult.tasksCreated,
+          tasksUpdated: loopResult.tasksUpdated,
+          deliverablesCreated: loopResult.deliverablesCreated,
+        };
+      }
+
       // Pre-fetch runMetadata once — consumed by both the Reporting Agent
       // finalize hook and Phase B's runResultStatus derivation (which reads
       // `hadUncertainty` from runMetadata, where the clarification-timeout
@@ -2212,6 +2239,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     timeoutMs,
     taskId: request.taskId,
     isTestRun: request.isTestRun ?? false,
+    conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? undefined,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
@@ -2666,6 +2694,140 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       }
 
       if (skipTool) continue;
+
+      // ── Integration block check ───────────────────────────────────────────
+      // Determine if this tool requires an OAuth integration that is not yet
+      // connected. In v1 checkRequiredIntegration always returns shouldBlock:false;
+      // the full block path is wired and ready to activate when ACTION_REGISTRY
+      // entries begin declaring requiredIntegration fields.
+      {
+        // Read current runMetadata for block-sequence tracking
+        const [runMeta] = await db
+          .select({ runMetadata: agentRuns.runMetadata })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, runId))
+          .limit(1);
+        const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
+        const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
+
+        let blockDecision: Awaited<ReturnType<typeof checkRequiredIntegration>>;
+        try {
+          blockDecision = await checkRequiredIntegration(
+            toolCall.name,
+            toolCall.input as Record<string, unknown>,
+            {
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+              runId,
+              agentId: request.agentId,
+              currentBlockSequence: newBlockSeq,
+            },
+          );
+        } catch (err: any) {
+          if (err?.errorCode === 'TOOL_NOT_RESUMABLE') {
+            // Cancel the run — this tool cannot be safely paused mid-execution.
+            await db.update(agentRuns).set({
+              status: 'cancelled',
+              runResultStatus: 'failed',
+              runMetadata: {
+                ...currentRunMeta,
+                cancelReason: 'tool_not_resumable',
+              },
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(agentRuns.id, runId));
+
+            logger.error('tool_not_resumable', {
+              runId,
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+              blockedReason: 'integration_required',
+              toolName: toolCall.name,
+              action: 'tool_not_resumable',
+            });
+
+            finalStatus = 'failed';
+            emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+            break outerLoop;
+          }
+          throw err;
+        }
+
+        if (blockDecision.shouldBlock) {
+          const plaintext = blockDecision.plaintext;
+          const tokenHash = blockDecision.tokenHash;
+          const appBase = process.env.APP_BASE_URL ?? '';
+          const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+          const cardContent = {
+            ...blockDecision.card,
+            actionUrl,
+            resumeToken: plaintext,
+            expiresAt: blockDecision.expiresAt.toISOString(),
+            schemaVersion: 1 as const,
+          };
+
+          // Persist blocked state on run
+          await db.update(agentRuns).set({
+            blockedReason: 'integration_required',
+            blockedExpiresAt: blockDecision.expiresAt,
+            integrationResumeToken: tokenHash,
+            integrationDedupKey: blockDecision.integrationDedupKey,
+            runMetadata: {
+              ...currentRunMeta,
+              currentBlockSequence: newBlockSeq,
+              blockedToolCall: {
+                toolName: toolCall.name,
+                toolArgs: toolCall.input,
+                dedupKey: blockDecision.integrationDedupKey,
+              },
+            },
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.info('run_blocked', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            integrationId: blockDecision.integrationId,
+            blockSequence: newBlockSeq,
+            action: 'run_blocked',
+          });
+
+          // Persist the integration card as an assistant message in the conversation.
+          // Skip insert if conversationId is empty — guard prevents a DB error when no conversation is associated.
+          const _integrationConvId =
+            request.conversationId ??
+            (request.triggerContext?.conversationId as string | undefined) ??
+            '';
+          if (_integrationConvId) {
+            await db.insert(agentMessages).values({
+              conversationId: _integrationConvId,
+              role: 'assistant',
+              content: `Integration required: ${cardContent.integrationId}`,
+              meta: cardContent as any,
+              createdAt: new Date(),
+            });
+            logger.info('integration_card_emitted', {
+              runId,
+              conversationId: _integrationConvId,
+              integrationId: cardContent.integrationId,
+              blockSequence: cardContent.blockSequence,
+              action: 'integration_card_emitted',
+            });
+          }
+
+          // Break out of the agent loop — run stays in 'running' status
+          // with blocked_reason set. The expiry sweep will cancel it if
+          // the user never connects.
+          finalStatus = 'blocked_awaiting_integration';
+          // Note: emitLoopTermination only accepts its fixed union — use
+          // the closest structural match and log the actual reason separately.
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+      }
 
       totalToolCalls++;
       const toolStart = Date.now();

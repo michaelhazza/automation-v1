@@ -12,22 +12,8 @@
  * Spec: docs/config-agent-guidelines-spec.md §3.4 / §3.5
  */
 
+import { expect, test } from 'vitest';
 import { decideSeederAction } from '../../../scripts/lib/seedConfigAgentGuidelinesPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -39,31 +25,29 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 
 test('no existing block → create', () => {
   const result = decideSeederAction({ blockExists: false, attachmentExists: false, contentMatches: false });
-  assertEqual(result.kind, 'create', 'decision');
+  expect(result.kind, 'decision').toBe('create');
 });
 
 test('block exists, no attachment → reattach', () => {
   const result = decideSeederAction({ blockExists: true, attachmentExists: false, contentMatches: true });
-  assertEqual(result.kind, 'reattach', 'decision');
+  expect(result.kind, 'decision').toBe('reattach');
 });
 
 test('block exists, no attachment, content differs → reattach (attachment has priority over divergence)', () => {
   const result = decideSeederAction({ blockExists: true, attachmentExists: false, contentMatches: false });
-  assertEqual(result.kind, 'reattach', 'decision');
+  expect(result.kind, 'decision').toBe('reattach');
 });
 
 test('block exists, attached, content matches → noop', () => {
   const result = decideSeederAction({ blockExists: true, attachmentExists: true, contentMatches: true });
-  assertEqual(result.kind, 'noop', 'decision');
+  expect(result.kind, 'decision').toBe('noop');
 });
 
 test('block exists, attached, content differs → warn_divergence (runtime edit preserved)', () => {
   const result = decideSeederAction({ blockExists: true, attachmentExists: true, contentMatches: false });
-  assertEqual(result.kind, 'warn_divergence', 'decision');
+  expect(result.kind, 'decision').toBe('warn_divergence');
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 console.log('\n--- seedConfigAgentGuidelinesPure ---');
-console.log(`  ${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exitCode = 1;

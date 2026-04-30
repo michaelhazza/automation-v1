@@ -14,6 +14,7 @@
 // Imports the PURE module (runContextLoaderPure.ts), which has zero
 // db / env dependencies — keeps the test runnable without DATABASE_URL
 // or any other environment setup.
+import { expect, test } from 'vitest';
 import {
   processContextPool,
   resolveScheduledTaskId,
@@ -39,25 +40,6 @@ interface LoadedDataSource {
   truncated?: boolean;
   suppressedByOverride?: boolean;
   suppressedBy?: string;
-}
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -97,7 +79,7 @@ test('sorts by scope precedence: task_instance < scheduled_task < subaccount < a
   ];
   const result = processContextPool(pool);
   // pool is mutated in place; check the order
-  assertEqual(pool.map(s => s.id), ['b', 'd', 'c', 'a'], 'sort order');
+  expect(pool.map(s => s.id), 'sort order').toEqual(['b', 'd', 'c', 'a']);
   void result;
 });
 
@@ -108,7 +90,7 @@ test('within a scope, sorts by priority ascending (lower wins)', () => {
     makeSource({ id: 'p2', scope: 'agent', name: 'p2', priority: 2 }),
   ];
   processContextPool(pool);
-  assertEqual(pool.map(s => s.id), ['p1', 'p2', 'p3'], 'priority order');
+  expect(pool.map(s => s.id), 'priority order').toEqual(['p1', 'p2', 'p3']);
 });
 
 // ─── orderIndex assignment ──────────────────────────────────────────────────
@@ -124,10 +106,10 @@ test('orderIndex assigned to every entry on the full sorted pool BEFORE suppress
   // Both should have orderIndex set
   const winner = result.eager.find(s => s.id === 'st-glossary')!;
   const loser = result.suppressed.find(s => s.id === 'a-glossary')!;
-  assert(winner.orderIndex === 0, 'winner orderIndex should be 0');
-  assert(loser.orderIndex === 1, 'loser orderIndex should be 1');
-  assert(loser.suppressedByOverride === true, 'loser must be marked suppressedByOverride');
-  assert(loser.suppressedBy === 'st-glossary', 'loser.suppressedBy must point at the winner id');
+  expect(winner.orderIndex === 0, 'winner orderIndex should be 0').toBeTruthy();
+  expect(loser.orderIndex === 1, 'loser orderIndex should be 1').toBeTruthy();
+  expect(loser.suppressedByOverride === true, 'loser must be marked suppressedByOverride').toBeTruthy();
+  expect(loser.suppressedBy === 'st-glossary', 'loser.suppressedBy must point at the winner id').toBeTruthy();
 });
 
 test('orderIndex stable across two runs with same input (determinism)', () => {
@@ -146,7 +128,7 @@ test('orderIndex stable across two runs with same input (determinism)', () => {
   // Both should have identical orderIndex per id
   for (const s1 of pool1) {
     const s2 = pool2.find(x => x.id === s1.id)!;
-    assertEqual(s1.orderIndex, s2.orderIndex, `orderIndex stability for ${s1.id}`);
+    expect(s1.orderIndex, `orderIndex stability for ${s1.id}`).toEqual(s2.orderIndex);
   }
 });
 
@@ -158,10 +140,10 @@ test('case and whitespace normalisation: "Glossary.MD" matches " glossary.md "',
     makeSource({ id: 'st-g', scope: 'scheduled_task', name: ' glossary.md ' }),
   ];
   const result = processContextPool(pool);
-  assert(result.eager.length === 1, `expected 1 winner, got ${result.eager.length}`);
-  assert(result.eager[0].id === 'st-g', 'scheduled_task scope should win');
-  assert(result.suppressed.length === 1, `expected 1 suppressed, got ${result.suppressed.length}`);
-  assert(result.suppressed[0].id === 'agent-g', 'agent scope should be suppressed');
+  expect(result.eager.length === 1, `expected 1 winner, got ${result.eager.length}`).toBeTruthy();
+  expect(result.eager[0].id === 'st-g', 'scheduled_task scope should win').toBeTruthy();
+  expect(result.suppressed.length === 1, `expected 1 suppressed, got ${result.suppressed.length}`).toBeTruthy();
+  expect(result.suppressed[0].id === 'agent-g', 'agent scope should be suppressed').toBeTruthy();
 });
 
 test('all four scopes share a name: task_instance wins, others suppressed by it', () => {
@@ -173,16 +155,16 @@ test('all four scopes share a name: task_instance wins, others suppressed by it'
   ];
   const result = processContextPool(pool);
   // Only the task_instance source should appear in the active eager set
-  assertEqual(result.eager.map(s => s.id), ['ti'], 'eager winners');
-  assertEqual(result.manifest.length, 0, 'manifest should be empty');
+  expect(result.eager.map(s => s.id), 'eager winners').toEqual(['ti']);
+  expect(result.manifest.length, 'manifest should be empty').toBe(0);
   // The other three should all be suppressed and point at the task_instance
   // source as the suppressedBy id.
   const suppressedIds = result.suppressed.map(s => s.id).sort();
-  assertEqual(suppressedIds, ['agent', 'st', 'sub'], 'suppressed ids');
+  expect(suppressedIds, 'suppressed ids').toEqual(['agent', 'st', 'sub']);
   for (const s of result.suppressed) {
-    assert(s.suppressedByOverride === true, `${s.id} should be marked suppressedByOverride`);
-    assertEqual(s.suppressedBy, 'ti', `${s.id} suppressedBy`);
-    assertEqual(s.includedInPrompt, false, `${s.id} includedInPrompt`);
+    expect(s.suppressedByOverride === true, `${s.id} should be marked suppressedByOverride`).toBeTruthy();
+    expect(s.suppressedBy, `${s.id} suppressedBy`).toBe('ti');
+    expect(s.includedInPrompt, `${s.id} includedInPrompt`).toBe(false);
   }
 });
 
@@ -193,10 +175,10 @@ test('three scopes share a name: scheduled_task wins over subaccount and agent',
     makeSource({ id: 'st', scope: 'scheduled_task', name: 'styleguide.md' }),
   ];
   const result = processContextPool(pool);
-  assert(result.eager.length === 1, `expected 1 winner, got ${result.eager.length}`);
-  assert(result.eager[0].id === 'st', 'scheduled_task scope wins');
-  assert(result.suppressed.length === 2, `expected 2 suppressed, got ${result.suppressed.length}`);
-  assert(result.suppressed.every(s => s.suppressedBy === 'st'), 'both losers point at scheduled_task winner');
+  expect(result.eager.length === 1, `expected 1 winner, got ${result.eager.length}`).toBeTruthy();
+  expect(result.eager[0].id === 'st', 'scheduled_task scope wins').toBeTruthy();
+  expect(result.suppressed.length === 2, `expected 2 suppressed, got ${result.suppressed.length}`).toBeTruthy();
+  expect(result.suppressed.every(s => s.suppressedBy === 'st'), 'both losers point at scheduled_task winner').toBeTruthy();
 });
 
 test('lazy + lazy override: winner is still lazy, loser is suppressed', () => {
@@ -205,10 +187,10 @@ test('lazy + lazy override: winner is still lazy, loser is suppressed', () => {
     makeSource({ id: 'st', scope: 'scheduled_task', name: 'big.md', loadingMode: 'lazy' }),
   ];
   const result = processContextPool(pool);
-  assert(result.eager.length === 0, 'no eager entries');
-  assert(result.manifest.length === 1, `expected 1 manifest entry, got ${result.manifest.length}`);
-  assert(result.manifest[0].id === 'st', 'scheduled_task scope wins');
-  assert(result.suppressed.length === 1, 'agent scope is suppressed');
+  expect(result.eager.length === 0, 'no eager entries').toBeTruthy();
+  expect(result.manifest.length === 1, `expected 1 manifest entry, got ${result.manifest.length}`).toBeTruthy();
+  expect(result.manifest[0].id === 'st', 'scheduled_task scope wins').toBeTruthy();
+  expect(result.suppressed.length === 1, 'agent scope is suppressed').toBeTruthy();
 });
 
 // ─── Pre-prompt budget walk ──────────────────────────────────────────────────
@@ -220,7 +202,7 @@ test('budget walk: everything fits → all marked includedInPrompt: true', () =>
     makeSource({ id: '3', scope: 'agent', name: 'c', tokenCount: 1500, priority: 2 }),
   ];
   const result = processContextPool(pool, { maxEagerBudget: 60000 });
-  assert(result.eager.every(s => s.includedInPrompt === true), 'all eager fit');
+  expect(result.eager.every(s => s.includedInPrompt === true), 'all eager fit').toBeTruthy();
 });
 
 test('budget walk: partial fit — first sources fit, later ones excluded', () => {
@@ -233,13 +215,13 @@ test('budget walk: partial fit — first sources fit, later ones excluded', () =
   ];
   const result = processContextPool(pool, { maxEagerBudget: 50000 });
   // Two sources fit (40k), third would push to 60k, doesn't fit
-  assert(result.eager[0].includedInPrompt === true, 'source 1 fits');
-  assert(result.eager[1].includedInPrompt === true, 'source 2 fits');
-  assert(result.eager[2].includedInPrompt === false, 'source 3 excluded');
-  assert(result.eager[3].includedInPrompt === false, 'source 4 excluded');
-  assert(result.eager[4].includedInPrompt === false, 'source 5 excluded');
+  expect(result.eager[0].includedInPrompt === true, 'source 1 fits').toBeTruthy();
+  expect(result.eager[1].includedInPrompt === true, 'source 2 fits').toBeTruthy();
+  expect(result.eager[2].includedInPrompt === false, 'source 3 excluded').toBeTruthy();
+  expect(result.eager[3].includedInPrompt === false, 'source 4 excluded').toBeTruthy();
+  expect(result.eager[4].includedInPrompt === false, 'source 5 excluded').toBeTruthy();
   // All five are still in the eager array (snapshot completeness)
-  assert(result.eager.length === 5, 'excluded sources stay in result.eager for snapshot');
+  expect(result.eager.length === 5, 'excluded sources stay in result.eager for snapshot').toBeTruthy();
 });
 
 test('budget walk: precedence preserved under pressure (most-specific wins)', () => {
@@ -254,9 +236,9 @@ test('budget walk: precedence preserved under pressure (most-specific wins)', ()
   const taskSource = result.eager.find(s => s.id === 'task')!;
   const stSource = result.eager.find(s => s.id === 'st')!;
   const agentSource = result.eager.find(s => s.id === 'agent')!;
-  assert(taskSource.includedInPrompt === true, 'task_instance fits');
-  assert(stSource.includedInPrompt === true, 'scheduled_task fits');
-  assert(agentSource.includedInPrompt === false, 'agent excluded by budget');
+  expect(taskSource.includedInPrompt === true, 'task_instance fits').toBeTruthy();
+  expect(stSource.includedInPrompt === true, 'scheduled_task fits').toBeTruthy();
+  expect(agentSource.includedInPrompt === false, 'agent excluded by budget').toBeTruthy();
 });
 
 test('lazy sources do not consume eager budget', () => {
@@ -266,7 +248,7 @@ test('lazy sources do not consume eager budget', () => {
   ];
   const result = processContextPool(pool, { maxEagerBudget: 60000 });
   const eagerSource = result.eager[0];
-  assert(eagerSource.includedInPrompt === true, '50k eager source still fits in 60k budget');
+  expect(eagerSource.includedInPrompt === true, '50k eager source still fits in 60k budget').toBeTruthy();
   // Lazy source should not consume any of the 60k budget
 });
 
@@ -277,9 +259,9 @@ test('lazy manifest cap: 10 lazy sources with cap=5 → manifestForPrompt.length
     makeSource({ id: `lazy-${i}`, scope: 'agent', name: `lazy-${i}`, loadingMode: 'lazy', priority: i })
   );
   const result = processContextPool(pool, { maxLazyManifestItems: 5 });
-  assert(result.manifest.length === 10, 'full manifest has all 10');
-  assert(result.manifestForPrompt.length === 5, 'capped subset has 5');
-  assert(result.manifestElidedCount === 5, 'elided count is 5');
+  expect(result.manifest.length === 10, 'full manifest has all 10').toBeTruthy();
+  expect(result.manifestForPrompt.length === 5, 'capped subset has 5').toBeTruthy();
+  expect(result.manifestElidedCount === 5, 'elided count is 5').toBeTruthy();
 });
 
 test('manifest cap: 3 lazy sources with cap=10 → manifestForPrompt has all 3, elided=0', () => {
@@ -287,8 +269,8 @@ test('manifest cap: 3 lazy sources with cap=10 → manifestForPrompt has all 3, 
     makeSource({ id: `lazy-${i}`, scope: 'agent', name: `lazy-${i}`, loadingMode: 'lazy', priority: i })
   );
   const result = processContextPool(pool, { maxLazyManifestItems: 10 });
-  assert(result.manifestForPrompt.length === 3, 'full manifest fits');
-  assert(result.manifestElidedCount === 0, 'no elision');
+  expect(result.manifestForPrompt.length === 3, 'full manifest fits').toBeTruthy();
+  expect(result.manifestElidedCount === 0, 'no elision').toBeTruthy();
 });
 
 // ─── Snapshot completeness ──────────────────────────────────────────────────
@@ -303,8 +285,8 @@ test('snapshot completeness: mixed scenario has every entry tagged', () => {
   const result = processContextPool(pool, { maxEagerBudget: 50000 });
   // All four should have orderIndex set
   for (const s of [...result.eager, ...result.manifest, ...result.suppressed]) {
-    assert(typeof s.orderIndex === 'number', `${s.id} should have orderIndex`);
-    assert(s.orderIndex! >= 0, `${s.id} orderIndex should be >= 0`);
+    expect(typeof s.orderIndex === 'number', `${s.id} should have orderIndex`).toBeTruthy();
+    expect(s.orderIndex! >= 0, `${s.id} orderIndex should be >= 0`).toBeTruthy();
   }
 });
 
@@ -312,30 +294,22 @@ test('snapshot completeness: mixed scenario has every entry tagged', () => {
 
 test('resolveScheduledTaskId: source=scheduled_task with scheduledTaskId returns id', () => {
   const result = resolveScheduledTaskId({ source: 'scheduled_task', scheduledTaskId: 'st-123' });
-  assert(result === 'st-123', 'should return scheduledTaskId');
+  expect(result === 'st-123', 'should return scheduledTaskId').toBeTruthy();
 });
 
 test('resolveScheduledTaskId: source=scheduled_task_retry STILL returns id (Blocker 1)', () => {
   const result = resolveScheduledTaskId({ source: 'scheduled_task_retry', scheduledTaskId: 'st-456' });
-  assert(
-    result === 'st-456',
-    'retry path must also load scheduled-task context — this is the Blocker 1 fix'
-  );
+  expect(result === 'st-456', 'retry path must also load scheduled-task context — this is the Blocker 1 fix').toBeTruthy();
 });
 
 test('resolveScheduledTaskId: no triggerContext → null', () => {
   const result = resolveScheduledTaskId(undefined);
-  assert(result === null, 'null when no trigger context');
+  expect(result === null, 'null when no trigger context').toBeTruthy();
 });
 
 test('resolveScheduledTaskId: triggerContext without scheduledTaskId → null', () => {
   const result = resolveScheduledTaskId({ source: 'manual' });
-  assert(result === null, 'null when scheduledTaskId is missing');
+  expect(result === null, 'null when scheduledTaskId is missing').toBeTruthy();
 });
 
 // ─── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed\n`);
-if (failed > 0) {
-  process.exit(1);
-}

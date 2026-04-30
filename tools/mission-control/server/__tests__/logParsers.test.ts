@@ -75,6 +75,24 @@ test('parseReviewLogFilename parses chatgpt-pr-review log with mixed-case slug',
   eq(m!.slug, 'claude-add-system-monitoring-BgLlY', 'slug');
 });
 
+test('parseReviewLogFilename parses adversarial-review log', () => {
+  const m = parseReviewLogFilename('adversarial-review-log-feature-foo-2026-04-30T08-00-00Z.md');
+  assert(m !== null, 'not null');
+  eq(m!.kind, 'adversarial-review', 'kind');
+  eq(m!.slug, 'feature-foo', 'slug');
+  eq(m!.timestampIso, '2026-04-30T08:00:00Z', 'iso');
+});
+
+test('parseReviewLogFilename parses adversarial-review log with hyphenated slug', () => {
+  const m = parseReviewLogFilename(
+    'adversarial-review-log-agentic-engineering-notes-2026-04-30T09-15-22Z.md',
+  );
+  assert(m !== null, 'not null');
+  eq(m!.kind, 'adversarial-review', 'kind');
+  eq(m!.slug, 'agentic-engineering-notes', 'slug');
+  eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso');
+});
+
 test('parseReviewLogFilename returns null for non-conforming names', () => {
   assert(parseReviewLogFilename('readme.md') === null, 'readme');
   assert(parseReviewLogFilename('pr-review-log-2026-04-25T11-00-13Z.md') === null, 'no slug');

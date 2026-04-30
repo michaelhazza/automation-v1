@@ -47,6 +47,8 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Compare expected vs actual behaviour
 - Ask yourself: "Would a senior/staff engineer approve this?"
 
+**Verifiability heuristic.** Before scoping work, ask: is the success condition checkable by a deterministic test or only by human judgment? Verifiable work (route returns X, row saves with the right shape, test passes) can be agent-driven aggressively. Non-verifiable work (UX polish, tone, copy, "feels right", layout taste) needs a human in the loop on every iteration — frontier models are jagged here and will not self-correct toward the goal. For non-verifiable work: do not subagent-drive it overnight; sit with it; iterate visually.
+
 ## Verification Commands
 
 Run these after every non-trivial change. No task is complete until all relevant checks pass.
@@ -142,6 +144,7 @@ Authoring tests and gates is encouraged — running the full battery of them loc
 - Not later. Not "I'll come back to it." Right now, as part of the task.
 - Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
 - Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+- **Canonical checklist:** `docs/doc-sync.md` — lists every reference doc with its update trigger. Enforced at finalisation by `chatgpt-pr-review`, `chatgpt-spec-review`, and `feature-coordinator`.
 
 ---
 
@@ -220,6 +223,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug present for per-chunk invocations from `feature-coordinator`). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done. For spec-driven tasks, run `spec-conformance` first. |
 | `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
+| `adversarial-reviewer` | Adversarial / threat-model review — read-only. Hunts tenant-isolation, auth, race-condition, injection, resource-abuse, and cross-tenant data-leakage holes. Emits a fenced `adversarial-review-log` block; the caller persists it. Phase 1 advisory; non-blocking. | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked. Auto-invocation from `feature-coordinator` is deferred. |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
 | `audit-runner` | Runs codebase audits per `docs/codebase-audit-framework.md`. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings → high-confidence fixes → deferred), self-writes the audit log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`, routes deferred items to `tasks/todo.md`. Uses a TodoWrite task list to process areas one by one without spawning sub-agents. Prints post-audit commands (`spec-conformance`, `pr-reviewer`) for the caller to run after the audit completes. Auto-commits and auto-pushes within its own flow. Does not create PRs — the user does. | Periodic codebase hygiene (quarterly), pre-major-release gating, post-incident health check, or any time a subsystem (RLS, agent execution, queues, skills, webhooks, frontend) feels gnarly. Default to Hotspot mode. |
@@ -261,6 +265,7 @@ Classify every task before starting:
 "feature-coordinator: implement [feature name]"
 "audit-runner: hotspot rls"              # see audit-runner.md for full mode list
 "dual-reviewer: [brief description]"     # local-only, user must explicitly ask
+"adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
 "spec-reviewer: review docs/path-to-spec.md"
 ```
 
@@ -273,6 +278,9 @@ For Standard/Significant/Major tasks, before marking done or opening a PR:
 1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
 2. `pr-reviewer` — always.
 3. `dual-reviewer` — optional, local-only, user must explicitly ask.
+4. `adversarial-reviewer` — optional, user must explicitly ask. Phase 1 advisory; findings are non-blocking unless the user escalates.
+
+Steps 3 and 4 are independent optional steps; their order does not affect correctness.
 
 Full caller contracts (filename convention, deferred-items routing, NON_CONFORMANT triage, log persistence) live in [`tasks/review-logs/README.md`](./tasks/review-logs/README.md). Each agent definition under `.claude/agents/` carries its own copy of the contract relevant to that agent.
 

@@ -14,7 +14,7 @@
  *   npx tsx server/services/__tests__/invokeAutomationStepErrorShapePure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -22,21 +22,6 @@ import {
   KNOWN_AUTOMATION_STEP_ERROR_STATUSES,
   type AutomationStepError,
 } from '../../lib/workflow/types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('AutomationStepError shape (§1.6):');
@@ -56,13 +41,10 @@ test('case 1: missing-connection error has type=configuration + status + context
     context: { automationId, missingKeys },
   };
 
-  assert.equal(err.type, 'configuration');
-  assert.equal(err.status, 'missing_connection');
-  assert.equal((err.context as { automationId: string }).automationId, automationId);
-  assert.deepStrictEqual(
-    (err.context as { missingKeys: string[] }).missingKeys,
-    missingKeys,
-  );
+  expect(err.type).toBe('configuration');
+  expect(err.status).toBe('missing_connection');
+  expect((err.context as { automationId: string }).automationId).toBe(automationId);
+  expect((err.context as { missingKeys: string[] }).missingKeys).toEqual(missingKeys);
 });
 
 // ─── Case 2: existing non-configuration errors keep status/context absent ───
@@ -76,8 +58,8 @@ test('case 2: existing execution-class error has no status/context fields', () =
     message: `Automation 'aut-missing' not found.`,
     retryable: false,
   };
-  assert.equal(err.status, undefined);
-  assert.equal(err.context, undefined);
+  expect(err.status).toBe(undefined);
+  expect(err.context).toBe(undefined);
 });
 
 // ─── Case 3: TypeScript narrowing on type==='configuration' compiles ────────
@@ -96,7 +78,7 @@ test('case 3: type-narrowing on configuration variant compiles', () => {
     // Within this branch, err is still AutomationStepError (no narrowing
     // beyond the discriminant). context access is allowed because it is
     // optional on the parent shape.
-    assert.ok(err.context);
+    expect(err.context).toBeTruthy();
   }
 });
 
@@ -139,23 +121,15 @@ test('case 4: every status string written by production code is listed in KNOWN_
       capturedStatuses.push(statusMatch[1]);
     }
   }
-  assert.ok(
-    capturedStatuses.length > 0,
-    'expected at least one status: \'...\' construction in the service file (regex drifted?)',
-  );
+  expect(capturedStatuses.length > 0).toBeTruthy();
   for (const value of capturedStatuses) {
     // Cast to readonly string[] so the .includes() check is a runtime,
     // not a type-narrowed, comparison. A bare-string status that escapes
     // the type system (via a future `as string` cast or a type loosening
     // back to `status?: string`) would surface here.
-    assert.ok(
-      (KNOWN_AUTOMATION_STEP_ERROR_STATUSES as readonly string[]).includes(value),
-      `production status '${value}' (captured from invokeAutomationStepService.ts) is not listed in KNOWN_AUTOMATION_STEP_ERROR_STATUSES`,
-    );
+    expect((KNOWN_AUTOMATION_STEP_ERROR_STATUSES as readonly string[]).includes(value)).toBeTruthy();
   }
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

@@ -10,26 +10,12 @@
  *   npx tsx server/services/__tests__/pulseServiceResolvedUrl.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { _resolveUrlForItem } from '../pulseService';
 
 // ---------------------------------------------------------------------------
 // Lightweight test runner (matches project tsx convention)
 // ---------------------------------------------------------------------------
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -50,11 +36,7 @@ function assertNull(actual: unknown, label: string) {
 console.log('\n── review ─────────────────────────────────────────────────────');
 
 test('review with subaccountId returns /clientpulse/clients/:subaccountId', () => {
-  assertEqual(
-    _resolveUrlForItem('review', 'item-1', 'sub-abc'),
-    '/clientpulse/clients/sub-abc',
-    'review with subaccountId',
-  );
+  expect(_resolveUrlForItem('review', 'item-1', 'sub-abc'), 'review with subaccountId').toBe('/clientpulse/clients/sub-abc');
 });
 
 test('review without subaccountId (undefined) returns null', () => {
@@ -76,11 +58,7 @@ test('review without subaccountId (empty string) returns null', () => {
 console.log('\n── task ──────────────────────────────────────────────────────');
 
 test('task with subaccountId returns /admin/subaccounts/:subaccountId/workspace', () => {
-  assertEqual(
-    _resolveUrlForItem('task', 'task-99', 'sub-xyz'),
-    '/admin/subaccounts/sub-xyz/workspace',
-    'task with subaccountId',
-  );
+  expect(_resolveUrlForItem('task', 'task-99', 'sub-xyz'), 'task with subaccountId').toBe('/admin/subaccounts/sub-xyz/workspace');
 });
 
 test('task without subaccountId (undefined) returns null', () => {
@@ -102,19 +80,11 @@ test('task without subaccountId (empty string) returns null', () => {
 console.log('\n── failed_run ────────────────────────────────────────────────');
 
 test('failed_run with subaccountId returns /runs/:id/live', () => {
-  assertEqual(
-    _resolveUrlForItem('failed_run', 'run-42', 'sub-abc'),
-    '/runs/run-42/live',
-    'failed_run with subaccountId',
-  );
+  expect(_resolveUrlForItem('failed_run', 'run-42', 'sub-abc'), 'failed_run with subaccountId').toBe('/runs/run-42/live');
 });
 
 test('failed_run without subaccountId returns /runs/:id/live', () => {
-  assertEqual(
-    _resolveUrlForItem('failed_run', 'run-42', null),
-    '/runs/run-42/live',
-    'failed_run without subaccountId',
-  );
+  expect(_resolveUrlForItem('failed_run', 'run-42', null), 'failed_run without subaccountId').toBe('/runs/run-42/live');
 });
 
 test('failed_run URL uses run id, not subaccountId', () => {
@@ -134,19 +104,11 @@ test('failed_run URL uses run id, not subaccountId', () => {
 console.log('\n── health_finding ────────────────────────────────────────────');
 
 test('health_finding returns /admin/health', () => {
-  assertEqual(
-    _resolveUrlForItem('health_finding', 'finding-1', null),
-    '/admin/health',
-    'health_finding null subaccountId',
-  );
+  expect(_resolveUrlForItem('health_finding', 'finding-1', null), 'health_finding null subaccountId').toBe('/admin/health');
 });
 
 test('health_finding ignores subaccountId', () => {
-  assertEqual(
-    _resolveUrlForItem('health_finding', 'finding-1', 'sub-abc'),
-    '/admin/health',
-    'health_finding with subaccountId',
-  );
+  expect(_resolveUrlForItem('health_finding', 'finding-1', 'sub-abc'), 'health_finding with subaccountId').toBe('/admin/health');
 });
 
 // ---------------------------------------------------------------------------
@@ -173,7 +135,7 @@ function makePulseItem(
 
 test('review with subaccountId — resolvedUrl on PulseItem', () => {
   const item = makePulseItem('review', 'rev-1', 'sub-1');
-  assertEqual(item.resolvedUrl, '/clientpulse/clients/sub-1', 'review PulseItem resolvedUrl');
+  expect(item.resolvedUrl, 'review PulseItem resolvedUrl').toBe('/clientpulse/clients/sub-1');
 });
 
 test('review without subaccountId — resolvedUrl null on PulseItem', () => {
@@ -183,7 +145,7 @@ test('review without subaccountId — resolvedUrl null on PulseItem', () => {
 
 test('task with subaccountId — resolvedUrl on PulseItem', () => {
   const item = makePulseItem('task', 'task-1', 'sub-2');
-  assertEqual(item.resolvedUrl, '/admin/subaccounts/sub-2/workspace', 'task PulseItem resolvedUrl');
+  expect(item.resolvedUrl, 'task PulseItem resolvedUrl').toBe('/admin/subaccounts/sub-2/workspace');
 });
 
 test('task without subaccountId — resolvedUrl null on PulseItem', () => {
@@ -193,12 +155,12 @@ test('task without subaccountId — resolvedUrl null on PulseItem', () => {
 
 test('failed_run — resolvedUrl on PulseItem', () => {
   const item = makePulseItem('failed_run', 'run-77', 'sub-3');
-  assertEqual(item.resolvedUrl, '/runs/run-77/live', 'failed_run PulseItem resolvedUrl');
+  expect(item.resolvedUrl, 'failed_run PulseItem resolvedUrl').toBe('/runs/run-77/live');
 });
 
 test('health_finding — resolvedUrl on PulseItem', () => {
   const item = makePulseItem('health_finding', 'finding-5', null);
-  assertEqual(item.resolvedUrl, '/admin/health', 'health_finding PulseItem resolvedUrl');
+  expect(item.resolvedUrl, 'health_finding PulseItem resolvedUrl').toBe('/admin/health');
 });
 
 test('getItem-equivalent carries resolvedUrl field', () => {
@@ -217,6 +179,3 @@ test('getItem-equivalent carries resolvedUrl field', () => {
 // ---------------------------------------------------------------------------
 
 console.log(`\n=== Summary ===`);
-console.log(`  PASS: ${passed}`);
-console.log(`  FAIL: ${failed}`);
-if (failed > 0) process.exit(1);

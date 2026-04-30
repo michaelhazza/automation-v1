@@ -436,6 +436,35 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const,
   },
 
+  // ── Workspace seat rollup (agents-as-employees D9) ──────────────
+  // Hourly sweep: counts active workspace identities per org and writes
+  // the result to org_subscriptions.consumed_seats. Each tick re-reads
+  // the current DB state so duplicate deliveries are a no-op.
+  'seat-rollup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'seat-rollup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Workspace identity migration (agents-as-employees E1) ────────
+  // Per-identity job dispatched by workspaceMigrationService.start().
+  // Provisions on the target backend, activates the new identity, then
+  // archives the source. retryLimit 5 with exponential backoff handles
+  // transient Google / SMTP failures. payload-key: migrationRequestId
+  // combined with actorId forms a deterministic idempotency token at
+  // the provisioning layer (provisioningRequestId = migrationRequestId:actorId).
+  'workspace.migrate-identity': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'workspace.migrate-identity__dlq',
+    idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
+  },
+
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
   'system-monitor-ingest': {
     retryLimit: 3,

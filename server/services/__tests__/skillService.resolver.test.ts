@@ -9,22 +9,8 @@
  *   npx tsx server/services/__tests__/skillService.resolver.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { computeDerivedSkills, shouldWarnMissingHierarchy } from '../skillServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -32,15 +18,11 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
   }
 }
 
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 test('returns [] when hierarchy is undefined', () => {
   const result = computeDerivedSkills({ hierarchy: undefined });
-  assertEqual(result, [], 'result should be empty array');
+  expect(result, 'result should be empty array').toEqual([]);
 });
 
 test('returns [] when hierarchy has no children (empty childIds)', () => {
@@ -53,7 +35,7 @@ test('returns [] when hierarchy has no children (empty childIds)', () => {
       depth: 0,
     },
   });
-  assertEqual(result, [], 'result should be empty array for leaf agent');
+  expect(result, 'result should be empty array for leaf agent').toEqual([]);
 });
 
 test('returns delegation slugs when agent has at least one child', () => {
@@ -66,11 +48,7 @@ test('returns delegation slugs when agent has at least one child', () => {
       depth: 0,
     },
   });
-  assertEqual(
-    result,
-    ['config_list_agents', 'spawn_sub_agents', 'reassign_task'],
-    'result should contain all three delegation slugs',
-  );
+  expect(result, 'result should contain all three delegation slugs').toEqual(['config_list_agents', 'spawn_sub_agents', 'reassign_task']);
 });
 
 test('returns delegation slugs when agent has multiple children', () => {
@@ -83,11 +61,7 @@ test('returns delegation slugs when agent has multiple children', () => {
       depth: 0,
     },
   });
-  assertEqual(
-    result,
-    ['config_list_agents', 'spawn_sub_agents', 'reassign_task'],
-    'result should contain all three delegation slugs regardless of child count',
-  );
+  expect(result, 'result should contain all three delegation slugs regardless of child count').toEqual(['config_list_agents', 'spawn_sub_agents', 'reassign_task']);
 });
 
 test('union idempotency: de-duped Set has no duplicates when attached slugs overlap derived slugs', () => {
@@ -106,11 +80,11 @@ test('union idempotency: de-duped Set has no duplicates when attached slugs over
   const effectiveSlugs = Array.from(new Set([...attachedSlugs, ...derivedSlugs]));
 
   // Expected: some_skill + config_list_agents + spawn_sub_agents + reassign_task = 4 unique slugs
-  assertEqual(effectiveSlugs.length, 4, 'no duplicates — spawn_sub_agents appears once');
-  assert(effectiveSlugs.includes('spawn_sub_agents'), 'spawn_sub_agents present');
-  assert(effectiveSlugs.includes('config_list_agents'), 'config_list_agents present');
-  assert(effectiveSlugs.includes('reassign_task'), 'reassign_task present');
-  assert(effectiveSlugs.includes('some_skill'), 'some_skill still present');
+  expect(effectiveSlugs.length, 'no duplicates — spawn_sub_agents appears once').toBe(4);
+  expect(effectiveSlugs.includes('spawn_sub_agents'), 'spawn_sub_agents present').toBeTruthy();
+  expect(effectiveSlugs.includes('config_list_agents'), 'config_list_agents present').toBeTruthy();
+  expect(effectiveSlugs.includes('reassign_task'), 'reassign_task present').toBeTruthy();
+  expect(effectiveSlugs.includes('some_skill'), 'some_skill still present').toBeTruthy();
 });
 
 test('union idempotency: all three derived slugs overlap with attached — result length equals 3', () => {
@@ -127,7 +101,7 @@ test('union idempotency: all three derived slugs overlap with attached — resul
 
   const effectiveSlugs = Array.from(new Set([...attachedSlugs, ...derivedSlugs]));
 
-  assertEqual(effectiveSlugs.length, 3, 'all three slugs de-duped to length 3');
+  expect(effectiveSlugs.length, 'all three slugs de-duped to length 3').toBe(3);
 });
 
 // ---------------------------------------------------------------------------
@@ -139,7 +113,7 @@ test('hierarchy undefined, subaccountId provided → shouldWarn true', () => {
     hierarchy: undefined,
     subaccountId: 'sub-abc',
   });
-  assert(result === true, 'expected shouldWarnMissingHierarchy to return true');
+  expect(result === true, 'expected shouldWarnMissingHierarchy to return true').toBeTruthy();
 });
 
 test('hierarchy undefined, subaccountId undefined → shouldWarn false (non-subaccount run)', () => {
@@ -147,7 +121,7 @@ test('hierarchy undefined, subaccountId undefined → shouldWarn false (non-suba
     hierarchy: undefined,
     subaccountId: undefined,
   });
-  assert(result === false, 'expected shouldWarnMissingHierarchy to return false for non-subaccount run');
+  expect(result === false, 'expected shouldWarnMissingHierarchy to return false for non-subaccount run').toBeTruthy();
 });
 
 test('hierarchy present, subaccountId provided → shouldWarn false (hierarchy built successfully)', () => {
@@ -161,11 +135,9 @@ test('hierarchy present, subaccountId provided → shouldWarn false (hierarchy b
     },
     subaccountId: 'sub-abc',
   });
-  assert(result === false, 'expected shouldWarnMissingHierarchy to return false when hierarchy is present');
+  expect(result === false, 'expected shouldWarnMissingHierarchy to return false when hierarchy is present').toBeTruthy();
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`skillService.resolver: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

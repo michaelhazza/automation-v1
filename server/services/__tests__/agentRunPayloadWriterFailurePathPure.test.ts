@@ -12,8 +12,7 @@
  *   npx tsx server/services/__tests__/agentRunPayloadWriterFailurePathPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { buildPayloadRow } from '../agentRunPayloadWriter.js';
 
 // ─── Case 1: response: null → output's response is null ─────────────────────
@@ -25,10 +24,10 @@ test('failure-path: response: null produces output with response === null', () =
     response: null,
     maxBytes: 1_000_000,
   });
-  assert.equal(out.response, null, 'response field must be null when input is null');
+  expect(out.response, 'response field must be null when input is null').toBe(null);
   // System prompt and messages still flow through unchanged.
-  assert.equal(out.systemPrompt, 'sys');
-  assert.deepStrictEqual(out.messages, [{ role: 'user', content: 'hi' }]);
+  expect(out.systemPrompt).toBe('sys');
+  expect(out.messages).toStrictEqual([{ role: 'user', content: 'hi' }]);
 });
 
 // ─── Case 2: partial response → output's response matches the partial ───────
@@ -50,10 +49,10 @@ test('failure-path: partial response is preserved through the pipeline', () => {
     response: partial,
     maxBytes: 1_000_000,
   });
-  assert.notEqual(out.response, null);
+  expect(out.response).not.toBe(null);
   // The pipeline returns a deep-copy, so a same-reference assertion is wrong;
   // assert structural equality instead.
-  assert.deepStrictEqual(out.response, partial);
+  expect(out.response).toStrictEqual(partial);
 });
 
 // ─── Case 3: round-trip — partial response is byte-identical to persisted ───
@@ -76,7 +75,7 @@ test('failure-path: partial response is byte-identical (no silent truncation)', 
   });
   const inputJson = JSON.stringify(partial);
   const outputJson = JSON.stringify(out.response);
-  assert.equal(outputJson, inputJson, 'partial response must round-trip byte-identical');
+  expect(outputJson, 'partial response must round-trip byte-identical').toBe(inputJson);
 });
 
 // ─── Case 4: usage-without-content — tokens NOT zeroed even when content empty
@@ -101,9 +100,9 @@ test('failure-path: usage-without-content preserves provider-reported usage', ()
     response: usageOnly,
     maxBytes: 1_000_000,
   });
-  assert.notEqual(out.response, null);
+  expect(out.response).not.toBe(null);
   const outResponse = out.response as Record<string, unknown>;
-  assert.equal(outResponse.tokensIn, 4096, 'provider-reported tokensIn must NOT be zeroed');
-  assert.equal(outResponse.content, '', 'empty content is preserved verbatim');
-  assert.equal(outResponse.stopReason, 'content_filter');
+  expect(outResponse.tokensIn, 'provider-reported tokensIn must NOT be zeroed').toBe(4096);
+  expect(outResponse.content, 'empty content is preserved verbatim').toBe('');
+  expect(outResponse.stopReason).toBe('content_filter');
 });

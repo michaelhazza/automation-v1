@@ -14,22 +14,8 @@
  *   npx tsx server/services/__tests__/workspaceMemoryServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { RECENCY_BOOST_WINDOW_DAYS, RECENCY_BOOST_WEIGHT } from '../../config/limits.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -45,10 +31,6 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
       `${label} — expected ~${expected} (±${tolerance}), got ${actual}`,
     );
   }
-}
-
-function assertTrue(condition: boolean, label: string) {
-  if (!condition) throw new Error(`${label} — expected true, got false`);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,8 +125,8 @@ test('boost reorders results when boosted entry was ranked lower', () => {
   ];
   const result = applyRecencyBoost(rows, NOW);
   // 'boosted' becomes 0.65 + 0.15 = 0.80 > 0.70 → should be first
-  assertEqual(result[0].id, 'boosted', 'boosted entry moves to top');
-  assertEqual(result[1].id, 'high', 'unboosted entry falls to second');
+  expect(result[0].id, 'boosted entry moves to top').toBe('boosted');
+  expect(result[1].id, 'unboosted entry falls to second').toBe('high');
 });
 
 test('§4.4 invariant — boost never mutates quality_score', () => {
@@ -154,7 +136,7 @@ test('§4.4 invariant — boost never mutates quality_score', () => {
   }];
   const result = applyRecencyBoost(rows, NOW);
   // quality_score must remain unchanged
-  assertEqual(result[0].quality_score, 0.8, 'quality_score unchanged after boost');
+  expect(result[0].quality_score, 'quality_score unchanged after boost').toBe(0.8);
 });
 
 test('§4.4 invariant — boost never mutates rrf_score', () => {
@@ -163,7 +145,7 @@ test('§4.4 invariant — boost never mutates rrf_score', () => {
     rrf_score: 0.3,
   }];
   const result = applyRecencyBoost(rows, NOW);
-  assertEqual(result[0].rrf_score, 0.3, 'rrf_score unchanged after boost');
+  expect(result[0].rrf_score, 'rrf_score unchanged after boost').toBe(0.3);
 });
 
 test('multiple boosted entries all get boost applied', () => {
@@ -174,14 +156,14 @@ test('multiple boosted entries all get boost applied', () => {
   ];
   const result = applyRecencyBoost(rows, NOW);
   // c stays highest at 0.9, a → 0.75, b → 0.65
-  assertEqual(result[0].id, 'c', 'unboosted high-score entry stays first');
-  assertEqual(result[1].id, 'a', 'higher boosted entry second');
-  assertEqual(result[2].id, 'b', 'lower boosted entry third');
+  expect(result[0].id, 'unboosted high-score entry stays first').toBe('c');
+  expect(result[1].id, 'higher boosted entry second').toBe('a');
+  expect(result[2].id, 'lower boosted entry third').toBe('b');
 });
 
 test('empty results array returns empty', () => {
   const result = applyRecencyBoost([], NOW);
-  assertEqual(result.length, 0, 'empty → empty');
+  expect(result.length, 'empty → empty').toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -220,53 +202,53 @@ console.log('Phase B §6.5 — selectPromotedEntryType:');
 
 // success × trajectoryPassed=true — trajectory-verified success.
 test('success+pass: observation → pattern (promoted)', () => {
-  assertEqual(selectPromotedEntryType('observation', outcome('success', true)), 'pattern', 'kind');
+  expect(selectPromotedEntryType('observation', outcome('success', true)), 'kind').toBe('pattern');
 });
 test('success+pass: decision stays decision', () => {
-  assertEqual(selectPromotedEntryType('decision', outcome('success', true)), 'decision', 'kind');
+  expect(selectPromotedEntryType('decision', outcome('success', true)), 'kind').toBe('decision');
 });
 test('success+pass: pattern stays pattern', () => {
-  assertEqual(selectPromotedEntryType('pattern', outcome('success', true)), 'pattern', 'kind');
+  expect(selectPromotedEntryType('pattern', outcome('success', true)), 'kind').toBe('pattern');
 });
 test('success+pass: preference stays preference', () => {
-  assertEqual(selectPromotedEntryType('preference', outcome('success', true)), 'preference', 'kind');
+  expect(selectPromotedEntryType('preference', outcome('success', true)), 'kind').toBe('preference');
 });
 test('success+pass: issue stays issue', () => {
-  assertEqual(selectPromotedEntryType('issue', outcome('success', true)), 'issue', 'kind');
+  expect(selectPromotedEntryType('issue', outcome('success', true)), 'kind').toBe('issue');
 });
 
 // success × trajectoryPassed=null — Phase B's live path.
 test('success+null: observation → pattern', () => {
-  assertEqual(selectPromotedEntryType('observation', outcome('success', null)), 'pattern', 'kind');
+  expect(selectPromotedEntryType('observation', outcome('success', null)), 'kind').toBe('pattern');
 });
 test('success+null: decision stays decision', () => {
-  assertEqual(selectPromotedEntryType('decision', outcome('success', null)), 'decision', 'kind');
+  expect(selectPromotedEntryType('decision', outcome('success', null)), 'kind').toBe('decision');
 });
 test('success+null: pattern stays pattern', () => {
-  assertEqual(selectPromotedEntryType('pattern', outcome('success', null)), 'pattern', 'kind');
+  expect(selectPromotedEntryType('pattern', outcome('success', null)), 'kind').toBe('pattern');
 });
 test('success+null: preference stays preference', () => {
-  assertEqual(selectPromotedEntryType('preference', outcome('success', null)), 'preference', 'kind');
+  expect(selectPromotedEntryType('preference', outcome('success', null)), 'kind').toBe('preference');
 });
 test('success+null: issue stays issue', () => {
-  assertEqual(selectPromotedEntryType('issue', outcome('success', null)), 'issue', 'kind');
+  expect(selectPromotedEntryType('issue', outcome('success', null)), 'kind').toBe('issue');
 });
 
 // success × trajectoryPassed=false — trajectory disagreement, demote durable types.
 test('success+fail: observation stays observation (no promotion)', () => {
-  assertEqual(selectPromotedEntryType('observation', outcome('success', false)), 'observation', 'kind');
+  expect(selectPromotedEntryType('observation', outcome('success', false)), 'kind').toBe('observation');
 });
 test('success+fail: decision → observation (demoted)', () => {
-  assertEqual(selectPromotedEntryType('decision', outcome('success', false)), 'observation', 'kind');
+  expect(selectPromotedEntryType('decision', outcome('success', false)), 'kind').toBe('observation');
 });
 test('success+fail: pattern → observation (demoted)', () => {
-  assertEqual(selectPromotedEntryType('pattern', outcome('success', false)), 'observation', 'kind');
+  expect(selectPromotedEntryType('pattern', outcome('success', false)), 'kind').toBe('observation');
 });
 test('success+fail: preference stays preference (user preference is path-independent)', () => {
-  assertEqual(selectPromotedEntryType('preference', outcome('success', false)), 'preference', 'kind');
+  expect(selectPromotedEntryType('preference', outcome('success', false)), 'kind').toBe('preference');
 });
 test('success+fail: issue stays issue', () => {
-  assertEqual(selectPromotedEntryType('issue', outcome('success', false)), 'issue', 'kind');
+  expect(selectPromotedEntryType('issue', outcome('success', false)), 'kind').toBe('issue');
 });
 
 // partial × any — neutral.
@@ -274,26 +256,26 @@ for (const t of ['true', 'false', 'null'] as const) {
   for (const e of ALL_ENTRY_TYPES) {
     test(`partial+${t}: ${e} kept as-is (neutral)`, () => {
       const tp = t === 'true' ? true : t === 'false' ? false : null;
-      assertEqual(selectPromotedEntryType(e, outcome('partial', tp)), e, 'kind');
+      expect(selectPromotedEntryType(e, outcome('partial', tp)), 'kind').toEqual(e);
     });
   }
 }
 
 // failed × any — §6.5 failure rules.
 test('failed: observation → issue (force-demoted)', () => {
-  assertEqual(selectPromotedEntryType('observation', outcome('failed')), 'issue', 'kind');
+  expect(selectPromotedEntryType('observation', outcome('failed')), 'kind').toBe('issue');
 });
 test('failed: pattern → issue (force-demoted)', () => {
-  assertEqual(selectPromotedEntryType('pattern', outcome('failed')), 'issue', 'kind');
+  expect(selectPromotedEntryType('pattern', outcome('failed')), 'kind').toBe('issue');
 });
 test('failed: decision → issue (force-demoted)', () => {
-  assertEqual(selectPromotedEntryType('decision', outcome('failed')), 'issue', 'kind');
+  expect(selectPromotedEntryType('decision', outcome('failed')), 'kind').toBe('issue');
 });
 test('failed: issue stays issue (reinforced)', () => {
-  assertEqual(selectPromotedEntryType('issue', outcome('failed')), 'issue', 'kind');
+  expect(selectPromotedEntryType('issue', outcome('failed')), 'kind').toBe('issue');
 });
 test('failed: preference → observation (preserves signal, no durable tier)', () => {
-  assertEqual(selectPromotedEntryType('preference', outcome('failed')), 'observation', 'kind');
+  expect(selectPromotedEntryType('preference', outcome('failed')), 'kind').toBe('observation');
 });
 
 // ─── scoreForOutcome — §6.5 right-hand modifier column ─────────────────
@@ -441,6 +423,4 @@ test('both overrides on partial: isUnverified=false, confidence=0.7', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

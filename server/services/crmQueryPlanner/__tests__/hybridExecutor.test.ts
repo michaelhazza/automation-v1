@@ -5,27 +5,9 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/hybridExecutor.test.ts
  */
+import { expect, test } from 'vitest';
 import { splitHybridPlan, HybridCapError, HybridLiveCallError } from '../executors/hybridExecutorPure.js';
 import type { QueryPlan } from '../../../../shared/types/crmQueryPlanner.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -62,8 +44,8 @@ test('canonical filters stay in canonicalBase', () => {
     ],
   });
   const { canonicalBase, liveFilters } = splitHybridPlan(plan);
-  assertEqual(canonicalBase.filters.length, 2, 'canonical filters count');
-  assertEqual(liveFilters.length, 0, 'no live filters');
+  expect(canonicalBase.filters.length, 'canonical filters count').toBe(2);
+  expect(liveFilters.length, 'no live filters').toBe(0);
 });
 
 test('live-only fields routed to liveFilters', () => {
@@ -74,15 +56,15 @@ test('live-only fields routed to liveFilters', () => {
     ],
   });
   const { canonicalBase, liveFilters } = splitHybridPlan(plan);
-  assertEqual(canonicalBase.filters.length, 1, 'one canonical filter');
-  assertEqual(liveFilters.length, 1, 'one live filter');
-  assertEqual(liveFilters[0]!.field, 'city');
+  expect(canonicalBase.filters.length, 'one canonical filter').toBe(1);
+  expect(liveFilters.length, 'one live filter').toBe(1);
+  expect(liveFilters[0]!.field).toBe('city');
 });
 
 test('canonicalBase source is forced to canonical', () => {
   const plan = makePlan({ source: 'hybrid' });
   const { canonicalBase } = splitHybridPlan(plan);
-  assertEqual(canonicalBase.source, 'canonical', 'canonicalBase.source');
+  expect(canonicalBase.source, 'canonicalBase.source').toBe('canonical');
 });
 
 test('multiple live-only fields all routed to liveFilters', () => {
@@ -94,26 +76,23 @@ test('multiple live-only fields all routed to liveFilters', () => {
     ],
   });
   const { liveFilters } = splitHybridPlan(plan);
-  assertEqual(liveFilters.length, 3, 'all 3 are live-only');
+  expect(liveFilters.length, 'all 3 are live-only').toBe(3);
 });
 
 // ── HybridCapError ────────────────────────────────────────────────────────────
 
 test('HybridCapError is instanceof Error', () => {
   const err = new HybridCapError('cap reached');
-  assert(err instanceof Error, 'should be Error');
-  assertEqual(err.errorCode, 'cost_exceeded');
+  expect(err instanceof Error, 'should be Error').toBeTruthy();
+  expect(err.errorCode).toBe('cost_exceeded');
 });
 
 // ── Non-hybrid / wrong pattern guards (testing exported contract) ─────────────
 
 test('HybridLiveCallError has correct errorCode', () => {
   const err = new HybridLiveCallError('test');
-  assert(err instanceof Error, 'should be Error');
-  assertEqual(err.errorCode, 'live_call_failed');
+  expect(err instanceof Error, 'should be Error').toBeTruthy();
+  expect(err.errorCode).toBe('live_call_failed');
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

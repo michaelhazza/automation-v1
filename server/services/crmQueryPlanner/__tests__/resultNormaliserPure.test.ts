@@ -4,6 +4,7 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/resultNormaliserPure.test.ts
  */
+import { expect, test } from 'vitest';
 import {
   buildStructuredResult,
   generateApprovalCards,
@@ -12,25 +13,6 @@ import {
 } from '../resultNormaliserPure.js';
 import type { NormaliserContext } from '../resultNormaliserPure.js';
 import type { QueryPlan, ExecutorResult } from '../../../../shared/types/crmQueryPlanner.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -76,46 +58,46 @@ const defaultContext: NormaliserContext = {
 
 test('structured result has kind=structured', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult());
-  assertEqual(result.kind, 'structured', 'kind');
+  expect(result.kind, 'kind').toBe('structured');
 });
 
 test('structured result has artefactId (non-empty string)', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult());
-  assert(typeof result.artefactId === 'string' && result.artefactId.length > 0, 'artefactId must be non-empty');
+  expect(typeof result.artefactId === 'string' && result.artefactId.length > 0, 'artefactId must be non-empty').toBeTruthy();
 });
 
 test('structured result entityType matches plan.primaryEntity', () => {
   const plan = makePlan({ primaryEntity: 'opportunities' });
   const result = buildStructuredResult(plan, makeExecResult());
-  assertEqual(result.entityType, 'opportunities', 'entityType');
+  expect(result.entityType, 'entityType').toBe('opportunities');
 });
 
 test('structured result rowCount propagates', () => {
   const execResult = makeExecResult({ rowCount: 42, rows: Array(42).fill({ id: '1' }) });
   const result = buildStructuredResult(makePlan(), execResult);
-  assertEqual(result.rowCount, 42, 'rowCount');
+  expect(result.rowCount, 'rowCount').toBe(42);
 });
 
 test('structured result truncated propagates', () => {
   const execResult = makeExecResult({ truncated: true, truncationReason: 'result_limit' });
   const result = buildStructuredResult(makePlan(), execResult);
-  assertEqual(result.truncated, true, 'truncated');
-  assertEqual(result.truncationReason, 'result_limit', 'truncationReason');
+  expect(result.truncated, 'truncated').toBe(true);
+  expect(result.truncationReason, 'truncationReason').toBe('result_limit');
 });
 
 test('structured result truncated=false propagates', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult({ truncated: false }));
-  assertEqual(result.truncated, false, 'truncated');
+  expect(result.truncated, 'truncated').toBe(false);
 });
 
 test('structured result costCents from execResult', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult({ actualCostCents: 5 }));
-  assertEqual(result.costCents, 5, 'costCents');
+  expect(result.costCents, 'costCents').toBe(5);
 });
 
 test('structured result source from execResult', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult({ source: 'live' }));
-  assertEqual(result.source, 'live', 'source');
+  expect(result.source, 'source').toBe('live');
 });
 
 test('structured result filtersApplied matches plan filters', () => {
@@ -125,9 +107,9 @@ test('structured result filtersApplied matches plan filters', () => {
     ],
   });
   const result = buildStructuredResult(plan, makeExecResult());
-  assertEqual(result.filtersApplied.length, 1, 'filtersApplied length');
-  assertEqual(result.filtersApplied[0]!.field, 'updatedAt', 'filter field');
-  assertEqual(result.filtersApplied[0]!.humanLabel, 'Updated more than 30 days ago', 'filter humanLabel');
+  expect(result.filtersApplied.length, 'filtersApplied length').toBe(1);
+  expect(result.filtersApplied[0]!.field, 'filter field').toBe('updatedAt');
+  expect(result.filtersApplied[0]!.humanLabel, 'filter humanLabel').toBe('Updated more than 30 days ago');
 });
 
 test('filtersApplied ne operator maps to neq on wire', () => {
@@ -135,7 +117,7 @@ test('filtersApplied ne operator maps to neq on wire', () => {
     filters: [{ field: 'stage', operator: 'ne', value: 'closed', humanLabel: 'Stage not closed' }],
   });
   const result = buildStructuredResult(plan, makeExecResult());
-  assertEqual(result.filtersApplied[0]!.operator, 'neq', 'ne→neq');
+  expect(result.filtersApplied[0]!.operator, 'ne→neq').toBe('neq');
 });
 
 test('filtersApplied is_null operator maps to exists=false on wire', () => {
@@ -143,8 +125,8 @@ test('filtersApplied is_null operator maps to exists=false on wire', () => {
     filters: [{ field: 'email', operator: 'is_null', value: null, humanLabel: 'Email is missing' }],
   });
   const result = buildStructuredResult(plan, makeExecResult());
-  assertEqual(result.filtersApplied[0]!.operator, 'exists', 'is_null→exists');
-  assertEqual(result.filtersApplied[0]!.value, false, 'is_null value=false');
+  expect(result.filtersApplied[0]!.operator, 'is_null→exists').toBe('exists');
+  expect(result.filtersApplied[0]!.value, 'is_null value=false').toBe(false);
 });
 
 test('filtersApplied is_not_null operator maps to exists=true on wire', () => {
@@ -152,13 +134,13 @@ test('filtersApplied is_not_null operator maps to exists=true on wire', () => {
     filters: [{ field: 'phone', operator: 'is_not_null', value: null, humanLabel: 'Phone is present' }],
   });
   const result = buildStructuredResult(plan, makeExecResult());
-  assertEqual(result.filtersApplied[0]!.operator, 'exists', 'is_not_null→exists');
-  assertEqual(result.filtersApplied[0]!.value, true, 'is_not_null value=true');
+  expect(result.filtersApplied[0]!.operator, 'is_not_null→exists').toBe('exists');
+  expect(result.filtersApplied[0]!.value, 'is_not_null value=true').toBe(true);
 });
 
 test('structured result suggestions is an array', () => {
   const result = buildStructuredResult(makePlan(), makeExecResult());
-  assert(Array.isArray(result.suggestions), 'suggestions must be array');
+  expect(Array.isArray(result.suggestions), 'suggestions must be array').toBeTruthy();
 });
 
 // ── generateSuggestions ───────────────────────────────────────────────────────
@@ -166,25 +148,25 @@ test('structured result suggestions is an array', () => {
 test('truncated result includes narrow suggestion', () => {
   const exec = makeExecResult({ truncated: true });
   const suggestions = generateSuggestions(makePlan(), exec);
-  assert(suggestions.some(s => s.kind === 'narrow'), 'should have narrow suggestion on truncation');
+  expect(suggestions.some(s => s.kind === 'narrow'), 'should have narrow suggestion on truncation').toBeTruthy();
 });
 
 test('rowCount > 50 includes sort suggestion', () => {
   const exec = makeExecResult({ rowCount: 51 });
   const suggestions = generateSuggestions(makePlan(), exec);
-  assert(suggestions.some(s => s.kind === 'sort'), 'should have sort suggestion for large results');
+  expect(suggestions.some(s => s.kind === 'sort'), 'should have sort suggestion for large results').toBeTruthy();
 });
 
 test('contact result with rows includes action suggestion', () => {
   const exec = makeExecResult({ rows: [{ id: 'c1', displayName: 'Alice' }], rowCount: 1 });
   const suggestions = generateSuggestions(makePlan({ primaryEntity: 'contacts' }), exec);
-  assert(suggestions.some(s => s.kind === 'action'), 'contacts with rows should have action suggestion');
+  expect(suggestions.some(s => s.kind === 'action'), 'contacts with rows should have action suggestion').toBeTruthy();
 });
 
 test('non-contact result with rows has no action suggestion', () => {
   const exec = makeExecResult({ rows: [{ id: 'o1' }], rowCount: 1 });
   const suggestions = generateSuggestions(makePlan({ primaryEntity: 'opportunities' }), exec);
-  assert(!suggestions.some(s => s.kind === 'action'), 'opportunities should not have email action in v1');
+  expect(!suggestions.some(s => s.kind === 'action'), 'opportunities should not have email action in v1').toBeTruthy();
 });
 
 // ── generateApprovalCards ─────────────────────────────────────────────────────
@@ -193,25 +175,25 @@ test('contact-list with ≥1 row → approval card for top row', () => {
   const plan = makePlan({ primaryEntity: 'contacts' });
   const exec = makeExecResult({ rows: [{ id: 'c1', displayName: 'Alice' }], rowCount: 1 });
   const cards = generateApprovalCards(plan, exec, defaultContext);
-  assertEqual(cards.length, 1, 'should emit 1 card');
-  assertEqual(cards[0]!.kind, 'approval', 'kind');
-  assertEqual(cards[0]!.actionSlug, 'crm.send_email', 'actionSlug');
-  assertEqual((cards[0]!.actionArgs as any).toContactId, 'c1', 'toContactId');
-  assertEqual((cards[0]!.actionArgs as any).from, 'sender@example.com', 'from');
+  expect(cards.length, 'should emit 1 card').toBe(1);
+  expect(cards[0]!.kind, 'kind').toBe('approval');
+  expect(cards[0]!.actionSlug, 'actionSlug').toBe('crm.send_email');
+  expect((cards[0]!.actionArgs as any).toContactId, 'toContactId').toBe('c1');
+  expect((cards[0]!.actionArgs as any).from, 'from').toBe('sender@example.com');
 });
 
 test('contact-list with 0 rows → no card', () => {
   const plan = makePlan({ primaryEntity: 'contacts' });
   const exec = makeExecResult({ rows: [], rowCount: 0 });
   const cards = generateApprovalCards(plan, exec, defaultContext);
-  assertEqual(cards.length, 0, 'no rows → no card');
+  expect(cards.length, 'no rows → no card').toBe(0);
 });
 
 test('opportunity-list → no card in v1', () => {
   const plan = makePlan({ primaryEntity: 'opportunities' });
   const exec = makeExecResult({ rows: [{ id: 'o1' }], rowCount: 1 });
   const cards = generateApprovalCards(plan, exec, defaultContext);
-  assertEqual(cards.length, 0, 'opportunities → no v1 card');
+  expect(cards.length, 'opportunities → no v1 card').toBe(0);
 });
 
 test('missing defaultSenderIdentifier → no card', () => {
@@ -219,21 +201,21 @@ test('missing defaultSenderIdentifier → no card', () => {
   const exec = makeExecResult({ rows: [{ id: 'c1' }], rowCount: 1 });
   const ctx: NormaliserContext = { subaccountId: 'sub-1' }; // no defaultSenderIdentifier
   const cards = generateApprovalCards(plan, exec, ctx);
-  assertEqual(cards.length, 0, 'no sender → no card');
+  expect(cards.length, 'no sender → no card').toBe(0);
 });
 
 test('approval card affectedRecordIds contains top-row id', () => {
   const plan = makePlan({ primaryEntity: 'contacts' });
   const exec = makeExecResult({ rows: [{ id: 'c99' }], rowCount: 1 });
   const cards = generateApprovalCards(plan, exec, defaultContext);
-  assert(cards[0]!.affectedRecordIds.includes('c99'), 'affectedRecordIds must include contact id');
+  expect(cards[0]!.affectedRecordIds.includes('c99'), 'affectedRecordIds must include contact id').toBeTruthy();
 });
 
 test('approval card riskLevel is low', () => {
   const plan = makePlan({ primaryEntity: 'contacts' });
   const exec = makeExecResult({ rows: [{ id: 'c1' }], rowCount: 1 });
   const cards = generateApprovalCards(plan, exec, defaultContext);
-  assertEqual(cards[0]!.riskLevel, 'low', 'single-contact email risk is always low');
+  expect(cards[0]!.riskLevel, 'single-contact email risk is always low').toBe('low');
 });
 
 // ── normaliseToArtefacts ──────────────────────────────────────────────────────
@@ -242,27 +224,24 @@ test('normaliseToArtefacts returns structured + approvalCards', () => {
   const plan = makePlan({ primaryEntity: 'contacts' });
   const exec = makeExecResult({ rows: [{ id: 'c1', displayName: 'Bob' }], rowCount: 1 });
   const result = normaliseToArtefacts(plan, exec, defaultContext);
-  assert('structured' in result, 'must have structured');
-  assert('approvalCards' in result, 'must have approvalCards');
-  assertEqual(result.structured.kind, 'structured', 'structured.kind');
-  assertEqual(result.approvalCards.length, 1, 'one approval card for contacts with rows');
+  expect('structured' in result, 'must have structured').toBeTruthy();
+  expect('approvalCards' in result, 'must have approvalCards').toBeTruthy();
+  expect(result.structured.kind, 'structured.kind').toBe('structured');
+  expect(result.approvalCards.length, 'one approval card for contacts with rows').toBe(1);
 });
 
 test('normaliseToArtefacts for live source propagates source', () => {
   const plan = makePlan({ source: 'live' as const, canonicalCandidateKey: null });
   const exec = makeExecResult({ source: 'live', rows: [] });
   const result = normaliseToArtefacts(plan, exec, defaultContext);
-  assertEqual(result.structured.source, 'live', 'source=live propagates');
+  expect(result.structured.source, 'source=live propagates').toBe('live');
 });
 
 test('normaliseToArtefacts for hybrid source propagates source', () => {
   const plan = makePlan({ source: 'hybrid' as const });
   const exec = makeExecResult({ source: 'hybrid', rows: [] });
   const result = normaliseToArtefacts(plan, exec, defaultContext);
-  assertEqual(result.structured.source, 'hybrid', 'source=hybrid propagates');
+  expect(result.structured.source, 'source=hybrid propagates').toBe('hybrid');
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -10,6 +10,7 @@
  * canonical JSON (determinism), and hashing (firewall pattern).
  */
 
+import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { defineWorkflow } from '../defineWorkflow.js';
 import {
@@ -24,23 +25,12 @@ import { canonicalJsonStringify } from '../canonicalJson.js';
 import { hashValue } from '../hash.js';
 import type { RunContext } from '../types.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
+function assertThrows(fn: () => unknown, pattern: RegExp, _label: string): void {
+  let thrown: unknown;
+  try { fn(); } catch (e) { thrown = e; }
+  if (thrown === undefined) throw new Error(`${_label}: expected an error to be thrown`);
+  const msg = thrown instanceof Error ? thrown.message : String(thrown);
+  if (!pattern.test(msg)) throw new Error(`${_label}: error message "${msg}" did not match ${pattern}`);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -63,23 +53,6 @@ function assertFailedWithRule(
   }
 }
 
-function assertThrows(fn: () => void, matcher: string | RegExp, label: string) {
-  let threw = false;
-  let message = '';
-  try {
-    fn();
-  } catch (err) {
-    threw = true;
-    message = err instanceof Error ? err.message : String(err);
-  }
-  if (!threw) throw new Error(`${label}: expected to throw, did not`);
-  if (matcher instanceof RegExp) {
-    if (!matcher.test(message)) throw new Error(`${label}: error message '${message}' did not match ${matcher}`);
-  } else {
-    if (!message.includes(matcher)) throw new Error(`${label}: error message '${message}' did not include '${matcher}'`);
-  }
-}
-
 function makeContext(overrides: Partial<RunContext> = {}): RunContext {
   return {
     input: { eventName: 'Launch Party', audience: 'devs' },
@@ -99,19 +72,19 @@ console.log('\n── canonicalJson ──');
 test('canonical JSON: deterministic key ordering', () => {
   const a = canonicalJsonStringify({ b: 2, a: 1 });
   const b = canonicalJsonStringify({ a: 1, b: 2 });
-  assertEqual(a, b, 'object key order');
-  assertEqual(a, '{"a":1,"b":2}', 'serialised form');
+  expect(a, 'object key order').toEqual(b);
+  expect(a, 'serialised form').toBe('{"a":1,"b":2}');
 });
 
 test('canonical JSON: nested deterministic', () => {
   const a = canonicalJsonStringify({ x: { z: 3, y: 2 }, w: [{ b: 'q', a: 'p' }] });
   const b = canonicalJsonStringify({ w: [{ a: 'p', b: 'q' }], x: { y: 2, z: 3 } });
-  assertEqual(a, b, 'nested object/array key order');
+  expect(a, 'nested object/array key order').toEqual(b);
 });
 
 test('canonical JSON: undefined dropped', () => {
   const s = canonicalJsonStringify({ a: 1, b: undefined, c: 3 });
-  assertEqual(s, '{"a":1,"c":3}', 'undefined keys removed');
+  expect(s, 'undefined keys removed').toBe('{"a":1,"c":3}');
 });
 
 console.log('\n── hash ──');
@@ -119,45 +92,41 @@ console.log('\n── hash ──');
 test('hash: same logical value → same hash regardless of key order', () => {
   const h1 = hashValue({ a: 1, b: { x: 1, y: 2 } });
   const h2 = hashValue({ b: { y: 2, x: 1 }, a: 1 });
-  assertEqual(h1, h2, 'reordered hash equality');
+  expect(h1, 'reordered hash equality').toEqual(h2);
 });
 
 test('hash: different value → different hash', () => {
   const h1 = hashValue({ a: 1 });
   const h2 = hashValue({ a: 2 });
-  assert(h1 !== h2, 'different values must hash differently');
+  expect(h1 !== h2, 'different values must hash differently').toBeTruthy();
 });
 
 console.log('\n── templating: happy path ──');
 
 test('resolve: run.input field', () => {
   const ctx = makeContext();
-  assertEqual(resolve('run.input.eventName', ctx), 'Launch Party', 'run.input string');
+  expect(resolve('run.input.eventName', ctx), 'run.input string').toBe('Launch Party');
 });
 
 test('resolve: nested step output', () => {
   const ctx = makeContext();
-  assertEqual(resolve('steps.positioning.output.tagline', ctx), 'Be there.', 'step output string');
+  expect(resolve('steps.positioning.output.tagline', ctx), 'step output string').toBe('Be there.');
 });
 
 test('resolve: array index access', () => {
   const ctx = makeContext();
-  assertEqual(
-    resolve('steps.research.output.findings[0].title', ctx),
-    'A',
-    'array index path'
-  );
+  expect(resolve('steps.research.output.findings[0].title', ctx), 'array index path').toBe('A');
 });
 
 test('resolve: subaccount whitelist field', () => {
   const ctx = makeContext();
-  assertEqual(resolve('run.subaccount.name', ctx), 'Acme', 'subaccount field');
+  expect(resolve('run.subaccount.name', ctx), 'subaccount field').toBe('Acme');
 });
 
 test('renderString: multiple expressions in one string', () => {
   const ctx = makeContext();
   const out = renderString('Hi {{ run.input.eventName }} for {{ run.input.audience }}', ctx);
-  assertEqual(out, 'Hi Launch Party for devs', 'rendered string');
+  expect(out, 'rendered string').toBe('Hi Launch Party for devs');
 });
 
 test('resolveInputs: single expression preserves type', () => {
@@ -169,8 +138,8 @@ test('resolveInputs: single expression preserves type', () => {
     },
     ctx
   );
-  assertEqual(out.tagline, 'Be there.', 'resolved tagline');
-  assertEqual(out.summary, 'great', 'resolved summary');
+  expect(out.tagline, 'resolved tagline').toBe('Be there.');
+  expect(out.summary, 'resolved summary').toBe('great');
 });
 
 console.log('\n── templating: prototype-pollution hardening ──');
@@ -267,10 +236,10 @@ test('extractReferences: parses all expressions', () => {
   const refs = extractReferences(
     'Use {{ run.input.eventName }} and {{ steps.positioning.output.tagline }}.'
   );
-  assertEqual(refs.length, 2, 'two refs extracted');
-  assertEqual(refs[0].namespace, 'run.input', 'first ref namespace');
-  assertEqual(refs[1].namespace, 'steps', 'second ref namespace');
-  assertEqual(refs[1].stepId, 'positioning', 'second ref stepId');
+  expect(refs.length, 'two refs extracted').toBe(2);
+  expect(refs[0].namespace, 'first ref namespace').toBe('run.input');
+  expect(refs[1].namespace, 'second ref namespace').toBe('steps');
+  expect(refs[1].stepId, 'second ref stepId').toBe('positioning');
 });
 
 console.log('\n── validator: happy path ──');
@@ -307,7 +276,7 @@ const validWorkflow = defineWorkflow({
 
 test('validator: valid playbook passes', () => {
   const result = validateDefinition(validWorkflow);
-  assert(result.ok, `valid playbook should pass: ${JSON.stringify(result)}`);
+  expect(result.ok, `valid playbook should pass: ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 console.log('\n── validator: rule failures ──');
@@ -562,9 +531,5 @@ test('renderWorkflowFile: hash changes when definition changes', () => {
 });
 
 console.log('\n──────────────────────────────────');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('──────────────────────────────────\n');
 
-if (failed > 0) {
-  process.exit(1);
-}

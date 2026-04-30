@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
+**Last updated:** 2026-04-30 (§§8.23–8.25 added from Tier 1 UI Uplift reviews)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -96,9 +96,9 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 
 - **Gates pass = done.** A green gate run in CI is the definition of done for a phase. Local sessions do not run the gate suite — see §5 and `CLAUDE.md` § *Test gates are CI-only — never run locally*.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
-- **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
+- **Do not add** jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding). Runtime unit tests use **Vitest** — see `docs/testing-conventions.md` for the canonical pattern.
 - **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
-- **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
+- **Run individual tests** with `npx vitest run <path-to-test-file>` — do not use `npx tsx` or `scripts/run-all-unit-tests.sh` for Vitest tests.
 - **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
 When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
@@ -194,6 +194,18 @@ Any pure resolver / reducer / ranker whose source array can be reordered between
 ### 8.22 Allow-list annotations name the function they cover
 
 Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
+
+### 8.23 ACTION_REGISTRY entries must be registered in SKILL_HANDLERS
+
+Any action registered in `ACTION_REGISTRY` must also have a matching entry in `SKILL_HANDLERS` in `skillExecutor.ts`; registration in one without the other leaves the action unreachable at runtime with no compile-time error.
+
+### 8.24 Module-level in-process caches require a size cap
+
+Module-level `Map` or `Set` used as a process-lifetime dedup or idempotency cache must be bounded by an explicit size cap with LRU eviction; unbounded maps grow indefinitely under production load.
+
+### 8.25 `<button>` elements outside a submit context require `type="button"`
+
+Every `<button>` that does not intentionally submit a form must declare `type="button"`; the HTML default is `type="submit"`, which silently submits any ancestor `<form>` on click.
 
 ---
 

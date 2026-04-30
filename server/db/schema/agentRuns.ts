@@ -7,6 +7,7 @@ import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 import { users } from './users';
+import { workspaceActors } from './workspaceActors';
 
 // ---------------------------------------------------------------------------
 // Agent Runs — logs of autonomous agent executions
@@ -88,7 +89,7 @@ export const agentRuns = pgTable(
     // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
     // (iee_runs). Transitions to a terminal value when the backend reaches its
     // own terminal state, via finaliseAgentRunFromIeeRun.
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -187,6 +188,18 @@ export const agentRuns = pgTable(
     // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
     isTestRun: boolean('is_test_run').notNull().default(false),
 
+    // Integration block state — set when the run is paused waiting for an
+    // OAuth connection. Cleared on resume or expiry sweep.
+    // blockedReason: discriminator; currently only 'integration_required'.
+    // integrationResumeToken: sha256 hash of the plaintext bearer token that
+    //   unblocks this run. Plaintext lives only in agent_messages.meta.
+    // integrationDedupKey: sha256(toolName:runId:blockSequence) — prevents
+    //   double-blocking the same tool call on retry.
+    blockedReason: text('blocked_reason').$type<'integration_required' | null>(),
+    blockedExpiresAt: timestamp('blocked_expires_at', { withTimezone: true }),
+    integrationResumeToken: text('integration_resume_token'),
+    integrationDedupKey: text('integration_dedup_key'),
+
     // P3A: Principal model fields (migration 0164)
     principalType: text('principal_type').notNull().default('user').$type<'user' | 'service' | 'delegated'>(),
     principalId: text('principal_id').notNull().default(''),
@@ -230,6 +243,7 @@ export const agentRuns = pgTable(
     // System monitoring — carries a request/job tracing ID into incident events
     // so a system incident can be correlated back to the agent run that caused it.
     correlationId: text('correlation_id'),
+    actorId: uuid('actor_id').references(() => workspaceActors.id),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

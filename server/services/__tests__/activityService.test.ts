@@ -8,6 +8,7 @@
  *   npx tsx server/services/__tests__/activityService.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   mapAgentRunTriggerType,
   sortActivityItems,
@@ -36,21 +37,6 @@ type _AdditiveFieldsPresent = {
 // ---------------------------------------------------------------------------
 // Minimal test harness (matches project convention — no framework)
 // ---------------------------------------------------------------------------
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   const a = JSON.stringify(actual);
@@ -133,7 +119,8 @@ console.log('--- sortActivityItems tiebreaker ---');
 const SAME_TIME = '2026-04-24T10:00:00.000Z';
 
 // Construct two SortableItems with identical createdAt but different ids.
-// With a uuid-style id, lexicographic DESC is deterministic.
+// DE-CR-8: spec §12 mandates `id ASC` within the same `created_at` for the
+// activity feed. Lower id wins.
 const itemA: SortableItem = {
   id: 'aaaaaaaa-0000-0000-0000-000000000002',
   status: 'completed',
@@ -148,30 +135,30 @@ const itemB: SortableItem = {
   createdAt: SAME_TIME,
 };
 
-// itemA.id > itemB.id (lexicographic), so itemA should sort first in id DESC order
+// itemB.id < itemA.id (lexicographic), so itemB sorts first under id ASC.
 
-test('identical createdAt — newest sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'newest');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — newest sort: lower id comes first (id ASC tiebreaker)', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'newest');
+  expect(sorted[0].id, 'first item id').toEqual(itemB.id);
+  expect(sorted[1].id, 'second item id').toEqual(itemA.id);
 });
 
-test('identical createdAt — oldest sort: higher id comes first (consistent tiebreaker)', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'oldest');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — oldest sort: lower id comes first (consistent tiebreaker)', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'oldest');
+  expect(sorted[0].id, 'first item id').toEqual(itemB.id);
+  expect(sorted[1].id, 'second item id').toEqual(itemA.id);
 });
 
-test('identical createdAt — severity sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'severity');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — severity sort: lower id comes first', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'severity');
+  expect(sorted[0].id, 'first item id').toEqual(itemB.id);
+  expect(sorted[1].id, 'second item id').toEqual(itemA.id);
 });
 
-test('identical createdAt — attention_first sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'attention_first');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — attention_first sort: lower id comes first', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'attention_first');
+  expect(sorted[0].id, 'first item id').toEqual(itemB.id);
+  expect(sorted[1].id, 'second item id').toEqual(itemA.id);
 });
 
 test('sort is stable for 3 items with different timestamps', () => {
@@ -181,7 +168,7 @@ test('sort is stable for 3 items with different timestamps', () => {
     { id: 'id-2', status: 'completed', severity: null, createdAt: '2026-04-24T09:00:00.000Z' },
   ];
   const sorted = sortActivityItems(items, 'newest');
-  assertEqual(sorted.map((i) => i.id), ['id-3', 'id-2', 'id-1'], 'order');
+  expect(sorted.map((i) => i.id), 'order').toEqual(['id-3', 'id-2', 'id-1']);
 });
 
 // ===========================================================================
@@ -208,7 +195,7 @@ test('non-run types produce null for all 5 additive fields', () => {
 test('addNullAdditiveFields returns exactly 5 keys', () => {
   const fields = addNullAdditiveFields();
   const keys = Object.keys(fields);
-  assertEqual(keys.length, 5, 'number of additive fields');
+  expect(keys.length, 'number of additive fields').toBe(5);
 });
 
 test('deleted user → triggeredByUserName = null, does not throw', () => {
@@ -223,7 +210,7 @@ test('workflow execution passes through triggerType directly', () => {
   // The pass-through rule: executions.triggerType is already the correct type;
   // no mapping needed.  We verify the type values are in the TriggerType union.
   const executionTriggerTypes: TriggerType[] = ['manual', 'agent', 'scheduled', 'webhook', 'system'];
-  assertEqual(executionTriggerTypes.length, 5, 'count');
+  expect(executionTriggerTypes.length, 'count').toBe(5);
   // Each value must be a valid TriggerType (compile-time check above is the
   // real guard; this runtime check confirms the array is non-empty).
   assertNotNull(executionTriggerTypes[0], 'first value');
@@ -234,9 +221,5 @@ test('workflow execution passes through triggerType directly', () => {
 // ===========================================================================
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log('');
 
-if (failed > 0) {
-  process.exit(1);
-}

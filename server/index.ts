@@ -162,6 +162,15 @@ import documentBundlesRouter from './routes/documentBundles.js';
 import systemIncidentsRouter from './routes/systemIncidents.js';
 import { recordIncident } from './services/incidentIngestor.js';
 import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
+// Workspace identity routes (agents-as-employees)
+import workspaceRouter from './routes/workspace.js';
+import workspaceMailRouter from './routes/workspaceMail.js';
+import workspaceCalendarRouter from './routes/workspaceCalendar.js';
+import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
+// Suggested action chip dispatch
+import suggestedActionsRouter from './routes/suggestedActions.js';
+// Thread Context — per-conversation living doc (Chunk A)
+import conversationThreadContextRouter from './routes/conversationThreadContext.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -232,6 +241,7 @@ app.use(cors({
 app.use(ghlWebhookRouter);
 app.use(teamworkWebhookRouter);
 app.use(slackWebhookRouter);
+app.use(workspaceInboundWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -364,6 +374,11 @@ app.use(delegationOutcomesRouter);
 app.use(referenceDocumentsRouter);
 app.use(documentBundlesRouter);
 app.use(systemIncidentsRouter);
+app.use(workspaceRouter);
+app.use(workspaceMailRouter);
+app.use(workspaceCalendarRouter);
+app.use(suggestedActionsRouter);
+app.use(conversationThreadContextRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -585,6 +600,15 @@ async function start() {
   } catch (err) {
     console.error('[boot] system skill handler validation failed:', err);
     throw err;
+  }
+  // Soft drift check between compile-time SYSTEM_AGENT_BY_SLUG (server/config/c.ts)
+  // and the active rows in system_agents. Warn-only — Phase B promotes this to
+  // a hard fail-fast invariant once code paths actively rely on registry/DB parity.
+  try {
+    const { validateSystemAgentRegistry } = await import('./services/systemAgentRegistryValidator.js');
+    await validateSystemAgentRegistry();
+  } catch (err) {
+    console.warn('[boot] system-agent registry drift check could not run:', err);
   }
 
   initWebSocket(httpServer);

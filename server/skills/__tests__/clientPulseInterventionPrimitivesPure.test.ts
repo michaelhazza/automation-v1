@@ -11,6 +11,7 @@
  *   npx tsx server/skills/__tests__/clientPulseInterventionPrimitivesPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   validateFireAutomationPayload,
   fireAutomationIdempotencyKey,
@@ -38,25 +39,6 @@ import {
   filterChannelsAgainstAvailability,
 } from '../clientPulseOperatorAlertServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 const mergeInputs = {
   contact: { firstName: 'Marcia' },
   subaccount: { name: 'Smith Dental' },
@@ -75,13 +57,13 @@ test('fire_automation: valid payload passes', () => {
     contactId: 'ct-1',
     scheduleHint: 'immediate',
   });
-  assert(r.ok, `expected ok, got ${JSON.stringify(r)}`);
+  expect(r.ok, `expected ok, got ${JSON.stringify(r)}`).toBeTruthy();
 });
 
 test('fire_automation: missing automationId rejected', () => {
   const r = validateFireAutomationPayload({ contactId: 'ct-1' });
-  assert(!r.ok, 'expected rejection');
-  assert(r.ok || r.errorCode === 'INVALID_PAYLOAD', 'expected INVALID_PAYLOAD');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
+  expect(r.ok || r.errorCode === 'INVALID_PAYLOAD', 'expected INVALID_PAYLOAD').toBeTruthy();
 });
 
 test('fire_automation: scheduled without scheduledFor rejected', () => {
@@ -90,8 +72,8 @@ test('fire_automation: scheduled without scheduledFor rejected', () => {
     contactId: 'ct-1',
     scheduleHint: 'scheduled',
   });
-  assert(!r.ok, 'expected rejection');
-  assert(r.ok || r.errorCode === 'MISSING_SCHEDULE', 'expected MISSING_SCHEDULE');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
+  expect(r.ok || r.errorCode === 'MISSING_SCHEDULE', 'expected MISSING_SCHEDULE').toBeTruthy();
 });
 
 test('fire_automation: idempotency key includes scheduleHint (immediate vs delay_24h distinct)', () => {
@@ -101,16 +83,16 @@ test('fire_automation: idempotency key includes scheduleHint (immediate vs delay
   const k2 = fireAutomationIdempotencyKey({
     subaccountId: 'sub-1', automationId: 'aut-1', contactId: 'ct-1', scheduleHint: 'delay_24h',
   });
-  assert(k1 !== k2, 'schedule-distinct keys should differ');
+  expect(k1 !== k2, 'schedule-distinct keys should differ').toBeTruthy();
 });
 
 test('fire_automation: provider call shape', () => {
   const call = buildFireAutomationProviderCall({
     automationId: 'aut-1', contactId: 'ct-1', scheduleHint: 'immediate',
   });
-  assert(call.method === 'POST', 'method');
-  assert(call.path === '/v1/automations/aut-1/fire', `path=${call.path}`);
-  assert((call.body as any).contactId === 'ct-1', 'body.contactId');
+  expect(call.method === 'POST', 'method').toBeTruthy();
+  expect(call.path === '/v1/automations/aut-1/fire', `path=${call.path}`).toBeTruthy();
+  expect((call.body as any).contactId === 'ct-1', 'body.contactId').toBeTruthy();
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -121,12 +103,12 @@ test('send_email: valid payload passes', () => {
   const r = validateSendEmailPayload({
     from: 'a@b.com', toContactId: 'ct-1', subject: 'Hi', body: 'Hello',
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('send_email: missing subject rejected', () => {
   const r = validateSendEmailPayload({ from: 'a@b.com', toContactId: 'ct-1', body: 'Hi' });
-  assert(!r.ok, 'expected rejection');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
 });
 
 test('send_email: merge fields resolved in subject + body before provider call', () => {
@@ -140,9 +122,9 @@ test('send_email: merge fields resolved in subject + body before provider call',
     },
     mergeInputs,
   );
-  assert((call.body as any).subject === 'Hi Marcia', `subject=${(call.body as any).subject}`);
-  assert((call.body as any).body === 'Score 48', `body=${(call.body as any).body}`);
-  assert(call.unresolvedMergeFields.length === 0, 'no unresolved');
+  expect((call.body as any).subject === 'Hi Marcia', `subject=${(call.body as any).subject}`).toBeTruthy();
+  expect((call.body as any).body === 'Score 48', `body=${(call.body as any).body}`).toBeTruthy();
+  expect(call.unresolvedMergeFields.length === 0, 'no unresolved').toBeTruthy();
 });
 
 test('send_email: unresolved merge field reported without crashing', () => {
@@ -150,7 +132,7 @@ test('send_email: unresolved merge field reported without crashing', () => {
     { from: 'a@b.com', toContactId: 'ct-1', subject: 'Hi {{contact.bogus}}', body: 'x', scheduleHint: 'immediate' },
     mergeInputs,
   );
-  assert(call.unresolvedMergeFields.includes('contact.bogus'), 'unresolved includes contact.bogus');
+  expect(call.unresolvedMergeFields.includes('contact.bogus'), 'unresolved includes contact.bogus').toBeTruthy();
 });
 
 test('send_email: idempotency key stable for same (contact, subject, schedule)', () => {
@@ -160,7 +142,7 @@ test('send_email: idempotency key stable for same (contact, subject, schedule)',
   const k2 = sendEmailIdempotencyKey({
     subaccountId: 'sub-1', toContactId: 'ct-1', subject: 'Hi', scheduleHint: 'immediate',
   });
-  assert(k1 === k2, 'stable key');
+  expect(k1 === k2, 'stable key').toBeTruthy();
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -171,16 +153,16 @@ test('send_sms: valid payload passes', () => {
   const r = validateSendSmsPayload({
     fromNumber: '+61400000000', toContactId: 'ct-1', body: 'Short msg',
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('send_sms: segment count for single segment', () => {
-  assert(countSmsSegments('a'.repeat(160)) === 1, 'exact 160 chars = 1 segment');
+  expect(countSmsSegments('a'.repeat(160)) === 1, 'exact 160 chars = 1 segment').toBeTruthy();
 });
 
 test('send_sms: segment count for multi-segment', () => {
   const count = countSmsSegments('a'.repeat(165));
-  assert(count === 2, `165 chars = 2 segments, got ${count}`);
+  expect(count === 2, `165 chars = 2 segments, got ${count}`).toBeTruthy();
 });
 
 test('send_sms: merge fields resolved before segment count', () => {
@@ -193,8 +175,8 @@ test('send_sms: merge fields resolved before segment count', () => {
     },
     mergeInputs,
   );
-  assert((call.body as any).body === 'Hi Marcia', `body=${(call.body as any).body}`);
-  assert(call.segmentCount === 1, `segments=${call.segmentCount}`);
+  expect((call.body as any).body === 'Hi Marcia', `body=${(call.body as any).body}`).toBeTruthy();
+  expect(call.segmentCount === 1, `segments=${call.segmentCount}`).toBeTruthy();
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -208,21 +190,21 @@ test('create_task: valid payload passes', () => {
     dueAt: '2026-04-25T10:00:00Z',
     priority: 'med',
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('create_task: missing title rejected', () => {
   const r = validateCreateTaskPayload({
     assigneeUserId: 'u-1', dueAt: '2026-04-25T10:00:00Z',
   });
-  assert(!r.ok, 'expected rejection');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
 });
 
 test('create_task: invalid dueAt rejected', () => {
   const r = validateCreateTaskPayload({
     assigneeUserId: 'u-1', title: 'x', dueAt: 'not-a-date',
   });
-  assert(!r.ok, 'expected rejection');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
 });
 
 test('create_task: provider call shape includes relatedContactId', () => {
@@ -233,8 +215,8 @@ test('create_task: provider call shape includes relatedContactId', () => {
     relatedContactId: 'ct-1',
     priority: 'high',
   });
-  assert((call.body as any).contactId === 'ct-1', 'contact');
-  assert((call.body as any).priority === 'high', 'priority');
+  expect((call.body as any).contactId === 'ct-1', 'contact').toBeTruthy();
+  expect((call.body as any).priority === 'high', 'priority').toBeTruthy();
 });
 
 test('create_task: idempotency key differs on title change', () => {
@@ -244,7 +226,7 @@ test('create_task: idempotency key differs on title change', () => {
   const k2 = createTaskIdempotencyKey({
     subaccountId: 'sub-1', assigneeUserId: 'u-1', title: 'B', dueAt: '2026-04-25T10:00:00Z',
   });
-  assert(k1 !== k2, 'title-distinct keys');
+  expect(k1 !== k2, 'title-distinct keys').toBeTruthy();
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -259,7 +241,7 @@ test('operator_alert: valid payload passes', () => {
     recipients: { kind: 'preset', value: 'agency_owners' },
     channels: ['in_app', 'email'],
   });
-  assert(r.ok, 'expected ok');
+  expect(r.ok, 'expected ok').toBeTruthy();
 });
 
 test('operator_alert: empty channels rejected', () => {
@@ -269,7 +251,7 @@ test('operator_alert: empty channels rejected', () => {
     recipients: { kind: 'preset', value: 'agency_owners' },
     channels: [],
   });
-  assert(!r.ok, 'expected rejection');
+  expect(!r.ok, 'expected rejection').toBeTruthy();
 });
 
 test('operator_alert: channel filter drops unconfigured channels', () => {
@@ -277,9 +259,9 @@ test('operator_alert: channel filter drops unconfigured channels', () => {
     ['in_app', 'email', 'slack'],
     { inApp: true, email: true, slack: false },
   );
-  assert(fanOut.length === 2, `fanOut=${fanOut.length}`);
-  assert(skipped.length === 1, `skipped=${skipped.length}`);
-  assert(skipped[0].channel === 'slack', 'skipped slack');
+  expect(fanOut.length === 2, `fanOut=${fanOut.length}`).toBeTruthy();
+  expect(skipped.length === 1, `skipped=${skipped.length}`).toBeTruthy();
+  expect(skipped[0].channel === 'slack', 'skipped slack').toBeTruthy();
 });
 
 test('operator_alert: idempotency key uses title hash + severity', () => {
@@ -289,10 +271,7 @@ test('operator_alert: idempotency key uses title hash + severity', () => {
   const k2 = operatorAlertIdempotencyKey({
     subaccountId: 'sub-1', orgId: 'org-1', title: 'Churn spike', severity: 'urgent',
   });
-  assert(k1 !== k2, 'severity-distinct keys');
+  expect(k1 !== k2, 'severity-distinct keys').toBeTruthy();
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

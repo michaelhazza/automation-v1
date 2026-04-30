@@ -96,6 +96,8 @@ const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
 const ConfigAssistantPage = lazy(() => import('./pages/ConfigAssistantPage'));
 const ConfigSessionHistoryPage = lazy(() => import('./pages/ConfigSessionHistoryPage'));
+const AgentMailboxPage = lazy(() => import('./pages/AgentMailboxPage'));
+const AgentCalendarPage = lazy(() => import('./pages/AgentCalendarPage'));
 
 // ClientPulse pages
 const SignupPage = lazy(() => import('./pages/SignupPage'));
@@ -305,6 +307,8 @@ export default function App() {
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/mailbox" element={<AgentMailboxPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/calendar" element={<AgentCalendarPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             {/* Unified Knowledge page (spec §7.2) — References + Memory Blocks in one place */}
@@ -346,8 +350,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<Navigate to="/" replace />} />
             {/* Activity — org scope (redirects to home) */}
             <Route path="/admin/activity" element={<Navigate to="/" replace />} />
-            {/* Activity — subaccount scope (redirects to home) */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<Navigate to="/" replace />} />
+            {/* Activity — subaccount scope */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Configuration Assistant */}

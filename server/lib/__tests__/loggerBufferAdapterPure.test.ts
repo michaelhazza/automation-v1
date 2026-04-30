@@ -1,19 +1,18 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { buildLogLineForBuffer } from '../loggerBufferAdapterPure.js';
 
 test('returns null when correlationId is missing', () => {
-  assert.equal(buildLogLineForBuffer({ event: 'e' }), null);
+  expect(buildLogLineForBuffer({ event: 'e' })).toBe(null);
 });
 
 test('returns null when correlationId is an empty string', () => {
-  assert.equal(buildLogLineForBuffer({ correlationId: '', event: 'e' }), null);
+  expect(buildLogLineForBuffer({ correlationId: '', event: 'e' })).toBe(null);
 });
 
 test('returns null when correlationId is non-string', () => {
-  assert.equal(buildLogLineForBuffer({ correlationId: 42 as unknown as string }), null);
-  assert.equal(buildLogLineForBuffer({ correlationId: undefined }), null);
-  assert.equal(buildLogLineForBuffer({ correlationId: {} as unknown as string }), null);
+  expect(buildLogLineForBuffer({ correlationId: 42 as unknown as string })).toBe(null);
+  expect(buildLogLineForBuffer({ correlationId: undefined })).toBe(null);
+  expect(buildLogLineForBuffer({ correlationId: {} as unknown as string })).toBe(null);
 });
 
 test('returns a valid LogLine when correlationId is non-empty', () => {
@@ -25,11 +24,11 @@ test('returns a valid LogLine when correlationId is non-empty', () => {
     runId: 'run-42',
     orgId: 'org-1',
   });
-  assert.ok(line);
-  assert.equal(line.correlationId, 'cid-7a8b');
-  assert.equal(line.event, 'agent_run_started');
-  assert.equal(line.level, 'info');
-  assert.deepEqual(line.meta, { runId: 'run-42', orgId: 'org-1' });
+  expect(line).toBeTruthy();
+  expect(line.correlationId).toBe('cid-7a8b');
+  expect(line.event).toBe('agent_run_started');
+  expect(line.level).toBe('info');
+  expect(line.meta).toEqual({ runId: 'run-42', orgId: 'org-1' });
 });
 
 test('strips timestamp/level/event/correlationId from meta', () => {
@@ -40,12 +39,12 @@ test('strips timestamp/level/event/correlationId from meta', () => {
     correlationId: 'cid',
     foo: 'bar',
   });
-  assert.ok(line);
-  assert.deepEqual(line.meta, { foo: 'bar' });
-  assert.ok(!('timestamp' in line.meta));
-  assert.ok(!('level' in line.meta));
-  assert.ok(!('event' in line.meta));
-  assert.ok(!('correlationId' in line.meta));
+  expect(line).toBeTruthy();
+  expect(line.meta).toEqual({ foo: 'bar' });
+  expect(!('timestamp' in line.meta)).toBeTruthy();
+  expect(!('level' in line.meta)).toBeTruthy();
+  expect(!('event' in line.meta)).toBeTruthy();
+  expect(!('correlationId' in line.meta)).toBeTruthy();
 });
 
 test('preserves all other keys in meta', () => {
@@ -55,17 +54,17 @@ test('preserves all other keys in meta', () => {
     b: 'two',
     c: { nested: true },
   });
-  assert.ok(line);
-  assert.deepEqual(line.meta, { a: 1, b: 'two', c: { nested: true } });
+  expect(line).toBeTruthy();
+  expect(line.meta).toEqual({ a: 1, b: 'two', c: { nested: true } });
 });
 
 test('falls back to new Date() when timestamp is missing or invalid', () => {
   const line1 = buildLogLineForBuffer({ correlationId: 'cid' });
-  assert.ok(line1);
-  assert.ok(line1.ts instanceof Date);
-  assert.ok(!isNaN(line1.ts.getTime()));
+  expect(line1).toBeTruthy();
+  expect(line1.ts instanceof Date).toBeTruthy();
+  expect(!isNaN(line1.ts.getTime())).toBeTruthy();
 
   const line2 = buildLogLineForBuffer({ correlationId: 'cid', timestamp: 'not-a-date' });
-  assert.ok(line2);
-  assert.ok(!isNaN(line2.ts.getTime()));
+  expect(line2).toBeTruthy();
+  expect(!isNaN(line2.ts.getTime())).toBeTruthy();
 });

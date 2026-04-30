@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agents Are Employees · Prototype catalogue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav">
+  <a href="../">../prototypes</a> · agent-as-employee
+</div>
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Prototypes</span><span class="sep">/</span><span>Agents are employees</span></span>
+  <span class="right">
+    <span class="pill pill-info">Draft v2 · 2026-04-29</span>
+  </span>
+</div>
+
+<div class="page" style="max-width: 1100px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Agents are employees — UI prototypes</h1>
+      <p class="page-sub">Static HTML mockups for the Major spec. Click any tile to open the screen full-page.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <a class="btn btn-secondary" href="../../docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md">Open spec ↗</a>
+      <a class="btn btn-secondary" href="../../tasks/builds/agent-as-employee/brief.md">Open brief ↗</a>
+    </div>
+  </div>
+
+  <div class="callout callout-info" style="margin-bottom: 24px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div>
+      <strong>Latest changes:</strong> "Hire" → "Onboard to workplace" — operates on existing subaccount agents (no template picker, no "adding to org chart" step since they're already there). Email format drops the <code>agent-</code> prefix; agents look human externally (<code>sarah@clientco.com</code>). Send-email is a per-agent toggle. Documents deferred from v1. Mailbox + Calendar use the same UI shell on both backends, with deep-links to Gmail / Calendar on Google. Identity tab no longer shows internal IDs. <strong>Activity reuses the existing <code>ActivityPage</code></strong> — subaccount-wide page (with new actor filter) + an Activity tab on the agent profile that hits the same backend with <code>agentId</code> locked. No new audit page.
+    </div>
+  </div>
+
+  <div class="proto-section">Workspace setup</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="01-workspace-setup-native.html">
+      <div class="tile-id">01</div>
+      <div class="tile-title">Workspace backend — Synthetos-native</div>
+      <div class="tile-desc">New tab on the subaccount admin page. Backend selection, default signature, inline seat count.</div>
+    </a>
+    <a class="proto-tile" href="02-workspace-setup-google.html">
+      <div class="tile-id">02</div>
+      <div class="tile-title">Workspace backend — Google Workspace</div>
+      <div class="tile-desc">Same tab with Google selected. Service-account connection, scopes, seats table including a Drive-only agent (Send mail off).</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Onboard-to-workplace flow</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="03-subaccount-agents-list.html">
+      <div class="tile-id">03</div>
+      <div class="tile-title">Subaccount Agents tab</div>
+      <div class="tile-desc">Existing list with new Workplace column + per-row "Onboard to workplace" CTA on agents that aren't onboarded yet.</div>
+    </a>
+    <a class="proto-tile" href="04-onboard-step1-identity.html">
+      <div class="tile-id">04</div>
+      <div class="tile-title">Onboard — step 1: identity</div>
+      <div class="tile-desc">Display name, reports-to, email handle (no <code>agent-</code> prefix), Send email toggle. No template picker — agent is already chosen.</div>
+    </a>
+    <a class="proto-tile" href="05-onboard-step2-confirm.html">
+      <div class="tile-id">05</div>
+      <div class="tile-title">Onboard — step 2: confirm</div>
+      <div class="tile-desc">Preview + explicit list of what happens on click. Confirmation-gated.</div>
+    </a>
+    <a class="proto-tile" href="06-onboard-step3-progress.html">
+      <div class="tile-id">06</div>
+      <div class="tile-title">Onboard — step 3: progress</div>
+      <div class="tile-desc">Idempotent provisioning steps. Native and Google flows shown side-by-side.</div>
+    </a>
+    <a class="proto-tile" href="07-onboard-success.html">
+      <div class="tile-id">07</div>
+      <div class="tile-title">Onboard — success</div>
+      <div class="tile-desc">Final state. Open the agent's profile or onboard another.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Org chart + agent profile</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="08-org-chart.html">
+      <div class="tile-id">08</div>
+      <div class="tile-title">Org chart — humans + agents</div>
+      <div class="tile-desc">Extends the existing canvas. Humans (orange) and agents (indigo) on one chart, joined via canonical actor.</div>
+    </a>
+    <a class="proto-tile" href="09-agent-identity-tab.html">
+      <div class="tile-id">09</div>
+      <div class="tile-title">Agent profile — Identity tab</div>
+      <div class="tile-desc">Workplace identity card (sending state inline), lifecycle progress, Activity row, suspend / revoke actions. No technical IDs.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Activity (mailbox / calendar)</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="10-agent-mailbox.html">
+      <div class="tile-id">10</div>
+      <div class="tile-title">Agent mailbox</div>
+      <div class="tile-desc">Same UI shell on both backends. Native shows the full inbox; Google shows recent activity with deep-links to Gmail.</div>
+    </a>
+    <a class="proto-tile" href="11-agent-calendar.html">
+      <div class="tile-id">11</div>
+      <div class="tile-title">Agent calendar</div>
+      <div class="tile-desc">Same UI shell on both backends. Native runs RFC 5546 calendar-over-email; Google syncs from Calendar API.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Lifecycle</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="12-suspend-dialog.html">
+      <div class="tile-id">12</div>
+      <div class="tile-title">Suspend confirmation</div>
+      <div class="tile-desc">Reversible action. Frees the seat immediately. Plain confirmation.</div>
+    </a>
+    <a class="proto-tile" href="13-revoke-dialog.html">
+      <div class="tile-id">13</div>
+      <div class="tile-title">Revoke confirmation</div>
+      <div class="tile-desc">Destructive. Type-the-name gate. Preserves owned resources under the actor.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Activity (existing ActivityPage, extended)</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="14-subaccount-activity.html">
+      <div class="tile-id">14</div>
+      <div class="tile-title">Subaccount Activity page</div>
+      <div class="tile-desc">Reuses the existing <code>ActivityPage</code>. New actor filter exposes humans + agents. The overarching feed for the whole client.</div>
+    </a>
+    <a class="proto-tile" href="15-agent-activity-tab.html">
+      <div class="tile-id">15</div>
+      <div class="tile-title">Agent Activity tab</div>
+      <div class="tile-desc">New tab on the existing agent profile (<code>SubaccountAgentEditPage</code>). Same component, <code>agentId</code> locked to the open agent.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">Migration</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="16-migration-modal.html">
+      <div class="tile-id">16</div>
+      <div class="tile-title">Workspace migration (native → Google)</div>
+      <div class="tile-desc">Per-subaccount. New identity per backend, actor preserved.</div>
+    </a>
+  </div>
+
+  <div class="proto-section">What we did NOT build</div>
+  <div class="card">
+    <div class="card-body">
+      <p style="font-size: 13px; color: var(--sl-700); margin-bottom: 12px;">Per CLAUDE.md frontend rules — primary task first, default to hidden, one primary action per screen — these surfaces are deliberately absent at launch:</p>
+      <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--sl-600); line-height: 1.8;">
+        <li>Agent activity dashboard with KPI tiles</li>
+        <li>Agent productivity score / "tasks completed this week"</li>
+        <li>Timeline-style visualisation of every action — the audit log is tabular</li>
+        <li>Internal IDs (actor, identity, connector) on user-facing screens — diagnostic only</li>
+        <li>Documents surface (deferred to a follow-up; on Google, agents own files in Drive directly)</li>
+        <li>Standalone aggregate "Agent inbox" landing page across all agents in an org</li>
+      </ul>
+      <p style="font-size: 12px; color: var(--sl-500); margin-top: 12px;">If a customer asks for any of these, we add them as targeted single-task surfaces in a follow-up. Default is they don't exist.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

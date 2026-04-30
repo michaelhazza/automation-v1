@@ -4,26 +4,12 @@
  * Runnable via:
  *   npx tsx server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts
  */
+import { expect, test } from 'vitest';
 import {
   isSilentAgentRatioElevated,
   parseMinSamplesEnv,
   parseRatioThresholdEnv,
 } from '../silentAgentSuccessPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -93,6 +79,3 @@ test('parseMinSamplesEnv: zero → default 5 (non-positive)', () => {
 test('parseMinSamplesEnv: valid 10 → 10', () => {
   check(parseMinSamplesEnv('10') === 10, 'expected 10 for valid string "10"');
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

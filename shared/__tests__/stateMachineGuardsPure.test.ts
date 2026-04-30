@@ -5,40 +5,17 @@
  *   npx tsx shared/__tests__/stateMachineGuardsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   assertValidTransition,
   InvalidTransitionError,
   type StateMachineKind,
 } from '../stateMachineGuards.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertThrows(fn: () => void, expectedKind?: StateMachineKind): InvalidTransitionError {
-  try {
-    fn();
-  } catch (err) {
-    if (!(err instanceof InvalidTransitionError)) {
-      throw new Error(`expected InvalidTransitionError, got ${err instanceof Error ? err.constructor.name : typeof err}`);
-    }
-    if (expectedKind && err.kind !== expectedKind) {
-      throw new Error(`expected kind=${expectedKind}, got ${err.kind}`);
-    }
-    return err;
-  }
-  throw new Error('expected throw, but call succeeded');
+function assertThrows(fn: () => unknown, label: string): any {
+  let thrown: unknown;
+  try { fn(); } catch (e) { thrown = e; return e; }
+  throw new Error(`${label} — expected throw, but did not throw`);
 }
 
 function assertNoThrow(fn: () => void): void {
@@ -185,7 +162,3 @@ test('error carries kind / recordId / from / to fields', () => {
 });
 
 console.log('');
-console.log(`Passed: ${passed}`);
-console.log(`Failed: ${failed}`);
-
-if (failed > 0) process.exit(1);

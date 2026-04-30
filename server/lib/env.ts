@@ -5,7 +5,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   EMAIL_FROM: z.string(),
   PORT: z.coerce.number().optional().default(3000),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test', 'integration']).default('development'),
   FILE_STORAGE_BACKEND: z.enum(['r2', 's3']).default('r2'),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -155,6 +155,18 @@ const envSchema = z.object({
     .positive()
     .optional()
     .default(30),
+  // Workspace — Native backend
+  // Domain used for agent email addresses provisioned by the native backend.
+  // Example: workspace.acme.com  Falls back to 'workspace.local' when unset.
+  NATIVE_EMAIL_DOMAIN: z.string().optional().default(''),
+  // HMAC-SHA256 shared secret for verifying inbound email webhook payloads from the provider.
+  NATIVE_EMAIL_INBOUND_WEBHOOK_SECRET: z.string().optional().default(''),
+
+  // Workspace — Google Workspace backend
+  // Service account JSON (path to file or inline JSON string) used for domain-wide delegation.
+  GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
+  // Email of the Workspace admin that the service account impersonates for Admin SDK calls.
+  GOOGLE_WORKSPACE_ADMIN_DELEGATED_USER: z.string().optional().default(''),
 });
 
 export const env = envSchema.parse(process.env);

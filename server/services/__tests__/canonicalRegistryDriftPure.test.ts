@@ -25,6 +25,7 @@
  */
 export {};
 
+import { expect, test } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,25 +35,6 @@ const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '../../..');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(message);
-}
 
 // ── Build schemaTables ────────────────────────────────────────────────────────
 // Scan every *.ts file in server/db/schema and extract the first string
@@ -109,11 +91,11 @@ const dictionaryTables = buildDictionaryTables();
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test('schemaTables is non-empty (sanity: schema files are readable)', () => {
-  assert(schemaTables.size > 0, 'No canonical_* tables found in server/db/schema — check the schema directory path');
+  expect(schemaTables.size > 0, 'No canonical_* tables found in server/db/schema — check the schema directory path').toBeTruthy();
 });
 
 test('dictionaryTables is non-empty (sanity: registry file is readable)', () => {
-  assert(dictionaryTables.size > 0, 'No canonical_* entries found in canonicalDictionaryRegistry.ts — check the registry file path');
+  expect(dictionaryTables.size > 0, 'No canonical_* entries found in canonicalDictionaryRegistry.ts — check the registry file path').toBeTruthy();
 });
 
 test('every canonical_* schema table is registered in CANONICAL_DICTIONARY_REGISTRY', () => {
@@ -159,5 +141,3 @@ test('CANONICAL_DICTIONARY_REGISTRY contains no duplicate canonical_* tableName 
 // ── Result ────────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`canonicalRegistryDriftPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -10,6 +10,7 @@
  *   npx tsx server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   serialiseMiddlewareContext,
   deserialiseMiddlewareContext,
@@ -23,19 +24,10 @@ import type {
 } from '../middleware/types.js';
 import { MIDDLEWARE_CONTEXT_VERSION } from '../../config/limits.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
+function assertThrows(fn: () => unknown, label: string): void {
+  let thrown = false;
+  try { fn(); } catch { thrown = true; }
+  if (!thrown) throw new Error(`${label} — expected throw`);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -44,16 +36,6 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
       `${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
-}
-
-function assertThrows(fn: () => void, label: string) {
-  let thrown = false;
-  try {
-    fn();
-  } catch {
-    thrown = true;
-  }
-  if (!thrown) throw new Error(`${label} — expected throw`);
 }
 
 // Build a fake MiddlewareContext. Only the persisted fields are
@@ -89,14 +71,14 @@ console.log('');
 test('serialises a fresh context with default counters', () => {
   const ctx = makeCtx();
   const out = serialiseMiddlewareContext(ctx);
-  assertEqual(out.middlewareVersion, MIDDLEWARE_CONTEXT_VERSION, 'version');
-  assertEqual(out.iteration, 0, 'iteration');
-  assertEqual(out.tokensUsed, 0, 'tokensUsed');
-  assertEqual(out.toolCallsCount, 0, 'toolCallsCount');
-  assertEqual(out.toolCallHistory, [], 'toolCallHistory');
-  assertEqual(out.preToolDecisions, {}, 'empty preToolDecisions');
-  assertEqual(out.lastReviewCodeVerdict, null, 'null verdict');
-  assertEqual(out.reviewCodeIterations, 0, 'zero review iters');
+  expect(out.middlewareVersion, 'version').toEqual(MIDDLEWARE_CONTEXT_VERSION);
+  expect(out.iteration, 'iteration').toBe(0);
+  expect(out.tokensUsed, 'tokensUsed').toBe(0);
+  expect(out.toolCallsCount, 'toolCallsCount').toBe(0);
+  expect(out.toolCallHistory, 'toolCallHistory').toEqual([]);
+  expect(out.preToolDecisions, 'empty preToolDecisions').toEqual({});
+  expect(out.lastReviewCodeVerdict, 'null verdict').toBe(null);
+  expect(out.reviewCodeIterations, 'zero review iters').toBe(0);
 });
 
 test('serialises a context with live counters', () => {
@@ -113,17 +95,13 @@ test('serialises a context with live counters', () => {
     lastAssistantText: '<tool_intent>{"tool":"x","confidence":0.9}</tool_intent>',
   });
   const out = serialiseMiddlewareContext(ctx);
-  assertEqual(out.iteration, 3, 'iteration');
-  assertEqual(out.tokensUsed, 12_345, 'tokensUsed');
-  assertEqual(out.toolCallsCount, 7, 'toolCallsCount');
-  assertEqual(out.toolCallHistory.length, 2, 'history length');
-  assertEqual(out.lastReviewCodeVerdict, 'APPROVE', 'verdict');
-  assertEqual(out.reviewCodeIterations, 2, 'review iters');
-  assertEqual(
-    out.lastAssistantText,
-    '<tool_intent>{"tool":"x","confidence":0.9}</tool_intent>',
-    'assistant text',
-  );
+  expect(out.iteration, 'iteration').toBe(3);
+  expect(out.tokensUsed, 'tokensUsed').toEqual(12_345);
+  expect(out.toolCallsCount, 'toolCallsCount').toBe(7);
+  expect(out.toolCallHistory.length, 'history length').toBe(2);
+  expect(out.lastReviewCodeVerdict, 'verdict').toBe('APPROVE');
+  expect(out.reviewCodeIterations, 'review iters').toBe(2);
+  expect(out.lastAssistantText, 'assistant text').toBe('<tool_intent>{"tool":"x","confidence":0.9}</tool_intent>');
 });
 
 test('flattens preToolDecisions Map into a plain object', () => {
@@ -134,14 +112,10 @@ test('flattens preToolDecisions Map into a plain object', () => {
     reason: 'policy_block',
   });
   const out = serialiseMiddlewareContext(ctx);
-  assertEqual(
-    out.preToolDecisions,
-    {
+  expect(out.preToolDecisions, 'flattened decisions').toEqual({
       tc_1: { action: 'continue' },
       tc_2: { action: 'block', reason: 'policy_block' },
-    },
-    'flattened decisions',
-  );
+    });
 });
 
 test('toolCallHistory is a defensive copy (not the same reference)', () => {
@@ -151,8 +125,8 @@ test('toolCallHistory is a defensive copy (not the same reference)', () => {
   const out = serialiseMiddlewareContext(ctx);
   // Mutate the source after serialisation — snapshot must not reflect it.
   ctx.toolCallHistory.push({ name: 'mutated', inputHash: 'zzz', iteration: 1 });
-  assertEqual(out.toolCallHistory.length, 1, 'snapshot unchanged');
-  assertEqual(out.toolCallHistory[0].name, 'search', 'original entry preserved');
+  expect(out.toolCallHistory.length, 'snapshot unchanged').toBe(1);
+  expect(out.toolCallHistory[0].name, 'original entry preserved').toBe('search');
 });
 
 test('round-trips through JSON.stringify without data loss', () => {
@@ -165,9 +139,9 @@ test('round-trips through JSON.stringify without data loss', () => {
   ctx.preToolDecisions.set('tc_1', { action: 'continue' });
   const out = serialiseMiddlewareContext(ctx);
   const round = JSON.parse(JSON.stringify(out)) as SerialisableMiddlewareContext;
-  assertEqual(round.iteration, 5, 'json iteration');
-  assertEqual(round.preToolDecisions?.tc_1?.action, 'continue', 'json decisions');
-  assertEqual(round.lastReviewCodeVerdict, 'BLOCKED', 'json verdict');
+  expect(round.iteration, 'json iteration').toBe(5);
+  expect(round.preToolDecisions?.tc_1?.action, 'json decisions').toBe('continue');
+  expect(round.lastReviewCodeVerdict, 'json verdict').toBe('BLOCKED');
 });
 
 // ── deserialiseMiddlewareContext ───────────────────────────────────
@@ -182,10 +156,10 @@ test('rehydrates a minimal serialised context', () => {
     preToolDecisions: {},
   };
   const out = deserialiseMiddlewareContext(serialised);
-  assertEqual(out.iteration, 2, 'iteration');
-  assertEqual(out.tokensUsed, 1000, 'tokens');
-  assertEqual(out.preToolDecisions instanceof Map, true, 'Map restored');
-  assertEqual(out.preToolDecisions.size, 0, 'empty map');
+  expect(out.iteration, 'iteration').toBe(2);
+  expect(out.tokensUsed, 'tokens').toBe(1000);
+  expect(out.preToolDecisions instanceof Map, 'Map restored').toBe(true);
+  expect(out.preToolDecisions.size, 'empty map').toBe(0);
 });
 
 test('rehydrates preToolDecisions as a Map<string, PreToolDecision>', () => {
@@ -201,12 +175,12 @@ test('rehydrates preToolDecisions as a Map<string, PreToolDecision>', () => {
     },
   };
   const out = deserialiseMiddlewareContext(serialised);
-  assertEqual(out.preToolDecisions instanceof Map, true, 'Map type');
-  assertEqual(out.preToolDecisions.size, 2, 'two decisions');
+  expect(out.preToolDecisions instanceof Map, 'Map type').toBe(true);
+  expect(out.preToolDecisions.size, 'two decisions').toBe(2);
   const d1 = out.preToolDecisions.get('tc_1') as PreToolDecision | undefined;
   const d2 = out.preToolDecisions.get('tc_2') as PreToolDecision | undefined;
-  assertEqual(d1?.action, 'continue', 'tc_1 action');
-  assertEqual(d2?.action, 'skip', 'tc_2 action');
+  expect(d1?.action, 'tc_1 action').toBe('continue');
+  expect(d2?.action, 'tc_2 action').toBe('skip');
 });
 
 test('rejects a checkpoint with a mismatched middlewareVersion', () => {
@@ -234,7 +208,7 @@ test('rehydrated toolCallHistory is a defensive copy', () => {
   };
   const out = deserialiseMiddlewareContext(serialised);
   history.push({ name: 'mutated', inputHash: 'b', iteration: 1 });
-  assertEqual(out.toolCallHistory.length, 1, 'snapshot unchanged');
+  expect(out.toolCallHistory.length, 'snapshot unchanged').toBe(1);
 });
 
 test('defaults missing reviewCodeIterations to 0', () => {
@@ -246,8 +220,8 @@ test('defaults missing reviewCodeIterations to 0', () => {
     toolCallHistory: [],
   };
   const out = deserialiseMiddlewareContext(serialised);
-  assertEqual(out.reviewCodeIterations, 0, 'default review iters');
-  assertEqual(out.lastReviewCodeVerdict, null, 'default verdict');
+  expect(out.reviewCodeIterations, 'default review iters').toBe(0);
+  expect(out.lastReviewCodeVerdict, 'default verdict').toBe(null);
 });
 
 // ── buildResumeContext ─────────────────────────────────────────────
@@ -293,17 +267,17 @@ test('builds a resume context at iteration + 1', () => {
     maxToolCalls: 50,
     timeoutMs: 300_000,
   });
-  assertEqual(out.iteration, 5, 'iteration + 1');
-  assertEqual(out.tokensUsed, 25_000, 'tokens carried forward');
-  assertEqual(out.toolCallsCount, 6, 'tool calls carried forward');
-  assertEqual(out.lastReviewCodeVerdict, 'APPROVE', 'verdict preserved');
-  assertEqual(out.reviewCodeIterations, 1, 'review iters preserved');
-  assertEqual(out.preToolDecisions instanceof Map, true, 'Map restored');
-  assertEqual(out.preToolDecisions.get('tc_1')?.action, 'continue', 'decision restored');
+  expect(out.iteration, 'iteration + 1').toBe(5);
+  expect(out.tokensUsed, 'tokens carried forward').toEqual(25_000);
+  expect(out.toolCallsCount, 'tool calls carried forward').toBe(6);
+  expect(out.lastReviewCodeVerdict, 'verdict preserved').toBe('APPROVE');
+  expect(out.reviewCodeIterations, 'review iters preserved').toBe(1);
+  expect(out.preToolDecisions instanceof Map, 'Map restored').toBe(true);
+  expect(out.preToolDecisions.get('tc_1')?.action, 'decision restored').toBe('continue');
   // Live runtime fields are the ones passed in, not the checkpoint.
-  assertEqual(out.startTime, 1_700_000_999_999, 'fresh startTime');
-  assertEqual(out.tokenBudget, 100_000, 'fresh tokenBudget');
-  assertEqual(out.runId, 'run-1', 'runId');
+  expect(out.startTime, 'fresh startTime').toEqual(1_700_000_999_999);
+  expect(out.tokenBudget, 'fresh tokenBudget').toEqual(100_000);
+  expect(out.runId, 'runId').toBe('run-1');
 });
 
 test('rejects a checkpoint with an unsupported version', () => {
@@ -396,15 +370,13 @@ test('round-trip: serialise → JSON → deserialise → build preserves state',
     timeoutMs: 300_000,
   });
 
-  assertEqual(out.iteration, 3, 'iteration + 1 after round trip');
-  assertEqual(out.tokensUsed, 9999, 'tokens preserved');
-  assertEqual(out.lastReviewCodeVerdict, 'BLOCKED', 'verdict preserved');
-  assertEqual(out.reviewCodeIterations, 2, 'review iters preserved');
-  assertEqual(out.preToolDecisions.get('tc_a')?.action, 'continue', 'decision preserved');
-  assertEqual(out.lastAssistantText, 'hello', 'assistant text preserved');
+  expect(out.iteration, 'iteration + 1 after round trip').toBe(3);
+  expect(out.tokensUsed, 'tokens preserved').toBe(9999);
+  expect(out.lastReviewCodeVerdict, 'verdict preserved').toBe('BLOCKED');
+  expect(out.reviewCodeIterations, 'review iters preserved').toBe(2);
+  expect(out.preToolDecisions.get('tc_a')?.action, 'decision preserved').toBe('continue');
+  expect(out.lastAssistantText, 'assistant text preserved').toBe('hello');
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

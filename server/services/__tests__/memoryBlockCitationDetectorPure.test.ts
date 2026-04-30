@@ -3,8 +3,7 @@
  * Run via: npx tsx server/services/__tests__/memoryBlockCitationDetectorPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { detectBlockCitationsPure } from '../memoryBlockCitationDetectorPure.js';
 import type { BlockCitationInput } from '../memoryBlockCitationDetectorPure.js';
 
@@ -24,7 +23,7 @@ test('returns empty when no applied block IDs', () => {
     config: CONFIG,
   };
   const result = detectBlockCitationsPure(input);
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('detects citation when output contains block words', () => {
@@ -35,9 +34,9 @@ test('detects citation when output contains block words', () => {
     config: CONFIG,
   };
   const result = detectBlockCitationsPure(input);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].memoryBlockId, 'block-1');
-  assert.ok(result[0].citationScore > 0);
+  expect(result.length).toBe(1);
+  expect(result[0].memoryBlockId).toBe('block-1');
+  expect(result[0].citationScore > 0).toBeTruthy();
 });
 
 test('returns no citation when output is unrelated to block', () => {
@@ -48,7 +47,7 @@ test('returns no citation when output is unrelated to block', () => {
     config: { minCitationScore: 0.4 },
   };
   const result = detectBlockCitationsPure(input);
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('respects minCitationScore threshold', () => {
@@ -60,7 +59,7 @@ test('respects minCitationScore threshold', () => {
   };
   const result = detectBlockCitationsPure(input);
   // High threshold — should filter out the citation
-  assert.equal(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('sorts results by citationScore descending', () => {
@@ -73,7 +72,7 @@ test('sorts results by citationScore descending', () => {
   };
   const result = detectBlockCitationsPure(input);
   if (result.length >= 2) {
-    assert.ok(result[0].citationScore >= result[1].citationScore);
+    expect(result[0].citationScore >= result[1].citationScore).toBeTruthy();
   }
 });
 
@@ -85,5 +84,5 @@ test('ignores blocks not in appliedBlockIds', () => {
     config: CONFIG,
   };
   const result = detectBlockCitationsPure(input);
-  assert.ok(!result.some((c) => c.memoryBlockId === 'block-2'));
+  expect(!result.some((c) => c.memoryBlockId === 'block-2')).toBeTruthy();
 });

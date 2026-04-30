@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>14 — Activity · Acme Client Co.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 14 / 16 · <span class="muted">ActivityPage (existing) — subaccount scope, with new actor filter exposed in UI</span> · <a href="13-revoke-dialog.html">← Revoke</a> · <a href="15-agent-activity-tab.html">Next: Agent Activity tab →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Subaccounts</a>
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Activity</span>
+  </span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim · Acme Agency</span></span></span>
+</div>
+
+<div class="page" style="max-width: 1280px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Activity</h1>
+      <p class="page-sub">All actions taken by agents and humans at this client. Reuses the existing <code style="font-size: 11px;">ActivityPage</code> with a new actor filter.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary btn-sm">Export CSV</button>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: white; border: 1px solid var(--sl-200); border-radius: 8px; margin-bottom: 14px; flex-wrap: wrap;">
+    <strong class="text-sm">Filter</strong>
+
+    <select class="field-select btn-sm" style="width: auto; padding: 5px 24px 5px 8px; font-size: 12px;">
+      <option>Last 30 days</option>
+      <option>Last 7 days</option>
+      <option>Last 24 hours</option>
+      <option>Custom range</option>
+    </select>
+
+    <select class="field-select btn-sm" style="width: auto; padding: 5px 24px 5px 8px; font-size: 12px;">
+      <option>All actions</option>
+      <option>Email</option>
+      <option>Calendar</option>
+      <option>Agent runs</option>
+      <option>Identity lifecycle</option>
+      <option>Workflows</option>
+      <option>Inbox</option>
+    </select>
+
+    <select class="field-select btn-sm" style="width: auto; padding: 5px 24px 5px 8px; font-size: 12px; border-color: var(--indigo-400); color: var(--indigo-700); font-weight: 500;">
+      <option>Actor: All</option>
+      <option>👤 Maya Lim (human)</option>
+      <option>👤 Tom Foster (human)</option>
+      <option>🤖 Sarah</option>
+      <option>🤖 Johnny</option>
+      <option>🤖 Helena</option>
+      <option>🤖 Patel</option>
+      <option>🤖 Riley</option>
+    </select>
+
+    <span style="margin-left: auto;" class="text-xs muted">247 events · 6 actors active</span>
+  </div>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 130px;">Timestamp</th>
+          <th style="width: 170px;">Actor</th>
+          <th style="width: 180px;">Action</th>
+          <th>Subject</th>
+          <th style="width: 100px;">Run / context</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-xs muted">29 Apr · 14:18</td>
+          <td>
+            <a href="15-agent-activity-tab.html" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit;">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Sarah</span>
+            </a>
+          </td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.sent</span></td>
+          <td><strong>To Maya Lim</strong> · "Re: Q2 attribution dashboard"</td>
+          <td><code class="text-xs">run_01HZX5</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 14:08</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-human">ML</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Maya Lim</span>
+            </span>
+          </td>
+          <td><span class="pill pill-purple" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">actor.onboarded</span></td>
+          <td><strong>Riley</strong> · onboarded to workplace · backend = synthetos_native</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 13:55</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">JO</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Johnny</span>
+            </span>
+          </td>
+          <td><span class="pill pill-active" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;"><span class="dot"></span>agent_run.completed</span></td>
+          <td>skill: sdr:enrich_lead · 4 tool calls · 47s</td>
+          <td><code class="text-xs">run_01HZX2</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 13:30</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">HE</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Helena</span>
+            </span>
+          </td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.sent</span></td>
+          <td><strong>To Tom Foster</strong> · "Spring campaign brief — draft v2"</td>
+          <td><code class="text-xs">run_01HZX0</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 11:30</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Sarah</span>
+            </span>
+          </td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">calendar.event_accept</span></td>
+          <td>Q2 attribution sync (cal.acme.com event)</td>
+          <td><code class="text-xs">run_01HZX1</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 09:14</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Sarah</span>
+            </span>
+          </td>
+          <td><span class="pill pill-active" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;"><span class="dot"></span>agent_run.completed</span></td>
+          <td>skill: marketing-analyst:cohort_analysis · 3 tool calls · 28s</td>
+          <td><code class="text-xs">run_01HZWY</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">29 Apr · 09:08</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-human">ML</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Maya Lim</span>
+            </span>
+          </td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.sent</span></td>
+          <td><strong>To Sarah</strong> · "Q2 attribution dashboard"</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">28 Apr · 17:02</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">JO</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Johnny</span>
+            </span>
+          </td>
+          <td><span class="pill pill-info" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;">email.sent</span></td>
+          <td><strong>To Sarah</strong> · "Lead enrichment hand-off"</td>
+          <td><code class="text-xs">run_01HZWX</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">28 Apr · 16:48</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Sarah</span>
+            </span>
+          </td>
+          <td><span class="pill" style="font-family: 'JetBrains Mono', monospace; font-size: 10px; background: var(--amber-50); color: var(--amber-700);">workflow_run.completed</span></td>
+          <td>Weekly attribution roll-up · 12 steps · 4m 12s</td>
+          <td><code class="text-xs">run_01HZWW</code></td>
+        </tr>
+        <tr>
+          <td class="text-xs muted">28 Apr · 14:20</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="avatar avatar-sm avatar-agent" style="opacity: 0.6;">PA</span>
+              <span style="font-weight: 500; color: var(--sl-900);">Patel</span>
+            </span>
+          </td>
+          <td><span class="pill pill-suspend" style="font-family: 'JetBrains Mono', monospace; font-size: 10px;"><span class="dot"></span>identity.suspended</span></td>
+          <td>Active → Suspended · paused by maya@acme.com</td>
+          <td class="muted text-xs">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+    <span class="text-xs muted">Showing 10 of 247 · 6 actors active in selected range</span>
+    <div style="display: flex; gap: 6px;">
+      <button class="btn btn-secondary btn-sm" disabled>Previous</button>
+      <button class="btn btn-secondary btn-sm">Next →</button>
+    </div>
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 14px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div><strong>Reusing the existing page.</strong> <code>ActivityPage.tsx</code> already aggregates 6 event types and accepts an <code>agentId</code> filter on the backend. This spec extends the event-type set (email, calendar, identity lifecycle) and adds the actor filter UI. Click any actor's name to jump to their personal Activity tab — same data, scoped.</div>
+  </div>
+</div>
+
+</body>
+</html>

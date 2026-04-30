@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>04 — Onboard step 1: identity · Riley</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 04 / 16 · <span class="muted">Onboard modal step 1 of 3 — for an existing subaccount agent</span> · <a href="03-subaccount-agents-list.html">← Agents list</a> · <a href="05-onboard-step2-confirm.html">Next: step 2 →</a></div>
+
+<div class="appbar" style="opacity: 0.55;">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Subaccounts / Acme Client Co. / Agents</span></span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+<div class="tabs" style="opacity: 0.55;"><a href="#" class="active">Agents</a></div>
+<div class="page" style="opacity: 0.55;"></div>
+
+<div class="modal-overlay">
+  <div class="modal" style="max-width: 640px;">
+
+    <div class="modal-head">
+      <div>
+        <h2>Onboard Riley to the workplace</h2>
+        <div class="step">Step 1 of 3 — Identity</div>
+      </div>
+      <button class="modal-close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="step-bar">
+        <span class="step current"></span>
+        <span class="step"></span>
+        <span class="step"></span>
+      </div>
+
+      <div class="callout callout-info" style="margin-bottom: 18px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Riley is already an active agent at this client (Reporting agent) and already shows on the org chart. Onboarding adds Riley's email address and calendar so the team can interact with Riley like a colleague.</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 80px 1fr; gap: 16px; align-items: start;">
+
+        <div>
+          <div class="field-label">Photo</div>
+          <span class="avatar avatar-lg avatar-agent" style="margin-top: 4px;">RI</span>
+          <p class="text-xs muted" style="margin-top: 8px; line-height: 1.4;">Auto-generated.</p>
+        </div>
+
+        <div>
+          <div class="field">
+            <label class="field-label">Display name</label>
+            <input class="field-input" value="Riley" />
+            <div class="field-hint">First name only is fine — agents look human externally.</div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Reports to</label>
+            <select class="field-select">
+              <option>— Top of org —</option>
+              <option selected>👤 Maya Lim · Founder</option>
+              <option>🤖 Sarah · Marketing analyst</option>
+              <option>🤖 Johnny · SDR</option>
+              <option>🤖 Helena · Content marketer</option>
+            </select>
+            <div class="field-hint">Same field as the existing "Reports to" — display only, doesn't gate permissions.</div>
+          </div>
+
+          <div class="hr"></div>
+
+          <div class="field">
+            <label class="field-label" style="display: flex; align-items: center; justify-content: space-between;">
+              <span>Send email</span>
+              <label class="toggle">
+                <input type="checkbox" checked />
+                <span class="track"><span class="thumb"></span></span>
+              </label>
+            </label>
+            <div class="field-hint" style="margin-top: 6px;">When off, Riley can read incoming mail but won't send any. Useful for agents that need Drive or Calendar access without email automation.</div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Email address</label>
+            <div class="field-prefix-wrap">
+              <input value="riley" />
+              <span class="field-suffix">@acme.synthetos.io</span>
+            </div>
+            <div class="field-hint">Lowercase, hyphens only. Must be unique within the workspace.</div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Signature</label>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--sl-200); border-radius: 7px; background: var(--sl-50);">
+              <span class="text-xs" style="color: var(--sl-700); flex: 1;">Inherits from subaccount default.</span>
+              <button class="btn btn-ghost btn-sm">Edit override</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn btn-secondary">Cancel</button>
+      <a href="05-onboard-step2-confirm.html" class="btn btn-primary">Next →</a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

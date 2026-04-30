@@ -4,28 +4,10 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/approvalCardGeneratorPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { generateApprovalCards } from '../approvalCardGeneratorPure.js';
 import type { ApprovalCardContext } from '../approvalCardGeneratorPure.js';
 import type { QueryPlan, ExecutorResult } from '../../../../shared/types/crmQueryPlanner.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -58,41 +40,38 @@ const ctx: ApprovalCardContext = {
 
 test('contact-list with ≥1 row → single approval card for top row', () => {
   const cards = generateApprovalCards(makePlan(), makeExec({ rows: [{ id: 'c1', displayName: 'Alice' }], rowCount: 1 }), ctx);
-  assertEqual(cards.length, 1, 'one card');
-  assertEqual(cards[0]!.kind, 'approval', 'kind=approval');
-  assertEqual(cards[0]!.actionSlug, 'crm.send_email', 'actionSlug=crm.send_email');
-  assertEqual((cards[0]!.actionArgs as any).toContactId, 'c1', 'toContactId');
-  assertEqual((cards[0]!.actionArgs as any).from, 'sender@example.com', 'from');
+  expect(cards.length, 'one card').toBe(1);
+  expect(cards[0]!.kind, 'kind=approval').toBe('approval');
+  expect(cards[0]!.actionSlug, 'actionSlug=crm.send_email').toBe('crm.send_email');
+  expect((cards[0]!.actionArgs as any).toContactId, 'toContactId').toBe('c1');
+  expect((cards[0]!.actionArgs as any).from, 'from').toBe('sender@example.com');
 });
 
 test('contact-list with 0 rows → no card', () => {
   const cards = generateApprovalCards(makePlan(), makeExec({ rows: [], rowCount: 0 }), ctx);
-  assertEqual(cards.length, 0, 'no card for empty result');
+  expect(cards.length, 'no card for empty result').toBe(0);
 });
 
 test('opportunity-list → no card in v1', () => {
   const plan = makePlan({ primaryEntity: 'opportunities' });
   const cards = generateApprovalCards(plan, makeExec({ rows: [{ id: 'o1' }], rowCount: 1 }), ctx);
-  assertEqual(cards.length, 0, 'v1 has no opportunity card');
+  expect(cards.length, 'v1 has no opportunity card').toBe(0);
 });
 
 test('missing defaultSenderIdentifier → no card (graceful skip)', () => {
   const noSenderCtx: ApprovalCardContext = { subaccountId: 'sub-1' };
   const cards = generateApprovalCards(makePlan(), makeExec({ rows: [{ id: 'c1' }], rowCount: 1 }), noSenderCtx);
-  assertEqual(cards.length, 0, 'no sender → no card');
+  expect(cards.length, 'no sender → no card').toBe(0);
 });
 
 test('approval card affectedRecordIds contains the top-row id', () => {
   const cards = generateApprovalCards(makePlan(), makeExec({ rows: [{ id: 'c99' }], rowCount: 1 }), ctx);
-  assert(cards[0]!.affectedRecordIds.includes('c99'), 'affectedRecordIds must include contact id');
+  expect(cards[0]!.affectedRecordIds.includes('c99'), 'affectedRecordIds must include contact id').toBeTruthy();
 });
 
 test('approval card riskLevel is always low for single-contact email (v1)', () => {
   const cards = generateApprovalCards(makePlan(), makeExec({ rows: [{ id: 'c1' }], rowCount: 1 }), ctx);
-  assertEqual(cards[0]!.riskLevel, 'low', 'single-contact email is always low risk');
+  expect(cards[0]!.riskLevel, 'single-contact email is always low risk').toBe('low');
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

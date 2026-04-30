@@ -30,21 +30,21 @@
 // function `asserts` overloads via TypeScript decorators. Dynamic-importing
 // it strips the narrowing and triggers TS2775. Heavy DB modules stay dynamic
 // so the no-DATABASE_URL skip path returns before they boot.
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import * as crypto from 'node:crypto';
 
 // Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
 // Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-await import('dotenv/config');
+import 'dotenv/config';
 
 process.env.NODE_ENV ??= 'test';
 process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 // Force ceiling routing so the test asserts a deterministic provider/model
 // pair regardless of the resolveLLM heuristic state in the test DB.
-process.env.ROUTER_FORCE_FRONTIER = '1';
+process.env.ROUTER_FORCE_FRONTIER ??= '1';
 
 // Heavy DB modules are imported conditionally — when SKIP is true the dynamic
 // imports are not reached, so env.ts validation and DB connection setup are
@@ -61,9 +61,11 @@ let orgBudgets: Awaited<typeof import('../../db/schema/index.js')>['orgBudgets']
 let costAggregates: Awaited<typeof import('../../db/schema/index.js')>['costAggregates'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'];
 let routeCall: Awaited<typeof import('../llmRouter.js')>['routeCall'];
 let registerProviderAdapter: Awaited<typeof import('../providers/registry.js')>['registerProviderAdapter'];
 let createFakeProviderAdapter: Awaited<typeof import('./fixtures/fakeProviderAdapter.js')>['createFakeProviderAdapter'];
+let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'];
 
 if (!SKIP) {
   ({ db } = await import('../../db/index.js'));
@@ -77,10 +79,11 @@ if (!SKIP) {
     orgBudgets,
     costAggregates,
   } = await import('../../db/schema/index.js'));
-  ({ eq, and } = await import('drizzle-orm'));
+  ({ eq, and, sql } = await import('drizzle-orm'));
   ({ routeCall } = await import('../llmRouter.js'));
   ({ registerProviderAdapter } = await import('../providers/registry.js'));
   ({ createFakeProviderAdapter } = await import('./fixtures/fakeProviderAdapter.js'));
+  ({ withOrgTx } = await import('../../instrumentation.js'));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -262,30 +265,6 @@ async function seedTestFixture(): Promise<{ orgId: string; agentId: string }> {
   return { orgId, agentId };
 }
 
-let passed = 0;
-let failed = 0;
-let skipped = 0;
-
-async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
-  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
-  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
-  if (opts.skip) {
-    skipped++;
-    console.log(`# SKIP ${name}`);
-    return;
-  }
-  try {
-    await body();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('llmRouter — LAEL integration:');
@@ -297,7 +276,7 @@ if (!SKIP) {
 }
 
 // ─── Test 1: happy-path agent-run emission ──────────────────────────────────
-await test('test 1: happy-path agent-run emits requested→completed with one referenced payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with one referenced payload row', async () => {
   const runId = crypto.randomUUID();
   await assertNoRowsForRunId(runId, [
     'agent_execution_events',
@@ -311,6 +290,9 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
     organisationId: orgId,
     agentId,
     runType: 'manual',
+    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+    // (executionScope='subaccount' demands a non-null subaccount_id).
+    executionScope: 'org',
     principalType: 'service',
     principalId: 'lael-int-test',
     status: 'running',
@@ -320,18 +302,27 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
   const fakeAdapter = createFakeProviderAdapter({ provider: 'anthropic' });
   const restore = registerProviderAdapter('anthropic', fakeAdapter);
   try {
-    await routeCall({
-      messages: [{ role: 'user', content: 'hello' }],
-      context: {
-        organisationId: orgId,
-        sourceType: 'agent_run',
-        runId,
-        taskType: 'general',
-        executionPhase: 'execution',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-6',
-        featureTag: 'lael-int-test',
-      },
+    // routeCall's downstream agentExecutionEventService.appendEvent uses
+    // getOrgScopedDb() which throws missing_org_context outside an active
+    // withOrgTx block. In production this is set by HTTP middleware /
+    // pg-boss worker; the integration test must wrap manually.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-1' }, async () => {
+        await routeCall({
+          messages: [{ role: 'user', content: 'hello' }],
+          context: {
+            organisationId: orgId,
+            sourceType: 'agent_run',
+            runId,
+            taskType: 'general',
+            executionPhase: 'execution',
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            featureTag: 'lael-int-test',
+          },
+        });
+      });
     });
 
     // Atomicity invariant — exactly one payload row, referenced by the
@@ -340,7 +331,7 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
       .select()
       .from(agentRunLlmPayloads)
       .where(eq(agentRunLlmPayloads.runId, runId));
-    assert.equal(payloadRows.length, 1, `expected exactly one payload row for runId, got ${payloadRows.length}`);
+    expect(payloadRows.length).toBe(1);
     const payloadRowId = payloadRows[0].llmRequestId;
 
     // Sequence invariant — exactly two events, llm.requested then llm.completed.
@@ -349,35 +340,27 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
       .from(agentExecutionEvents)
       .where(eq(agentExecutionEvents.runId, runId))
       .orderBy(agentExecutionEvents.sequenceNumber);
-    assert.equal(events.length, 2, `expected exactly 2 events for runId, got ${events.length}`);
-    assert.equal(events[0].eventType, 'llm.requested');
-    assert.equal(events[1].eventType, 'llm.completed');
-    assert.equal(
-      events[1].sequenceNumber,
-      events[0].sequenceNumber + 1,
-      'llm.completed must be immediately after llm.requested in the sequence',
-    );
+    expect(events.length).toBe(2);
+    expect(events[0].eventType).toBe('llm.requested');
+    expect(events[1].eventType).toBe('llm.completed');
+    expect(events[1].sequenceNumber).toBe(events[0].sequenceNumber + 1);
 
     // Completed event references the payload row.
     const completedPayload = events[1].payload as Record<string, unknown>;
-    assert.equal(
-      completedPayload.payloadRowId,
-      payloadRowId,
-      'llm.completed.payloadRowId must equal the inserted payload row id',
-    );
-    assert.equal(completedPayload.payloadInsertStatus, 'ok');
-    assert.equal(completedPayload.status, 'success');
+    expect(completedPayload.payloadRowId).toBe(payloadRowId);
+    expect(completedPayload.payloadInsertStatus).toBe('ok');
+    expect(completedPayload.status).toBe('success');
 
     // Ledger row exists with status=success.
     const ledgerRows = await db
       .select()
       .from(llmRequests)
       .where(eq(llmRequests.runId, runId));
-    assert.equal(ledgerRows.length, 1);
-    assert.equal(ledgerRows[0].status, 'success');
+    expect(ledgerRows.length).toBe(1);
+    expect(ledgerRows[0].status).toBe('success');
 
     // Fake adapter received exactly one call.
-    assert.equal(fakeAdapter.callCount, 1);
+    expect(fakeAdapter.callCount).toBe(1);
   } finally {
     restore();
     // Clean up — DELETE in dependent order then the agent_runs row.
@@ -391,7 +374,7 @@ await test('test 1: happy-path agent-run emits requested→completed with one re
 });
 
 // ─── Test 2: budget_blocked silence ─────────────────────────────────────────
-await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', async () => {
   // Deterministically trip the budget breaker by saturating the org-monthly
   // cap. We seed BOTH `org_budgets.monthlyCostLimitCents` (a tight cap) AND
   // a `cost_aggregates` row showing the org has already exceeded the cap;
@@ -469,6 +452,9 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
     organisationId: orgId,
     agentId,
     runType: 'manual',
+    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+    // (executionScope='subaccount' demands a non-null subaccount_id).
+    executionScope: 'org',
     principalType: 'service',
     principalId: 'lael-int-test',
     status: 'running',
@@ -486,26 +472,28 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
     // (§1.3 acceptance) was guarding against).
     let routerError: unknown = null;
     try {
-      await routeCall({
-        messages: [{ role: 'user', content: 'budget-blocked-probe' }],
-        context: {
-          organisationId: orgId,
-          sourceType: 'agent_run',
-          runId,
-          taskType: 'general',
-          executionPhase: 'execution',
-          provider: 'anthropic',
-          model: 'claude-sonnet-4-6',
-          featureTag: 'lael-int-test-budget',
-        },
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+        await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-2' }, async () => {
+          await routeCall({
+            messages: [{ role: 'user', content: 'budget-blocked-probe' }],
+            context: {
+              organisationId: orgId,
+              sourceType: 'agent_run',
+              runId,
+              taskType: 'general',
+              executionPhase: 'execution',
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-6',
+              featureTag: 'lael-int-test-budget',
+            },
+          });
+        });
       });
     } catch (err) {
       routerError = err;
     }
-    assert.ok(
-      routerError,
-      'routeCall MUST throw under saturated budget; the breaker precondition was not tripped',
-    );
+    expect(routerError).toBeTruthy();
 
     // Silence invariants — no LAEL events, no payload row, fake adapter never reached.
     const laelEvents = await db
@@ -513,23 +501,15 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
       .from(agentExecutionEvents)
       .where(eq(agentExecutionEvents.runId, runId));
     const llmEventTypes = laelEvents.map((e) => e.eventType).filter((t) => t.startsWith('llm.'));
-    assert.equal(
-      llmEventTypes.length,
-      0,
-      `budget_blocked path must not emit any llm.* events; got ${llmEventTypes.join(',')}`,
-    );
+    expect(llmEventTypes.length).toBe(0);
 
     const payloadRows = await db
       .select()
       .from(agentRunLlmPayloads)
       .where(eq(agentRunLlmPayloads.runId, runId));
-    assert.equal(payloadRows.length, 0, 'budget_blocked path must not insert a payload row');
+    expect(payloadRows.length).toBe(0);
 
-    assert.equal(
-      fakeAdapter.callCount,
-      0,
-      'budget_blocked path must short-circuit before reaching the provider adapter',
-    );
+    expect(fakeAdapter.callCount).toBe(0);
   } finally {
     restore();
     await assertNoRowsForRunId(runId, [
@@ -578,7 +558,7 @@ await test('test 2: budget-blocked agent-run emits no LAEL events and inserts no
 });
 
 // ─── Test 3: non-agent-run silence ──────────────────────────────────────────
-await test('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 3: non-agent-run (system) emits no LAEL events and inserts no payload row', async () => {
   // No agent_runs row needed — sourceType !== 'agent_run' means LAEL gating
   // returns false. The ledger row is written with `runId: null` for system-
   // source calls, so cleanup CANNOT scope by runId — we'd leak the row on
@@ -608,17 +588,22 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
     // for platform work that goes through the router, has no run context,
     // and is excluded by `shouldEmitLaelLifecycle` because sourceType !==
     // 'agent_run'. Bypass routing so the call doesn't need an executionPhase.
-    await routeCall({
-      messages: [{ role: 'user', content: 'system-probe' }],
-      context: {
-        organisationId: orgId,
-        sourceType: 'system',
-        taskType: 'general',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-6',
-        systemCallerPolicy: 'bypass_routing',
-        featureTag,
-      },
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-3' }, async () => {
+        await routeCall({
+          messages: [{ role: 'user', content: 'system-probe' }],
+          context: {
+            organisationId: orgId,
+            sourceType: 'system',
+            taskType: 'general',
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            systemCallerPolicy: 'bypass_routing',
+            featureTag,
+          },
+        });
+      });
     });
 
     // No agent_execution_events for this org's call — there is no runId to
@@ -627,10 +612,10 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
       .select()
       .from(agentRunLlmPayloads)
       .where(eq(agentRunLlmPayloads.runId, placeholderRunId));
-    assert.equal(payloadRows.length, 0, 'non-agent-run must not insert a payload row');
+    expect(payloadRows.length).toBe(0);
 
     // Adapter was reached — system calls go through the provider as normal.
-    assert.equal(fakeAdapter.callCount, 1);
+    expect(fakeAdapter.callCount).toBe(1);
 
     // Ledger row exists with this featureTag and `runId: null` (the system-
     // source attribution shape). One row, exactly.
@@ -638,8 +623,8 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
       .select({ id: llmRequests.id, runId: llmRequests.runId })
       .from(llmRequests)
       .where(eq(llmRequests.featureTag, featureTag));
-    assert.equal(ledgerRows.length, 1, 'system-source call must produce exactly one ledger row');
-    assert.equal(ledgerRows[0].runId, null, 'system-source ledger row carries runId: null');
+    expect(ledgerRows.length).toBe(1);
+    expect(ledgerRows[0].runId).toBe(null);
   } finally {
     restore();
     await assertNoRowsForRunId(placeholderRunId, [
@@ -651,7 +636,4 @@ await test('test 3: non-agent-run (system) emits no LAEL events and inserts no p
   }
 });
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
-console.log('');
-if (failed > 0) process.exit(1);
+
