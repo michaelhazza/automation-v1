@@ -8,6 +8,65 @@
 
 ---
 
+## Round 5 — 2026-05-01T01:30:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Strong PR from a product/UI perspective, but not safe to merge yet. Structural gaps causing runtime inconsistencies.
+
+P1 blockers:
+1. Resume path still not guaranteed to execute work — no enqueue / resume job in agentResumeService
+2. Resume idempotency edge case — token consumed, retry cannot find run → RUN_NOT_FOUND instead of already_resumed
+3. Thread context route missing agentId ownership guard
+
+High-impact design gaps:
+4. Thread context not wired into execution — LLM does not receive thread context
+5. Integration card optimism ahead of backend truth — popup.status === 'success' → 'connected' before backend confirms resume
+6. Cost model divergence (per-message vs run-level aggregates)
+
+Smaller issues:
+7. Missing conversationId in integration action URL
+8. useOAuthPopup origin check too strict (event.origin !== window.location.origin fails on different subdomain)
+9. No persistence for dismissed integration cards (TODO(v2))
+
+Positive: UI architecture clean, thread context model well-designed, suggested actions production-grade, cost meter UX excellent.
+```
+
+### Recommendations and Decisions
+
+| # | Finding (one-line) | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|--------------------|--------|----------------|----------------|----------|-----------|
+| F1 | Resume doesn't restart executor | — | — | already deferred R4/F1 | critical | Sprint 3B wiring tracked in `tasks/todo.md`. |
+| F2 | Idempotent resume broken | — | — | already resolved R4 (ecafc6c6) | critical | Token preserved after resume; idempotent check now reachable. Pre-fix description. |
+| F3 | Thread context route missing agentId | — | — | already resolved R4 (ecafc6c6) | medium | `eq(agentConversations.agentId, agentId)` added in R4. Pre-fix description. |
+| F4 | Thread context not injected into LLM | — | — | already deferred R4/F5 | medium | Chunk B wiring tracked in `tasks/todo.md`. |
+| F5 (new) | Optimistic "Connected! Continuing execution…" shown before execution guaranteed | user-facing | defer | defer (user) | medium | `InlineIntegrationCard.tsx:81` copy makes a promise Sprint 3B hasn't fulfilled. Deferred until Sprint 3B lands; copy softening + WebSocket run-state listener can ship together. Routed to `tasks/todo.md` R5/F5. |
+| F6 | conversationId missing from actionUrl | — | — | already resolved R4 (ecafc6c6) | medium | Fixed in R4. Pre-fix description. |
+| F7 | Cost model divergence | — | — | already deferred R4/F6 | medium | Tracked in `tasks/todo.md`. |
+| F8 (new) | useOAuthPopup origin check fails in split-origin deployments | technical | defer | auto (defer) | low | Security-correct for same-origin. Risk only in split-subdomain deployments — env config question, not a code bug. Routed to `tasks/todo.md` R5/F8. |
+| F9 (new) | Dismissed card state lost on reload | user-facing | defer | defer (user) | low | Already `// TODO(v2)` in source at `InlineIntegrationCard.tsx:54`. Author-scoped as v2 work. Routed to `tasks/todo.md` R5/F9. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — all findings already resolved, already deferred, or newly deferred this round.
+
+### Deferred this round
+
+- **F5** [user] — Optimistic connected copy. Routed to `tasks/todo.md` R5/F5.
+- **F8** [auto] — Origin check split-subdomain risk. Routed to `tasks/todo.md` R5/F8.
+- **F9** [user] — Dismissed card persistence. Routed to `tasks/todo.md` R5/F9.
+
+### Top themes
+
+`architecture`, `scope`, `idempotency`. Round 5 confirms R4 fixes are registered by ChatGPT as still-open (stale context — no diff provided). Three genuine new items: one user-facing copy gap (F5), one env-config risk (F8), one known TODO (F9). All deferred.
+
+### Files changed
+
+`tasks/todo.md` only (deferred items).
+
+---
+
 ## Round 4 — 2026-05-01T01:00:00Z
 
 ### ChatGPT Feedback (raw)
