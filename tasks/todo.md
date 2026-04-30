@@ -335,6 +335,10 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 — ChatGPT review round 1)
+
+- [ ] [auto] **F8: Integration tests still mix real DB + mocks (test-strategy posture)** — Severity low, scope architectural. ChatGPT round 1 explicitly flagged this as "not a blocker, but note it." Concern: false confidence on transaction boundaries, RLS behaviour, and idempotency invariants when mocks stand in for the DB inside otherwise-integration tests. Out of scope for this PR — overlaps with the existing TI-005 follow-up (`docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md`) and PR #239 round-1 deferred items F1/F4/F6 above. Fold into the integration-test harness PR. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-claude-improve-ui-design-2F5Mg-2026-04-30T20-13-29Z.md`. PR #244 — https://github.com/michaelhazza/automation-v1/pull/244.
+
 ### PR #239 — vitest-migration-2026-04-29 (2026-04-30 — ChatGPT review round 1)
 
 All four items are technical and recommended for the TI-005 follow-up branch. The brief at `docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md` already scopes most of this work.
