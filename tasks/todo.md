@@ -1906,8 +1906,8 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
 ## Doc drift backlog (audit 2026-05-01)
 
-- [ ] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:open] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry (actor model, provisioning adapters, per-agent email/calendar, org chart). Spec `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md` is pre-spec-reviewer draft. Re-evaluate after spec-reviewer ratification; adding a new product capability section before the spec is ratified risks editorial churn.
-- [ ] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:open] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign (PR #187) as a worked example alongside the cached-context infrastructure example. Requires a human author pass to select which design decisions to highlight and frame as transferable principles — directional editorial work, not a mechanical addition.
+- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
+- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign as worked example. Added "Worked example — ClientPulse health monitoring" section covering band-pill pattern, drilldown minimal surface, intervention modal, and per-block settings. User approved editorial decisions 2026-05-01.
 
 ## Deferred from pr-reviewer review — fix-doco-may2026
 

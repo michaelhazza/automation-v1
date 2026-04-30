@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-01 (doc-sync audit: add invoke_automation as eighth Workflow step type; add 14 v7.1 system-agent skills; remove retired update_financial_record skill)
+> **Last updated:** 2026-05-01 (add Agent Workplace Identity section; doc-sync audit: add invoke_automation as eighth Workflow step type; add 14 v7.1 system-agent skills; remove retired update_financial_record skill)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -39,6 +39,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Multi-Tenant Platform](#multi-tenant-platform)
   - [Authentication & Access Control](#authentication--access-control)
   - [AI Agent System](#ai-agent-system)
+  - [Agent Workplace Identity](#agent-workplace-identity)
   - [Capability-Aware Orchestrator](#capability-aware-orchestrator)
   - [Platform Feature Request Pipeline](#platform-feature-request-pipeline)
   - [Configuration Assistant](#configuration-assistant)
@@ -205,6 +206,20 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - Agent templates for rapid team deployment; full run history with execution traces; exactly-once deduplication on all run paths
 - **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
 - **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with real-time streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill. Rapid clicks and retries are automatically deduplicated; per-user rate limits prevent runaway test costs.
+
+### Agent Workplace Identity
+
+Each agent gets a real workplace seat — not an alias or a borrowed login. Agents have their own email address, calendar, and org-chart row, attributable and revocable independently of any human. Agencies can run two backends in parallel: a built-in native backend (no external account required) and a direct integration with a cloud business-workspace provider (agents appear as real accounts on the agency's or client's domain).
+
+- **Real identities, not aliases** — Each agent owns a dedicated email address (e.g. `sarah@clientco.com`), a calendar, and a mailbox. Outbound mail is signed, policy-enforced, and audit-attributed to the specific agent — external recipients see a professional business identity, not a system address
+- **Actor / identity model** — Every agent and every human is a stable actor with a persistent identity. Backends can be migrated (native → cloud provider, or cloud → native) without losing the actor record, audit history, or continuity of work
+- **Onboard in four clicks** — Existing agents onboard to the workplace from the Agents tab: select the agent → set email and send-mail toggle → confirm. The agent's email, photo, and lifecycle state are visible immediately
+- **Org chart with humans and agents** — A single org-chart canvas shows every team member — human and agent — with reporting lines and hierarchy. An agency operator can see the full team structure at a glance, including which agents report to which humans
+- **Per-agent mailbox and calendar** — Each onboarded agent has a read-only mailbox and calendar view inside the platform, with compose and new-event actions always routed through Automation OS so policy, signing, and audit run regardless of backend
+- **Activity feed with workplace events** — The subaccount Activity page includes email, calendar, and identity lifecycle events (sent, received, accepted, suspended, migrated) alongside task and playbook runs — a single audit-ready view of everything an agent did
+- **Lifecycle management** — Operators can activate, suspend, revoke, and migrate agent identities from the Identity tab. Suspension is instant and reversible; revocation removes the identity from the backend. Migration moves the agent's identity from one backend to another in a tracked, failure-tolerant background job
+- **Seat tracking** — Consumed seats are derived from active agent identities and displayed inline on the subaccount header; no separate billing dashboard
+- **Email governance built in** — A send-mail toggle per agent, three-window rate limiting, and a central email pipeline (audit → rate-limit → signing → dispatch) apply to every outbound message regardless of which backend delivers it
 
 ### Capability-Aware Orchestrator
 
