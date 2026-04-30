@@ -6,12 +6,13 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents, subaccountAgents, users } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql, asc } from 'drizzle-orm';
 import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { workspaceIdentityService } from '../services/workspace/workspaceIdentityService.js';
 import * as workspaceOnboardingService from '../services/workspace/workspaceOnboardingService.js';
+import * as workspaceMigrationService from '../services/workspace/workspaceMigrationService.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import { googleWorkspaceAdapter } from '../adapters/workspace/googleWorkspaceAdapter.js';
 import { auditEvents } from '../db/schema/auditEvents.js';
@@ -199,8 +200,109 @@ router.post(
   '/api/subaccounts/:subaccountId/workspace/migrate',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
-  asyncHandler(async (_req, res) => {
-    res.status(501).json({ status: 'not_implemented' });
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const { targetBackend, targetConnectorConfigId, migrationRequestId } = req.body as {
+      targetBackend: 'synthetos_native' | 'google_workspace';
+      targetConnectorConfigId: string;
+      migrationRequestId: string;
+    };
+
+    const result = await workspaceMigrationService.start({
+      organisationId: req.orgId!,
+      subaccountId,
+      targetBackend,
+      targetConnectorConfigId,
+      migrationRequestId,
+      initiatedByUserId: req.user!.id,
+    });
+
+    if ('failureReason' in result) {
+      if (result.failureReason === 'workspace_idempotency_collision') {
+        return res.status(409).json(result);
+      }
+      return res.status(500).json(result);
+    }
+
+    res.status(202).json(result);
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/migrate/:batchId ───────────
+
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/migrate/:batchId',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { batchId } = req.params;
+
+    const db = getOrgScopedDb('workspace.migrationStatus');
+
+    // Aggregate audit_events rows for this batch
+    // Terminal actions per identity: identity.migrated | identity.migration_failed |
+    //   identity.migration_activation_failed | identity.migration_archive_failed
+    const rows = await db
+      .select({
+        workspaceActorId: auditEvents.workspaceActorId,
+        action: auditEvents.action,
+        metadata: auditEvents.metadata,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organisationId, req.orgId!),
+          eq(auditEvents.entityType, 'workspace_identity'),
+          sql`${auditEvents.metadata}->>'batchId' = ${batchId}`,
+        ),
+      )
+      .orderBy(asc(auditEvents.createdAt));
+
+    // Build per-identity state map (last terminal event wins)
+    const actorState = new Map<string, { state: string; reason?: string }>();
+    for (const row of rows) {
+      if (!row.workspaceActorId) continue;
+      const meta = row.metadata as Record<string, unknown> | null;
+      if (row.action === 'identity.migrated') {
+        actorState.set(row.workspaceActorId, { state: 'migrated' });
+      } else if (
+        row.action === 'identity.migration_failed' ||
+        row.action === 'identity.migration_activation_failed' ||
+        row.action === 'identity.migration_archive_failed'
+      ) {
+        actorState.set(row.workspaceActorId, { state: 'failed', reason: meta?.reason as string | undefined });
+      }
+    }
+
+    const perIdentity = Array.from(actorState.entries()).map(([actorId, s]) => ({
+      actorId,
+      state: s.state,
+      reason: s.reason,
+    }));
+
+    const completed = perIdentity.filter((p) => p.state === 'migrated').length;
+    const failed = perIdentity.filter((p) => p.state === 'failed').length;
+    const skipped = perIdentity.filter((p) => p.state === 'skipped').length;
+    const total = perIdentity.length;
+
+    const allTerminal =
+      perIdentity.length > 0 &&
+      perIdentity.every(
+        (p) => p.state === 'migrated' || p.state === 'failed' || p.state === 'skipped',
+      );
+
+    let status: 'running' | 'success' | 'partial' | 'failed';
+    if (!allTerminal) {
+      status = 'running';
+    } else if (failed === 0 && skipped === 0) {
+      status = 'success';
+    } else if (completed === 0) {
+      status = 'failed';
+    } else {
+      status = 'partial';
+    }
+
+    res.json({ status, total, completed, failed, skipped, perIdentity });
   }),
 );
 
