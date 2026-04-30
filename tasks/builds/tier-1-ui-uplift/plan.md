@@ -171,12 +171,16 @@ This section records the **non-obvious decisions** for each item. For each decis
 - Rejected: extending the `status` enum with `blocked_on_integration`. Rejected because (a) the brief's verified direction is parallel column for lower risk, (b) a status-enum change ripples into every consumer that switch-cases on status (workspace health, dashboards, terminal-state computations), (c) the parallel column is independently nullable and easier to roll forward/back.
 - The existing `resumeToken` payload (in `agent_run_snapshots.checkpoint.resumeToken`) is **NOT reused** — those are SHA-256 hashes of `runId:iteration` for crash-recovery checkpointing. We introduce a separate `integration_resume_token` column with its own generation policy and lifecycle.
 
-**E-2. `blocked_reason` is a repeatable state.**
-- A run may transition into and out of `blocked_reason = 'integration_required'` multiple times (Notion → Slack → success). Each block:
+**E-2. `blocked_reason` is a repeatable state; each block carries a monotonic `blockSequence`.**
+- A run may transition into and out of `blocked_reason = 'integration_required'` multiple times (Notion → Slack → success). Each block increments `runMetadata.currentBlockSequence` (starting at 1) before issuing the token.
+- Each block:
+  - Increments `runMetadata.currentBlockSequence`.
   - Sets `blocked_reason = 'integration_required'`, `blocked_expires_at = now() + 24h`, `integration_resume_token = sha256(plaintextToken)`, `integration_dedup_key = sha256(toolName + stableStringify(toolArgs) + integrationId)`.
+  - Persists `runMetadata.currentBlockSequence` alongside the token so the resume path can validate it.
   - `integration_dedup_key` is deterministic given the same logical block — retries of the same blocked tool call produce the same key, enabling safe re-execution on resume.
-  - Emits one `integration_card` message into the conversation.
+  - Emits one `integration_card` message (carrying `blockSequence`) into the conversation.
 - Each resume:
+  - Appends `runMetadata.currentBlockSequence` to `runMetadata.completedBlockSequences`.
   - Clears `blocked_reason`, `blocked_expires_at`, `integration_resume_token` to NULL.
   - Continues run execution. The `integration_dedup_key` of the *just-completed* block stays in `runMetadata` for audit/dedup.
 - Linkage: I-4 — repeatable, idempotent, versioned per block.
@@ -322,7 +326,7 @@ LEFT JOIN cost_aggregates ca
 WHERE ar.organisation_id = $2;
 ```
 
-Aggregation (summing into `ConversationCostResponse`) happens in-service after the query returns. Runs with no `cost_aggregates` row contribute zero (LEFT JOIN). `model_id` is resolved via `agents.model_id` — confirmed 2026-04-30: `configSnapshot` does not store the model (it contains `{ tokenBudget, maxToolCalls, timeoutMs, skillSlugs, customInstructions, executionScope }` only). Resolves §10.1.
+Aggregation (summing into `ConversationCostResponse`) happens in-service after the query returns. Runs with no `cost_aggregates` row contribute zero (LEFT JOIN). `model_id` is resolved via `agents.model_id` — confirmed 2026-04-30: `configSnapshot` does not store the model (it contains `{ tokenBudget, maxToolCalls, timeoutMs, skillSlugs, customInstructions, executionScope }` only). Resolves §10.1. The `modelBreakdown` array is sorted `ORDER BY costCents DESC` before returning, so the highest-cost model always appears first. This produces stable UI rendering across calls and avoids client-side sort ambiguity.
 
 **Route shape:**
 - Method: `GET`
@@ -707,7 +711,7 @@ What this chunk does:
 - Adds an `agentResumeService` (or extends the existing one) with a single `resumeFromIntegrationConnect(resumeToken)` entrypoint that is idempotent under the optimistic-state predicate.
 - Wires the OAuth callback path (`server/routes/oauthIntegrations.ts`) to call the resume endpoint when both `resumeToken` and `conversationId` query params are present.
 - Adds a `BlockedRunExpiryJob` (one-shot pg-boss recurring job) that scans for `blocked_expires_at < now()` and transitions matching runs to `cancelled`.
-- Renders the inline card in `AgentChatPage` with the four visual states: Active, Dismissed, Expired, Connected. Only `dismissed` is persisted on the message; the other three states are derived at read time from `expiresAt` and the run's current `blocked_reason` (see §7.3 `IntegrationCardContent`).
+- Renders the inline card in `AgentChatPage` with the four visual states: Active, Dismissed, Expired, Connected. Only `dismissed` is persisted on the message; the other three states are derived at read time from the card's `blockSequence`, `expiresAt`, and `runMetadata.completedBlockSequences` / `currentBlockSequence` (see §7.3 `IntegrationCardContent`). This ensures correct per-card state in multi-block runs.
 - Pops OAuth in a popup (not same-tab); receives `postMessage` on success.
 
 What this chunk does NOT do:
@@ -772,6 +776,7 @@ export interface IntegrationCardContent {
   kind: 'integration_card';
   schemaVersion: 1;              // fixed literal; bump when wire format changes
   integrationId: string;        // canonical integration slug ('notion', 'slack', …)
+  blockSequence: number;        // monotonic block counter for this run (1, 2, 3…); used to derive per-card state
   title: string;                // ≤ 80 chars
   description: string;          // ≤ 240 chars
   actionLabel: string;          // 'Connect Notion'
@@ -779,11 +784,11 @@ export interface IntegrationCardContent {
   resumeToken: string;          // plaintext bearer token; never stored in DB
   expiresAt: string;            // ISO; 24h after issue
   dismissed: boolean;           // ONLY persisted state — set true on user dismiss action
-  // state is NOT stored on the message; it is DERIVED at read time:
+  // visual state is NOT stored; DERIVED at read time from blockSequence + run metadata:
   // 'dismissed'  → dismissed === true
-  // 'expired'    → !dismissed && expiresAt < now()
-  // 'connected'  → !dismissed && run.blocked_reason === null && run reached terminal after this block
-  // 'active'     → !dismissed && expiresAt >= now() && run still blocked
+  // 'connected'  → blockSequence ∈ runMetadata.completedBlockSequences
+  // 'expired'    → !dismissed && expiresAt < now() && blockSequence not yet completed
+  // 'active'     → !dismissed && expiresAt >= now() && blockSequence === runMetadata.currentBlockSequence
 }
 ```
 
@@ -817,7 +822,7 @@ WHERE id = $1
 RETURNING id;
 ```
 
-0 rows updated → perform a follow-up read. Return `{ status: 'already_resumed' }` with HTTP 200 **only if** the run exists, `blocked_reason` is NULL, **and** `runMetadata.lastResumeTokenHash === sha256(submittedToken)` (proving this exact token was the one that succeeded). Any other state → 410. This closes the replay-ambiguity gap: a stale or different token cannot be laundered through the idempotent path. On a successful UPDATE, write `runMetadata.lastResumeTokenHash = sha256(submittedToken)` before returning.
+0 rows updated → perform a follow-up read. Return `{ status: 'already_resumed' }` with HTTP 200 **only if** all three hold: (1) the run exists and `blocked_reason` is NULL, (2) `runMetadata.lastResumeTokenHash === sha256(submittedToken)`, and (3) `runMetadata.lastResumeBlockSequence === token.blockSequence`. Any other state → 410. Condition (3) closes the cross-block replay gap: a token from a previous block (e.g. block A's token submitted after block B has started) matches condition (2) but fails condition (3) and correctly returns 410. On a successful UPDATE, write both `runMetadata.lastResumeTokenHash = sha256(submittedToken)` and `runMetadata.lastResumeBlockSequence = currentBlockSequence` before returning.
 
 **Resume — re-execute the blocked tool call:**
 - Read `runMetadata.blockedToolCall = { toolName, toolArgs, dedupKey }`.
@@ -834,8 +839,8 @@ RETURNING id;
 ### 7.5 Execution-safety contracts (per Section 10)
 
 - **State machine closure:** the `blocked_reason` field is a closed enum (v1: `integration_required` only). Adding a new value requires a spec amendment.
-- **Valid transitions:** `blocked_reason = NULL → 'integration_required'` (executor blocks); `'integration_required' → NULL` (resume); `'integration_required' → cancelled` (TTL expiry); `'integration_required' → 'integration_required'` is **forbidden** (each block is a fresh transition with a new token; the executor must clear before re-blocking).
-- **Idempotency posture:** `state-based` for the resume write (optimistic predicate above). The "already_resumed" path additionally validates `runMetadata.lastResumeTokenHash === sha256(submittedToken)` — a different token hash → 410, not a success. `keyed_write` for the re-executed tool call (`integration_dedup_key`).
+- **Valid transitions:** `blocked_reason = NULL → 'integration_required'` (executor blocks, increments `currentBlockSequence`); `'integration_required' → NULL` (resume, appends `currentBlockSequence` to `completedBlockSequences`); `'integration_required' → cancelled` (TTL expiry); `'integration_required' → 'integration_required'` is **forbidden** (each block is a fresh transition with a new token; the executor must clear before re-blocking).
+- **Idempotency posture:** `state-based` for the resume write (optimistic predicate above). The "already_resumed" path validates both `runMetadata.lastResumeTokenHash === sha256(submittedToken)` and `runMetadata.lastResumeBlockSequence === token.blockSequence` — either mismatch → 410. This prevents a stale token from a prior block being accepted as a valid idempotent success for a later block. `keyed_write` for the re-executed tool call (`integration_dedup_key`).
 - **Retry classification:** `guarded` for resume; the underlying tool re-execution is `guarded` for `keyed_write`/`locked` strategies and `safe` for `read_only`. `unsafe` strategies are NOT permitted to participate in blocking — if a tool whose handler is `unsafe` ends up in `runMetadata.blockedToolCall`, the resume rejects with `errorCode: 'TOOL_NOT_RESUMABLE'` and the run is cancelled with `cancelReason: 'tool_not_resumable'`.
 - **Concurrency guard:** the optimistic predicate above. Two simultaneous resume calls → exactly one wins the UPDATE, the other observes 0 rows and falls into the idempotent-success path.
 - **Terminal event guarantee:** every blocked run reaches exactly one of: `running → completed` (resume succeeded and run finished), `running → cancelled` (TTL expired or user gave up), `running → failed` (resume succeeded but execution then errored unrecoverably). Post-terminal: no further `meta.kind === 'integration_card'` messages may be emitted with the same run's tokens.
@@ -1099,6 +1104,8 @@ The following are explicitly **out of scope for this brief** and should NOT be i
 - **Pre-execution integration capability check (E).** Before the LLM generates a tool call, a pre-check layer could inject an instruction when a required integration is missing — preventing the LLM from emitting the tool call and wasting tokens on a guaranteed-blocked path. Requires an integration-requirement registry not yet built. Defer to a Phase 2 optimisation of Chunk E.
 - **`triggered_run_id` write-layer enforcement (B).** The I-5 cost-determinism rule handles the current case via the message-JOIN approach. A write-layer invariant enforcing that every persisted assistant message carries a non-null `triggered_run_id` is valid hardening but belongs in the general message-writing contract, not this plan. Route to `tasks/todo.md` as a follow-up hardening item.
 - **Cost query scalability (B).** The canonical `SELECT DISTINCT triggered_run_id FROM agent_messages WHERE conversation_id = ?` query is cheap for typical conversation sizes. At high message volume (>5k messages per conversation), a lightweight `conversation_run_index` materialized table keyed on `(conversation_id, run_id)` would eliminate the full-scan. Not needed for v1; revisit if `conversationCostService` latency becomes observable in production.
+- **Patch no-op reason field (A).** When `update_thread_context` emits a no-op log (remove of non-existent ID, duplicate patch, task already in target state), the log currently has no `reason` discriminator. A future `reason: 'id_not_found' | 'already_in_state' | 'duplicate_patch'` field would make agent prompt debugging significantly faster. Defer to a logging-hygiene pass post-launch.
+- **Integration dedup key versioning (E).** `integration_dedup_key = sha256(toolName + stableStringify(toolArgs) + integrationId)` does not incorporate a tool contract version. If a tool's argument schema changes in a backward-incompatible way, an old dedup key stored in `runMetadata` could match a new tool invocation with different semantics. Mitigated in practice by the fact that tool arg schemas evolve rarely. Formal versioning (appending `actionVersion` from `ACTION_REGISTRY`) is deferred until the registry gains a version field.
 
 ---
 
