@@ -218,6 +218,8 @@ If either invariant changes, search for `resolveAgentSubaccountId` and `workspac
 
 **Permission scope invariant (test-pinned):** `resolveAgentSubaccountId` resolves via `agents.workspaceActorId → workspace_actors.subaccountId`, NOT via `subaccount_agents`. If a future contributor reverts to `subaccount_agents LIMIT 1`, the unit test in `server/routes/__tests__/workspaceAgentScope.test.ts` will fail because the resolver becomes non-deterministic when an agent has multiple subaccount links.
 
+**`ProvisionParams.signature` is `string`, not `string | null`.** The absence of a configured signature is represented as `''` (empty string), not `null`. This keeps the adapter contract strict and avoids null-propagation through the pipeline. Test fixtures must use `''`, not `null`. The tenant-level default signature template lives in `connector_configs.config_json.defaultSignatureTemplate` and is resolved by `connectorConfigService.getWorkspaceTenantConfig`; it also defaults to `''` when not set.
+
 ---
 
 ## Orchestrator Capability-Aware Routing
