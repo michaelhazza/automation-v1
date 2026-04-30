@@ -1,12 +1,13 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, requireSubaccountPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { agents, subaccountAgents, users } from '../db/schema/index.js';
+import { agents, users, connectorConfigs } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { eq, and, isNull, sql, asc } from 'drizzle-orm';
+import { eq, and, isNull, sql, asc, inArray, or } from 'drizzle-orm';
 import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
@@ -196,6 +197,16 @@ router.post(
 
 // ─── POST /api/subaccounts/:subaccountId/workspace/migrate ───────────────────
 
+// B1/S2: validate request shape. The client sends `targetBackend` only — the
+// server resolves the target connector_config from (orgId, subaccountId,
+// targetBackend) so a buggy or stale client can't pass the source backend's
+// connector_config_id by mistake. If no target config exists yet, the response
+// tells the operator to configure the target backend first.
+const MigrateRequestSchema = z.object({
+  targetBackend: z.enum(['synthetos_native', 'google_workspace']),
+  migrationRequestId: z.string().uuid(),
+});
+
 router.post(
   '/api/subaccounts/:subaccountId/workspace/migrate',
   authenticate,
@@ -203,19 +214,45 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const { targetBackend, targetConnectorConfigId, migrationRequestId } = req.body as {
-      targetBackend: 'synthetos_native' | 'google_workspace';
-      targetConnectorConfigId: string;
-      migrationRequestId: string;
-    };
+
+    const parsed = MigrateRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        details: parsed.error.flatten(),
+      });
+    }
+    const { targetBackend, migrationRequestId } = parsed.data;
+
+    // Resolve the target connector_config server-side. The unique constraint
+    // (organisationId, subaccountId, connectorType) guarantees at most one row.
+    const scopedDb = getOrgScopedDb('workspace.migrate.targetConfigLookup');
+    const [targetConfig] = await scopedDb
+      .select({ id: connectorConfigs.id })
+      .from(connectorConfigs)
+      .where(
+        and(
+          eq(connectorConfigs.organisationId, req.orgId!),
+          eq(connectorConfigs.subaccountId, subaccountId),
+          eq(connectorConfigs.connectorType, targetBackend),
+        ),
+      )
+      .limit(1);
+
+    if (!targetConfig) {
+      return res.status(409).json({
+        error: 'target_backend_not_configured',
+        message: `Target backend ${targetBackend} is not configured for this subaccount. Configure it first via /workspace/configure.`,
+      });
+    }
 
     const result = await workspaceMigrationService.start({
       organisationId: req.orgId!,
       subaccountId,
       targetBackend,
-      targetConnectorConfigId,
+      targetConnectorConfigId: targetConfig.id,
       migrationRequestId,
-      initiatedByUserId: req.user!.id,
+      initiatedByUserId: req.userId!,
     });
 
     if ('failureReason' in result) {
@@ -682,6 +719,11 @@ router.get(
         and(
           eq(workspaceIdentities.actorId, workspaceActors.id),
           isNull(workspaceIdentities.archivedAt),
+          // S3: filter to user-meaningful identities only. During a migration
+          // window an actor briefly holds two non-archived rows (source: `active`,
+          // target: `provisioned`); the latter is invisible to operators by
+          // design — it isn't switched live until the worker activates it.
+          inArray(workspaceIdentities.status, ['active', 'suspended']),
         ),
       )
       .where(eq(workspaceActors.subaccountId, subaccountId));

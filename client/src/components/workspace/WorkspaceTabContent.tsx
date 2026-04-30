@@ -202,7 +202,6 @@ export function WorkspaceTabContent({ subaccountId }: { subaccountId: string }) 
           subaccountId={subaccountId}
           currentBackend={activeBackend as 'synthetos_native' | 'google_workspace'}
           targetBackend={activeBackend === 'synthetos_native' ? 'google_workspace' : 'synthetos_native'}
-          targetConnectorConfigId={config.connectorConfigId ?? ''}
           onClose={() => setMigrateOpen(false)}
         />
       )}

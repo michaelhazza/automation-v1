@@ -92,7 +92,6 @@ export const getAgentIdentity = (agentId: string) =>
 
 export const migrateWorkspace = (saId: string, body: {
   targetBackend: 'synthetos_native' | 'google_workspace';
-  targetConnectorConfigId: string;
   migrationRequestId: string;
 }) => api.post(`/api/subaccounts/${saId}/workspace/migrate`, body).then(r => r.data);
 

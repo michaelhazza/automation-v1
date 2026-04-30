@@ -637,8 +637,18 @@ async function fetchAuditEvents(
   const cursorPredicate = buildCursorPredicate(auditEvents.createdAt, auditEvents.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
+  // B3: subaccount-scoped reads must include rows whose subaccount is identified
+  // via `entity_type='subaccount' AND entity_id=<saId>` — these rows have no
+  // `workspace_actor_id` (e.g. `subaccount.migration_completed`), so a strict
+  // join-keyed predicate would drop them silently.
   const whereClause = subId
-    ? and(...conditions, eq(workspaceActors.subaccountId, subId))
+    ? and(
+        ...conditions,
+        or(
+          eq(workspaceActors.subaccountId, subId),
+          and(eq(auditEvents.entityType, 'subaccount'), eq(auditEvents.entityId, subId)),
+        ),
+      )
     : conditions.length > 0 ? and(...conditions) : undefined;
 
   const rows = await db
@@ -646,6 +656,8 @@ async function fetchAuditEvents(
       id: auditEvents.id,
       action: auditEvents.action,
       workspaceActorId: auditEvents.workspaceActorId,
+      entityType: auditEvents.entityType,
+      entityId: auditEvents.entityId,
       metadata: auditEvents.metadata,
       createdAt: auditEvents.createdAt,
       actorDisplayName: workspaceActors.displayName,
@@ -660,13 +672,17 @@ async function fetchAuditEvents(
   return rows.map((row) => {
     const action = row.action as ActivityType;
     const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    // B3: subaccount-scoped audit rows (entity_type='subaccount') carry their
+    // subaccount in `entity_id`, not via the actor join.
+    const resolvedSubaccountId = row.actorSubaccountId
+      ?? (row.entityType === 'subaccount' ? row.entityId : null);
     return {
       id: row.id,
       type: action,
       status: 'completed' as NormalisedStatus,
       subject: formatAuditEventSubject(action, metadata),
       actor: row.actorDisplayName ?? 'System',
-      subaccountId: row.actorSubaccountId ?? null,
+      subaccountId: resolvedSubaccountId,
       subaccountName: null,
       agentId: null,
       agentName: null,

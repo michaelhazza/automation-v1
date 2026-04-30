@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { eq, and, inArray, isNull, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../../db/schema/workspaceActors.js';
@@ -12,6 +13,24 @@ import { workspaceIdentityService } from './workspaceIdentityService.js';
 import { logger } from '../../lib/logger.js';
 
 export type MigrationStep = 'provision' | 'activate' | 'archive';
+
+// S1: Zod schema for the per-identity migration job. `satisfies` only buys
+// compile-time confidence; a runtime parse before `boss.send` is the only thing
+// that prevents a future caller building the payload from untyped data
+// (admin script, replayed dead-letter, manual queue insert) publishing a
+// poison-pill that the worker only fails on at first field access.
+export const MigrateIdentityJobSchema = z.object({
+  organisationId: z.string().uuid(),
+  subaccountId: z.string().uuid(),
+  actorId: z.string().uuid(),
+  currentIdentityId: z.string().uuid(),
+  targetBackend: z.enum(['synthetos_native', 'google_workspace']),
+  targetConnectorConfigId: z.string().uuid(),
+  migrationRequestId: z.string().uuid(),
+  migrationJobBatchId: z.string().uuid(),
+  migrationJobBatchSize: z.number().int().positive(),
+  initiatedByUserId: z.string().uuid(),
+});
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,20 +45,10 @@ export interface MigrateStartParams {
   initiatedByUserId: string;
 }
 
-export interface MigrateIdentityJob {
-  organisationId: string;
-  subaccountId: string;
-  actorId: string;
-  currentIdentityId: string;
-  targetBackend: 'synthetos_native' | 'google_workspace';
-  targetConnectorConfigId: string;
-  migrationRequestId: string;
-  migrationJobBatchId: string;
-  /** Total identities enqueued for this batch — used by the worker to detect when
-   *  it has processed the LAST identity and should write `subaccount.migration_completed`. */
-  migrationJobBatchSize: number;
-  initiatedByUserId: string;
-}
+// Type derived from the Zod schema so the schema is the single source of truth.
+// `migrationJobBatchSize` carries the start()-time snapshot count; the worker
+// uses it to detect the LAST identity and write `subaccount.migration_completed`.
+export type MigrateIdentityJob = z.infer<typeof MigrateIdentityJobSchema>;
 
 // ---------------------------------------------------------------------------
 // start — acquire advisory lock, load identities, enqueue per-identity jobs
@@ -94,20 +103,24 @@ export async function start(
   const boss = await getPgBoss();
   const batchSize = identities.length;
   for (const identity of identities) {
+    // S1: Zod-parse before enqueue. Throws synchronously if any caller's input
+    // produces a malformed payload — which is what we want, instead of letting
+    // a poison-pill into the queue that fails per-attempt for `retryLimit` rounds.
+    const payload = MigrateIdentityJobSchema.parse({
+      organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
+      actorId: identity.actorId,
+      currentIdentityId: identity.id,
+      targetBackend: params.targetBackend,
+      targetConnectorConfigId: params.targetConnectorConfigId,
+      migrationRequestId: params.migrationRequestId,
+      migrationJobBatchId: batchId,
+      migrationJobBatchSize: batchSize,
+      initiatedByUserId: params.initiatedByUserId,
+    });
     await (boss as any).send(
       'workspace.migrate-identity',
-      {
-        organisationId: params.organisationId,
-        subaccountId: params.subaccountId,
-        actorId: identity.actorId,
-        currentIdentityId: identity.id,
-        targetBackend: params.targetBackend,
-        targetConnectorConfigId: params.targetConnectorConfigId,
-        migrationRequestId: params.migrationRequestId,
-        migrationJobBatchId: batchId,
-        migrationJobBatchSize: batchSize,
-        initiatedByUserId: params.initiatedByUserId,
-      } satisfies MigrateIdentityJob,
+      payload,
       { retryLimit: 5, retryDelay: 60, retryBackoff: true },
     );
   }
@@ -234,6 +247,13 @@ function hashSubaccountId(saId: string): bigint {
   return BigInt(`0x${hex}`);
 }
 
+// B2: separate advisory-lock keyspace for the per-batch finaliser. Distinct prefix
+// from the per-subaccount lock used in `start()` so the two never alias.
+function hashBatchId(batchId: string): bigint {
+  const hex = crypto.createHash('sha1').update(`migration-batch:${batchId}`).digest('hex').slice(0, 12);
+  return BigInt(`0x${hex}`);
+}
+
 function deriveLocalPart(displayName: string): string {
   return displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'agent';
 }
@@ -266,14 +286,22 @@ async function writeIdentityMigrationFailed(
   });
 }
 
-// DE-CR-6: when the LAST in-flight identity for a batch reaches a terminal state
-// (success or failure), write a single `subaccount.migration_completed` row.
-// Idempotent on (batchId) via the partial unique index in migration 0261, so a
-// race between two final workers becomes ON CONFLICT DO NOTHING.
+// DE-CR-6 / B2: when the LAST in-flight identity for a batch reaches a terminal
+// state (success or failure), write a single `subaccount.migration_completed`
+// row. Idempotent on (batchId) via the partial unique index in migration 0261.
+//
+// B2 race fix: under READ COMMITTED, two concurrent workers could both see N-1
+// terminal rows (each missing the other's pending commit), both decide "not yet
+// done", and the completion row would never be written — leaving the batch
+// stranded as `running` forever. The advisory lock serialises the count→insert
+// window across workers; the loser sees the winner's committed terminal rows
+// (or its already-written completion row, which the partial unique index handles).
 async function maybeFinaliseBatch(
   db: ReturnType<typeof getOrgScopedDb>,
   job: MigrateIdentityJob,
 ): Promise<void> {
+  await db.execute(sql`SELECT pg_advisory_xact_lock(${hashBatchId(job.migrationJobBatchId)}::bigint)`);
+
   const terminalRows = await db
     .select({
       workspaceActorId: auditEvents.workspaceActorId,

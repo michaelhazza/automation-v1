@@ -29,7 +29,6 @@ interface Props {
   subaccountId: string;
   currentBackend: TargetBackend;
   targetBackend: TargetBackend;
-  targetConnectorConfigId: string;
   onClose: () => void;
 }
 
@@ -39,7 +38,6 @@ export function MigrateWorkspaceModal({
   subaccountId,
   currentBackend,
   targetBackend,
-  targetConnectorConfigId,
   onClose,
 }: Props) {
   const [phase, setPhase] = useState<Phase>('confirm');
@@ -47,6 +45,10 @@ export function MigrateWorkspaceModal({
   const [batchId, setBatchId] = useState<string | null>(null);
   const [migStatus, setMigStatus] = useState<MigrationStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // S4: `submitting` debounces handleMigrate against double-clicks while the
+  // POST is in flight; `pollRef` is defensively cleared before any new setInterval
+  // so a previous orphan can't keep polling after a re-entry.
+  const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Stop polling on unmount
@@ -73,22 +75,26 @@ export function MigrateWorkspaceModal({
 
   async function handleMigrate() {
     if (keyword !== 'MIGRATE') return;
+    if (submitting || phase === 'migrating') return;
+    setSubmitting(true);
     setError(null);
     try {
       const migrationRequestId = crypto.randomUUID();
       const result = await migrateWorkspace(subaccountId, {
         targetBackend,
-        targetConnectorConfigId,
         migrationRequestId,
       });
       const bid: string = result.migrationJobBatchId;
       setBatchId(bid);
       setPhase('migrating');
-      // Start polling every 2 s
+      // Defensively clear any previous interval before starting a new one.
+      if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(() => poll(bid), 2000);
       poll(bid);
     } catch (err: unknown) {
       setError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Migration failed to start');
+    } finally {
+      setSubmitting(false);
     }
   }
 

@@ -17,6 +17,11 @@
  */
 
 import { strict as assert } from 'node:assert';
+// S5: type-only import — `WorkspaceAdapter` is an `export interface`, which
+// erases at runtime, so trying to extract it from `typeof <namespace>` resolves
+// to `never` and silently disables type-checking on `NOOP_ADAPTER`. `import type`
+// is stripped by tsx at runtime and gives the test a real shape to satisfy.
+import type { WorkspaceAdapter } from '../../../../shared/types/workspaceAdapterContract.js';
 
 // ── Stub required env vars before any module that imports server/lib/env.ts ──
 //    env.ts validation runs at module evaluation time; these must be set first.
@@ -29,8 +34,6 @@ const { withOrgTx } = await import('../../../instrumentation.js');
 const { workspaceIdentityService } = await import('../workspaceIdentityService.js');
 const { workspaceActorService } = await import('../workspaceActorService.js');
 const { onboard } = await import('../workspaceOnboardingService.js');
-const workspaceAdapterModule = await import('../../../../shared/types/workspaceAdapterContract.js');
-type WorkspaceAdapter = typeof workspaceAdapterModule extends { WorkspaceAdapter: infer T } ? T : never;
 
 let passed = 0;
 let failed = 0;
@@ -79,14 +82,27 @@ const BASE_PARAMS = {
 };
 
 // ── Noop adapter (must never be invoked in idempotency-path tests) ───────────
+// All methods throw — these tests exercise the resume/idempotency paths only;
+// the adapter MUST NOT be reached. Typing as `WorkspaceAdapter` ensures any
+// future addition to the contract surfaces here as a type error rather than
+// being silently elided (S5 fix).
 
-const NOOP_ADAPTER = {
-  backend: 'synthetos_native' as const,
-  provisionIdentity: async (): Promise<never> => {
-    throw new Error('provisionIdentity should not be called when identity already exists');
-  },
-  deprovisionIdentity: async () => {},
-  syncIdentitySettings: async () => {},
+const noopMethod = async (): Promise<never> => {
+  throw new Error('Adapter should not be called when identity already exists');
+};
+
+const NOOP_ADAPTER: WorkspaceAdapter = {
+  backend: 'synthetos_native',
+  provisionIdentity: noopMethod,
+  suspendIdentity: noopMethod,
+  resumeIdentity: noopMethod,
+  revokeIdentity: noopMethod,
+  archiveIdentity: noopMethod,
+  sendEmail: noopMethod,
+  fetchInboundSince: noopMethod,
+  createEvent: noopMethod,
+  respondToEvent: noopMethod,
+  fetchUpcoming: noopMethod,
 };
 
 // ── Common fixture rows ──────────────────────────────────────────────────────
