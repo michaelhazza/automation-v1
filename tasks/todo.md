@@ -2042,3 +2042,24 @@ Add structured log lines for each when the observability layer is extended.
 `migrations/0262_external_doc_refs_google_drive.sql` — `failure_reason varchar(64)` with no CHECK constraint. TypeScript `FetchFailureReason` union provides compile-time safety, but nothing prevents invalid strings via direct SQL.
 
 Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','network_error','quota_exceeded','budget_exceeded','unsupported_content'))` in a future migration. Low urgency — TS types already enforce this on all code paths.
+
+---
+
+## Doc drift backlog (audit 2026-05-01)
+
+- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
+- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign as worked example. Added "Worked example — ClientPulse health monitoring" section covering band-pill pattern, drilldown minimal surface, intervention modal, and per-block settings. User approved editorial decisions 2026-05-01.
+
+## Deferred from pr-reviewer review — fix-doco-may2026
+
+**Captured:** 2026-05-01
+**Source log:** tasks/review-logs/pr-review-log-fix-doco-may2026-2026-05-01T00-30-00Z.md
+
+- [ ] [origin:pr-review:fix-doco-may2026:2026-05-01T00-30-00Z] [status:open] Add `scripts/verify-doc-sync-parity.ts` — parse Final Summary templates in `chatgpt-pr-review.md` and `chatgpt-spec-review.md`, assert they match the field list in `docs/doc-sync.md` (PR agent omits spec-context.md; spec agent includes it). Guards against someone adding a new reference doc to doc-sync.md and forgetting to update the two agent templates and README.md table. Single test file; CI runs it.
+
+## PR Review deferred items
+
+### PR #245 — fix-doco-may2026 (2026-05-01)
+
+- [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
+- [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
