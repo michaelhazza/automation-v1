@@ -11,11 +11,7 @@
 
 import { expect, test } from 'vitest';
 import crypto from 'crypto';
-
-// Pure helper extracted for testing: same logic as agentResumeService.
-function deriveTokenHash(plaintext: string): string {
-  return crypto.createHash('sha256').update(plaintext).digest('hex');
-}
+import { deriveTokenHash } from '../agentResumeService.js';
 
 test('token hash: sha256 of 64-char hex string produces 64-char hex hash', () => {
   const plaintext = crypto.randomBytes(32).toString('hex');

@@ -15,5 +15,6 @@ CREATE INDEX conv_thread_ctx_org_idx ON conversation_thread_context (organisatio
 CREATE UNIQUE INDEX conv_thread_ctx_conv_uniq ON conversation_thread_context (conversation_id);
 
 ALTER TABLE conversation_thread_context ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_thread_context FORCE ROW LEVEL SECURITY;
 CREATE POLICY conv_thread_ctx_org_isolation ON conversation_thread_context
   USING (organisation_id = current_setting('app.organisation_id', true)::uuid);

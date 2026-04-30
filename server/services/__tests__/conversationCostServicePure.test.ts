@@ -9,63 +9,7 @@
  */
 
 import { expect, test } from 'vitest';
-
-// ---------------------------------------------------------------------------
-// Pure aggregation helper — extracted here to enable isolated testing without
-// booting the DB. Mirrors the logic in getConversationCost().
-// ---------------------------------------------------------------------------
-
-interface MessageCostRow {
-  modelId: string | null;
-  costCents: number;
-  tokensIn: number;
-  tokensOut: number;
-  messageCount: number;
-}
-
-interface ModelBreakdown {
-  modelId: string;
-  costCents: number;
-  tokensIn: number;
-  tokensOut: number;
-  messageCount: number;
-}
-
-interface CostSummary {
-  totalCostCents: number;
-  totalTokensIn: number;
-  totalTokensOut: number;
-  totalTokens: number;
-  messageCount: number;
-  modelBreakdown: ModelBreakdown[];
-}
-
-function aggregateCostRows(rows: MessageCostRow[]): CostSummary {
-  const modelBreakdown: ModelBreakdown[] = rows
-    .filter((r) => r.modelId !== null)
-    .map((r) => ({
-      modelId:      r.modelId as string,
-      costCents:    r.costCents,
-      tokensIn:     r.tokensIn,
-      tokensOut:    r.tokensOut,
-      messageCount: r.messageCount,
-    }))
-    .sort((a, b) => b.costCents - a.costCents);
-
-  const totalCostCents  = rows.reduce((s, r) => s + r.costCents, 0);
-  const totalTokensIn   = rows.reduce((s, r) => s + r.tokensIn, 0);
-  const totalTokensOut  = rows.reduce((s, r) => s + r.tokensOut, 0);
-  const messageCount    = rows.reduce((s, r) => s + r.messageCount, 0);
-
-  return {
-    totalCostCents,
-    totalTokensIn,
-    totalTokensOut,
-    totalTokens: totalTokensIn + totalTokensOut,
-    messageCount,
-    modelBreakdown,
-  };
-}
+import { aggregateCostRows, type MessageCostRow } from '../conversationCostService.js';
 
 // ── Empty / zero cases ────────────────────────────────────────────────────────
 

@@ -529,3 +529,35 @@ Most responses should have NO chips. Include them only for natural next-steps.
     };
   },
 };
+
+export async function verifyConversationAccess(params: {
+  convId: string;
+  agentId: string;
+  userId: string;
+  organisationId: string;
+}): Promise<void> {
+  const { convId, agentId, userId, organisationId } = params;
+  const [conv] = await db
+    .select({ id: agentConversations.id, userId: agentConversations.userId })
+    .from(agentConversations)
+    .where(
+      and(
+        eq(agentConversations.id, convId),
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+  if (!conv) throw { statusCode: 404, message: 'Conversation not found', errorCode: 'CONVERSATION_NOT_FOUND' };
+  if (conv.userId !== userId) throw { statusCode: 403, message: 'Forbidden', errorCode: 'FORBIDDEN' };
+}
+
+export async function verifyMessageInConversation(messageId: string, convId: string): Promise<void> {
+  const [msg] = await db
+    .select({ id: agentMessages.id })
+    .from(agentMessages)
+    .where(and(eq(agentMessages.id, messageId), eq(agentMessages.conversationId, convId)))
+    .limit(1);
+  if (!msg) throw { statusCode: 404, message: 'Message not found', errorCode: 'NOT_FOUND' };
+}
+

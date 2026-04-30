@@ -32,6 +32,10 @@ export interface ResumeError {
   errorCode: 'RESUME_TOKEN_EXPIRED';
 }
 
+export function deriveTokenHash(plaintext: string): string {
+  return crypto.createHash('sha256').update(plaintext).digest('hex');
+}
+
 /**
  * Atomically clears the blocked state on an agent_run using the plaintext
  * resume token. Idempotent — a second call with the same token returns
@@ -48,7 +52,7 @@ export async function resumeFromIntegrationConnect(params: {
 }): Promise<ResumeResult> {
   const { resumeToken, organisationId } = params;
 
-  const tokenHash = crypto.createHash('sha256').update(resumeToken).digest('hex');
+  const tokenHash = deriveTokenHash(resumeToken);
   const tokenHashPrefix = tokenHash.slice(0, 8); // for logs only — never log the full hash
 
   // Step 1: find the run by token hash (GAP 8 — get the id for the predicate UPDATE).

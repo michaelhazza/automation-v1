@@ -1,11 +1,9 @@
 import { Router } from 'express';
-import { and, eq } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { db } from '../db/index.js';
-import { agentConversations, agentMessages } from '../db/schema/index.js';
 import { dispatchSuggestedAction } from '../services/suggestedActionDispatchService.js';
+import { verifyConversationAccess, verifyMessageInConversation } from '../services/conversationService.js';
 import {
   SUGGESTED_ACTION_KEYS,
   type SuggestedActionKey,
@@ -33,44 +31,11 @@ router.post(
       return;
     }
 
-    // Verify conversation belongs to this org + agent + user
-    const [conv] = await db
-      .select()
-      .from(agentConversations)
-      .where(
-        and(
-          eq(agentConversations.id, convId),
-          eq(agentConversations.agentId, agentId),
-          eq(agentConversations.userId, userId),
-          eq(agentConversations.organisationId, orgId),
-        ),
-      );
-
-    if (!conv) {
-      res.status(404).json({ error: 'NOT_FOUND', message: 'Conversation not found' });
-      return;
-    }
-
-    // Verify message exists in this conversation.
-    // Safety by transitivity: the conversation check above already confirmed
-    // that convId belongs to this orgId + agentId + userId, so any message
-    // row with conversationId === convId is implicitly within scope. The
-    // conversationId predicate here is therefore both a functional lookup
-    // filter and a belt-and-suspenders ownership assertion.
-    const [msg] = await db
-      .select()
-      .from(agentMessages)
-      .where(
-        and(
-          eq(agentMessages.id, messageId),
-          eq(agentMessages.conversationId, convId),
-        ),
-      );
-
-    if (!msg) {
-      res.status(404).json({ error: 'NOT_FOUND', message: 'Message not found' });
-      return;
-    }
+    // Verify conversation belongs to this org + agent + user.
+    // Safety by transitivity: once ownership is confirmed, any message with
+    // conversationId === convId is implicitly within scope.
+    await verifyConversationAccess({ convId, agentId, userId, organisationId: orgId });
+    await verifyMessageInConversation(messageId, convId);
 
     const result = await dispatchSuggestedAction({
       actionKey: actionKey as SuggestedActionKey,

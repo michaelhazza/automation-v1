@@ -21,6 +21,48 @@ export interface ConversationCostParams {
   agentId: string;
 }
 
+export interface MessageCostRow {
+  modelId: string | null;
+  costCents: number;
+  tokensIn: number;
+  tokensOut: number;
+  messageCount: number;
+}
+
+export function aggregateCostRows(rows: MessageCostRow[]): {
+  totalCostCents: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalTokens: number;
+  messageCount: number;
+  modelBreakdown: ConversationCostModelBreakdown[];
+} {
+  const modelBreakdown: ConversationCostModelBreakdown[] = rows
+    .filter((r) => r.modelId !== null)
+    .map((r) => ({
+      modelId:      r.modelId as string,
+      costCents:    r.costCents,
+      tokensIn:     r.tokensIn,
+      tokensOut:    r.tokensOut,
+      messageCount: r.messageCount,
+    }))
+    .sort((a, b) => b.costCents - a.costCents);
+
+  const totalCostCents  = rows.reduce((s, r) => s + r.costCents, 0);
+  const totalTokensIn   = rows.reduce((s, r) => s + r.tokensIn, 0);
+  const totalTokensOut  = rows.reduce((s, r) => s + r.tokensOut, 0);
+  const messageCount    = rows.reduce((s, r) => s + r.messageCount, 0);
+
+  return {
+    totalCostCents,
+    totalTokensIn,
+    totalTokensOut,
+    totalTokens: totalTokensIn + totalTokensOut,
+    messageCount,
+    modelBreakdown,
+  };
+}
+
 export async function getConversationCost(
   params: ConversationCostParams,
 ): Promise<ConversationCostResponse> {
@@ -74,39 +116,25 @@ export async function getConversationCost(
     )
     .groupBy(agentMessages.modelId);
 
-  // Build model breakdown — sort by costCents DESC, exclude null modelId rows
-  // from the named breakdown (they go into totals only).
-  const modelBreakdown: ConversationCostModelBreakdown[] = rows
-    .filter((r) => r.modelId !== null)
-    .map((r) => ({
-      modelId:      r.modelId as string,
-      costCents:    Number(r.costCents),
-      tokensIn:     Number(r.tokensIn),
-      tokensOut:    Number(r.tokensOut),
-      messageCount: Number(r.messageCount),
-    }))
-    .sort((a, b) => b.costCents - a.costCents);
+  const numericRows: MessageCostRow[] = rows.map((r) => ({
+    modelId:      r.modelId,
+    costCents:    Number(r.costCents),
+    tokensIn:     Number(r.tokensIn),
+    tokensOut:    Number(r.tokensOut),
+    messageCount: Number(r.messageCount),
+  }));
 
-  // Totals across all rows (including null modelId messages)
-  const totalCostCents  = rows.reduce((s, r) => s + Number(r.costCents), 0);
-  const totalTokensIn   = rows.reduce((s, r) => s + Number(r.tokensIn), 0);
-  const totalTokensOut  = rows.reduce((s, r) => s + Number(r.tokensOut), 0);
-  const messageCount    = rows.reduce((s, r) => s + Number(r.messageCount), 0);
+  const agg = aggregateCostRows(numericRows);
 
   const response: ConversationCostResponse = {
     conversationId,
-    totalCostCents,
-    totalTokensIn,
-    totalTokensOut,
-    totalTokens: totalTokensIn + totalTokensOut,
-    messageCount,
-    modelBreakdown,
+    ...agg,
     computedAt: new Date().toISOString(),
   };
 
   logger.info('conversation_cost_computed', {
     conversationId,
-    totalCostCents,
+    totalCostCents: agg.totalCostCents,
     totalTokens: response.totalTokens,
     action: 'conversation_cost_computed',
   });
