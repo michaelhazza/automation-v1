@@ -80,7 +80,11 @@ while IFS= read -r test_file; do
   fi
 
   # ── Rule 1: location — must be under a __tests__/ directory ─────────────
-  if ! echo "$rel_path" | grep -q "/__tests__/"; then
+  # Match both root-level (e.g. `__tests__/foo.test.ts`) and nested (e.g.
+  # `server/services/__tests__/foo.test.ts`) — the `(^|/)` prefix anchors to
+  # either start-of-path or after a slash. Plain `/__tests__/` would miss
+  # root-level test directories and false-positive flag valid files.
+  if ! echo "$rel_path" | grep -qE "(^|/)__tests__/"; then
     emit_violation "$GUARD_ID" "error" "$rel_path" "1" \
       "Test file outside __tests__/ — Vitest's include glob will not pick it up" \
       "Move the file under a __tests__/ directory next to the module it tests. See docs/testing-conventions.md § Test discovery."
@@ -170,8 +174,9 @@ while IFS= read -r test_file; do
 
   # ── Rule 5: files with no test()/describe() blocks ─────────────────────
   # Only enforced on files that ARE under __tests__/ — files outside already
-  # tripped Rule 1.
-  if echo "$rel_path" | grep -q "/__tests__/"; then
+  # tripped Rule 1. Same `(^|/)__tests__/` shape as Rule 1 so root-level and
+  # nested __tests__/ both qualify.
+  if echo "$rel_path" | grep -qE "(^|/)__tests__/"; then
     if ! grep -qE "(^|\s)(test|describe|it)(\.[a-zA-Z]+)?\s*[\(\.]" "$test_file"; then
       emit_violation "$GUARD_ID" "error" "$rel_path" "1" \
         "Test file has no test()/describe()/it() block — Vitest will report '0 test'" \
