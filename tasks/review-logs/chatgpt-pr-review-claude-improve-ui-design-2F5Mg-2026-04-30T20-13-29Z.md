@@ -8,6 +8,60 @@
 
 ---
 
+## Round 4 — 2026-05-01T01:00:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+PR #244 has merge blockers. I would not merge yet.
+
+P1 blockers:
+1. Resume does not actually continue execution — resumeFromIntegrationConnect() clears block fields and returns resumed, but no executor is restarted, no job is enqueued, and the blocked tool call is not resumed. Result: user connects OAuth, UI says connected, run never continues. Codex already flagged this correctly.
+2. Idempotent resume path is broken — First resume clears integration_resume_token. Retry looks up by integration_resume_token = tokenHash, so it cannot find the already-resumed run. Result: duplicate OAuth callbacks/client retries return RUN_NOT_FOUND instead of already_resumed.
+3. Thread context route misses agentId ownership check — Route is /api/agents/:agentId/conversations/:convId/thread-context. Query checks conversationId + organisationId, but not agentId. Result: wrong agent path can fetch another conversation's context within the same org/user scope.
+
+P2 concerns:
+4. Integration card action URL omits conversationId — actionUrl includes provider + resumeToken, but not conversationId.
+5. Thread context is UI-only unless injected into agent runtime — The PR adds the Context panel and update action, but the LLM does not appear to receive the thread context at run start or resume.
+6. Cost model intentionally diverges from the plan — Implementation sums per-message cost_cents, while the plan expected run-linked cost_aggregates.
+```
+
+### Recommendations and Decisions
+
+| # | Finding (one-line) | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|--------------------|--------|----------------|----------------|----------|-----------|
+| F1 | P1: Resume clears blocked state but never restarts executor | technical-escalated (architectural + high) | defer | defer (user) | critical | `resumeAgentRun()` labelled "Sprint 3A library entry point / Sprint 3B async resume path" — execution restart was staged to Sprint 3B by design. Shipping without it means OAuth connect flow shows success but run never resumes. PR description must document this gap; Sprint 3B must land before feature is customer-facing. |
+| F2 | P1: Idempotent resume broken — token cleared before idempotent check reachable | technical | implement | auto (implement) | critical | SELECT queries by `integrationResumeToken = tokenHash`; first resume sets column to NULL; retry finds 0 rows → RUN_NOT_FOUND. Fix: preserve token after resume (replay blocked by `blocked_reason = 'integration_required'` predicate in UPDATE). |
+| F3 | P1: Thread context route ignores agentId param — any agent path within org can fetch | technical | implement | auto (implement) | medium | `req.params.agentId` extracted but never added to WHERE clause. `agentConversations.agentId` column exists. Fix: add `eq(agentConversations.agentId, agentId)` to ownership check query. |
+| F4 | P2: Integration card actionUrl omits conversationId | technical | implement | auto (implement) | medium | `blockConversationId` available in scope at block-decision site. OAuth auth-url handler already accepts and validates `conversationId` query param. One-line addition. |
+| F5 | P2: Thread context UI-only — LLM receives no thread context at run start or resume | user-facing | defer | defer (user) | medium | Spec labels service "Chunk A — Thread Context doc + plan checklist." Injection into system prompt is Chunk B. Acceptable staged rollout if PR description documents that context panel is display-only until Chunk B ships. |
+| F6 | P2: Cost model diverges from plan (per-message vs run-linked aggregates) | technical | defer | auto (defer) | medium | `conversationCostService` sums `agent_messages.cost_cents`; `cost_aggregates` table exists but unused here. Functional divergence — spec/plan must be amended or implementation aligned. Routed to `tasks/todo.md`. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+- [auto] `server/services/agentResumeService.ts` — preserve `integrationResumeToken` after resume; fix misleading comment
+- [auto] `server/routes/conversationThreadContext.ts` — add `eq(agentConversations.agentId, agentId)` to ownership check
+- [auto] `server/services/agentExecutionService.ts` — add `conversationId` to integration card `actionUrl`
+
+### Deferred this round
+
+- **F1** [user] — Execution restart (Sprint 3B) not wired. Routed to `tasks/todo.md` § PR #244.
+- **F5** [user] — Thread context not injected into LLM (Chunk B). Routed to `tasks/todo.md` § PR #244.
+- **F6** [auto] — Cost model vs plan divergence. Routed to `tasks/todo.md` § PR #244.
+
+### Top themes
+
+`architecture`, `idempotency`, `security`, `scope`. First round to surface concrete line-level defects. Two P1 bugs fixed (F2, F3); one P2 omission fixed (F4); one P1 architectural gap and one P2 feature gap deferred with explicit doc requirement.
+
+### Files changed
+
+- `server/services/agentResumeService.ts` (F2)
+- `server/routes/conversationThreadContext.ts` (F3)
+- `server/services/agentExecutionService.ts` (F4)
+- `tasks/todo.md` (F1, F5, F6 deferred items)
+
+---
+
 ## Round 3 — 2026-05-01T00:30:00Z
 
 ### ChatGPT Feedback (raw)
