@@ -62,7 +62,7 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [offset, setOffset] = useState<number>(0);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [dateRange, setDateRange] = useState<DateRange>('last_30_days');
@@ -74,28 +74,26 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
     setLoading(true);
     setFetchError(null);
 
+    const nextOffset = reset ? 0 : offset;
     const params: Record<string, string> = {
       actorId,
       limit: String(LIMIT),
-      after: dateRangeToAfter(dateRange),
+      from: dateRangeToAfter(dateRange),
+      offset: String(nextOffset),
     };
 
     const types = EVENT_TYPE_GROUP_MAP[eventTypeGroup];
     if (types) {
-      params['types'] = types.join(',');
-    }
-
-    if (!reset && cursor) {
-      params['cursor'] = cursor;
+      params['type'] = types.join(',');
     }
 
     try {
       const res = await api.get(`/api/subaccounts/${subaccountId}/activity`, { params });
-      const data = res.data as { items: ActivityItem[]; nextCursor?: string };
+      const data = res.data as { items: ActivityItem[]; total: number; hasMore: boolean };
       const fetched: ActivityItem[] = data.items ?? [];
       setItems(prev => reset ? fetched : [...prev, ...fetched]);
-      setCursor(data.nextCursor);
-      setHasMore(!!data.nextCursor);
+      setOffset(nextOffset + fetched.length);
+      setHasMore(!!data.hasMore);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: { message?: string } | string } }; message?: string };
       const apiErr = err.response?.data?.error;
@@ -104,11 +102,11 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
     } finally {
       setLoading(false);
     }
-  }, [actorId, subaccountId, dateRange, eventTypeGroup, cursor]);
+  }, [actorId, subaccountId, dateRange, eventTypeGroup, offset]);
 
   // Reset and fetch when filters change
   useEffect(() => {
-    setCursor(undefined);
+    setOffset(0);
     setItems([]);
     fetchItems(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,7 +117,7 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
   }
 
   function handleRefresh() {
-    setCursor(undefined);
+    setOffset(0);
     setItems([]);
     fetchItems(true);
   }

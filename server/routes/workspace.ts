@@ -202,6 +202,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { targetBackend, targetConnectorConfigId, migrationRequestId } = req.body as {
       targetBackend: 'synthetos_native' | 'google_workspace';
       targetConnectorConfigId: string;
@@ -235,7 +236,8 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
   asyncHandler(async (req, res) => {
-    const { batchId } = req.params;
+    const { subaccountId, batchId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     const db = getOrgScopedDb('workspace.migrationStatus');
 
@@ -586,6 +588,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     const db = getOrgScopedDb('workspace.orgChart');
 
@@ -702,6 +705,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     const db = getOrgScopedDb('workspace.actors');
 
