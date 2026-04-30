@@ -11,8 +11,31 @@ import {
   type LLMMessage,
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
+import { getPricing } from './pricingService.js';
 import { env } from '../lib/env.js';
 import { emitConversationUpdate } from '../websocket/emitters.js';
+
+// ---------------------------------------------------------------------------
+// Cost helpers — convert tokensIn/tokensOut → whole cents using pricingService.
+// Falls back to 0 cost rather than throwing so a pricing miss never breaks chat.
+// ---------------------------------------------------------------------------
+
+async function computeCostCents(
+  provider: string,
+  modelId: string,
+  tokensIn: number,
+  tokensOut: number,
+): Promise<number> {
+  try {
+    const pricing = await getPricing(provider, modelId);
+    const costDollars =
+      (tokensIn / 1000) * pricing.inputRate +
+      (tokensOut / 1000) * pricing.outputRate;
+    return Math.round(costDollars * 100);
+  } catch {
+    return 0;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Conversation CRUD
@@ -274,10 +297,10 @@ export const conversationService = {
       context: {
         organisationId,
         userId,
-        sourceType: 'agent_run',
+        sourceType: 'system',
+        systemCallerPolicy: 'bypass_routing',
         agentName: agent.name,
         taskType: 'general',
-        executionPhase: 'planning',
         provider: agent.modelProvider ?? 'anthropic',
         model: agent.modelId,
         routingMode: 'ceiling',
@@ -391,15 +414,22 @@ export const conversationService = {
         context: {
           organisationId,
           userId,
-          sourceType: 'agent_run',
+          sourceType: 'system',
+          systemCallerPolicy: 'bypass_routing',
           agentName: agent.name,
           taskType: 'process_trigger',
-          executionPhase: 'synthesis',
           provider: agent.modelProvider ?? 'anthropic',
           model: agent.modelId,
           routingMode: 'ceiling',
         },
       });
+
+      const finalCostCents = await computeCostCents(
+        agent.modelProvider ?? 'anthropic',
+        agent.modelId,
+        llmResponse.tokensIn,
+        llmResponse.tokensOut,
+      );
 
       // Save final assistant response
       const [finalMsg] = await db
@@ -409,6 +439,10 @@ export const conversationService = {
           role: 'assistant',
           content: llmResponse.content,
           triggeredExecutionId: triggeredExecutionId ?? null,
+          costCents: finalCostCents,
+          tokensIn: llmResponse.tokensIn,
+          tokensOut: llmResponse.tokensOut,
+          modelId: agent.modelId,
           createdAt: new Date(),
         })
         .returning();
@@ -427,12 +461,23 @@ export const conversationService = {
     }
 
     // ── 10. Save regular assistant response ───────────────────────────────────
+    const regularCostCents = await computeCostCents(
+      agent.modelProvider ?? 'anthropic',
+      agent.modelId,
+      llmResponse.tokensIn,
+      llmResponse.tokensOut,
+    );
+
     const [assistantMsg] = await db
       .insert(agentMessages)
       .values({
         conversationId,
         role: 'assistant',
         content: llmResponse.content,
+        costCents: regularCostCents,
+        tokensIn: llmResponse.tokensIn,
+        tokensOut: llmResponse.tokensOut,
+        modelId: agent.modelId,
         createdAt: new Date(),
       })
       .returning();

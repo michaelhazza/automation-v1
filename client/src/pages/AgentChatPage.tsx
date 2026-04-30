@@ -4,7 +4,9 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
+import CostMeterPill from '../components/CostMeterPill';
 import { relativeTime } from '../lib/relativeTime';
+import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
 
 interface AgentRunHandoff {
   version: 1;
@@ -182,6 +184,22 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   // last session" card). Null until loaded; null after load if no prior
   // run with a handoff exists.
   const [latestHandoff, setLatestHandoff] = useState<LatestHandoffResponse | null>(null);
+  // Per-thread cost/token meter — refreshed after each new assistant message
+  const [conversationCost, setConversationCost] = useState<ConversationCostResponse | null>(null);
+
+  // Fetch per-thread cost from the cost endpoint. Silently no-ops when
+  // agentId or convId is absent (e.g. before initial load).
+  const loadConversationCost = useCallback(async (convId: string | null) => {
+    if (!agentId || !convId) return;
+    try {
+      const res = await api.get<ConversationCostResponse>(
+        `/api/agents/${agentId}/conversations/${convId}/cost`,
+      );
+      setConversationCost(res.data);
+    } catch {
+      // Silently ignore — cost is non-critical
+    }
+  }, [agentId]);
 
   // Load recent runs for this agent (org-scope). Refreshed when WebSocket
   // signals a run completion.
@@ -240,6 +258,8 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           return [...prev, d.message!];
         });
         setSending(false);
+        // Refresh cost after each new assistant message
+        void loadConversationCost(activeConvId);
       }
     },
     'conversation:tool_use': () => {
@@ -278,11 +298,13 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   useEffect(() => {
     if (!agentId || !activeConvId) return;
     setLoadingMessages(true); setMessages([]);
+    setConversationCost(null);
     api.get(`/api/agents/${agentId}/conversations/${activeConvId}`)
       .then((res) => { const data = res.data; setMessages(Array.isArray(data) ? data : (data.messages ?? [])); })
       .catch((err) => { console.error('[AgentChat] Failed to load conversation messages:', err); setMessages([]); })
       .finally(() => setLoadingMessages(false));
-  }, [agentId, activeConvId]);
+    void loadConversationCost(activeConvId);
+  }, [agentId, activeConvId, loadConversationCost]);
 
   const handleNewConversation = async () => {
     if (!agentId) return;
@@ -381,6 +403,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           {agent.status === 'active' ? 'Active' : agent.status}
         </span>
         <span className="text-[12px] text-slate-400 font-mono shrink-0">{agent.modelId}</span>
+        <CostMeterPill cost={conversationCost} />
         <Link
           to={`/admin/agents/${agentId}`}
           title="Manage agent — prompts, skills, schedule, integrations"

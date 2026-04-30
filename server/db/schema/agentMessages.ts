@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { agentConversations } from './agentConversations';
 
 export const agentMessages = pgTable(
@@ -32,6 +32,11 @@ export const agentMessages = pgTable(
       fileSizeBytes: number;
       storagePath: string;
     }>>(),
+    // Cost/token tracking — populated for assistant messages by conversationService
+    costCents: integer('cost_cents'),
+    tokensIn: integer('tokens_in'),
+    tokensOut: integer('tokens_out'),
+    modelId: text('model_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

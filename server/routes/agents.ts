@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
+import { getConversationCost } from '../services/conversationCostService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -219,6 +220,18 @@ router.post('/api/agents/:id/test-run',
     res.status(201).json(result);
   })
 );
+
+// ── Conversation cost meter ────────────────────────────────────────────────
+
+router.get('/api/agents/:id/conversations/:convId/cost', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT), asyncHandler(async (req, res) => {
+  const result = await getConversationCost({
+    conversationId: req.params.convId,
+    agentId: req.params.id,
+    userId: req.user!.id,
+    organisationId: req.orgId!,
+  });
+  res.json(result);
+}));
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
