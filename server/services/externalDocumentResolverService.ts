@@ -158,8 +158,11 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
   const tokensBeforeTruncation = truncation.truncated ? rawTokens : null;
 
   // 8. Cache upsert inside advisory lock (fetch-outside-lock, write-inside-lock)
+  // Steps 9 (state transition) and 10 (audit log) are inside the same transaction
+  // to satisfy §17.8 atomicity.
   const contentHash = createHash('sha256').update(truncation.content).digest('hex');
   let fetchedAt = new Date();
+  let peerBeatUs = false;
   await db.transaction(async (tx) => {
     await withAdvisoryLock(tx, `external_doc:google_drive:${p.fileId}:${p.connectionId}`, async () => {
       // Double-check: did a peer worker write a matching row while we were fetching?
@@ -176,9 +179,11 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
         peerRow.revisionId === providerRevisionId &&
         peerRow.fetchedAt >= fetchStart
       ) {
-        // Peer beat us; discard our fetch and use their row
+        // Peer beat us; discard our fetch and use their row.
+        // serveCacheAsActive handles state + audit for this path.
         cacheRow = peerRow;
         fetchedAt = peerRow.fetchedAt;
+        peerBeatUs = true;
         return;
       }
       // No matching peer row — write our content
@@ -206,28 +211,37 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
           updatedAt: sql`now()`,
         },
       });
+
+      // 9. State transition (inline with tx for atomicity — §17.8)
+      if (p.referenceType === 'reference_document') {
+        await tx.update(referenceDocuments)
+          .set({ attachmentState: 'active', updatedAt: sql`now()` })
+          .where(eq(referenceDocuments.id, p.referenceId));
+      }
+
+      // 10. Audit-log write (inside transaction — §17.8)
+      await tx.insert(documentFetchEvents).values({
+        organisationId: p.organisationId,
+        subaccountId: p.subaccountId,
+        referenceId: p.referenceId,
+        referenceType: p.referenceType,
+        runId: p.runId,
+        cacheHit: false,
+        provider: 'google_drive',
+        docName: providerName ?? p.docName,
+        revisionId: providerRevisionId,
+        tokensUsed,
+        tokensBeforeTruncation,
+        resolverVersion: resolver.resolverVersion,
+        failureReason: null,
+      });
     });
   });
 
-  // 9. State transition
-  await transitionState(p.referenceType, p.referenceId, 'active');
-
-  // 10. Audit-log write
-  await db.insert(documentFetchEvents).values({
-    organisationId: p.organisationId,
-    subaccountId: p.subaccountId,
-    referenceId: p.referenceId,
-    referenceType: p.referenceType,
-    runId: p.runId,
-    cacheHit: false,
-    provider: 'google_drive',
-    docName: providerName ?? p.docName,
-    revisionId: providerRevisionId,
-    tokensUsed,
-    tokensBeforeTruncation,
-    resolverVersion: resolver.resolverVersion,
-    failureReason: null,
-  });
+  // If a peer beat us, delegate to serveCacheAsActive which handles its own state + audit.
+  if (peerBeatUs) {
+    return serveCacheAsActive(p, resolver.resolverVersion, cacheRow!, providerRevisionId, startedAt);
+  }
 
   emitStructuredLog({
     runId: p.runId,
