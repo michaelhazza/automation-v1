@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { rebindExternalReference, verifyAccess } from '../api/externalDocumentReferences';
+import { useState } from 'react';
+import { rebindExternalReference } from '../api/externalDocumentReferences';
 import type { ExternalDocumentReference } from '../api/externalDocumentReferences';
 
 interface Props {
@@ -13,39 +13,26 @@ interface Props {
   onRemove: () => void;
 }
 
-type VerifyState = { kind: 'idle' } | { kind: 'verifying' } | { kind: 'verified' } | { kind: 'failed'; reason: string };
-
 export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, connections, isOpen, onClose, onRebound, onRemove }: Props) {
   const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
-  const [verifyState, setVerifyState] = useState<VerifyState>({ kind: 'idle' });
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) { setSelectedConnId(null); setVerifyState({ kind: 'idle' }); }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!selectedConnId) return;
-    setVerifyState({ kind: 'verifying' });
-    verifyAccess(selectedConnId, reference.externalFileId)
-      .then(() => setVerifyState({ kind: 'verified' }))
-      .catch((err: unknown) => {
-        const reason = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'unknown';
-        setVerifyState({ kind: 'failed', reason });
-      });
-  }, [selectedConnId, reference.externalFileId]);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const canConfirm = verifyState.kind === 'verified' && !submitting;
+  const canConfirm = !!selectedConnId && !submitting;
 
   const handleConfirm = async () => {
     if (!selectedConnId) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const updated = await rebindExternalReference(subaccountId, taskId, reference.id, selectedConnId);
       onRebound(updated);
       onClose();
+    } catch (err: unknown) {
+      const reason = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'unknown';
+      setSubmitError(reason);
     } finally {
       setSubmitting(false);
     }
@@ -60,8 +47,8 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
         </header>
         <div className="space-y-4 p-5">
           <div>
-            <p className="text-sm text-slate-700 font-medium">{reference.externalFileName}</p>
-            <p className="mt-1 text-xs text-slate-500">{plainEnglishFailureReason(reference.lastFailureReason)}</p>
+            <p className="text-sm text-slate-700 font-medium">{reference.name}</p>
+            <p className="mt-1 text-xs text-slate-500">{plainEnglishFailureReason(reference.failureReason)}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700">Choose a connection</label>
@@ -76,10 +63,8 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
               ))}
             </select>
           </div>
-          {verifyState.kind === 'verifying' && <p className="text-sm text-slate-500">Verifying access…</p>}
-          {verifyState.kind === 'verified' && <p className="text-sm text-emerald-700">This connection can read the file.</p>}
-          {verifyState.kind === 'failed' && (
-            <p className="text-sm text-red-700">This connection cannot read the file ({verifyState.reason}). Try another.</p>
+          {submitError && (
+            <p className="text-sm text-red-700">Could not re-attach: {submitError}. Try another connection.</p>
           )}
         </div>
         <footer className="flex items-center justify-between border-t bg-slate-50 px-5 py-3">

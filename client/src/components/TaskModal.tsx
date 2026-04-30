@@ -206,7 +206,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
   const [rebindReference, setRebindReference] = useState<ExternalDocumentReference | null>(null);
 
   // Derived
-  const brokenCount = driveRefs.filter(r => r.attachmentState === 'broken').length;
+  const brokenCount = driveRefs.filter(r => r.state === 'broken').length;
 
   const loadAttachments = useCallback(async () => {
     setAttachmentsLoading(true);
@@ -735,26 +735,26 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
             <div
               key={ref.id}
               className={`rounded-lg border p-3 flex items-center gap-3 ${
-                ref.attachmentState === 'degraded' ? 'border-amber-200 bg-amber-50' :
-                ref.attachmentState === 'broken'   ? 'border-red-200 bg-red-50' :
+                ref.state === 'degraded' ? 'border-amber-200 bg-amber-50' :
+                ref.state === 'broken'   ? 'border-red-200 bg-red-50' :
                 'border-slate-200 bg-slate-50'
               }`}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate font-medium text-sm">{ref.externalFileName}</span>
+                  <span className="truncate font-medium text-sm">{ref.name}</span>
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                    ref.attachmentState === 'active'   ? 'bg-emerald-100 text-emerald-700' :
-                    ref.attachmentState === 'degraded' ? 'bg-amber-100 text-amber-700' :
+                    ref.state === 'active'   ? 'bg-emerald-100 text-emerald-700' :
+                    ref.state === 'degraded' ? 'bg-amber-100 text-amber-700' :
                     'bg-red-100 text-red-700'
-                  }`}>{ref.attachmentState}</span>
+                  }`}>{ref.state}</span>
                 </div>
                 <div className="mt-0.5 text-xs text-slate-500">
-                  Google Drive · {humanFileType(ref.externalFileMimeType)} · Fetched {relativeTime(ref.lastFetchedAt)}
+                  Google Drive · Fetched {relativeTime(ref.lastFetchedAt)}
                 </div>
-                {ref.attachmentState === 'broken' && (
+                {ref.state === 'broken' && (
                   <div className="mt-2 border-t border-red-200 pt-2 text-sm text-red-800">
-                    <p>{plainEnglishFailureReason(ref.lastFailureReason)}</p>
+                    <p>{plainEnglishFailureReason(ref.failureReason)}</p>
                     <div className="mt-2 flex items-center gap-3">
                       <button
                         type="button"
