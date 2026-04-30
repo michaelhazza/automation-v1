@@ -60,7 +60,13 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 2. Run `git diff main...HEAD` to get the full diff
 3. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
    - If the command returns nothing (no PR): run `gh pr create --fill` to create one
-4. Always print the PR URL — whether just created or already existing
+4. Always print the PR URL as a prominent standalone line — whether just created or already existing:
+
+   ```
+   PR: https://github.com/.../<number>
+   ```
+
+   Print this BEFORE any other output. It must be the first visible line the user sees.
 5. Create the session log at `tasks/review-logs/chatgpt-pr-review-<branch-slug>-<YYYY-MM-DDThh-mm-ssZ>.md` and write the Session Info header (see Log Format)
 6. [AUTOMATED] **Verify `OPENAI_API_KEY` is set.** If not, print:
 
@@ -110,10 +116,17 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
 8. [AUTOMATED] Print the ready message:
 
-   `Ready. PR #<N>: <url> — Round 1 results received.`
+   ```
+   PR: <url>
+   Ready — Round 1 results received.
+   ```
    If HUMAN_IN_LOOP is `yes`, add: `Raw response will be shown before triage begins — type yes to proceed.`
 
-8. [MANUAL] Print: `Ready. PR #<N>: <url> — Round 1 response received. Proceeding to triage.`
+8. [MANUAL] Print:
+   ```
+   PR: <url>
+   Ready — Round 1 response received. Proceeding to triage.
+   ```
 
 ---
 
