@@ -66,8 +66,8 @@ Three documents converted from human-shaped to agent-shaped.
 
 - Exact command to install and boot dev (`npm install && npm run dev`).
 - Required env vars (link to `docs/env-manifest.json`).
-- One-line verification command (`npm run typecheck`).
-- Pointer to `architecture.md` for code conventions and `scripts/README.md` for tooling.
+- One-line verification command (`npx tsc --noEmit`).
+- Pointer to `architecture.md` for code conventions, `scripts/README.md` for tooling, and `docs/README.md` for the spec-corpus index.
 
 Keep the existing stack-description content but demote it below the quick-start.
 
@@ -104,9 +104,9 @@ New agent definition `.claude/agents/adversarial-reviewer.md`. Read-only (Read, 
 
 ### 4.2 Agent contract
 
-**Trigger:** Manually invoked, or auto-invoked by `feature-coordinator` after `pr-reviewer` on Significant / Major tasks that touch the multi-tenant safety surface (any change under `server/db/schema/`, `server/routes/`, `server/services/auth*`, `server/middleware/`, RLS-related migrations).
+**Trigger:** Manually invoked only — the user must explicitly ask, matching the `dual-reviewer` posture. Auto-invocation from `feature-coordinator` is deferred (see § 9). The intended auto-trigger surface, once auto-invocation lands, is any change under `server/db/schema/`, `server/routes/`, `server/services/auth*`, `server/middleware/`, or RLS-related migrations.
 
-**Input:** The branch diff. Same auto-detection logic as `pr-reviewer` (committed + staged + unstaged + untracked).
+**Input:** The branch diff. Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked).
 
 **Threat model checklist** (seeded from our actual surface, expanded as findings accumulate):
 
@@ -119,6 +119,14 @@ New agent definition `.claude/agents/adversarial-reviewer.md`. Read-only (Read, 
 
 **Output:** Findings written to `tasks/review-logs/adversarial-review-log-<slug>-<timestamp>.md`. Each finding labelled `confirmed-hole`, `likely-hole`, or `worth-confirming`, with file:line references and a one-paragraph attack scenario. Confirmed holes route to `tasks/todo.md` for the main session to fix.
 
+The log MUST include a verdict header per `tasks/review-logs/README.md § Verdict header convention`:
+
+```
+**Verdict:** <ENUM>
+```
+
+Allowed values for `adversarial-reviewer`: `NO_HOLES_FOUND` | `HOLES_FOUND` | `NEEDS_DISCUSSION`. The Mission Control dashboard parses this line — without it the log is treated as "review in progress."
+
 **Non-goals:** Does not fix anything. Does not run code. Does not create a runtime fuzzing harness — that is deferred (see § 9).
 
 ### 4.3 Files touched
@@ -128,7 +136,7 @@ New agent definition `.claude/agents/adversarial-reviewer.md`. Read-only (Read, 
 | `.claude/agents/adversarial-reviewer.md` | New file |
 | `CLAUDE.md` § "Local Dev Agent Fleet" table | Edit — add row |
 | `CLAUDE.md` § "Review pipeline (mandatory order)" | Edit — adversarial-reviewer is optional, post-`pr-reviewer`, user must explicitly ask (matches `dual-reviewer` posture) |
-| `tasks/review-logs/README.md` | Edit — add adversarial-review-log filename convention |
+| `tasks/review-logs/README.md` | Edit — add `adversarial-review-log` to the filename convention examples and add `adversarial-reviewer` row to the per-agent Verdict enum table (`NO_HOLES_FOUND` \| `HOLES_FOUND` \| `NEEDS_DISCUSSION`) |
 
 ### 4.4 Out of scope (deferred to § 9)
 
@@ -201,7 +209,7 @@ No change to the four-class scheme (Trivial / Standard / Significant / Major). T
 | 1 | Item D (heuristic) | None — single paragraph edit | ~10 min |
 | 2 | Item C (architect pre-check) | None — single prompt edit | ~15 min |
 | 3 | Item A (setup docs) | None — three doc edits | ~1–2 hr |
-| 4 | Item B (adversarial reviewer) | Pattern matches `pr-reviewer.md` and `dual-reviewer.md` | ~2–3 hr |
+| 4 | Item B (adversarial reviewer) | Pattern matches `pr-reviewer.md` (read-only single agent, no Codex loop) | ~2–3 hr |
 
 All four items are independent. Order is by ascending cost; ship the cheap edits first so the heuristic and architect change are live for any work the adversarial-reviewer build itself produces.
 
@@ -211,14 +219,14 @@ All four items are independent. Order is by ascending cost; ship the cheap edits
 
 | Item | Verification |
 |---|---|
-| A | Open a fresh Claude Code session, give it `replit.md` only, ask it to boot the dev env and run `npm run typecheck`. It should succeed without asking for stack details. |
+| A | Open a fresh Claude Code session, give it `replit.md` only, ask it to boot the dev env and run `npx tsc --noEmit`. It should succeed without asking for stack details. |
 | A | Ask the same session to "reseed the dev DB." It should locate the right script via `scripts/README.md` without grepping. |
 | B | Invoke `adversarial-reviewer` against a known-good past PR (e.g. a recent RLS migration). Confirm the log file lands in `tasks/review-logs/` with the expected filename pattern and produces zero false confirmed-holes. |
 | B | Invoke against a synthetic diff that intentionally drops a tenant filter. Confirm the agent flags it as a confirmed-hole with file:line reference. |
 | C | Run architect on a fresh feature ask ("add a CSV import for contacts"). Confirm the plan output includes a "Model-collapse check" heading with an explicit decision. |
 | D | After the heuristic ships, on the next non-verifiable task (e.g. a UI polish pass), confirm the main session does not subagent-drive it overnight and instead iterates inline with the user. |
 
-No code changes; no test gates required. `npm run lint` and `npm run typecheck` are not affected.
+No code changes; no test gates required. `npm run lint` and `npx tsc --noEmit` are not affected.
 
 ---
 
