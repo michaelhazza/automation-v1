@@ -431,8 +431,10 @@ For each round:
     --- UPDATED DIFF ---
     <git diff main...HEAD output>
 
-  [MANUAL] Generate the round N+1 code-only diff (rounds 2+ skip the full
-  diff — spec / plan / log files were reviewed in round 1):
+  **[MANUAL — MANDATORY, NO EXCEPTIONS]** Generate the round N+1 code-only diff
+  immediately after the commit in step 8. Do not print the round summary until
+  the diff file exists on disk. Rounds 2+ skip the full diff — spec / plan / log
+  files were reviewed in round 1:
 
     ```bash
     git diff main...HEAD -- . \
@@ -449,19 +451,23 @@ For each round:
       > .chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff
     ```
 
-  Compute size and file count, then print:
+  Compute size and file count, then print the round summary (step 9 above)
+  followed immediately by:
 
     ```
     Round <N+1> diff ready for upload to ChatGPT:
 
       - [.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff](.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff) — <size>, code-only (<file-count> files)
 
-    The PR diff has been updated since the last round. Upload the file to ChatGPT
-    (focus on remaining issues and any new ones introduced by the latest changes),
-    then paste the response here to continue.
+    Upload the file to ChatGPT (focus on remaining issues and any new ones
+    introduced by the latest changes), then paste the response here to continue.
+    Or say 'done' to finalise.
     ```
 
-**After printing the round summary and round N+1 input prep: WAIT. Do not finalize.**
+  The diff link MUST appear in the same message as the round summary. A round
+  summary without the diff link is incomplete — the user cannot proceed without it.
+
+**After printing the round summary and round N+1 diff link: WAIT. Do not finalize.**
 Every round ends with the mode-appropriate line:
   [Automated] "Say 'next round' to fetch another automated review, or 'done' to finalise."
   [Manual] "Round <N+1> diff ready at .chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff — upload it to ChatGPT, paste the response here. Or say 'done' to finalise."
