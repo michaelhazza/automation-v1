@@ -61,9 +61,9 @@ jobs:
   integration_tests:
     # Same image, same DB, NODE_ENV=integration. Surfaces the ~36 tests
     # gated on `process.env.NODE_ENV === 'integration'` (real-DB exactly-once,
-    # idempotency races, RLS propagation). Currently runs with
-    # continue-on-error: true while we audit individual integration tests
-    # for vitest lifecycle compatibility (TI-005). Flip to false once green.
+    # idempotency races, RLS propagation). Load-bearing — failures block
+    # merge on a `ready-to-merge` PR (TI-005 closeout, branch
+    # claude/integration-tests-fix-2026-04-30).
     name: integration tests
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'ready-to-merge')

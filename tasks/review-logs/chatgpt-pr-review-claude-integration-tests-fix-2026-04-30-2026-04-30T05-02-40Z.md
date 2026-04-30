@@ -35,4 +35,34 @@ Implemented: R1.1 (ACCEPT).
 Deferred: none.
 Rebutted: none.
 
-Next: commit the fix, push, and either (a) ask the user for any additional rounds or (b) finalise the session.
+---
+
+## Round 2 — ChatGPT verdict
+
+ChatGPT delivered a final-call verdict: **APPROVED — merge**. No P1 issues remain. Four P2 items raised, evaluated below.
+
+### Finding R2.1 — P2.1: `continue-on-error: true` still present
+- **Verdict:** REBUT. The `continue-on-error: true` line was removed in phase 5 of this branch (commit `f4144e9c`). What remained in `.github/workflows/ci.yml` was a stale comment block above the job ("Currently runs with continue-on-error: true while we audit individual integration tests… Flip to false once green") that described the historical state, not the current YAML. ChatGPT was reading the comment, not the actual workflow flag.
+- **Action:** rewrote the comment block to describe the current load-bearing state. No semantic change to the workflow itself.
+
+### Finding R2.2 — P2.2: Seeder uses gen_random_uuid() for the subaccount
+- **Verdict:** ACCEPT, defer. The observation is correct: only the org / user / agent IDs are pinned. Tests use a "any subaccount under this org" anchor query, which is fine today (one seeded subaccount) but ambiguous if a future seed inserts a second. Not blocking for this PR — no current test depends on a specific subaccount UUID.
+- **Routed to:** `tasks/todo.md` TI-006 (Canonical subaccount UUID for integration fixtures).
+
+### Finding R2.3 — P2.3: Mixed real-DB vs mocked-DB inside the `*.integration.test.ts` glob
+- **Verdict:** ACCEPT, defer. ChatGPT's framing matches the actual state — `incidentIngestorThrottle.integration.test.ts` mocks the DB / pg-boss / logger at module boundaries while the rest hit a real DB. Both shapes are intentional; the convention is implicit. A short convention note in `references/` (or a header comment template) would make the rule explicit for future contributors.
+- **Routed to:** `tasks/todo.md` TI-007 (Integration test conventions doc).
+
+### Finding R2.4 — P2.4: Superuser short-circuit reduces RLS coverage in CI
+- **Verdict:** ACCEPT, defer. Already documented in this branch's closeout (`tasks/builds/integration-tests-fix/progress.md` — "Configure a non-superuser app role in CI"). ChatGPT is reinforcing the existing follow-up.
+- **Routed to:** `tasks/todo.md` TI-008 (Configure CI with a non-superuser app role for RLS coverage).
+
+---
+
+## Final state
+
+- Verdict: **APPROVED**.
+- P1: 0.
+- P2: 4 raised — 1 rebutted (already shipped), 3 deferred to TI-006 / TI-007 / TI-008.
+- This-branch action: update the stale ci.yml comment so the next reviewer (and the next ChatGPT pass) sees an accurate description.
+- Ready to merge.

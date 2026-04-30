@@ -85,3 +85,4 @@
 
 - Session log: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](../../review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
 - Round 1 (Codex): one P1 finding accepted — convert `if (runningAsSuperuser) return;` to `ctx.skip()` in the four affected test bodies so superuser short-circuits report as SKIPPED, not PASSED. Applied in commit on top of phase 5.
+- Round 2 (ChatGPT verdict): **APPROVED — merge**. Four P2 follow-ups: P2.1 rebutted (the `continue-on-error: true` flag was already removed in phase 5; the stale explanatory comment that misled the review was rewritten in this round). P2.2/P2.3/P2.4 accepted as deferred — routed to `tasks/todo.md` as TI-006 (canonical subaccount UUID), TI-007 (integration test conventions doc), TI-008 (CI non-superuser app role for RLS coverage).
