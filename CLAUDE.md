@@ -47,6 +47,8 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Compare expected vs actual behaviour
 - Ask yourself: "Would a senior/staff engineer approve this?"
 
+**Verifiability heuristic.** Before scoping work, ask: is the success condition checkable by a deterministic test or only by human judgment? Verifiable work (route returns X, row saves with the right shape, test passes) can be agent-driven aggressively. Non-verifiable work (UX polish, tone, copy, "feels right", layout taste) needs a human in the loop on every iteration — frontier models are jagged here and will not self-correct toward the goal. For non-verifiable work: do not subagent-drive it overnight; sit with it; iterate visually.
+
 ## Verification Commands
 
 Run these after every non-trivial change. No task is complete until all relevant checks pass.
