@@ -350,8 +350,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<Navigate to="/" replace />} />
             {/* Activity — org scope (redirects to home) */}
             <Route path="/admin/activity" element={<Navigate to="/" replace />} />
-            {/* Activity — subaccount scope (redirects to home) */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<Navigate to="/" replace />} />
+            {/* Activity — subaccount scope */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Configuration Assistant */}

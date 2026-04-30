@@ -1,24 +1,35 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, requireSubaccountPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D2 deferred — route helpers use organisationId-scoped queries; service extraction tracked in tasks/todo.md"
-import { agents, subaccountAgents } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { agents, users, connectorConfigs } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull, sql, asc, inArray, or } from 'drizzle-orm';
+import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { workspaceIdentityService } from '../services/workspace/workspaceIdentityService.js';
 import * as workspaceOnboardingService from '../services/workspace/workspaceOnboardingService.js';
+import * as workspaceMigrationService from '../services/workspace/workspaceMigrationService.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
+import { googleWorkspaceAdapter } from '../adapters/workspace/googleWorkspaceAdapter.js';
+import { auditEvents } from '../db/schema/auditEvents.js';
+import { env } from '../lib/env.js';
+import { failure } from '../../shared/iee/failure.js';
+
+function resolveAdapter(backend: string) {
+  return backend === 'google_workspace' ? googleWorkspaceAdapter : nativeWorkspaceAdapter;
+}
 
 const router = Router();
 
 // ─── Helper: resolve agent's active workspace identity ────────────────────────
 
 async function resolveAgentIdentity(agentId: string, organisationId: string) {
-  const [agent] = await db
+  const [agent] = await getOrgScopedDb('workspace.resolveAgentIdentity')
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
@@ -39,24 +50,38 @@ async function resolveAgentIdentity(agentId: string, organisationId: string) {
   return { agent, identity };
 }
 
-// ─── Helper: resolve agent's subaccountId ─────────────────────────────────────
+// ─── Helper: resolve agent's canonical subaccountId ───────────────────────────
+// The agent's home subaccount is the one that owns its workspace_actor row
+// (agents.workspace_actor_id → workspace_actors.subaccount_id). The legacy
+// `subaccount_agents` link table can map an agent to multiple subaccounts —
+// resolving permission scope from there with LIMIT 1 was non-deterministic
+// and could let a caller authenticate via the "wrong" subaccount link.
 
 async function resolveAgentSubaccountId(agentId: string, organisationId: string): Promise<string> {
-  const [link] = await db
-    .select({ subaccountId: subaccountAgents.subaccountId })
-    .from(subaccountAgents)
-    .where(
-      and(
-        eq(subaccountAgents.agentId, agentId),
-        eq(subaccountAgents.organisationId, organisationId),
-      ),
-    )
+  const scopedDb = getOrgScopedDb('workspace.resolveAgentSubaccountId');
+  const [agent] = await scopedDb
+    .select({ workspaceActorId: agents.workspaceActorId })
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
     .limit(1);
 
-  if (!link) {
-    throw Object.assign(new Error('Agent is not linked to any subaccount'), { statusCode: 404 });
+  if (!agent) {
+    throw Object.assign(new Error('Agent not found'), { statusCode: 404 });
   }
-  return link.subaccountId;
+  if (!agent.workspaceActorId) {
+    throw Object.assign(new Error('Agent has no workspace actor'), { statusCode: 404 });
+  }
+
+  const [actor] = await scopedDb
+    .select({ subaccountId: workspaceActors.subaccountId })
+    .from(workspaceActors)
+    .where(eq(workspaceActors.id, agent.workspaceActorId))
+    .limit(1);
+
+  if (!actor) {
+    throw Object.assign(new Error('Workspace actor not found'), { statusCode: 404 });
+  }
+  return actor.subaccountId;
 }
 
 // ─── POST /api/subaccounts/:subaccountId/workspace/configure ─────────────────
@@ -76,6 +101,19 @@ router.post(
 
     const configJson: Record<string, unknown> = {};
     if (domain) configJson.domain = domain;
+
+    // Guard: reject backend swap if non-archived identities exist.
+    // Same-backend reconfigure and initial configure are unaffected.
+    const existingOtherConfig = await connectorConfigService.getBySubaccountAndDifferentType(
+      req.orgId!, subaccountId, backend
+    );
+    if (existingOtherConfig) {
+      const activeIdentities = await workspaceIdentityService.getActiveIdentitiesForSubaccount(subaccountId);
+      if (activeIdentities.length > 0) {
+        return res.status(409).json(failure('workspace_configure_requires_migration',
+          'Backend cannot be changed while identities exist. Use /migrate.'));
+      }
+    }
 
     const existing = await connectorConfigService.getBySubaccountAndType(req.orgId!, subaccountId, backend);
 
@@ -159,12 +197,210 @@ router.post(
 
 // ─── POST /api/subaccounts/:subaccountId/workspace/migrate ───────────────────
 
+// B1/S2: validate request shape. The client sends `targetBackend` only — the
+// server resolves the target connector_config from (orgId, subaccountId,
+// targetBackend) so a buggy or stale client can't pass the source backend's
+// connector_config_id by mistake. If no target config exists yet, the response
+// tells the operator to configure the target backend first.
+const MigrateRequestSchema = z.object({
+  targetBackend: z.enum(['synthetos_native', 'google_workspace']),
+  migrationRequestId: z.string().uuid(),
+});
+
 router.post(
   '/api/subaccounts/:subaccountId/workspace/migrate',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
-  asyncHandler(async (_req, res) => {
-    res.status(501).json({ status: 'not_implemented' });
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+
+    const parsed = MigrateRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        details: parsed.error.flatten(),
+      });
+    }
+    const { targetBackend, migrationRequestId } = parsed.data;
+
+    // Resolve the target connector_config server-side. The unique constraint
+    // (organisationId, subaccountId, connectorType) guarantees at most one row.
+    const scopedDb = getOrgScopedDb('workspace.migrate.targetConfigLookup');
+    const [targetConfig] = await scopedDb
+      .select({ id: connectorConfigs.id })
+      .from(connectorConfigs)
+      .where(
+        and(
+          eq(connectorConfigs.organisationId, req.orgId!),
+          eq(connectorConfigs.subaccountId, subaccountId),
+          eq(connectorConfigs.connectorType, targetBackend),
+        ),
+      )
+      .limit(1);
+
+    if (!targetConfig) {
+      return res.status(409).json({
+        error: 'target_backend_not_configured',
+        message: `Target backend ${targetBackend} is not configured for this subaccount. Configure it first via /workspace/configure.`,
+      });
+    }
+
+    const result = await workspaceMigrationService.start({
+      organisationId: req.orgId!,
+      subaccountId,
+      targetBackend,
+      targetConnectorConfigId: targetConfig.id,
+      migrationRequestId,
+      initiatedByUserId: req.userId!,
+    });
+
+    if ('failureReason' in result) {
+      if (result.failureReason === 'workspace_idempotency_collision') {
+        return res.status(409).json(result);
+      }
+      return res.status(500).json(result);
+    }
+
+    res.status(202).json(result);
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/migrate/:batchId ───────────
+
+// DE-CR-3: response shape matches spec §12 `MigrateSubaccountResponse` —
+// `{ status, total, migrated, failed, failures: [{actorId, previousIdentityId, reason, retryable}] }`.
+// `perIdentity[]` is retained alongside as a UI-only convenience for the modal's
+// progress bar; it is NOT part of the spec contract.
+//
+// Retryability classification mirrors spec §7's failure-reason → retryability
+// table for the workspace failure family. `failure.message` strings from
+// `processIdentityMigration` are matched defensively — the migration helper
+// re-throws raw `Error`s from the adapter, so reason text is the primary signal.
+const RETRYABLE_REASON_HINTS = [
+  'workspace_identity_provisioning_failed',
+  'workspace_email_rate_limited',
+  'rate_limited',
+  'connector_timeout',
+  'timeout',
+  'transient',
+] as const;
+
+const NON_RETRYABLE_REASON_HINTS = [
+  'workspace_email_sending_disabled',
+  'workspace_provider_acl_denied',
+  'workspace_idempotency_collision',
+  'parent_actor_cycle_detected',
+] as const;
+
+function classifyRetryable(reason: string | undefined): boolean {
+  if (!reason) return false;
+  const lower = reason.toLowerCase();
+  if (NON_RETRYABLE_REASON_HINTS.some((h) => lower.includes(h))) return false;
+  if (RETRYABLE_REASON_HINTS.some((h) => lower.includes(h))) return true;
+  // Default for unclassified failures: not retryable. Operators must look at the
+  // reason and decide; auto-retrying unknown failures masks real problems.
+  return false;
+}
+
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/migrate/:batchId',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, batchId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+
+    const db = getOrgScopedDb('workspace.migrationStatus');
+
+    // Per-identity terminal events: `identity.migrated` and
+    // `identity.migration_failed` (DE-CR-5 collapsed activation/archive failures
+    // into the same action with `metadata.step`).
+    const rows = await db
+      .select({
+        workspaceActorId: auditEvents.workspaceActorId,
+        action: auditEvents.action,
+        metadata: auditEvents.metadata,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organisationId, req.orgId!),
+          eq(auditEvents.entityType, 'workspace_identity'),
+          sql`${auditEvents.metadata}->>'batchId' = ${batchId}`,
+        ),
+      )
+      .orderBy(asc(auditEvents.createdAt));
+
+    interface ActorTerminal {
+      state: 'migrated' | 'failed';
+      reason?: string;
+      previousIdentityId?: string;
+    }
+    const actorState = new Map<string, ActorTerminal>();
+    for (const row of rows) {
+      if (!row.workspaceActorId) continue;
+      const meta = row.metadata as Record<string, unknown> | null;
+      if (row.action === 'identity.migrated') {
+        // `migrated` wins over a prior `migration_failed` for retry scenarios.
+        actorState.set(row.workspaceActorId, {
+          state: 'migrated',
+          previousIdentityId: meta?.from as string | undefined,
+        });
+      } else if (row.action === 'identity.migration_failed') {
+        if (actorState.get(row.workspaceActorId)?.state === 'migrated') continue;
+        actorState.set(row.workspaceActorId, {
+          state: 'failed',
+          reason: meta?.reason as string | undefined,
+          previousIdentityId: meta?.from as string | undefined,
+        });
+      }
+    }
+
+    const perIdentity = Array.from(actorState.entries()).map(([actorId, s]) => ({
+      actorId,
+      state: s.state,
+      reason: s.reason,
+    }));
+
+    const failures = Array.from(actorState.entries())
+      .filter(([, s]) => s.state === 'failed')
+      .map(([actorId, s]) => ({
+        actorId,
+        previousIdentityId: s.previousIdentityId ?? '',
+        reason: s.reason ?? 'unknown',
+        retryable: classifyRetryable(s.reason),
+      }));
+
+    const migrated = perIdentity.filter((p) => p.state === 'migrated').length;
+    const failed = perIdentity.filter((p) => p.state === 'failed').length;
+    const total = perIdentity.length;
+
+    // The subaccount-level terminal event (DE-CR-6) is written by the worker once
+    // every enqueued identity reaches a terminal state. Its presence is the
+    // single source of truth for `running` vs terminal.
+    const [completionRow] = await db
+      .select({ metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organisationId, req.orgId!),
+          eq(auditEvents.entityType, 'subaccount'),
+          eq(auditEvents.action, 'subaccount.migration_completed'),
+          sql`${auditEvents.metadata}->>'batchId' = ${batchId}`,
+        ),
+      )
+      .limit(1);
+
+    let status: 'running' | 'success' | 'partial' | 'failed';
+    if (completionRow) {
+      const meta = (completionRow.metadata ?? {}) as { status?: string };
+      status = (meta.status as 'success' | 'partial' | 'failed') ?? 'failed';
+    } else {
+      status = 'running';
+    }
+
+    res.json({ status, total, migrated, failed, failures, perIdentity });
   }),
 );
 
@@ -189,10 +425,32 @@ router.get(
     const suspended = identities.filter((i) => i.status === 'suspended').length;
     const total = identities.length;
 
+    // Fetch billing snapshot from org_subscriptions for this org
+    const scopedDb = getOrgScopedDb('workspace.getConfig');
+    const [orgSub] = await scopedDb
+      .select({
+        consumedSeats: orgSubscriptions.consumedSeats,
+        updatedAt: orgSubscriptions.updatedAt,
+      })
+      .from(orgSubscriptions)
+      .where(eq(orgSubscriptions.organisationId, req.orgId!))
+      .limit(1);
+
+    const billingSnapshot = orgSub?.consumedSeats ?? null;
+    const lastSnapshotAt = orgSub?.updatedAt?.toISOString() ?? null;
+
+    // Surface the effective email domain so the UI can render
+    // `<localPart>@<domain>` previews without hardcoding a literal.
+    const configDomain = (connectorConfig?.configJson as Record<string, unknown> | undefined)?.domain;
+    const emailDomain = typeof configDomain === 'string' && configDomain.length > 0
+      ? configDomain
+      : (env.NATIVE_EMAIL_DOMAIN || 'workspace.local');
+
     res.json({
       backend: connectorConfig?.connectorType ?? null,
       connectorConfigId: connectorConfig?.id ?? null,
-      seatUsage: { active, suspended, total },
+      emailDomain,
+      seatUsage: { active, suspended, total, billingSnapshot, lastSnapshotAt },
     });
   }),
 );
@@ -240,7 +498,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'suspend', req.userId!);
-    await nativeWorkspaceAdapter.suspendIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).suspendIdentity(identity.id);
+      await getOrgScopedDb('workspace.suspend').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.suspended',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -261,7 +529,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'resume', req.userId!);
-    await nativeWorkspaceAdapter.resumeIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).resumeIdentity(identity.id);
+      await getOrgScopedDb('workspace.resume').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.resumed',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -284,19 +562,29 @@ router.post(
     const { agent, identity } = await resolveAgentIdentity(agentId, req.orgId!);
 
     // Resolve the workspace actor's display name for confirmation
-    const [actorRow] = await db
+    const [actorRow] = await getOrgScopedDb('workspace.revokeIdentity')
       .select()
       .from(workspaceActors)
       .where(eq(workspaceActors.id, identity.actorId));
 
     const displayName = actorRow?.displayName ?? agent.name;
-    if (confirmName !== displayName) {
+    if (confirmName !== displayName && confirmName !== agent.name) {
       res.status(400).json({ error: 'confirmName does not match agent display name', expected: displayName });
       return;
     }
 
     const result = await workspaceIdentityService.transition(identity.id, 'revoke', req.userId!);
-    await nativeWorkspaceAdapter.revokeIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).revokeIdentity(identity.id);
+      await getOrgScopedDb('workspace.revoke').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.revoked',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -317,7 +605,17 @@ router.post(
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
     const result = await workspaceIdentityService.transition(identity.id, 'archive', req.userId!);
-    await nativeWorkspaceAdapter.archiveIdentity(identity.id);
+    if (!result.noOpDueToRace) {
+      await resolveAdapter(identity.backend).archiveIdentity(identity.id);
+      await getOrgScopedDb('workspace.archive').insert(auditEvents).values({
+        organisationId: req.orgId!,
+        actorType: 'agent',
+        workspaceActorId: identity.actorId,
+        action: 'identity.archived',
+        entityType: 'workspace_identity',
+        metadata: { identityId: identity.id },
+      });
+    }
     res.json(result);
   }),
 );
@@ -338,8 +636,200 @@ router.patch(
     }
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
+
+    // State guard: email sending can only be toggled on identities that are
+    // actually capable of sending. Revoked/archived identities are terminal
+    // and toggling on them is meaningless — return 409 so the UI can refresh.
+    const TOGGLE_ALLOWED: ReadonlyArray<string> = ['active', 'suspended', 'provisioned'];
+    if (!TOGGLE_ALLOWED.includes(identity.status)) {
+      res.status(409).json({
+        error: {
+          code: 'invalid_identity_state',
+          message: `Cannot toggle email sending on identity in status '${identity.status}'.`,
+        },
+      });
+      return;
+    }
+
     await workspaceIdentityService.setEmailSending(identity.id, enabled, req.userId!);
+    await getOrgScopedDb('workspace.emailSending').insert(auditEvents).values({
+      organisationId: req.orgId!,
+      actorType: 'agent',
+      workspaceActorId: identity.actorId,
+      action: enabled ? 'identity.email_sending_enabled' : 'identity.email_sending_disabled',
+      entityType: 'workspace_identity',
+      metadata: { identityId: identity.id, enabled },
+    });
     res.json({ identityId: identity.id, emailSendingEnabled: enabled });
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/org-chart ──────────────────
+
+interface OrgChartNode {
+  actorId: string;
+  actorKind: 'agent' | 'human';
+  displayName: string;
+  parentActorId: string | null;
+  parentValidationError?: 'cross_subaccount_parent' | 'cycle_detected';
+  agentRole: string | null;
+  agentTitle: string | null;
+  identity?: { id: string; emailAddress: string; status: string; photoUrl: string | null };
+  user?: { id: string; email: string };
+}
+
+// DE-CR-9: org-chart and actors are viewer-level reads — managers and
+// activity-viewers should see the chart without holding `manage_connector`.
+// Lifecycle mutations + /configure remain on `WORKSPACE_CONNECTOR_MANAGE`.
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/org-chart',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+
+    const db = getOrgScopedDb('workspace.orgChart');
+
+    // Fetch all workspace actors for this subaccount
+    const actorRows = await db
+      .select({
+        actorId: workspaceActors.id,
+        actorKind: workspaceActors.actorKind,
+        displayName: workspaceActors.displayName,
+        parentActorId: workspaceActors.parentActorId,
+        agentRole: workspaceActors.agentRole,
+        agentTitle: workspaceActors.agentTitle,
+        // Agent join
+        agentId: agents.id,
+        // User join
+        userId: users.id,
+        userEmail: users.email,
+        // Identity join (active, non-archived)
+        identityId: workspaceIdentities.id,
+        identityEmail: workspaceIdentities.emailAddress,
+        identityStatus: workspaceIdentities.status,
+        identityPhotoUrl: workspaceIdentities.photoUrl,
+      })
+      .from(workspaceActors)
+      .leftJoin(agents, eq(agents.workspaceActorId, workspaceActors.id))
+      .leftJoin(users, eq(users.workspaceActorId, workspaceActors.id))
+      .leftJoin(
+        workspaceIdentities,
+        and(
+          eq(workspaceIdentities.actorId, workspaceActors.id),
+          isNull(workspaceIdentities.archivedAt),
+          // S3: filter to user-meaningful identities only. During a migration
+          // window an actor briefly holds two non-archived rows (source: `active`,
+          // target: `provisioned`); the latter is invisible to operators by
+          // design — it isn't switched live until the worker activates it.
+          inArray(workspaceIdentities.status, ['active', 'suspended']),
+        ),
+      )
+      .where(eq(workspaceActors.subaccountId, subaccountId));
+
+    // Build a set of all actor IDs in this subaccount for cross-subaccount parent validation
+    const actorIdSet = new Set(actorRows.map((r) => r.actorId));
+
+    // Cycle detection via max-depth check (≤10 hops from any node to root)
+    const parentMap = new Map<string, string | null>();
+    for (const r of actorRows) {
+      parentMap.set(r.actorId, r.parentActorId);
+    }
+
+    function isInCycle(startId: string): boolean {
+      const visited = new Set<string>();
+      let current: string | null = startId;
+      let hops = 0;
+      while (current !== null && hops <= 10) {
+        if (visited.has(current)) return true;
+        visited.add(current);
+        current = parentMap.get(current) ?? null;
+        hops++;
+      }
+      return hops > 10;
+    }
+
+    const nodes: OrgChartNode[] = actorRows.map((r) => {
+      let parentActorId: string | null = r.parentActorId;
+      let parentValidationError: OrgChartNode['parentValidationError'] = undefined;
+
+      if (parentActorId !== null) {
+        if (!actorIdSet.has(parentActorId)) {
+          // D-Inv-3: parent points outside this subaccount
+          parentActorId = null;
+          parentValidationError = 'cross_subaccount_parent';
+        } else if (isInCycle(r.actorId)) {
+          parentActorId = null;
+          parentValidationError = 'cycle_detected';
+        }
+      }
+
+      const node: OrgChartNode = {
+        actorId: r.actorId,
+        actorKind: r.actorKind as 'agent' | 'human',
+        displayName: r.displayName,
+        parentActorId,
+        agentRole: r.agentRole,
+        agentTitle: r.agentTitle,
+      };
+
+      if (parentValidationError) {
+        node.parentValidationError = parentValidationError;
+      }
+
+      if (r.identityId) {
+        node.identity = {
+          id: r.identityId,
+          emailAddress: r.identityEmail!,
+          status: r.identityStatus!,
+          photoUrl: r.identityPhotoUrl ?? null,
+        };
+      }
+
+      if (r.userId) {
+        node.user = {
+          id: r.userId,
+          email: r.userEmail!,
+        };
+      }
+
+      return node;
+    });
+
+    res.json(nodes);
+  }),
+);
+
+// ─── GET /api/subaccounts/:subaccountId/workspace/actors ─────────────────────
+
+router.get(
+  '/api/subaccounts/:subaccountId/workspace/actors',
+  authenticate,
+  // DE-CR-9: viewer-level read — see comment on /workspace/org-chart route.
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+
+    const db = getOrgScopedDb('workspace.actors');
+
+    const rows = await db
+      .select({
+        actorId: workspaceActors.id,
+        displayName: workspaceActors.displayName,
+        actorKind: workspaceActors.actorKind,
+      })
+      .from(workspaceActors)
+      .where(eq(workspaceActors.subaccountId, subaccountId));
+
+    res.json(
+      rows.map((r) => ({
+        actorId: r.actorId,
+        displayName: r.displayName,
+        actorKind: r.actorKind as 'agent' | 'human',
+      })),
+    );
   }),
 );
 

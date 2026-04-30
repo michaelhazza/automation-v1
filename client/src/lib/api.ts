@@ -89,3 +89,11 @@ export const respondToAgentCalendarEvent = (agentId: string, eventId: string, re
 
 export const getAgentIdentity = (agentId: string) =>
   api.get(`/api/agents/${agentId}/identity`).then(r => r.data);
+
+export const migrateWorkspace = (saId: string, body: {
+  targetBackend: 'synthetos_native' | 'google_workspace';
+  migrationRequestId: string;
+}) => api.post(`/api/subaccounts/${saId}/workspace/migrate`, body).then(r => r.data);
+
+export const getMigrationStatus = (saId: string, batchId: string) =>
+  api.get(`/api/subaccounts/${saId}/workspace/migrate/${batchId}`).then(r => r.data);

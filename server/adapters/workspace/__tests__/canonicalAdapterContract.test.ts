@@ -7,8 +7,8 @@
 
 import { expect, describe, test } from 'vitest';
 import type { WorkspaceAdapter } from '../workspaceAdapterContract.js';
-import { mockNativeAdapter, resetMockNative } from './mockNativeAdapter.js';
-import { mockGoogleAdapter, resetMockGoogle } from './mockGoogleApi.js';
+import { mockNativeAdapter, resetMockNative, failNextCall as nativeFail } from './mockNativeAdapter.js';
+import { mockGoogleAdapter, resetMockGoogle, failNextCall as googleFail } from './mockGoogleApi.js';
 
 const BASE_PROVISION: Parameters<WorkspaceAdapter['provisionIdentity']>[0] = {
   organisationId: '00000000-0000-0000-0000-000000000001',
@@ -19,8 +19,8 @@ const BASE_PROVISION: Parameters<WorkspaceAdapter['provisionIdentity']>[0] = {
   emailLocalPart: 'alex',
   emailSendingEnabled: true,
   provisioningRequestId: 'req-contract-test-1',
-  signature: null,
-  photoUrl: null,
+  signature: '',
+  photoUrl: undefined,
 };
 
 const adapters: Array<[string, WorkspaceAdapter, () => void]> = [
@@ -105,4 +105,119 @@ describe('WorkspaceAdapter canonical contract', () => {
       await adapter.archiveIdentity(c.identityId);
     });
   }
+});
+
+// ── Migration scenario: native → google (cross-adapter idempotency) ──────────
+//
+// NOTE: Full service-level orchestration tests (processIdentityMigration with
+// audit events) require a live DB and run in CI under the test:gates suite.
+// This block tests adapter-level behaviour only.
+
+describe('WorkspaceAdapter migration: native → google', () => {
+  test('cross-adapter migration is idempotent on migrationRequestId:actorId', async () => {
+    resetMockNative();
+    resetMockGoogle();
+
+    const MIGRATION_REQUEST_ID = 'mig-req-contract-test-1';
+    const actorIds = ['actor-alpha', 'actor-beta', 'actor-gamma'];
+
+    // Provision all actors on native (simulating "pre-migration" state)
+    const nativeIds: Record<string, string> = {};
+    for (const actorId of actorIds) {
+      const r = await mockNativeAdapter.provisionIdentity({
+        ...BASE_PROVISION,
+        actorId,
+        emailLocalPart: actorId.replace('actor-', ''),
+        provisioningRequestId: `seed:${actorId}`,
+      });
+      nativeIds[actorId] = r.identityId;
+      expect(r.identityId, `native provision ${actorId}`).toBeTruthy();
+    }
+
+    // Migrate each actor to google: same migrationRequestId:actorId key → idempotent
+    const googleIds: Record<string, string> = {};
+    for (const actorId of [...actorIds].sort()) {
+      const provisioningRequestId = `${MIGRATION_REQUEST_ID}:${actorId}`;
+      const r = await mockGoogleAdapter.provisionIdentity({
+        ...BASE_PROVISION,
+        actorId,
+        emailLocalPart: actorId.replace('actor-', ''),
+        provisioningRequestId,
+      });
+      googleIds[actorId] = r.identityId;
+      expect(r.identityId, `google provision ${actorId}`).toBeTruthy();
+    }
+
+    // Idempotency: same migrationRequestId → same google identityId
+    for (const actorId of actorIds) {
+      const provisioningRequestId = `${MIGRATION_REQUEST_ID}:${actorId}`;
+      const retry = await mockGoogleAdapter.provisionIdentity({
+        ...BASE_PROVISION,
+        actorId,
+        emailLocalPart: actorId.replace('actor-', ''),
+        provisioningRequestId,
+      });
+      expect(
+        retry.identityId,
+        `migration idempotency: retry for ${actorId} returns same google identityId`,
+      ).toBe(googleIds[actorId]);
+    }
+
+    // Archive native identities (simulating post-migration cleanup)
+    for (const actorId of actorIds) {
+      await mockNativeAdapter.archiveIdentity(nativeIds[actorId]);
+    }
+  });
+});
+
+// ── Failure injection scenarios ───────────────────────────────────────────────
+
+describe('WorkspaceAdapter failure injection', () => {
+  test('F1: provisionIdentity fails → retry succeeds (idempotency preserved)', async () => {
+    resetMockNative();
+    resetMockGoogle();
+
+    const provisioningRequestId = 'fail-test-provision-1';
+    googleFail('provisionIdentity', new Error('quota_exceeded'));
+    await expect(
+      mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId }),
+    ).rejects.toThrow(/quota_exceeded/);
+
+    // Retry: same provisioningRequestId, no longer failing → succeeds
+    const r = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId });
+    expect(r.identityId, 'F1: retry after provision failure succeeds').toBeTruthy();
+
+    // Second retry: idempotent (same identityId)
+    const r2 = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId });
+    expect(r.identityId, 'F1: idempotent after success').toBe(r2.identityId);
+  });
+
+  test('F2: sendEmail fails once → retry succeeds', async () => {
+    resetMockNative();
+    resetMockGoogle();
+
+    const r = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId: 'fail-test-send-actor' });
+
+    googleFail('sendEmail', new Error('rate_limited'));
+    await expect(
+      mockGoogleAdapter.sendEmail({ fromIdentityId: r.identityId, toAddresses: ['x@example.com'], subject: 'F2', bodyText: 'body', bodyHtml: null, policyContext: { skill: 'test', runId: 'run-f2' } }),
+    ).rejects.toThrow(/rate_limited/);
+
+    // Retry succeeds
+    const sent = await mockGoogleAdapter.sendEmail({ fromIdentityId: r.identityId, toAddresses: ['x@example.com'], subject: 'F2', bodyText: 'body', bodyHtml: null, policyContext: { skill: 'test', runId: 'run-f2' } });
+    expect(sent.externalMessageId, 'F2: retry send succeeds').toBeTruthy();
+  });
+
+  test('F3: archiveIdentity fails once → retry succeeds', async () => {
+    resetMockNative();
+    resetMockGoogle();
+
+    const r = await mockNativeAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId: 'fail-test-archive-1' });
+
+    nativeFail('archiveIdentity', new Error('archive_conflict'));
+    await expect(mockNativeAdapter.archiveIdentity(r.identityId)).rejects.toThrow(/archive_conflict/);
+
+    // Retry: no longer failing
+    await mockNativeAdapter.archiveIdentity(r.identityId); // should not throw
+  });
 });

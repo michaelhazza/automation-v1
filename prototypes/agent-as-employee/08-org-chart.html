@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>08 — Org chart with humans + agents · Acme Client Co.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .chart-canvas {
+    background: white;
+    background-image: radial-gradient(circle, var(--sl-200) 1px, transparent 1px);
+    background-size: 18px 18px;
+    border: 1px solid var(--sl-200);
+    border-radius: 10px;
+    padding: 36px 24px;
+    overflow: auto;
+  }
+  .row { display: flex; justify-content: center; gap: 32px; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 28px; position: relative; }
+  .line-down { width: 2px; height: 28px; background: var(--sl-300); }
+</style>
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 08 / 16 · <span class="muted">OrgChartPage (existing) — extended to render humans + agents</span> · <a href="07-onboard-success.html">← Onboard success</a> · <a href="09-agent-identity-tab.html">Next: Identity tab →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Subaccounts</a>
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Org chart</span>
+  </span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim · Acme Agency</span></span></span>
+</div>
+
+<div class="page" style="max-width: 1280px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Org chart</h1>
+      <p class="page-sub">Humans and agents on one canvas. Reporting lines are display only — they do not gate permissions.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <select class="field-select btn-sm" style="width: auto; padding: 6px 28px 6px 10px; font-size: 12px;">
+        <option>All identities</option>
+        <option>Humans only</option>
+        <option>Agents only</option>
+        <option>Active only</option>
+      </select>
+      <div style="display: flex; gap: 0; border: 1px solid var(--sl-200); border-radius: 7px; overflow: hidden; background: white;">
+        <button class="btn btn-sm btn-secondary" style="border: 0; border-radius: 0; background: var(--sl-100);">Chart</button>
+        <button class="btn btn-sm btn-ghost" style="border: 0; border-radius: 0;">List</button>
+        <button class="btn btn-sm btn-ghost" style="border: 0; border-radius: 0;">Schedule</button>
+      </div>
+      <a href="03-subaccount-agents-list.html" class="btn btn-primary btn-sm">Onboard an agent</a>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 16px; align-items: center; padding: 8px 14px; background: white; border: 1px solid var(--sl-200); border-radius: 8px; margin-bottom: 14px; font-size: 11px;">
+    <strong style="color: var(--sl-700);">Legend</strong>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 14px; height: 4px; background: #f59e0b; border-radius: 2px;"></span>Human</span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 14px; height: 4px; background: var(--indigo-500); border-radius: 2px;"></span>Agent</span>
+    <span style="height: 12px; width: 1px; background: var(--sl-200);"></span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="dot" style="width: 7px; height: 7px; background: #10b981; border-radius: 999px;"></span>Active</span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="dot" style="width: 7px; height: 7px; background: #f97316; border-radius: 999px;"></span>Suspended</span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="dot" style="width: 7px; height: 7px; background: var(--sl-400); border-radius: 999px;"></span>Not onboarded</span>
+    <span style="height: 12px; width: 1px; background: var(--sl-200);"></span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;"><span class="live-dot" style="width: 7px; height: 7px; background: #10b981; border-radius: 999px; box-shadow: 0 0 0 3px rgba(16,185,129,0.18);"></span>Currently running</span>
+  </div>
+
+  <div class="chart-canvas">
+
+    <!-- Root -->
+    <div class="row" style="margin-bottom: 0;">
+      <div class="col">
+        <div class="orgcard human" style="border-left-color: #f59e0b;">
+          <div class="top">
+            <span class="avatar avatar-sm avatar-human">ML</span>
+            <div>
+              <div class="name">Maya Lim</div>
+              <div class="role">Founder</div>
+            </div>
+          </div>
+          <div class="footer">
+            <span class="pill pill-active"><span class="dot"></span>Active</span>
+          </div>
+        </div>
+        <div class="line-down"></div>
+      </div>
+    </div>
+
+    <!-- Horizontal connector to children -->
+    <div style="display: flex; justify-content: center; padding: 0 12px;">
+      <div style="width: 720px; height: 2px; background: var(--sl-300); position: relative;">
+        <div style="position: absolute; left: 0; top: 0; width: 2px; height: 28px; background: var(--sl-300);"></div>
+        <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 0; width: 2px; height: 28px; background: var(--sl-300);"></div>
+        <div style="position: absolute; right: 0; top: 0; width: 2px; height: 28px; background: var(--sl-300);"></div>
+      </div>
+    </div>
+
+    <!-- Tier 2: Sarah, Tom (human), Riley -->
+    <div class="row" style="gap: 80px; margin-top: 28px;">
+
+      <!-- Sarah branch -->
+      <div class="col">
+        <a href="09-agent-identity-tab.html" style="text-decoration: none;">
+          <div class="orgcard agent">
+            <div class="top">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <div>
+                <div class="name">Sarah</div>
+                <div class="role">Marketing analyst · Specialist</div>
+              </div>
+            </div>
+            <div class="footer">
+              <span class="pill pill-active"><span class="dot"></span>Active</span>
+              <span class="live"><span class="live-dot"></span>Running</span>
+            </div>
+          </div>
+        </a>
+        <div class="line-down"></div>
+        <div class="orgcard agent">
+          <div class="top">
+            <span class="avatar avatar-sm avatar-agent">HE</span>
+            <div>
+              <div class="name">Helena</div>
+              <div class="role">Content marketer · Worker</div>
+            </div>
+          </div>
+          <div class="footer">
+            <span class="pill pill-active"><span class="dot"></span>Active</span>
+            <span class="live"><span class="live-dot"></span>Running</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tom branch (human) with two agents under -->
+      <div class="col">
+        <div class="orgcard human" style="border-left-color: #f59e0b;">
+          <div class="top">
+            <span class="avatar avatar-sm avatar-human">TF</span>
+            <div>
+              <div class="name">Tom Foster</div>
+              <div class="role">Sales director</div>
+            </div>
+          </div>
+          <div class="footer">
+            <span class="pill pill-active"><span class="dot"></span>Active</span>
+          </div>
+        </div>
+
+        <div style="position: relative; width: 100%; height: 28px;">
+          <div style="position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 2px; height: 14px; background: var(--sl-300);"></div>
+          <div style="position: absolute; left: 25%; right: 25%; top: 14px; height: 2px; background: var(--sl-300);"></div>
+          <div style="position: absolute; left: 25%; top: 14px; width: 2px; height: 14px; background: var(--sl-300);"></div>
+          <div style="position: absolute; right: 25%; top: 14px; width: 2px; height: 14px; background: var(--sl-300);"></div>
+        </div>
+
+        <div style="display: flex; gap: 24px;">
+          <div class="orgcard agent">
+            <div class="top">
+              <span class="avatar avatar-sm avatar-agent">JO</span>
+              <div>
+                <div class="name">Johnny</div>
+                <div class="role">SDR · Worker</div>
+              </div>
+            </div>
+            <div class="footer">
+              <span class="pill pill-active"><span class="dot"></span>Active</span>
+            </div>
+          </div>
+          <div class="orgcard agent">
+            <div class="top">
+              <span class="avatar avatar-sm avatar-agent">PA</span>
+              <div>
+                <div class="name">Patel</div>
+                <div class="role">Support triage · Worker</div>
+              </div>
+            </div>
+            <div class="footer">
+              <span class="pill pill-suspend"><span class="dot"></span>Suspended</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Riley branch (just-onboarded) -->
+      <div class="col">
+        <div class="orgcard agent" style="box-shadow: 0 0 0 3px var(--green-100);">
+          <div class="top">
+            <span class="avatar avatar-sm avatar-agent">RI</span>
+            <div>
+              <div class="name">Riley</div>
+              <div class="role">Reporting agent · Worker</div>
+            </div>
+          </div>
+          <div class="footer">
+            <span class="pill pill-active"><span class="dot"></span>Just onboarded</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 12px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div><strong>Click any card</strong> to open the identity profile. Humans use the existing user profile page; agents open the Identity tab on the agent profile.</div>
+  </div>
+</div>
+
+</body>
+</html>

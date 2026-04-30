@@ -8,6 +8,8 @@ import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
 import { IdentityCard } from '../components/workspace/IdentityCard';
+import type { IdentityCardAction } from '../components/workspace/IdentityCard';
+import AgentActivityTab from '../components/agent/AgentActivityTab';
 import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDialog';
 import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
 import {
@@ -53,10 +55,11 @@ interface LinkDetail {
     modelProvider: string;
     modelId: string;
     defaultSkillSlugs: string[];
+    workspaceActorId: string | null;
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity';
 
 interface AgentIdentity {
   identityId: string;
@@ -101,6 +104,32 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
   const [identityLoading, setIdentityLoading] = useState(false);
   const [suspendOpen, setSuspendOpen] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
+  const [identityPending, setIdentityPending] = useState<IdentityCardAction | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  function extractApiError(e: unknown, fallback: string): string {
+    const err = e as { response?: { data?: { error?: { message?: string } | string; message?: string } }; message?: string };
+    const apiErr = err.response?.data?.error;
+    return (typeof apiErr === 'string' ? apiErr : apiErr?.message)
+      ?? err.response?.data?.message
+      ?? err.message
+      ?? fallback;
+  }
+
+  async function runIdentityAction(action: IdentityCardAction, fn: () => Promise<unknown>) {
+    if (!link) return;
+    setIdentityPending(action);
+    setIdentityError(null);
+    try {
+      await fn();
+      const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+      setIdentity(updated);
+    } catch (e: unknown) {
+      setIdentityError(extractApiError(e, 'Action failed'));
+    } finally {
+      setIdentityPending(null);
+    }
+  }
 
   // Per-section form state
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
@@ -217,6 +246,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'scheduling', label: 'Scheduling' },
     { id: 'beliefs', label: 'Beliefs' },
     { id: 'identity', label: 'Identity' },
+    { id: 'activity', label: 'Activity' },
   ];
 
   return (
@@ -528,22 +558,13 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
               <IdentityCard
                 identity={{ ...identity, id: identity.identityId }}
                 actor={{ displayName: link.agent.name, agentRole: null }}
-                onSuspend={() => setSuspendOpen(true)}
-                onResume={async () => {
-                  await resumeAgentIdentity(link.agentId);
-                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
-                  setIdentity(updated);
-                }}
-                onRevoke={() => setRevokeOpen(true)}
-                onArchive={async () => {
-                  await archiveAgentIdentity(link.agentId);
-                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
-                  setIdentity(updated);
-                }}
-                onToggleEmail={async (enabled) => {
-                  await toggleAgentEmailSending(link.agentId, enabled);
-                  setIdentity((prev) => prev ? { ...prev, emailSendingEnabled: enabled } : prev);
-                }}
+                pendingAction={identityPending}
+                actionError={identityError}
+                onSuspend={() => { setIdentityError(null); setSuspendOpen(true); }}
+                onResume={() => runIdentityAction('resume', () => resumeAgentIdentity(link.agentId))}
+                onRevoke={() => { setIdentityError(null); setRevokeOpen(true); }}
+                onArchive={() => runIdentityAction('archive', () => archiveAgentIdentity(link.agentId))}
+                onToggleEmail={(enabled) => runIdentityAction('toggleEmail', () => toggleAgentEmailSending(link.agentId, enabled))}
               />
               <SuspendIdentityDialog
                 open={suspendOpen}
@@ -568,6 +589,23 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             </>
           )}
         </>
+      )}
+      {/* ── Activity tab ── */}
+      {activeTab === 'activity' && (
+        link?.agent.workspaceActorId && subaccountId
+          ? (
+            <AgentActivityTab
+              agentId={link.agentId}
+              actorId={link.agent.workspaceActorId}
+              subaccountId={subaccountId}
+              agentName={link.agent.name}
+            />
+          )
+          : (
+            <div className="text-[13px] text-slate-500">
+              This agent has no workspace identity.
+            </div>
+          )
       )}
     </div>{/* end main content */}
 

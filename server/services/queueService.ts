@@ -1121,6 +1121,42 @@ export const queueService = {
         }
       });
 
+      // Workspace seat rollup (agents-as-employees D9) — hourly billing snapshot
+      await boss.schedule('seat-rollup', '0 * * * *', {});
+      await (boss as any).work('seat-rollup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+          await withTimeout(runSeatRollup().then(() => undefined), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'seat-rollup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Workspace identity migration — per-identity job dispatched by workspaceMigrationService.start()
+      // Uses createWorker so the handler runs inside an org-scoped tx pulled from job.data.organisationId.
+      const migrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
+      await createWorker<import('./workspace/workspaceMigrationService.js').MigrateIdentityJob>({
+        queue: 'workspace.migrate-identity',
+        boss: boss as any,
+        concurrency: migrationConcurrency,
+        timeoutMs: 270_000,
+        handler: async (job) => {
+          const { processIdentityMigration, WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT } = await import('./workspace/workspaceMigrationService.js');
+          const adapter = await resolveMigrationAdapter(job.data.targetBackend);
+          // Codex P1 round 2 (2026-04-30): forward pg-boss retry counter so
+          // the failure path defers writing the (`ON CONFLICT DO NOTHING`-locked)
+          // `subaccount.migration_completed` row until the final attempt. See
+          // workspaceMigrationService.persistTerminalFailure for rationale.
+          await processIdentityMigration(job.data, { adapter }, {
+            retrycount: getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>),
+            retryLimit: WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT,
+          });
+        },
+      });
+
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
       await (boss as any).work('slack-inbound', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 2 }, async (job: any) => {
         try {
@@ -1234,7 +1270,31 @@ export const queueService = {
         });
       }, 24 * 60 * 60 * 1000); // daily
 
+      // Workspace seat rollup — hourly billing snapshot (in-memory fallback)
+      setInterval(async () => {
+        const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+        runSeatRollup().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'seat-rollup:error', ...serializeError(err) }));
+        });
+      }, 60 * 60 * 1000); // hourly
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// resolveMigrationAdapter — inline helper for workspace.migrate-identity worker
+// ---------------------------------------------------------------------------
+
+async function resolveMigrationAdapter(backend: string) {
+  if (backend === 'synthetos_native') {
+    const { nativeWorkspaceAdapter } = await import('../adapters/workspace/nativeWorkspaceAdapter.js');
+    return nativeWorkspaceAdapter;
+  }
+  if (backend === 'google_workspace') {
+    const { googleWorkspaceAdapter } = await import('../adapters/workspace/googleWorkspaceAdapter.js');
+    return googleWorkspaceAdapter;
+  }
+  throw new Error(`unknown migration backend: ${backend}`);
+}

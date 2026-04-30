@@ -18,11 +18,13 @@
  * Route is intentionally unauthenticated (provider cannot supply a JWT).
  */
 
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import crypto from 'crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D19 deferred — email→identity bootstrap lookup; withAdminConnection wrap tracked in tasks/todo.md"
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
+import { withOrgTx } from '../instrumentation.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import { ingest } from '../services/workspace/workspaceEmailPipeline.js';
 import { env } from '../lib/env.js';
@@ -139,21 +141,24 @@ function normalise(body: RawPayload): { msg: Omit<InboundMessage, 'rawProviderId
 
 router.post(
   '/api/workspace/native/inbound',
+  raw({ type: '*/*' }),
   async (req, res) => {
+    const rawBody = req.body as Buffer;
     const signature = req.headers['x-webhook-signature'] as string | undefined;
-
-    // rawBody is populated by the express.raw() middleware when it's mounted
-    // before JSON parsing for this path. Fall back to serialising the already-
-    // parsed body if rawBody is absent (integration test / dev convenience).
-    const rawBody: Buffer = (req as unknown as { rawBody?: Buffer }).rawBody
-      ?? Buffer.from(JSON.stringify(req.body ?? {}));
 
     if (!verifySignature(rawBody, signature)) {
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }
 
-    const payload = req.body as RawPayload;
+    let payload: RawPayload;
+    try {
+      payload = JSON.parse(rawBody.toString('utf-8')) as RawPayload;
+    } catch {
+      res.status(400).json({ error: 'Invalid JSON' });
+      return;
+    }
+
     const normalised = normalise(payload);
 
     if (!normalised) {
@@ -166,12 +171,20 @@ router.post(
     const { msg, toAddress } = normalised;
     const emailLower = toAddress.toLowerCase();
 
-    // Resolve identity by recipient address
-    const [identity] = await db
-      .select()
-      .from(workspaceIdentities)
-      .where(eq(workspaceIdentities.emailAddress, emailLower))
-      .limit(1);
+    // Resolve identity by recipient address — cross-org bootstrap lookup.
+    // No organisation_id is known yet, so this must bypass RLS via admin_role.
+    const identityRows = await withAdminConnection(
+      { source: 'inbound-webhook.identity-lookup', reason: 'bootstrap email-to-org resolution' },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        return tx
+          .select()
+          .from(workspaceIdentities)
+          .where(eq(workspaceIdentities.emailAddress, emailLower))
+          .limit(1);
+      },
+    );
+    const [identity] = identityRows;
 
     if (!identity) {
       logger.warn('workspace.inbound_webhook.identity_not_found', { toAddress: emailLower });
@@ -186,7 +199,13 @@ router.post(
     };
 
     try {
-      const result = await ingest(identity.organisationId, identity.id, raw, { adapter: nativeWorkspaceAdapter });
+      const result = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.organisation_id', ${identity.organisationId}, true)`);
+        return withOrgTx(
+          { tx, organisationId: identity.organisationId, source: 'inbound-webhook' },
+          () => ingest(identity.organisationId, identity.id, raw, { adapter: nativeWorkspaceAdapter }),
+        );
+      });
       logger.info('workspace.inbound_webhook.ok', { messageId: result.messageId, deduplicated: result.deduplicated });
       res.json({ ok: true, messageId: result.messageId, deduplicated: result.deduplicated });
     } catch (err) {

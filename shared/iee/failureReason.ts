@@ -55,6 +55,10 @@ export const FailureReason = z.enum([
   // Workspace actor hierarchy additions (agents-as-employees spec §6.1).
   'parent_actor_cycle_detected',
   'workspace_mirror_write_failed',
+  // Workspace backend-swap guard (agents-as-employees spec E0).
+  // Returned by POST /workspace/configure when a different backend is already
+  // configured and non-archived identities exist — use /migrate instead.
+  'workspace_configure_requires_migration',
   'unknown',
 ]);
 

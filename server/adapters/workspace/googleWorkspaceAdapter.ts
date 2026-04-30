@@ -17,7 +17,7 @@ import { google } from 'googleapis';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { eq, and, gte } from 'drizzle-orm';
-import { db } from '../../db/index.js'; // guard-ignore: rls-contract-compliance reason="D3 deferred — adapter writes use caller-supplied organisationId; withOrgTx wrap tracked in tasks/todo.md"
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceCalendarEvents } from '../../db/schema/workspaceCalendarEvents.js';
 import { env } from '../../lib/env.js';
@@ -90,7 +90,7 @@ function calendarAuth(agentEmail: string) {
 // ---------------------------------------------------------------------------
 
 async function getIdentity(identityId: string) {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('googleAdapter.getIdentity')
     .select()
     .from(workspaceIdentities)
     .where(eq(workspaceIdentities.id, identityId));
@@ -162,7 +162,8 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
 
   async provisionIdentity(params: ProvisionParams): Promise<ProvisionResult> {
     // Idempotency: check existing row first
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('googleAdapter.provisionIdentity');
+    const [existing] = await scopedDb
       .select()
       .from(workspaceIdentities)
       .where(eq(workspaceIdentities.provisioningRequestId, params.provisioningRequestId));
@@ -203,7 +204,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
       throw err;
     }
 
-    const [row] = await db
+    const [row] = await scopedDb
       .insert(workspaceIdentities)
       .values({
         organisationId: params.organisationId,
@@ -225,7 +226,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
 
     if (!row) {
       // Race: concurrent insert won — re-fetch
-      const [raced] = await db
+      const [raced] = await scopedDb
         .select()
         .from(workspaceIdentities)
         .where(eq(workspaceIdentities.provisioningRequestId, params.provisioningRequestId));
@@ -381,7 +382,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
       },
     });
 
-    const [evt] = await db
+    const [evt] = await getOrgScopedDb('googleAdapter.createEvent')
       .insert(workspaceCalendarEvents)
       .values({
         organisationId: identity.organisationId,
@@ -403,7 +404,8 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
   },
 
   async respondToEvent(eventId: string, response: 'accepted' | 'declined' | 'tentative'): Promise<void> {
-    const [evt] = await db
+    const scopedDb = getOrgScopedDb('googleAdapter.respondToEvent');
+    const [evt] = await scopedDb
       .select()
       .from(workspaceCalendarEvents)
       .where(eq(workspaceCalendarEvents.id, eventId));
@@ -425,7 +427,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
       });
     }
 
-    await db
+    await scopedDb
       .update(workspaceCalendarEvents)
       .set({ responseStatus: response, updatedAt: new Date() })
       .where(eq(workspaceCalendarEvents.id, eventId));
@@ -471,7 +473,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
     }
 
     const now = new Date();
-    const rows = await db
+    const rows = await getOrgScopedDb('googleAdapter.fetchUpcoming')
       .select()
       .from(workspaceCalendarEvents)
       .where(
@@ -500,7 +502,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
 
 async function getDomainFromConnector(connectorConfigId: string): Promise<string> {
   const { connectorConfigs } = await import('../../db/schema/connectorConfigs.js');
-  const [row] = await db
+  const [row] = await getOrgScopedDb('googleAdapter.getDomainFromConnector')
     .select({ configJson: connectorConfigs.configJson })
     .from(connectorConfigs)
     .where(eq(connectorConfigs.id, connectorConfigId));

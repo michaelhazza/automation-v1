@@ -112,14 +112,14 @@ test('approve success — onApproved called, conflict=false, error=null, isPendi
 
   const promise = actions.approve('item-1');
   // Synchronously after call: isPending must be true (set before await)
-  expect(state.isPending).toBe(true, 'isPending=true immediately after approve()');
+  expect(state.isPending, 'isPending=true immediately after approve()').toBe(true);
 
   await promise;
 
-  expect(approvedCalled).toBe(true, 'onApproved was called');
-  expect(state.conflict).toBe(false, 'conflict cleared');
-  expect(state.error).toBe(null, 'error cleared');
-  expect(state.isPending).toBe(false, 'isPending=false after resolution');
+  expect(approvedCalled, 'onApproved was called').toBe(true);
+  expect(state.conflict, 'conflict cleared').toBe(false);
+  expect(state.error, 'error cleared').toBe(null);
+  expect(state.isPending, 'isPending=false after resolution').toBe(false);
 });
 
 test('approve 409 ITEM_CONFLICT — conflict=true, onConflict called, onApproved NOT called', async () => {
@@ -141,10 +141,10 @@ test('approve 409 ITEM_CONFLICT — conflict=true, onConflict called, onApproved
 
   await actions.approve('item-2');
 
-  expect(state.conflict).toBe(true, 'conflict=true on 409');
-  expect(conflictCalled).toBe(true, 'onConflict called');
-  expect(approvedCalled).toBe(false, 'onApproved NOT called');
-  expect(state.isPending).toBe(false, 'isPending cleared in finally');
+  expect(state.conflict, 'conflict=true on 409').toBe(true);
+  expect(conflictCalled, 'onConflict called').toBe(true);
+  expect(approvedCalled, 'onApproved NOT called').toBe(false);
+  expect(state.isPending, 'isPending cleared in finally').toBe(false);
 });
 
 test('approve 412 MAJOR_ACK_REQUIRED — error set to "Major acknowledgement required"', async () => {
@@ -161,8 +161,8 @@ test('approve 412 MAJOR_ACK_REQUIRED — error set to "Major acknowledgement req
 
   await actions.approve('item-3');
 
-  expect(state.error).toBe('Major acknowledgement required', 'error message for 412');
-  expect(state.isPending).toBe(false, 'isPending cleared');
+  expect(state.error, 'error message for 412').toBe('Major acknowledgement required');
+  expect(state.isPending, 'isPending cleared').toBe(false);
 });
 
 test('approve 500 — error set to message, onApproved NOT called', async () => {
@@ -181,8 +181,8 @@ test('approve 500 — error set to message, onApproved NOT called', async () => 
   await actions.approve('item-4');
 
   expect(state.error !== null, 'error is set on 500').toBeTruthy();
-  expect(approvedCalled).toBe(false, 'onApproved NOT called');
-  expect(state.isPending).toBe(false, 'isPending cleared');
+  expect(approvedCalled, 'onApproved NOT called').toBe(false);
+  expect(state.isPending, 'isPending cleared').toBe(false);
 });
 
 test('double-click guard — second approve while first is pending is a no-op (no second HTTP call)', async () => {
@@ -216,7 +216,7 @@ test('double-click guard — second approve while first is pending is a no-op (n
 
   await Promise.all([first, second]);
 
-  expect(callCount).toBe(1, 'api.post called only once');
+  expect(callCount, 'api.post called only once').toBe(1);
 });
 
 test('reject with empty comment — synchronous throw, no HTTP call', async () => {
@@ -241,8 +241,8 @@ test('reject with empty comment — synchronous throw, no HTTP call', async () =
 
   await expect(async () => actions.reject('item-6', '')).rejects.toThrow('Comment is required');
 
-  expect(callCount).toBe(0, 'no HTTP call on empty comment');
-  expect(state.isPending).toBe(false, 'isPending remains false');
+  expect(callCount, 'no HTTP call on empty comment').toBe(0);
+  expect(state.isPending, 'isPending remains false').toBe(false);
 });
 
 test('reject success — onRejected called, conflict=false, error=null', async () => {
@@ -260,8 +260,8 @@ test('reject success — onRejected called, conflict=false, error=null', async (
 
   await actions.reject('item-7', 'not appropriate');
 
-  expect(rejectedCalled).toBe(true, 'onRejected was called');
-  expect(state.conflict).toBe(false, 'conflict cleared');
-  expect(state.error).toBe(null, 'error cleared');
-  expect(state.isPending).toBe(false, 'isPending=false after rejection');
+  expect(rejectedCalled, 'onRejected was called').toBe(true);
+  expect(state.conflict, 'conflict cleared').toBe(false);
+  expect(state.error, 'error cleared').toBe(null);
+  expect(state.isPending, 'isPending=false after rejection').toBe(false);
 });

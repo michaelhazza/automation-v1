@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { nextStatus, type IdentityAction } from './workspaceIdentityServicePure.js';
@@ -100,13 +100,18 @@ export const workspaceIdentityService = {
   },
 
   /**
-   * Returns all workspace_identities rows for a given subaccount (all statuses).
+   * Returns all non-archived workspace_identities rows for a given subaccount.
+   * "Active" here means archivedAt IS NULL — covers provisioned, active,
+   * suspended, and revoked identities, but excludes archived ones (migration done).
    */
   async getActiveIdentitiesForSubaccount(subaccountId: string) {
     return db
       .select()
       .from(workspaceIdentities)
-      .where(eq(workspaceIdentities.subaccountId, subaccountId));
+      .where(and(
+        eq(workspaceIdentities.subaccountId, subaccountId),
+        isNull(workspaceIdentities.archivedAt),
+      ));
   },
 
   /**
