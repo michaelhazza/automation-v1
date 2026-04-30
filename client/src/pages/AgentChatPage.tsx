@@ -5,8 +5,10 @@ import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
 import CostMeterPill from '../components/CostMeterPill';
+import SuggestedActionChips from '../components/SuggestedActionChips';
 import { relativeTime } from '../lib/relativeTime';
 import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
+import type { SuggestedAction, SuggestedActionKey } from '../../../shared/types/messageSuggestedActions';
 
 interface AgentRunHandoff {
   version: 1;
@@ -46,6 +48,7 @@ interface Message {
   role: 'user' | 'assistant' | 'tool_result';
   content?: string;
   triggeredExecutionId?: string;
+  suggestedActions?: SuggestedAction[] | null;
   createdAt: string;
 }
 
@@ -361,6 +364,29 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  const handlePromptFill = useCallback((prompt: string) => {
+    setInput(prompt);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
+
+  const handleSystemAction = useCallback(async (actionKey: SuggestedActionKey) => {
+    if (!agentId || !activeConvId) return;
+    const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistantMsg) return;
+    try {
+      const { data } = await api.post(
+        `/api/agents/${agentId}/conversations/${activeConvId}/messages/${lastAssistantMsg.id}/dispatch-action`,
+        { actionKey },
+      );
+      if (data.redirectUrl) {
+        navigate(data.redirectUrl);
+      }
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to dispatch action.');
+    }
+  }, [agentId, activeConvId, messages, navigate]);
+
   if (loading) {
     return (
       <div className="flex flex-col h-[calc(100vh-64px)]">
@@ -610,6 +636,22 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
               <button onClick={() => setError('')} className="ml-auto bg-transparent border-0 cursor-pointer text-red-600 text-lg leading-none">×</button>
             </div>
           )}
+
+          {/* Suggested action chips — shown above composer for most recent assistant message only */}
+          {(() => {
+            let lastAssistantMsg: Message | undefined;
+            for (let i = visibleMessages.length - 1; i >= 0; i--) {
+              if (visibleMessages[i].role === 'assistant') { lastAssistantMsg = visibleMessages[i]; break; }
+            }
+            const chips = lastAssistantMsg?.suggestedActions ?? [];
+            return chips.length > 0 && !sending ? (
+              <SuggestedActionChips
+                chips={chips}
+                onPromptFill={handlePromptFill}
+                onSystemAction={handleSystemAction}
+              />
+            ) : null;
+          })()}
 
           {/* Input bar */}
           <div className="px-5 pt-3 pb-4 bg-white border-t border-slate-200 shrink-0">

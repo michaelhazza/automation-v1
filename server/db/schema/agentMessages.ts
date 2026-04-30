@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { agentConversations } from './agentConversations';
+import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions.js';
 
 export const agentMessages = pgTable(
   'agent_messages',
@@ -32,6 +33,8 @@ export const agentMessages = pgTable(
       fileSizeBytes: number;
       storagePath: string;
     }>>(),
+    // Suggested action chips emitted by agent on terminal turns
+    suggestedActions: jsonb('suggested_actions').$type<SuggestedAction[] | null>(),
     // Cost/token tracking — populated for assistant messages by conversationService
     costCents: integer('cost_cents'),
     tokensIn: integer('tokens_in'),

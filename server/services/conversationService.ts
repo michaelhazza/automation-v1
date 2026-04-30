@@ -14,6 +14,7 @@ import { routeCall } from './llmRouter.js';
 import { calculateCost } from './pricingService.js';
 import { env } from '../lib/env.js';
 import { emitConversationUpdate } from '../websocket/emitters.js';
+import { parseSuggestedActions } from '../../shared/types/messageSuggestedActions.js';
 
 // ---------------------------------------------------------------------------
 // Cost helpers — convert tokensIn/tokensOut → whole cents using pricingService.
@@ -225,11 +226,19 @@ export const conversationService = {
     const orgProcesses = await getOrgProcessesForTools(organisationId);
 
     // ── 5. Build system prompt ────────────────────────────────────────────────
-    const systemPrompt = buildSystemPrompt(
+    const baseSystemPrompt = buildSystemPrompt(
       agent.masterPrompt,
       dataSourceContents,
       orgProcesses,
     );
+    const systemPrompt = baseSystemPrompt + `
+---
+OPTIONAL CHIP SUGGESTIONS: At the very end of your response (after all substantive content), you may optionally include a <suggested_actions> block with up to 4 follow-up actions. Only include chips when genuinely useful. Format:
+<suggested_actions>
+[{"kind":"prompt","label":"Short label ≤80 chars","prompt":"Pre-fill text ≤2000 chars"},{"kind":"system","label":"Short label","actionKey":"save_thread_as_agent|schedule_daily|pin_skill"}]
+</suggested_actions>
+Most responses should have NO chips. Include them only for natural next-steps.
+`;
 
     // ── 6. Build message history (last N messages) ────────────────────────────
     const maxContextMessages = env.AGENT_CONTEXT_MESSAGES;
@@ -444,13 +453,19 @@ export const conversationService = {
       );
 
       // Save final assistant response
+      const { chips: finalChips, strippedContent: finalContent } = parseSuggestedActions(
+        llmResponse.content,
+        { conversationId },
+      );
+
       const [finalMsg] = await db
         .insert(agentMessages)
         .values({
           conversationId,
           role: 'assistant',
-          content: llmResponse.content,
+          content: finalContent,
           triggeredExecutionId: triggeredExecutionId ?? null,
+          suggestedActions: finalChips.length > 0 ? finalChips : null,
           costCents: finalCostCents,
           tokensIn: llmResponse.tokensIn,
           tokensOut: llmResponse.tokensOut,
@@ -460,14 +475,14 @@ export const conversationService = {
         .returning();
 
       emitConversationUpdate(conversationId, 'conversation:message', {
-        message: { id: finalMsg.id, role: 'assistant', content: llmResponse.content, createdAt: finalMsg.createdAt },
+        message: { id: finalMsg.id, role: 'assistant', content: finalContent, suggestedActions: finalChips.length > 0 ? finalChips : null, createdAt: finalMsg.createdAt },
         triggeredExecutionId: triggeredExecutionId ?? null,
       });
 
       return {
         userMessageId: userMsg.id,
         assistantMessageId: finalMsg.id,
-        content: llmResponse.content,
+        content: finalContent,
         triggeredExecutionId: triggeredExecutionId ?? null,
       };
     }
@@ -481,12 +496,18 @@ export const conversationService = {
       organisationId,
     );
 
+    const { chips: regularChips, strippedContent: regularContent } = parseSuggestedActions(
+      llmResponse.content,
+      { conversationId },
+    );
+
     const [assistantMsg] = await db
       .insert(agentMessages)
       .values({
         conversationId,
         role: 'assistant',
-        content: llmResponse.content,
+        content: regularContent,
+        suggestedActions: regularChips.length > 0 ? regularChips : null,
         costCents: regularCostCents,
         tokensIn: llmResponse.tokensIn,
         tokensOut: llmResponse.tokensOut,
@@ -496,14 +517,14 @@ export const conversationService = {
       .returning();
 
     emitConversationUpdate(conversationId, 'conversation:message', {
-      message: { id: assistantMsg.id, role: 'assistant', content: llmResponse.content, createdAt: assistantMsg.createdAt },
+      message: { id: assistantMsg.id, role: 'assistant', content: regularContent, suggestedActions: regularChips.length > 0 ? regularChips : null, createdAt: assistantMsg.createdAt },
       triggeredExecutionId: null,
     });
 
     return {
       userMessageId: userMsg.id,
       assistantMessageId: assistantMsg.id,
-      content: llmResponse.content,
+      content: regularContent,
       triggeredExecutionId: null,
     };
   },
