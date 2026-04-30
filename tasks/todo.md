@@ -323,6 +323,20 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 - [ ] [auto] **Convert `withOrgTx` invariant from grep-check to lint rule or AST test** — Round 2 ChatGPT verdict surfaced this as the one minor observation (explicitly NOT a blocker, "natural evolution"). The §5.2 invariant "A handler passed to `createWorker` MUST NOT open its own org-scoped transaction" is currently enforced via `grep -n "withOrgTx" <file>` against each converted handler. The grep + decision table works for the current scope (3 handlers being converted) but is human-executed — every future `createWorker` call site re-introduces the verification burden. Long-term: replace with either (a) an ESLint custom rule that flags `withOrgTx(...)` calls inside the handler argument of `createWorker(...)`, or (b) a test-time AST check that walks `createWorker` call sites and asserts no nested `withOrgTx` in the handler body. **Reconsider per trigger:** when adding a 4th `createWorker` conversion OR when a `withOrgTx` regression slips past the grep check in code review. Until then, the human-executed grep is sufficient. Rationale: "not needed now, just a natural evolution" — ChatGPT Round 2 verdict.
 
+### agentic-engineering-notes (2026-04-30)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-agentic-engineering-notes-2026-04-30T09-14-16Z.md`
+**Spec:** `docs/agentic-engineering-notes-dev-spec.md`
+**PR:** #243 — https://github.com/michaelhazza/automation-v1/pull/243
+**Branch:** `claude/agentic-engineering-notes-WL2of`
+
+- [ ] [user] **Standardise canonical log schema across all review agents** — ChatGPT Round 1 surfaced as F5: add a single invariant requiring all review-agent logs to conform to a shared schema `{ agent, timestamp, target, verdict, findings[], metadata }`, even if persisted as markdown. Deferred from this spec because it is a cross-agent contract change — scope is `pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`, and the future `adversarial-reviewer`. Adding it here would expand this spec's boundary from "add adversarial-reviewer" to "standardise log schemas across the review fleet." **Home:** the canonical contract belongs in `tasks/review-logs/README.md` (single source of truth for log conventions, already referenced by every agent definition); each agent's `.claude/agents/<agent>.md` then points to it. **Reconsider per trigger:** when Mission Control's parser starts losing fidelity on real findings, OR when a new review agent ships and surfaces a third schema variant. Until then, the existing per-agent verdict-header convention is sufficient and the cost of retrofitting all seven agents simultaneously outweighs the drift risk.
+
+  **Round 2 additions (2026-04-30):** ChatGPT Round 2 surfaced two more cross-agent items with the same trigger condition (revisit when auto-invocation lands or when cross-agent log schema is designed) and the same canonical home (`tasks/review-logs/README.md`). Bundle with the F5 entry above when the standardisation work is picked up.
+
+  - [ ] [user] **Idempotency invariant for adversarial-reviewer** — Round 2 F1: add an explicit invariant guaranteeing that a second run of `adversarial-reviewer` against an unchanged diff produces identical findings (or a documented "no-op, already reviewed" log). Implementation cost too high for Phase 1 manual non-blocking — would require a finding-fingerprint scheme, parsing the prior log, comparing fingerprints, and skipping or no-op'ing on match. Defer until auto-invocation lands (re-running on every push amplifies the noise risk). **Home:** belongs in the cross-agent log-schema work above — idempotency is naturally expressed via the `findings[]` fingerprint field if the canonical schema is designed first.
+  - [ ] [user] **Log header schema fields (`gitHeadSha`, `filesChanged`)** — Round 2 F4: ChatGPT proposed adding `gitHeadSha` and `filesChanged` to every review log's Session Info header so logs are self-contained snapshots of what was reviewed. Deferred for two reasons: (1) asymmetry — none of the existing review-log producers (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`) emit these fields today, so adding them only to `adversarial-reviewer` creates the schema drift the F5 standardisation is meant to prevent; (2) Mission Control's parser has no read-side consumer for either field — adding them to the producer with no reader is dead weight until the dashboard surfaces them. Bundle with the F5 standardisation work so the header schema is designed once across all seven agents.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -1843,10 +1857,31 @@ in tests, every file has at least one `test()` / `describe()` / `it()`
 block, no bare top-level `await`, no module-level `process.env.X = '...'`
 without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
-### TI-005: Fix all integration CI test failures (full execution brief)
+### TI-005: Fix all integration CI test failures (full execution brief) — DONE
 - Captured: 2026-04-30 (after PR #239 surfaced 24 failures across 14 files)
-- **Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md)** — 5-phase plan, 3–4h, ready to execute in a new branch.
-- Replaces the older 2-file scope; covers all 14 failing files plus the seed-fixture work and the gate flip from `continue-on-error: true` → `false`.
+- Closed: 2026-04-30 by branch `claude/integration-tests-fix-2026-04-30`. Closeout summary: [tasks/builds/integration-tests-fix/progress.md](./builds/integration-tests-fix/progress.md).
+- Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md).
+- Outcome: integration_tests CI job is now load-bearing (`continue-on-error` removed). Five phases shipped: seeder + CI wiring (1), incident-ingestor reset-guard relaxation + Vitest-mock rewrite of the throttle integration test (2), TI-005 lifecycle refactor of five files (3), constraint / suppression / RLS-superuser fixes (4), and the gate flip itself (5).
+- ChatGPT round 1 (Codex P1, accepted): superuser short-circuit reports SKIPPED, not PASSED — `ctx.skip()` in four test bodies.
+- ChatGPT round 2 (verdict APPROVED, three P2 follow-ups deferred — see TI-006 / TI-007 / TI-008 below).
+
+### TI-006: Canonical subaccount UUID for integration fixtures
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.2)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
+- Issue: `scripts/seed-integration-fixtures.ts` uses `gen_random_uuid()` for the seeded subaccount. Tests rely on the "anchor" pattern — `SELECT … FROM organisations JOIN subaccounts … LIMIT 1` — which works while the seeded org has only one subaccount but becomes ambiguous if a future seed (or test) inserts a second. Pin a canonical UUID like `00000000-0000-0000-0000-000000000010` so seed inserts and test references stay deterministic; document the anchor-selection contract.
+- Effort: 30 min. Touches `scripts/seed-integration-fixtures.ts` and the small handful of test files that read the anchor (currently only `workspaceMemoryService.test.ts`).
+
+### TI-007: Integration test conventions doc — real-DB vs mocked-DB rule
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.3)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md)
+- Issue: the `*.integration.test.ts` glob now contains a mix of real-DB tests and tests that mock the DB at the module boundary (e.g. `incidentIngestorThrottle.integration.test.ts` mocks `db`, `getPgBoss`, `logger`). Both shapes are intentional, but the convention is implicit; future contributors may misread the file naming as "always real DB". Write a short convention note ("integration tests may mock external boundaries but must preserve DB contract OR explicitly declare isolation in the file header") and link it from CLAUDE.md / `references/`.
+- Effort: 15 min.
+
+### TI-008: Configure CI with a non-superuser app role for RLS coverage
+- Captured: 2026-04-30 (PR #241 ChatGPT round 2 P2.4 — also flagged in the closeout follow-ups)
+- Source: [tasks/review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md](./review-logs/chatgpt-pr-review-claude-integration-tests-fix-2026-04-30-2026-04-30T05-02-40Z.md), [tasks/builds/integration-tests-fix/progress.md](./builds/integration-tests-fix/progress.md)
+- Issue: CI's integration_tests job connects as the `postgres` superuser. Superusers bypass RLS unconditionally, so `rls.context-propagation.test.ts` and `crmQueryPlanner/__tests__/integration.test.ts` skip themselves at runtime via `ctx.skip()` — the cases are reported as SKIPPED rather than asserting tenant isolation. Provision a non-superuser app role in CI (a Postgres init script or a setup step that `CREATE ROLE app_test WITH LOGIN INHERIT` and grants admin_role membership) and connect `DATABASE_URL` as that role; then drop the `runningAsSuperuser` short-circuits in both files.
+- Effort: 60 min. Touches `.github/workflows/ci.yml` plus the two test files (revert the runtime check + `ctx.skip()` once the role is in place).
 
 ### [DEPRECATED — see brief above] TI-005 (original): Refactor 2 legacy integration tests to vitest-idiomatic structure
 - Captured: 2026-04-30
@@ -1942,3 +1977,25 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
     - **Preferred (spec-aligned):** add `"pdf-parse": "^1.1.1"` to `package.json` dependencies. Verify the dynamic import path matches the package's main export. This requires HITL approval to edit `package.json`.
     - **Alternative (capability-aligned):** drop `'application/pdf'` from `SUPPORTED_MIME_TYPES` in `client/src/components/DriveFilePicker.tsx` and from the resolver's `SUPPORTED_MIME_TYPES` set, plus update spec §9.3 to mark PDF as deferred to a follow-up.
   - Recommended action: take the preferred fix (add pdf-parse to package.json) on the next manual session; spec already promises PDF support.
+
+---
+
+## Deferred: agentic-engineering-notes follow-ups (2026-04-30)
+
+**Branch:** `claude/agentic-engineering-notes-WL2of`
+
+### D1. adversarial-reviewer chunk-slug gap
+
+`tasks/review-logs/README.md:98` includes `[-<chunk-slug>]` in the log filename template for `adversarial-reviewer`. The agent definition (`adversarial-reviewer.md:55`) only specifies the non-chunk form. Currently moot — auto-invocation from `feature-coordinator` is deferred and the agent is manual-only. When auto-invocation lands, add chunk-slug handling to the agent definition and verify the README template remains consistent.
+
+### D2. CLAUDE.md Task Classification table gap
+
+`CLAUDE.md` Task Classification table (Significant and Major rows) mentions `dual-reviewer` as optional but does not mention `adversarial-reviewer`. The review pipeline (step 4) is correct. A future CLAUDE.md edit should add `adversarial-reviewer optionally — only if the user explicitly asks` to the Significant and Major rows to match the pattern.
+
+### D3. logParsers.test.ts second adversarial test missing timestampIso assertion
+
+`tools/mission-control/server/__tests__/logParsers.test.ts` — the second adversarial-review test (`parses adversarial-review log with hyphenated slug`) does not assert `timestampIso`. Consider adding `eq(m!.timestampIso, '2026-04-30T09:15:22Z', 'iso')` to lock the normalisation path for hyphenated slugs.
+
+### D4. Spec § 4.2 input-detection wording contradicts § 4.1 tools list
+
+`docs/agentic-engineering-notes-dev-spec.md` § 4.1 declares the agent has tools `Read, Glob, Grep` (no Bash); § 4.2 instructs "Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked)" — which requires shell access `spec-conformance` has but this agent does not. `dual-reviewer` (Codex pass) flagged this as `[P2] Give the agent a way to detect the diff` (`tasks/review-logs/dual-review-log-agentic-engineering-notes-*.md`). The agent definition has been updated in-branch to make the contract self-consistent (caller provides the changed-file set, mirroring `pr-reviewer`'s posture). The spec § 4.2 wording should be aligned in a follow-up commit — drop the "auto-detection" clause and replace with "caller provides the changed-file set, same posture as `pr-reviewer`." Same wording symmetry applies to whatever invocation snippets exist for `adversarial-reviewer`.

@@ -73,12 +73,14 @@ export function derivePhaseFromVerdict(verdict: string | null): Phase {
     case 'CONFORMANT_AFTER_FIXES':
     case 'PASS':
     case 'PASS_WITH_DEFERRED':
+    case 'NO_HOLES_FOUND':
       return 'MERGE_READY';
     case 'CHANGES_REQUESTED':
     case 'NEEDS_REVISION':
     case 'NEEDS_DISCUSSION':
     case 'NON_CONFORMANT':
     case 'FAIL':
+    case 'HOLES_FOUND':
       return 'REVIEWING';
     default:
       return 'REVIEWING';

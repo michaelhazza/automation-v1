@@ -294,7 +294,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
 
   // Test seam: freeze at triage_status='running' so integration tests can assert
   // the increment fired without the terminal flip overwriting the state.
-  if (__testHooks.throwAfterIncrement && process.env.NODE_ENV === 'test') {
+  if (__testHooks.throwAfterIncrement && (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'integration')) {
     throw new Error('__testHooks.throwAfterIncrement: frozen after increment for test assertion');
   }
 
@@ -307,7 +307,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   let agentId: string;
   const runId = crypto.randomUUID();
 
-  if (__testHooks.stubSystemOpsContext && process.env.NODE_ENV === 'test') {
+  if (__testHooks.stubSystemOpsContext && (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'integration')) {
     ({ organisationId, agentId } = __testHooks.stubSystemOpsContext);
   } else {
     ({ organisationId } = await resolveSystemOpsContext());
