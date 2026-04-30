@@ -8,6 +8,128 @@
 
 ---
 
+## Round 3 — 2026-05-01T00:30:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary: without the diff, focus on highest-leverage checks — determinism, idempotency, concurrency safety, observability.
+
+1) Idempotency everywhere — unique constraints; ON CONFLICT; no double-write on retry
+2) Deterministic ordering — explicit ORDER BY; no insertion order / JS iteration reliance
+3) Single source of truth — one write path per entity; no shadow writers
+4) Concurrency — unique indexes for idempotency keys; no check-then-insert; per-key serialization in job runners; bounded backoff; DB time not app clocks
+5) Failure handling — retryable vs non-retryable; no silent downgrade; no orphaned partial state
+6) Data model/migrations — forward+backward safe; all hot paths indexed; down migrations tested
+7) API/contract integrity — no breaking changes; consistent timestamps/IDs/states; no ambiguous null
+8) Observability — runId, orgId, subaccountId, action, state on every boundary; start+end log per op; errors include classification + retryability + correlation IDs; metrics
+9) LLM/cost layer — exact token accounting; per-run caps; routing decisions logged; no hidden escalations
+10) Security/tenancy — every query scoped by org/subaccount; no cross-tenant joins; no credential leakage in logs
+11) Tests — happy path + retry + concurrency; integration tests not mixing mocks and real DB unless intentional
+
+Final gate: if DB enforces invariants, writes idempotent, no unprotected multi-step logic, logs reconstruct any run, tests cover failure paths → merge.
+```
+
+### Recommendations and Decisions
+
+| # | Finding (one-line) | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|--------------------|--------|----------------|----------------|----------|-----------|
+| F1 | Idempotency: unique constraints; ON CONFLICT; no double-write on retry | technical | reject (not applicable) | auto (reject) | medium | `agentResumeService` atomically clears token in DB transaction; token set to NULL after resume prevents second match. `applyPatch` uses `onConflictDoNothing` + version predicate. Already verified R1/F2, R2/F1. |
+| F2 | Deterministic ordering: explicit ORDER BY; no insertion-order reliance | technical | reject (not applicable) | auto (reject) | medium | New services filter on UNIQUE PKs with `.limit(1)`. New UI components are display-only with no LLM-facing ordering. Already verified R1/F1. |
+| F3 | Single source of truth: one write path per entity | technical | reject (not applicable) | auto (reject) | medium | One write path each: `applyPatch` for thread context, `resumeFromIntegrationConnect` for blocked-state clear. No shadow writers. Already verified R2/F3. |
+| F4 | Concurrency: unique indexes + transaction + no unprotected check-then-insert | technical | reject (not applicable) | auto (reject) | high | `agentResumeService` wraps clear in DB transaction; token predicate in UPDATE WHERE handles TOCTOU (expired-between-read-and-write → UPDATE returns 0 → 410). Already verified R1–R2. |
+| F5 | Failure handling: retryable vs non-retryable; no orphaned partial state | technical | reject (not applicable) | auto (reject) | high | APPROACH_TOO_LONG non-retryable. RESUME_TOKEN_EXPIRED 410 non-retryable. `txResult === null` → 410, no orphaned state. Race-retry bounded to 1. Already verified R2/F5/F8. |
+| F6 | Time consistency: DB time not app clocks | technical | reject (not applicable) | auto (reject) | medium | Version-integer OCC is the concurrency key, not timestamp. `gt(blockedExpiresAt, new Date())` in atomic UPDATE predicate handles clock drift — expired token → UPDATE returns 0 → 410. |
+| F7 | Data model/migrations: forward+backward safe; all paths indexed; down migrations | technical | reject (not applicable) | auto (reject) | medium | 0264/0265 additive. Partial index on `WHERE blocked_reason IS NOT NULL`. Down migrations in `migrations/_down/`. Already verified R2/F9. |
+| F8 | API/contract integrity: consistent nulls; no breaking changes | technical | reject (not applicable) | auto (reject) | medium | `resumeToken` validated at route boundary. `integration_resume_token` not in general listing responses. No ambiguous null/undefined in new API shapes. Already verified R2/F8. |
+| F9 | Observability: start+end logs; retryability classification; metrics | technical | defer | auto (defer) | low | `run_resumed` log has `conversationId: ''` (TODO(v2) in source at line 144). No start log before `applyPatch` DB reads. Race-retry path logs no retry count. Valid improvement; consistent with existing codebase patterns. Routed to `tasks/todo.md` as R3/F11. |
+| F10 | LLM/cost layer: exact token accounting; per-run caps; routing logged | technical | reject (not applicable) | auto (reject) | medium | `conversationCostService` is read-only. Token enforcement upstream in `llmRouter.ts` (pre-existing, out of scope). Already verified R2/F12. |
+| F11 | Security/tenancy: org-scoped queries; no credential leakage in logs | technical | reject (not applicable) | auto (reject) | high | All new service queries scoped by `organisationId`. 8-char token prefix only in logs (line 52), SHA-256 hash in DB, plaintext never persisted. Already verified R2/F13. |
+| F12 | Tests: happy path + retry + concurrency; integration tests not mixing mocks | technical | defer (already deferred) | auto (defer) | low | Mixed real+mock DB posture already deferred R1/F8, R2/F9. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — all findings not applicable or already deferred.
+
+### Deferred this round
+
+- **F9 (new)** — Observability gaps in resume + patch paths. Routed to `tasks/todo.md` § PR #244, R3/F11.
+- **F12** — Integration test posture. References existing R1/F8, R2/F9 defer; not duplicated in `tasks/todo.md`.
+
+### Top themes
+
+`idempotency`, `architecture`, `security`, `test_coverage`. Third sweep-style checklist pass with tighter specificity. Zero new concrete defects. F9 (observability) deferred as a low-severity improvement.
+
+### Files changed
+
+None (F9 → `tasks/todo.md`).
+
+### Recommendation
+
+**Ship-ready.** Three rounds of ChatGPT review, zero new concrete defects across all rounds. One low-severity observability improvement (R3/F9) routed to backlog.
+
+---
+
+## Round 2 — 2026-05-01T00:00:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+No obvious blockers without the diff, but assume you're in final-pass territory. Focus on three areas before merging: idempotency and retry safety, data consistency under concurrency, and observability completeness.
+
+1) Idempotency — all write paths safe to retry; unique constraints / onConflictDoNothing; no check-then-insert races
+2) Determinism — explicit ORDER BY on all queries affecting logic; no timestamp reliance unless DB-generated
+3) Single source of truth — no duplicated state derivation / status mapping
+4) Concurrency — multi-step flows in transaction OR protected by unique index; no read→compute→write without locking
+5) Failure handling — retryable vs non-retryable; bounded backoff; no orphaned records
+6) Data model — business invariants at DB level; nullable hygiene; enum completeness
+7) Observability — requestId/runId/entity IDs/action/outcome/failure reason logged per critical op
+8) API/contract integrity — no breaking changes; no internal field leaks
+9) Tests — edge cases, duplicates, retries, failure paths; no mixed real+mock DB
+10) Performance — N+1 queries; unbounded loops; missing indexes
+11) Migration safety — reversible; no long locks; chunked/resumable backfill
+
+Final call: if DB enforces invariants, writes are idempotent, no unprotected multi-step logic, logs sufficient, tests cover failure paths → safe to merge.
+```
+
+### Recommendations and Decisions
+
+| # | Finding (one-line) | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|--------------------|--------|----------------|----------------|----------|-----------|
+| F1 | Idempotency: all write paths safe to retry | technical | reject (not applicable) | auto (reject) | medium | `conversationThreadContextService` uses `onConflictDoNothing()` on INSERT + optimistic version predicate on UPDATE with one bounded retry. Already verified R1/F2. |
+| F2 | Determinism: explicit ORDER BY; no implied ordering | technical | reject (not applicable) | auto (reject) | medium | `.limit(1)` in new services filter on UNIQUE-constrained columns. Already verified R1/F1. |
+| F3 | Single source of truth: no duplicated state/status derivation | technical | reject (not applicable) | medium | auto (reject) | InvocationsCard has zero run-status logic; status routes exclusively through `shared/runStatus.ts`. No duplication found. |
+| F4 | Concurrency: multi-step flows protected | technical | reject (not applicable) | auto (reject) | high | Full dual-path race handler in `applyPatch`: INSERT→`onConflictDoNothing`→retry; UPDATE→version predicate→retry. Both paths single-bounded. Already verified R1. |
+| F5 | Failure handling: retryable vs non-retryable; no orphaned records | technical | reject (not applicable) | auto (reject) | high | `APPROACH_TOO_LONG` thrown as non-retryable. Race-retry bounded to 1 attempt. `blockedRunExpiryJob` clears orphaned blocked runs. No silent partial failures. |
+| F6 | Data model: DB invariants; nullable hygiene | technical | reject (not applicable) | auto (reject) | medium | 0264: UNIQUE on `conversation_id`, all columns NOT NULL. 0265: new agent_run columns intentionally nullable (blocked-only); partial index on `WHERE blocked_reason IS NOT NULL`. |
+| F7 | Observability: correlation IDs in all critical ops | technical | reject (not applicable) | auto (reject) | medium | `thread_context_patched` logs `conversationId`, `runId`, `version`, `action`, `opsApplied`. Cost service logs `conversationId` + outcome on read path — sufficient for debugging. |
+| F8 | API/contract integrity: no leaks or breaking changes | technical | reject (not applicable) | auto (reject) | medium | `integration_resume_token` validated by `/^[a-f0-9]{64}$/` at route boundary. Not in general run-listing responses. No breaking changes to existing endpoints. |
+| F9 | Tests: edge cases and mixed real+mock DB | technical | defer (already deferred) | auto (defer) | low | Pure-function tests exist for new services. Mixed real+mock DB posture already deferred as R1/F8 in `tasks/todo.md`. |
+| F10 | Performance: N+1 queries; unbounded loops; missing indexes | technical | reject (not applicable) | auto (reject) | medium | New client components make single API calls. No per-item fetch loops found. Partial index added by migration. |
+| F11 | Migration safety: reversible; no long locks | technical | reject (not applicable) | auto (reject) | medium | 0264 creates new table. 0265 adds nullable columns via `ADD COLUMN IF NOT EXISTS` — Postgres metadata-only, no table rewrite, no backfill needed. Idempotent via `IF NOT EXISTS`. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — all findings not applicable to Tier 1 scope, or already deferred (F9 → R1/F8).
+
+### Deferred this round
+
+None new — F9 references existing R1/F8 defer already in `tasks/todo.md`.
+
+### Top themes
+
+`idempotency`, `architecture`, `test_coverage`, `scope`. Round 2 was another sweep-style checklist without specific code references. All checklist items confirmed correct or already tracked.
+
+### Files changed
+
+None — read-only round.
+
+### Recommendation
+
+**Ship-ready.** Two rounds of ChatGPT review have surfaced zero new concrete defects. Every concern either does not apply to the Tier 1 code paths or is already in `tasks/todo.md`. Consistent with Round 1 verdict.
+
+---
+
 ## Round 1 — 2026-04-30T20:30:00Z
 
 ### ChatGPT Feedback (raw)

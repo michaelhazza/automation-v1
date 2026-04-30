@@ -23,11 +23,11 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
   asyncHandler(async (req, res) => {
-    const { convId } = req.params;
+    const { convId, agentId } = req.params;
     const organisationId = req.orgId!;
     const userId = req.user!.id;
 
-    // Ownership check — 404 if conversation doesn't exist, 403 if wrong user
+    // Ownership check — 404 if conversation doesn't exist, 403 if wrong user or wrong agent
     const [conv] = await db
       .select()
       .from(agentConversations)
@@ -35,6 +35,7 @@ router.get(
         and(
           eq(agentConversations.id, convId),
           eq(agentConversations.organisationId, organisationId),
+          eq(agentConversations.agentId, agentId),
         ),
       )
       .limit(1);

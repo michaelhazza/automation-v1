@@ -91,7 +91,6 @@ export async function resumeFromIntegrationConnect(params: {
       .set({
         blockedReason: null,
         blockedExpiresAt: null,
-        integrationResumeToken: null,
         updatedAt: new Date(),
       })
       .where(
@@ -152,9 +151,8 @@ export async function resumeFromIntegrationConnect(params: {
   }
 
   // 0 rows updated — token is expired or in an unrecognised state → 410.
-  // Note: after a successful resume, integrationResumeToken is set to NULL,
-  // so we cannot match on it again. The idempotent check above handles the
-  // already-resumed case before reaching this point.
+  // integrationResumeToken is intentionally kept (not cleared) so the
+  // idempotent check at the top of this function remains reachable on retries.
   const err = Object.assign(
     new Error('Resume token expired or invalid'),
     { statusCode: 410, errorCode: 'RESUME_TOKEN_EXPIRED' as const },

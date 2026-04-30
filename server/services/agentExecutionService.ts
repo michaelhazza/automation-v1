@@ -2757,7 +2757,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           const plaintext = blockDecision.plaintext;
           const tokenHash = blockDecision.tokenHash;
           const appBase = process.env.APP_BASE_URL ?? '';
-          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}`;
+          const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
 
           const cardContent = {
             ...blockDecision.card,
