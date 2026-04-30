@@ -3,7 +3,7 @@ import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
-import { scheduledTasks, referenceDocuments, documentBundleAttachments, documentBundleMembers, agentDataSources } from '../db/schema/index.js';
+import { scheduledTasks, referenceDocuments, documentBundleAttachments, documentBundleMembers, agentDataSources, documentFetchEvents } from '../db/schema/index.js';
 import {
   fetchDataSourcesByScope,
   type LoadedDataSource,
@@ -301,9 +301,29 @@ async function loadExternalDocumentBlocks(
   for (const ref of withinQuota) {
     const meta = ref.meta;
 
-    // Wall-clock budget check
+    // Wall-clock budget check — §17.5 no-silent-partial-success: write audit row
     if (Date.now() - wallClockStart >= EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS) {
-      blocks.push(`[External document "${meta.name}" skipped: resolver time budget exceeded]`);
+      blocks.push(`[External reference unavailable — budget_exceeded. This document was attached but could not be fetched.]`);
+      // Fire-and-forget: failure to write the audit row must not break the run.
+      // Skipped if subaccountId is absent (the subaccount column is NOT NULL).
+      if (request.subaccountId) {
+        db.insert(documentFetchEvents).values({
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId,
+          referenceId: meta.id,
+          referenceType: meta.kind === 'reference_document' ? 'reference_document' : 'agent_data_source',
+          runId: request.runId ?? null,
+          cacheHit: false,
+          provider: 'google_drive',
+          docName: meta.name,
+          revisionId: null,
+          tokensUsed: 0,
+          failureReason: 'budget_exceeded',
+          resolverVersion: 1,
+        }).catch((err: unknown) => {
+          console.error('[runContextLoader] Failed to write budget_exceeded fetch event', err);
+        });
+      }
       continue;
     }
 
