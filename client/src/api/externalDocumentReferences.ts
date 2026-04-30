@@ -3,16 +3,10 @@ import api from '../lib/api';
 export interface ExternalDocumentReference {
   id: string;
   name: string;
-  externalProvider: 'google_drive';
-  externalConnectionId: string;
-  externalFileId: string;
-  externalFileName: string;
-  externalFileMimeType: string;
-  attachmentState: 'active' | 'degraded' | 'broken';
-  attachmentOrder: number;
-  createdAt: string;
+  state: 'active' | 'degraded' | 'broken';
   lastFetchedAt: string | null;
-  lastFailureReason: string | null;
+  failureReason: string | null;
+  canRebind: boolean;
 }
 
 export async function attachExternalReference(subaccountId: string, taskId: string, body: {

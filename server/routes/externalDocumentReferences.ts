@@ -5,6 +5,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { externalDocFlags } from '../lib/featureFlags.js';
+import { toExternalDocumentViewModel } from '../api/types/externalDocumentViewModel.js';
 import { referenceDocuments, documentBundleAttachments, documentFetchEvents } from '../db/schema/index.js';
 import { eq, and, isNull, desc, count } from 'drizzle-orm';
 import * as documentBundleService from '../services/documentBundleService.js';
@@ -63,7 +64,15 @@ router.get(
       }),
     );
 
-    return res.json(enriched);
+    const viewModels = enriched.map((item) => toExternalDocumentViewModel({
+      id: item.id,
+      externalFileName: item.externalFileName,
+      attachmentState: item.attachmentState,
+      lastFetchEvent: item.latestFetchEvent
+        ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason ?? null }
+        : null,
+    }));
+    return res.json(viewModels);
   }),
 );
 
