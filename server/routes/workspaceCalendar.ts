@@ -3,8 +3,9 @@ import { authenticate, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { agents, subaccountAgents } from '../db/schema/index.js';
+import { agents } from '../db/schema/index.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
+import { workspaceActors } from '../db/schema/workspaceActors.js';
 import { eq, and, gte, lte, isNull } from 'drizzle-orm';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import type { CreateEventParams } from '../adapters/workspace/workspaceAdapterContract.js';
@@ -43,17 +44,31 @@ async function resolveIdentityForAgent(agentId: string, organisationId: string) 
   return { agent, identity };
 }
 
-// ─── Helper: resolve agent → subaccountId ────────────────────────────────────
+// ─── Helper: resolve agent → canonical subaccountId via its workspace actor ──
+// Calendar permission scope must come from the agent's home actor row, not
+// from `subaccount_agents` — see the matching helper in workspaceMail.ts.
 
 async function resolveAgentSubaccountId(agentId: string, organisationId: string): Promise<string> {
-  const [link] = await getOrgScopedDb('workspaceCalendar.resolveAgentSubaccountId')
-    .select({ subaccountId: subaccountAgents.subaccountId })
-    .from(subaccountAgents)
-    .where(and(eq(subaccountAgents.agentId, agentId), eq(subaccountAgents.organisationId, organisationId)))
+  const scopedDb = getOrgScopedDb('workspaceCalendar.resolveAgentSubaccountId');
+  const [agent] = await scopedDb
+    .select({ workspaceActorId: agents.workspaceActorId })
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
     .limit(1);
 
-  if (!link) throw Object.assign(new Error('Agent is not linked to any subaccount'), { statusCode: 404 });
-  return link.subaccountId;
+  if (!agent) throw Object.assign(new Error('Agent not found'), { statusCode: 404 });
+  if (!agent.workspaceActorId) {
+    throw Object.assign(new Error('Agent has no workspace actor'), { statusCode: 404 });
+  }
+
+  const [actor] = await scopedDb
+    .select({ subaccountId: workspaceActors.subaccountId })
+    .from(workspaceActors)
+    .where(eq(workspaceActors.id, agent.workspaceActorId))
+    .limit(1);
+
+  if (!actor) throw Object.assign(new Error('Workspace actor not found'), { statusCode: 404 });
+  return actor.subaccountId;
 }
 
 // ─── GET /api/agents/:agentId/calendar ───────────────────────────────────────

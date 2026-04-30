@@ -3,6 +3,8 @@ import type { WorkspaceIdentityStatus } from '../../../../shared/types/workspace
 import { LifecycleProgress } from './LifecycleProgress';
 import { EmailSendingToggle } from './EmailSendingToggle';
 
+export type IdentityCardAction = 'suspend' | 'resume' | 'revoke' | 'archive' | 'toggleEmail';
+
 interface IdentityCardProps {
   identity: {
     id: string;
@@ -20,14 +22,32 @@ interface IdentityCardProps {
   onRevoke: () => void;
   onArchive: () => void;
   onToggleEmail: (enabled: boolean) => void;
+  pendingAction?: IdentityCardAction | null;
+  actionError?: string | null;
 }
 
 function isTerminal(status: string): boolean {
   return status === 'archived';
 }
 
-export function IdentityCard({ identity, actor: _actor, onSuspend, onResume, onRevoke, onArchive, onToggleEmail }: IdentityCardProps) {
+function isEmailToggleAllowed(status: string): boolean {
+  return status === 'active' || status === 'suspended' || status === 'provisioned';
+}
+
+export function IdentityCard({
+  identity,
+  actor: _actor,
+  onSuspend,
+  onResume,
+  onRevoke,
+  onArchive,
+  onToggleEmail,
+  pendingAction = null,
+  actionError = null,
+}: IdentityCardProps) {
   const status = identity.status as WorkspaceIdentityStatus;
+  const anyPending = pendingAction !== null;
+  const emailToggleEnabled = isEmailToggleAllowed(status);
 
   return (
     <div className="bg-white rounded-[10px] border border-slate-200">
@@ -50,8 +70,19 @@ export function IdentityCard({ identity, actor: _actor, onSuspend, onResume, onR
         </div>
 
         <div>
-          <EmailSendingToggle enabled={identity.emailSendingEnabled} onChange={onToggleEmail} />
+          <EmailSendingToggle
+            enabled={identity.emailSendingEnabled}
+            onChange={onToggleEmail}
+            disabled={!emailToggleEnabled || (anyPending && pendingAction !== 'toggleEmail')}
+            pending={pendingAction === 'toggleEmail'}
+          />
         </div>
+
+        {actionError && (
+          <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-[12px] text-red-700">
+            {actionError}
+          </div>
+        )}
 
         {!isTerminal(status) && (
           <div className="flex gap-2 pt-2">
@@ -59,15 +90,17 @@ export function IdentityCard({ identity, actor: _actor, onSuspend, onResume, onR
               <>
                 <button
                   onClick={onSuspend}
-                  className="px-3 py-1.5 text-sm bg-amber-500 text-white rounded hover:bg-amber-600 transition-colors"
+                  disabled={anyPending}
+                  className="px-3 py-1.5 text-sm bg-amber-500 text-white rounded hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Suspend
+                  {pendingAction === 'suspend' ? 'Suspending…' : 'Suspend'}
                 </button>
                 <button
                   onClick={onRevoke}
-                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"
+                  disabled={anyPending}
+                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Revoke
+                  {pendingAction === 'revoke' ? 'Revoking…' : 'Revoke'}
                 </button>
               </>
             )}
@@ -75,24 +108,27 @@ export function IdentityCard({ identity, actor: _actor, onSuspend, onResume, onR
               <>
                 <button
                   onClick={onResume}
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                  disabled={anyPending}
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Resume
+                  {pendingAction === 'resume' ? 'Resuming…' : 'Resume'}
                 </button>
                 <button
                   onClick={onRevoke}
-                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"
+                  disabled={anyPending}
+                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Revoke
+                  {pendingAction === 'revoke' ? 'Revoking…' : 'Revoke'}
                 </button>
               </>
             )}
             {status === 'revoked' && (
               <button
                 onClick={onArchive}
-                className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+                disabled={anyPending}
+                className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Archive
+                {pendingAction === 'archive' ? 'Archiving…' : 'Archive'}
               </button>
             )}
           </div>
