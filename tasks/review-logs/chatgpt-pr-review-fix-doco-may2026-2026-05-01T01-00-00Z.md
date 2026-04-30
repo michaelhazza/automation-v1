@@ -62,3 +62,24 @@ Round 2 verdict: APPROVED. PR has crossed the threshold from process-reliant-on-
 - [auto] R2-F1 + R2-F3: docs/doc-sync.md — Verdict rule section: expanded to `no — <rationale>` format with examples; section references must match actual headings. Final Summary fields template updated to show `no — <rationale>`.
 
 ---
+
+## Round 3 — 2026-05-01T02:00:00Z
+
+### ChatGPT Feedback (raw)
+
+Round 3 verdict: APPROVED — merge. System is now internally consistent, enforceable without ambiguity, scalable across agents. No blockers. Three optional hardening ideas only.
+
+**Observations:** (1) KNOWLEDGE.md "special-case" — add clarifying note (misread — it IS in the table); (2) add lightweight validator script for verdict format (optional, not blocking); (3) feature coordinator only checks at end (repeat of R1-F4).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R3-F1: KNOWLEDGE.md special-case note | technical | reject | auto (reject) | low | Misread — KNOWLEDGE.md is row 6 of the scope table; adding a "not in table" note would be factually wrong |
+| R3-F2: Lightweight validator script for verdict format | technical | defer | user (defer) | low | Future tooling upgrade, out of scope for this docs PR; routed to tasks/todo.md alongside existing verify-doc-sync-parity.ts item |
+| R3-F3: Feature coordinator only checks at end | technical | reject | auto (reject) | low | Dedup — already deferred as R1-F4 |
+
+### Implemented (auto-applied technical)
+None — all findings rejected or deferred.
+
+---

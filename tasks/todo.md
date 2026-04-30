@@ -1921,3 +1921,4 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 ### PR #245 — fix-doco-may2026 (2026-05-01)
 
 - [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
+- [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
