@@ -367,7 +367,7 @@ async function loadExternalDocumentBlocks(
     }
 
     if (policyAction.action === 'skip_reference') {
-      blocks.push(`[External document "${meta.name}" skipped: ${resolved.failureReason}]`);
+      blocks.push(`[External reference unavailable — ${resolved.failureReason}. This document was attached but could not be fetched.]`);
       continue;
     }
 
