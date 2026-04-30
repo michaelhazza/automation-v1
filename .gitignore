@@ -28,3 +28,6 @@ references/.watcher.pid
 references/import-graph/
 references/project-map.md
 references/.code-graph-health-*.md
+
+# ChatGPT PR review working files — transient diff bundles for ChatGPT upload (chatgpt-pr-review agent, manual mode); removed at finalization
+.chatgpt-diffs/
