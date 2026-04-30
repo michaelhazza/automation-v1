@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 import os from 'node:os';
 
+const cpuCount = os.cpus()?.length ?? 2;
+// In CI use all available CPUs; locally leave one free for the IDE/watcher.
+const maxThreads = process.env.CI ? cpuCount : Math.max(1, cpuCount - 1);
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -19,6 +23,9 @@ export default defineConfig({
       '**/dist/**',
       'tools/mission-control/**',
       'worker/**',
+      // Spawns real subprocesses + holds a singleton filesystem lock (up to 120s).
+      // Not suitable for CI — tracked for refactor in tasks/todo.md TI-001.
+      ...(process.env.CI ? ['scripts/__tests__/build-code-graph-watcher.test.ts'] : []),
     ],
     env: {
       JWT_SECRET: 'ci-throwaway-jwt-secret-at-least-32-chars',
@@ -29,7 +36,7 @@ export default defineConfig({
     },
     poolOptions: {
       threads: {
-        maxThreads: Math.max(1, (os.cpus()?.length ?? 2) - 1),
+        maxThreads,
         minThreads: 1,
       },
     },
