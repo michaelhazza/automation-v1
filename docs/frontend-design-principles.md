@@ -210,6 +210,32 @@ A non-technical operator opening the drilldown for a high-risk client sees: the 
 
 ---
 
+## Worked example — tier-1 agent chat uplift
+
+The PR #244 backend ships: per-message cost columns, a suggested-actions JSONB field on messages, a per-conversation thread context table, and a blocked-run / OAuth-resume infrastructure. Each of those is a substantial backend capability. The question is what surfaces in the UI.
+
+### What the v1 UI should ship
+
+- **Cost pill** — one small inline token/cost pill in the chat thread. Single number. No charts, no per-model breakdown, no trend line. The operator sees "~$0.04" next to the conversation header and moves on.
+- **Suggested action chips** — a row of one-tap chips below each assistant message. No more than 3 chips per message, each a single short label ("Run report", "Send summary"). Chips dispatch the action immediately — no confirmation modal unless the action is irreversible. No chip history, no chip analytics.
+- **Thread context panel** — a collapsible right pane with three plain text fields (task, approach, decisions). One primary action: save. No versioning UI, no diff view, no per-field history. The panel is open by default on first visit; operators who don't need it collapse it once.
+- **Inline integration card** — when a run pauses for a missing OAuth connection, one card appears inline in the conversation. It names the integration, shows a "Connect" button that opens a popup, and collapses to a one-line stub once the connection succeeds. No redirect, no settings page link, no status dashboard. The agent continues automatically — the operator sees "Connected, continuing…" and the conversation resumes.
+
+### What the v1 UI should NOT ship
+
+- A per-conversation cost dashboard or trend chart.
+- Cost breakdown by model, skill, or run — that lives on the run-detail page, not in chat.
+- A chip analytics panel showing which chips were clicked and how often.
+- A thread context version history or diff viewer — operators edit in place.
+- A "Connections required" status page or integration health tile inside the chat — the inline card is the entire surface.
+- Any exposure of `blockSequence`, `resumeToken`, `threadContextVersion`, or other internal identifiers to the operator.
+
+### The principle this illustrates
+
+Backend richness (cost attribution per message, suggested-action dispatch, OCC versioning on thread context, cryptographic resume tokens) does not imply UI richness. Every new backend capability in this PR maps to the smallest possible UI signal: a number, a chip row, a text field, a card. The depth is in the execution path, not the screen.
+
+---
+
 ## Re-check before delivery
 
 Before committing any UI artifact (mockup, PR, component), run through this quickly:

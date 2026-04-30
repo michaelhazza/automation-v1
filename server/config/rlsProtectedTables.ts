@@ -914,6 +914,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0000_wandering_firedrake.sql',
     rationale: 'Renamed from canonical_workflow_definitions (migration 0219) — same table, policy deferred. Using baselined migration 0000 as placeholder per deferred-enforcement convention.',
   },
+  // 0264 — Thread Context: per-conversation living doc
+  {
+    tableName: 'conversation_thread_context',
+    schemaFile: 'conversationThreadContext.ts',
+    policyMigration: '0264_conversation_thread_context.sql',
+    rationale: 'Per-conversation agent tasks, approach, and decisions — may contain sensitive strategy and business context.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

@@ -798,6 +798,21 @@ export const queueService = {
         }
       });
 
+      // Chunk E — integration block expiry sweep (every 5 minutes).
+      // Cancels agent_runs whose blocked_expires_at has passed without the
+      // user connecting the required integration.
+      await (boss as any).work('maintenance:blocked-run-expiry', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFn } = await import('../jobs/blockedRunExpiryJob.js');
+          await withTimeout(runFn().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:blocked-run-expiry', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // IEE Phase 0 — main-app reconciliation for "Class 2" stuck runs.
       // See docs/iee-delegation-lifecycle-spec.md Step 4. The worker-side
       // cleanup-orphans sweep already handles Class 1 (unemitted events) and
@@ -1080,6 +1095,8 @@ export const queueService = {
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
       // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // Chunk E — integration block expiry sweep (every 5 minutes)
+      await boss.schedule('maintenance:blocked-run-expiry', '*/5 * * * *', {});
       // IEE Phase 0 — main-app reconciliation for stuck 'delegated' runs (every 2 minutes)
       await boss.schedule('maintenance:iee-main-app-reconciliation', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)

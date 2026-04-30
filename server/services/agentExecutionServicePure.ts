@@ -583,6 +583,7 @@ export function computeRunResultStatus(
     case 'delegated':
     case 'awaiting_clarification':
     case 'waiting_on_clarification':
+    case 'blocked_awaiting_integration':
       return null;
     default:
       // Unknown statuses are treated as non-terminal. If a new status is
