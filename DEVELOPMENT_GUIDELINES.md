@@ -96,9 +96,9 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 
 - **Gates pass = done.** A green gate run in CI is the definition of done for a phase. Local sessions do not run the gate suite — see §5 and `CLAUDE.md` § *Test gates are CI-only — never run locally*.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
-- **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
+- **Do not add** jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding). Runtime unit tests use **Vitest** — see `docs/testing-conventions.md` for the canonical pattern.
 - **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
-- **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
+- **Run individual tests** with `npx vitest run <path-to-test-file>` — do not use `npx tsx` or `scripts/run-all-unit-tests.sh` for Vitest tests.
 - **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
 When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
