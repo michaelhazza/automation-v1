@@ -621,7 +621,29 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    + deferred count + KNOWLEDGE.md entry count. Push after commit. If nothing
    changed (rare — only if finalize produced zero edits), skip.
 
-10. Add the `ready-to-merge` label to trigger CI:
+10. Merge `main` into the feature branch and resolve any conflicts before marking
+    ready-to-merge. This ensures CI validates the merged state, not the branch in
+    isolation.
+
+    ```bash
+    git fetch origin main
+    git merge origin/main
+    ```
+
+    If `git merge` exits with conflicts:
+    - Read each conflicted file (`git status` lists them).
+    - For every conflict: keep the version that is correct given the PR's intent.
+      When the feature branch added something that `main` doesn't have, keep the
+      feature branch version. When `main` has a fix the feature branch missed,
+      take `main`.
+    - Stage resolved files and commit: `git commit -m "chore: merge main into <branch> — resolve conflicts"`.
+    - Push: `git push`.
+
+    If `git merge` is clean (fast-forward or no conflicts), push: `git push`.
+
+    Print: "main merged into <branch>. Branch is up-to-date — ready to label."
+
+11. Add the `ready-to-merge` label to trigger CI:
     ```bash
     gh pr edit <N> --add-label "ready-to-merge"
     ```
@@ -630,9 +652,9 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
     If the command fails (network, permissions), print a warning and the manual
     equivalent so the user can run it themselves — do NOT block finalization.
 
-11. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+12. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
 
-12. [MANUAL] Remove the per-round diff files generated during the session:
+13. [MANUAL] Remove the per-round diff files generated during the session:
 
     ```bash
     rm -f .chatgpt-diffs/pr<N>-round*-code-diff.diff .chatgpt-diffs/pr<N>-round*-diff.diff
