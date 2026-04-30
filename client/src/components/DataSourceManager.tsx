@@ -510,6 +510,9 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
                   {ds.description && (
                     <div className="text-[11px] text-slate-400 mt-0.5">{ds.description}</div>
                   )}
+                  {ds.sourceType === 'google_drive' && ds.lastFetchStatus === 'error' && (
+                    <p className="mt-0.5 text-xs text-red-600">Last fetch failed. Check the Drive connection.</p>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-[12px] text-slate-600">{ds.sourceType}</td>
                 <td className="px-3 py-2">
