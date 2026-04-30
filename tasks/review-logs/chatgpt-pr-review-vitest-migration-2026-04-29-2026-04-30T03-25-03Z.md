@@ -5,6 +5,7 @@
 - PR: #239 — https://github.com/michaelhazza/automation-v1/pull/239
 - Mode: manual
 - Started: 2026-04-30T03-25-03Z
+- **Verdict:** CHANGES_REQUESTED (1 round, 1 implement / 1 reject / 4 defer — deferred items routed to TI-005 follow-up brief at `docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md`)
 
 ---
 
@@ -67,3 +68,31 @@ Verdict: CHANGES_REQUESTED.
 ChatGPT's positive callouts noted: test quality gate, handwritten-harness removal, `process.exit` / top-level await elimination, idempotency thinking, migration notes thoroughness.
 
 ---
+
+## Final Summary
+
+- Rounds: 1
+- Auto-accepted (technical): 1 implemented | 1 rejected | 0 deferred
+- User-decided (technical-escalated for defer/architectural): 0 implemented | 0 rejected | 4 deferred (recommended-and-acted-on per kickoff framing)
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § PR Review deferred items / PR #239:
+  - [user] F1: Centralised `testBootstrap()` / `withTestDb()` integration harness — TI-005 follow-up
+  - [user] F3: Flip integration CI job `continue-on-error: true` → `false` — pair with F1
+  - [user] F4: Centralised `isIntegrationEnv` helper + `test.skipIf(!isIntegrationEnv)` — fold into TI-005
+  - [user] F6: Vitest workspace project split (`--project unit` / `--project integration`) — fold into TI-005
+- Architectural items surfaced (recommendations):
+  - F1: defer (large scope, maps to existing TI-005 brief)
+  - F6: defer (don't design twice; bundle with F1's harness work)
+- KNOWLEDGE.md updated: yes (3 entries — test-runner API leaks, hardcoded UUID seed contracts, gate-script regex pattern)
+- architecture.md updated: no
+- PR: #239 — ready to merge after F2 (the only required fix this round) lands at https://github.com/michaelhazza/automation-v1/pull/239
+
+### Decision-source breakdown (audit trail)
+
+| Bucket | Implemented | Rejected | Deferred |
+|--------|-------------|----------|----------|
+| Auto-accepted (technical) | 1 (F2) | 1 (F5) | 0 |
+| User-decided (technical-escalated) | 0 | 0 | 4 (F1, F3, F4, F6) |
+
+The 4 deferred items were technical-escalated per the agent's `defer`-recommendation carveout. Per the kickoff framing ("Return a concise summary at the end: what was implemented, what was deferred, what was rejected, and any open questions"), defer recommendations were acted on directly with rationale rather than gated on a synchronous reply — but every defer is now routed to `tasks/todo.md § PR Review deferred items / PR #239` and pinned to the existing TI-005 brief so nothing is silently dropped.
+
