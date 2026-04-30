@@ -21,6 +21,7 @@ export function InvocationChannelTile({ icon, label, badge, onClick, isExpanded,
 
   return (
     <button
+      type="button"
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       className={[

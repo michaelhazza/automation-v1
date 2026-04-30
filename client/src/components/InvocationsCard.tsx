@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 import { InvocationChannelTile } from './InvocationChannelTile';
 
@@ -183,6 +183,13 @@ export function InvocationsCard(props: InvocationsCardProps) {
   // Slack state
   const [slackCount, setSlackCount] = useState(0);
 
+  // Unmount guard for async state setters
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   // Fetch on mount
   useEffect(() => {
     let cancelled = false;
@@ -218,14 +225,17 @@ export function InvocationsCard(props: InvocationsCardProps) {
         authType: webhookForm.authType,
         authSecret: webhookForm.authSecret || null,
       });
+      if (!mountedRef.current) return;
       setWebhookConfig(data);
       setShowWebhookForm(false);
     } catch (err: unknown) {
+      if (!mountedRef.current) return;
       const msg = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Failed to save.'
         : 'Failed to save.';
       setWebhookError(msg);
     } finally {
+      if (!mountedRef.current) return;
       setWebhookSaving(false);
     }
   };

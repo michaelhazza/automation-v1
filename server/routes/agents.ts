@@ -173,10 +173,11 @@ router.post('/api/agents/:id/test-run',
       res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
       return;
     }
-    const { prompt, inputJson, idempotencyKey } = req.body as {
+    const { prompt, inputJson, idempotencyKey, conversationId: fromConvId } = req.body as {
       prompt?: string;
       inputJson?: Record<string, unknown>;
       idempotencyKey?: string;
+      conversationId?: string;
     };
 
     // Resolve the org subaccount and the agent link within it.
@@ -216,6 +217,7 @@ router.post('/api/agents/:id/test-run',
       triggerContext,
       idempotencyKey: currentKey,
       idempotencyCandidateKeys: [currentKey, previousKey],
+      conversationId: fromConvId,  // optional; enables integration card messages in the conversation
     });
     res.status(201).json(result);
   })
@@ -250,6 +252,22 @@ router.post('/api/agents/:id/conversations/:convId/messages', authenticate, requ
     attachments,
   });
   res.json(result);
+}));
+
+// ── Slack channel count ────────────────────────────────────────────────────
+
+router.get('/api/agents/:id/slack-channel-count', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+  const { db } = await import('../db/index.js');
+  const { slackConversations } = await import('../db/schema/index.js');
+  const { sql, eq, and } = await import('drizzle-orm');
+  const [row] = await db
+    .select({ count: sql<number>`COUNT(DISTINCT ${slackConversations.channelId})` })
+    .from(slackConversations)
+    .where(and(
+      eq(slackConversations.agentId, req.params.id),
+      eq(slackConversations.organisationId, req.orgId!),
+    ));
+  res.json({ count: Number(row?.count ?? 0) });
 }));
 
 export default router;
