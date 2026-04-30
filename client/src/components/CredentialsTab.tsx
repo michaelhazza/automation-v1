@@ -91,6 +91,16 @@ export default function CredentialsTab({ subaccountId }: Props) {
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const providerMenuRef = useRef<HTMLDivElement>(null);
 
+  const storageKey = `cred:gdrive-info-dismissed:${subaccountId ?? 'org'}`;
+  const [infoBoxDismissed, setInfoBoxDismissed] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem(storageKey) === '1'
+  );
+  const dismissInfoBox = () => {
+    localStorage.setItem(storageKey, '1');
+    setInfoBoxDismissed(true);
+  };
+  const hasGoogleDriveConnection = connections.some(c => c.providerType === 'google_drive' && c.connectionStatus === 'active');
+
   // Slack channel config modal
   const [slackConfigConn, setSlackConfigConn] = useState<Connection | null>(null);
   const [slackChannels, setSlackChannels] = useState<{ id: string; name: string }[]>([]);
@@ -424,6 +434,30 @@ export default function CredentialsTab({ subaccountId }: Props) {
           </div>
         )}
       </section>
+
+      {hasGoogleDriveConnection && !infoBoxDismissed && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm text-blue-900">
+              <p className="font-semibold">Shared across this subaccount.</p>
+              <p className="mt-1">
+                Any admin can attach Drive files using this connection. The connection
+                is not tied to your personal account, so it survives if you leave the
+                team. Agents access files on behalf of this connection, not their own
+                identity.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="text-blue-600 hover:text-blue-800"
+              onClick={dismissInfoBox}
+            >
+              x
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Web Login Credentials */}
       <section>
