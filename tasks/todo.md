@@ -1865,3 +1865,76 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
   by running with `NODE_ENV=integration` against the integration CI job.
 - Linked: blocks flipping `.github/workflows/ci.yml` integration job from
   `continue-on-error: true` → `false`.
+
+## Deferred from spec-conformance review — tier-1-ui-uplift (2026-04-30)
+
+**Captured:** 2026-04-30T10:51:32Z
+**Source log:** `tasks/review-logs/spec-conformance-log-tier-1-ui-uplift-2026-04-30T10-51-32Z.md`
+**Spec:** `tasks/brief-tier-1-ui-uplift.md` (operationalised by `tasks/builds/tier-1-ui-uplift/plan.md`)
+
+These are directional gaps where the implementation diverges from the plan in ways that need a human design decision (keep the new approach and amend the plan, or restore the planned approach). None are mechanical fixes; all require triage before merge.
+
+- [ ] **B-D1 — Cost rollup approach diverges from canonical I-5 pattern.**
+  - Spec section: plan §1 I-5; §4.3 (canonical SQL block); brief §5 (run→conversation linkage)
+  - Gap: Plan I-5 mandates `SELECT DISTINCT triggered_run_id FROM agent_messages` JOINed to `cost_aggregates` as the single allowed implementation. The implementation instead added new columns (`cost_cents`, `tokens_in`, `tokens_out`, `model_id`) directly on `agent_messages` (migration 0262) and reads cost from those — bypassing both `triggered_run_id` and `cost_aggregates`.
+  - Suggested approach: Decide whether (a) the on-row approach is better and amend plan §1 I-5 to declare it canonical (then update §11 deferred items to drop `triggered_run_id` enforcement); or (b) revert to the canonical query, drop migration 0262's columns, and add `triggered_run_id` to `agent_messages` per plan §11 backlog item. Picking (a) is faster and avoids a backfill but locks future cost surfaces (per-skill, org-wide) into the same pattern; picking (b) preserves the plan's "single canonical implementation" intent.
+
+- [ ] **B-D2 — `ConversationCostResponse.runCount` field renamed to `messageCount`.**
+  - Spec section: plan §4.3 TypeScript interface
+  - Gap: plan defines `runCount` (count of distinct runs that produced ≥1 user-visible message); implementation returns `messageCount` (count of assistant messages). Per-model breakdown shape also differs (`messageCount` vs `runCount`).
+  - Suggested approach: tie this to B-D1 — if (a) is chosen, the field name change is acceptable but needs the plan amended; if (b) is chosen, restore `runCount` to match the canonical implementation.
+
+- [ ] **A-D1 — Thread Context not injected at run start; resume re-injection missing.**
+  - Spec section: plan §6.2 ("Modify `agentExecutionService.ts`"), §2.4 E-7, §7.3 ("re-inject `buildThreadContextReadModel(conversationId, orgId)`")
+  - Gap: `buildThreadContextReadModel` is exported and consumed by the `GET /thread-context` route, but **not** called inside `agentExecutionService.ts`. As a result the LLM never sees the conversation's tasks/approach/decisions during execution; the right-pane display works in isolation. `runMetadata.threadContextVersionAtStart` is also never written. Resume path (Chunk E) similarly does not re-inject.
+  - Suggested approach: at run start (after the system prompt is assembled), call `buildThreadContextReadModel(conversationId, orgId)` and prepend its formatted projection as a system message. Capture `version` into `runMetadata.threadContextVersionAtStart`. Mirror the same call inside `resumeFromIntegrationConnect` after the optimistic UPDATE succeeds, before re-executing the blocked tool call. This is the highest-impact fix in the list — without it Chunk A's LLM-side value is missing entirely.
+
+- [ ] **A-D2 — Concurrency guard does not use `version = ?` predicate.**
+  - Spec section: plan §6.5 ("Concurrency guard: patch application is wrapped in `BEGIN; SELECT … FOR UPDATE; UPDATE … WHERE id = ? AND version = ?; COMMIT`")
+  - Gap: `applyPatch` does a plain UPDATE-by-id without the version predicate. The race-retry path on insert collision applies the patch to the concurrent row's state (which is correct), but the UPDATE path on existing rows is non-versioned, so two concurrent writers on an existing row can produce a silent lost write.
+  - Suggested approach: wrap the existing-row UPDATE in `WHERE id = ? AND version = ?` with the snapshot version captured at the start of `applyPatch`. On 0 rows updated (lost race), reload, re-apply, retry once. After 2 failures throw `CONCURRENT_PATCH_FAILURE` per plan. Acceptance test from §6.7 needs to exercise the failure path.
+
+- [ ] **A-D3 — Migration 0264 RLS policy uses single combined `USING` clause.**
+  - Spec section: plan §6.4 ("Three-layer policy (`organisation_id = app.organisation_id`)")
+  - Gap: migration creates `CREATE POLICY conv_thread_ctx_org_isolation … USING (organisation_id = current_setting('app.organisation_id', true)::uuid)` — single policy, no separate `WITH CHECK`. Architecture.md § Row-Level Security canonical template typically separates `USING` and `WITH CHECK` for INSERT vs SELECT enforcement.
+  - Suggested approach: align with the canonical template in `architecture.md § Row-Level Security` — most existing tenant tables use a paired `USING` + `WITH CHECK` policy. Confirm the canonical template and either add a corrective migration or document why a single combined clause is sufficient here.
+
+- [ ] **E-D1 — `agent_runs.status` enum extended despite plan rejecting this approach.**
+  - Spec section: plan §2.4 E-1 ("Parallel `blocked_reason` + `integration_resume_token` columns; status enum NOT extended … Rejected: extending the `status` enum")
+  - Gap: `'blocked_awaiting_integration'` was added to the `agentRuns.status` type union (`server/db/schema/agentRuns.ts:92`) and is set by `agentExecutionService.ts` at lines 285, 1375, 2823. This contradicts the explicit "rejected" decision in the plan. The parallel `blocked_reason` column is also set, so both are now used.
+  - Suggested approach: pick one approach and document. If keeping the status-extension, amend plan §2.4 E-1 (and document why every status-switching consumer was reviewed for the new value); also remove the redundant `blocked_reason = 'integration_required'` writes since the status is enough. If reverting, drop the new status value, restore the parallel-column-only pattern, and audit consumers (workspace health, dashboards) for any switch on the new status.
+
+- [ ] **E-D2 — Resume already-resumed validation incomplete.**
+  - Spec section: plan §7.5 ("validates both `runMetadata.lastResumeTokenHash === sha256(submittedToken)` and `runMetadata.lastResumeBlockSequence === token.blockSequence`")
+  - Gap: `agentResumeService.ts:78` checks only `candidateMeta.lastResumeTokenHash === tokenHash`. The submitted token's `blockSequence` is not extracted (the token is a 32-byte random string with no embedded blockSequence) and not validated against `runMetadata.lastResumeBlockSequence`. As a result a stale token from block N could match the idempotent-success path even when block N+1 is currently active.
+  - Suggested approach: either (a) bind the blockSequence into the token (e.g. `${blockSequence}.${randomHex}` and parse on resume), or (b) accept the gap and document it as a v1 limitation in plan §7.5. The gap is currently shielded by the optimistic-predicate UPDATE clearing `integration_resume_token` on resume — so a stale token from a *prior block* would not match the candidate read either, because the column is NULL after resume. Re-verify whether the actual replay-attack class is reachable before committing to a fix.
+
+- [ ] **E-D3 — `integrationBlockService` is a stub; the entire block-on-integration feature is inert.**
+  - Spec section: plan §7.2 ("Files to create"), §7.7 ("acceptance criteria — first row")
+  - Gap: `integrationBlockService.checkRequiredIntegration` always returns `{ shouldBlock: false }` (file lines 67-75). The TODO comment on lines 52-66 describes the intended ACTION_REGISTRY-lookup logic. Consequence: the integration-block branch in `agentExecutionService.ts:2756` never fires in production — runs do not pause for missing integrations, no integration_card messages are emitted to conversations, the OAuth resume flow is unreachable from the agent loop. The infrastructure (token issuing, optimistic-resume UPDATE, expiry sweep) is correct but unused.
+  - Suggested approach: implement the body of `checkRequiredIntegration` per the TODO. (i) Add a `requiredIntegration?: string` field to `ActionDefinition` in `actionRegistry.ts`. (ii) Tag the actions known to require external connections (Notion, Gmail, GHL, Slack, etc.). (iii) In `checkRequiredIntegration`, look up the action's `requiredIntegration`, query `integration_connections` for `(organisation_id, provider_type, connection_status='active', oauth_status='active')`, and call `generateBlockDecision(...)` if absent. This is roughly half a day of work and unblocks the entire feature.
+
+- [ ] **E-D4 — `tool_not_resumable` enforcement missing for `unsafe` strategies.**
+  - Spec section: plan §7.5 ("`unsafe` strategies are NOT permitted to participate in blocking — if a tool whose handler is `unsafe` ends up in `runMetadata.blockedToolCall`, the resume rejects with `errorCode: 'TOOL_NOT_RESUMABLE'`")
+  - Gap: `integrationBlockService.ts:62-65` has TODO comment only. Currently no `unsafe` actions exist (every entry declares `'read_only' | 'keyed_write' | 'locked'`), so the gap is theoretical until a future action is registered with `unsafe`. But the plan explicitly named this as the safety guard.
+  - Suggested approach: add the check inside `checkRequiredIntegration` once E-D3 is closed. Throw `{ statusCode: 409, errorCode: 'TOOL_NOT_RESUMABLE', toolName }` and have the caller catch it in `agentExecutionService.ts`, transition the run to `cancelled` with `cancelReason: 'tool_not_resumable'`, and emit a non-card error message. Pair with a unit test that registers a fake `unsafe` action and asserts the cancellation path.
+
+- [ ] **E-D5 — OAuth callback does not pass `conversationId` to `resumeFromIntegrationConnect`.**
+  - Spec section: plan §7.3 (resume endpoint receives `conversationId`); §7.4 (resume validates `agent_conversations.user_id === req.user.id`)
+  - Gap: `oauthIntegrations.ts:273` calls `resumeFromIntegrationConnect({ resumeToken, organisationId })` without `conversationId`. The `payload.conversationId` is destructured from JWT into the cast type but discarded. `agentResumeService.ts:44` accepts `conversationId?` but never uses it. Net effect: the OAuth-callback resume path bypasses any conversation-ownership check at the resume boundary.
+  - Suggested approach: pass `payload.conversationId` through to the resume service. In `agentResumeService.ts`, when a `conversationId` is provided, additionally validate that the run's conversation matches and that the conversation owner matches the OAuth-callback user (the JWT's user). The popup-postMessage path through `POST /api/agent-runs/resume-from-integration` already has user-auth via `requireOrgPermission(AGENTS_CHAT)`; this gap is specific to the server-side OAuth-callback path.
+
+- [ ] **E-D6 — `dismissed` state is client-local only; no PATCH endpoint persists it.**
+  - Spec section: plan §7.3 ("Only `dismissed` is persisted"), §7.7 ("Click `Dismiss` → card collapses to a 1-line stub")
+  - Gap: `InlineIntegrationCard.tsx:54` has `// TODO(v2): persist dismissed=true via PATCH /api/.../messages/:id/meta`. Local React state holds the dismissed flag for the session; on page reload the card returns to its undismissed state. Dismiss is therefore not durable.
+  - Suggested approach: add `PATCH /api/agents/:agentId/conversations/:convId/messages/:messageId/meta` route accepting `{ dismissed: true }` and updating `agent_messages.meta.dismissed`. RLS-protected via the existing conversation ownership check. Or document that v1 ships with session-only dismissal and amend plan §7.3 accordingly.
+
+- [ ] **D-D1 — Email tile renders placeholder instead of inline config UI.**
+  - Spec section: plan §8.1 ("Click expands to show the existing email/mailbox config UI"), §8.6 acceptance criteria
+  - Gap: `InvocationsCard.tsx:626-637` shows static placeholder text instead of an embedded mailbox/inbound-email editor. The other channels (Scheduled, Webhook) host their existing UIs inline.
+  - Suggested approach: confirm with the brief author whether per-agent email config currently exists. If yes, embed it. If no (email is workspace-wide-only), update plan §8.1 to clarify that Email is a "view-only / managed elsewhere" tile in v1 — the placeholder text then becomes a feature, not a gap.
+
+- [ ] **Cross-1 — Plan §11 deferred item `triggered_run_id` write-layer enforcement is moot under the implemented approach.**
+  - Spec section: plan §11 ("`triggered_run_id` write-layer enforcement (B)")
+  - Gap: this item assumed cost rollup would key off `triggered_run_id`. With the implemented on-row cost approach (B-D1), `triggered_run_id` is no longer load-bearing for cost. The §11 backlog item should either be retired or rescoped to a different surface that relies on it.
+  - Suggested approach: tie to the B-D1 decision. If (a) is chosen, drop §11's `triggered_run_id` enforcement item; if (b) is chosen, keep it as planned. Either way the plan needs an amendment so future readers do not chase a deferred item that no longer maps to the code.
