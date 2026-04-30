@@ -76,6 +76,13 @@ export interface CalendarEvent {
   responseStatus: 'needs_action' | 'accepted' | 'declined' | 'tentative';
 }
 
+export interface WorkspaceTenantConfig {
+  defaultSignatureTemplate: string;   // '' if not configured
+  discloseAsAgent: boolean;           // defaults to false
+  vanityDomain: string | null;        // null if not set
+  subaccountName: string;             // resolved from subaccounts.name
+}
+
 export interface WorkspaceAdapter {
   readonly backend: 'synthetos_native' | 'google_workspace';
   provisionIdentity(params: ProvisionParams): Promise<ProvisionResult>;

@@ -4,14 +4,16 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { hasSubaccountPermission } from '../middleware/auth.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { agents, subaccountAgents } from '../db/schema/index.js';
+import { agents } from '../db/schema/index.js';
 import { workspaceMessages } from '../db/schema/workspaceMessages.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
+import { workspaceActors } from '../db/schema/workspaceActors.js';
 import { eq, and, desc, lt, isNull } from 'drizzle-orm';
 import * as workspaceEmailPipeline from '../services/workspace/workspaceEmailPipeline.js';
 import { defaultRateLimitCheck } from '../services/workspace/workspaceEmailRateLimit.js';
 import { nativeWorkspaceAdapter } from '../adapters/workspace/nativeWorkspaceAdapter.js';
 import type { SendEmailParams } from '../../shared/types/workspaceAdapterContract.js';
+import { connectorConfigService } from '../services/connectorConfigService.js';
 
 const router = Router();
 
@@ -48,17 +50,32 @@ async function resolveIdentityForAgent(agentId: string, organisationId: string) 
   return { agent, identity };
 }
 
-// ─── Helper: resolve agent → subaccountId ────────────────────────────────────
+// ─── Helper: resolve agent → canonical subaccountId via its workspace actor ──
+// Mailbox/calendar permission scope must come from the agent's home actor row,
+// not from `subaccount_agents` — an agent linked to multiple subaccounts via
+// the link table would otherwise resolve non-deterministically.
 
 async function resolveAgentSubaccountId(agentId: string, organisationId: string): Promise<string> {
-  const [link] = await getOrgScopedDb('workspaceMail.resolveAgentSubaccountId')
-    .select({ subaccountId: subaccountAgents.subaccountId })
-    .from(subaccountAgents)
-    .where(and(eq(subaccountAgents.agentId, agentId), eq(subaccountAgents.organisationId, organisationId)))
+  const scopedDb = getOrgScopedDb('workspaceMail.resolveAgentSubaccountId');
+  const [agent] = await scopedDb
+    .select({ workspaceActorId: agents.workspaceActorId })
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
     .limit(1);
 
-  if (!link) throw Object.assign(new Error('Agent is not linked to any subaccount'), { statusCode: 404 });
-  return link.subaccountId;
+  if (!agent) throw Object.assign(new Error('Agent not found'), { statusCode: 404 });
+  if (!agent.workspaceActorId) {
+    throw Object.assign(new Error('Agent has no workspace actor'), { statusCode: 404 });
+  }
+
+  const [actor] = await scopedDb
+    .select({ subaccountId: workspaceActors.subaccountId })
+    .from(workspaceActors)
+    .where(eq(workspaceActors.id, agent.workspaceActorId))
+    .limit(1);
+
+  if (!actor) throw Object.assign(new Error('Workspace actor not found'), { statusCode: 404 });
+  return actor.subaccountId;
 }
 
 // ─── GET /api/agents/:agentId/mailbox ────────────────────────────────────────
@@ -132,18 +149,14 @@ router.post(
       policyContext: params.policyContext ?? { skill: 'mailbox-ui', runId: undefined },
     };
 
-    const signatureMetadata = identity.metadata as Record<string, unknown> | null;
-    const signatureTemplate =
-      typeof signatureMetadata?.signature === 'string'
-        ? signatureMetadata.signature
-        : '';
+    const tenantConfig = await connectorConfigService.getWorkspaceTenantConfig(req.orgId!, subaccountId);
 
     const result = await workspaceEmailPipeline.send(req.orgId!, sendParams, {
       adapter: nativeWorkspaceAdapter,
       signatureContext: {
-        template: signatureTemplate,
-        subaccountName: subaccountId,
-        discloseAsAgent: false,
+        template: tenantConfig.defaultSignatureTemplate,
+        subaccountName: tenantConfig.subaccountName,
+        discloseAsAgent: tenantConfig.discloseAsAgent,
       },
       rateLimitCheck: defaultRateLimitCheck,
       policyCheck: async () => ({ ok: true }),

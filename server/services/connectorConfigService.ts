@@ -1,7 +1,21 @@
 import { eq, and, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { connectorConfigs, canonicalAccounts } from '../db/schema/index.js';
+import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
+import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
+
+export function buildWorkspaceTenantConfig(
+  subaccountName: string,
+  configJson: Record<string, unknown> | null,
+): WorkspaceTenantConfig {
+  const cfg = configJson ?? {};
+  return {
+    subaccountName,
+    defaultSignatureTemplate: typeof cfg.defaultSignatureTemplate === 'string' ? cfg.defaultSignatureTemplate : '',
+    discloseAsAgent: cfg.discloseAsAgent === true,
+    vanityDomain: typeof cfg.vanityDomain === 'string' ? cfg.vanityDomain : null,
+  };
+}
 
 type ConnectorInsert = typeof connectorConfigs.$inferInsert;
 type ConnectorType = ConnectorInsert['connectorType'];
@@ -229,5 +243,23 @@ export const connectorConfigService = {
       .update(connectorConfigs)
       .set({ ...status, updatedAt: new Date() })
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+  },
+
+  async getWorkspaceTenantConfig(orgId: string, subaccountId: string): Promise<WorkspaceTenantConfig> {
+    const [sub] = await db
+      .select({ name: subaccounts.name })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, orgId)));
+
+    const [config] = await db
+      .select({ configJson: connectorConfigs.configJson })
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, orgId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+      ))
+      .limit(1);
+
+    return buildWorkspaceTenantConfig(sub?.name ?? '', config?.configJson as Record<string, unknown> | null);
   },
 };
