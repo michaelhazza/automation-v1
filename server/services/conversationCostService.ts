@@ -42,13 +42,12 @@ export async function getConversationCost(
     .limit(1);
 
   if (!conv) {
-    throw { statusCode: 404, message: 'Conversation not found' };
+    throw { statusCode: 404, message: 'Conversation not found', errorCode: 'CONVERSATION_NOT_FOUND' };
   }
 
-  // 403 if the conversation belongs to a different user (unless admin — the
-  // route already requires AGENTS_CHAT, so this is the intra-org user guard).
+  // 403 if the conversation belongs to a different user — intra-org user guard.
   if (conv.userId !== userId) {
-    throw { statusCode: 403, message: 'Forbidden' };
+    throw { statusCode: 403, message: 'Forbidden', errorCode: 'FORBIDDEN' };
   }
 
   // Aggregate cost/token data grouped by model_id — only assistant messages

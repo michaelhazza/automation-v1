@@ -11,7 +11,7 @@ import {
   type LLMMessage,
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
-import { getPricing } from './pricingService.js';
+import { calculateCost } from './pricingService.js';
 import { env } from '../lib/env.js';
 import { emitConversationUpdate } from '../websocket/emitters.js';
 
@@ -25,13 +25,11 @@ async function computeCostCents(
   modelId: string,
   tokensIn: number,
   tokensOut: number,
+  organisationId: string,
 ): Promise<number> {
   try {
-    const pricing = await getPricing(provider, modelId);
-    const costDollars =
-      (tokensIn / 1000) * pricing.inputRate +
-      (tokensOut / 1000) * pricing.outputRate;
-    return Math.round(costDollars * 100);
+    const result = await calculateCost(provider, modelId, tokensIn, tokensOut, organisationId);
+    return result.costWithMarginCents;
   } catch {
     return 0;
   }
@@ -311,6 +309,15 @@ export const conversationService = {
     let triggeredExecutionId: string | undefined;
 
     if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+      // Compute cost for the initial LLM call (tool-use request)
+      const initialCostCents = await computeCostCents(
+        agent.modelProvider ?? 'anthropic',
+        agent.modelId,
+        llmResponse.tokensIn,
+        llmResponse.tokensOut,
+        organisationId,
+      );
+
       // Save the assistant's tool-use message
       const [assistantToolMsg] = await db
         .insert(agentMessages)
@@ -324,6 +331,10 @@ export const conversationService = {
               name: toolCall.name,
               input: toolCall.input,
             })),
+            costCents: initialCostCents,
+            tokensIn: llmResponse.tokensIn,
+            tokensOut: llmResponse.tokensOut,
+            modelId: agent.modelId,
             createdAt: new Date(),
           })
         .returning();
@@ -429,6 +440,7 @@ export const conversationService = {
         agent.modelId,
         llmResponse.tokensIn,
         llmResponse.tokensOut,
+        organisationId,
       );
 
       // Save final assistant response
@@ -466,6 +478,7 @@ export const conversationService = {
       agent.modelId,
       llmResponse.tokensIn,
       llmResponse.tokensOut,
+      organisationId,
     );
 
     const [assistantMsg] = await db
