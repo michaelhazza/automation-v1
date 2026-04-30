@@ -1,6 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import {
   EXTERNAL_DOC_HARD_TOKEN_LIMIT,
@@ -44,6 +45,7 @@ export const externalDocumentResolverService = {
 };
 
 async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
+  const db = getOrgScopedDb('externalDocumentResolverService.resolve');
   const resolver = googleDriveResolver;
   const startedAt = Date.now();
   // Invariant #11: TTL boundary uses fetch-start time. Captured ONCE at the top.
@@ -64,11 +66,12 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
       accessToken = conn.accessToken;
     }
   } catch {
-    return emitFailure(p, resolver.resolverVersion, 'auth_revoked', null, startedAt);
+    return emitFailure(db, p, resolver.resolverVersion, 'auth_revoked', null, startedAt);
   }
 
   // 2. Cache lookup
   const cached = await db.select().from(documentCache).where(and(
+    eq(documentCache.organisationId, p.organisationId),
     eq(documentCache.provider, 'google_drive'),
     eq(documentCache.fileId, p.fileId),
     eq(documentCache.connectionId, p.connectionId),
@@ -81,9 +84,9 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     if (retrySuppressor.shouldSuppress(p.referenceId, reason)) {
       if (cacheRow) {
         const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
-        if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, reason, startedAt);
+        if (!stale) return serveCacheAsDegraded(db, p, resolver.resolverVersion, cacheRow, reason, startedAt);
       }
-      return emitFailure(p, resolver.resolverVersion, reason, null, startedAt);
+      return emitFailure(db, p, resolver.resolverVersion, reason, null, startedAt);
     }
   }
 
@@ -128,16 +131,16 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
       if (cacheRow) {
         const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
         if (!stale) {
-          return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, mapResolverError(err), startedAt);
+          return serveCacheAsDegraded(db, p, resolver.resolverVersion, cacheRow, mapResolverError(err), startedAt);
         }
       }
-      return emitFailure(p, resolver.resolverVersion, mapResolverError(err), null, startedAt);
+      return emitFailure(db, p, resolver.resolverVersion, mapResolverError(err), null, startedAt);
     }
   }
 
   // 5a. Cache hit + revision match + version current — serve cache
   if (cacheRow && !versionStale && revisionMatches) {
-    return serveCacheAsActive(p, resolver.resolverVersion, cacheRow, providerRevisionId, startedAt);
+    return serveCacheAsActive(db, p, resolver.resolverVersion, cacheRow, providerRevisionId, startedAt);
   }
 
   // 5b. Fetch
@@ -148,9 +151,9 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     const reason = mapResolverError(err);
     if (cacheRow) {
       const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
-      if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, reason, startedAt);
+      if (!stale) return serveCacheAsDegraded(db, p, resolver.resolverVersion, cacheRow, reason, startedAt);
     }
-    return emitFailure(p, resolver.resolverVersion, reason, null, startedAt);
+    return emitFailure(db, p, resolver.resolverVersion, reason, null, startedAt);
   }
 
   // 6. Minimum-content check
@@ -158,9 +161,9 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
   if (rawTokens < EXTERNAL_DOC_MIN_CONTENT_TOKENS) {
     if (cacheRow) {
       const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
-      if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, 'unsupported_content', startedAt);
+      if (!stale) return serveCacheAsDegraded(db, p, resolver.resolverVersion, cacheRow, 'unsupported_content', startedAt);
     }
-    return emitFailure(p, resolver.resolverVersion, 'unsupported_content', null, startedAt);
+    return emitFailure(db, p, resolver.resolverVersion, 'unsupported_content', null, startedAt);
   }
 
   // 7. Truncate to per-document hard limit
@@ -178,6 +181,7 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     await withAdvisoryLock(tx, `external_doc:google_drive:${p.fileId}:${p.connectionId}`, async () => {
       // Double-check: did a peer worker write a matching row while we were fetching?
       const peer = await tx.select().from(documentCache).where(and(
+        eq(documentCache.organisationId, p.organisationId),
         eq(documentCache.provider, 'google_drive'),
         eq(documentCache.fileId, p.fileId),
         eq(documentCache.connectionId, p.connectionId),
@@ -227,7 +231,10 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
       if (p.referenceType === 'reference_document') {
         await tx.update(referenceDocuments)
           .set({ attachmentState: 'active', updatedAt: sql`now()` })
-          .where(eq(referenceDocuments.id, p.referenceId));
+          .where(and(
+            eq(referenceDocuments.id, p.referenceId),
+            eq(referenceDocuments.organisationId, p.organisationId),
+          ));
       }
 
       // 10. Audit-log write (inside transaction — §17.8)
@@ -251,7 +258,7 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
 
   // If a peer beat us, delegate to serveCacheAsActive which handles its own state + audit.
   if (peerBeatUs) {
-    return serveCacheAsActive(p, resolver.resolverVersion, cacheRow!, providerRevisionId, startedAt);
+    return serveCacheAsActive(db, p, resolver.resolverVersion, cacheRow!, providerRevisionId, startedAt);
   }
 
   emitStructuredLog({
@@ -283,13 +290,14 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
 }
 
 async function serveCacheAsActive(
+  db: OrgScopedTx,
   p: ResolveParams,
   resolverVersion: number,
   cacheRow: typeof documentCache.$inferSelect,
   revisionId: string | null,
   startedAt: number,
 ): Promise<ResolvedDocument> {
-  await transitionState(p.referenceType, p.referenceId, 'active');
+  await transitionState(db, p.referenceType, p.referenceId, p.organisationId, 'active');
   await db.insert(documentFetchEvents).values({
     organisationId: p.organisationId,
     subaccountId: p.subaccountId,
@@ -333,6 +341,7 @@ async function serveCacheAsActive(
 }
 
 async function serveCacheAsDegraded(
+  db: OrgScopedTx,
   p: ResolveParams,
   resolverVersion: number,
   cacheRow: typeof documentCache.$inferSelect,
@@ -342,7 +351,7 @@ async function serveCacheAsDegraded(
   if (reason === 'auth_revoked' || reason === 'rate_limited') {
     retrySuppressor.recordFailure(p.referenceId, reason);
   }
-  await transitionState(p.referenceType, p.referenceId, 'degraded');
+  await transitionState(db, p.referenceType, p.referenceId, p.organisationId, 'degraded');
   // Invariant #12: idempotent failure writes via onConflictDoNothing
   await db.insert(documentFetchEvents).values({
     organisationId: p.organisationId,
@@ -387,6 +396,7 @@ async function serveCacheAsDegraded(
 }
 
 async function emitFailure(
+  db: OrgScopedTx,
   p: ResolveParams,
   resolverVersion: number,
   reason: FetchFailureReason,
@@ -396,7 +406,7 @@ async function emitFailure(
   if (reason === 'auth_revoked' || reason === 'rate_limited') {
     retrySuppressor.recordFailure(p.referenceId, reason);
   }
-  await transitionState(p.referenceType, p.referenceId, 'broken');
+  await transitionState(db, p.referenceType, p.referenceId, p.organisationId, 'broken');
   // Invariant #12: idempotent failure writes
   await db.insert(documentFetchEvents).values({
     organisationId: p.organisationId,
@@ -441,14 +451,19 @@ async function emitFailure(
 }
 
 async function transitionState(
+  db: OrgScopedTx,
   referenceType: 'reference_document' | 'agent_data_source',
   referenceId: string,
+  organisationId: string,
   newState: 'active' | 'degraded' | 'broken',
 ): Promise<void> {
   if (referenceType !== 'reference_document') return;
   await db.update(referenceDocuments)
     .set({ attachmentState: newState, updatedAt: sql`now()` })
-    .where(eq(referenceDocuments.id, referenceId));
+    .where(and(
+      eq(referenceDocuments.id, referenceId),
+      eq(referenceDocuments.organisationId, organisationId),
+    ));
 }
 
 function mapResolverError(err: unknown): FetchFailureReason {

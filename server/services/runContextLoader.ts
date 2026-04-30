@@ -2,7 +2,7 @@ import { eq, and, or, isNull } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { scheduledTasks, referenceDocuments, documentBundleAttachments, documentBundleMembers, agentDataSources, documentFetchEvents } from '../db/schema/index.js';
 import {
   fetchDataSourcesByScope,
@@ -141,7 +141,8 @@ interface GDriveRefRow {
  * same scope conditions as fetchDataSourcesByScope. Returns GDriveRefRow[]
  * so they can be merged with reference_documents in loadExternalDocumentBlocks.
  */
-async function queryGoogleDriveAgentSources(scope: DataSourceScope): Promise<GDriveRefRow[]> {
+async function queryGoogleDriveAgentSources(scope: DataSourceScope, organisationId: string): Promise<GDriveRefRow[]> {
+  const db = getOrgScopedDb('runContextLoader.queryGoogleDriveAgentSources');
   const scopeConditions = [
     and(
       eq(agentDataSources.agentId, scope.agentId),
@@ -191,7 +192,8 @@ async function queryGoogleDriveAgentSources(scope: DataSourceScope): Promise<GDr
  * Load task-scoped external document references from reference_documents
  * via bundle joins for a specific task id.
  */
-async function loadTaskExternalRefs(taskId: string): Promise<GDriveRefRow[]> {
+async function loadTaskExternalRefs(taskId: string, organisationId: string): Promise<GDriveRefRow[]> {
+  const db = getOrgScopedDb('runContextLoader.loadTaskExternalRefs');
   const rows = await db
     .select({
       id: referenceDocuments.id,
@@ -215,6 +217,7 @@ async function loadTaskExternalRefs(taskId: string): Promise<GDriveRefRow[]> {
       referenceDocuments,
       and(
         eq(referenceDocuments.id, documentBundleMembers.documentId),
+        eq(referenceDocuments.organisationId, organisationId),
         eq(referenceDocuments.sourceType, 'google_drive'),
         isNull(referenceDocuments.deletedAt),
       ),
@@ -259,7 +262,7 @@ async function loadExternalDocumentBlocks(
   // Merge agent sources with task-scoped reference docs
   let allRefs: GDriveRefRow[] = [...agentSourceRows];
   if (request.taskId) {
-    const taskRefs = await loadTaskExternalRefs(request.taskId);
+    const taskRefs = await loadTaskExternalRefs(request.taskId, request.organisationId);
     allRefs = [...allRefs, ...taskRefs];
   }
 
@@ -307,22 +310,23 @@ async function loadExternalDocumentBlocks(
       // Fire-and-forget: failure to write the audit row must not break the run.
       // Skipped if subaccountId is absent (the subaccount column is NOT NULL).
       if (request.subaccountId) {
-        db.insert(documentFetchEvents).values({
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId,
-          referenceId: meta.id,
-          referenceType: meta.kind === 'reference_document' ? 'reference_document' : 'agent_data_source',
-          runId: request.runId ?? null,
-          cacheHit: false,
-          provider: 'google_drive',
-          docName: meta.name,
-          revisionId: null,
-          tokensUsed: 0,
-          failureReason: 'budget_exceeded',
-          resolverVersion: 1,
-        }).catch((err: unknown) => {
-          console.error('[runContextLoader] Failed to write budget_exceeded fetch event', err);
-        });
+        getOrgScopedDb('runContextLoader.loadExternalDocumentBlocks.budgetExceeded')
+          .insert(documentFetchEvents).values({
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId,
+            referenceId: meta.id,
+            referenceType: meta.kind === 'reference_document' ? 'reference_document' : 'agent_data_source',
+            runId: request.runId ?? null,
+            cacheHit: false,
+            provider: 'google_drive',
+            docName: meta.name,
+            revisionId: null,
+            tokensUsed: 0,
+            failureReason: 'budget_exceeded',
+            resolverVersion: 1,
+          }).catch((err: unknown) => {
+            console.error('[runContextLoader] Failed to write budget_exceeded fetch event', err);
+          });
       }
       continue;
     }
@@ -339,7 +343,6 @@ async function loadExternalDocumentBlocks(
         expectedMimeType: meta.mimeType,
         docName: meta.name,
         runId: request.runId ?? null,
-        db,
       });
     } catch {
       blocks.push(`[External document "${meta.name}" could not be resolved]`);
@@ -427,7 +430,7 @@ export async function loadRunContextData(
 
   // Pre-load google_drive agent sources — these are handled by the external
   // document resolver pipeline and must be excluded from the regular pool.
-  const googleDriveSourceRows = await queryGoogleDriveAgentSources(scope);
+  const googleDriveSourceRows = await queryGoogleDriveAgentSources(scope, request.organisationId);
   const googleDriveIds = new Set(googleDriveSourceRows.map((r) => r.id));
 
   const scopedSources = await fetchDataSourcesByScope(scope);
@@ -446,7 +449,7 @@ export async function loadRunContextData(
   // 3. Resolve scheduled task instructions (the "Task Instructions" layer)
   let taskInstructions: string | null = null;
   if (triggerScheduledTaskId) {
-    const [rawSt] = await db
+    const [rawSt] = await getOrgScopedDb('runContextLoader.loadRunContextData.scheduledTask')
       .select({
         description: scheduledTasks.description,
         brief: scheduledTasks.brief,

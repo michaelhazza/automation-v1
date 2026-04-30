@@ -36,6 +36,5 @@ export interface ResolveParams {
   expectedMimeType: string;
   docName: string;
   runId: string | null;
-  db: unknown; // scoped DB client — typed loosely here, callers pass project's scoped DB
   accessToken?: string;
 }
