@@ -76,6 +76,8 @@ AssertionError: should have 2 hits: expected 3 to be 2
 AssertionError: after reset, known key should be miss: expected true to be false
 ```
 
+**High-signal investigation item — the `expected 2, got 3` mismatch may indicate a real product bug, not just test pollution.** Before flipping the gate, verify the assertion drift is purely state leakage: re-run the failing tests in isolation (`npx vitest run server/services/__tests__/incidentIngestorIdempotency.test.ts`) and confirm they pass under `NODE_ENV=integration` once `__resetForTest()` is wired in `beforeEach`. If a single-file isolated run still produces `expected 2, got 3`, that is a duplicate-processing-path / missing-dedupe-key / retry-semantics bug in `incidentIngestor` itself — fix the underlying ingest logic (idempotency-key collision, double-fire from the throttle path, or retry-without-dedup) before treating it as test isolation. Source: ChatGPT PR #239 review round 2.
+
 Affected files:
 
 | File | Failures | Notes |
