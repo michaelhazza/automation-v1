@@ -1757,52 +1757,52 @@ Captured 2026-04-30 from ChatGPT review of [PR #237](https://github.com/michaelh
 **Source log:** `tasks/review-logs/spec-conformance-log-agent-as-employee-phases-de-2026-04-30T00-38-18Z.md`
 **Spec:** `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`
 
-- [ ] **DE-CR-1** — `processIdentityMigration` worker is registered with bare `(boss as any).work(...)` so no `withOrgTx` is opened for the handler — `getOrgScopedDb()` will throw `missing_org_context` on first invocation
+- [x] **DE-CR-1** — `processIdentityMigration` worker is registered with bare `(boss as any).work(...)` so no `withOrgTx` is opened for the handler — `getOrgScopedDb()` will throw `missing_org_context` on first invocation
   - Spec section: §13 (queued execution model), §10.5 (multi-tenant safety checklist item 6)
   - Gap: `server/services/queueService.ts:1140` registers `workspace.migrate-identity` outside `createWorker`, but `workspaceMigrationService.processIdentityMigration` uses `getOrgScopedDb`. The handler will fail-closed on every job. Migration is non-functional in production until this is wired.
   - Suggested approach: switch the registration to `createWorker<MigrateIdentityJob>({ queue: 'workspace.migrate-identity', boss, handler: ..., timeoutMs: 270_000 })`. The job payload already carries `organisationId` + `subaccountId`, so the default `resolveOrgContext` works. Remove the bare `boss.work(...)` block.
 
-- [ ] **DE-CR-2** — `seatRollupJob` reads from `workspace_identities` via the bare `db` connection — RLS-FORCED table, no session var → returns 0 rows
+- [x] **DE-CR-2** — `seatRollupJob` reads from `workspace_identities` via the bare `db` connection — RLS-FORCED table, no session var → returns 0 rows
   - Spec section: §10.6 (seat rollup wiring), §10.5 (multi-tenant safety checklist item 6), DEVELOPMENT_GUIDELINES.md §1
   - Gap: `server/jobs/seatRollupJob.ts` imports `db` directly. `workspace_identities` has `FORCE ROW LEVEL SECURITY` (migration 0254 line 245). With `app.organisation_id` unset, the policy rejects every row. `consumed_seats` will always roll up to 0.
   - Suggested approach: replicate `memoryDedupJob.ts`. Use `withAdminConnection` for the cross-org SELECT iteration (BYPASSRLS), then `withOrgTx` per-organisation for the `UPDATE org_subscriptions ... consumed_seats`.
 
-- [ ] **DE-CR-3** — Migration status-poll response shape diverges from spec §12 `MigrateSubaccountResponse`
+- [x] **DE-CR-3** — Migration status-poll response shape diverges from spec §12 `MigrateSubaccountResponse`
   - Spec section: §12 (Contract `MigrateSubaccountResponse`)
   - Gap: spec contract says `{ status, total, migrated, failed, failures: [{ actorId, previousIdentityId, reason, retryable }] }`. Implementation returns `{ status, total, completed, failed, skipped, perIdentity }`. `migrated` was renamed to `completed`; `failures[]` (with `retryable`) is replaced by `perIdentity[]` (no retryable classification).
   - Suggested approach: rename `completed` → `migrated`. Add a `failures: Array<{ actorId, previousIdentityId, reason, retryable }>` aggregate alongside `perIdentity` (keep `perIdentity` for the modal's progress bar, but populate the spec-named `failures[]` for callers expecting the contract). `previousIdentityId` is recoverable from `auditEvents.metadata.from`. `retryable` follows §7's failure-reason → retryability table.
 
-- [ ] **DE-CR-4** — `WorkspaceTenantConfig` interface drops spec-named fields `backend`, `connectorConfigId`, `domain`
+- [x] **DE-CR-4** — `WorkspaceTenantConfig` interface drops spec-named fields `backend`, `connectorConfigId`, `domain`
   - Spec section: §12 (Contract `WorkspaceTenantConfig`)
   - Gap: spec example carries `backend`, `connectorConfigId`, `domain`, `defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`. Implementation in `shared/types/workspaceAdapterContract.ts:79–84` carries only the last three plus an extra `subaccountName`. Callers cannot resolve which backend or connector this tenant is on without a separate query.
   - Suggested approach: extend `WorkspaceTenantConfig` to include `backend: 'synthetos_native' | 'google_workspace' | null`, `connectorConfigId: string | null`, `domain: string | null` populated from `connector_configs.config_json.domain` (with the `NATIVE_EMAIL_DOMAIN` fallback already used in the workspace summary route). `subaccountName` is fine as an additive helper; document why it's there.
 
-- [ ] **DE-CR-5** — Per-step migration failure audits emit `identity.migration_activation_failed` and `identity.migration_archive_failed` action types not enumerated in spec §14.4
+- [x] **DE-CR-5** — Per-step migration failure audits emit `identity.migration_activation_failed` and `identity.migration_archive_failed` action types not enumerated in spec §14.4
   - Spec section: §14.4 (terminal events), §10 (activity types)
   - Gap: spec §14.4 says the per-identity terminal failure event is `identity.migration_failed`. `workspaceMigrationService.processIdentityMigration` writes step-specific actions for activation (line 202) and archive (line 227) failures. These types are not in `WORKSPACE_EVENT_TYPES` (`activityService.ts:509`), so they will not surface on the activity feed; the migration status-poll route detects them via hardcoded action-name matching, which couples the route to an action namespace that isn't in the spec or the activity union.
   - Suggested approach: collapse all three terminal-failure events to `identity.migration_failed`, distinguishing the failed step via `metadata.step ∈ {'provision','activate','archive'}`. Update the status-poll route to read only `identity.migrated` and `identity.migration_failed`.
 
-- [ ] **DE-CR-6** — `subaccount.migration_completed` audit event is in the activity-type union but never written
+- [x] **DE-CR-6** — `subaccount.migration_completed` audit event is in the activity-type union but never written
   - Spec section: §14.4 (terminal event for "Migration of one subaccount")
   - Gap: spec §14.4 lists `subaccount.migration_completed` as the per-subaccount terminal event with `status ∈ {'success','partial','failed'}`. Nothing in the implementation writes this row — the status-poll route computes the aggregate on demand from per-identity audits. Operators have no audit trail of "subaccount X migrated" for the activity feed.
   - Suggested approach: when the last in-flight identity for a `migrationJobBatchId` reaches a terminal state, write a single `subaccount.migration_completed` audit row with `metadata = { batchId, status, total, migrated, failed }`. Either fire from the worker after each per-identity job (idempotent on `(batchId)`), or schedule a "migration finaliser" job dispatched on the last per-identity completion.
 
-- [ ] **DE-CR-7** — `activity.ts` route uses offset-based pagination; spec §12 forbids it for the activity feed
+- [x] **DE-CR-7** — `activity.ts` route uses offset-based pagination; spec §12 forbids it for the activity feed
   - Spec section: §12 (Contract `ActivityFeedItem` — "Offset pagination ... is explicitly forbidden for this feed")
   - Gap: `parseFilters` accepts `limit` + `offset`; `listActivityItems` slices `items.slice(offset, offset + limit)`. Spec §12 mandates cursor pagination (`{ created_at, id }` opaque cursor) and explicitly forbids offset, citing drift under concurrent inserts.
   - Suggested approach: change the contract to cursor-based. Server emits `{ items, nextCursor }`; cursor is `base64({ created_at, id })`. WHERE clause becomes `(created_at, id) < (cursor.created_at, cursor.id)` over the merged result set. Keep limit; remove offset. ActivityPage and AgentActivityTab both need updating in lockstep.
 
-- [ ] **DE-CR-8** — `ActivityFeedItem` tiebreaker is `id DESC`; spec §12 says `id ASC`
+- [x] **DE-CR-8** — `ActivityFeedItem` tiebreaker is `id DESC`; spec §12 says `id ASC`
   - Spec section: §12 (Contract `ActivityFeedItem` — "Tie-breaker: `id ASC` within the same `created_at`")
   - Gap: `server/services/activityServicePure.ts:98` defines `idDesc(a, b)` as the tiebreaker; spec contract calls for `id ASC`. The DB-level `.orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))` (activityService line 593) follows the same DESC pattern.
   - Suggested approach: flip both the pure tiebreaker and the DB orderBy. The pure-function determinism test in §8.21 should be re-run after the change.
 
-- [ ] **DE-CR-9** — Org-chart and actors routes use `WORKSPACE_CONNECTOR_MANAGE` instead of a viewer-level permission
+- [x] **DE-CR-9** — Org-chart and actors routes use `WORKSPACE_CONNECTOR_MANAGE` instead of a viewer-level permission
   - Spec section: §10.1 (permission keys table)
   - Gap: spec §10.1 reserves `subaccounts:manage_workspace` (= `WORKSPACE_CONNECTOR_MANAGE`) for *configuring* the workspace; viewing the org chart and actor list should be available to a `manager` who has `agents:view_activity` (already exists). The current permission gate hides the org chart from operators who can manage agents day-to-day but lack workspace-config rights.
   - Suggested approach: split the gates. `GET /workspace/org-chart` and `GET /workspace/actors` use `AGENTS_VIEW_ACTIVITY` (or just `authenticate`+`resolveSubaccount` if the data is non-sensitive). `POST /configure`, `POST /onboard`, `POST /migrate`, lifecycle mutations stay on `WORKSPACE_CONNECTOR_MANAGE`.
 
-- [ ] **DE-CR-10** — `seatRollupJob` and `activityService` call `db` directly instead of going through service-layer helpers
+- [x] **DE-CR-10** — `seatRollupJob` and `activityService` call `db` directly instead of going through service-layer helpers
   - Spec section: §10.5 (multi-tenant safety checklist), DEVELOPMENT_GUIDELINES.md §2 ("Routes and `server/lib/**` never import `db` directly — call a service")
   - Gap: `server/jobs/seatRollupJob.ts` and the workspace-extension fetchers in `server/services/activityService.ts` keep the pre-existing pattern of importing `db` directly. The activityService precedent existed before this branch — but the new `fetchAuditEvents` adds another consumer.
-  - Suggested approach: introduce a `workspaceSeatService` wrapper for the rollup write/read pair, or accept the existing convention as a documented exception in `activityService.ts`. Either is fine — but the decision should be explicit. Tracked here so it doesn't slip past the audit.
+  - **Resolution (2026-04-30):** Decision recorded in `tasks/builds/agent-as-employee/progress.md` § "Spec-conformance follow-ups". The DEVELOPMENT_GUIDELINES.md §2 rule scopes to "routes and `server/lib/**`" — services and jobs are exempt. `seatRollupJob` no longer imports `db` directly post-DE-CR-2 fix (uses `withAdminConnection`); `activityService` (a service) is permitted to import `db` per the rule. No code change required.

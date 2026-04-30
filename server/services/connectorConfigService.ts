@@ -6,10 +6,31 @@ import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterC
 
 export function buildWorkspaceTenantConfig(
   subaccountName: string,
-  configJson: Record<string, unknown> | null,
+  connectorConfig: { id: string; connectorType: string; configJson: unknown } | null,
 ): WorkspaceTenantConfig {
-  const cfg = configJson ?? {};
+  const cfg = (connectorConfig?.configJson as Record<string, unknown> | null) ?? {};
+  const configDomain = typeof cfg.domain === 'string' && cfg.domain.length > 0 ? cfg.domain : null;
+
+  // Workspace `domain` resolution mirrors the GET /workspace summary route:
+  // per-subaccount override (configJson.domain) → NATIVE_EMAIL_DOMAIN → null.
+  // Returning `null` (rather than 'workspace.local') lets callers distinguish
+  // "no workspace configured" from "configured with the dev fallback".
+  // Read from process.env directly rather than the validated env module so that
+  // pure unit tests of this builder don't have to bootstrap the entire env Zod
+  // schema (which requires DATABASE_URL, EMAIL_FROM, ...).
+  const envDomain = typeof process.env.NATIVE_EMAIL_DOMAIN === 'string' && process.env.NATIVE_EMAIL_DOMAIN.length > 0
+    ? process.env.NATIVE_EMAIL_DOMAIN
+    : null;
+  const resolvedDomain = configDomain ?? envDomain;
+
+  const backend = connectorConfig?.connectorType === 'synthetos_native' || connectorConfig?.connectorType === 'google_workspace'
+    ? connectorConfig.connectorType
+    : null;
+
   return {
+    backend,
+    connectorConfigId: connectorConfig?.id ?? null,
+    domain: resolvedDomain,
     subaccountName,
     defaultSignatureTemplate: typeof cfg.defaultSignatureTemplate === 'string' ? cfg.defaultSignatureTemplate : '',
     discloseAsAgent: cfg.discloseAsAgent === true,
@@ -252,7 +273,11 @@ export const connectorConfigService = {
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, orgId)));
 
     const [config] = await db
-      .select({ configJson: connectorConfigs.configJson })
+      .select({
+        id: connectorConfigs.id,
+        connectorType: connectorConfigs.connectorType,
+        configJson: connectorConfigs.configJson,
+      })
       .from(connectorConfigs)
       .where(and(
         eq(connectorConfigs.organisationId, orgId),
@@ -260,6 +285,6 @@ export const connectorConfigService = {
       ))
       .limit(1);
 
-    return buildWorkspaceTenantConfig(sub?.name ?? '', config?.configJson as Record<string, unknown> | null);
+    return buildWorkspaceTenantConfig(sub?.name ?? '', config ?? null);
   },
 };

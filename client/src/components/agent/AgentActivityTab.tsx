@@ -61,8 +61,8 @@ function dateRangeToAfter(range: DateRange): string {
 export default function AgentActivityTab({ agentId: _agentId, actorId, subaccountId, agentName }: AgentActivityTabProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [offset, setOffset] = useState<number>(0);
+  // DE-CR-7: cursor-based pagination — `null` means no further page exists.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [dateRange, setDateRange] = useState<DateRange>('last_30_days');
@@ -70,17 +70,16 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
 
   const LIMIT = 50;
 
-  const fetchItems = useCallback(async (reset: boolean) => {
+  const fetchItems = useCallback(async (reset: boolean, cursor: string | null) => {
     setLoading(true);
     setFetchError(null);
 
-    const nextOffset = reset ? 0 : offset;
     const params: Record<string, string> = {
       actorId,
       limit: String(LIMIT),
       from: dateRangeToAfter(dateRange),
-      offset: String(nextOffset),
     };
+    if (!reset && cursor) params.cursor = cursor;
 
     const types = EVENT_TYPE_GROUP_MAP[eventTypeGroup];
     if (types) {
@@ -89,11 +88,10 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
 
     try {
       const res = await api.get(`/api/subaccounts/${subaccountId}/activity`, { params });
-      const data = res.data as { items: ActivityItem[]; total: number; hasMore: boolean };
+      const data = res.data as { items: ActivityItem[]; nextCursor: string | null };
       const fetched: ActivityItem[] = data.items ?? [];
       setItems(prev => reset ? fetched : [...prev, ...fetched]);
-      setOffset(nextOffset + fetched.length);
-      setHasMore(!!data.hasMore);
+      setNextCursor(data.nextCursor ?? null);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: { message?: string } | string } }; message?: string };
       const apiErr = err.response?.data?.error;
@@ -102,24 +100,24 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
     } finally {
       setLoading(false);
     }
-  }, [actorId, subaccountId, dateRange, eventTypeGroup, offset]);
+  }, [actorId, subaccountId, dateRange, eventTypeGroup]);
 
   // Reset and fetch when filters change
   useEffect(() => {
-    setOffset(0);
+    setNextCursor(null);
     setItems([]);
-    fetchItems(true);
+    fetchItems(true, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actorId, subaccountId, dateRange, eventTypeGroup]);
 
   function handleLoadMore() {
-    fetchItems(false);
+    if (nextCursor) fetchItems(false, nextCursor);
   }
 
   function handleRefresh() {
-    setOffset(0);
+    setNextCursor(null);
     setItems([]);
-    fetchItems(true);
+    fetchItems(true, null);
   }
 
   const lockLabel = agentName ? `${agentName} only` : 'This agent only';
@@ -177,7 +175,7 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
       <ActivityFeedTable
         items={items}
         loading={loading}
-        hasMore={hasMore}
+        hasMore={nextCursor !== null}
         onLoadMore={handleLoadMore}
       />
     </div>

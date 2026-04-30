@@ -9,12 +9,19 @@ interface PerIdentity {
   reason?: string;
 }
 
+interface MigrationFailure {
+  actorId: string;
+  previousIdentityId: string;
+  reason: string;
+  retryable: boolean;
+}
+
 interface MigrationStatus {
   status: 'running' | 'success' | 'partial' | 'failed';
   total: number;
-  completed: number;
+  migrated: number;
   failed: number;
-  skipped: number;
+  failures: MigrationFailure[];
   perIdentity: PerIdentity[];
 }
 
@@ -88,7 +95,7 @@ export function MigrateWorkspaceModal({
   const backendLabel = (b: TargetBackend) =>
     b === 'synthetos_native' ? 'Synthetos native' : 'Google Workspace';
 
-  const failedIdentities = migStatus?.perIdentity.filter(p => p.state === 'failed') ?? [];
+  const failedIdentities = migStatus?.failures ?? [];
 
   // suppress unused-variable warning for batchId (used for debugging / future use)
   void batchId;
@@ -180,11 +187,11 @@ export function MigrateWorkspaceModal({
                   <div className="w-full bg-slate-100 rounded-full h-2">
                     <div
                       className="bg-indigo-600 h-2 rounded-full transition-all"
-                      style={{ width: migStatus.total > 0 ? `${((migStatus.completed + migStatus.failed + migStatus.skipped) / migStatus.total) * 100}%` : '0%' }}
+                      style={{ width: migStatus.total > 0 ? `${((migStatus.migrated + migStatus.failed) / migStatus.total) * 100}%` : '0%' }}
                     />
                   </div>
                   <p className="text-[12px] text-slate-500">
-                    {migStatus.completed + migStatus.failed + migStatus.skipped} / {migStatus.total} identities processed
+                    {migStatus.migrated + migStatus.failed} / {migStatus.total} identities processed
                   </p>
                 </>
               )}
@@ -195,7 +202,7 @@ export function MigrateWorkspaceModal({
             <div className="text-center py-8 space-y-2">
               <div className="text-green-600 text-[32px]">&#10003;</div>
               <p className="text-[14px] font-semibold text-slate-900">
-                All {migStatus?.completed ?? migStatus?.total} identities migrated.
+                All {migStatus?.migrated ?? migStatus?.total} identities migrated.
               </p>
             </div>
           )}
@@ -203,15 +210,17 @@ export function MigrateWorkspaceModal({
           {phase === 'partial' && (
             <div className="space-y-4">
               <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[13px] text-amber-800">
-                {migStatus?.completed} of {migStatus?.total} identities migrated. {failedIdentities.length} failed.
+                {migStatus?.migrated} of {migStatus?.total} identities migrated. {failedIdentities.length} failed.
               </div>
               {failedIdentities.length > 0 && (
                 <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 text-[13px]">
-                  {failedIdentities.map(p => (
-                    <div key={p.actorId} className="px-4 py-2.5 flex items-center gap-3">
+                  {failedIdentities.map(f => (
+                    <div key={f.actorId} className="px-4 py-2.5 flex items-center gap-3">
                       <span className="text-red-600 text-[11px] font-medium">FAILED</span>
-                      <span className="flex-1 text-slate-700 font-mono text-[11px]">{p.actorId}</span>
-                      {p.reason && <span className="text-slate-400 text-[11px]">{p.reason}</span>}
+                      <span className="flex-1 text-slate-700 font-mono text-[11px]">{f.actorId}</span>
+                      <span className={`text-[11px] ${f.retryable ? 'text-amber-600' : 'text-slate-500'}`}>
+                        {f.reason}{f.retryable ? ' (retryable)' : ''}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -223,7 +232,7 @@ export function MigrateWorkspaceModal({
             <div className="text-center py-8 space-y-2">
               <p className="text-[14px] font-semibold text-slate-900">No identities migrated.</p>
               <p className="text-[13px] text-slate-500">
-                {migStatus?.perIdentity[0]?.reason ?? 'An error occurred.'}
+                {failedIdentities[0]?.reason ?? 'An error occurred.'}
               </p>
             </div>
           )}

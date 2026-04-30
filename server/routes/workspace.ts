@@ -231,6 +231,41 @@ router.post(
 
 // ─── GET /api/subaccounts/:subaccountId/workspace/migrate/:batchId ───────────
 
+// DE-CR-3: response shape matches spec §12 `MigrateSubaccountResponse` —
+// `{ status, total, migrated, failed, failures: [{actorId, previousIdentityId, reason, retryable}] }`.
+// `perIdentity[]` is retained alongside as a UI-only convenience for the modal's
+// progress bar; it is NOT part of the spec contract.
+//
+// Retryability classification mirrors spec §7's failure-reason → retryability
+// table for the workspace failure family. `failure.message` strings from
+// `processIdentityMigration` are matched defensively — the migration helper
+// re-throws raw `Error`s from the adapter, so reason text is the primary signal.
+const RETRYABLE_REASON_HINTS = [
+  'workspace_identity_provisioning_failed',
+  'workspace_email_rate_limited',
+  'rate_limited',
+  'connector_timeout',
+  'timeout',
+  'transient',
+] as const;
+
+const NON_RETRYABLE_REASON_HINTS = [
+  'workspace_email_sending_disabled',
+  'workspace_provider_acl_denied',
+  'workspace_idempotency_collision',
+  'parent_actor_cycle_detected',
+] as const;
+
+function classifyRetryable(reason: string | undefined): boolean {
+  if (!reason) return false;
+  const lower = reason.toLowerCase();
+  if (NON_RETRYABLE_REASON_HINTS.some((h) => lower.includes(h))) return false;
+  if (RETRYABLE_REASON_HINTS.some((h) => lower.includes(h))) return true;
+  // Default for unclassified failures: not retryable. Operators must look at the
+  // reason and decide; auto-retrying unknown failures masks real problems.
+  return false;
+}
+
 router.get(
   '/api/subaccounts/:subaccountId/workspace/migrate/:batchId',
   authenticate,
@@ -241,9 +276,9 @@ router.get(
 
     const db = getOrgScopedDb('workspace.migrationStatus');
 
-    // Aggregate audit_events rows for this batch
-    // Terminal actions per identity: identity.migrated | identity.migration_failed |
-    //   identity.migration_activation_failed | identity.migration_archive_failed
+    // Per-identity terminal events: `identity.migrated` and
+    // `identity.migration_failed` (DE-CR-5 collapsed activation/archive failures
+    // into the same action with `metadata.step`).
     const rows = await db
       .select({
         workspaceActorId: auditEvents.workspaceActorId,
@@ -260,19 +295,28 @@ router.get(
       )
       .orderBy(asc(auditEvents.createdAt));
 
-    // Build per-identity state map (last terminal event wins)
-    const actorState = new Map<string, { state: string; reason?: string }>();
+    interface ActorTerminal {
+      state: 'migrated' | 'failed';
+      reason?: string;
+      previousIdentityId?: string;
+    }
+    const actorState = new Map<string, ActorTerminal>();
     for (const row of rows) {
       if (!row.workspaceActorId) continue;
       const meta = row.metadata as Record<string, unknown> | null;
       if (row.action === 'identity.migrated') {
-        actorState.set(row.workspaceActorId, { state: 'migrated' });
-      } else if (
-        row.action === 'identity.migration_failed' ||
-        row.action === 'identity.migration_activation_failed' ||
-        row.action === 'identity.migration_archive_failed'
-      ) {
-        actorState.set(row.workspaceActorId, { state: 'failed', reason: meta?.reason as string | undefined });
+        // `migrated` wins over a prior `migration_failed` for retry scenarios.
+        actorState.set(row.workspaceActorId, {
+          state: 'migrated',
+          previousIdentityId: meta?.from as string | undefined,
+        });
+      } else if (row.action === 'identity.migration_failed') {
+        if (actorState.get(row.workspaceActorId)?.state === 'migrated') continue;
+        actorState.set(row.workspaceActorId, {
+          state: 'failed',
+          reason: meta?.reason as string | undefined,
+          previousIdentityId: meta?.from as string | undefined,
+        });
       }
     }
 
@@ -282,29 +326,44 @@ router.get(
       reason: s.reason,
     }));
 
-    const completed = perIdentity.filter((p) => p.state === 'migrated').length;
+    const failures = Array.from(actorState.entries())
+      .filter(([, s]) => s.state === 'failed')
+      .map(([actorId, s]) => ({
+        actorId,
+        previousIdentityId: s.previousIdentityId ?? '',
+        reason: s.reason ?? 'unknown',
+        retryable: classifyRetryable(s.reason),
+      }));
+
+    const migrated = perIdentity.filter((p) => p.state === 'migrated').length;
     const failed = perIdentity.filter((p) => p.state === 'failed').length;
-    const skipped = perIdentity.filter((p) => p.state === 'skipped').length;
     const total = perIdentity.length;
 
-    const allTerminal =
-      perIdentity.length > 0 &&
-      perIdentity.every(
-        (p) => p.state === 'migrated' || p.state === 'failed' || p.state === 'skipped',
-      );
+    // The subaccount-level terminal event (DE-CR-6) is written by the worker once
+    // every enqueued identity reaches a terminal state. Its presence is the
+    // single source of truth for `running` vs terminal.
+    const [completionRow] = await db
+      .select({ metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organisationId, req.orgId!),
+          eq(auditEvents.entityType, 'subaccount'),
+          eq(auditEvents.action, 'subaccount.migration_completed'),
+          sql`${auditEvents.metadata}->>'batchId' = ${batchId}`,
+        ),
+      )
+      .limit(1);
 
     let status: 'running' | 'success' | 'partial' | 'failed';
-    if (!allTerminal) {
-      status = 'running';
-    } else if (failed === 0 && skipped === 0) {
-      status = 'success';
-    } else if (completed === 0) {
-      status = 'failed';
+    if (completionRow) {
+      const meta = (completionRow.metadata ?? {}) as { status?: string };
+      status = (meta.status as 'success' | 'partial' | 'failed') ?? 'failed';
     } else {
-      status = 'partial';
+      status = 'running';
     }
 
-    res.json({ status, total, completed, failed, skipped, perIdentity });
+    res.json({ status, total, migrated, failed, failures, perIdentity });
   }),
 );
 
@@ -582,10 +641,13 @@ interface OrgChartNode {
   user?: { id: string; email: string };
 }
 
+// DE-CR-9: org-chart and actors are viewer-level reads — managers and
+// activity-viewers should see the chart without holding `manage_connector`.
+// Lifecycle mutations + /configure remain on `WORKSPACE_CONNECTOR_MANAGE`.
 router.get(
   '/api/subaccounts/:subaccountId/workspace/org-chart',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
@@ -702,7 +764,8 @@ router.get(
 router.get(
   '/api/subaccounts/:subaccountId/workspace/actors',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE),
+  // DE-CR-9: viewer-level read — see comment on /workspace/org-chart route.
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);

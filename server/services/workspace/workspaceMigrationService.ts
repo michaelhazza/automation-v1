@@ -11,6 +11,8 @@ import type { FailureObject } from '../../../shared/iee/failureReason.js';
 import { workspaceIdentityService } from './workspaceIdentityService.js';
 import { logger } from '../../lib/logger.js';
 
+export type MigrationStep = 'provision' | 'activate' | 'archive';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -33,6 +35,9 @@ export interface MigrateIdentityJob {
   targetConnectorConfigId: string;
   migrationRequestId: string;
   migrationJobBatchId: string;
+  /** Total identities enqueued for this batch — used by the worker to detect when
+   *  it has processed the LAST identity and should write `subaccount.migration_completed`. */
+  migrationJobBatchSize: number;
   initiatedByUserId: string;
 }
 
@@ -87,6 +92,7 @@ export async function start(
   // (3) Enqueue per-identity jobs — lazy import to avoid circular deps
   const { getPgBoss } = await import('../../lib/pgBossInstance.js');
   const boss = await getPgBoss();
+  const batchSize = identities.length;
   for (const identity of identities) {
     await (boss as any).send(
       'workspace.migrate-identity',
@@ -99,6 +105,7 @@ export async function start(
         targetConnectorConfigId: params.targetConnectorConfigId,
         migrationRequestId: params.migrationRequestId,
         migrationJobBatchId: batchId,
+        migrationJobBatchSize: batchSize,
         initiatedByUserId: params.initiatedByUserId,
       } satisfies MigrateIdentityJob,
       { retryLimit: 5, retryDelay: 60, retryBackoff: true },
@@ -170,19 +177,8 @@ export async function processIdentityMigration(
       provisioningRequestId,
     });
   } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    await db.insert(auditEvents).values({
-      organisationId: job.organisationId,
-      actorType: 'system' as const,
-      workspaceActorId: job.actorId,
-      action: 'identity.migration_failed',
-      entityType: 'workspace_identity',
-      metadata: {
-        from: job.currentIdentityId,
-        reason,
-        batchId: job.migrationJobBatchId,
-      },
-    });
+    await writeIdentityMigrationFailed(db, job, 'provision', err, null);
+    await maybeFinaliseBatch(db, job);
     throw err;
   }
 
@@ -194,20 +190,8 @@ export async function processIdentityMigration(
       job.initiatedByUserId,
     );
   } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    await db.insert(auditEvents).values({
-      organisationId: job.organisationId,
-      actorType: 'system' as const,
-      workspaceActorId: job.actorId,
-      action: 'identity.migration_activation_failed',
-      entityType: 'workspace_identity',
-      metadata: {
-        from: job.currentIdentityId,
-        target: provisioned.identityId,
-        reason,
-        batchId: job.migrationJobBatchId,
-      },
-    });
+    await writeIdentityMigrationFailed(db, job, 'activate', err, provisioned.identityId);
+    await maybeFinaliseBatch(db, job);
     throw err;
   }
 
@@ -219,20 +203,8 @@ export async function processIdentityMigration(
       job.initiatedByUserId,
     );
   } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    await db.insert(auditEvents).values({
-      organisationId: job.organisationId,
-      actorType: 'system' as const,
-      workspaceActorId: job.actorId,
-      action: 'identity.migration_archive_failed',
-      entityType: 'workspace_identity',
-      metadata: {
-        from: job.currentIdentityId,
-        target: provisioned.identityId,
-        reason,
-        batchId: job.migrationJobBatchId,
-      },
-    });
+    await writeIdentityMigrationFailed(db, job, 'archive', err, provisioned.identityId);
+    await maybeFinaliseBatch(db, job);
     throw err;
   }
 
@@ -249,6 +221,8 @@ export async function processIdentityMigration(
       batchId: job.migrationJobBatchId,
     },
   });
+
+  await maybeFinaliseBatch(db, job);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,4 +236,103 @@ function hashSubaccountId(saId: string): bigint {
 
 function deriveLocalPart(displayName: string): string {
   return displayName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'agent';
+}
+
+// DE-CR-5: every per-identity step-failure writes a single `identity.migration_failed`
+// terminal event. The failed step is recorded in `metadata.step` so callers can
+// show "provision failed" / "activation failed" / "archive failed" without needing
+// distinct action names that aren't in the spec §14.4 union.
+async function writeIdentityMigrationFailed(
+  db: ReturnType<typeof getOrgScopedDb>,
+  job: MigrateIdentityJob,
+  step: MigrationStep,
+  err: unknown,
+  targetIdentityId: string | null,
+): Promise<void> {
+  const reason = err instanceof Error ? err.message : String(err);
+  await db.insert(auditEvents).values({
+    organisationId: job.organisationId,
+    actorType: 'system' as const,
+    workspaceActorId: job.actorId,
+    action: 'identity.migration_failed',
+    entityType: 'workspace_identity',
+    metadata: {
+      from: job.currentIdentityId,
+      target: targetIdentityId,
+      step,
+      reason,
+      batchId: job.migrationJobBatchId,
+    },
+  });
+}
+
+// DE-CR-6: when the LAST in-flight identity for a batch reaches a terminal state
+// (success or failure), write a single `subaccount.migration_completed` row.
+// Idempotent on (batchId) via the partial unique index in migration 0261, so a
+// race between two final workers becomes ON CONFLICT DO NOTHING.
+async function maybeFinaliseBatch(
+  db: ReturnType<typeof getOrgScopedDb>,
+  job: MigrateIdentityJob,
+): Promise<void> {
+  const terminalRows = await db
+    .select({
+      workspaceActorId: auditEvents.workspaceActorId,
+      action: auditEvents.action,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.organisationId, job.organisationId),
+        eq(auditEvents.entityType, 'workspace_identity'),
+        sql`${auditEvents.metadata}->>'batchId' = ${job.migrationJobBatchId}`,
+        inArray(auditEvents.action, ['identity.migrated', 'identity.migration_failed']),
+      ),
+    );
+
+  // Collapse to one terminal action per actor — `migrated` wins over `migration_failed`
+  // for retry scenarios where an earlier attempt failed and a later one succeeded.
+  const actorTerminalAction = new Map<string, string>();
+  for (const row of terminalRows) {
+    if (!row.workspaceActorId) continue;
+    const existing = actorTerminalAction.get(row.workspaceActorId);
+    if (existing !== 'identity.migrated') {
+      actorTerminalAction.set(row.workspaceActorId, row.action);
+    }
+  }
+
+  // Only finalise when every enqueued identity has reached a terminal state.
+  if (actorTerminalAction.size < job.migrationJobBatchSize) return;
+
+  let migrated = 0;
+  let failed = 0;
+  for (const action of actorTerminalAction.values()) {
+    if (action === 'identity.migrated') migrated++;
+    else if (action === 'identity.migration_failed') failed++;
+  }
+  const total = actorTerminalAction.size;
+
+  let status: 'success' | 'partial' | 'failed';
+  if (failed === 0) status = 'success';
+  else if (migrated === 0) status = 'failed';
+  else status = 'partial';
+
+  // Idempotent on (batchId) via partial unique index in migration 0261. We use
+  // raw SQL because drizzle's `.onConflictDoNothing()` doesn't support partial
+  // expression indexes — the conflict target has to be `WHERE`-qualified to
+  // match the partial index inference.
+  await db.execute(sql`
+    INSERT INTO audit_events (organisation_id, actor_type, action, entity_type, entity_id, metadata, created_at)
+    VALUES (
+      ${job.organisationId},
+      'system',
+      'subaccount.migration_completed',
+      'subaccount',
+      ${job.subaccountId},
+      ${JSON.stringify({ batchId: job.migrationJobBatchId, status, total, migrated, failed })}::jsonb,
+      NOW()
+    )
+    ON CONFLICT ((metadata->>'batchId'))
+      WHERE entity_type = 'subaccount' AND action = 'subaccount.migration_completed'
+    DO NOTHING
+  `);
 }

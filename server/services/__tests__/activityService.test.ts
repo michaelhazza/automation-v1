@@ -133,7 +133,8 @@ console.log('--- sortActivityItems tiebreaker ---');
 const SAME_TIME = '2026-04-24T10:00:00.000Z';
 
 // Construct two SortableItems with identical createdAt but different ids.
-// With a uuid-style id, lexicographic DESC is deterministic.
+// DE-CR-8: spec §12 mandates `id ASC` within the same `created_at` for the
+// activity feed. Lower id wins.
 const itemA: SortableItem = {
   id: 'aaaaaaaa-0000-0000-0000-000000000002',
   status: 'completed',
@@ -148,30 +149,30 @@ const itemB: SortableItem = {
   createdAt: SAME_TIME,
 };
 
-// itemA.id > itemB.id (lexicographic), so itemA should sort first in id DESC order
+// itemB.id < itemA.id (lexicographic), so itemB sorts first under id ASC.
 
-test('identical createdAt — newest sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'newest');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — newest sort: lower id comes first (id ASC tiebreaker)', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'newest');
+  assertEqual(sorted[0].id, itemB.id, 'first item id');
+  assertEqual(sorted[1].id, itemA.id, 'second item id');
 });
 
-test('identical createdAt — oldest sort: higher id comes first (consistent tiebreaker)', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'oldest');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — oldest sort: lower id comes first (consistent tiebreaker)', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'oldest');
+  assertEqual(sorted[0].id, itemB.id, 'first item id');
+  assertEqual(sorted[1].id, itemA.id, 'second item id');
 });
 
-test('identical createdAt — severity sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'severity');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — severity sort: lower id comes first', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'severity');
+  assertEqual(sorted[0].id, itemB.id, 'first item id');
+  assertEqual(sorted[1].id, itemA.id, 'second item id');
 });
 
-test('identical createdAt — attention_first sort: higher id comes first', () => {
-  const sorted = sortActivityItems([itemB, itemA], 'attention_first');
-  assertEqual(sorted[0].id, itemA.id, 'first item id');
-  assertEqual(sorted[1].id, itemB.id, 'second item id');
+test('identical createdAt — attention_first sort: lower id comes first', () => {
+  const sorted = sortActivityItems([itemA, itemB], 'attention_first');
+  assertEqual(sorted[0].id, itemB.id, 'first item id');
+  assertEqual(sorted[1].id, itemA.id, 'second item id');
 });
 
 test('sort is stable for 3 items with different timestamps', () => {

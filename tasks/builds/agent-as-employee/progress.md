@@ -127,6 +127,21 @@ Pending — to be completed during Task A4.
 
 **N1–N4:** Minor non-blocking improvements (see full review log in review-logs/).
 
+## Spec-conformance follow-ups DE-CR-3 .. DE-CR-10 (2026-04-30)
+
+All 8 directional gaps from `spec-conformance-log-agent-as-employee-phases-de-2026-04-30T00-38-18Z.md` are closed (DE-CR-1 / DE-CR-2 were resolved in commit `d5bbc2ef`).
+
+| ID | Resolution |
+|---|---|
+| DE-CR-3 | Status-poll response shape now matches §12: `{ status, total, migrated, failed, failures: [{actorId, previousIdentityId, reason, retryable}], perIdentity }`. `completed` renamed → `migrated`. `failures[]` aggregate added with retryability classifier per spec §7. `perIdentity[]` retained as a UI-only convenience for the modal progress bar. |
+| DE-CR-4 | `WorkspaceTenantConfig` extended with spec §12 fields `backend`, `connectorConfigId`, `domain`. Domain resolution mirrors the GET /workspace summary route (per-subaccount override → `NATIVE_EMAIL_DOMAIN` env → null). Tenant-config test extended with backend / connectorConfigId / domain coverage. |
+| DE-CR-5 | All three step-failure events collapsed into a single `identity.migration_failed` action with `metadata.step ∈ {'provision','activate','archive'}`. Status-poll route reads only `identity.migrated` and `identity.migration_failed`. |
+| DE-CR-6 | New `subaccount.migration_completed` terminal event written by the per-identity worker once every enqueued identity reaches a terminal state. Idempotent on `(batchId)` via partial unique index in migration **0261**. Aggregate status follows §14.4 no-silent-partial-success rule (success / partial / failed). `migrationJobBatchSize` added to `MigrateIdentityJob` so the worker can detect the batch's last completion. |
+| DE-CR-7 | Activity feed migrated to cursor pagination per spec §12. `ActivityFilters.offset` removed; `ActivityFilters.cursor` added. Each of the 6 source fetchers applies `(createdAt, id) > cursor` predicate at the SQL layer. Server returns `{ items, nextCursor }` (base64-encoded `{createdAt, id}`); client decodes opaquely. `total/hasMore` removed; `hasMore` derived from `nextCursor !== null` in the client. |
+| DE-CR-8 | Tiebreaker flipped from `id DESC` to `id ASC` in both the pure sort (`activityServicePure.ts`) and all 7 DB-level orderBy clauses (`activityService.ts`). Pure tiebreaker tests rewritten and re-verified (`npx tsx server/services/__tests__/activityService.test.ts` — 18 passed). |
+| DE-CR-9 | `GET /workspace/org-chart` and `GET /workspace/actors` permission gates moved from `WORKSPACE_CONNECTOR_MANAGE` to `WORKSPACE_VIEW`. Lifecycle mutations + `POST /configure` / `/onboard` / `/migrate` remain on `WORKSPACE_CONNECTOR_MANAGE`. |
+| DE-CR-10 | **Decision: deviation accepted.** `DEVELOPMENT_GUIDELINES.md §2` scopes the rule to "routes and `server/lib/**`". `server/services/activityService.ts` is a service layer; importing `db` directly is permitted by the rule. `server/jobs/seatRollupJob.ts` no longer imports `db` directly after the DE-CR-2 fix (uses `withAdminConnection`). No code change required. |
+
 ## Open questions
 
 (none)

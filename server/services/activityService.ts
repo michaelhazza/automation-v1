@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, gte, lte, ilike, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, isNull, gte, lte, ilike, inArray, lt, gt, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   agentRuns,
@@ -82,6 +82,17 @@ export type ActivityScope =
   | { type: 'org'; orgId: string; subaccountId?: string }
   | { type: 'system'; organisationId?: string };
 
+/**
+ * Cursor for the activity feed (DE-CR-7 / spec §12).
+ * Encodes the (createdAt, id) tuple of the LAST item in the previous page.
+ * Server filter: `(createdAt, id) "after" cursor` under `createdAt DESC, id ASC` ordering, i.e.
+ *   `createdAt < cursor.createdAt OR (createdAt = cursor.createdAt AND id > cursor.id)`.
+ */
+export interface ActivityCursor {
+  createdAt: string;  // ISO string
+  id: string;
+}
+
 export type ActivityFilters = {
   type?: string[];
   status?: string[];
@@ -94,7 +105,8 @@ export type ActivityFilters = {
   q?: string;
   sort?: 'newest' | 'oldest' | 'severity' | 'attention_first';
   limit?: number;
-  offset?: number;
+  /** DE-CR-7: cursor pagination only — offset is forbidden by spec §12. */
+  cursor?: ActivityCursor;
 };
 
 // ---------------------------------------------------------------------------
@@ -202,6 +214,37 @@ function subaccountIdFromScope(scope: ActivityScope): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Cursor predicate helper — DE-CR-7
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the SQL predicate that walks PAST a cursor under `createdAt DESC, id ASC`
+ * ordering. Returns `undefined` when no cursor is present so the predicate can be
+ * omitted from `and(...)` without producing a `WHERE TRUE` no-op.
+ *
+ * For a cursor C = (createdAt_c, id_c), an item is "after" C in the feed if
+ * `createdAt < createdAt_c OR (createdAt = createdAt_c AND id > id_c)`.
+ *
+ * Each source applies this against its own canonical (createdAt, id) columns.
+ * After in-memory merge + sort, items remain in canonical order because the
+ * tiebreaker (id ASC) is consistent across sources.
+ */
+function buildCursorPredicate<C extends { name: string }, I extends { name: string }>(
+  createdAtCol: C,
+  idCol: I,
+  cursor: ActivityCursor | undefined,
+) {
+  if (!cursor) return undefined;
+  const cutoff = new Date(cursor.createdAt);
+  // Cast columns through `any` because drizzle's column type expressions are too
+  // loose to compose generically without a deep type-import dance — the runtime
+  // shape is just `Column` either way.
+  const c = createdAtCol as any;
+  const i = idCol as any;
+  return or(lt(c, cutoff), and(eq(c, cutoff), gt(i, cursor.id)));
+}
+
+// ---------------------------------------------------------------------------
 // Data source fetchers
 // ---------------------------------------------------------------------------
 
@@ -220,6 +263,9 @@ async function fetchAgentRuns(
   if (filters.to) conditions.push(lte(agentRuns.createdAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(agentRuns.summary, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(agentRuns.createdAt, agentRuns.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       run: agentRuns,
@@ -235,7 +281,7 @@ async function fetchAgentRuns(
     // LEFT JOIN users — deleted user yields null, does NOT drop the row
     .leftJoin(users, eq(users.id, agentRuns.actingAsUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(agentRuns.createdAt), desc(agentRuns.id))
+    .orderBy(desc(agentRuns.createdAt), asc(agentRuns.id))
     .limit(200);
 
   return rows.map(({ run, agentName, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
@@ -280,6 +326,9 @@ async function fetchReviewItems(
   if (filters.from) conditions.push(gte(reviewItems.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(reviewItems.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(reviewItems.createdAt, reviewItems.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       item: reviewItems,
@@ -292,7 +341,7 @@ async function fetchReviewItems(
     .leftJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, reviewItems.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(reviewItems.createdAt), desc(reviewItems.id))
+    .orderBy(desc(reviewItems.createdAt), asc(reviewItems.id))
     .limit(200);
 
   return rows.map(({ item, actionType, agentName, subaccountName }) => ({
@@ -328,11 +377,14 @@ async function fetchHealthFindings(
   if (filters.to) conditions.push(lte(workspaceHealthFindings.detectedAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(workspaceHealthFindings.message, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(workspaceHealthFindings.detectedAt, workspaceHealthFindings.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select()
     .from(workspaceHealthFindings)
     .where(and(...conditions))
-    .orderBy(desc(workspaceHealthFindings.detectedAt), desc(workspaceHealthFindings.id))
+    .orderBy(desc(workspaceHealthFindings.detectedAt), asc(workspaceHealthFindings.id))
     .limit(200);
 
   return rows.map((f) => ({
@@ -368,6 +420,9 @@ async function fetchInboxItems(
   if (filters.from) conditions.push(gte(actions.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(actions.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(actions.createdAt, actions.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       action: actions,
@@ -378,7 +433,7 @@ async function fetchInboxItems(
     .innerJoin(agents, and(eq(agents.id, actions.agentId), isNull(agents.deletedAt)))
     .leftJoin(subaccounts, and(eq(subaccounts.id, actions.subaccountId), isNull(subaccounts.deletedAt)))
     .where(and(...conditions))
-    .orderBy(desc(actions.createdAt), desc(actions.id))
+    .orderBy(desc(actions.createdAt), asc(actions.id))
     .limit(200);
 
   return rows.map(({ action, agentName, subaccountName }) => ({
@@ -414,6 +469,9 @@ async function fetchWorkflowRuns(
   if (filters.from) conditions.push(gte(workflowRuns.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(workflowRuns.createdAt, new Date(filters.to)));
 
+  const cursorPredicate = buildCursorPredicate(workflowRuns.createdAt, workflowRuns.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       run: workflowRuns,
@@ -422,7 +480,7 @@ async function fetchWorkflowRuns(
     .from(workflowRuns)
     .leftJoin(subaccounts, and(eq(subaccounts.id, workflowRuns.subaccountId), isNull(subaccounts.deletedAt)))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
+    .orderBy(desc(workflowRuns.createdAt), asc(workflowRuns.id))
     .limit(200);
 
   return rows.map(({ run, subaccountName }) => ({
@@ -457,6 +515,9 @@ async function fetchWorkflowExecutions(
   if (filters.to) conditions.push(lte(executions.createdAt, new Date(filters.to)));
   if (filters.q) conditions.push(ilike(executions.errorMessage, `%${filters.q}%`));
 
+  const cursorPredicate = buildCursorPredicate(executions.createdAt, executions.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const rows = await db
     .select({
       exec: executions,
@@ -470,7 +531,7 @@ async function fetchWorkflowExecutions(
     // LEFT JOIN users — deleted user yields null, does NOT drop the row
     .leftJoin(users, eq(users.id, executions.triggeredByUserId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(executions.createdAt), desc(executions.id))
+    .orderBy(desc(executions.createdAt), asc(executions.id))
     .limit(200);
 
   return rows.map(({ exec, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
@@ -573,6 +634,9 @@ async function fetchAuditEvents(
 
   conditions.push(inArray(auditEvents.action, workspaceTypes));
 
+  const cursorPredicate = buildCursorPredicate(auditEvents.createdAt, auditEvents.id, filters.cursor);
+  if (cursorPredicate) conditions.push(cursorPredicate);
+
   const whereClause = subId
     ? and(...conditions, eq(workspaceActors.subaccountId, subId))
     : conditions.length > 0 ? and(...conditions) : undefined;
@@ -590,7 +654,7 @@ async function fetchAuditEvents(
     .from(auditEvents)
     .leftJoin(workspaceActors, eq(workspaceActors.id, auditEvents.workspaceActorId))
     .where(whereClause)
-    .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
+    .orderBy(desc(auditEvents.createdAt), asc(auditEvents.id))
     .limit(200);
 
   return rows.map((row) => {
@@ -646,11 +710,12 @@ function filterBySeverity(items: ActivityItem[], severities: string[]): Activity
 export async function listActivityItems(
   filters: ActivityFilters,
   scope: ActivityScope,
-): Promise<{ items: ActivityItem[]; total: number; hasMore: boolean }> {
+): Promise<{ items: ActivityItem[]; nextCursor: ActivityCursor | null }> {
   const typeFilter = filters.type ?? [];
   const shouldFetch = (t: ActivityType) => typeFilter.length === 0 || typeFilter.includes(t);
 
-  // Fan out to data sources in parallel
+  // Fan out to data sources in parallel. Each fetcher applies the cursor
+  // predicate at the SQL layer, so the merged set is already past the cursor.
   const [
     agentRunItems,
     reviewItemRows,
@@ -691,18 +756,21 @@ export async function listActivityItems(
     items = filterBySeverity(items, filters.severity);
   }
 
-  // Sort
+  // Sort under the canonical (createdAt DESC, id ASC) ordering — DE-CR-8.
   items = sortItems(items, filters.sort ?? 'attention_first');
 
-  const total = items.length;
   const limit = Math.min(filters.limit ?? 50, 200);
-  const offset = filters.offset ?? 0;
+  const paged = items.slice(0, limit);
 
-  const paged = items.slice(offset, offset + limit);
+  // DE-CR-7: emit a cursor only when the full page was filled. If we returned
+  // fewer than `limit` items, there is no next page to walk to. The cursor is
+  // the (createdAt, id) of the LAST item shown — clients pass it back to
+  // continue under `(createdAt, id) "after" cursor` semantics.
+  const last = paged[paged.length - 1];
+  const nextCursor: ActivityCursor | null =
+    paged.length === limit && last
+      ? { createdAt: last.createdAt, id: last.id }
+      : null;
 
-  return {
-    items: paged,
-    total,
-    hasMore: offset + limit < total,
-  };
+  return { items: paged, nextCursor };
 }

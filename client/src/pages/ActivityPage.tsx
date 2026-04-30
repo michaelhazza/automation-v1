@@ -174,9 +174,10 @@ export default function ActivityPage({ user }: { user: User }) {
       ? 'system'
       : 'org';
 
-  // Data state
+  // Data state — DE-CR-7: cursor pagination only; `total` is not part of the
+  // server contract any more, so the "X items" counter reflects items currently
+  // loaded into the feed.
   const [items, setItems] = useState<ActivityItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // Workspace actors (subaccount scope only)
@@ -260,11 +261,9 @@ export default function ActivityPage({ user }: { user: User }) {
       const data = scope === 'org'
         ? res.data.data
         : res.data;
-      setItems(data.items);
-      setTotal(data.total);
+      setItems(data.items ?? []);
     } catch {
       setItems([]);
-      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -354,7 +353,7 @@ export default function ActivityPage({ user }: { user: User }) {
               Clear all
             </button>
           )}
-          <span className="text-[13px] text-slate-500">{total} items</span>
+          <span className="text-[13px] text-slate-500">{items.length} items</span>
         </div>
       </div>
 
