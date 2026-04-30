@@ -38,7 +38,7 @@ export async function runSkillAnalyzerJobWithIncidentEmission(
     const retryLimit = getJobConfig('skill-analyzer').retryLimit ?? 0;
     const isTerminalAttempt = retryCount >= retryLimit;
     if (isTerminalAttempt) {
-      recordIncident({
+      await recordIncident({
         source: 'job',
         severity: 'high',
         summary: `Skill analyzer terminal failure for job ${jobId}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,

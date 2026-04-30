@@ -109,7 +109,7 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
 
         const [actor] = await db
           .insert(workspaceActors)
-          .values({ id: uid(), organisationId: orgId, subaccountId: subA.id })
+          .values({ id: uid(), organisationId: orgId, subaccountId: subA.id, actorKind: 'agent', displayName: 'scope-test-actor' })
           .returning({ id: workspaceActors.id });
 
         const [agent] = await db

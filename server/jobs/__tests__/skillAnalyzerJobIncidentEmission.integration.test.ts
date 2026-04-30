@@ -43,7 +43,7 @@ test.skipIf(SKIP)('skill-analyzer wrapper re-throws + writes incident on TERMINA
   expect(row, 'expected a system_incidents row from wrapper invocation').toBeTruthy();
   expect(row.errorCode).toBe('skill_analyzer_failed');
   expect(row.severity).toBe('high');
-  expect((row.latestErrorDetail as { jobId?: string }).toBeTruthy().jobId === fakeJobId, 'expected jobId in errorDetail');
+  expect((row.latestErrorDetail as { jobId?: string }).jobId, 'expected jobId in errorDetail').toBe(fakeJobId);
 });
 
 test.skipIf(SKIP)('skill-analyzer wrapper RE-THROWS but does NOT emit on non-terminal (retryCount < retryLimit)', async () => {

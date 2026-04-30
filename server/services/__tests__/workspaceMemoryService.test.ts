@@ -85,7 +85,7 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
     const [agent] = await db
       .select({ id: schema.agents.id })
       .from(schema.agents)
-      .where(eq(schema.agents.id, AGENT_ID))
+      .where(and(eq(schema.agents.id, AGENT_ID), eq(schema.agents.organisationId, ORG_ID)))
       .limit(1);
     if (!agent) throw new Error(`Canonical agent ${AGENT_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
 

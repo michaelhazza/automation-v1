@@ -26,9 +26,10 @@ if (!DATABASE_URL) {
 // Canonical UUIDs — extracted from the *.integration.test.ts files. Tests
 // reference these directly; do not change without coordinating with every
 // test file that depends on them.
-const ORG_ID         = '00000000-0000-0000-0000-000000000001';
-const USER_ID        = '00000000-0000-0000-0000-000000000002';
-const AGENT_ID       = '00000000-0000-0000-0000-000000000002'; // agent UUID overlaps with user UUID intentionally — different tables
+const ORG_ID              = '00000000-0000-0000-0000-000000000001';
+const USER_ID             = '00000000-0000-0000-0000-000000000002';
+const AGENT_ID            = '00000000-0000-0000-0000-000000000002'; // agent UUID overlaps with user UUID intentionally — different tables
+const SYSTEM_MONITOR_AGENT_ID = '00000000-0000-0000-0000-000000000003';
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
@@ -79,11 +80,20 @@ async function main(): Promise<void> {
       [AGENT_ID, ORG_ID],
     );
 
+    // ── system_monitor agent — required by triageHandler.resolveSystemMonitorAgentId ──
+    await client.query(
+      `INSERT INTO agents (id, organisation_id, name, slug, status)
+       VALUES ($1::uuid, $2::uuid, 'System Monitor', 'system_monitor', 'active')
+       ON CONFLICT (id) DO NOTHING`,
+      [SYSTEM_MONITOR_AGENT_ID, ORG_ID],
+    );
+
     await client.query('COMMIT');
 
     const orgCount    = await client.query(`SELECT COUNT(*)::int AS c FROM organisations WHERE id = $1::uuid`, [ORG_ID]);
     const userCount   = await client.query(`SELECT COUNT(*)::int AS c FROM users         WHERE id = $1::uuid`, [USER_ID]);
     const agentCount  = await client.query(`SELECT COUNT(*)::int AS c FROM agents        WHERE id = $1::uuid`, [AGENT_ID]);
+    const sysMonCount = await client.query(`SELECT COUNT(*)::int AS c FROM agents        WHERE id = $1::uuid`, [SYSTEM_MONITOR_AGENT_ID]);
     const subaccountCount = await client.query(
       `SELECT COUNT(*)::int AS c FROM subaccounts WHERE organisation_id = $1::uuid AND slug = 'integration-test-subaccount' AND deleted_at IS NULL`,
       [ORG_ID],
@@ -94,6 +104,7 @@ async function main(): Promise<void> {
     console.log(`  subaccounts[org=${ORG_ID}, slug=integration-test-subaccount]: ${subaccountCount.rows[0].c}`);
     console.log(`  users[${USER_ID}]: ${userCount.rows[0].c}`);
     console.log(`  agents[${AGENT_ID}]: ${agentCount.rows[0].c}`);
+    console.log(`  agents[system_monitor, ${SYSTEM_MONITOR_AGENT_ID}]: ${sysMonCount.rows[0].c}`);
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

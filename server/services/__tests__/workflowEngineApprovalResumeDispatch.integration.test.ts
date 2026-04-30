@@ -473,7 +473,7 @@ test.skipIf(SKIP)('test 2: concurrent double-approve fires webhook exactly once 
       await cleanupWorkflowScope({ runId: seed.runId, stepRunId: seed.stepRunId });
     }
   } finally {
-    signSpy.mock.restore();
+    signSpy.mockRestore();
     await receiver.close();
   }
 });
@@ -539,7 +539,7 @@ test.skipIf(SKIP)('test 3: rejected invoke_automation completes without webhook 
       await cleanupWorkflowScope({ runId: seed.runId, stepRunId: seed.stepRunId });
     }
   } finally {
-    signSpy.mock.restore();
+    signSpy.mockRestore();
     await receiver.close();
   }
 });

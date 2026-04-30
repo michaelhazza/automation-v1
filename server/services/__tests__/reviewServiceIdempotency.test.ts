@@ -164,6 +164,7 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
   }
 
   async function cleanupSharedFixture(ids: SeedIds): Promise<void> {
+    await db.delete(actions).where(eq(actions.organisationId, ids.orgId));
     await db.delete(subaccounts).where(eq(subaccounts.organisationId, ids.orgId));
     await db.delete(agents).where(eq(agents.organisationId, ids.orgId));
     await db.delete(organisations).where(eq(organisations.id, ids.orgId));
@@ -192,7 +193,7 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
     try {
       installServiceMocks(actionId, sharedIds.subaccountId, sharedIds.orgId);
 
-      const userId = '00000000-0000-0000-0000-000000000001';
+      const userId = '00000000-0000-0000-0000-000000000002';
 
       let loserCanStart: (() => void) | undefined;
       const loserGate = new Promise<void>((resolve) => { loserCanStart = resolve; });
@@ -240,7 +241,7 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
       }));
       mock.method(actionService, 'emitEvent', async () => undefined);
 
-      const userId = '00000000-0000-0000-0000-000000000001';
+      const userId = '00000000-0000-0000-0000-000000000002';
       const comment = 'Race test rejection';
 
       let loserCanStart: (() => void) | undefined;
@@ -277,7 +278,7 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
     try {
       installServiceMocks(actionId, sharedIds.subaccountId, sharedIds.orgId);
 
-      const userId = '00000000-0000-0000-0000-000000000001';
+      const userId = '00000000-0000-0000-0000-000000000002';
 
       let loserCanStart: (() => void) | undefined;
       const loserGate = new Promise<void>((resolve) => { loserCanStart = resolve; });
