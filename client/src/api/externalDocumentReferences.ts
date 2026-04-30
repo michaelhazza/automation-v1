@@ -19,8 +19,15 @@ export async function attachExternalReference(subaccountId: string, taskId: stri
   return res.data;
 }
 
-export async function listExternalReferences(subaccountId: string, taskId: string): Promise<ExternalDocumentReference[]> {
+export interface ListExternalReferencesResult {
+  refs: ExternalDocumentReference[];
+  fetchFailurePolicy: 'tolerant' | 'strict' | 'best_effort';
+}
+
+export async function listExternalReferences(subaccountId: string, taskId: string): Promise<ListExternalReferencesResult> {
   const res = await api.get(`/api/subaccounts/${subaccountId}/tasks/${taskId}/external-references`);
+  // API returns { refs, fetchFailurePolicy } when refs exist; bare [] when empty (no bundle).
+  if (Array.isArray(res.data)) return { refs: res.data, fetchFailurePolicy: 'tolerant' };
   return res.data;
 }
 

@@ -237,8 +237,9 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
 
   const loadDriveRefs = useCallback(async () => {
     try {
-      const refs = await listExternalReferences(subaccountId, itemId);
-      setDriveRefs(refs);
+      const result = await listExternalReferences(subaccountId, itemId);
+      setDriveRefs(result.refs);
+      setFetchFailurePolicy(result.fetchFailurePolicy);
     } catch { /* ignore */ }
   }, [subaccountId, itemId]);
 
@@ -381,7 +382,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     }
   };
 
-  const handlePick = async (file: DriveFile, connectionId: string) => {
+  const handlePick = useCallback(async (file: DriveFile, connectionId: string) => {
     try {
       await attachExternalReference(subaccountId, itemId, {
         connectionId,
@@ -398,7 +399,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     } finally {
       setPickerOpen(false);
     }
-  };
+  }, [subaccountId, itemId, loadDriveRefs]);
 
   const handleRemoveDriveRef = async (referenceId: string) => {
     try {

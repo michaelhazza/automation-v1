@@ -131,10 +131,18 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
   }, [load]);
 
   useEffect(() => {
-    api.get('/api/org/connections', { params: { provider: 'google_drive' } })
-      .then((res) => setDriveConnections(res.data ?? []))
+    // Drive connections are subaccount-scoped; use the subaccount endpoint when available.
+    const url = scope.type === 'scheduled_task'
+      ? `/api/subaccounts/${scope.subaccountId}/connections`
+      : '/api/org/connections';
+    api.get(url)
+      .then((res) => setDriveConnections(
+        (res.data ?? []).filter((c: { providerType: string; connectionStatus: string }) =>
+          c.providerType === 'google_drive' && c.connectionStatus === 'active'
+        )
+      ))
       .catch(() => { /* non-fatal: picker will show no connections */ });
-  }, []);
+  }, [scope]);
 
   function openAdd() {
     setForm(EMPTY_FORM);

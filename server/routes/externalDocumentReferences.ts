@@ -99,7 +99,10 @@ router.get(
         ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason ?? null }
         : null,
     }));
-    return res.json(viewModels);
+    return res.json({
+      refs: viewModels,
+      fetchFailurePolicy: attachments[0].fetchFailurePolicy,
+    });
   }),
 );
 

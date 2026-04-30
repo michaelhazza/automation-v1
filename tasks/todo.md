@@ -2063,3 +2063,14 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 - [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
 - [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
+
+## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review — 2026-05-01
+
+### D-R1-F5: Rebind modal does not verify access before confirm
+
+`RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
+
+Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
