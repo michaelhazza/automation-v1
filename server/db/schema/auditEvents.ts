@@ -12,6 +12,9 @@ export const auditEvents = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id')
       .references(() => organisations.id),
+    // actorId = auth/request principal (user_id, agent_id, or system origin).
+    // Polymorphic — unioned with actorType. Do NOT join across actorId and
+    // workspaceActorId: they live in different identity spaces.
     actorId: uuid('actor_id'),
     actorType: text('actor_type').notNull().$type<'user' | 'system' | 'agent'>(),
     action: text('action').notNull(),
@@ -20,6 +23,9 @@ export const auditEvents = pgTable(
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     correlationId: text('correlation_id'), // end-to-end flow tracing (runId, requestId, etc.)
     ipAddress: text('ip_address'),
+    // workspaceActorId = canonical domain identity (the "who" in workspace
+    // terms). FK to workspace_actors. Use this for activity feeds, org charts,
+    // and cross-actor analytics. Not a substitute for actorId in auth checks.
     workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
