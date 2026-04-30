@@ -30,4 +30,14 @@ This session uses corrected diff base (`origin/main`, not local `main`) → 460K
 ### Round 1 commit
 `3a8632e6` — fix(external-doc-refs): ChatGPT round-1 — picker reopen, connection scope, failure policy hydration
 
+| 2 | F1 | Picker re-open — onClose still inline | technical | implement | implemented | `handleClosePicker = useCallback(...)` extracted; passed as `onClose` to DriveFilePicker |
+| 2 | F2 | Connection scope inconsistency | technical | reject | rejected | Agent scope is dead code (no callsite); all live paths fixed in R1 |
+| 2 | F3 | Failure policy not hydrated | technical | reject | rejected | Fixed in R1; ChatGPT reviewed pre-fix code |
+| 2 | F4 | Rebind skips access validation | technical | implement | implemented | `ExternalDocumentRebindModal` calls `verifyAccess()` on connection select; blocks confirm on failure |
+| 2 | F5 | Squash migrations | technical | reject | rejected | Corrective migration pattern is correct |
+| 2 | F6 | Unique index too broad | technical | reject | rejected | Misread: multi-bundle via `document_bundle_members` |
+
+### Round 2 commit
+`3fde398e` — fix(external-doc-refs): ChatGPT round-2 — memoize onClose, rebind access verification
+
 ---
