@@ -373,18 +373,15 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     if (!agentId || !activeConvId) return;
     const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant');
     if (!lastAssistantMsg) return;
-    try {
-      const { data } = await api.post(
-        `/api/agents/${agentId}/conversations/${activeConvId}/messages/${lastAssistantMsg.id}/dispatch-action`,
-        { actionKey },
-      );
-      if (data.redirectUrl) {
-        navigate(data.redirectUrl);
-      }
-    } catch (err) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to dispatch action.');
+    const { data } = await api.post(
+      `/api/agents/${agentId}/conversations/${activeConvId}/messages/${lastAssistantMsg.id}/dispatch-action`,
+      { actionKey },
+    );
+    if (data.redirectUrl) {
+      navigate(data.redirectUrl);
     }
+    // If no redirect, the chip component shows a brief "Done" state.
+    // Errors propagate as thrown exceptions so the chip shows inline error state.
   }, [agentId, activeConvId, messages, navigate]);
 
   if (loading) {
@@ -649,6 +646,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                 chips={chips}
                 onPromptFill={handlePromptFill}
                 onSystemAction={handleSystemAction}
+                disabledKeys={[]}
               />
             ) : null;
           })()}

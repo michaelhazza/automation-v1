@@ -66,10 +66,17 @@ export function parseSuggestedActions(
     if (result.success) {
       chips.push(result.data);
     } else {
-      console.warn('[suggestedActions] Dropping invalid chip entry', {
+      const droppedKey =
+        item !== null &&
+        typeof item === 'object' &&
+        (item as Record<string, unknown>).kind === 'system' &&
+        typeof (item as Record<string, unknown>).actionKey === 'string'
+          ? ((item as Record<string, unknown>).actionKey as string)
+          : 'malformed';
+      console.warn('suggested_action_dropped', {
         conversationId: logCtx.conversationId,
-        item,
-        error: result.error.message,
+        droppedKey,
+        action: 'suggested_action_dropped',
       });
     }
   }
