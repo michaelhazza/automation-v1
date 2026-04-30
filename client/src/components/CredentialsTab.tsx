@@ -30,15 +30,17 @@ const PROVIDER_LABELS: Record<string, string> = {
   teamwork: 'Teamwork',
   web_login: 'Web Login',
   custom: 'Custom',
+  google_drive: 'Google Drive',
 };
 
 /** OAuth providers available for connection — matches server/config/oauthProviders.ts */
-const OAUTH_PROVIDER_OPTIONS: { key: string; label: string; description: string }[] = [
-  { key: 'slack', label: 'Slack', description: 'Team messaging and notifications' },
-  { key: 'gmail', label: 'Gmail', description: 'Send and read emails' },
-  { key: 'hubspot', label: 'HubSpot', description: 'CRM contacts and deals' },
-  { key: 'ghl', label: 'GoHighLevel', description: 'Contacts and opportunities' },
-  { key: 'teamwork', label: 'Teamwork', description: 'Project management' },
+const OAUTH_PROVIDER_OPTIONS: { key: string; label: string; description: string; category?: 'file_store' | 'action' }[] = [
+  { key: 'google_drive', label: 'Google Drive', description: 'Attach Drive files as live document references', category: 'file_store' },
+  { key: 'slack', label: 'Slack', description: 'Team messaging and notifications', category: 'action' },
+  { key: 'gmail', label: 'Gmail', description: 'Send and read emails', category: 'action' },
+  { key: 'hubspot', label: 'HubSpot', description: 'CRM contacts and deals', category: 'action' },
+  { key: 'ghl', label: 'GoHighLevel', description: 'Contacts and opportunities', category: 'action' },
+  { key: 'teamwork', label: 'Teamwork', description: 'Project management', category: 'action' },
 ];
 
 const STATUS_STYLES: Record<string, string> = {
@@ -361,16 +363,22 @@ export default function CredentialsTab({ subaccountId }: Props) {
             </button>
             {showProviderMenu && (
               <div className="absolute right-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1">
-                {OAUTH_PROVIDER_OPTIONS.map(p => (
-                  <button
-                    key={p.key}
-                    onClick={() => connectProvider(p.key)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors"
-                  >
-                    <span className="text-sm font-medium text-slate-800">{p.label}</span>
-                    <span className="block text-xs text-slate-400">{p.description}</span>
-                  </button>
-                ))}
+                {OAUTH_PROVIDER_OPTIONS.map((p, idx) => {
+                  const prev = OAUTH_PROVIDER_OPTIONS[idx - 1];
+                  const showDivider = idx > 0 && p.category === 'action' && prev?.category === 'file_store';
+                  return (
+                    <div key={p.key}>
+                      {showDivider && <div className="border-t border-slate-200 my-1" />}
+                      <button
+                        onClick={() => connectProvider(p.key)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="text-sm font-medium text-slate-800">{p.label}</span>
+                        <span className="block text-xs text-slate-400">{p.description}</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
