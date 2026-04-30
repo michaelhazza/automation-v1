@@ -153,6 +153,11 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
         - **Recommended:** [.chatgpt-diffs/pr<N>-round1-code-diff.diff](.chatgpt-diffs/pr<N>-round1-code-diff.diff) — <size>, code-only (<file-count> files)
         - **Full:** [.chatgpt-diffs/pr<N>-round1-diff.diff](.chatgpt-diffs/pr<N>-round1-diff.diff) — <size>, includes specs/plan/logs (<file-count> files)
+
+      Use the **full** diff when the PR changes both code and spec files that are
+      load-bearing context for the code (e.g. an agent definition alongside its
+      spec, or a capabilities doc update alongside the feature it describes).
+      The code-only diff is sufficient when specs/plans are background-only.
       ```
 
    f. Print: `Upload the recommended diff to ChatGPT, then paste the response here to begin Round 1.`

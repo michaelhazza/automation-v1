@@ -6,6 +6,8 @@ Per-agent Final Summary contracts, verdict regex, and persistence rules live in 
 
 Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` (step 5), and `feature-coordinator` (D.5 Doc Sync gate). Agents reference this file rather than embedding their own copy of the list.
 
+**Adding a new reference doc:** any PR that introduces a new top-level reference doc must add it to the table below in the same commit. A doc not in this table is never enforced.
+
 ---
 
 ## Reference docs and update triggers

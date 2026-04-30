@@ -120,7 +120,9 @@ Self-write session logs to `tasks/review-logs/chatgpt-pr-review-<slug>-<timestam
 
 **Final Summary fields** — every finalised log must include all of these in its
 `## Final Summary` block. A missing field blocks finalisation; `no` requires a
-one-line rationale; `n/a` = doc scope not touched by this session.
+one-line rationale written on the same line (`no — <rationale>`); a bare `no` with
+no rationale is treated as a missing verdict. `n/a` = doc scope not touched by
+this session.
 
 | Field | PR agent | Spec agent |
 |---|---|---|
