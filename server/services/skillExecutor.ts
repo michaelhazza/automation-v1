@@ -61,6 +61,7 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 import { recordIncident } from './incidentIngestor.js';
+import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
 
 registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
@@ -169,6 +170,13 @@ export interface SkillExecutionContext {
   mcpCallCount?: number;
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
+  /**
+   * The conversation this run is associated with, when known. Populated from
+   * AgentRunRequest.conversationId so that worker skills that need to write
+   * conversation-scoped data (e.g. update_thread_context) can resolve the
+   * correct conversation without a DB lookup.
+   */
+  conversationId?: string;
   /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
@@ -1869,6 +1877,21 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   write_event: async (input, context) => {
     const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
     return executeWriteEvent(input, context);
+  },
+
+  // ── Thread context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: async (input, context) => {
+    if (!context.conversationId) {
+      return { success: false, error: 'update_thread_context requires a conversation context — this run has no associated conversation.' };
+    }
+    return executeWithActionAudit('update_thread_context', input, context, () =>
+      updateThreadContextHandler(input, {
+        conversationId: context.conversationId!,
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+      }),
+    );
   },
 };
 

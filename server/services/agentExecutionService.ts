@@ -2239,6 +2239,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     timeoutMs,
     taskId: request.taskId,
     isTestRun: request.isTestRun ?? false,
+    conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? undefined,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
@@ -2806,6 +2807,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
               content: `Integration required: ${cardContent.integrationId}`,
               meta: cardContent as any,
               createdAt: new Date(),
+            });
+            logger.info('integration_card_emitted', {
+              runId,
+              conversationId: _integrationConvId,
+              integrationId: cardContent.integrationId,
+              blockSequence: cardContent.blockSequence,
+              action: 'integration_card_emitted',
             });
           }
 
