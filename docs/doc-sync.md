@@ -28,11 +28,11 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 
 For each doc, record one of:
 
-- `yes (sections X, Y)` — doc was updated; cite the section edited
-- `no` — scope was touched but the doc is already accurate; include a one-line rationale
+- `yes (sections X, Y)` — doc was updated; cite the section edited. Section references should match actual headings in the doc (e.g. `yes (Agent Workplace Identity, Playbook Engine)`), not vague descriptors like `yes (misc updates)`.
+- `no — <one-line rationale>` — scope was touched but the doc is already accurate. Format: `no — <rationale>`. A bare `no` with no rationale is treated as a missing verdict. Examples: `no — capability already reflects added skill set` / `no — no changes to integration surface in this PR`.
 - `n/a` — scope of this doc was not touched by this session
 
-**A missing verdict blocks finalisation.** A `no` verdict requires a one-line rationale. Stale docs are a blocking issue per `CLAUDE.md § 11`.
+**A missing verdict blocks finalisation.** Stale docs are a blocking issue per `CLAUDE.md § 11`.
 
 ---
 
@@ -41,13 +41,13 @@ For each doc, record one of:
 Every finalised `chatgpt-pr-review` and `chatgpt-spec-review` log must include these fields in its `## Final Summary` block:
 
 ```
-- KNOWLEDGE.md updated: yes (N entries) | no
-- architecture.md updated: yes (sections X, Y) | no | n/a
-- capabilities.md updated: yes (sections X) | no | n/a
-- integration-reference.md updated: yes (slug X) | no | n/a
-- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no | n/a
-- spec-context.md updated: yes | no | n/a        # spec-review sessions only
-- frontend-design-principles.md updated: yes | no | n/a
+- KNOWLEDGE.md updated: yes (N entries) | no — <rationale>
+- architecture.md updated: yes (sections X, Y) | no — <rationale> | n/a
+- capabilities.md updated: yes (sections X) | no — <rationale> | n/a
+- integration-reference.md updated: yes (slug X) | no — <rationale> | n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no — <rationale> | n/a
+- spec-context.md updated: yes | no — <rationale> | n/a   # spec-review sessions only
+- frontend-design-principles.md updated: yes | no — <rationale> | n/a
 ```
 
 `spec-context.md` applies to spec-review sessions only — omitted from PR review and feature-pipeline summaries.

@@ -39,3 +39,26 @@ Executive summary: Solid PR. Clean tightening of process discipline around doc-s
 - [auto] F6: rejected — no change
 
 ---
+
+## Round 2 — 2026-05-01T01:30:00Z
+
+### ChatGPT Feedback (raw)
+
+Round 2 verdict: APPROVED. PR has crossed the threshold from process-reliant-on-discipline to process-that-enforces-discipline. Remaining items are hardening / anti-drift, none blocking.
+
+**Issues raised:** (1) "no" format still no example in doc-sync.md; (2) KNOWLEDGE.md not in doc-sync table (incorrect — it is row 6); (3) section references in "yes" verdicts not explicit enough; (4) feature coordinator only checks at end (repeat of R1-F4); (5) sweep/gate terminology (repeat of R1-F6).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2-F1: "no" format still no example in doc-sync.md | technical | implement | auto (implement) | medium | README.md updated R1; doc-sync.md (canonical source) also needs the format + examples |
+| R2-F2: KNOWLEDGE.md not in doc-sync table | technical | reject | auto (reject) | low | Misread — KNOWLEDGE.md is row 6 of the reference docs table in doc-sync.md |
+| R2-F3: Section references in "yes" not explicit enough | technical | implement | auto (implement) | low | Added note that sections must match actual headings, not vague descriptors |
+| R2-F4: Feature coordinator only checks at end | technical | reject | auto (reject) | low | Dedup — already deferred as R1-F4; already in tasks/todo.md |
+| R2-F5: sweep/gate terminology | technical | reject | auto (reject) | low | Dedup — already rejected as R1-F6; distinction is intentional |
+
+### Implemented (auto-applied technical)
+- [auto] R2-F1 + R2-F3: docs/doc-sync.md — Verdict rule section: expanded to `no — <rationale>` format with examples; section references must match actual headings. Final Summary fields template updated to show `no — <rationale>`.
+
+---
