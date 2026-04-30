@@ -10,8 +10,8 @@
 
 import { strict as assert } from 'node:assert';
 import type { WorkspaceAdapter } from '../workspaceAdapterContract.js';
-import { mockNativeAdapter, resetMockNative } from './mockNativeAdapter.js';
-import { mockGoogleAdapter, resetMockGoogle } from './mockGoogleApi.js';
+import { mockNativeAdapter, resetMockNative, failNextCall as nativeFail } from './mockNativeAdapter.js';
+import { mockGoogleAdapter, resetMockGoogle, failNextCall as googleFail } from './mockGoogleApi.js';
 
 const BASE_PROVISION: Parameters<WorkspaceAdapter['provisionIdentity']>[0] = {
   organisationId: '00000000-0000-0000-0000-000000000001',
@@ -108,5 +108,142 @@ for (const [name, adapter, reset] of adapters) {
 
   console.log(`✓ ${name}: all scenarios passed`);
 }
+
+// ── Migration scenario: native → google (cross-adapter idempotency) ──────────
+//
+// NOTE: Full service-level orchestration tests (processIdentityMigration with
+// audit events) require a live DB and run in CI under the test:gates suite.
+// This block tests adapter-level behaviour only.
+
+console.log('\n── migration: native → google ──');
+
+resetMockNative();
+resetMockGoogle();
+
+const MIGRATION_REQUEST_ID = 'mig-req-contract-test-1';
+const actorIds = ['actor-alpha', 'actor-beta', 'actor-gamma'];
+
+// Provision all actors on native (simulating "pre-migration" state)
+const nativeIds: Record<string, string> = {};
+for (const actorId of actorIds) {
+  const r = await mockNativeAdapter.provisionIdentity({
+    ...BASE_PROVISION,
+    actorId,
+    emailLocalPart: actorId.replace('actor-', ''),
+    provisioningRequestId: `seed:${actorId}`,
+  });
+  nativeIds[actorId] = r.identityId;
+  assert.ok(r.identityId, `native provision ${actorId}`);
+}
+
+// Migrate each actor to google: same migrationRequestId:actorId key → idempotent
+const googleIds: Record<string, string> = {};
+for (const actorId of [...actorIds].sort()) {
+  const provisioningRequestId = `${MIGRATION_REQUEST_ID}:${actorId}`;
+  const r = await mockGoogleAdapter.provisionIdentity({
+    ...BASE_PROVISION,
+    actorId,
+    emailLocalPart: actorId.replace('actor-', ''),
+    provisioningRequestId,
+  });
+  googleIds[actorId] = r.identityId;
+  assert.ok(r.identityId, `google provision ${actorId}`);
+}
+
+// Idempotency: same migrationRequestId → same google identityId
+for (const actorId of actorIds) {
+  const provisioningRequestId = `${MIGRATION_REQUEST_ID}:${actorId}`;
+  const retry = await mockGoogleAdapter.provisionIdentity({
+    ...BASE_PROVISION,
+    actorId,
+    emailLocalPart: actorId.replace('actor-', ''),
+    provisioningRequestId,
+  });
+  assert.equal(
+    retry.identityId,
+    googleIds[actorId],
+    `migration idempotency: retry for ${actorId} returns same google identityId`,
+  );
+}
+
+// Archive native identities (simulating post-migration cleanup)
+for (const actorId of actorIds) {
+  await mockNativeAdapter.archiveIdentity(nativeIds[actorId]);
+}
+
+console.log('✓ migration: native → google — all assertions passed');
+
+// ── Failure injection scenarios ───────────────────────────────────────────────
+
+console.log('\n── failure injection ──');
+
+resetMockNative();
+resetMockGoogle();
+
+// Scenario F1: provisionIdentity fails → retry succeeds (idempotency preserved)
+{
+  const provisioningRequestId = 'fail-test-provision-1';
+  googleFail('provisionIdentity', new Error('quota_exceeded'));
+  let threw = false;
+  try {
+    await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId });
+  } catch (err: unknown) {
+    threw = true;
+    assert.match(String(err), /quota_exceeded/, 'F1: provision failure message');
+  }
+  assert.ok(threw, 'F1: provision failure throws');
+
+  // Retry: same provisioningRequestId, no longer failing → succeeds
+  const r = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId });
+  assert.ok(r.identityId, 'F1: retry after provision failure succeeds');
+
+  // Second retry: idempotent (same identityId)
+  const r2 = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId });
+  assert.equal(r.identityId, r2.identityId, 'F1: idempotent after success');
+
+  console.log('  ✓ F1: provision fail → retry → idempotent');
+}
+
+// Scenario F2: sendEmail fails once → retry succeeds
+{
+  const r = await mockGoogleAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId: 'fail-test-send-actor' });
+
+  googleFail('sendEmail', new Error('rate_limited'));
+  let threw = false;
+  try {
+    await mockGoogleAdapter.sendEmail({ fromIdentityId: r.identityId, toAddresses: ['x@example.com'], subject: 'F2', bodyText: 'body', bodyHtml: null, policyContext: { skill: 'test', runId: 'run-f2' } });
+  } catch (err: unknown) {
+    threw = true;
+    assert.match(String(err), /rate_limited/, 'F2: send failure message');
+  }
+  assert.ok(threw, 'F2: send failure throws');
+
+  // Retry succeeds
+  const sent = await mockGoogleAdapter.sendEmail({ fromIdentityId: r.identityId, toAddresses: ['x@example.com'], subject: 'F2', bodyText: 'body', bodyHtml: null, policyContext: { skill: 'test', runId: 'run-f2' } });
+  assert.ok(sent.externalMessageId, 'F2: retry send succeeds');
+
+  console.log('  ✓ F2: send fail → retry succeeds');
+}
+
+// Scenario F3: archiveIdentity fails once → retry succeeds
+{
+  const r = await mockNativeAdapter.provisionIdentity({ ...BASE_PROVISION, provisioningRequestId: 'fail-test-archive-1' });
+
+  nativeFail('archiveIdentity', new Error('archive_conflict'));
+  let threw = false;
+  try {
+    await mockNativeAdapter.archiveIdentity(r.identityId);
+  } catch (err: unknown) {
+    threw = true;
+    assert.match(String(err), /archive_conflict/, 'F3: archive failure message');
+  }
+  assert.ok(threw, 'F3: archive failure throws');
+
+  // Retry: no longer failing
+  await mockNativeAdapter.archiveIdentity(r.identityId); // should not throw
+  console.log('  ✓ F3: archive fail → retry succeeds');
+}
+
+console.log('\n✓ failure injection: all scenarios passed');
 
 console.log('\ncanonicialAdapterContract.test: OK');
