@@ -27,7 +27,7 @@ Executive summary: Solid PR. Clean tightening of process discipline around doc-s
 | F1: "no" verdict has no enforced format | technical | implement | auto (implement) | medium | Bare "no" will silently degrade over time; format note in README.md enforces the convention |
 | F2: No rule requiring new docs to be added to doc-sync.md | technical | implement | auto (implement) | low | Without it, a future reference doc introduction will silently skip enforcement |
 | F3: Diff exclusion may hide spec+code co-changes | technical | implement | auto (implement) | low | Added guidance on when to use the full diff (round 1 kickoff message in chatgpt-pr-review.md) |
-| F4: Feature-coordinator per-chunk doc sync not enforced | technical | defer | escalated — defer | low | Adding per-chunk detection is scope creep; pipeline already has an end-of-pipeline gate in D.5 |
+| F4: Feature-coordinator per-chunk doc sync not enforced | technical | defer | user (defer) | low | Adding per-chunk detection is scope creep; pipeline already has an end-of-pipeline gate in D.5. Routed to tasks/todo.md |
 | F5: capabilities.md Final Summary needs section specifics | technical | implement | auto (implement) | low | Handled at finalisation — Final Summary will cite "Agent Workplace Identity, Playbook Engine step types, Skills tables" |
 | F6: "sweep" vs "gate" terminology | technical | reject | auto (reject) | low | Distinction is intentional: "gate" names the D.5 pipeline checkpoint; "sweep" names the action inside it. D.5 body already uses "Doc Sync sweep" |
 
