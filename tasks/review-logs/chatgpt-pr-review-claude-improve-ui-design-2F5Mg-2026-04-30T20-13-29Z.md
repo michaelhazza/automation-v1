@@ -5,6 +5,8 @@
 - PR: #244 — https://github.com/michaelhazza/automation-v1/pull/244
 - Mode: manual
 - Started: 2026-04-30T20:13:29Z
+- Finalised: 2026-05-01T10:00:00Z
+**Verdict:** APPROVED (5 rounds, 3 implement / 6 defer — 3 user-decided, 3 auto; 0 reject-blocking)
 
 ---
 
@@ -333,6 +335,47 @@ None — read-only round.
 
 ### Recommendation
 
-**Ship-ready.** Round 1 surfaced zero new concrete defects. Every concern either does not apply to the Tier 1 code paths or is already tracked in `tasks/todo.md` with a suggested resolution. The known directional gaps (A-D1, B-D1, E-D3) are non-blocking for the merge: each is a forward-looking item routed to the build backlog after spec-conformance NON_CONFORMANT, with the PR body explicitly documenting them. Suggest the user approves merge or runs one more round to confirm no further sweeps.
+**Ship-ready.** Round 1 surfaced zero new concrete defects. Every concern either does not apply to the Tier 1 code paths or is already tracked in `tasks/todo.md` with a suggested resolution. The known directional gaps (A-D1, B-D1, E-D3) are non-blocking for the merge: each is a forward-looking item routed to the build backlog after spec-conformance NON_CONFORMANT, with the PR body explicitly documenting them.
+
+---
+
+## Consistency Check
+
+No contradictions found. The three implement decisions (R4/F2, R4/F3, R4/F7) were auto-applied technical fixes; none were revisited or reversed in subsequent rounds. R5 re-raised R4/F2 and R4/F3 as still open — confirmed already fixed (ecafc6c6). All deferred items are stable across rounds. No same finding was implemented in one round and rejected in another.
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED — zero blocking issues remain; 3 concrete bugs fixed; all open items tracked as deferred with explicit non-blocking rationale.
+
+### Totals across 5 rounds
+
+- Auto-accepted (technical): 3 implemented, 3 deferred, ~18 rejected (N/A sweep findings across R1–R3)
+- User-decided: 3 deferred (R4/F1, R4/F5, R5/F5, R5/F9 — user explicitly approved defer at gates)
+
+### Deferred items (written to `tasks/todo.md`)
+
+- [user] R4/F1 — Execution restart after resume not wired (Sprint 3B dependency)
+- [user] R4/F5 — Thread context not injected into LLM at run start (Chunk B dependency)
+- [auto] R4/F6 — Cost model on-row diverges from canonical `cost_aggregates` path
+- [user] R5/F5 — Optimistic "Connected! Continuing execution…" copy (Sprint 3B dependency)
+- [auto] R5/F8 — `useOAuthPopup` origin check fails in split-subdomain deployments
+- [user] R5/F9 — Dismissed integration card state not persisted (TODO v2)
+
+### Doc sync sweep
+
+- `KNOWLEDGE.md` updated: yes (2 entries — token idempotency pattern, path-param WHERE clause pattern)
+- `architecture.md` updated: yes (Key files per domain — 4 new entries: per-thread cost meter, suggested action chips, thread context panel, integration block/resume flow)
+- `capabilities.md` updated: yes (AI Agent System — 3 new bullets: cost meter, suggested actions, thread context; Integration Framework — 1 new bullet: inline integration setup)
+- `integration-reference.md` updated: n/a — no new OAuth provider; inline OAuth flow is infrastructure for existing providers
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` updated: no — two patterns captured in KNOWLEDGE.md; no build-discipline or locked-rule gaps identified
+- `frontend-design-principles.md` updated: yes (new worked example — tier-1 agent chat uplift, per PR #244)
+
+### KNOWLEDGE.md entries
+
+2 new entries appended during this session:
+1. `[2026-05-01] Pattern — Token-based idempotency breaks when the token is consumed before the idempotency check runs`
+2. `[2026-05-01] Pattern — URL path params extracted in route handler must appear in every relevant WHERE clause`
 
 ---
