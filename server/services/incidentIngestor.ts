@@ -183,7 +183,7 @@ export async function ingestInline(
       sql`${systemIncidentSuppressions.fingerprint} = ${fingerprint}
         AND ${orgClause}
         AND (${systemIncidentSuppressions.expiresAt} IS NULL
-          OR ${systemIncidentSuppressions.expiresAt} > ${now})`
+          OR ${systemIncidentSuppressions.expiresAt} > ${now.toISOString()})`
     )
     .limit(1);
 

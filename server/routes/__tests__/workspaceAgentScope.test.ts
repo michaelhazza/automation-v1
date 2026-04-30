@@ -118,6 +118,7 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
             id:               uid(),
             organisationId:   orgId,
             name:             'scope-test-agent',
+            slug:             `scope-test-agent-${slugSuffix}`,
             workspaceActorId: actor.id,
           })
           .returning({ id: agents.id });

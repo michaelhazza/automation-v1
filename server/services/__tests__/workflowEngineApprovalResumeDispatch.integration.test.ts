@@ -270,7 +270,7 @@ async function seedAutomationAndDefinition(opts: {
     ],
   };
 
-  const version = Math.floor(Date.now() / 1000) % 1_000_000;
+  const version = Date.now() % 2_000_000_000;
   const [tv] = await db
     .insert(workflowTemplateVersions)
     .values({

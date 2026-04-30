@@ -164,6 +164,7 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
   }
 
   async function cleanupSharedFixture(ids: SeedIds): Promise<void> {
+    await db.delete(auditEvents).where(eq(auditEvents.organisationId, ids.orgId));
     await db.delete(actions).where(eq(actions.organisationId, ids.orgId));
     await db.delete(subaccounts).where(eq(subaccounts.organisationId, ids.orgId));
     await db.delete(agents).where(eq(agents.organisationId, ids.orgId));
