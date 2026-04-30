@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — pg-boss DLQ round-trip; no static sibling module import applies (test currently a stub pending pg-boss enqueue wiring)"
 import { test } from 'vitest';
 
 const SKIP = process.env.NODE_ENV !== 'integration';

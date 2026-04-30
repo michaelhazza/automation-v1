@@ -61,9 +61,11 @@ let orgBudgets: Awaited<typeof import('../../db/schema/index.js')>['orgBudgets']
 let costAggregates: Awaited<typeof import('../../db/schema/index.js')>['costAggregates'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'];
 let routeCall: Awaited<typeof import('../llmRouter.js')>['routeCall'];
 let registerProviderAdapter: Awaited<typeof import('../providers/registry.js')>['registerProviderAdapter'];
 let createFakeProviderAdapter: Awaited<typeof import('./fixtures/fakeProviderAdapter.js')>['createFakeProviderAdapter'];
+let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'];
 
 if (!SKIP) {
   ({ db } = await import('../../db/index.js'));
@@ -77,10 +79,11 @@ if (!SKIP) {
     orgBudgets,
     costAggregates,
   } = await import('../../db/schema/index.js'));
-  ({ eq, and } = await import('drizzle-orm'));
+  ({ eq, and, sql } = await import('drizzle-orm'));
   ({ routeCall } = await import('../llmRouter.js'));
   ({ registerProviderAdapter } = await import('../providers/registry.js'));
   ({ createFakeProviderAdapter } = await import('./fixtures/fakeProviderAdapter.js'));
+  ({ withOrgTx } = await import('../../instrumentation.js'));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -299,18 +302,27 @@ test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with
   const fakeAdapter = createFakeProviderAdapter({ provider: 'anthropic' });
   const restore = registerProviderAdapter('anthropic', fakeAdapter);
   try {
-    await routeCall({
-      messages: [{ role: 'user', content: 'hello' }],
-      context: {
-        organisationId: orgId,
-        sourceType: 'agent_run',
-        runId,
-        taskType: 'general',
-        executionPhase: 'execution',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-6',
-        featureTag: 'lael-int-test',
-      },
+    // routeCall's downstream agentExecutionEventService.appendEvent uses
+    // getOrgScopedDb() which throws missing_org_context outside an active
+    // withOrgTx block. In production this is set by HTTP middleware /
+    // pg-boss worker; the integration test must wrap manually.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-1' }, async () => {
+        await routeCall({
+          messages: [{ role: 'user', content: 'hello' }],
+          context: {
+            organisationId: orgId,
+            sourceType: 'agent_run',
+            runId,
+            taskType: 'general',
+            executionPhase: 'execution',
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            featureTag: 'lael-int-test',
+          },
+        });
+      });
     });
 
     // Atomicity invariant — exactly one payload row, referenced by the
@@ -460,18 +472,23 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
     // (§1.3 acceptance) was guarding against).
     let routerError: unknown = null;
     try {
-      await routeCall({
-        messages: [{ role: 'user', content: 'budget-blocked-probe' }],
-        context: {
-          organisationId: orgId,
-          sourceType: 'agent_run',
-          runId,
-          taskType: 'general',
-          executionPhase: 'execution',
-          provider: 'anthropic',
-          model: 'claude-sonnet-4-6',
-          featureTag: 'lael-int-test-budget',
-        },
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+        await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-2' }, async () => {
+          await routeCall({
+            messages: [{ role: 'user', content: 'budget-blocked-probe' }],
+            context: {
+              organisationId: orgId,
+              sourceType: 'agent_run',
+              runId,
+              taskType: 'general',
+              executionPhase: 'execution',
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-6',
+              featureTag: 'lael-int-test-budget',
+            },
+          });
+        });
       });
     } catch (err) {
       routerError = err;
@@ -571,17 +588,22 @@ test.skipIf(SKIP)('test 3: non-agent-run (system) emits no LAEL events and inser
     // for platform work that goes through the router, has no run context,
     // and is excluded by `shouldEmitLaelLifecycle` because sourceType !==
     // 'agent_run'. Bypass routing so the call doesn't need an executionPhase.
-    await routeCall({
-      messages: [{ role: 'user', content: 'system-probe' }],
-      context: {
-        organisationId: orgId,
-        sourceType: 'system',
-        taskType: 'general',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-6',
-        systemCallerPolicy: 'bypass_routing',
-        featureTag,
-      },
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-3' }, async () => {
+        await routeCall({
+          messages: [{ role: 'user', content: 'system-probe' }],
+          context: {
+            organisationId: orgId,
+            sourceType: 'system',
+            taskType: 'general',
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            systemCallerPolicy: 'bypass_routing',
+            featureTag,
+          },
+        });
+      });
     });
 
     // No agent_execution_events for this org's call — there is no runId to

@@ -49,6 +49,13 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
   let eq: Awaited<typeof import('drizzle-orm')>['eq'];
   let and: Awaited<typeof import('drizzle-orm')>['and'];
 
+  // Canonical UUIDs from scripts/seed-integration-fixtures.ts. Pinning these
+  // (rather than `SELECT … LIMIT 1` to find any anchor) makes the suite robust
+  // against pollution from parallel integration tests that create their own
+  // throwaway orgs / subaccounts / agents.
+  const ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const AGENT_ID = '00000000-0000-0000-0000-000000000002';
+
   let orgId: string;
   let subaccountId: string;
   let agentId: string;
@@ -61,26 +68,30 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
     ({ eq, and } = await import('drizzle-orm'));
     ({ workspaceMemoryService } = await import('../workspaceMemoryService.js'));
 
-    const [anchor] = await db
-      .select({
-        orgId: schema.organisations.id,
-        subaccountId: schema.subaccounts.id,
-      })
+    const [org] = await db
+      .select({ id: schema.organisations.id })
       .from(schema.organisations)
-      .innerJoin(schema.subaccounts, eq(schema.subaccounts.organisationId, schema.organisations.id))
+      .where(eq(schema.organisations.id, ORG_ID))
       .limit(1);
-    if (!anchor) throw new Error('No (organisation, subaccount) seeded — run scripts/seed-integration-fixtures.ts');
+    if (!org) throw new Error(`Canonical org ${ORG_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
 
-    const [anchorAgent] = await db
+    const [sub] = await db
+      .select({ id: schema.subaccounts.id })
+      .from(schema.subaccounts)
+      .where(and(eq(schema.subaccounts.organisationId, ORG_ID), eq(schema.subaccounts.slug, 'integration-test-subaccount')))
+      .limit(1);
+    if (!sub) throw new Error(`Canonical subaccount under ${ORG_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
+
+    const [agent] = await db
       .select({ id: schema.agents.id })
       .from(schema.agents)
-      .where(eq(schema.agents.organisationId, anchor.orgId))
+      .where(eq(schema.agents.id, AGENT_ID))
       .limit(1);
-    if (!anchorAgent) throw new Error('No agent seeded for the anchor organisation — run scripts/seed-integration-fixtures.ts');
+    if (!agent) throw new Error(`Canonical agent ${AGENT_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
 
-    orgId = anchor.orgId;
-    subaccountId = anchor.subaccountId;
-    agentId = anchorAgent.id;
+    orgId = org.id;
+    subaccountId = sub.id;
+    agentId = agent.id;
   });
 
   afterAll(async () => {

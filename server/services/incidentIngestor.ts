@@ -119,8 +119,15 @@ export async function recordIncident(
     }
   } catch (err) {
     recordFailure();
+    // drizzle wraps postgres-js errors as `Error: Failed query: <sql>` and
+    // attaches the underlying postgres error on `.cause`. The cause carries
+    // the actual `code` / `detail` / `constraint_name` we need to triage —
+    // logging only `err.message` flies blind.
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause : null;
     logger.error('incident_ingest_failed', {
       error: err instanceof Error ? err.message : String(err),
+      cause: cause ? cause.message : null,
+      causeCode: cause ? (cause as Error & { code?: string }).code ?? null : null,
       source: input.source,
       summary: input.summary?.slice(0, 100),
     });

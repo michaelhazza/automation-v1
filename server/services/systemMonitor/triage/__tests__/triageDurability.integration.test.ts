@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — gated on a real DATABASE_URL probe before dynamically importing the IO modules; static sibling imports would force module-load before the skip check."
 /**
  * triageDurability — G1+G2 coordination contract (spec §7.3).
  *

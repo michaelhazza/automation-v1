@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — dynamic imports required so npm run test:unit can skip without DATABASE_URL; no static sibling module import is applicable"
 /**
  * CRM Query Planner — RLS isolation integration test (spec §20.2).
  *

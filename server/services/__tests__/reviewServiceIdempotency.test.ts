@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — gated on a real DATABASE_URL probe before dynamically importing the IO modules; exercises transactional race semantics that require real Postgres."
 /**
  * reviewServiceIdempotency.test.ts — §1.8 S6
  *
