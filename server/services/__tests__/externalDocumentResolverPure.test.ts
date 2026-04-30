@@ -1,17 +1,16 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { test, expect } from 'vitest';
 import {
   truncateContentToTokenBudget,
   buildProvenanceHeader,
   countTokensApprox,
-} from '../externalDocumentResolverPure';
+} from '../externalDocumentResolverPure.js';
 
 test('truncateContentToTokenBudget — under budget passes through unchanged', () => {
   const input = 'short content';
   const result = truncateContentToTokenBudget(input, 1000);
-  assert.equal(result.truncated, false);
-  assert.equal(result.content, input);
-  assert.equal(result.tokensRemoved, 0);
+  expect(result.truncated).toBe(false);
+  expect(result.content).toBe(input);
+  expect(result.tokensRemoved).toBe(0);
 });
 
 test('truncateContentToTokenBudget — over budget applies 70/30 head+tail with marker', () => {
@@ -20,13 +19,13 @@ test('truncateContentToTokenBudget — over budget applies 70/30 head+tail with 
   const middle = ' MID '.repeat(2000);
   const input = head + middle + tail;
   const result = truncateContentToTokenBudget(input, 600);
-  assert.equal(result.truncated, true);
-  assert.ok(result.content.includes('HEAD'));
-  assert.ok(result.content.includes('TAIL'));
-  assert.ok(result.content.includes('[TRUNCATED:'));
-  assert.ok(result.tokensRemoved > 0);
+  expect(result.truncated).toBe(true);
+  expect(result.content).toContain('HEAD');
+  expect(result.content).toContain('TAIL');
+  expect(result.content).toContain('[TRUNCATED:');
+  expect(result.tokensRemoved).toBeGreaterThan(0);
   const head70 = result.content.split('[TRUNCATED:')[0];
-  assert.ok(countTokensApprox(head70) >= countTokensApprox(result.content) * 0.6);
+  expect(countTokensApprox(head70)).toBeGreaterThanOrEqual(countTokensApprox(result.content) * 0.6);
 });
 
 test('buildProvenanceHeader — includes Source, Fetched, Revision when present', () => {
@@ -36,11 +35,11 @@ test('buildProvenanceHeader — includes Source, Fetched, Revision when present'
     revisionId: '7',
     isStale: false,
   });
-  assert.match(header, /^--- Document: Test Doc/m);
-  assert.match(header, /Source: Google Drive/);
-  assert.match(header, /Fetched: 2026-04-30T09:04:00Z/);
-  assert.match(header, /Revision: 7/);
-  assert.doesNotMatch(header, /Warning:/);
+  expect(header).toMatch(/^--- Document: Test Doc/m);
+  expect(header).toMatch(/Source: Google Drive/);
+  expect(header).toMatch(/Fetched: 2026-04-30T09:04:00Z/);
+  expect(header).toMatch(/Revision: 7/);
+  expect(header).not.toMatch(/Warning:/);
 });
 
 test('buildProvenanceHeader — omits Revision line when revisionId is null', () => {
@@ -50,7 +49,7 @@ test('buildProvenanceHeader — omits Revision line when revisionId is null', ()
     revisionId: null,
     isStale: false,
   });
-  assert.doesNotMatch(header, /Revision:/);
+  expect(header).not.toMatch(/Revision:/);
 });
 
 test('buildProvenanceHeader — adds Warning line on stale cache', () => {
@@ -60,5 +59,5 @@ test('buildProvenanceHeader — adds Warning line on stale cache', () => {
     revisionId: '5',
     isStale: true,
   });
-  assert.match(header, /Warning: content is from cache \(2026-04-29T09:00:00Z\); last fetch failed/);
+  expect(header).toMatch(/Warning: content is from cache \(2026-04-29T09:00:00Z\); last fetch failed/);
 });

@@ -9,6 +9,7 @@ BEGIN;
 
 -- 1. Fix document_cache RLS policy ------------------------------------------
 
+ALTER TABLE document_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_cache FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS document_cache_isolation ON document_cache;
@@ -26,6 +27,7 @@ CREATE POLICY document_cache_org_isolation ON document_cache
 
 -- 2. Fix document_fetch_events RLS policy ------------------------------------
 
+ALTER TABLE document_fetch_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_fetch_events FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS document_fetch_events_isolation ON document_fetch_events;

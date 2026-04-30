@@ -1,6 +1,5 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
-import { SingleFlightGuard } from '../externalDocumentSingleFlight';
+import { test, expect } from 'vitest';
+import { SingleFlightGuard } from '../externalDocumentSingleFlight.js';
 
 test('SingleFlightGuard — concurrent calls for same key share one promise', async () => {
   const guard = new SingleFlightGuard<string>(10);
@@ -11,10 +10,10 @@ test('SingleFlightGuard — concurrent calls for same key share one promise', as
     guard.run('k1', work),
     guard.run('k1', work),
   ]);
-  assert.equal(calls, 1);
-  assert.equal(a, 'value');
-  assert.equal(b, 'value');
-  assert.equal(c, 'value');
+  expect(calls).toBe(1);
+  expect(a).toBe('value');
+  expect(b).toBe('value');
+  expect(c).toBe('value');
 });
 
 test('SingleFlightGuard — different keys execute independently', async () => {
@@ -22,7 +21,7 @@ test('SingleFlightGuard — different keys execute independently', async () => {
   let calls = 0;
   const work = async () => { calls++; return 'v'; };
   await Promise.all([guard.run('k1', work), guard.run('k2', work)]);
-  assert.equal(calls, 2);
+  expect(calls).toBe(2);
 });
 
 test('SingleFlightGuard — key is cleared after completion (no stale caching)', async () => {
@@ -31,5 +30,5 @@ test('SingleFlightGuard — key is cleared after completion (no stale caching)',
   const work = async () => { calls++; return 'v'; };
   await guard.run('k1', work);
   await guard.run('k1', work);
-  assert.equal(calls, 2);
+  expect(calls).toBe(2);
 });
