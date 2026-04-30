@@ -22,6 +22,7 @@ For repo conventions and patterns, read [`../architecture.md`](../architecture.m
 - [`orchestrator-capability-routing-spec.md`](orchestrator-capability-routing-spec.md) — capability-aware routing in the Orchestrator agent (P1–P5 implementation).
 - [`hierarchical-delegation-dev-spec.md`](hierarchical-delegation-dev-spec.md) — hierarchical agent delegation: parent/child agent trees, capability negotiation, and result propagation.
 - [`superpowers/specs/2026-04-29-agents-as-employees-spec.md`](superpowers/specs/2026-04-29-agents-as-employees-spec.md) — "agents are employees" model: persistent identity, assignment lifecycle, and UX contract.
+- [`agent-coworker-features-spec.md`](agent-coworker-features-spec.md) — agent-as-coworker feature contracts: Ops Dashboard, Work Feed, Skill Studio, Slack conversational surface, and cross-agent memory search (distinct from agents-as-employees; covers the five surface-level feature implementations).
 - [`riley-observations-dev-spec.md`](riley-observations-dev-spec.md) — observation patterns and agent self-monitoring for the Riley agent persona.
 - [`agent-intelligence-dev-spec.md`](agent-intelligence-dev-spec.md) — agent intelligence upgrade: reasoning depth, OSS pattern adoption, and skill gap resolution.
 - [`execution-contracts.md`](execution-contracts.md) — execution contract primitives shared across all agent tiers.
@@ -33,6 +34,7 @@ For repo conventions and patterns, read [`../architecture.md`](../architecture.m
 ## Skills
 
 - [`subaccount-skills-and-history-spec.md`](subaccount-skills-and-history-spec.md) — subaccount skill assignment, version history, and analyser UI improvements.
+- [`skill-analyzer-v2-spec.md`](skill-analyzer-v2-spec.md) — Skill Analyzer v2: backend classification model, DB-backed system-skills store migration, system-only rescoping, and merge-view pipeline (backend layer; the two entries below cover UX only).
 - [`superpowers/specs/2026-04-13-skill-analyzer-ux-redesign.md`](superpowers/specs/2026-04-13-skill-analyzer-ux-redesign.md) — canonical Skill Analyzer UX redesign (results page).
 - [`superpowers/specs/2026-04-14-skill-analyzer-processing-ux.md`](superpowers/specs/2026-04-14-skill-analyzer-processing-ux.md) — Skill Analyzer processing UX and reliability improvements.
 
@@ -119,3 +121,4 @@ For repo conventions and patterns, read [`../architecture.md`](../architecture.m
 - Historical drafts and superseded versions of the above (the canonical link is the latest).
 - Per-domain "how to extend" recipes (deferred per `agentic-engineering-notes-dev-spec.md` § 9).
 - Implementation notes that live as comments in the code or as commit messages.
+- `improvements-roadmap-spec.md` — broad pre-test restructuring plan written against a specific `main` snapshot; historical planning artifact now superseded by per-domain superpowers/specs entries.
