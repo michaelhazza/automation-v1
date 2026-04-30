@@ -772,21 +772,51 @@ export async function listActivityItems(
     items = filterBySeverity(items, filters.severity);
   }
 
-  // Sort under the canonical (createdAt DESC, id ASC) ordering — DE-CR-8.
-  items = sortItems(items, filters.sort ?? 'attention_first');
-
   const limit = Math.min(filters.limit ?? 50, 200);
-  const paged = items.slice(0, limit);
+  const displaySort = filters.sort ?? 'attention_first';
 
-  // DE-CR-7: emit a cursor only when the full page was filled. If we returned
-  // fewer than `limit` items, there is no next page to walk to. The cursor is
-  // the (createdAt, id) of the LAST item shown — clients pass it back to
-  // continue under `(createdAt, id) "after" cursor` semantics.
+  // Codex P2 (2026-04-30): cursor pagination MUST walk the canonical
+  // (createdAt DESC, id ASC) ordering mandated by spec §12. The per-source
+  // cursor predicate (`buildCursorPredicate`) is hard-coded to that ordering;
+  // if we slice the page under any other sort (`attention_first` / `severity`
+  // / `oldest`), the `nextCursor` would point at an item whose canonical
+  // position is NOT the page boundary, and rows with newer `createdAt` that
+  // weren't picked up under the alternative sort would be silently skipped
+  // on the next page (cursor predicate excludes them).
+  //
+  // Resolution: when the caller is paginating (a `cursor` is in play), we
+  // MUST slice in canonical order — anything else corrupts the walk. When
+  // no cursor is in use the caller is doing a single-page query and the
+  // requested ranking sort decides page membership. This preserves the
+  // legacy `attention_first` / `severity` / `oldest` ranking semantics for
+  // non-paginating callers (e.g. ActivityPage) while keeping the new
+  // cursor-paginating callers (AgentActivityTab) spec-compliant.
+  const isPaginating = filters.cursor !== undefined;
+
+  const sliceSort = isPaginating ? 'newest' : displaySort;
+  const sortedForSlice = sortItems(items, sliceSort);
+  const paged = sortedForSlice.slice(0, limit);
+
+  // DE-CR-7 / Codex P2: cursor is emitted from the slice's LAST item under
+  // canonical (newest) ordering when paginating, so subsequent pages walk
+  // past it under `(createdAt DESC, id ASC)` and never miss intervening
+  // rows. When not paginating, no cursor is emitted regardless of slice
+  // length — non-paginating callers MUST NOT consume `nextCursor`, since
+  // an alternative-sort slice's last item is not a valid cursor anchor.
   const last = paged[paged.length - 1];
   const nextCursor: ActivityCursor | null =
-    paged.length === limit && last
+    isPaginating && paged.length === limit && last
       ? { createdAt: last.createdAt, id: last.id }
       : null;
 
-  return { items: paged, nextCursor };
+  // Apply the requested display sort. When paginating the slice was taken in
+  // canonical order; we re-sort here so the operator sees their chosen
+  // ordering on each page (the slice membership is fixed by canonical
+  // ordering above, so this reorder does not change which rows are returned).
+  // When not paginating the slice was already taken under `displaySort`.
+  const display = isPaginating && displaySort !== 'newest'
+    ? sortItems(paged, displaySort)
+    : paged;
+
+  return { items: display, nextCursor };
 }

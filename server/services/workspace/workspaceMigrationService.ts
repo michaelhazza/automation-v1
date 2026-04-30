@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { eq, and, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { db } from '../../db/index.js';
+import type { OrgScopedTx } from '../../db/index.js';
 import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceIdentities } from '../../db/schema/workspaceIdentities.js';
 import { workspaceActors } from '../../db/schema/workspaceActors.js';
@@ -49,6 +51,12 @@ export interface MigrateStartParams {
 // `migrationJobBatchSize` carries the start()-time snapshot count; the worker
 // uses it to detect the LAST identity and write `subaccount.migration_completed`.
 export type MigrateIdentityJob = z.infer<typeof MigrateIdentityJobSchema>;
+
+// pg-boss retryLimit for `workspace.migrate-identity` jobs. Exported so the
+// queueService createWorker handler and the failure-path "is this the final
+// attempt?" predicate read the same constant. Changing this value requires
+// updating both the `boss.send` site below and the consume-side handler.
+export const WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT = 5;
 
 // ---------------------------------------------------------------------------
 // start — acquire advisory lock, load identities, enqueue per-identity jobs
@@ -121,7 +129,7 @@ export async function start(
     await (boss as any).send(
       'workspace.migrate-identity',
       payload,
-      { retryLimit: 5, retryDelay: 60, retryBackoff: true },
+      { retryLimit: WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT, retryDelay: 60, retryBackoff: true },
     );
   }
 
@@ -142,12 +150,28 @@ export async function start(
  * Each failure path writes an audit event and re-throws so pg-boss retries.
  * Must be called from within an established org-scoped context — the queueService
  * worker wrapper (createWorker / inline boss.work) is responsible for that.
+ *
+ * `attempt` carries the pg-boss retry counter so the failure path knows
+ * whether to write the (single, terminal-per-spec-§14.4) `identity.migration_failed`
+ * audit row + finaliser now (final attempt → terminal) or defer to the next
+ * retry (intermediate attempt → no audit row, just rethrow; pg-boss retries).
+ * Writing the audit row on every attempt would corrupt the finaliser's
+ * per-actor terminal-state map: a later actor's final-attempt failure could
+ * see an earlier actor's still-retryable failure row, count both as terminal,
+ * and lock in a `subaccount.migration_completed` row before the earlier
+ * actor's retries actually exhaust. When `attempt` is omitted, the call is
+ * treated as a final attempt — preserves backwards compatibility for direct
+ * test callers.
  */
 export async function processIdentityMigration(
   job: MigrateIdentityJob,
   deps: { adapter: WorkspaceAdapter },
+  attempt?: { retrycount: number; retryLimit: number },
 ): Promise<void> {
-  const db = getOrgScopedDb('workspaceMigrationService.processIdentityMigration');
+  const orgDb = getOrgScopedDb('workspaceMigrationService.processIdentityMigration');
+  const isFinalAttempt = attempt
+    ? attempt.retrycount >= attempt.retryLimit
+    : true;
 
   logger.info('workspace_migration_identity_start', {
     organisationId: job.organisationId,
@@ -159,7 +183,7 @@ export async function processIdentityMigration(
   });
 
   // Load actor for display name derivation
-  const [actor] = await db
+  const [actor] = await orgDb
     .select()
     .from(workspaceActors)
     .where(eq(workspaceActors.id, job.actorId));
@@ -190,8 +214,7 @@ export async function processIdentityMigration(
       provisioningRequestId,
     });
   } catch (err: unknown) {
-    await writeIdentityMigrationFailed(db, job, 'provision', err, null);
-    await maybeFinaliseBatch(db, job);
+    await persistTerminalFailure(job, 'provision', err, null, isFinalAttempt);
     throw err;
   }
 
@@ -203,8 +226,7 @@ export async function processIdentityMigration(
       job.initiatedByUserId,
     );
   } catch (err: unknown) {
-    await writeIdentityMigrationFailed(db, job, 'activate', err, provisioned.identityId);
-    await maybeFinaliseBatch(db, job);
+    await persistTerminalFailure(job, 'activate', err, provisioned.identityId, isFinalAttempt);
     throw err;
   }
 
@@ -216,13 +238,16 @@ export async function processIdentityMigration(
       job.initiatedByUserId,
     );
   } catch (err: unknown) {
-    await writeIdentityMigrationFailed(db, job, 'archive', err, provisioned.identityId);
-    await maybeFinaliseBatch(db, job);
+    await persistTerminalFailure(job, 'archive', err, provisioned.identityId, isFinalAttempt);
     throw err;
   }
 
-  // (d) Terminal success audit
-  await db.insert(auditEvents).values({
+  // (d) Terminal success audit — written in the worker tx so it commits
+  // atomically with the (a)/(b)/(c) workspace_identities transitions. The
+  // worker-tx finaliser (`maybeFinaliseBatch(orgDb, ...)`) below sees this
+  // row inside the same tx (READ COMMITTED, same connection) and so the
+  // completion-row count includes it on the success path.
+  await orgDb.insert(auditEvents).values({
     organisationId: job.organisationId,
     actorType: 'system' as const,
     workspaceActorId: job.actorId,
@@ -235,7 +260,7 @@ export async function processIdentityMigration(
     },
   });
 
-  await maybeFinaliseBatch(db, job);
+  await maybeFinaliseBatch(orgDb, job);
 }
 
 // ---------------------------------------------------------------------------
@@ -263,14 +288,14 @@ function deriveLocalPart(displayName: string): string {
 // show "provision failed" / "activation failed" / "archive failed" without needing
 // distinct action names that aren't in the spec §14.4 union.
 async function writeIdentityMigrationFailed(
-  db: ReturnType<typeof getOrgScopedDb>,
+  txOrDb: OrgScopedTx | ReturnType<typeof getOrgScopedDb>,
   job: MigrateIdentityJob,
   step: MigrationStep,
   err: unknown,
   targetIdentityId: string | null,
 ): Promise<void> {
   const reason = err instanceof Error ? err.message : String(err);
-  await db.insert(auditEvents).values({
+  await txOrDb.insert(auditEvents).values({
     organisationId: job.organisationId,
     actorType: 'system' as const,
     workspaceActorId: job.actorId,
@@ -286,6 +311,61 @@ async function writeIdentityMigrationFailed(
   });
 }
 
+// Codex P1 (2026-04-30): persist the terminal-failure audit row + finaliser
+// outside the worker tx so they survive the rollback that follows a rethrow.
+//
+// `createWorker` wraps `processIdentityMigration` in `db.transaction(...)`. When
+// any step (a)/(b)/(c) throws, that tx rolls back — taking with it any audit
+// rows written via `getOrgScopedDb()`. Without a durable failure row the batch
+// would stall in `running` forever (status-poll relies on `subaccount.migration_completed`
+// to flip to terminal) and the operator UI would never show the per-actor reason.
+//
+// We open a fresh `db.transaction(...)` here. postgres-js's pool gives us a
+// separate connection, so the inner tx commits independently of the outer
+// worker tx. We set `app.organisation_id` so RLS allows the audit_events insert
+// under the same tenant scope — no admin-bypass.
+//
+// Codex P1 round 2/3 (2026-04-30): the `identity.migration_failed` audit row is
+// the spec §14.4 TERMINAL event for a per-identity migration — exactly one per
+// actor. Writing one on every retry attempt would corrupt the batch finaliser:
+// a later identity's final-attempt failure could trigger `maybeFinaliseBatch`,
+// see an EARLIER identity's still-retryable failure row, count both as
+// terminal, and lock in a `subaccount.migration_completed` row before the
+// earlier identity actually finished its retries. Because the completion row
+// is `ON CONFLICT DO NOTHING`-protected by the partial unique index in
+// migration 0261, a later successful retry cannot correct the stale aggregate.
+//
+// Resolution: only write `identity.migration_failed` AND call `maybeFinaliseBatch`
+// on the FINAL pg-boss attempt (`retrycount >= retryLimit`). Earlier attempts
+// just rethrow — the per-attempt diagnostic trail lives in the `logger.info(
+// 'workspace_migration_identity_start', …)` line plus pg-boss's job history;
+// the SPEC-LEVEL terminal audit row is single, written when the actor's
+// retries exhaust. On a successful retry, the worker tx writes
+// `identity.migrated` and finalises atomically (no race because no failure
+// row was ever written for this actor).
+async function persistTerminalFailure(
+  job: MigrateIdentityJob,
+  step: MigrationStep,
+  err: unknown,
+  targetIdentityId: string | null,
+  isFinalAttempt: boolean,
+): Promise<void> {
+  if (!isFinalAttempt) {
+    // Earlier attempt with retries left — pg-boss will retry the job. Don't
+    // write the terminal audit row yet; doing so corrupts the finaliser's
+    // per-actor terminal-state map (see header comment above for the trace
+    // through the multi-actor batch race).
+    return;
+  }
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.organisation_id', ${job.organisationId}, true)`,
+    );
+    await writeIdentityMigrationFailed(tx as OrgScopedTx, job, step, err, targetIdentityId);
+    await maybeFinaliseBatch(tx as OrgScopedTx, job);
+  });
+}
+
 // DE-CR-6 / B2: when the LAST in-flight identity for a batch reaches a terminal
 // state (success or failure), write a single `subaccount.migration_completed`
 // row. Idempotent on (batchId) via the partial unique index in migration 0261.
@@ -297,12 +377,12 @@ async function writeIdentityMigrationFailed(
 // window across workers; the loser sees the winner's committed terminal rows
 // (or its already-written completion row, which the partial unique index handles).
 async function maybeFinaliseBatch(
-  db: ReturnType<typeof getOrgScopedDb>,
+  txOrDb: OrgScopedTx | ReturnType<typeof getOrgScopedDb>,
   job: MigrateIdentityJob,
 ): Promise<void> {
-  await db.execute(sql`SELECT pg_advisory_xact_lock(${hashBatchId(job.migrationJobBatchId)}::bigint)`);
+  await txOrDb.execute(sql`SELECT pg_advisory_xact_lock(${hashBatchId(job.migrationJobBatchId)}::bigint)`);
 
-  const terminalRows = await db
+  const terminalRows = await txOrDb
     .select({
       workspaceActorId: auditEvents.workspaceActorId,
       action: auditEvents.action,
@@ -348,7 +428,7 @@ async function maybeFinaliseBatch(
   // raw SQL because drizzle's `.onConflictDoNothing()` doesn't support partial
   // expression indexes — the conflict target has to be `WHERE`-qualified to
   // match the partial index inference.
-  await db.execute(sql`
+  await txOrDb.execute(sql`
     INSERT INTO audit_events (organisation_id, actor_type, action, entity_type, entity_id, metadata, created_at)
     VALUES (
       ${job.organisationId},

@@ -1144,9 +1144,16 @@ export const queueService = {
         concurrency: migrationConcurrency,
         timeoutMs: 270_000,
         handler: async (job) => {
-          const { processIdentityMigration } = await import('./workspace/workspaceMigrationService.js');
+          const { processIdentityMigration, WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT } = await import('./workspace/workspaceMigrationService.js');
           const adapter = await resolveMigrationAdapter(job.data.targetBackend);
-          await processIdentityMigration(job.data, { adapter });
+          // Codex P1 round 2 (2026-04-30): forward pg-boss retry counter so
+          // the failure path defers writing the (`ON CONFLICT DO NOTHING`-locked)
+          // `subaccount.migration_completed` row until the final attempt. See
+          // workspaceMigrationService.persistTerminalFailure for rationale.
+          await processIdentityMigration(job.data, { adapter }, {
+            retrycount: getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>),
+            retryLimit: WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT,
+          });
         },
       });
 
