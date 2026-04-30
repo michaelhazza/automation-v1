@@ -66,6 +66,20 @@ You produce a plan the main Claude Code session will use as a build contract. Pl
 
 ---
 
+## Pre-plan: model-collapse check
+
+Before producing the implementation plan, ask:
+
+1. Does this feature decompose into ingest → extract → transform → render?
+2. Is each step doing something a frontier multimodal model could do in a single call?
+3. If yes: can the whole pipeline collapse into one model call with a structured-output schema?
+
+State the collapsed-call alternative explicitly in the plan, even if you reject it. If you reject, give the reason in one paragraph (latency, cost, determinism, audit trail, compliance, model jaggedness in this domain). Do NOT default to a multi-step pipeline because that is how it would have been built before frontier multimodal models existed.
+
+Record the decision under a heading "Model-collapse check" in the plan output.
+
+---
+
 ## TodoWrite hygiene during execution
 
 In Step 4, while working the list:
