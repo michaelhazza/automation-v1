@@ -38,14 +38,6 @@ import { connectorEmptyResponseRepeated } from '../infrastructure/connectorEmpty
 
 import type { AgentRunEntity, SkillExecutionEntity, JobEntity, ConnectorPollEntity } from '../candidateTypes.js';
 
-const pendingTests: Array<Promise<void>> = [];
-function asyncTest(name: string, fn: () => Promise<void>) {
-  const p = new Promise<void>((resolve) => {
-    fn().then(() => { passed++; console.log(`  PASS  ${name}`); resolve(); }, (err: unknown) => { failed++; console.log(`  FAIL  ${name}`); console.log(`        ${err instanceof Error ? err.message : err}`); resolve(); });
-  });
-  pendingTests.push(p);
-}
-
 const NOW = new Date('2026-04-25T14:00:00.000Z');
 
 // ── Minimal mock helpers ──────────────────────────────────────────────────────
@@ -171,21 +163,21 @@ test('does not match a neutral message', () => { expect(!claimsSuccess('Processi
 
 console.log('\nemptyOutputBaselineAware');
 
-asyncTest('fires when empty output and baseline p50 > 200', async () => {
+test('fires when empty output and baseline p50 > 200', async () => {
   const baselineMap = new Map([['agent:test-agent:output_length_chars', makeBaseline({ metric: 'output_length_chars', p50: 500, sampleCount: 10 })]]);
   const result = await emptyOutputBaselineAware.evaluate(makeCtx(baselineMap), makeAgentCandidate({ finalMessageLengthChars: 0 }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when output is non-empty', async () => {
+test('does not fire when output is non-empty', async () => {
   const result = await emptyOutputBaselineAware.evaluate(makeCtx(), makeAgentCandidate({ finalMessageLengthChars: 50 }));
   expect(!result.fired, 'should not fire').toBeTruthy();
 });
-asyncTest('does not fire when baseline p50 <= 200 (agent that normally outputs little)', async () => {
+test('does not fire when baseline p50 <= 200 (agent that normally outputs little)', async () => {
   const baselineMap = new Map([['agent:test-agent:output_length_chars', makeBaseline({ metric: 'output_length_chars', p50: 150, sampleCount: 10 })]]);
   const result = await emptyOutputBaselineAware.evaluate(makeCtx(baselineMap), makeAgentCandidate({ finalMessageLengthChars: 0 }));
   expect(!result.fired, 'should not fire — low baseline p50').toBeTruthy();
 });
-asyncTest('does not fire when no baseline (insufficient_data)', async () => {
+test('does not fire when no baseline (insufficient_data)', async () => {
   const result = await emptyOutputBaselineAware.evaluate(makeCtx(), makeAgentCandidate({ finalMessageLengthChars: 0 }));
   expect(!result.fired, 'should not fire — no baseline').toBeTruthy();
 });
@@ -194,11 +186,11 @@ asyncTest('does not fire when no baseline (insufficient_data)', async () => {
 
 console.log('\nmaxTurnsHit');
 
-asyncTest('fires when reachedMaxTurns is true', async () => {
+test('fires when reachedMaxTurns is true', async () => {
   const result = await maxTurnsHit.evaluate(makeCtx(), makeAgentCandidate({ reachedMaxTurns: true }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when reachedMaxTurns is false', async () => {
+test('does not fire when reachedMaxTurns is false', async () => {
   const result = await maxTurnsHit.evaluate(makeCtx(), makeAgentCandidate({ reachedMaxTurns: false }));
   expect(!result.fired, 'should not fire').toBeTruthy();
 });
@@ -207,21 +199,21 @@ asyncTest('does not fire when reachedMaxTurns is false', async () => {
 
 console.log('\ntoolSuccessButFailureLanguage');
 
-asyncTest('fires when success status and failure language in final message', async () => {
+test('fires when success status and failure language in final message', async () => {
   const result = await toolSuccessButFailureLanguage.evaluate(makeCtx(), makeAgentCandidate({
     runResultStatus: 'success',
     finalMessageContent: "I'm unable to complete this task.",
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when run status is not success', async () => {
+test('does not fire when run status is not success', async () => {
   const result = await toolSuccessButFailureLanguage.evaluate(makeCtx(), makeAgentCandidate({
     runResultStatus: 'failed',
     finalMessageContent: "I couldn't do it.",
   }));
   expect(!result.fired, 'should not fire — not success status').toBeTruthy();
 });
-asyncTest('does not fire when final message has no failure language', async () => {
+test('does not fire when final message has no failure language', async () => {
   const result = await toolSuccessButFailureLanguage.evaluate(makeCtx(), makeAgentCandidate({
     runResultStatus: 'success',
     finalMessageContent: 'Task complete.',
@@ -233,27 +225,27 @@ asyncTest('does not fire when final message has no failure language', async () =
 
 console.log('\nruntimeAnomaly');
 
-asyncTest('fires when durationMs > 5× p95 and > 1000ms', async () => {
+test('fires when durationMs > 5× p95 and > 1000ms', async () => {
   // baseline p95 = 2000ms; threshold = 10000ms; durationMs = 12000ms
   const baselineMap = new Map([['agent:test-agent:runtime_ms', makeBaseline({ p95: 2000, sampleCount: 10 })]]);
   const result = await runtimeAnomaly.evaluate(makeCtx(baselineMap), makeAgentCandidate({ durationMs: 12000 }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when durationMs is null', async () => {
+test('does not fire when durationMs is null', async () => {
   const result = await runtimeAnomaly.evaluate(makeCtx(), makeAgentCandidate({ durationMs: null }));
   expect(!result.fired, 'should not fire — null duration').toBeTruthy();
 });
-asyncTest('does not fire when durationMs is below absolute floor', async () => {
+test('does not fire when durationMs is below absolute floor', async () => {
   const baselineMap = new Map([['agent:test-agent:runtime_ms', makeBaseline({ p95: 50, sampleCount: 10 })]]);
   const result = await runtimeAnomaly.evaluate(makeCtx(baselineMap), makeAgentCandidate({ durationMs: 800 }));
   expect(!result.fired, 'should not fire — below 1000ms floor').toBeTruthy();
 });
-asyncTest('does not fire when within 5× threshold', async () => {
+test('does not fire when within 5× threshold', async () => {
   const baselineMap = new Map([['agent:test-agent:runtime_ms', makeBaseline({ p95: 2000, sampleCount: 10 })]]);
   const result = await runtimeAnomaly.evaluate(makeCtx(baselineMap), makeAgentCandidate({ durationMs: 5000 }));
   expect(!result.fired, 'should not fire — within threshold').toBeTruthy();
 });
-asyncTest('does not fire when no baseline', async () => {
+test('does not fire when no baseline', async () => {
   const result = await runtimeAnomaly.evaluate(makeCtx(), makeAgentCandidate({ durationMs: 50000 }));
   expect(!result.fired, 'should not fire — insufficient data').toBeTruthy();
 });
@@ -262,7 +254,7 @@ asyncTest('does not fire when no baseline', async () => {
 
 console.log('\ntokenAnomaly');
 
-asyncTest('fires when totalTokens > 3× combined p95 and above floor', async () => {
+test('fires when totalTokens > 3× combined p95 and above floor', async () => {
   // baseline input p95=1000, output p95=2000 → combined=3000; threshold=9000; total=15000
   const baselineMap = new Map([
     ['agent:test-agent:token_count_input', makeBaseline({ metric: 'token_count_input', p95: 1000, sampleCount: 10 })],
@@ -271,11 +263,11 @@ asyncTest('fires when totalTokens > 3× combined p95 and above floor', async () 
   const result = await tokenAnomaly.evaluate(makeCtx(baselineMap), makeAgentCandidate({ totalTokens: 15000 }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when totalTokens below absolute floor of 5000', async () => {
+test('does not fire when totalTokens below absolute floor of 5000', async () => {
   const result = await tokenAnomaly.evaluate(makeCtx(), makeAgentCandidate({ totalTokens: 3000 }));
   expect(!result.fired, 'should not fire — below floor').toBeTruthy();
 });
-asyncTest('does not fire when no baseline', async () => {
+test('does not fire when no baseline', async () => {
   const result = await tokenAnomaly.evaluate(makeCtx(), makeAgentCandidate({ totalTokens: 50000 }));
   expect(!result.fired, 'should not fire — insufficient data').toBeTruthy();
 });
@@ -284,19 +276,19 @@ asyncTest('does not fire when no baseline', async () => {
 
 console.log('\nrepeatedSkillInvocation');
 
-asyncTest('fires when any skill invoked > 5 times', async () => {
+test('fires when any skill invoked > 5 times', async () => {
   const result = await repeatedSkillInvocation.evaluate(makeCtx(), makeAgentCandidate({
     skillInvocationCounts: { 'send-email': 6 },
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when all skills invoked ≤ 5 times', async () => {
+test('does not fire when all skills invoked ≤ 5 times', async () => {
   const result = await repeatedSkillInvocation.evaluate(makeCtx(), makeAgentCandidate({
     skillInvocationCounts: { 'send-email': 3, 'create-task': 5 },
   }));
   expect(!result.fired, 'should not fire — within threshold').toBeTruthy();
 });
-asyncTest('does not fire when no skill invocations', async () => {
+test('does not fire when no skill invocations', async () => {
   const result = await repeatedSkillInvocation.evaluate(makeCtx(), makeAgentCandidate({ skillInvocationCounts: {} }));
   expect(!result.fired, 'should not fire — empty map').toBeTruthy();
 });
@@ -305,19 +297,19 @@ asyncTest('does not fire when no skill invocations', async () => {
 
 console.log('\nfinalMessageNotAssistant');
 
-asyncTest('fires when finalMessageRole is "user"', async () => {
+test('fires when finalMessageRole is "user"', async () => {
   const result = await finalMessageNotAssistant.evaluate(makeCtx(), makeAgentCandidate({ finalMessageRole: 'user' }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('fires when finalMessageRole is "system"', async () => {
+test('fires when finalMessageRole is "system"', async () => {
   const result = await finalMessageNotAssistant.evaluate(makeCtx(), makeAgentCandidate({ finalMessageRole: 'system' }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when finalMessageRole is "assistant"', async () => {
+test('does not fire when finalMessageRole is "assistant"', async () => {
   const result = await finalMessageNotAssistant.evaluate(makeCtx(), makeAgentCandidate({ finalMessageRole: 'assistant' }));
   expect(!result.fired, 'should not fire').toBeTruthy();
 });
-asyncTest('does not fire when finalMessageRole is null (no messages)', async () => {
+test('does not fire when finalMessageRole is null (no messages)', async () => {
   const result = await finalMessageNotAssistant.evaluate(makeCtx(), makeAgentCandidate({ finalMessageRole: null }));
   expect(!result.fired, 'should not fire — null role means no messages').toBeTruthy();
 });
@@ -326,7 +318,7 @@ asyncTest('does not fire when finalMessageRole is null (no messages)', async () 
 
 console.log('\noutputTruncation');
 
-asyncTest('fires when content looks truncated (no terminal punct, near budget)', async () => {
+test('fires when content looks truncated (no terminal punct, near budget)', async () => {
   // tokenBudget=1000 → estimatedMax=4000 chars; 90%=3600; finalMessageLengthChars=3700
   const result = await outputTruncation.evaluate(makeCtx(), makeAgentCandidate({
     finalMessageContent: 'trailing text without ending',
@@ -335,7 +327,7 @@ asyncTest('fires when content looks truncated (no terminal punct, near budget)',
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when content ends with terminal punctuation', async () => {
+test('does not fire when content ends with terminal punctuation', async () => {
   const result = await outputTruncation.evaluate(makeCtx(), makeAgentCandidate({
     finalMessageContent: 'All done.',
     finalMessageLengthChars: 3700,
@@ -343,7 +335,7 @@ asyncTest('does not fire when content ends with terminal punctuation', async () 
   }));
   expect(!result.fired, 'should not fire — ends with period').toBeTruthy();
 });
-asyncTest('does not fire when length is well below budget', async () => {
+test('does not fire when length is well below budget', async () => {
   const result = await outputTruncation.evaluate(makeCtx(), makeAgentCandidate({
     finalMessageContent: 'short output',
     finalMessageLengthChars: 100,
@@ -356,7 +348,7 @@ asyncTest('does not fire when length is well below budget', async () => {
 
 console.log('\nidenticalOutputDifferentInputs');
 
-asyncTest('fires when same outputHash but different triggerHash in recent runs', async () => {
+test('fires when same outputHash but different triggerHash in recent runs', async () => {
   const result = await identicalOutputDifferentInputs.evaluate(makeCtx(), makeAgentCandidate({
     runId: 'run-2',
     outputHash: 'hash-abc',
@@ -367,11 +359,11 @@ asyncTest('fires when same outputHash but different triggerHash in recent runs',
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when no outputHash', async () => {
+test('does not fire when no outputHash', async () => {
   const result = await identicalOutputDifferentInputs.evaluate(makeCtx(), makeAgentCandidate({ outputHash: null }));
   expect(!result.fired, 'should not fire — no output hash').toBeTruthy();
 });
-asyncTest('does not fire when no matching prior runs', async () => {
+test('does not fire when no matching prior runs', async () => {
   const result = await identicalOutputDifferentInputs.evaluate(makeCtx(), makeAgentCandidate({
     runId: 'run-2',
     outputHash: 'hash-abc',
@@ -387,15 +379,15 @@ asyncTest('does not fire when no matching prior runs', async () => {
 
 console.log('\ntoolOutputSchemaMismatch');
 
-asyncTest('fires when schemaMismatch is true', async () => {
+test('fires when schemaMismatch is true', async () => {
   const result = await toolOutputSchemaMismatch.evaluate(makeCtx(), makeSkillCandidate({ schemaMismatch: true }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when schemaMismatch is false', async () => {
+test('does not fire when schemaMismatch is false', async () => {
   const result = await toolOutputSchemaMismatch.evaluate(makeCtx(), makeSkillCandidate({ schemaMismatch: false }));
   expect(!result.fired, 'should not fire').toBeTruthy();
 });
-asyncTest('does not fire when schemaMismatch is absent', async () => {
+test('does not fire when schemaMismatch is absent', async () => {
   const result = await toolOutputSchemaMismatch.evaluate(makeCtx(), makeSkillCandidate({}));
   expect(!result.fired, 'should not fire — no schemaMismatch').toBeTruthy();
 });
@@ -404,18 +396,18 @@ asyncTest('does not fire when schemaMismatch is absent', async () => {
 
 console.log('\nskillLatencyAnomaly');
 
-asyncTest('fires when durationMs > 5× p95 and > 500ms', async () => {
+test('fires when durationMs > 5× p95 and > 500ms', async () => {
   // baseline p95=200ms; threshold=1000ms; durationMs=2000ms
   const baselineMap = new Map([['skill:test-skill:runtime_ms', makeBaseline({ entityKind: 'skill', p95: 200, sampleCount: 10 })]]);
   const result = await skillLatencyAnomaly.evaluate(makeCtx(baselineMap), makeSkillCandidate({ durationMs: 2000 }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when durationMs ≤ 500ms absolute floor', async () => {
+test('does not fire when durationMs ≤ 500ms absolute floor', async () => {
   const baselineMap = new Map([['skill:test-skill:runtime_ms', makeBaseline({ entityKind: 'skill', p95: 50, sampleCount: 10 })]]);
   const result = await skillLatencyAnomaly.evaluate(makeCtx(baselineMap), makeSkillCandidate({ durationMs: 400 }));
   expect(!result.fired, 'should not fire — below floor').toBeTruthy();
 });
-asyncTest('does not fire when no baseline', async () => {
+test('does not fire when no baseline', async () => {
   const result = await skillLatencyAnomaly.evaluate(makeCtx(), makeSkillCandidate({ durationMs: 10000 }));
   expect(!result.fired, 'should not fire — insufficient data').toBeTruthy();
 });
@@ -424,28 +416,28 @@ asyncTest('does not fire when no baseline', async () => {
 
 console.log('\ntoolFailedButAgentClaimedSuccess');
 
-asyncTest('fires when skill failed but assistant claims success', async () => {
+test('fires when skill failed but assistant claims success', async () => {
   const result = await toolFailedButAgentClaimedSuccess.evaluate(makeCtx(), makeSkillCandidate({
     succeeded: false,
     assistantMessageAfterTool: 'The task completed successfully.',
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when skill succeeded', async () => {
+test('does not fire when skill succeeded', async () => {
   const result = await toolFailedButAgentClaimedSuccess.evaluate(makeCtx(), makeSkillCandidate({
     succeeded: true,
     assistantMessageAfterTool: 'The task completed successfully.',
   }));
   expect(!result.fired, 'should not fire — skill succeeded').toBeTruthy();
 });
-asyncTest('does not fire when no assistant message after tool', async () => {
+test('does not fire when no assistant message after tool', async () => {
   const result = await toolFailedButAgentClaimedSuccess.evaluate(makeCtx(), makeSkillCandidate({
     succeeded: false,
     assistantMessageAfterTool: null,
   }));
   expect(!result.fired, 'should not fire — no follow-up message').toBeTruthy();
 });
-asyncTest('does not fire when failed but message does not claim success', async () => {
+test('does not fire when failed but message does not claim success', async () => {
   const result = await toolFailedButAgentClaimedSuccess.evaluate(makeCtx(), makeSkillCandidate({
     succeeded: false,
     assistantMessageAfterTool: 'I was unable to complete the request.',
@@ -457,21 +449,21 @@ asyncTest('does not fire when failed but message does not claim success', async 
 
 console.log('\njobCompletedNoSideEffect');
 
-asyncTest('fires when job completed and side effect is absent', async () => {
+test('fires when job completed and side effect is absent', async () => {
   const result = await jobCompletedNoSideEffect.evaluate(makeCtx(), makeJobCandidate({
     state: 'completed',
     expectedSideEffectPresent: false,
   }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when job state is not completed', async () => {
+test('does not fire when job state is not completed', async () => {
   const result = await jobCompletedNoSideEffect.evaluate(makeCtx(), makeJobCandidate({
     state: 'active',
     expectedSideEffectPresent: false,
   }));
   expect(!result.fired, 'should not fire — job not completed').toBeTruthy();
 });
-asyncTest('does not fire when side effect is present', async () => {
+test('does not fire when side effect is present', async () => {
   const result = await jobCompletedNoSideEffect.evaluate(makeCtx(), makeJobCandidate({
     state: 'completed',
     expectedSideEffectPresent: true,
@@ -483,27 +475,22 @@ asyncTest('does not fire when side effect is present', async () => {
 
 console.log('\nconnectorEmptyResponseRepeated');
 
-asyncTest('fires when recentEmptyResultCount >= 3 and baseline p50 >= 1', async () => {
+test('fires when recentEmptyResultCount >= 3 and baseline p50 >= 1', async () => {
   const baselineMap = new Map([['connector:conn-1:rows_ingested', makeBaseline({ entityKind: 'connector', metric: 'rows_ingested', p50: 50, sampleCount: 10 })]]);
   const result = await connectorEmptyResponseRepeated.evaluate(makeCtx(baselineMap), makeConnectorCandidate({ recentEmptyResultCount: 3 }));
   expect(result.fired, 'should fire').toBeTruthy();
 });
-asyncTest('does not fire when count < 3', async () => {
+test('does not fire when count < 3', async () => {
   const result = await connectorEmptyResponseRepeated.evaluate(makeCtx(), makeConnectorCandidate({ recentEmptyResultCount: 2 }));
   expect(!result.fired, 'should not fire — below threshold').toBeTruthy();
 });
-asyncTest('does not fire when count >= 3 but no baseline', async () => {
+test('does not fire when count >= 3 but no baseline', async () => {
   const result = await connectorEmptyResponseRepeated.evaluate(makeCtx(), makeConnectorCandidate({ recentEmptyResultCount: 5 }));
   expect(!result.fired, 'should not fire — insufficient data').toBeTruthy();
 });
-asyncTest('does not fire when baseline p50 < 1 (connector normally returns nothing)', async () => {
+test('does not fire when baseline p50 < 1 (connector normally returns nothing)', async () => {
   const baselineMap = new Map([['connector:conn-1:rows_ingested', makeBaseline({ entityKind: 'connector', metric: 'rows_ingested', p50: 0, sampleCount: 10 })]]);
   const result = await connectorEmptyResponseRepeated.evaluate(makeCtx(baselineMap), makeConnectorCandidate({ recentEmptyResultCount: 5 }));
   expect(!result.fired, 'should not fire — baseline p50 < 1').toBeTruthy();
 });
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-
-await Promise.all(pendingTests);
-
-console.log('');

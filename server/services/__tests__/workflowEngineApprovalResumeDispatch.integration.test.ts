@@ -41,7 +41,7 @@
 // function `asserts` overloads via TypeScript decorators. Dynamic-importing
 // it strips the narrowing and triggers TS2775. Heavy DB modules stay dynamic
 // so the no-DATABASE_URL skip path returns before they boot.
-import { expect, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import * as crypto from 'node:crypto';
 // Evaluate SKIP before dotenv so the guard fires even when .env sets DATABASE_URL.
 // Tests that require a real Postgres instance are skipped unless NODE_ENV=integration.
@@ -333,36 +333,8 @@ async function seedRunWithAwaitingStep(opts: {
   return { runId, stepRunId, automationId: '' };
 }
 
-let passed = 0;
-let failed = 0;
-let skipped = 0;
-
-async function test(name: string, opts: { skip?: boolean }, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, fn: () => Promise<void>): Promise<void>;
-async function test(name: string, optsOrFn: { skip?: boolean } | (() => Promise<void>), fn?: () => Promise<void>): Promise<void> {
-  const opts = typeof optsOrFn === 'function' ? {} : optsOrFn;
-  const body = typeof optsOrFn === 'function' ? optsOrFn : fn!;
-  if (opts.skip) {
-    skipped++;
-    console.log(`# SKIP ${name}`);
-    return;
-  }
-  try {
-    await body();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
-
-console.log('');
-console.log('workflowEngine — approval-resume dispatch:');
-
 // ─── Test 1: approved → fires webhook ONCE + reaches completed ──────────────
-await test('test 1: approved invoke_automation fires webhook and reaches completed status', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 1: approved invoke_automation fires webhook and reaches completed status', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     const fixture = await seedFixture(receiver.url);
@@ -423,7 +395,7 @@ await test('test 1: approved invoke_automation fires webhook and reaches complet
 });
 
 // ─── Test 2: concurrent double-approve fires webhook EXACTLY once ───────────
-await test('test 2: concurrent double-approve fires webhook exactly once + sign-call boundary spy', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 2: concurrent double-approve fires webhook exactly once + sign-call boundary spy', async () => {
   const receiver = await startFakeWebhookReceiver();
   // Spy on the HMAC-signing call site INSIDE the dispatch path. The signing
   // call happens between the engine's race-resolving UPDATE and the outbound
@@ -504,7 +476,7 @@ await test('test 2: concurrent double-approve fires webhook exactly once + sign-
 });
 
 // ─── Test 3: rejected → no dispatch + no webhook ────────────────────────────
-await test('test 3: rejected invoke_automation completes without webhook dispatch + sign-call=0', { skip: SKIP }, async () => {
+test.skipIf(SKIP)('test 3: rejected invoke_automation completes without webhook dispatch + sign-call=0', async () => {
   const receiver = await startFakeWebhookReceiver();
   // Symmetric with Test 2: spy on the HMAC-signing boundary so a regression
   // that triggered a sign-then-crash-before-fetch path on the rejected
@@ -569,7 +541,3 @@ await test('test 3: rejected invoke_automation completes without webhook dispatc
   }
 });
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed, ${skipped} skipped`);
-console.log('');
-if (failed > 0) process.exit(1);

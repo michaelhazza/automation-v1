@@ -1756,6 +1756,27 @@ The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-v
   `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
 - Linked invariant: I-6 (quarantine contract with expiry pressure).
 
+### TI-003: Add a "no-handwritten-harness-leftovers" gate
+- Captured: 2026-04-30 (after diagnosing the CI hang on PR #238)
+- Owner: unowned
+- Reason: Phase 2/3 conversion scripts left some files in a half-converted
+  state — they imported `test`/`expect` from vitest but kept a custom
+  `function asyncTest()` helper, an unawaited `pendingTests` array, top-level
+  `await Promise.all(pendingTests)`, references to undeclared `passed`/
+  `failed` counters, and a final `if (failed > 0) process.exit(1)`. Symptom
+  on PR #238: vitest worker hung for 13+ minutes after all tests appeared
+  to complete because `await Promise.all(pendingTests)` waited on promises
+  that never resolved (the resolver path threw `passed is not defined`).
+  Fixed in commit on this branch — but a guard prevents the next regression.
+- Goal: a `scripts/verify-no-harness-leftovers.sh` gate that fails if any
+  `*.test.ts` contains any of: `function asyncTest`, `let passed = 0`,
+  `let failed = 0`, `pendingTests`, `if (failed > 0) process.exit`,
+  `Promise.all(pendingTests)`, `passed++`, `failed++`. Wire into
+  `scripts/run-all-gates.sh`.
+- Linked invariant: I-7b (no module-load side effects in tests) and the
+  testing-conventions.md "Forbidden patterns" list (which already names
+  these patterns but is not enforced).
+
 ### TI-002: Add a test-discovery guard to prevent orphan `*.test.ts` files
 - Captured: 2026-04-30 (after fixing two orphan tests on the vitest-migration branch)
 - Owner: unowned

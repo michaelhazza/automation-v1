@@ -44,4 +44,29 @@ Key learnings:
   testing-conventions.md) and relocated under `__tests__/`. Discovery guard
   (TI-002) queued for after the two remaining outlier files move per
   Phase 6 plan.
+- 2026-04-30 (later): first CI run on PR #238 hit the 15-min timeout. Root
+  cause: five test files were left half-migrated by Phase 2/3 conversion
+  scripts — they kept handwritten-harness helpers (`asyncTest`,
+  `pendingTests`, `passed++`/`failed++` counters, `await Promise.all(
+  pendingTests)`). The unresolved promises and ReferenceError-throwing
+  resolver path caused vitest workers to hang post-test for 13+ minutes
+  before being SIGKILLed. Fixed:
+    - `server/services/systemMonitor/heuristics/__tests__/heuristicsPure.test.ts`
+      (47 asyncTest calls + dangling Promise.all + pendingTests array)
+    - `server/services/systemMonitor/heuristics/__tests__/heuristics25Pure.test.ts`
+      (entire file wrapped in a single `test('assertions')` with internal
+      asyncTest helper; unwrapped into 21 top-level test() blocks)
+    - `server/lib/__tests__/llmStub.test.ts` (tests defined inside an
+      `async function main()` that ran via `main().catch(...)` — moved to
+      top level and converted)
+    - `server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts`
+      (custom `test()` function shadowing vitest's; replaced with
+      `test.skipIf(SKIP)`)
+    - Two orphan-pattern files in `server/services/workspace/__tests__/`
+      with no test() blocks at all — converted to proper vitest tests.
+  Local result post-fix: 4555 tests pass, 33 skipped, 40s wall clock (was
+  hanging at 15+ min). Net +115 tests vs pre-fix because the previously
+  hidden asyncTest assertions now actually run.
+- New follow-up TI-003: gate against handwritten-harness leftovers
+  (asyncTest, pendingTests, passed++, etc.).
 - CI unit-layer runtime baseline: pending CI run on PR #238.
