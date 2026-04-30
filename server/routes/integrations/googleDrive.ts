@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../../lib/permissions.js';
 import { integrationConnectionService } from '../../services/integrationConnectionService.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { googleDriveResolver, ResolverError } from '../../services/resolvers/googleDriveResolver.js';
@@ -11,6 +12,7 @@ const router = Router();
 router.get(
   '/api/integrations/google-drive/picker-token',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     const { connectionId } = req.query as { connectionId?: string };
     if (!connectionId) return res.status(400).json({ error: 'connectionId_required' });
@@ -40,6 +42,7 @@ router.get(
 router.get(
   '/api/integrations/google-drive/verify-access',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     const { connectionId, fileId } = req.query as { connectionId?: string; fileId?: string };
     if (!connectionId || !fileId) {
