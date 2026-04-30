@@ -7,10 +7,12 @@ import SessionLogCardList, { type SessionLogRun } from '../components/SessionLog
 import CostMeterPill from '../components/CostMeterPill';
 import SuggestedActionChips from '../components/SuggestedActionChips';
 import ThreadContextPanel from '../components/ThreadContextPanel';
+import { InlineIntegrationCard } from '../components/InlineIntegrationCard';
 import { relativeTime } from '../lib/relativeTime';
 import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
 import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions';
 import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext';
+import type { IntegrationCardContent, MessageMeta } from '../../../shared/types/integrationCardContent';
 
 interface AgentRunHandoff {
   version: 1;
@@ -51,6 +53,7 @@ interface Message {
   content?: string;
   triggeredExecutionId?: string;
   suggestedActions?: SuggestedAction[] | null;
+  meta?: MessageMeta | null;
   createdAt: string;
 }
 
@@ -187,6 +190,8 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [error, setError] = useState('');
   // Recent runs sidebar section
   const [recentRuns, setRecentRuns] = useState<SessionLogRun[]>([]);
+  // Local dismissed state for integration cards — keyed by messageId
+  const [dismissedCards, setDismissedCards] = useState<Set<string>>(new Set());
   // Latest structured handoff from a previous run (for the "Continue from
   // last session" card). Null until loaded; null after load if no prior
   // run with a handoff exists.
@@ -627,6 +632,16 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                         </svg>
                         Triggered automation · Execution {msg.triggeredExecutionId} queued
                       </div>
+                    )}
+
+                    {/* Inline integration-setup card — emitted when a run blocks waiting for OAuth */}
+                    {msg.meta?.kind === 'integration_card' && (
+                      <InlineIntegrationCard
+                        card={{ ...(msg.meta as IntegrationCardContent), dismissed: dismissedCards.has(msg.id) }}
+                        runMetadata={recentRuns.length > 0 ? null : null}
+                        messageId={msg.id}
+                        onDismiss={(id) => setDismissedCards((prev) => new Set([...prev, id]))}
+                      />
                     )}
 
                     <div className={`text-[11px] text-slate-400 ${msg.role === 'user' ? 'pr-0.5 self-end' : 'pl-0.5 self-start'}`}>

@@ -95,6 +95,9 @@ import {
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 // Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
 import { validateArtefactForPersistence } from './briefArtefactValidator.js';
+// Integration block service — pauses runs waiting for OAuth connections
+import { checkRequiredIntegration } from './integrationBlockService.js';
+import { agentMessages } from '../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -2666,6 +2669,84 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       }
 
       if (skipTool) continue;
+
+      // ── Integration block check ───────────────────────────────────────────
+      // Determine if this tool requires an OAuth integration that is not yet
+      // connected. In v1 checkRequiredIntegration always returns shouldBlock:false;
+      // the full block path is wired and ready to activate when ACTION_REGISTRY
+      // entries begin declaring requiredIntegration fields.
+      {
+        // Read current runMetadata for block-sequence tracking
+        const [runMeta] = await db
+          .select({ runMetadata: agentRuns.runMetadata })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, runId))
+          .limit(1);
+        const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
+        const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
+
+        const blockDecision = await checkRequiredIntegration(
+          toolCall.name,
+          toolCall.input as Record<string, unknown>,
+          {
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+            runId,
+            agentId: request.agentId,
+            currentBlockSequence: newBlockSeq,
+          },
+        );
+
+        if (blockDecision.shouldBlock) {
+          const plaintext = blockDecision.plaintext;
+          const tokenHash = blockDecision.tokenHash;
+          const appBase = process.env.APP_BASE_URL ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}`;
+
+          const cardContent = {
+            ...blockDecision.card,
+            actionUrl,
+            resumeToken: plaintext,
+            expiresAt: blockDecision.expiresAt.toISOString(),
+            schemaVersion: 1 as const,
+          };
+
+          // Persist blocked state on run
+          await db.update(agentRuns).set({
+            blockedReason: 'integration_required',
+            blockedExpiresAt: blockDecision.expiresAt,
+            integrationResumeToken: tokenHash,
+            integrationDedupKey: blockDecision.integrationDedupKey,
+            runMetadata: {
+              ...currentRunMeta,
+              currentBlockSequence: newBlockSeq,
+              blockedToolCall: {
+                toolName: toolCall.name,
+                toolArgs: toolCall.input,
+                dedupKey: blockDecision.integrationDedupKey,
+              },
+            },
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.info('run_blocked', {
+            runId,
+            integrationId: blockDecision.integrationId,
+            blockSequence: newBlockSeq,
+            action: 'run_blocked',
+          });
+
+          // Break out of the agent loop — run stays in 'running' status
+          // with blocked_reason set. The expiry sweep will cancel it if
+          // the user never connects.
+          finalStatus = 'blocked_awaiting_integration';
+          // Note: emitLoopTermination only accepts its fixed union — use
+          // the closest structural match and log the actual reason separately.
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+      }
 
       totalToolCalls++;
       const toolStart = Date.now();

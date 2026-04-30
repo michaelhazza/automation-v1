@@ -14,6 +14,7 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '../config/oauthProviders.js';
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
+import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
@@ -28,11 +29,13 @@ router.get(
   '/api/integrations/oauth2/auth-url',
   authenticate,
   asyncHandler(async (req, res) => {
-    const { provider, subaccountId, scope: connectionScope, returnPath } = req.query as {
+    const { provider, subaccountId, scope: connectionScope, returnPath, resumeToken, conversationId } = req.query as {
       provider: string;
       subaccountId?: string;
       scope?: string;
       returnPath?: string;
+      resumeToken?: string;
+      conversationId?: string;
     };
 
     const isOrgLevel = connectionScope === 'org';
@@ -84,6 +87,15 @@ router.get(
         ? returnPath
         : null;
 
+    // Validate resumeToken is a non-empty opaque string (hex, no length constraint here)
+    const safeResumeToken = resumeToken && typeof resumeToken === 'string' && /^[a-f0-9]{64}$/.test(resumeToken)
+      ? resumeToken
+      : undefined;
+    // Validate conversationId is a UUID
+    const safeConversationId = conversationId && typeof conversationId === 'string' && /^[0-9a-f-]{36}$/.test(conversationId)
+      ? conversationId
+      : undefined;
+
     const state = jwt.sign(
       {
         provider,
@@ -92,6 +104,8 @@ router.get(
         connectionScope: isOrgLevel ? 'org' : 'subaccount',
         returnPath: safeReturnPath,
         nonce: crypto.randomUUID(),
+        ...(safeResumeToken ? { resumeToken: safeResumeToken } : {}),
+        ...(safeConversationId ? { conversationId: safeConversationId } : {}),
       },
       env.JWT_SECRET,
       { expiresIn: '10m' },
@@ -155,7 +169,15 @@ router.get(
       return res.redirect(`${appBase}/settings/integrations?error=missing_params`);
     }
 
-    let payload: { provider: string; subaccountId: string | null; organisationId: string; connectionScope?: string; returnPath?: string | null };
+    let payload: {
+      provider: string;
+      subaccountId: string | null;
+      organisationId: string;
+      connectionScope?: string;
+      returnPath?: string | null;
+      resumeToken?: string;
+      conversationId?: string;
+    };
     try {
       payload = jwt.verify(state, env.JWT_SECRET) as typeof payload;
     } catch {
@@ -242,6 +264,35 @@ router.get(
     } catch (err) {
       console.error(`[OAuth] Failed to store ${provider} connection:`, err);
       return res.redirect(`${appBase}${redirectBase}?error=storage_failed`);
+    }
+
+    // Popup / agent-resume flow: if the state contained a resumeToken, this
+    // was a popup-based connect triggered by an integration_card. Resume the
+    // blocked agent run server-side and render a self-closing popup page
+    // instead of the normal redirect.
+    if (payload.resumeToken) {
+      try {
+        await resumeFromIntegrationConnect({
+          resumeToken: payload.resumeToken,
+          organisationId,
+        });
+      } catch (err) {
+        // Non-fatal — the integration is connected, even if the run resume
+        // fails (e.g. token expired). The popup will still close.
+        console.warn('[OAuth] run resume failed after connect:', err);
+      }
+
+      return res.send(`<!DOCTYPE html>
+<html>
+<head><title>Connected</title></head>
+<body>
+<script>
+  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, window.location.origin); } catch (e) {}
+  window.close();
+</script>
+<p>Connected! You may close this window.</p>
+</body>
+</html>`);
     }
 
     return res.redirect(`${appBase}${redirectBase}?connected=${provider}`);

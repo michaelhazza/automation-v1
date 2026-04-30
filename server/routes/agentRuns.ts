@@ -5,6 +5,7 @@ import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentRunCancelService } from '../services/agentRunCancelService.js';
+import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
@@ -486,5 +487,26 @@ router.get('/api/system/agent-activity/stats', authenticate, requireSystemAdmin,
   });
   res.json(stats);
 }));
+
+// ─── Resume a blocked agent run after OAuth integration connect ───────────────
+// The client calls this after receiving oauth_success from the popup, OR it is
+// called server-side by the OAuth callback when state.resumeToken is present.
+
+router.post(
+  '/api/agent-runs/resume-from-integration',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const { resumeToken } = req.body as { resumeToken?: string };
+    if (!resumeToken || typeof resumeToken !== 'string') {
+      throw Object.assign(new Error('resumeToken required'), { statusCode: 400, errorCode: 'INVALID_TOKEN' });
+    }
+    const result = await resumeFromIntegrationConnect({
+      resumeToken,
+      organisationId: req.orgId!,
+    });
+    res.json(result);
+  }),
+);
 
 export default router;

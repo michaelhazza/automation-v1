@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { agentConversations } from './agentConversations';
 import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions.js';
+import type { MessageMeta } from '../../../shared/types/integrationCardContent.js';
 
 export const agentMessages = pgTable(
   'agent_messages',
@@ -35,6 +36,10 @@ export const agentMessages = pgTable(
     }>>(),
     // Suggested action chips emitted by agent on terminal turns
     suggestedActions: jsonb('suggested_actions').$type<SuggestedAction[] | null>(),
+    // Typed UI extension metadata — discriminated union on meta.kind.
+    // Used for integration_card messages emitted when a run blocks waiting
+    // for an OAuth connection. See shared/types/integrationCardContent.ts.
+    meta: jsonb('meta').$type<MessageMeta | null>(),
     // Cost/token tracking — populated for assistant messages by conversationService
     costCents: integer('cost_cents'),
     tokensIn: integer('tokens_in'),
