@@ -36,4 +36,12 @@ Key learnings:
 - 2026-04-30: Phase 4 complete. 10 consecutive clean runs in parallel threads mode (3 shuffle, 7 default). maxThreads=cores-1. Quarantines added: none. Env vars added: SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS, SYSTEM_INCIDENT_THROTTLE_MS.
 - 2026-04-30: Phase 5 cutover: bash runner deleted, test:unit → vitest run, CI timeout 45→15min, vitest-pre-cutover tag pushed. PR #238 open.
 - 2026-04-30: Phase 6 complete: testing-conventions.md updated, .nvmrc added.
+- 2026-04-30 (late): post-PR triage — review feedback identified two orphan
+  `*.test.ts` files in `shared/types/` and `shared/billing/` that lived
+  outside `__tests__/` and were silently not picked up by Vitest's include
+  globs (same failure class as 4d0cef9f canonicalAdapterContract). Both
+  files migrated to vitest format (`expect` style, per
+  testing-conventions.md) and relocated under `__tests__/`. Discovery guard
+  (TI-002) queued for after the two remaining outlier files move per
+  Phase 6 plan.
 - CI unit-layer runtime baseline: pending CI run on PR #238.

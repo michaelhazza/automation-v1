@@ -1755,3 +1755,25 @@ The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-v
   scoped to a temp directory + injected lock path, then remove the
   `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
 - Linked invariant: I-6 (quarantine contract with expiry pressure).
+
+### TI-002: Add a test-discovery guard to prevent orphan `*.test.ts` files
+- Captured: 2026-04-30 (after fixing two orphan tests on the vitest-migration branch)
+- Owner: unowned
+- Reason: Vitest's `include` glob is `**/__tests__/**/*.test.ts` plus two
+  explicitly-listed outliers. Test files placed outside `__tests__/` and not
+  added to the explicit list silently provide zero coverage. This has now
+  bitten the codebase three times: `canonicalAdapterContract.test.ts`
+  (commit 4d0cef9f), `shared/types/workspace.test.ts`, and
+  `shared/billing/seatDerivation.test.ts` (both fixed on the
+  vitest-migration branch).
+- Blocking dependency: the two outliers explicitly listed in
+  `vitest.config.ts` (`shared/lib/parseContextSwitchCommand.test.ts`,
+  `server/services/scopeResolutionService.test.ts`) are scheduled for
+  relocation to `__tests__/` per the migration plan's Phase 6 "Moved"
+  section. The guard will false-positive on those two until they move.
+- Goal: after the two outliers are relocated, add
+  `scripts/verify-test-discovery.sh` that fails if any `*.test.ts` exists
+  outside `**/__tests__/**`. Wire it into `scripts/run-all-gates.sh` and
+  remove the `include` allow-list entries from `vitest.config.ts`.
+- Linked invariant: I-3 (parity — every test file the bash runner ran must
+  also be discovered by Vitest).
