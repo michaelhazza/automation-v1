@@ -9,11 +9,13 @@
  *   npx tsx server/services/__tests__/conversationThreadContextServicePure.test.ts
  */
 
+import { createHash } from 'crypto';
 import { expect, test, describe } from 'vitest';
 import {
   applyPatchToPureState,
   pruneCompletedTasks,
   buildReadModelFromState,
+  normalizePatch,
   TASK_CAP,
   DECISION_CAP,
   APPROACH_MAX_CHARS,
@@ -320,5 +322,119 @@ describe('buildReadModelFromState', () => {
 
     const model = buildReadModelFromState(state);
     expect(model.updatedAt).toBe('2026-04-30T00:00:00.000Z');
+  });
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sha256(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+// ── normalizePatch ────────────────────────────────────────────────────────────
+
+describe('normalizePatch', () => {
+  test('strips clientRefId from hash input', () => {
+    const withRef = normalizePatch({
+      tasks: { add: [{ clientRefId: 'ref-abc', label: 'Do the thing' }] },
+    });
+    const withoutRef = normalizePatch({
+      tasks: { add: [{ label: 'Do the thing' }] },
+    });
+    expect(sha256(withRef)).toBe(sha256(withoutRef));
+  });
+
+  test('different clientRefId values produce same hash', () => {
+    const patchA = normalizePatch({
+      tasks: { add: [{ clientRefId: 'ref-111', label: 'Task A' }] },
+    });
+    const patchB = normalizePatch({
+      tasks: { add: [{ clientRefId: 'ref-999', label: 'Task A' }] },
+    });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('tasks.add sorted by label — different ordering produces same hash', () => {
+    const patchA = normalizePatch({
+      tasks: {
+        add: [
+          { label: 'Zebra task' },
+          { label: 'Alpha task' },
+        ],
+      },
+    });
+    const patchB = normalizePatch({
+      tasks: {
+        add: [
+          { label: 'Alpha task' },
+          { label: 'Zebra task' },
+        ],
+      },
+    });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('decisions.add sorted by decision text — different ordering produces same hash', () => {
+    const patchA = normalizePatch({
+      decisions: {
+        add: [
+          { decision: 'Use Redis', rationale: 'Fast' },
+          { decision: 'Use Postgres', rationale: 'Reliable' },
+        ],
+      },
+    });
+    const patchB = normalizePatch({
+      decisions: {
+        add: [
+          { decision: 'Use Postgres', rationale: 'Reliable' },
+          { decision: 'Use Redis', rationale: 'Fast' },
+        ],
+      },
+    });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('tasks.remove sorted — different ordering produces same hash', () => {
+    const patchA = normalizePatch({ tasks: { remove: ['id-z', 'id-a'] } });
+    const patchB = normalizePatch({ tasks: { remove: ['id-a', 'id-z'] } });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('decisions.remove sorted — different ordering produces same hash', () => {
+    const patchA = normalizePatch({ decisions: { remove: ['dec-z', 'dec-a'] } });
+    const patchB = normalizePatch({ decisions: { remove: ['dec-a', 'dec-z'] } });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('tasks.updateStatus sorted by id — different ordering produces same hash', () => {
+    const patchA = normalizePatch({
+      tasks: {
+        updateStatus: [
+          { id: 'task-z', status: 'done' },
+          { id: 'task-a', status: 'in_progress' },
+        ],
+      },
+    });
+    const patchB = normalizePatch({
+      tasks: {
+        updateStatus: [
+          { id: 'task-a', status: 'in_progress' },
+          { id: 'task-z', status: 'done' },
+        ],
+      },
+    });
+    expect(sha256(patchA)).toBe(sha256(patchB));
+  });
+
+  test('different patches produce different hashes', () => {
+    const patchA = normalizePatch({ tasks: { add: [{ label: 'Task A' }] } });
+    const patchB = normalizePatch({ tasks: { add: [{ label: 'Task B' }] } });
+    expect(sha256(patchA)).not.toBe(sha256(patchB));
+  });
+
+  test('approach patch is preserved in hash input', () => {
+    const patchA = normalizePatch({ approach: { replace: 'Build fast' } });
+    const patchB = normalizePatch({ approach: { replace: 'Build slow' } });
+    expect(sha256(patchA)).not.toBe(sha256(patchB));
   });
 });

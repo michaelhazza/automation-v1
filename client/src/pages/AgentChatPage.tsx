@@ -708,7 +708,10 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
             </div>
             <ThreadContextPanel
               readModel={threadContext}
-              isLive={sending || recentRuns.some((r) => (r as { status?: string }).status === 'running')}
+              isLive={sending || recentRuns.some((r) => {
+                const s = (r as { status?: string }).status;
+                return s === 'running' || s === 'pending' || s === 'delegated';
+              })}
             />
           </div>
         )}

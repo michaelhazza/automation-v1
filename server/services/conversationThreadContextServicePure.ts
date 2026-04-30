@@ -65,6 +65,8 @@ export interface PatchResult {
   approach: string;
   createdIds: Record<string, string>;
   opsApplied: OpsApplied;
+  /** IDs that were in a remove list but did not match any existing item. */
+  noOpRemovedIds: string[];
 }
 
 // ── pruneCompletedTasks ───────────────────────────────────────────────────────
@@ -159,10 +161,17 @@ export function applyPatchToPureState(
   };
 
   const now = new Date().toISOString();
+  const noOpRemovedIds: string[] = [];
 
   // ── Decisions ──────────────────────────────────────────────────────────────
 
   if (patch.decisions?.remove?.length) {
+    const existingIds = new Set(decisions.map((d) => d.id));
+    for (const id of patch.decisions.remove) {
+      if (!existingIds.has(id)) {
+        noOpRemovedIds.push(id);
+      }
+    }
     const removeSet = new Set(patch.decisions.remove);
     const before = decisions.length;
     decisions = decisions.filter((d) => !removeSet.has(d.id));
@@ -191,6 +200,12 @@ export function applyPatchToPureState(
   // ── Tasks ──────────────────────────────────────────────────────────────────
 
   if (patch.tasks?.remove?.length) {
+    const existingTaskIds = new Set(tasks.map((t) => t.id));
+    for (const id of patch.tasks.remove) {
+      if (!existingTaskIds.has(id)) {
+        noOpRemovedIds.push(id);
+      }
+    }
     const removeSet = new Set(patch.tasks.remove);
     const before = tasks.length;
     tasks = tasks.filter((t) => !removeSet.has(t.id));
@@ -271,5 +286,47 @@ export function applyPatchToPureState(
     opsApplied.approachAppended = true;
   }
 
-  return { decisions, tasks, approach, createdIds, opsApplied };
+  return { decisions, tasks, approach, createdIds, opsApplied, noOpRemovedIds };
+}
+
+// ── normalizePatch ────────────────────────────────────────────────────────────
+
+/**
+ * Produce a stable, canonical representation of a ThreadContextPatch for
+ * idempotency hashing. Strips clientRefId (caller-side token), sorts all
+ * arrays by a stable key so ordering differences do not produce different hashes.
+ *
+ * Spec §6.5: keyed_write idempotency key = `${runId}:${sha256(normalizePatch(patch))}`
+ */
+export function normalizePatch(patch: ThreadContextPatch): unknown {
+  return {
+    decisions: patch.decisions
+      ? {
+          add: patch.decisions.add
+            ? [...patch.decisions.add]
+                .map(({ clientRefId: _strip, ...rest }) => rest)
+                .sort((a, b) => a.decision.localeCompare(b.decision))
+            : undefined,
+          remove: patch.decisions.remove
+            ? [...patch.decisions.remove].sort()
+            : undefined,
+        }
+      : undefined,
+    tasks: patch.tasks
+      ? {
+          add: patch.tasks.add
+            ? [...patch.tasks.add]
+                .map(({ clientRefId: _strip, ...rest }) => rest)
+                .sort((a, b) => a.label.localeCompare(b.label))
+            : undefined,
+          updateStatus: patch.tasks.updateStatus
+            ? [...patch.tasks.updateStatus].sort((a, b) => a.id.localeCompare(b.id))
+            : undefined,
+          remove: patch.tasks.remove
+            ? [...patch.tasks.remove].sort()
+            : undefined,
+        }
+      : undefined,
+    approach: patch.approach,
+  };
 }

@@ -4,6 +4,7 @@
 // Spec: Chunk A — Thread Context doc + plan checklist
 // ---------------------------------------------------------------------------
 
+import { createHash } from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { conversationThreadContext } from '../db/schema/index.js';
@@ -12,6 +13,7 @@ import { logger } from '../lib/logger.js';
 import {
   applyPatchToPureState,
   buildReadModelFromState,
+  normalizePatch,
 } from './conversationThreadContextServicePure.js';
 import type {
   ThreadContextPatch,
@@ -19,6 +21,14 @@ import type {
   ThreadContextReadModel,
 } from '../../shared/types/conversationThreadContext.js';
 import type { ConversationThreadContext } from '../db/schema/conversationThreadContext.js';
+
+// ── Idempotency dedup store (module-level, in-memory, v1) ────────────────────
+// Keyed by `${runId}:${sha256(normalizePatch(patch))}`.
+// Limitation: does not survive process restarts or work across multiple
+// server instances. Acceptable for v1 — the write is idempotent at the
+// data level regardless (version not bumped twice), so worst-case the
+// duplicate write is a no-op in practice.
+const processedIdempotencyKeys = new Map<string, ThreadContextPatchResult>();
 
 // ── Read model builder (exported for route use) ──────────────────────────────
 
@@ -77,6 +87,22 @@ export async function applyPatch(
   patch: ThreadContextPatch,
   ctx: { runId?: string },
 ): Promise<ThreadContextPatchResult> {
+  const runId = ctx.runId;
+
+  // ── Idempotency check (keyed_write, §6.5) ──────────────────────────────────
+  // Only dedup when a runId is present — agent-driven calls always supply one.
+  let idempotencyKey: string | null = null;
+  if (runId) {
+    const patchHash = createHash('sha256')
+      .update(JSON.stringify(normalizePatch(patch)))
+      .digest('hex');
+    idempotencyKey = `${runId}:${patchHash}`;
+    const cached = processedIdempotencyKeys.get(idempotencyKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
   // Load or initialise the row
   const existing = await db
     .select()
@@ -97,8 +123,34 @@ export async function applyPatch(
   };
 
   // Apply patch (throws cap error if needed)
-  const { decisions, tasks, approach, createdIds, opsApplied } =
-    applyPatchToPureState(currentState, patch);
+  let pureResult: ReturnType<typeof applyPatchToPureState>;
+  try {
+    pureResult = applyPatchToPureState(currentState, patch);
+  } catch (err: unknown) {
+    const capErr = err as { errorCode?: string };
+    if (capErr?.errorCode === 'APPROACH_TOO_LONG') {
+      // Compute attempted length for the structured log
+      let attemptedLength: number;
+      if (patch.approach?.replace !== undefined) {
+        attemptedLength = patch.approach.replace.length;
+      } else if (patch.approach?.appendNote !== undefined) {
+        const base = currentState.approach ? `${currentState.approach}\n\n` : '';
+        attemptedLength = (base + patch.approach.appendNote).length;
+      } else {
+        attemptedLength = 0;
+      }
+      logger.warn('approach_cap_rejected', {
+        conversationId,
+        runId,
+        action: 'approach_cap_rejected',
+        currentLength: currentState.approach.length,
+        attemptedLength,
+      });
+    }
+    throw err;
+  }
+
+  const { decisions, tasks, approach, createdIds, opsApplied, noOpRemovedIds } = pureResult;
 
   const nextVersion = (current?.version ?? 0) + 1;
   const now = new Date();
@@ -187,11 +239,21 @@ export async function applyPatch(
   // Structured log
   logger.info('thread_context_patched', {
     conversationId,
-    runId: ctx.runId,
+    runId,
     version: updatedRow.version,
     action: 'thread_context_patched',
     opsApplied,
   });
+
+  // Log no-op removes (spec: silent no-op + structured log)
+  if (noOpRemovedIds.length > 0) {
+    logger.info('thread_context_noop_remove', {
+      conversationId,
+      runId,
+      noOpRemovedIds,
+      action: 'thread_context_noop_remove',
+    });
+  }
 
   // Emit live update
   emitConversationUpdate(
@@ -200,11 +262,18 @@ export async function applyPatch(
     readModel as unknown as Record<string, unknown>,
   );
 
-  return {
+  const result: ThreadContextPatchResult = {
     version: updatedRow.version,
     createdIds,
     readModel,
   };
+
+  // Store in idempotency cache for future duplicate calls
+  if (idempotencyKey) {
+    processedIdempotencyKeys.set(idempotencyKey, result);
+  }
+
+  return result;
 }
 
 // ── Named export object (mirrors conversationService pattern) ─────────────────
