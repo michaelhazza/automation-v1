@@ -64,7 +64,7 @@ let _testMode = false;
 
 /** Reset internal state between tests. Only callable in test environments. */
 export function __resetForTest(): void {
-  if (process.env.NODE_ENV !== 'test') return;
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'integration') return;
   processLocalFailureCounter.length = 0;
   _testMode = false;
 }
