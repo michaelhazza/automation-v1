@@ -241,3 +241,6 @@ export * from './rateLimitBuckets';
 // Live External Document References — document cache + fetch audit log (migration 0262)
 export * from './documentCache';
 export * from './documentFetchEvents';
+
+// Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
+export * from './conversationThreadContext';

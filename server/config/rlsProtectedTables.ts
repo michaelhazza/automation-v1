@@ -928,6 +928,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0263_fix_external_doc_rls_and_uniq.sql',
     rationale: 'Per-subaccount fetch audit log; records which documents were accessed in which runs.',
   },
+  // 0264 (PR #244) — Thread Context: per-conversation living doc
+  {
+    tableName: 'conversation_thread_context',
+    schemaFile: 'conversationThreadContext.ts',
+    policyMigration: '0264_conversation_thread_context.sql',
+    rationale: 'Per-conversation agent tasks, approach, and decisions — may contain sensitive strategy and business context.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

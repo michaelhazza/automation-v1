@@ -652,25 +652,144 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
     If the command fails (network, permissions), print a warning and the manual
     equivalent so the user can run it themselves — do NOT block finalization.
 
-12. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+12. CI Monitor and Auto-Merge Loop — starts immediately after the label is applied.
 
-13. [MANUAL] Remove the per-round diff files generated during the session:
+    **Goal:** poll CI status once per minute, auto-fix failures iteratively (max 3
+    remedy attempts), then merge when all checks pass. If 3 remedies all fail, stop
+    and surface a structured failure report for the user to investigate manually.
 
+    **State:** `REMEDY_ATTEMPTS = 0`  `POLL_COUNT = 0`  `REMEDY_LOG = []`
+
+    **Initial wait** — GitHub Actions needs ~30 seconds to pick up the label event
+    and queue new runs. Avoid a spurious "no checks yet" read:
     ```bash
-    rm -f .chatgpt-diffs/pr<N>-round*-code-diff.diff .chatgpt-diffs/pr<N>-round*-diff.diff
-    rmdir .chatgpt-diffs 2>/dev/null  # remove the dir if empty after cleanup
+    sleep 30
     ```
 
-    These files are transient — the audit trail lives in the session log
-    (`tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md`), not the diff
-    bundles. The git history captures what changed; the diff files were only a
-    copy-paste convenience for ChatGPT input. Skip silently if the directory
-    or files do not exist (e.g. session finalised mid-bootstrap before the
-    first diff was written).
+    **Poll loop** — repeat until resolved. Hard cap: 30 polls (30 minutes total).
 
-    [AUTOMATED] No-op (no diff files in automated mode).
+    a. Increment `POLL_COUNT`. Query the PR's current check status:
+       ```bash
+       gh pr view <N> --json statusCheckRollup --jq '
+         (.statusCheckRollup // []) as $checks |
+         if ($checks | length) == 0 then "pending"
+         elif ($checks | all(.status == "COMPLETED")) then
+           if ($checks | all(
+               .conclusion == "SUCCESS" or
+               .conclusion == "NEUTRAL" or
+               .conclusion == "SKIPPED")) then "passed"
+           else "failed"
+           end
+         else "pending"
+         end'
+       ```
 
-12. [MANUAL] Remove the per-round diff files generated during the session:
+    b. **`passed`** → all CI checks succeeded. Proceed to **Auto-Merge** below.
+
+    c. **`pending`** → CI is still running. Print:
+       > CI in progress — <POLL_COUNT>m elapsed. Next poll in 60s...
+       ```bash
+       sleep 60
+       ```
+       Return to (a). If `POLL_COUNT >= 30` without conclusion, print:
+       > CI has not concluded after 30 minutes — stopping monitor.
+       > PR #<N>: <url>
+       > Check status manually and merge when ready.
+       Then continue to step 13 (session-complete print).
+
+    d. **`failed`** → enter **Remedy Cycle** below.
+
+    ---
+
+    **Remedy Cycle** — entered when a check fails. Gate: `REMEDY_ATTEMPTS < 3`.
+
+    i.   Increment `REMEDY_ATTEMPTS`. Print:
+         > CI failure — remedy attempt <REMEDY_ATTEMPTS>/3. Fetching logs...
+
+    ii.  Identify failed run IDs:
+         ```bash
+         gh run list --head-branch <branch> --json databaseId,name,status,conclusion \
+           --limit 10 --jq '.[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .databaseId'
+         ```
+
+    iii. For each failed run ID, retrieve failure logs:
+         ```bash
+         gh run view <run-id> --log-failed
+         ```
+         Read the output. Identify root cause (lint error, TypeScript error, test
+         failure, migration failure, etc.). Note the specific file and line if present.
+
+    iv.  Fix the code using Edit, Write, and Bash. Apply targeted fixes only — do not
+         scope-creep into unrelated areas. Run `npm run lint && npm run typecheck` to
+         confirm the local fix before committing. If the fix requires a schema change
+         (`npm run db:generate`) run that too.
+
+    v.   Commit and push:
+         ```bash
+         git add <changed files>
+         git commit -m "fix(ci): remedy <REMEDY_ATTEMPTS>/3 — <short root-cause description>
+
+         Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+         git push
+         ```
+         Append `{attempt: <N>, sha: <short-sha>, description: <root-cause>}` to
+         `REMEDY_LOG`.
+
+    vi.  Print:
+         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 45s for CI to queue...
+         ```bash
+         sleep 45
+         ```
+         Reset `POLL_COUNT = 0`. Return to poll loop step (a).
+
+    **If `REMEDY_ATTEMPTS >= 3` AND CI still fails** — retrieve final failure logs
+    then print the failure report and continue to step 13:
+
+    ```
+    ✗ CI failed after 3 remedy attempts — manual investigation required.
+    PR #<N>: <url>
+    Branch: <branch>
+
+    Remedies applied:
+      1. <description from REMEDY_LOG[0]> — <sha>
+      2. <description from REMEDY_LOG[1]> — <sha>
+      3. <description from REMEDY_LOG[2]> — <sha>
+
+    Last failure log:
+    <gh run view <last-run-id> --log-failed output, truncated to ~50 lines>
+
+    Hypothesis: <one-sentence root-cause guess based on the logs>
+    Suggested next step: <specific command or action to investigate>
+    ```
+
+    ---
+
+    **Auto-Merge** — entered when all CI checks pass.
+
+    ```bash
+    gh pr merge <N> --merge --delete-branch --yes
+    ```
+
+    If `--merge` is rejected (branch protection, required reviews), try squash:
+    ```bash
+    gh pr merge <N> --squash --delete-branch --yes
+    ```
+
+    On success, print:
+    ```
+    ✓ PR #<N> merged into main. Branch deleted.
+    ```
+
+    On any merge failure, print the error and continue to step 13 — the review
+    session is complete regardless of whether auto-merge succeeded:
+    ```
+    ✗ Auto-merge failed: <error>
+    Merge manually: <url>
+    ```
+
+13. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+
+14. [MANUAL] Remove the per-round diff files generated during the session:
 
     ```bash
     rm -f .chatgpt-diffs/pr<N>-round*-code-diff.diff .chatgpt-diffs/pr<N>-round*-diff.diff

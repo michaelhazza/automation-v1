@@ -10,6 +10,7 @@ import type { AvailableSkill } from '../components/SkillPickerSection';
 import TestPanel from '../components/runs/TestPanel';
 import { isTerminalRunStatus } from '../lib/runStatus';
 import { RunCostPanel } from '../components/run-cost/RunCostPanel';
+import { InvocationsCard } from '../components/InvocationsCard';
 
 interface OrgAgentOption {
   id: string;
@@ -1406,164 +1407,20 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       </> /* end Capabilities tab */}
 
       {/* ── Scheduling tab ──────────────────────────────────────────────── */}
-      {!isNew && agentTab === 'scheduling' && <>
-      {/* ── Section: Schedule & Concurrency (combined) ── */}
-      <SectionCard
-        title="Schedule & Concurrency"
-        subtitle="When the agent runs, how often, and how overlapping or missed runs are handled. The schedule runs in the company's timezone."
-      >
-        <p className="m-0 mb-[18px] text-[13.5px] text-slate-500 leading-relaxed">
-          Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
-        </p>
-
-        {/* Enable toggle */}
-        <label className="flex items-center gap-2.5 cursor-pointer mb-5">
-          <div
-            onClick={() => setForm({ ...form, heartbeatEnabled: !form.heartbeatEnabled })}
-            className={`w-10 h-[22px] rounded-[11px] relative cursor-pointer shrink-0 transition-colors duration-150 ${form.heartbeatEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
-          >
-            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-sm transition-[left] duration-150 ${form.heartbeatEnabled ? 'left-[21px]' : 'left-[3px]'}`} />
-          </div>
-          <span className="text-[14px] font-semibold text-slate-900">Enable heartbeat</span>
-        </label>
-
-        {form.heartbeatEnabled && (
-          <div className="flex flex-wrap items-end gap-5">
-            {/* Start time */}
-            <div>
-              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Start time</div>
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={form.heartbeatOffsetHours}
-                  onChange={(e) => setForm({ ...form, heartbeatOffsetHours: Number(e.target.value) })}
-                  className={`${inputCls} w-[80px]`}
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
-                  ))}
-                </select>
-                <span className="text-slate-400">:</span>
-                <select
-                  value={form.heartbeatOffsetMinutes}
-                  onChange={(e) => setForm({ ...form, heartbeatOffsetMinutes: Number(e.target.value) })}
-                  className={`${inputCls} w-[80px]`}
-                >
-                  {[0, 15, 30, 45].map((m) => (
-                    <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Interval */}
-            <div>
-              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Repeat every</div>
-              <div className="flex gap-2 flex-wrap">
-                {([1, 2, 3, 4, 6, 8, 12, 24] as const).map((h) => (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => setForm({ ...form, heartbeatIntervalHours: h })}
-                    className={`px-3 py-1.5 rounded-lg border text-[13px] font-medium cursor-pointer transition-all duration-100 ${
-                      form.heartbeatIntervalHours === h
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
-                    }`}
-                  >
-                    {h === 24 ? '1 day' : `${h}h`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Timeline preview */}
-            {form.heartbeatIntervalHours && (
-              <div className="w-full">
-                <div className="text-[13px] font-semibold text-gray-700 mb-2.5">Schedule preview (24h)</div>
-                <HeartbeatTimeline
-                  agentName={form.name || 'This agent'}
-                  intervalHours={form.heartbeatIntervalHours}
-                  offsetHours={form.heartbeatOffsetHours}
-                  offsetMinutes={form.heartbeatOffsetMinutes}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Divider before concurrency controls */}
-        <div className="border-t border-slate-100 my-6" />
-        <div className="text-[13px] font-semibold text-slate-700 mb-1">Concurrency</div>
-        <div className="text-xs text-slate-500 mb-4">Control how overlapping and missed runs are handled.</div>
-
-        <div className="flex flex-wrap gap-5">
-          {/* Concurrency Policy */}
-          <div className="min-w-[220px]">
-            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Concurrency Policy</div>
-            <select
-              value={form.concurrencyPolicy}
-              onChange={(e) => setForm({ ...form, concurrencyPolicy: e.target.value as AgentForm['concurrencyPolicy'] })}
-              className={`${inputCls} w-full`}
-            >
-              <option value="skip_if_active">Skip if active</option>
-              <option value="coalesce_if_active">Queue one (coalesce)</option>
-              <option value="always_enqueue">Queue all</option>
-            </select>
-            <div className="text-xs text-slate-400 mt-1">
-              {form.concurrencyPolicy === 'skip_if_active' && 'New runs are dropped while the agent is already running.'}
-              {form.concurrencyPolicy === 'coalesce_if_active' && 'At most one run is queued while the agent is active.'}
-              {form.concurrencyPolicy === 'always_enqueue' && 'Every triggered run is queued and executed in order.'}
-            </div>
-          </div>
-
-          {/* Catch-up Policy */}
-          <div className="min-w-[220px]">
-            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Catch-up Policy</div>
-            <select
-              value={form.catchUpPolicy}
-              onChange={(e) => setForm({ ...form, catchUpPolicy: e.target.value as AgentForm['catchUpPolicy'] })}
-              className={`${inputCls} w-full`}
-            >
-              <option value="skip_missed">Skip missed</option>
-              <option value="enqueue_missed_with_cap">Catch up with cap</option>
-            </select>
-            <div className="text-xs text-slate-400 mt-1">
-              {form.catchUpPolicy === 'skip_missed' && 'Missed heartbeats are skipped — the next run starts at the next scheduled time.'}
-              {form.catchUpPolicy === 'enqueue_missed_with_cap' && `Up to ${form.catchUpCap} missed runs will be queued and executed.`}
-            </div>
-          </div>
-
-          {/* Catch-up Cap (only shown when catch-up policy is enqueue_missed_with_cap) */}
-          {form.catchUpPolicy === 'enqueue_missed_with_cap' && (
-            <div className="min-w-[140px]">
-              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Catch-up Cap</div>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={form.catchUpCap}
-                onChange={(e) => setForm({ ...form, catchUpCap: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })}
-                className={`${inputCls} w-[100px]`}
-              />
-              <div className="text-xs text-slate-400 mt-1">Max missed runs to catch up on.</div>
-            </div>
-          )}
-
-          {/* Max Concurrent Runs */}
-          <div className="min-w-[140px]">
-            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Max Concurrent Runs</div>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={form.maxConcurrentRuns}
-              onChange={(e) => setForm({ ...form, maxConcurrentRuns: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
-              className={`${inputCls} w-[100px]`}
-            />
-            <div className="text-xs text-slate-400 mt-1">How many runs can execute simultaneously (1–10).</div>
-          </div>
-        </div>
-      </SectionCard>
+      {!isNew && agentTab === 'scheduling' && id && <>
+      <InvocationsCard
+        agentId={id}
+        agentName={form.name}
+        heartbeatEnabled={form.heartbeatEnabled}
+        heartbeatIntervalHours={form.heartbeatIntervalHours}
+        heartbeatOffsetHours={form.heartbeatOffsetHours}
+        heartbeatOffsetMinutes={form.heartbeatOffsetMinutes}
+        concurrencyPolicy={form.concurrencyPolicy}
+        catchUpPolicy={form.catchUpPolicy}
+        catchUpCap={form.catchUpCap}
+        maxConcurrentRuns={form.maxConcurrentRuns}
+        onChange={(fields) => setForm((prev) => ({ ...prev, ...fields } as AgentForm))}
+      />
       </> /* end Scheduling tab */}
 
       {/* For new agents, show a Create button under the form (no tabs) */}

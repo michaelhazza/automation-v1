@@ -4,7 +4,15 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
+import CostMeterPill from '../components/CostMeterPill';
+import SuggestedActionChips from '../components/SuggestedActionChips';
+import ThreadContextPanel from '../components/ThreadContextPanel';
+import { InlineIntegrationCard } from '../components/InlineIntegrationCard';
 import { relativeTime } from '../lib/relativeTime';
+import type { ConversationCostResponse } from '../../../shared/types/conversationCost';
+import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions';
+import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext';
+import type { IntegrationCardContent, MessageMeta } from '../../../shared/types/integrationCardContent';
 
 interface AgentRunHandoff {
   version: 1;
@@ -44,6 +52,8 @@ interface Message {
   role: 'user' | 'assistant' | 'tool_result';
   content?: string;
   triggeredExecutionId?: string;
+  suggestedActions?: SuggestedAction[] | null;
+  meta?: MessageMeta | null;
   createdAt: string;
 }
 
@@ -175,13 +185,46 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [contextPanelVisible, setContextPanelVisible] = useState(false);
+  const [threadContext, setThreadContext] = useState<ThreadContextReadModel | null>(null);
   const [error, setError] = useState('');
   // Recent runs sidebar section
   const [recentRuns, setRecentRuns] = useState<SessionLogRun[]>([]);
+  // Local dismissed state for integration cards — keyed by messageId
+  const [dismissedCards, setDismissedCards] = useState<Set<string>>(new Set());
   // Latest structured handoff from a previous run (for the "Continue from
   // last session" card). Null until loaded; null after load if no prior
   // run with a handoff exists.
   const [latestHandoff, setLatestHandoff] = useState<LatestHandoffResponse | null>(null);
+  // Per-thread cost/token meter — refreshed after each new assistant message
+  const [conversationCost, setConversationCost] = useState<ConversationCostResponse | null>(null);
+
+  // Fetch per-conversation thread context. Returns empty model if none exists yet.
+  const loadThreadContext = useCallback(async (convId: string | null) => {
+    if (!agentId || !convId) return;
+    try {
+      const res = await api.get<ThreadContextReadModel>(
+        `/api/agents/${agentId}/conversations/${convId}/thread-context`,
+      );
+      setThreadContext(res.data);
+    } catch {
+      // Non-critical — silently ignore
+    }
+  }, [agentId]);
+
+  // Fetch per-thread cost from the cost endpoint. Silently no-ops when
+  // agentId or convId is absent (e.g. before initial load).
+  const loadConversationCost = useCallback(async (convId: string | null) => {
+    if (!agentId || !convId) return;
+    try {
+      const res = await api.get<ConversationCostResponse>(
+        `/api/agents/${agentId}/conversations/${convId}/cost`,
+      );
+      setConversationCost(res.data);
+    } catch {
+      // Silently ignore — cost is non-critical
+    }
+  }, [agentId]);
 
   // Load recent runs for this agent (org-scope). Refreshed when WebSocket
   // signals a run completion.
@@ -240,10 +283,15 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           return [...prev, d.message!];
         });
         setSending(false);
+        // Refresh cost after each new assistant message
+        void loadConversationCost(activeConvId);
       }
     },
     'conversation:tool_use': () => {
       // Keep the typing indicator visible during tool execution
+    },
+    'conversation:thread_context_updated': (data: unknown) => {
+      setThreadContext(data as ThreadContextReadModel);
     },
   });
 
@@ -278,11 +326,15 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   useEffect(() => {
     if (!agentId || !activeConvId) return;
     setLoadingMessages(true); setMessages([]);
+    setConversationCost(null);
+    setThreadContext(null);
     api.get(`/api/agents/${agentId}/conversations/${activeConvId}`)
       .then((res) => { const data = res.data; setMessages(Array.isArray(data) ? data : (data.messages ?? [])); })
       .catch((err) => { console.error('[AgentChat] Failed to load conversation messages:', err); setMessages([]); })
       .finally(() => setLoadingMessages(false));
-  }, [agentId, activeConvId]);
+    void loadConversationCost(activeConvId);
+    void loadThreadContext(activeConvId);
+  }, [agentId, activeConvId, loadConversationCost, loadThreadContext]);
 
   const handleNewConversation = async () => {
     if (!agentId) return;
@@ -339,6 +391,11 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  const handlePromptFill = useCallback((prompt: string) => {
+    setInput(prompt);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
+
   if (loading) {
     return (
       <div className="flex flex-col h-[calc(100vh-64px)]">
@@ -381,6 +438,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           {agent.status === 'active' ? 'Active' : agent.status}
         </span>
         <span className="text-[12px] text-slate-400 font-mono shrink-0">{agent.modelId}</span>
+        <CostMeterPill cost={conversationCost} />
         <Link
           to={`/admin/agents/${agentId}`}
           title="Manage agent — prompts, skills, schedule, integrations"
@@ -400,6 +458,16 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
           </svg>
+        </button>
+        <button
+          onClick={() => setContextPanelVisible((v) => !v)}
+          title={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors text-[12.5px] font-semibold shrink-0 ${contextPanelVisible ? 'bg-violet-50 border-indigo-200 text-indigo-600' : 'bg-transparent border-slate-200 text-slate-400 hover:text-slate-600'}`}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
+          </svg>
+          Context
         </button>
       </div>
 
@@ -566,6 +634,20 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                       </div>
                     )}
 
+                    {/* Inline integration-setup card — emitted when a run blocks waiting for OAuth */}
+                    {msg.meta?.kind === 'integration_card' && (
+                      <InlineIntegrationCard
+                        card={{ ...(msg.meta as IntegrationCardContent), dismissed: dismissedCards.has(msg.id) }}
+                        runMetadata={null /* TODO(v2): extract from recentRuns once SessionLogRun carries runMetadata */}
+                        messageId={msg.id}
+                        onDismiss={(id) => setDismissedCards((prev) => new Set([...prev, id]))}
+                        onRetry={() => {
+                          // TODO(v2): create new run with conversation context
+                          // For v1: trigger a new message to start a fresh run
+                        }}
+                      />
+                    )}
+
                     <div className={`text-[11px] text-slate-400 ${msg.role === 'user' ? 'pr-0.5 self-end' : 'pl-0.5 self-start'}`}>
                       {formatTime(msg.createdAt)}
                     </div>
@@ -587,6 +669,25 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
               <button onClick={() => setError('')} className="ml-auto bg-transparent border-0 cursor-pointer text-red-600 text-lg leading-none">×</button>
             </div>
           )}
+
+          {/* Suggested action chips — shown above composer for most recent assistant message only */}
+          {(() => {
+            let lastAssistantMsg: Message | undefined;
+            for (let i = visibleMessages.length - 1; i >= 0; i--) {
+              if (visibleMessages[i].role === 'assistant') { lastAssistantMsg = visibleMessages[i]; break; }
+            }
+            const chips = lastAssistantMsg?.suggestedActions ?? [];
+            return chips.length > 0 && !sending && agentId && activeConvId ? (
+              <SuggestedActionChips
+                messageId={lastAssistantMsg!.id}
+                agentId={agentId}
+                convId={activeConvId}
+                chips={chips}
+                onPromptFill={handlePromptFill}
+                disabledKeys={[]}
+              />
+            ) : null;
+          })()}
 
           {/* Input bar */}
           <div className="px-5 pt-3 pb-4 bg-white border-t border-slate-200 shrink-0">
@@ -617,6 +718,22 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
             </div>
           </div>
         </div>
+
+        {/* Context panel — right pane */}
+        {contextPanelVisible && (
+          <div className="w-[280px] shrink-0 bg-slate-50 border-l border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+              <div className="text-[13px] font-bold text-slate-800">Context</div>
+            </div>
+            <ThreadContextPanel
+              readModel={threadContext}
+              isLive={sending || recentRuns.some((r) => {
+                const s = (r as { status?: string }).status;
+                return s === 'running' || s === 'pending' || s === 'delegated';
+              })}
+            />
+          </div>
+        )}
 
       </div>
     </div>
