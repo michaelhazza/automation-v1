@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { rebindExternalReference } from '../api/externalDocumentReferences';
+import { rebindExternalReference, verifyAccess } from '../api/externalDocumentReferences';
 import type { ExternalDocumentReference } from '../api/externalDocumentReferences';
 
 interface Props {
@@ -17,10 +17,26 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
   const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const canConfirm = !!selectedConnId && !submitting;
+  const canConfirm = !!selectedConnId && !submitting && !verifying && !accessError;
+
+  const handleConnectionChange = async (connId: string) => {
+    setSelectedConnId(connId || null);
+    setAccessError(null);
+    if (!connId) return;
+    setVerifying(true);
+    try {
+      await verifyAccess(connId, reference.id);
+    } catch {
+      setAccessError('This connection cannot access the file. Choose another.');
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleConfirm = async () => {
     if (!selectedConnId) return;
@@ -55,7 +71,7 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
             <select
               className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
               value={selectedConnId ?? ''}
-              onChange={e => setSelectedConnId(e.target.value || null)}
+              onChange={e => handleConnectionChange(e.target.value)}
             >
               <option value="">Select a Google Drive connection…</option>
               {connections.map(c => (
@@ -63,6 +79,8 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
               ))}
             </select>
           </div>
+          {verifying && <p className="text-xs text-slate-500">Checking access…</p>}
+          {accessError && <p className="text-sm text-red-700">{accessError}</p>}
           {submitError && (
             <p className="text-sm text-red-700">Could not re-attach: {submitError}. Try another connection.</p>
           )}
@@ -85,7 +103,7 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
               onClick={handleConfirm}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50 hover:bg-blue-700"
             >
-              {submitting ? 'Re-attaching…' : 'Re-attach'}
+              {submitting ? 'Re-attaching…' : verifying ? 'Checking…' : 'Re-attach'}
             </button>
           </div>
         </footer>

@@ -401,6 +401,8 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     }
   }, [subaccountId, itemId, loadDriveRefs]);
 
+  const handleClosePicker = useCallback(() => setPickerOpen(false), []);
+
   const handleRemoveDriveRef = async (referenceId: string) => {
     try {
       await removeExternalReference(subaccountId, itemId, referenceId);
@@ -805,7 +807,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
       <DriveFilePicker
         connections={driveConnections}
         isOpen={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        onClose={handleClosePicker}
         onPick={handlePick}
       />
       {rebindReference && (
