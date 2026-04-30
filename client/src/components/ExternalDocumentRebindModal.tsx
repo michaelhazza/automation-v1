@@ -10,11 +10,12 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onRebound: (updated: ExternalDocumentReference) => void;
+  onRemove: () => void;
 }
 
 type VerifyState = { kind: 'idle' } | { kind: 'verifying' } | { kind: 'verified' } | { kind: 'failed'; reason: string };
 
-export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, connections, isOpen, onClose, onRebound }: Props) {
+export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, connections, isOpen, onClose, onRebound, onRemove }: Props) {
   const [selectedConnId, setSelectedConnId] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<VerifyState>({ kind: 'idle' });
   const [submitting, setSubmitting] = useState(false);
@@ -81,18 +82,27 @@ export function ExternalDocumentRebindModal({ subaccountId, taskId, reference, c
             <p className="text-sm text-red-700">This connection cannot read the file ({verifyState.reason}). Try another.</p>
           )}
         </div>
-        <footer className="flex items-center justify-end gap-3 border-t bg-slate-50 px-5 py-3">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">
-            Cancel
-          </button>
+        <footer className="flex items-center justify-between border-t bg-slate-50 px-5 py-3">
           <button
             type="button"
-            disabled={!canConfirm}
-            onClick={handleConfirm}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50 hover:bg-blue-700"
+            onClick={() => { onRemove(); onClose(); }}
+            className="text-sm text-red-600 hover:text-red-800 underline"
           >
-            {submitting ? 'Re-attaching…' : 'Re-attach'}
+            Remove reference instead
           </button>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canConfirm}
+              onClick={handleConfirm}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50 hover:bg-blue-700"
+            >
+              {submitting ? 'Re-attaching…' : 'Re-attach'}
+            </button>
+          </div>
         </footer>
       </div>
     </div>

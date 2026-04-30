@@ -819,6 +819,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
             setDriveRefs(prev => prev.map(r => r.id === updated.id ? updated : r));
             setRebindReference(null);
           }}
+          onRemove={() => handleRemoveDriveRef(rebindReference!.id)}
         />
       )}
     </Modal>
