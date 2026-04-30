@@ -6,6 +6,7 @@ import {
   EXTERNAL_DOC_HARD_TOKEN_LIMIT,
   EXTERNAL_DOC_MAX_STALENESS_MINUTES,
   EXTERNAL_DOC_MIN_CONTENT_TOKENS,
+  EXTERNAL_DOC_RETRY_SUPPRESSION_WINDOW_MS,
   EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES,
 } from '../lib/constants.js';
 import { documentCache } from '../db/schema/documentCache.js';
@@ -20,9 +21,11 @@ import {
   truncateContentToTokenBudget,
 } from './externalDocumentResolverPure.js';
 import { SingleFlightGuard } from './externalDocumentSingleFlight.js';
+import { RetrySuppressor } from './externalDocumentRetrySuppression.js';
 import type { ResolveParams, ResolvedDocument } from './externalDocumentResolverTypes.js';
 
 const singleFlight = new SingleFlightGuard<ResolvedDocument>(EXTERNAL_DOC_SINGLE_FLIGHT_MAX_ENTRIES);
+const retrySuppressor = new RetrySuppressor(EXTERNAL_DOC_RETRY_SUPPRESSION_WINDOW_MS);
 
 // hashtext returns int4; widen to bigint for pg_advisory_xact_lock(bigint).
 // Lock auto-releases on transaction commit/rollback.
@@ -70,6 +73,18 @@ async function doResolve(p: ResolveParams): Promise<ResolvedDocument> {
     eq(documentCache.connectionId, p.connectionId),
   )).limit(1);
   let cacheRow = cached[0];
+
+  // Suppression check: skip re-attempt if this ref recently failed with a suppressible reason.
+  const suppressibleReasons = ['auth_revoked', 'rate_limited'] as const;
+  for (const reason of suppressibleReasons) {
+    if (retrySuppressor.shouldSuppress(p.referenceId, reason)) {
+      if (cacheRow) {
+        const stale = isPastStalenessBoundary(cacheRow.fetchedAt, fetchStart, EXTERNAL_DOC_MAX_STALENESS_MINUTES);
+        if (!stale) return serveCacheAsDegraded(p, resolver.resolverVersion, cacheRow, reason, startedAt);
+      }
+      return emitFailure(p, resolver.resolverVersion, reason, null, startedAt);
+    }
+  }
 
   // 3. Resolver-version check
   const versionStale = cacheRow ? isResolverVersionStale(cacheRow.resolverVersion, resolver.resolverVersion) : true;
@@ -299,6 +314,9 @@ async function serveCacheAsDegraded(
   reason: FetchFailureReason,
   startedAt: number,
 ): Promise<ResolvedDocument> {
+  if (reason === 'auth_revoked' || reason === 'rate_limited') {
+    retrySuppressor.recordFailure(p.referenceId, reason);
+  }
   await transitionState(p.referenceType, p.referenceId, 'degraded');
   // Invariant #12: idempotent failure writes via onConflictDoNothing
   await db.insert(documentFetchEvents).values({
@@ -350,6 +368,9 @@ async function emitFailure(
   revisionId: string | null,
   startedAt: number,
 ): Promise<ResolvedDocument> {
+  if (reason === 'auth_revoked' || reason === 'rate_limited') {
+    retrySuppressor.recordFailure(p.referenceId, reason);
+  }
   await transitionState(p.referenceType, p.referenceId, 'broken');
   // Invariant #12: idempotent failure writes
   await db.insert(documentFetchEvents).values({
