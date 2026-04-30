@@ -1901,3 +1901,17 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 ### D4. Spec § 4.2 input-detection wording contradicts § 4.1 tools list
 
 `docs/agentic-engineering-notes-dev-spec.md` § 4.1 declares the agent has tools `Read, Glob, Grep` (no Bash); § 4.2 instructs "Same auto-detection logic as `spec-conformance` (committed + staged + unstaged + untracked)" — which requires shell access `spec-conformance` has but this agent does not. `dual-reviewer` (Codex pass) flagged this as `[P2] Give the agent a way to detect the diff` (`tasks/review-logs/dual-review-log-agentic-engineering-notes-*.md`). The agent definition has been updated in-branch to make the contract self-consistent (caller provides the changed-file set, mirroring `pr-reviewer`'s posture). The spec § 4.2 wording should be aligned in a follow-up commit — drop the "auto-detection" clause and replace with "caller provides the changed-file set, same posture as `pr-reviewer`." Same wording symmetry applies to whatever invocation snippets exist for `adversarial-reviewer`.
+
+---
+
+## Doc drift backlog (audit 2026-05-01)
+
+- [ ] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:open] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry (actor model, provisioning adapters, per-agent email/calendar, org chart). Spec `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md` is pre-spec-reviewer draft. Re-evaluate after spec-reviewer ratification; adding a new product capability section before the spec is ratified risks editorial churn.
+- [ ] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:open] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign (PR #187) as a worked example alongside the cached-context infrastructure example. Requires a human author pass to select which design decisions to highlight and frame as transferable principles — directional editorial work, not a mechanical addition.
+
+## Deferred from pr-reviewer review — fix-doco-may2026
+
+**Captured:** 2026-05-01
+**Source log:** tasks/review-logs/pr-review-log-fix-doco-may2026-2026-05-01T00-30-00Z.md
+
+- [ ] [origin:pr-review:fix-doco-may2026:2026-05-01T00-30-00Z] [status:open] Add `scripts/verify-doc-sync-parity.ts` — parse Final Summary templates in `chatgpt-pr-review.md` and `chatgpt-spec-review.md`, assert they match the field list in `docs/doc-sync.md` (PR agent omits spec-context.md; spec agent includes it). Guards against someone adding a new reference doc to doc-sync.md and forgetting to update the two agent templates and README.md table. Single test file; CI runs it.
