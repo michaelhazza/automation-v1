@@ -28,7 +28,10 @@ export default defineConfig({
     env: {
       JWT_SECRET: 'ci-throwaway-jwt-secret-at-least-32-chars',
       EMAIL_FROM: 'ci@automation-os.local',
-      NODE_ENV: 'test',
+      // Default to 'test' but let the shell override (e.g. CI integration
+      // job runs with NODE_ENV=integration to un-skip the *.integration.
+      // test.ts files gated on `process.env.NODE_ENV === 'integration'`).
+      NODE_ENV: process.env.NODE_ENV ?? 'test',
       SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1',
       SYSTEM_INCIDENT_THROTTLE_MS: '100',
     },
