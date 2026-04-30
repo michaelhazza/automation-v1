@@ -29,8 +29,6 @@
 export {};
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
-
 await import('dotenv/config');
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -92,33 +90,25 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
       .from(conversationMessages)
       .where(eq(conversationMessages.conversationId, t1.convId));
 
-    assert.strictEqual(rows1.length, 1, 'test 1: exactly 1 row written');
-    assert.strictEqual(rows1[0]!.content, 'Hello from noop test', 'test 1: correct content');
+    expect(rows1.length).toBe(1);
+    expect(rows1[0]!.content).toBe('Hello from noop test');
 
     // --- Test 2: brief-scoped DB conversation → 'brief_followup' ---
     const t2 = await seedConversation('brief');
     seeded.push(t2.scopeId);
 
     const briefConv = await assertCanViewConversation(t2.convId, TEST_ORG_ID);
-    assert.ok(briefConv !== null, 'test 2: brief conv fetched from DB');
-    assert.strictEqual(briefConv!.scopeType, 'brief', 'test 2: scopeType is brief');
-    assert.strictEqual(
-      selectConversationFollowUpAction(briefConv),
-      'brief_followup',
-      'test 2: brief DB conv → brief_followup action',
-    );
+    expect(briefConv !== null).toBeTruthy();
+    expect(briefConv!.scopeType).toBe('brief');
+    expect(selectConversationFollowUpAction(briefConv)).toBe('brief_followup');
 
     // --- Test 3: task-scoped DB conversation → 'noop' ---
     const t3 = await seedConversation('task');
     seeded.push(t3.scopeId);
 
     const taskConv = await assertCanViewConversation(t3.convId, TEST_ORG_ID);
-    assert.ok(taskConv !== null, 'test 3: task conv fetched from DB');
-    assert.strictEqual(
-      selectConversationFollowUpAction(taskConv),
-      'noop',
-      'test 3: task DB conv → noop action',
-    );
+    expect(taskConv !== null).toBeTruthy();
+    expect(selectConversationFollowUpAction(taskConv)).toBe('noop');
 
     // --- Test 4: no built-in dedupe — route single-call contract is load-bearing ---
     await writeConversationMessage({
@@ -135,11 +125,7 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
       .from(conversationMessages)
       .where(eq(conversationMessages.conversationId, t1.convId));
 
-    assert.strictEqual(
-      rows4.length,
-      2,
-      'test 4: writeConversationMessage has no built-in dedupe — route single-call invariant is load-bearing',
-    );
+    expect(rows4.length).toBe(2);
   } finally {
     for (const id of seeded) await cleanup(id);
   }

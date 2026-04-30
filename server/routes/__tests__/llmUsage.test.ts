@@ -21,7 +21,6 @@
  */
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import type { RunCostResponse } from '../../../shared/types/runCost.js';
 
 // ─── Section 1: Pure type-shape assertions ────────────────────────────
@@ -44,16 +43,16 @@ await test('RunCostResponse zero-default shape type-checks end to end', () => {
   // Enumerate every contract field so a future type change that removes
   // or renames one of the four new fields fails this file at compile
   // time before it reaches the client.
-  assert.equal(zeroShape.entityId, 'run-uuid');
-  assert.equal(zeroShape.totalCostCents, 0);
-  assert.equal(zeroShape.requestCount, 0);
-  assert.equal(zeroShape.llmCallCount, 0);
-  assert.equal(zeroShape.totalTokensIn, 0);
-  assert.equal(zeroShape.totalTokensOut, 0);
-  assert.equal(zeroShape.callSiteBreakdown.app.costCents, 0);
-  assert.equal(zeroShape.callSiteBreakdown.app.requestCount, 0);
-  assert.equal(zeroShape.callSiteBreakdown.worker.costCents, 0);
-  assert.equal(zeroShape.callSiteBreakdown.worker.requestCount, 0);
+  expect(zeroShape.entityId).toBe('run-uuid');
+  expect(zeroShape.totalCostCents).toBe(0);
+  expect(zeroShape.requestCount).toBe(0);
+  expect(zeroShape.llmCallCount).toBe(0);
+  expect(zeroShape.totalTokensIn).toBe(0);
+  expect(zeroShape.totalTokensOut).toBe(0);
+  expect(zeroShape.callSiteBreakdown.app.costCents).toBe(0);
+  expect(zeroShape.callSiteBreakdown.app.requestCount).toBe(0);
+  expect(zeroShape.callSiteBreakdown.worker.costCents).toBe(0);
+  expect(zeroShape.callSiteBreakdown.worker.requestCount).toBe(0);
 });
 
 // ─── Section 2: Integration (requires DATABASE_URL) ─────────────────
@@ -207,13 +206,13 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
       await test('Run with 0 LLM calls → zero-default shape', async () => {
         const runId = await seedRun();
         const r = await runRouteQuery(runId);
-        assert.equal(r.llmCallCount, 0);
-        assert.equal(r.totalTokensIn, 0);
-        assert.equal(r.totalTokensOut, 0);
-        assert.equal(r.callSiteBreakdown.app.costCents, 0);
-        assert.equal(r.callSiteBreakdown.app.requestCount, 0);
-        assert.equal(r.callSiteBreakdown.worker.costCents, 0);
-        assert.equal(r.callSiteBreakdown.worker.requestCount, 0);
+        expect(r.llmCallCount).toBe(0);
+        expect(r.totalTokensIn).toBe(0);
+        expect(r.totalTokensOut).toBe(0);
+        expect(r.callSiteBreakdown.app.costCents).toBe(0);
+        expect(r.callSiteBreakdown.app.requestCount).toBe(0);
+        expect(r.callSiteBreakdown.worker.costCents).toBe(0);
+        expect(r.callSiteBreakdown.worker.requestCount).toBe(0);
       });
 
       await test('Run with 3 successful app calls', async () => {
@@ -222,12 +221,12 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         await insertLedger({ runId, status: 'success', callSite: 'app', costCents: 20, tokensIn: 200, tokensOut: 70 });
         await insertLedger({ runId, status: 'success', callSite: 'app', costCents: 12, tokensIn: 150, tokensOut: 60 });
         const r = await runRouteQuery(runId);
-        assert.equal(r.llmCallCount, 3);
-        assert.equal(r.callSiteBreakdown.app.requestCount, 3);
-        assert.equal(r.callSiteBreakdown.app.costCents, 47);
-        assert.equal(r.callSiteBreakdown.worker.requestCount, 0);
-        assert.equal(r.totalTokensIn, 450);
-        assert.equal(r.totalTokensOut, 180);
+        expect(r.llmCallCount).toBe(3);
+        expect(r.callSiteBreakdown.app.requestCount).toBe(3);
+        expect(r.callSiteBreakdown.app.costCents).toBe(47);
+        expect(r.callSiteBreakdown.worker.requestCount).toBe(0);
+        expect(r.totalTokensIn).toBe(450);
+        expect(r.totalTokensOut).toBe(180);
       });
 
       await test('Run with 2 success + 1 error → error excluded from new fields', async () => {
@@ -236,11 +235,11 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         await insertLedger({ runId, status: 'success', callSite: 'app', costCents: 10, tokensIn: 100, tokensOut: 30 });
         await insertLedger({ runId, status: 'error',   callSite: 'app', costCents: 5,  tokensIn: 50,  tokensOut: 0  });
         const r = await runRouteQuery(runId);
-        assert.equal(r.llmCallCount, 2, 'errored call excluded from count');
-        assert.equal(r.callSiteBreakdown.app.requestCount, 2);
-        assert.equal(r.callSiteBreakdown.app.costCents, 20);
-        assert.equal(r.totalTokensIn, 200);
-        assert.equal(r.totalTokensOut, 60);
+        expect(r.llmCallCount).toBe(2);
+        expect(r.callSiteBreakdown.app.requestCount).toBe(2);
+        expect(r.callSiteBreakdown.app.costCents).toBe(20);
+        expect(r.totalTokensIn).toBe(200);
+        expect(r.totalTokensOut).toBe(60);
       });
 
       await test('Run with mixed call-site (app + worker)', async () => {
@@ -249,20 +248,20 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         await insertLedger({ runId, status: 'success', callSite: 'app',    costCents: 20, tokensIn: 100, tokensOut: 40 });
         await insertLedger({ runId, status: 'partial', callSite: 'worker', costCents: 40, tokensIn: 300, tokensOut: 50 });
         const r = await runRouteQuery(runId);
-        assert.equal(r.callSiteBreakdown.app.requestCount, 2);
-        assert.equal(r.callSiteBreakdown.app.costCents, 50);
-        assert.equal(r.callSiteBreakdown.worker.requestCount, 1);
-        assert.equal(r.callSiteBreakdown.worker.costCents, 40);
-        assert.equal(r.totalTokensIn, 600);
-        assert.equal(r.totalTokensOut, 170);
-        assert.equal(r.llmCallCount, 3, 'partial counts as successful traffic');
+        expect(r.callSiteBreakdown.app.requestCount).toBe(2);
+        expect(r.callSiteBreakdown.app.costCents).toBe(50);
+        expect(r.callSiteBreakdown.worker.requestCount).toBe(1);
+        expect(r.callSiteBreakdown.worker.costCents).toBe(40);
+        expect(r.totalTokensIn).toBe(600);
+        expect(r.totalTokensOut).toBe(170);
+        expect(r.llmCallCount).toBe(3);
       });
 
       await test('Partial status is included alongside success', async () => {
         const runId = await seedRun();
         await insertLedger({ runId, status: 'partial', callSite: 'app', costCents: 15, tokensIn: 80, tokensOut: 20 });
         const r = await runRouteQuery(runId);
-        assert.equal(r.llmCallCount, 1, 'partial counted');
+        expect(r.llmCallCount).toBe(1);
       });
 
       // Summary log removed (counters managed by vitest)

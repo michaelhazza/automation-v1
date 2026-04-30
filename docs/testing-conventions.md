@@ -85,12 +85,15 @@ Run a single test file during development:
 npx vitest run server/services/__tests__/runContextLoader.test.ts
 ```
 
-**Forbidden patterns (gate will catch these):**
-- `function test(name: string, fn: () => void)` — handwritten harness
+**Forbidden patterns** — enforced by `scripts/verify-test-quality.sh`:
+- `function asyncTest(...)` — handwritten harness
 - `import test from 'node:test'` — node:test runner
-- `import assert from 'node:assert'` — node:assert API
-- `let passed = 0; let failed = 0` — counter boilerplate
-- `if (failed > 0) process.exit(1)` — manual exit
+- `import assert from 'node:assert'` — node:assert API (use `expect()` instead)
+- `let passed = 0`, `let failed = 0`, `passed++`, `failed++` — counter boilerplate
+- `pendingTests`, `Promise.all(pendingTests)` — module-load test queues
+- `process.exit` / `process.exitCode` in test files — use `test.skip` / `test.skipIf` / `throw`
+- `*.test.ts` outside `**/__tests__/**/` — Vitest's discovery glob will not pick it up
+- A test file with zero `test()` / `describe()` / `it()` blocks — silently runs no tests
 
 ### Skip-gates (integration / DB-backed tests)
 
@@ -124,7 +127,7 @@ afterEach(() => { process.env = envSnapshot; });
 
 ## Test discovery
 
-Vitest discovers every `**/__tests__/*.test.ts` file automatically (per `vitest.config.ts`). A file is included the moment it lands — no registration step. Two outlier paths (`shared/lib/parseContextSwitchCommand.test.ts`, `server/services/scopeResolutionService.test.ts`) are explicitly listed in `vitest.config.ts` because they live outside `__tests__/`.
+Vitest discovers every `**/__tests__/*.test.ts` file automatically (per `vitest.config.ts`). A file is included the moment it lands — no registration step. The discovery glob is the only allowed location: `verify-test-quality.sh` rejects any `*.test.ts` outside `**/__tests__/**/`.
 
 To run a single test file during development:
 

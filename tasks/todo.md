@@ -1756,45 +1756,11 @@ The 5 items below remain open. D19 and D20 are NEW gaps surfaced during the re-v
   `poolMatchGlobs` entry and the `// @vitest-isolate` comment.
 - Linked invariant: I-6 (quarantine contract with expiry pressure).
 
-### TI-003: Add a "no-handwritten-harness-leftovers" gate
-- Captured: 2026-04-30 (after diagnosing the CI hang on PR #238)
-- Owner: unowned
-- Reason: Phase 2/3 conversion scripts left some files in a half-converted
-  state — they imported `test`/`expect` from vitest but kept a custom
-  `function asyncTest()` helper, an unawaited `pendingTests` array, top-level
-  `await Promise.all(pendingTests)`, references to undeclared `passed`/
-  `failed` counters, and a final `if (failed > 0) process.exit(1)`. Symptom
-  on PR #238: vitest worker hung for 13+ minutes after all tests appeared
-  to complete because `await Promise.all(pendingTests)` waited on promises
-  that never resolved (the resolver path threw `passed is not defined`).
-  Fixed in commit on this branch — but a guard prevents the next regression.
-- Goal: a `scripts/verify-no-harness-leftovers.sh` gate that fails if any
-  `*.test.ts` contains any of: `function asyncTest`, `let passed = 0`,
-  `let failed = 0`, `pendingTests`, `if (failed > 0) process.exit`,
-  `Promise.all(pendingTests)`, `passed++`, `failed++`. Wire into
-  `scripts/run-all-gates.sh`.
-- Linked invariant: I-7b (no module-load side effects in tests) and the
-  testing-conventions.md "Forbidden patterns" list (which already names
-  these patterns but is not enforced).
-
-### TI-002: Add a test-discovery guard to prevent orphan `*.test.ts` files
-- Captured: 2026-04-30 (after fixing two orphan tests on the vitest-migration branch)
-- Owner: unowned
-- Reason: Vitest's `include` glob is `**/__tests__/**/*.test.ts` plus two
-  explicitly-listed outliers. Test files placed outside `__tests__/` and not
-  added to the explicit list silently provide zero coverage. This has now
-  bitten the codebase three times: `canonicalAdapterContract.test.ts`
-  (commit 4d0cef9f), `shared/types/workspace.test.ts`, and
-  `shared/billing/seatDerivation.test.ts` (both fixed on the
-  vitest-migration branch).
-- Blocking dependency: the two outliers explicitly listed in
-  `vitest.config.ts` (`shared/lib/parseContextSwitchCommand.test.ts`,
-  `server/services/scopeResolutionService.test.ts`) are scheduled for
-  relocation to `__tests__/` per the migration plan's Phase 6 "Moved"
-  section. The guard will false-positive on those two until they move.
-- Goal: after the two outliers are relocated, add
-  `scripts/verify-test-discovery.sh` that fails if any `*.test.ts` exists
-  outside `**/__tests__/**`. Wire it into `scripts/run-all-gates.sh` and
-  remove the `include` allow-list entries from `vitest.config.ts`.
-- Linked invariant: I-3 (parity — every test file the bash runner ran must
-  also be discovered by Vitest).
+### TI-002 + TI-003: [DONE 2026-04-30] verify-test-quality.sh
+Discovery guard + harness-leftover guard merged into a single gate at
+`scripts/verify-test-quality.sh` (wired into `scripts/run-all-gates.sh`).
+Enforces five rules: file location under `__tests__/`, no `node:test` /
+`node:assert` imports, no handwritten-harness leftovers (`asyncTest`,
+`pendingTests`, `passed++`, `failed++`, `Promise.all(pendingTests)`), no
+`process.exit` in tests, every file has at least one `test()` / `describe()`
+/ `it()` block. Currently 282 files scanned, 0 violations.

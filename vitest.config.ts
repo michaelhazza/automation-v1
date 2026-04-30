@@ -15,8 +15,6 @@ export default defineConfig({
   test: {
     include: [
       '**/__tests__/**/*.test.ts',
-      'shared/lib/parseContextSwitchCommand.test.ts',
-      'server/services/scopeResolutionService.test.ts',
     ],
     exclude: [
       '**/node_modules/**',

@@ -6,41 +6,40 @@
  */
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import {
   selectConversationFollowUpAction,
   buildConversationFollowUpResponseExtras,
 } from '../conversationsRoutePure.js';
 
 test('selectConversationFollowUpAction predicate matrix', () => {
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: 'brief' }), 'brief_followup');
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: 'task' }), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: 'agent_run' }), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: 'agent' }), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: null }), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction({ scopeType: undefined }), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction(null), 'noop');
-  assert.strictEqual(selectConversationFollowUpAction(undefined), 'noop');
+  expect(selectConversationFollowUpAction({ scopeType: 'brief' })).toBe('brief_followup');
+  expect(selectConversationFollowUpAction({ scopeType: 'task' })).toBe('noop');
+  expect(selectConversationFollowUpAction({ scopeType: 'agent_run' })).toBe('noop');
+  expect(selectConversationFollowUpAction({ scopeType: 'agent' })).toBe('noop');
+  expect(selectConversationFollowUpAction({ scopeType: null })).toBe('noop');
+  expect(selectConversationFollowUpAction({ scopeType: undefined })).toBe('noop');
+  expect(selectConversationFollowUpAction(null)).toBe('noop');
+  expect(selectConversationFollowUpAction(undefined)).toBe('noop');
 });
 
 test('buildConversationFollowUpResponseExtras — noop branch', () => {
   const extras = buildConversationFollowUpResponseExtras(null);
-  assert.ok('route' in extras);
-  assert.ok('fastPathDecision' in extras);
-  assert.strictEqual(extras.route, null);
-  assert.strictEqual(extras.fastPathDecision, null);
+  expect('route' in extras).toBeTruthy();
+  expect('fastPathDecision' in extras).toBeTruthy();
+  expect(extras.route).toBe(null);
+  expect(extras.fastPathDecision).toBe(null);
   const json = JSON.parse(JSON.stringify(extras));
-  assert.strictEqual(json.route, null);
-  assert.strictEqual(json.fastPathDecision, null);
-  assert.ok('route' in json);
-  assert.ok('fastPathDecision' in json);
+  expect(json.route).toBe(null);
+  expect(json.fastPathDecision).toBe(null);
+  expect('route' in json).toBeTruthy();
+  expect('fastPathDecision' in json).toBeTruthy();
 });
 
 test('buildConversationFollowUpResponseExtras — brief branch', () => {
   const fastPathDecision = { route: 'simple_reply', confidence: 0.92, reasonCode: 'low_complexity' };
   const extras = buildConversationFollowUpResponseExtras({ route: 'simple_reply', fastPathDecision });
-  assert.strictEqual(extras.route, 'simple_reply');
-  assert.deepStrictEqual(extras.fastPathDecision, fastPathDecision);
-  assert.notStrictEqual(extras.route, null);
-  assert.notStrictEqual(extras.fastPathDecision, null);
+  expect(extras.route).toBe('simple_reply');
+  expect(extras.fastPathDecision).toEqual(fastPathDecision);
+  expect(extras.route).not.toBe(null);
+  expect(extras.fastPathDecision).not.toBe(null);
 });

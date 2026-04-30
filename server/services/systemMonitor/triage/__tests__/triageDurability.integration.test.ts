@@ -45,13 +45,18 @@ const { runTriage, __testHooks } = await import('../triageHandler.js');
 const { runStaleTriageSweep } = await import('../staleTriageSweep.js');
 
 // Verify migration 0239 has been applied before running any test.
+let MIGRATION_OK = true;
 try {
   await db.execute(sql`SELECT last_triage_job_id FROM system_incidents LIMIT 0`);
 } catch {
   console.log('\nSKIP: migration 0239 not applied (column last_triage_job_id missing).');
   console.log('Apply the migration and re-run.\n');
-  process.exit(0);
+  MIGRATION_OK = false;
 }
+
+if (!MIGRATION_OK) {
+  test.skip('triageDurability integration (requires migration 0239 applied)', () => {});
+} else {
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -206,4 +211,5 @@ try {
     // best-effort
   }
 }
+} // end if (MIGRATION_OK)
 } // end if (!SKIP_TRIAGE_DUR)

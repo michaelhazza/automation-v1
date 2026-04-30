@@ -23,7 +23,6 @@
 export {};
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import * as http from 'node:http';
 
 await import('dotenv/config');
@@ -86,7 +85,7 @@ test('T0: middleware ordering invariant (no DB)', async () => {
   try {
     // T0a: no Authorization header → 401 (NOT 429); proves authenticate runs first
     const res = await httpPost('/api/session/message', { text: 'hello' });
-    assert.strictEqual(res.status, 401, 'T0a: unauthenticated request → 401 (not 429)');
+    expect(res.status).toBe(401);
 
     // T0b: structural ordering — authenticate is positioned before the rate-limit
     const fs = await import('node:fs/promises');
@@ -94,11 +93,11 @@ test('T0: middleware ordering invariant (no DB)', async () => {
     const authIdx = routeSrc.indexOf('authenticate');
     const rateLimitIdx = routeSrc.indexOf('rateLimitCheck(');
     const requirePermIdx = routeSrc.indexOf('requireOrgPermission(');
-    assert.ok(authIdx !== -1, 'T0b: route uses `authenticate` middleware');
-    assert.ok(rateLimitIdx !== -1, 'T0b: route invokes `rateLimitCheck` in its middleware chain');
-    assert.ok(requirePermIdx !== -1, 'T0b: route uses `requireOrgPermission` middleware');
-    assert.ok(authIdx < rateLimitIdx, 'T0b: `authenticate` is wired before rate-limit (401 → 429 ordering)');
-    assert.ok(rateLimitIdx < requirePermIdx, 'T0b: rate-limit is wired before `requireOrgPermission` (429 → 403 ordering)');
+    expect(authIdx !== -1).toBeTruthy();
+    expect(rateLimitIdx !== -1).toBeTruthy();
+    expect(requirePermIdx !== -1).toBeTruthy();
+    expect(authIdx < rateLimitIdx).toBeTruthy();
+    expect(rateLimitIdx < requirePermIdx).toBeTruthy();
   } finally {
     server.close();
   }
@@ -167,9 +166,9 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
         userRole: 'org_admin',
         userOrganisationId: ownedOrgId,
       });
-      assert.ok(result !== null, 'T1: org candidate accessible to org_admin');
-      assert.strictEqual(result!.resolvedOrgId, ownedOrgId, 'T1: resolvedOrgId matches candidate');
-      assert.strictEqual(result!.resolvedSubaccountId, null, 'T1: no subaccount for org candidate');
+      expect(result !== null).toBeTruthy();
+      expect(result!.resolvedOrgId).toBe(ownedOrgId);
+      expect(result!.resolvedSubaccountId).toBe(null);
     }
 
     // ── T2: Path A — subaccount candidate with pendingRemainder ────────────
@@ -184,9 +183,9 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
             userOrganisationId: ownedOrgId,
           }),
       );
-      assert.ok(result !== null, 'T2: subaccount candidate accessible to org_admin');
-      assert.strictEqual(result!.resolvedOrgId, ownedOrgId, 'T2: resolvedOrgId is parent org');
-      assert.strictEqual(result!.resolvedSubaccountId, ownSubId, 'T2: resolvedSubaccountId matches');
+      expect(result !== null).toBeTruthy();
+      expect(result!.resolvedOrgId).toBe(ownedOrgId);
+      expect(result!.resolvedSubaccountId).toBe(ownSubId);
     }
 
     // ── T3: Path A — cross-tenant rejection ────────────────────────────────
@@ -197,7 +196,7 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
         userRole: 'org_admin',
         userOrganisationId: ownedOrgId,
       });
-      assert.strictEqual(result, null, 'T3: cross-tenant org candidate returns null (rejected)');
+      expect(result).toBe(null);
     }
 
     // ── T3b: Path A — cross-tenant subaccount RLS isolation ────────────────
@@ -207,14 +206,8 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
         new URL('../../services/scopeResolutionService.ts', import.meta.url),
         'utf8',
       );
-      assert.ok(
-        scopeSrc.includes('getOrgScopedDb'),
-        'T3b(a): scopeResolutionService imports/uses getOrgScopedDb for tenant isolation',
-      );
-      assert.ok(
-        /isSystemAdmin\s*\?\s*db\s*:\s*getOrgScopedDb/.test(scopeSrc),
-        'T3b(a): non-admin branch resolves to getOrgScopedDb (RLS-bound), admin branch to raw db',
-      );
+      expect(scopeSrc.includes('getOrgScopedDb')).toBeTruthy();
+      expect(/isSystemAdmin\s*\?\s*db\s*:\s*getOrgScopedDb/.test(scopeSrc)).toBeTruthy();
 
       const adminResult = await resolveCandidateScope({
         candidateId: otherSubId,
@@ -222,8 +215,8 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
         userRole: 'system_admin',
         userOrganisationId: null,
       });
-      assert.ok(adminResult !== null, 'T3b(b): system_admin can resolve cross-tenant subaccount');
-      assert.strictEqual(adminResult!.resolvedSubaccountId, otherSubId, 'T3b(b): system_admin gets correct sub id');
+      expect(adminResult !== null).toBeTruthy();
+      expect(adminResult!.resolvedSubaccountId).toBe(otherSubId);
     }
 
     // ── T4: Path B — command resolves to subaccount (service assertion) ─────
@@ -238,23 +231,23 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
             userOrganisationId: ownedOrgId,
           }),
       );
-      assert.ok(result !== null, 'T4: subaccount candidate resolves for command path');
-      assert.strictEqual(result!.resolvedSubaccountId, ownSubId, 'T4: subaccountId set on resolved tuple');
+      expect(result !== null).toBeTruthy();
+      expect(result!.resolvedSubaccountId).toBe(ownSubId);
     }
 
     // ── T5: Path B — hint shorter than 2 chars → error ─────────────────────
     {
       const entityName = 'A'; // 1 char
       const routeWouldReject = !entityName || entityName.length < 2;
-      assert.ok(routeWouldReject, 'T5: 1-char entity name fails route-level length guard');
+      expect(routeWouldReject).toBeTruthy();
     }
 
     // ── T6: Path C — plain brief submission ────────────────────────────────
     {
       const resolved = await resolveSubaccount(ownSubId, ownedOrgId);
-      assert.ok(resolved, 'T6: resolveSubaccount succeeds for valid sub+org');
-      assert.strictEqual(resolved.id, ownSubId, 'T6: returned sub id matches');
-      assert.strictEqual(resolved.organisationId, ownedOrgId, 'T6: sub belongs to org');
+      expect(resolved).toBeTruthy();
+      expect(resolved.id).toBe(ownSubId);
+      expect(resolved.organisationId).toBe(ownedOrgId);
     }
 
     // ── T7: Path C — cross-tenant via X-Organisation-Id (auth middleware) ──
@@ -262,8 +255,8 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
       const jwtPayload = { id: STUB_USER_ID, organisationId: ownedOrgId, role: 'user', email: 'test@test.com' };
       const headerOrgId = otherOrgId;
       const effectiveOrgId = jwtPayload.role === 'system_admin' ? (headerOrgId || jwtPayload.organisationId) : jwtPayload.organisationId;
-      assert.strictEqual(effectiveOrgId, ownedOrgId, 'T7: non-admin cannot override orgId via X-Organisation-Id');
-      assert.notStrictEqual(effectiveOrgId, otherOrgId, 'T7: adversarial header value not used');
+      expect(effectiveOrgId).toBe(ownedOrgId);
+      expect(effectiveOrgId).not.toBe(otherOrgId);
     }
 
     // ── T8: Path C — stale subaccount dropped ───────────────────────────────
@@ -274,7 +267,7 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
       } catch {
         threw = true;
       }
-      assert.ok(threw, 'T8: resolveSubaccount throws for stale subaccount (wrong org)');
+      expect(threw).toBeTruthy();
 
       let subaccountId: string | undefined = ownSubId;
       try {
@@ -282,7 +275,7 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
       } catch {
         subaccountId = undefined;
       }
-      assert.strictEqual(subaccountId, undefined, 'T8: stale subaccount dropped → subaccountId: null in response');
+      expect(subaccountId).toBe(undefined);
     }
   } finally {
     for (const orgId of seededOrgs) {

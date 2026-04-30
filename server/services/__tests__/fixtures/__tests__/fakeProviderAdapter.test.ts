@@ -16,7 +16,6 @@
  */
 
 import { expect, test } from 'vitest';
-import { strict as assert } from 'node:assert';
 import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
 // NOTE: registry is NOT imported here. It is imported lazily (see below, between
 // Case 6 and Case 7) so that Cases 1–6 — which test only the adapter itself —
@@ -39,10 +38,10 @@ await test('default response path records the invocation and returns the default
     model: 'fake-model',
     messages: [{ role: 'user', content: 'hi' }],
   });
-  assert.equal(out.content, 'fake response');
-  assert.equal(out.tokensIn, 100);
-  assert.equal(out.tokensOut, 50);
-  assert.equal(adapter.callCount, 1);
+  expect(out.content).toBe('fake response');
+  expect(out.tokensIn).toBe(100);
+  expect(out.tokensOut).toBe(50);
+  expect(adapter.callCount).toBe(1);
 });
 
 // ─── Case 2: setResponse override ───────────────────────────────────────────
@@ -56,7 +55,7 @@ await test('setResponse override is returned on subsequent calls', async () => {
     providerRequestId: 'custom',
   });
   const out = await adapter.call({ model: 'fake-model', messages: [] });
-  assert.equal(out.content, 'custom');
+  expect(out.content).toBe('custom');
 });
 
 // ─── Case 3: setError rejects the next call (one-shot), then default returns
@@ -68,12 +67,12 @@ await test('setError rejects exactly one call, then defaults again', async () =>
     await adapter.call({ model: 'fake-model', messages: [] });
   } catch (err) {
     threw = true;
-    assert.match((err as Error).message, /boom/);
+    expect((err as Error).message).toMatch(/boom/);
   }
-  assert.ok(threw);
+  expect(threw).toBeTruthy();
   // Second call returns default — error is one-shot.
   const out = await adapter.call({ model: 'fake-model', messages: [] });
-  assert.equal(out.content, 'fake response');
+  expect(out.content).toBe('fake response');
 });
 
 // ─── Case 4: setLatencyMs delays the success path ──────────────────────────
@@ -83,7 +82,7 @@ await test('setLatencyMs(60) delays the success path by >= 60ms', async () => {
   const start = Date.now();
   await adapter.call({ model: 'fake-model', messages: [] });
   const elapsed = Date.now() - start;
-  assert.ok(elapsed >= 55, `expected >= 55ms, got ${elapsed}ms`);
+  expect(elapsed >= 55).toBeTruthy();
 });
 
 // ─── Case 5: setError + setLatencyMs — latency applies to error path too ───
@@ -96,16 +95,16 @@ await test('setError + setLatencyMs delays the rejection AND records on entry', 
   try {
     await adapter.call({ model: 'fake-model', messages: [] });
   } catch (err) {
-    assert.match((err as Error).message, /delayed-boom/);
+    expect((err as Error).message).toMatch(/delayed-boom/);
     threw = true;
   }
   const elapsed = Date.now() - start;
-  assert.ok(threw, 'must reject');
-  assert.ok(elapsed >= 55, `latency must apply to error path; got ${elapsed}ms`);
+  expect(threw).toBeTruthy();
+  expect(elapsed >= 55).toBeTruthy();
   // Crucially: the call was recorded immediately on entry, BEFORE the
   // latency-then-rejection settlement. Asserting recording is independent
   // of settlement is the whole point of the latency-on-error contract.
-  assert.equal(adapter.callCount, 1);
+  expect(adapter.callCount).toBe(1);
 });
 
 // ─── Case 5b: setResponse + setLatencyMs — latency applies on success path ─
@@ -126,10 +125,10 @@ await test('setResponse + setLatencyMs delays the override response AND records 
   // applied before the resolve. Symmetric with Case 5 (error + latency) —
   // a future regression that special-cased the success path could break
   // this without breaking either single-knob test.
-  assert.equal(out.content, 'overridden-with-latency');
-  assert.equal(out.tokensIn, 7);
-  assert.ok(elapsed >= 55, `latency must apply on the override-resolve path; got ${elapsed}ms`);
-  assert.equal(adapter.callCount, 1);
+  expect(out.content).toBe('overridden-with-latency');
+  expect(out.tokensIn).toBe(7);
+  expect(elapsed >= 55).toBeTruthy();
+  expect(adapter.callCount).toBe(1);
 });
 
 // ─── Case 6: reset() clears calls and overrides ─────────────────────────────
@@ -137,7 +136,7 @@ await test('reset() clears calls + cancels pending error/latency/response overri
   const adapter = createFakeProviderAdapter();
   await adapter.call({ model: 'fake-model', messages: [] });
   await adapter.call({ model: 'fake-model', messages: [] });
-  assert.equal(adapter.callCount, 2);
+  expect(adapter.callCount).toBe(2);
   adapter.setError(new Error('queued'));
   adapter.setLatencyMs(150);
   adapter.setResponse({
@@ -145,12 +144,12 @@ await test('reset() clears calls + cancels pending error/latency/response overri
     providerRequestId: 'x',
   });
   adapter.reset();
-  assert.equal(adapter.callCount, 0);
+  expect(adapter.callCount).toBe(0);
   const start = Date.now();
   const out = await adapter.call({ model: 'fake-model', messages: [] });
   const elapsed = Date.now() - start;
-  assert.equal(out.content, 'fake response', 'response override cleared by reset');
-  assert.ok(elapsed < 100, 'latency override cleared by reset');
+  expect(out.content).toBe('fake response');
+  expect(elapsed < 100).toBeTruthy();
 });
 
 // ─── Registry-dependent tests (Cases 7–13) ────────────────────────────────────
@@ -170,12 +169,12 @@ test.skipIf(SKIP)('register + restore restores the EXACT prior state at the key'
   // Verify pre-state: no entry at fake-test-provider
   let priorThrew = false;
   try { getProviderAdapter('fake-test-provider'); } catch { priorThrew = true; }
-  assert.ok(priorThrew, 'pre-condition: fake-test-provider must be absent');
+  expect(priorThrew).toBeTruthy();
 
   const a = createFakeProviderAdapter({ provider: 'fake-test-provider' });
   const restoreA = registerProviderAdapter('fake-test-provider', a);
   try {
-    assert.strictEqual(getProviderAdapter('fake-test-provider'), a);
+    expect(getProviderAdapter('fake-test-provider')).toBe(a);
   } finally {
     restoreA();
   }
@@ -183,7 +182,7 @@ test.skipIf(SKIP)('register + restore restores the EXACT prior state at the key'
   // After restore: the key is absent again (was unbound before register).
   let postThrew = false;
   try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
-  assert.ok(postThrew, 'restore must put the registry back to ABSENT (not undefined)');
+  expect(postThrew).toBeTruthy();
 });
 
 // ─── Case 8: restore is idempotent ──────────────────────────────────────────
@@ -195,7 +194,7 @@ test.skipIf(SKIP)('calling restore() twice is a no-op the second time', async ()
   restore();
   let threw = false;
   try { getProviderAdapter('fake-test-provider'); } catch { threw = true; }
-  assert.ok(threw, 'key must remain absent after both restores');
+  expect(threw).toBeTruthy();
 });
 
 // ─── Case 9: register over a prior adapter, restore brings prior back ───────
@@ -206,11 +205,11 @@ test.skipIf(SKIP)('registering B over A and restoring B brings A back', async ()
     const b = createFakeProviderAdapter();
     const restoreB = registerProviderAdapter('fake-test-provider', b);
     try {
-      assert.strictEqual(getProviderAdapter('fake-test-provider'), b);
+      expect(getProviderAdapter('fake-test-provider')).toBe(b);
     } finally {
       restoreB();
     }
-    assert.strictEqual(getProviderAdapter('fake-test-provider'), a, 'A must be callable again');
+    expect(getProviderAdapter('fake-test-provider')).toBe(a);
   } finally {
     restoreA();
   }
@@ -225,7 +224,7 @@ test.skipIf(SKIP)('same-key SEQUENTIAL: B sees only its own calls', async () => 
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a1' }] });
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a2' }] });
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a3' }] });
-    assert.equal(a.callCount, 3);
+    expect(a.callCount).toBe(3);
   } finally {
     restoreA();
   }
@@ -234,8 +233,8 @@ test.skipIf(SKIP)('same-key SEQUENTIAL: B sees only its own calls', async () => 
   try {
     const adapterB = getProviderAdapter('fake-test-provider');
     await adapterB.call({ model: 'fake-model', messages: [{ role: 'user', content: 'b1' }] });
-    assert.equal(b.callCount, 1, 'B must NOT see A\'s calls');
-    assert.equal(a.callCount, 3, 'A\'s calls array is independent of B\'s');
+    expect(b.callCount).toBe(1);
+    expect(a.callCount).toBe(3);
   } finally {
     restoreB();
   }
@@ -275,27 +274,21 @@ test.skipIf(SKIP)('same-key PARALLEL: each adapter sees only its own calls', asy
   await Promise.all([task(a, 'A'), task(b, 'B')]);
 
   // Each adapter's calls array contains only its own invocations.
-  assert.equal(a.callCount, 2);
-  assert.equal(b.callCount, 2);
+  expect(a.callCount).toBe(2);
+  expect(b.callCount).toBe(2);
   for (const call of a.calls) {
     const msg = call.args.messages[0];
-    assert.ok(
-      typeof msg.content === 'string' && msg.content.startsWith('A-'),
-      `A.calls must contain only A-* messages; got ${JSON.stringify(msg.content)}`,
-    );
+    expect(typeof msg.content === 'string' && msg.content.startsWith('A-')).toBeTruthy();
   }
   for (const call of b.calls) {
     const msg = call.args.messages[0];
-    assert.ok(
-      typeof msg.content === 'string' && msg.content.startsWith('B-'),
-      `B.calls must contain only B-* messages; got ${JSON.stringify(msg.content)}`,
-    );
+    expect(typeof msg.content === 'string' && msg.content.startsWith('B-')).toBeTruthy();
   }
 
   // Registry returns to its pre-test state after BOTH restores have run.
   let postThrew = false;
   try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
-  assert.ok(postThrew, 'registry must return to ABSENT state after both restores');
+  expect(postThrew).toBeTruthy();
 });
 
 // ─── Case 12: NON-LIFO restore — the load-bearing parallel-safety case ──────
@@ -303,7 +296,7 @@ test.skipIf(SKIP)('non-LIFO restore: outer registration restored BEFORE inner re
   // Pre-state: key absent.
   let priorThrew = false;
   try { getProviderAdapter('fake-test-provider'); } catch { priorThrew = true; }
-  assert.ok(priorThrew, 'pre-condition: fake-test-provider must be absent');
+  expect(priorThrew).toBeTruthy();
 
   const a = createFakeProviderAdapter();
   const b = createFakeProviderAdapter();
@@ -312,7 +305,7 @@ test.skipIf(SKIP)('non-LIFO restore: outer registration restored BEFORE inner re
   const restoreA = registerProviderAdapter('fake-test-provider', a);
   const restoreB = registerProviderAdapter('fake-test-provider', b);
   // Currently active: B (top of stack).
-  assert.strictEqual(getProviderAdapter('fake-test-provider'), b);
+  expect(getProviderAdapter('fake-test-provider')).toBe(b);
 
   // NON-LIFO restore: outer (A) restores FIRST while inner (B) is still
   // logically active. With the old closure-capture-prior-state implementation,
@@ -322,20 +315,13 @@ test.skipIf(SKIP)('non-LIFO restore: outer registration restored BEFORE inner re
   // this case correct: A's restore removes A's entry from the stack, sees
   // B is still on top, leaves registry pointing at B.
   restoreA();
-  assert.strictEqual(
-    getProviderAdapter('fake-test-provider'),
-    b,
-    'after outer restore, registry must still reflect inner registration (B remains active)',
-  );
+  expect(getProviderAdapter('fake-test-provider')).toBe(b);
 
   // Now restore B — last active registration → original state (absent).
   restoreB();
   let postThrew = false;
   try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
-  assert.ok(
-    postThrew,
-    'after both restores, registry must return to ABSENT regardless of restore order',
-  );
+  expect(postThrew).toBeTruthy();
 });
 
 // ─── Case 13: NON-LIFO restore over a pre-existing adapter ──────────────────
@@ -351,22 +337,14 @@ test.skipIf(SKIP)('non-LIFO restore preserves pre-existing prior across out-of-o
 
   const restoreA = registerProviderAdapter('anthropic', fakeA);
   const restoreB = registerProviderAdapter('anthropic', fakeB);
-  assert.strictEqual(getProviderAdapter('anthropic'), fakeB);
+  expect(getProviderAdapter('anthropic')).toBe(fakeB);
 
   // Out-of-order: A first, then B.
   restoreA();
-  assert.strictEqual(
-    getProviderAdapter('anthropic'),
-    fakeB,
-    'B remains active until its own restore — A leaving the stack does not re-install A',
-  );
+  expect(getProviderAdapter('anthropic')).toBe(fakeB);
 
   restoreB();
-  assert.strictEqual(
-    getProviderAdapter('anthropic'),
-    realAnthropic,
-    'after both restores, the real anthropic adapter (captured on first register) is restored',
-  );
+  expect(getProviderAdapter('anthropic')).toBe(realAnthropic);
 });
 
 console.log('');
