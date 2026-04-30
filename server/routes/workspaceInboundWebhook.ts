@@ -199,6 +199,7 @@ router.post(
     };
 
     try {
+      // guard-ignore-next-line: rls-contract-compliance reason="D19 deferred — inbound webhook owns its own transaction boundary; service extraction tracked in tasks/todo.md"
       const result = await db.transaction(async (tx) => {
         await tx.execute(sql`SELECT set_config('app.organisation_id', ${identity.organisationId}, true)`);
         return withOrgTx(
