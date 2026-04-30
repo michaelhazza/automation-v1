@@ -39,7 +39,7 @@ export interface IncidentInput {
 
 // Binding contract: override must be domain:error-id[:optional-extra-parts]
 // Uppercase is allowed in error-identifier components (e.g. CLASSIFICATION_PARSE_FAILURE).
-export const FINGERPRINT_OVERRIDE_RE = /^[a-z_]+:[a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)+$/;
+export const FINGERPRINT_OVERRIDE_RE = /^[a-z_]+:[a-zA-Z0-9_.-]+(:[a-zA-Z0-9_.-]+)*$/;
 
 const USER_FAULT_CATEGORIES: ReadonlySet<ErrorCategory> = new Set([
   'validation_error',

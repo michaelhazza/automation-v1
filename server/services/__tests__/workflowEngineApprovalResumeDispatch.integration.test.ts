@@ -452,7 +452,7 @@ test.skipIf(SKIP)('test 2: concurrent double-approve fires webhook exactly once 
       // parallel-running test against the same module doesn't pollute the
       // count (defence-in-depth against test interference).
       const signCallsForThisStep = signSpy.mock.calls.filter(
-        (c) => c.arguments[0] === seed.stepRunId,
+        (c) => c[0] === seed.stepRunId,
       );
       expect(signCallsForThisStep.length, `signOutboundRequest must be invoked EXACTLY once for this stepRunId; got ${signCallsForThisStep.length} (total spy calls: ${signSpy.mock.calls.length})`).toBe(1);
 
@@ -521,7 +521,7 @@ test.skipIf(SKIP)('test 3: rejected invoke_automation completes without webhook 
       // a rejection would surface here even when the HTTP receiver count
       // is unchanged.
       const signCallsForThisStep = signSpy.mock.calls.filter(
-        (c) => c.arguments[0] === seed.stepRunId,
+        (c) => c[0] === seed.stepRunId,
       );
       expect(signCallsForThisStep.length, `signOutboundRequest must NOT be invoked for a rejected stepRunId; got ${signCallsForThisStep.length} sign calls`).toBe(0);
 

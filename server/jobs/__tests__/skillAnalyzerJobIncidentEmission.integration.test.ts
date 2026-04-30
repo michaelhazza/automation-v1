@@ -7,6 +7,7 @@ let systemIncidents: typeof import('../../db/schema/index.js')['systemIncidents'
 let eq: typeof import('drizzle-orm')['eq'];
 let hashFingerprint: typeof import('../../services/incidentIngestorPure.js')['hashFingerprint'];
 let runSkillAnalyzerJobWithIncidentEmission: typeof import('../skillAnalyzerJobWithIncidentEmission.js')['runSkillAnalyzerJobWithIncidentEmission'];
+let resetThrottle: typeof import('../../services/incidentIngestorThrottle.js')['__resetForTest'];
 
 if (!SKIP) {
   ({ db } = await import('../../db/index.js'));
@@ -14,9 +15,11 @@ if (!SKIP) {
   ({ eq } = await import('drizzle-orm'));
   ({ hashFingerprint } = await import('../../services/incidentIngestorPure.js'));
   ({ runSkillAnalyzerJobWithIncidentEmission } = await import('../skillAnalyzerJobWithIncidentEmission.js'));
+  ({ __resetForTest: resetThrottle } = await import('../../services/incidentIngestorThrottle.js'));
 }
 
 test.skipIf(SKIP)('skill-analyzer wrapper re-throws + writes incident on TERMINAL attempt', async () => {
+  resetThrottle();
   const fingerprint = hashFingerprint('skill_analyzer:terminal_failure');
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
@@ -78,6 +81,9 @@ test.skipIf(SKIP)('skill-analyzer dedup: 5 terminal failures collapse to one row
   await db.delete(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
 
   for (let i = 0; i < 5; i++) {
+    // Reset throttle so each iteration's incident write reaches the DB regardless
+    // of SYSTEM_INCIDENT_THROTTLE_MS in the CI environment.
+    resetThrottle();
     // retryCount=1 → terminal → each call emits
     await runSkillAnalyzerJobWithIncidentEmission(`test-${i}`, 1, {
       processFn: async (_jobId) => {
