@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-21 (LLM Spend Observability follow-ups — partial-external-success double-bill protection via provisional audit records, single-terminal-transition invariant with ghost-arrival logging, pre-dispatch queue-wait visibility, logical-attempt sequencing across fallback providers, click-through live payload inspection, forensic in-flight archive with self-disabling soft circuit on write degradation, mobile-responsive operations view, token-level streaming progress infrastructure, and deterministic idempotency-key versioning)
+> **Last updated:** 2026-05-01 (doc-sync audit: add invoke_automation as eighth Workflow step type; add 14 v7.1 system-agent skills; remove retired update_financial_record skill)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -299,7 +299,7 @@ Natural-language CRM reads that stay cheap and deterministic by default. Agents 
 
 Multi-step workflow automation with dependency graphs, parallel execution, branching logic, and human review gates.
 
-- **Seven step types:**
+- **Eight step types:**
     - **Human input** — structured form captured from a human operator or client
     - **AI prompt** — direct one-shot AI generation
     - **Agent handoff** — delegate the step to a full agent with its complete skill set
@@ -307,6 +307,7 @@ Multi-step workflow automation with dependency graphs, parallel execution, branc
     - **AI decision** — a focused AI call that returns a structured choice (e.g. routing, classification, approve/edit/reject) the workflow uses to branch
     - **Conditional** — deterministic branching on results from prior steps
     - **Approval gate** — pauses the workflow for human review before downstream steps run
+    - **Invoke Automation** — execute a registered external automation as a workflow step, with input/output mapping and HITL gate resolution driven by the automation's declared side-effect classification
 - **Five run modes:** hands-off, supervised (pauses at every approval gate), background (silent batch), bulk (one run per item in a list), and replay (re-execute a prior run with the same inputs)
 - **Parallel execution** — Independent branches run simultaneously; results flow between steps automatically
 - **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares its risk level; concurrent execution guards prevent double actions
@@ -716,9 +717,11 @@ Complete list of all 112 skills.
 | `deliver_report` | Deliver approved client report via email or portal with review gating | Hybrid | HITL |
 | `draft_report` | Draft client-facing performance report with executive summary and recommendations | LLM | — |
 | `generate_portfolio_report` | Generate cross-subaccount portfolio intelligence briefing | LLM | — |
+| `prepare_renewal_brief` | Produce renewal readiness briefing with NPS/CSAT signals, health history, and recommended next steps | LLM | — |
 | `read_analytics` | Retrieve social media performance metrics for analysis and reporting | Deterministic | — |
 | `read_expenses` | Retrieve expense data from accounting system | Deterministic | — |
 | `read_revenue` | Retrieve revenue data from accounting system | Deterministic | — |
+| `score_nps_csat` | Analyse NPS/CSAT survey responses to compute segment scores and flag at-risk accounts | LLM | — |
 | `synthesise_voc` | Convert voice-of-customer data into structured insight report with themes | LLM | — |
 
 ### Content Creation & Publishing
@@ -743,16 +746,20 @@ Complete list of all 112 skills.
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
+| `book_meeting` | Propose and schedule a meeting with a prospect or contact via calendar integration | Deterministic | HITL |
 | `compute_churn_risk` | Evaluate churn risk signals and produce risk score with intervention recommendation | LLM | — |
 | `compute_health_score` | Calculate composite health score (0-100) for account | LLM | — |
 | `compute_staff_activity_pulse` | Calculate weighted activity score from canonical CRM mutations; excludes automation users via outlier-volume classifier | Deterministic | — |
 | `detect_anomaly` | Compare current metrics against historical baseline and flag deviations | LLM | — |
 | `detect_churn_risk` | Analyse account health signals to identify at-risk accounts | LLM | — |
+| `discover_prospects` | Find SMB prospects matching geo, vertical, and size criteria via location and business data APIs | Deterministic | — |
+| `draft_outbound` | Draft personalised 1:1 outbound prospecting email for a specific lead | LLM | — |
 | `scan_integration_fingerprints` | Match canonical artifacts against a seed fingerprint library; emit per-subaccount detections and queue novel observations for operator triage | Deterministic | — |
 | `draft_followup` | Draft contextual follow-up email for stale deal or at-risk contact | LLM | — |
 | `enrich_contact` | Retrieve enrichment data for contact and write back to CRM | Deterministic | — |
 | `read_crm` | Retrieve contact, deal, and pipeline data from CRM | Deterministic | — |
 | `crm.query` | Natural-language CRM read via the CRM Query Planner (canonical-first, AI fallback, read-only) | Hybrid | — |
+| `score_lead` | Score an inbound or outbound lead against configured qualification criteria | LLM | — |
 | `trigger_account_intervention` | Propose intervention action (check-in, pause, alert) | LLM | HITL |
 | `update_crm` | Write contact/deal updates to CRM | Deterministic | HITL |
 
@@ -786,6 +793,18 @@ Complete list of all 112 skills.
 | `query_subaccount_cohort` | Read board health and memory summaries across subaccounts by tags | Deterministic | — |
 | `read_campaigns` | Retrieve campaign data with budget, spend, and performance summary | Deterministic | — |
 | `update_bid` | Propose bid adjustment for campaign/ad group | LLM | HITL |
+
+### Admin Operations & Finance
+
+| Skill | Description | Type | Gate |
+|-------|-------------|------|------|
+| `chase_overdue` | Draft and send overdue-payment follow-up communications to clients | LLM | HITL |
+| `generate_invoice` | Generate a client invoice from engagement records and billing configuration | LLM | HITL |
+| `prepare_month_end` | Compile month-end close pack: outstanding invoices, reconciliation exceptions, budget vs actual | LLM | — |
+| `process_bill` | Review and propose approval for incoming vendor bills | LLM | HITL |
+| `reconcile_transactions` | Match transactions against expected records and flag discrepancies for review | Deterministic | HITL |
+| `send_invoice` | Deliver a generated invoice to the client via email with payment link | Deterministic | HITL |
+| `track_subscriptions` | Audit SaaS subscription inventory against approved vendor list and flag unexpected charges | Deterministic | — |
 
 ### Task & Board Management
 
@@ -858,13 +877,13 @@ Complete list of all 112 skills.
 | `read_priority_feed` | Read, claim, or release prioritised work feed items | Deterministic | Universal |
 | `request_approval` | Escalate decision to human operator for review | LLM | — |
 | `spawn_sub_agents` | Split work into 2-3 parallel sub-tasks executed simultaneously | LLM | — |
+| `list_my_subordinates` | Query direct reports and subtree agents available for delegation (scope-aware) | Deterministic | — |
 
 ### Configuration & Integration
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
 | `configure_integration` | Guide workspace integration setup with review gating | LLM | HITL |
-| `update_financial_record` | Write financial record update (budget/forecast/expense note) | Deterministic | HITL |
 | `config_publish_workflow_output_to_portal` | Publish a workflow step's output to the sub-account portal card; upserts the portal brief and marks the run portal-visible (workflow `action_call` steps only) | Deterministic | — |
 | `config_send_workflow_email_digest` | Send a markdown email digest to configured recipients with per-run deduplication; irreversible (workflow `action_call` steps only) | Deterministic | HITL |
 
@@ -965,6 +984,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-01 | Skills Reference: add invoke_automation as the eighth Workflow step type (PR #186); add 14 new system-agent v7.1 skills across Admin Operations & Finance, CRM & Contact Management, and Analytics & Reporting categories; remove retired update_financial_record skill (PR #212/#216). | — |
 | 2026-04-24 | System Monitor (Phase 0 + 0.5): fingerprint-deduplicating incident pipeline that surfaces production failures — route errors, job DLQ landings, agent run failures, connector sync failures, skill terminal failures, LLM provider exhaustion — as actionable incidents on a sysadmin dashboard. Incidents deduplicate by SHA-256 fingerprint, auto-escalate severity on repeated occurrence, and support ack / resolve / suppress / escalate-to-agent lifecycle. Resolution links back to the agent task so operators see the full remediation chain. AlertFatigueGuard refactored to a shared base class so push-notification rate-limiting (Phase 0.75) uses the same per-run + per-day cap logic. Live nav badge + WebSocket push via a dedicated sysadmin room. Self-check job surfaces ingest pipeline degradation as a self-referential incident. | — |
 | 2026-04-23 | Paperclip Hierarchy: per-sub-account lead-agent guarantee (exactly one active lead at all times, atomic rotation, degraded-fallback + health signal if ever missing), scoped delegation enforcement (children / subtree / sub-account) at execution time, visible delegation graph per run (DAG view with direction + scope inline, up to 5 levels), starter team templates for one-step sub-account setup, and observable delegation ledger with idempotent writes. Three new workspace-health detectors (multiple leads, no lead, orphaned delegation skills) bring the detector total to 10. | — |
 | 2026-04-22 | Universal Brief v1: ship the chat-first entry point. Polymorphic conversation model spans Briefs, tasks, agent runs, and agent configuration on a single transport-only table. Fast-path classifier short-circuits chatter and low-stakes intents before the Orchestrator runs. Typed artefact contract (structured result / approval card / error) persists per turn with client-side lifecycle resolution (chains / superseded / orphans / out-of-order arrival). Backend write-time integrity guard enforces "a parent result cannot be superseded twice" with idempotent re-writes. Per-write artefact cap with explicit rejection so runaway capability emission fails loud. Deterministic "Thinking…" pending-assistant state with 15-second fallback. Synchronous double-send protection via the shared conversation hook. Quality-gated rule capture — approval-suggested or low-confidence rules start paused for human review. Structured per-turn signal in the write response plus scraped operational counters (conflict total / over-limit total / validation-rejected total). Task-board and agent-run detail pages both embed the same conversation surface. | — |
