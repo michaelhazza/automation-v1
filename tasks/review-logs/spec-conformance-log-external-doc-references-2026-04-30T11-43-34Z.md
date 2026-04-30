@@ -8,6 +8,7 @@
 **Scope:** targeted re-verification of 8 previously-deferred gaps (C1, C2, C4, C5, C7, C8, C10, C11). C3, C6, C9, C12 explicitly excluded by caller (intentional deferrals / informational).
 **Changed-code set:** 8 files in scope for verification (all already in branch diff)
 **Run at:** 2026-04-30T11:43:34Z
+**Commit at finish:** `6933365c`
 **Prior run:** `tasks/review-logs/spec-conformance-log-external-doc-references-2026-04-30T11-21-30Z.md`
 
 ---

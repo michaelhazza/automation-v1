@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
+**Last updated:** 2026-04-30 (§3 soft-delete unique index rule; §8.23 feature-flag kill-switch scope rule — from external-doc-references PR review)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -50,6 +50,7 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 
 - **Schema files are leaves.** `server/db/schema/**` may only import from `drizzle-orm`, `shared/types/**`, and other schema files — never from `services/`, `lib/`, `routes/`, or `middleware/`. One violation drove 175 circular cycles in the 2026-04-25 audit.
 - **Types crossing the schema/service boundary live in `shared/types/`.** If a type is used by both a schema file (as a JSONB column) and a service (as a return type), put it in `shared/types/` and have services re-export for backward compat.
+- **Partial unique indexes on soft-deletable tables must include `AND deleted_at IS NULL`.** Without it, re-inserting a soft-deleted row permanently fails with a unique constraint violation — the record is logically gone but still occupies the index.
 
 ---
 
@@ -194,6 +195,10 @@ Any pure resolver / reducer / ranker whose source array can be reordered between
 ### 8.22 Allow-list annotations name the function they cover
 
 Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
+
+### 8.23 Feature kill switches must gate all consumer paths
+
+A system-disabled flag must short-circuit every route that touches the feature — mutation routes, read-through routes, picker/integration endpoints — not just the primary write path; partial gating leaves orphaned traffic and partial state when the flag is flipped.
 
 ---
 
