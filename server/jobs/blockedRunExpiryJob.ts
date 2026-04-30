@@ -57,6 +57,9 @@ export async function runFn(): Promise<BlockedRunExpirySummary> {
       );
       logger.info('run_blocked_expired', {
         runId: run.id,
+        conversationId: '', // not available without conversation_id on agent_runs
+        blockedReason: 'integration_required',
+        integrationId: '', // not stored on run — TODO(v2): store integrationId in runMetadata at block time
         action: 'run_blocked_expired',
       });
     } catch (err) {

@@ -60,6 +60,11 @@ export async function checkRequiredIntegration(
   //
   // If not connected, call _generateBlockDecision(...) and return it.
 
+  // TODO(v2): look up ACTION_REGISTRY[toolName]?.idempotencyStrategy here.
+  // If idempotencyStrategy === 'unsafe', throw TOOL_NOT_RESUMABLE before
+  // evaluating shouldBlock so the caller can cancel the run cleanly.
+  // Guard omitted in v1 because ACTION_REGISTRY is not yet wired.
+
   // v1 safe-default: never block.
   logger.debug('integration_block_check.skipped', {
     toolName,
@@ -68,6 +73,20 @@ export async function checkRequiredIntegration(
   });
 
   return { shouldBlock: false };
+}
+
+/**
+ * Thrown (not returned) when a tool cannot be safely paused mid-execution
+ * because its idempotencyStrategy is 'unsafe'.
+ *
+ * Callers catch this error code and cancel the run with cancelReason:
+ * 'tool_not_resumable'.
+ */
+export interface ToolNotResumableError {
+  statusCode: 409;
+  message: string;
+  errorCode: 'TOOL_NOT_RESUMABLE';
+  toolName: string;
 }
 
 /**

@@ -20,6 +20,7 @@ interface InlineIntegrationCardProps {
   runMetadata: { completedBlockSequences?: number[]; currentBlockSequence?: number } | null;
   messageId: string;
   onDismiss: (messageId: string) => void;
+  onRetry?: () => void;
 }
 
 export function InlineIntegrationCard({
@@ -27,6 +28,7 @@ export function InlineIntegrationCard({
   runMetadata,
   messageId,
   onDismiss,
+  onRetry,
 }: InlineIntegrationCardProps) {
   const [dismissed, setDismissed] = useState(card.dismissed);
   const [expanded, setExpanded] = useState(false);
@@ -146,9 +148,15 @@ export function InlineIntegrationCard({
             </span>
             <p className="text-[13px] font-medium text-slate-600">{card.title}</p>
           </div>
-          <p className="text-[12px] text-slate-400">
-            This integration request has expired. Start a new conversation to try again.
-          </p>
+          <p className="text-sm text-gray-500">Integration connection expired after 24 hours.</p>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="mt-2 px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 text-gray-700"
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
     </div>

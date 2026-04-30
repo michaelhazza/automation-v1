@@ -497,15 +497,16 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
   asyncHandler(async (req, res) => {
-    const { resumeToken } = req.body as { resumeToken?: string };
+    const { resumeToken, conversationId } = req.body as { resumeToken?: string; conversationId?: string };
     if (!resumeToken || typeof resumeToken !== 'string') {
       throw Object.assign(new Error('resumeToken required'), { statusCode: 400, errorCode: 'INVALID_TOKEN' });
     }
     const result = await resumeFromIntegrationConnect({
       resumeToken,
       organisationId: req.orgId!,
+      conversationId,
     });
-    res.json(result);
+    res.json({ ...result, conversationId: conversationId ?? '' });
   }),
 );
 

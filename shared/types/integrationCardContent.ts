@@ -45,5 +45,14 @@ export function deriveCardState(
   const completed = runMetadata?.completedBlockSequences ?? [];
   if (completed.includes(card.blockSequence)) return 'connected';
   if (new Date(card.expiresAt) < new Date()) return 'expired';
+  // Active only when blockSequence matches current block; otherwise treat as expired-like
+  // (stale block from a previous loop iteration that was superseded).
+  if (
+    runMetadata !== null &&
+    runMetadata.currentBlockSequence !== undefined &&
+    card.blockSequence !== runMetadata.currentBlockSequence
+  ) {
+    return 'expired';
+  }
   return 'active';
 }

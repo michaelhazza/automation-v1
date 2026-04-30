@@ -44,14 +44,43 @@ export interface ResumeError {
 export async function resumeFromIntegrationConnect(params: {
   resumeToken: string;
   organisationId: string;
+  conversationId?: string;
 }): Promise<ResumeResult> {
   const { resumeToken, organisationId } = params;
 
   const tokenHash = crypto.createHash('sha256').update(resumeToken).digest('hex');
   const tokenHashPrefix = tokenHash.slice(0, 8); // for logs only — never log the full hash
 
-  // Optimistic predicate UPDATE — atomically unblocks the run.
-  // Conditions: same org, currently blocked with 'integration_required',
+  // Step 1: find the run by token hash (GAP 8 — get the id for the predicate UPDATE).
+  // Also handles GAP 6 — 404 if no run is found at all.
+  const candidate = await db
+    .select({ id: agentRuns.id, blockedReason: agentRuns.blockedReason, runMetadata: agentRuns.runMetadata })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.organisationId, organisationId),
+        eq(agentRuns.integrationResumeToken, tokenHash),
+      ),
+    )
+    .limit(1);
+
+  if (candidate.length === 0) {
+    throw Object.assign(
+      new Error('Run not found'),
+      { statusCode: 404, errorCode: 'RUN_NOT_FOUND' as const },
+    );
+  }
+
+  // Check idempotent path before attempting the UPDATE — if the run was already
+  // resumed (blockedReason cleared, last token hash recorded), return 'already_resumed'.
+  const candidateRun = candidate[0];
+  const candidateMeta = (candidateRun.runMetadata as Record<string, unknown>) ?? {};
+  if (candidateRun.blockedReason === null && candidateMeta.lastResumeTokenHash === tokenHash) {
+    return { status: 'already_resumed', runId: candidateRun.id };
+  }
+
+  // Step 2: optimistic UPDATE with explicit id predicate (GAP 8).
+  // Conditions: correct run id, same org, currently blocked with 'integration_required',
   // token hash matches, and expiry has not passed.
   const updated = await db
     .update(agentRuns)
@@ -63,6 +92,7 @@ export async function resumeFromIntegrationConnect(params: {
     })
     .where(
       and(
+        eq(agentRuns.id, candidateRun.id),
         eq(agentRuns.organisationId, organisationId),
         eq(agentRuns.blockedReason, 'integration_required'),
         eq(agentRuns.integrationResumeToken, tokenHash),
@@ -103,49 +133,24 @@ export async function resumeFromIntegrationConnect(params: {
 
     logger.info('run_resumed', {
       runId: run.id,
+      conversationId: '', // not available without conversation_id on agent_runs
+      blockedReason: 'integration_required',
+      integrationId: '', // not stored on run — TODO(v2): store integrationId in runMetadata at block time
       tokenHashPrefix,
       action: 'run_resumed',
-      organisationId,
     });
 
     return { status: 'resumed', runId: run.id };
   }
 
-  // 0 rows updated — check if this token was already used (idempotent path).
-  const existing = await db
-    .select({
-      id: agentRuns.id,
-      blockedReason: agentRuns.blockedReason,
-      runMetadata: agentRuns.runMetadata,
-    })
-    .from(agentRuns)
-    .where(
-      and(
-        eq(agentRuns.organisationId, organisationId),
-        eq(agentRuns.integrationResumeToken, tokenHash),
-      ),
-    )
-    .limit(1);
-
+  // 0 rows updated — token is expired or in an unrecognised state → 410.
   // Note: after a successful resume, integrationResumeToken is set to NULL,
-  // so we cannot match on it again. The "already_resumed" check below handles
-  // the case where blockedReason was cleared but the token is still present
-  // (race: two concurrent calls, one cleared the token before the other checked).
-  // In practice, the second call will find 0 rows in both queries and get a 410.
-  // This is acceptable — the integration is already connected and the run is
-  // already unblocked. The client should refresh the conversation.
-  if (existing.length === 1) {
-    const run = existing[0];
-    const meta = (run.runMetadata as Record<string, unknown>) ?? {};
-    if (run.blockedReason === null && meta.lastResumeTokenHash === tokenHash) {
-      return { status: 'already_resumed', runId: run.id };
-    }
-  }
-
-  // Token is unknown, expired, or in an unrecognised state → 410
+  // so we cannot match on it again. The idempotent check above handles the
+  // already-resumed case before reaching this point.
   const err = Object.assign(
     new Error('Resume token expired or invalid'),
     { statusCode: 410, errorCode: 'RESUME_TOKEN_EXPIRED' as const },
   );
   throw err;
 }
+

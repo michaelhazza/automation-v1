@@ -2685,18 +2685,48 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
         const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
 
-        const blockDecision = await checkRequiredIntegration(
-          toolCall.name,
-          toolCall.input as Record<string, unknown>,
-          {
-            organisationId: request.organisationId,
-            subaccountId: request.subaccountId ?? null,
-            conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
-            runId,
-            agentId: request.agentId,
-            currentBlockSequence: newBlockSeq,
-          },
-        );
+        let blockDecision: Awaited<ReturnType<typeof checkRequiredIntegration>>;
+        try {
+          blockDecision = await checkRequiredIntegration(
+            toolCall.name,
+            toolCall.input as Record<string, unknown>,
+            {
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+              runId,
+              agentId: request.agentId,
+              currentBlockSequence: newBlockSeq,
+            },
+          );
+        } catch (err: any) {
+          if (err?.errorCode === 'TOOL_NOT_RESUMABLE') {
+            // Cancel the run — this tool cannot be safely paused mid-execution.
+            await db.update(agentRuns).set({
+              status: 'cancelled',
+              runResultStatus: 'failed',
+              runMetadata: {
+                ...currentRunMeta,
+                cancelReason: 'tool_not_resumable',
+              },
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(agentRuns.id, runId));
+
+            logger.error('tool_not_resumable', {
+              runId,
+              conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+              blockedReason: 'integration_required',
+              toolName: toolCall.name,
+              action: 'tool_not_resumable',
+            });
+
+            finalStatus = 'failed';
+            emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+            break outerLoop;
+          }
+          throw err;
+        }
 
         if (blockDecision.shouldBlock) {
           const plaintext = blockDecision.plaintext;
@@ -2732,10 +2762,27 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
           logger.info('run_blocked', {
             runId,
+            conversationId: '',  // TODO(v2): thread conversationId via AgentRunRequest
+            blockedReason: 'integration_required',
             integrationId: blockDecision.integrationId,
             blockSequence: newBlockSeq,
             action: 'run_blocked',
           });
+
+          // Persist the integration card as an assistant message in the conversation.
+          // NOTE: conversationId is '' for now — will be threaded through when agent_runs gets conversation_id.
+          // Skip insert if conversationId is empty (v1 limitation).
+          // ctx.conversationId is the value passed into checkRequiredIntegration above.
+          const _integrationConvId = ''; // TODO(v2): use ctx.conversationId once threaded via AgentRunRequest
+          if (_integrationConvId) {
+            await db.insert(agentMessages).values({
+              conversationId: _integrationConvId,
+              role: 'assistant',
+              content: `Integration required: ${cardContent.integrationId}`,
+              meta: cardContent as any,
+              createdAt: new Date(),
+            });
+          }
 
           // Break out of the agent loop — run stays in 'running' status
           // with blocked_reason set. The expiry sweep will cancel it if

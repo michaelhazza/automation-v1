@@ -638,9 +638,13 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                     {msg.meta?.kind === 'integration_card' && (
                       <InlineIntegrationCard
                         card={{ ...(msg.meta as IntegrationCardContent), dismissed: dismissedCards.has(msg.id) }}
-                        runMetadata={recentRuns.length > 0 ? null : null}
+                        runMetadata={null /* TODO(v2): extract from recentRuns once SessionLogRun carries runMetadata */}
                         messageId={msg.id}
                         onDismiss={(id) => setDismissedCards((prev) => new Set([...prev, id]))}
+                        onRetry={() => {
+                          // TODO(v2): create new run with conversation context
+                          // For v1: trigger a new message to start a fresh run
+                        }}
                       />
                     )}
 
