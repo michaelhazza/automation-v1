@@ -1843,10 +1843,11 @@ in tests, every file has at least one `test()` / `describe()` / `it()`
 block, no bare top-level `await`, no module-level `process.env.X = '...'`
 without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
-### TI-005: Fix all integration CI test failures (full execution brief)
+### TI-005: Fix all integration CI test failures (full execution brief) — DONE
 - Captured: 2026-04-30 (after PR #239 surfaced 24 failures across 14 files)
-- **Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md)** — 5-phase plan, 3–4h, ready to execute in a new branch.
-- Replaces the older 2-file scope; covers all 14 failing files plus the seed-fixture work and the gate flip from `continue-on-error: true` → `false`.
+- Closed: 2026-04-30 by branch `claude/integration-tests-fix-2026-04-30`. Closeout summary: [tasks/builds/integration-tests-fix/progress.md](./builds/integration-tests-fix/progress.md).
+- Brief: [docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md](../docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md).
+- Outcome: integration_tests CI job is now load-bearing (`continue-on-error` removed). Five phases shipped: seeder + CI wiring (1), incident-ingestor reset-guard relaxation + Vitest-mock rewrite of the throttle integration test (2), TI-005 lifecycle refactor of five files (3), constraint / suppression / RLS-superuser fixes (4), and the gate flip itself (5).
 
 ### [DEPRECATED — see brief above] TI-005 (original): Refactor 2 legacy integration tests to vitest-idiomatic structure
 - Captured: 2026-04-30
