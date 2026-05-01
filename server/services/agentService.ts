@@ -113,7 +113,28 @@ function extractGoogleDocText(doc: GoogleDocsContent): string {
 // Fetch raw content from a data source
 // ---------------------------------------------------------------------------
 
+/**
+ * Thrown by fetchSourceContent when a source has sourceType === 'google_drive'.
+ * These sources are handled exclusively by the external document resolver
+ * pipeline in loadRunContextData and must not flow through the regular
+ * fetch / cache / error-status path.
+ */
+class ExternalDocSourceError extends Error {
+  constructor(sourceName: string) {
+    super(`google_drive source "${sourceName}" is handled by the external document resolver pipeline`);
+    this.name = 'ExternalDocSourceError';
+  }
+}
+
 async function fetchSourceContent(source: typeof agentDataSources.$inferSelect): Promise<string> {
+  if (source.sourceType === 'google_drive') {
+    // google_drive sources are resolved through externalDocumentResolverService
+    // in loadRunContextData and are filtered from the regular pool.
+    // Returning empty here prevents false lastFetchStatus='error' DB writes
+    // for sources that will be handled separately.
+    throw new ExternalDocSourceError(source.name);
+  }
+
   if (source.sourceType === 'http_url') {
     const headers: Record<string, string> = { Accept: 'text/plain, application/json, text/csv, */*' };
     if (source.sourceHeaders) {
@@ -350,6 +371,12 @@ export async function loadSourceContent(
         .where(eq(agentDataSources.id, source.id))
         .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
     } catch (err) {
+      if (err instanceof ExternalDocSourceError) {
+        // This source is handled by the external doc resolver pipeline.
+        // Return empty without marking the source as failed or sending admin alerts.
+        return { content: '', fetchOk: false, tokenCount: 0 };
+      }
+
       fetchOk = false;
       const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
 
@@ -1026,8 +1053,8 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
@@ -1035,6 +1062,7 @@ export const agentService = {
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     }
   ) {
     const [agent] = await db
@@ -1053,7 +1081,7 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
@@ -1061,6 +1089,7 @@ export const agentService = {
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1310,8 +1339,8 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
@@ -1319,6 +1348,7 @@ export const agentService = {
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     },
     actorUserId?: string
   ) {
@@ -1335,7 +1365,7 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
@@ -1343,6 +1373,7 @@ export const agentService = {
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })

@@ -1,13 +1,15 @@
-import { pgTable, uuid, text, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, varchar, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
+import { integrationConnections } from './integrationConnections';
+import { users } from './users';
 
 // ---------------------------------------------------------------------------
 // Reference Documents — user-uploaded reference documents for cached context
 // ---------------------------------------------------------------------------
 
-export type ReferenceDocumentSourceType = 'manual' | 'external';
+export type ReferenceDocumentSourceType = 'manual' | 'external' | 'google_drive';
 
 export const referenceDocuments = pgTable(
   'reference_documents',
@@ -34,6 +36,16 @@ export const referenceDocuments = pgTable(
     deprecatedAt: timestamp('deprecated_at', { withTimezone: true }),
     deprecationReason: text('deprecation_reason'),
 
+    // External document reference fields (google_drive and future providers).
+    externalProvider:     varchar('external_provider', { length: 64 }),
+    externalConnectionId: uuid('external_connection_id').references(() => integrationConnections.id, { onDelete: 'set null' }),
+    externalFileId:       varchar('external_file_id', { length: 1024 }),
+    externalFileName:     varchar('external_file_name', { length: 512 }),
+    externalFileMimeType: varchar('external_file_mime_type', { length: 256 }),
+    attachedByUserId:     uuid('attached_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    attachmentOrder:      integer('attachment_order').notNull().default(0),
+    attachmentState:      varchar('attachment_state', { length: 32 }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -54,3 +66,6 @@ export const referenceDocuments = pgTable(
 
 export type ReferenceDocument = typeof referenceDocuments.$inferSelect;
 export type NewReferenceDocument = typeof referenceDocuments.$inferInsert;
+
+export const ATTACHMENT_STATES = ['active', 'degraded', 'broken'] as const;
+export type AttachmentState = (typeof ATTACHMENT_STATES)[number];

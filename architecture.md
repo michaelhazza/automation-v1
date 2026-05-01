@@ -873,6 +873,74 @@ The agent-level data source routes at `/api/agents/:id/data-sources` are unchang
 
 ---
 
+## External Document References
+
+Live pointers to files in connected cloud storage (v1: Google Drive). Distinct from static uploads — content is always fetched at its latest version when a run starts. Spec: [`docs/external-document-references-spec.md`](./docs/external-document-references-spec.md). Migrations 0262–0264.
+
+### Data model
+
+| Table | Purpose |
+|-------|---------|
+| `reference_documents` (extended) | Rows with `source_type = 'google_drive'` carry `externalFileId`, `externalConnectionId`, `externalFileName`, `attachmentState` |
+| `document_cache` | Persistent content cache keyed on `(provider, file_id, connection_id, resolver_version)`. `resolver_version` isolates cache across breaking resolver upgrades. |
+| `document_fetch_events` | Per-fetch audit log: outcome, failure reason, bytes, duration, indexed on `fetched_at` for analytics. |
+| `document_bundle_attachments` (extended) | New `fetch_failure_policy` column: `tolerant` (default), `strict`, `best_effort`. |
+
+### Resolver pipeline
+
+At run start, `runContextLoader.ts` calls `externalDocumentResolverService.resolve()` for each attached external reference. The resolver:
+
+1. Checks `document_cache` for a matching `(provider, file_id, connection_id, resolver_version)` row.
+2. On hit: performs a cheap metadata call (Drive `files.get`) to compare `revisionId`/`ETag`. Returns cached content if unchanged.
+3. On miss or revision change: fetches full content via `googleDriveResolver.ts`, normalises it (Docs → plain text, Sheets → CSV, PDF → extracted text), updates the cache inside a Postgres advisory lock to prevent stampede.
+4. Records a `document_fetch_events` row regardless of outcome.
+
+### Concurrency guards
+
+Both are process-local (single-instance assumption — see tasks/todo.md D-GPT-1 for multi-node follow-up):
+
+- `RetrySuppressor` (`externalDocumentRetrySuppression.ts`) — suppresses retries for documents that failed within a configurable window. Prevents rapid failure loops on broken references.
+- `SingleFlightGuard` (`externalDocumentSingleFlight.ts`) — deduplicates concurrent fetches for the same file. A second caller waits for the in-flight fetch instead of issuing a duplicate provider call.
+
+### Failure policy
+
+`applyFailurePolicy(policy, state)` (pure, in `runContextLoaderPure.ts`) maps `(policy, attachment_state)` → action:
+
+| Policy | degraded | broken |
+|--------|----------|--------|
+| `tolerant` | `serve_stale_with_warning` | `block_run` |
+| `strict` | `block_run` | `block_run` |
+| `best_effort` | `serve_stale_silent` | `skip_reference` |
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `server/services/externalDocumentResolverService.ts` | Orchestrates cache lookup, advisory-lock fetch, event logging |
+| `server/services/resolvers/googleDriveResolver.ts` | Drive-specific fetch + normalisation; exposes `resolverVersion` |
+| `server/services/externalDocumentRetrySuppression.ts` | Process-local retry suppressor |
+| `server/services/externalDocumentSingleFlight.ts` | Process-local single-flight guard |
+| `server/services/runContextLoaderPure.ts` | Pure helpers: `mergeAndOrderReferences`, `enforceRunBudget`, `applyFailurePolicy`, `smallDocumentFragmentationWarning` |
+| `server/api/types/externalDocumentViewModel.ts` | `toExternalDocumentViewModel` — maps DB row + runtime state → UI shape |
+| `server/routes/externalDocumentReferences.ts` | CRUD + rebind routes |
+| `server/routes/integrations/googleDrive.ts` | OAuth picker flow |
+| `server/db/schema/documentCache.ts` | Drizzle schema for `document_cache` |
+| `server/db/schema/documentFetchEvents.ts` | Drizzle schema for `document_fetch_events` |
+
+### Routes
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /api/subaccounts/:sid/external-document-references` | `externalDocumentReferences.ts` | List attached references |
+| `POST .../external-document-references` | `externalDocumentReferences.ts` | Attach a Drive file |
+| `DELETE .../external-document-references/:refId` | `externalDocumentReferences.ts` | Detach |
+| `POST .../external-document-references/:refId/rebind` | `externalDocumentReferences.ts` | Re-link broken reference to new connection |
+| `GET /api/integrations/google-drive/auth-url` | `googleDrive.ts` | Begin OAuth |
+| `GET /api/integrations/google-drive/callback` | `googleDrive.ts` | OAuth callback |
+| `POST /api/integrations/google-drive/picker-token` | `googleDrive.ts` | Issue short-lived picker access token |
+
+---
+
 ## Scraping Engine
 
 Multi-tier web scraping with automatic escalation, adaptive CSS selector healing, and recurring change monitoring. Lives in `server/services/scrapingEngine/`.
@@ -3116,6 +3184,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the per-run cost breaker | `server/lib/runCostBreaker.ts` — five exports: `resolveRunCostCeiling`, `getRunCostCents` / `assertWithinRunBudget` (rollup-based; Slack + Whisper), `getRunCostCentsFromLedger` / `assertWithinRunBudgetFromLedger` (ledger-based; LLM router). Ledger helper uses a **merged visibility + SUM aggregate** (single scan returning both) — do not split; see `tasks/hermes-audit-tier-1-spec.md` §7.3.1. Hard-ceiling `>=` semantics (not `>`). |
 | Modify outcome-gated entry-type promotion | `server/services/workspaceMemoryServicePure.ts` (`selectPromotedEntryType` / `scoreForOutcome` / `computeProvenanceConfidence` / `applyOutcomeDefaults`) + `workspaceMemoryService.ts::extractRunInsights` (wires outcome through). `runResultStatus` is derived by `agentExecutionServicePure.ts::computeRunResultStatus` and written exactly once at 3 terminal sites (normal + catch in `agentExecutionService.ts`; IEE in `agentRunFinalizationService.ts`) with `AND run_result_status IS NULL` guard. Per-entryType half-life decay lives in `memoryEntryQualityServicePure.ts::computeDecayFactor`. |
 | Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
+| Attach a Google Drive file as a live external reference | `server/services/externalDocumentResolverService.ts` (resolve pipeline) + `server/services/resolvers/googleDriveResolver.ts` (Drive fetch + normalisation) + `server/routes/externalDocumentReferences.ts` (CRUD) + `server/routes/integrations/googleDrive.ts` (OAuth + picker). Cache: `document_cache`. Audit log: `document_fetch_events`. Pure helpers: `server/services/runContextLoaderPure.ts`. See §External Document References above. |
 | Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
 | Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
 | Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |

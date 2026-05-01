@@ -77,6 +77,14 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     // See https://apidocs.teamwork.com/docs/teamwork-rest-api for available scopes.
     scopes: [],
   },
+
+  google_drive: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    // Forces refresh_token issuance even after the user has previously consented
+    extra: { access_type: 'offline', prompt: 'consent' },
+  },
 };
 
 // ---------------------------------------------------------------------------

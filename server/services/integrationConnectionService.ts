@@ -98,6 +98,21 @@ export const integrationConnectionService = {
     return conn ?? null;
   },
 
+  // Look up a connection by ID within an org, regardless of subaccount scope.
+  // Returns subaccount-scoped or org-level rows. Routes that accept either
+  // scope (e.g. Google Drive attach/picker) should use this and then enforce
+  // the subaccount-membership check themselves.
+  async getConnectionWithToken(id: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return conn ?? null;
+  },
+
   async createOrgConnection(organisationId: string, data: {
     providerType: string;
     authType: string;
