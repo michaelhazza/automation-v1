@@ -2205,3 +2205,18 @@ The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton i
 **Rationale:** Phase 2 restart-not-resume posture means hard escalations should leave the repo in a clean state (NONE) rather than a stuck state (BUILDING). "Appropriately" in §6.4.2 should be interpreted as NONE for all Phase 2 PAUSED* escalations.
 
 **Action if human agrees:** Add a line to each hard-escalation path in §2.16 specifying `current-focus.md → NONE`. Minor spec clarification; non-blocking for implementation.
+
+---
+
+## Spec Review deferred items
+
+### dev-pipeline-coordinators (2026-05-01)
+
+Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec-review-dev-pipeline-coordinators-2026-05-01T02-20-30Z.md`). All items have explicit re-evaluation triggers.
+
+- [ ] **Per-phase cost and time budgeting.** Optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Re-evaluation trigger: `live_users: yes` in `docs/spec-context.md`. [user]
+- [ ] **Overgrown progress.md compression.** Keep last N detailed entries; summarize older entries. Re-evaluation trigger: builds consistently exceed 20+ chunks. [user]
+- [ ] **Runtime smoke check for routes/schema/integration chunks.** Lightweight runtime verification (hit endpoint, verify response shape) after chunks touching API routes, DB schema, or integration points. Re-evaluation trigger: `api_contract_tests: not none` in `docs/spec-context.md` (i.e. when `live_users: yes`). [auto]
+- [ ] **Mid-run architecture checkpoint at 50% of chunks.** Re-invoke architect mid-build to catch slow architectural drift. Re-evaluation trigger: multi-month builds surface architectural drift as a recurring issue. [auto]
+- [ ] **Simplification pass at end of Phase 2.** "What can be removed, merged, or simplified?" pass after all chunks built. Re-evaluation trigger: when builder surgical-changes rule + review stack prove insufficient for complexity control. [auto]
+- [ ] **Confidence score per chunk (`confidence: HIGH/MEDIUM/LOW` in builder return).** Informational field only (no auto-trigger); operator uses it to decide manual review cadence. Re-evaluation trigger: when operator finds they regularly want to spot-review specific chunks based on complexity. [auto]

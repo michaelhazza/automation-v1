@@ -292,6 +292,22 @@ Closing out the cached-context spec after 5 rounds of external ChatGPT review + 
 
 **Rule for vocabulary drift:** when a user or reviewer observes that a spec is using two names for the same concept (backend name vs UI name), rename to the single preferred name immediately, at every layer (schema, services, routes, types, error codes, prose, mockups). Do not "defer to implementation" — vocabulary inconsistency compounds with every layer it survives into. This spec's pack → bundle rename fixed 390+ references across 6 files in one commit because it happened pre-implementation.
 
+### 2026-05-01 Convention — Coordinator handoff write ordering on abort (seen 1 time)
+
+On any coordinator abort or hard-escalation path: always write `handoff.md` FIRST, then update `tasks/current-focus.md`. Never reverse this order. A crash between the two writes leaves current-focus.md pointing at a valid handoff (recoverable) rather than an updated current-focus with no handoff (ambiguous state that every subsequent coordinator launch will reject as a bug). Applied in §6.4.2 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Generalises to any two-file state machine where the second write is the pointer.
+
+### 2026-05-01 Pattern — Commit file-scope invariant in coordinator-driven builds (seen 1 time)
+
+When a coordinator stages files after a builder sub-agent run: (1) capture the builder's declared "Files changed" list, (2) run `git diff --name-only HEAD`, (3) hard fail if unexpected files appear — do NOT offer to stage only declared files. The "stage only declared files" option allows a distracted operator to accidentally commit cross-chunk bleed. Hard fail forces investigation. Never use `git add .` or `git add -A` from a coordinator. Always `git add <explicit file list>`. Applied in §2.9.3 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Pattern — Pre-resume typecheck gate for coordinator resume runs (seen 1 time)
+
+When feature-coordinator resumes from an interrupted build (any chunk is `done` in progress.md): run one full `npm run typecheck` BEFORE processing any chunk-skip decisions. If it fails, do NOT skip any completed chunks — type drift from incomplete later chunks can make a previously-passing chunk look clean when it isn't. The typecheck gate is the cheapest way to catch integrated-state drift before acting on stale progress.md data. Applied in §2.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Convention — Doc-sync count enforcement (seen 1 time)
+
+When enforcing a doc-sync gate (coordinator or review agent): count the registered docs in `docs/doc-sync.md`, then verify the verdict table in progress.md / session log has exactly that many rows. A row count shortfall is a gate failure, not a review comment. "Missing verdict blocks finalisation" is only enforceable if you verify count, not just presence of some verdicts. Applied in §2.12 and §3.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
 **Rule for testing-posture framing in long specs:** if the spec inherits a framing default from a higher-level doc (e.g. `runtime_tests: pure_function_only` from `docs/spec-context.md`), and the spec defines tests that deviate from that default, declare the deviation explicitly in the spec's own framing-deviations section. Silence creates a cross-layer contradiction that reviewers will catch late. Caught in round 5 of this spec; worth doing proactively next time.
 
 Applies to any implementation-readiness spec review: API contracts, primitive rollouts, cross-cutting concerns.

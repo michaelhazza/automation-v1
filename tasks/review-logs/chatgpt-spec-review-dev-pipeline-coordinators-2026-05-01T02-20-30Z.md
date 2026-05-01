@@ -6,6 +6,7 @@
 - PR: #248 — https://github.com/michaelhazza/automation-v1/pull/248
 - Mode: manual
 - Started: 2026-05-01T02:20:30Z
+- **Verdict:** APPROVED (4 rounds)
 
 ---
 
@@ -146,3 +147,52 @@ Extremely tight, production-grade spec. Final surgical pass: 7 of 13 findings we
 - Missing field: `spec_deviations reviewed:` absent from §6.1.2 Phase 3 handoff schema — auto-fixed
 
 ---
+
+## Round 4 — 2026-05-01T04:00:00Z
+
+**Top themes:** resume environment snapshot + final polish deferrals
+
+### ChatGPT Feedback (raw)
+
+"You are past ready — now in operational excellence optimisation territory." Verdict: READY TO SHIP. New findings: resume environment-change snapshot, runtime smoke check, mid-run architect checkpoint, simplification pass, confidence score. Plus repeats of rounds 2/3. One genuine new apply: environment fingerprint at resume. Rest deferred or rejected.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F4: Resume environment snapshot | technical-escalated (critical) | apply | apply (user) | critical | Added git HEAD + package-lock hash + migration count snapshot to §2.9 resume detection; warn on mismatch |
+| F1: Runtime smoke check for routes/schema | technical | reject/defer | auto (defer) | critical | Contradicts spec-context.md `api_contract_tests: none_for_now`; deferred with live_users trigger |
+| F2: Mid-run architect checkpoint at 50% | technical | defer | auto (defer) | critical | Valid for long builds; too complex for v1; deferred |
+| F3: Finish upgrading warnings to gates (repeat round 2/3) | technical | reject | auto (reject) | critical | Already done in rounds 2/3 |
+| F5: Simplification pass at Phase 2 end | technical | defer | auto (defer) | critical | Surgical-changes rule + review stack covers v1 |
+| F6: Confidence score per chunk | technical | defer | auto (defer) | high | ChatGPT review is deliberately operator-driven; defer as informational field only |
+
+### Applied
+- [user] §2.9: environment snapshot check added (git HEAD, package-lock hash, migration count; warn on mismatch)
+- [auto] §Deferred items: runtime smoke check, mid-run checkpoint, simplification pass, confidence score added
+
+### Integrity check: 0 issues this round
+
+---
+
+## Final Summary
+- Rounds: 4
+- Auto-accepted (technical): 6 applied | 9 rejected | 4 deferred
+- User-decided: 23 applied | 3 rejected | 2 deferred
+- Integrity-check fixes across all rounds: 4 auto-fixed
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / dev-pipeline-coordinators:
+  - [user] Per-phase cost and time budgeting — pre-production scope
+  - [user] Overgrown progress.md compression — revisit at 20+ chunk builds
+  - [auto] Runtime smoke check — spec-context.md `live_users: yes` trigger
+  - [auto] Mid-run architect checkpoint — multi-month build drift trigger
+  - [auto] Simplification pass — review stack sufficient for v1
+  - [auto] Confidence score per chunk — operator-driven review preference
+- KNOWLEDGE.md updated: yes (4 entries — handoff write ordering, commit file-scope invariant, pre-resume typecheck gate, doc-sync count enforcement)
+- architecture.md updated: n/a — spec review session only; agent fleet changes planned for implementation phase
+- capabilities.md updated: n/a
+- integration-reference.md updated: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — spec review session only
+- spec-context.md updated: no — spec inherits existing framing unchanged; no new framing assumptions implied by this review
+- frontend-design-principles.md updated: n/a
+- PR: #248 — https://github.com/michaelhazza/automation-v1/pull/248

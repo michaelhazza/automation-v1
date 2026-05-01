@@ -452,6 +452,13 @@ Process chunks **one at a time** in plan order. For each chunk:
 
 **Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If ANY chunk is recorded as `done` (i.e. this is a resume run, not a fresh start):
 
+**Environment snapshot check:** capture the current environment fingerprint and compare against the values stored in `progress.md` from the prior run:
+- `git rev-parse HEAD` (last known commit hash)
+- MD5/SHA of `package-lock.json` (dependency state)
+- `ls migrations/*.sql | wc -l` (migration file count)
+
+If no prior snapshot is recorded in `progress.md`: store the current values and continue. If values differ from the stored snapshot, print: "Environment changed since last run: {list of diffs}" — warn only, do not block. Store the updated snapshot back to `progress.md` under `## Environment Snapshot` so the next resume can detect further changes.
+
 **Pre-resume typecheck:** run `npm run typecheck` ONCE before processing any chunks. If it fails: surface the diagnostics, pause, and require the operator to fix the failures before resume proceeds — do NOT skip any completed chunks while the integrated state is type-broken. Completed-chunk skipping is only safe when the branch typechecks cleanly.
 
 Then, for each chunk recorded as `done`:
@@ -2076,6 +2083,10 @@ The OLD `feature-coordinator.md` is fully replaced in the same commit that intro
 - **`builder` parallelism within a chunk.** Builder runs sequentially file-by-file. If chunks grow large enough that parallel implementation would help, consider invoking multiple builders in parallel. Risk: parallel builders could produce conflicting edits to the same file. Defer.
 - **Overgrown progress.md compression.** For large multi-month builds, `progress.md` may accumulate many chunk/gate entries that reduce machine readability. Consider keeping a detailed section for the last N entries and a summarized archive section for older ones. Deferred: pre-production build sizes are insufficient to trigger this; revisit when builds consistently exceed 20+ chunks.
 - **Per-phase cost and time budgeting.** Add optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Deferred: cost budgeting is a post-live-agency concern; revisit when first client onboards and `docs/spec-context.md` framing updates to `live_users: yes`.
+- **Runtime smoke check for routes/schema/integration changes.** After a chunk that adds API routes, DB schema, or integration points, a lightweight runtime smoke check (hit endpoint, run minimal flow, verify response shape) would catch "green typecheck but broken runtime wiring" scenarios. Deferred: `docs/spec-context.md` explicitly sets `api_contract_tests: none_for_now` and `e2e_tests_of_own_app: none_for_now`; revisit when `live_users: yes`.
+- **Mid-run architecture checkpoint at 50% of chunks.** Re-invoking architect after ~50% of chunks are built to ask "would you still design it this way?" would catch slow architectural drift. Deferred: adds significant orchestration complexity; the post-G2 spec-validity checkpoint (§2.10) addresses the intent for v1. Revisit if multi-month builds surface architectural drift as a recurring issue.
+- **Simplification pass at end of Phase 2.** A "what can be removed, merged, or simplified?" pass after all chunks are built would reduce unnecessary complexity by 10–20%. Deferred: builder's surgical-changes rule (§4.1.6) + pr-reviewer + dual-reviewer already cover this for v1.
+- **Confidence score per chunk.** Builder returns `confidence: HIGH/MEDIUM/LOW`; coordinator uses it to focus review effort. Deferred: ChatGPT review is deliberately operator-driven per the spec; auto-triggering on LOW would introduce unpredictable cadence. Deferred revision: add `confidence:` to builder return summary (§4.1.8) as an informational field only, without auto-triggering — operator uses it to decide whether to add a manual review round.
 - **Sub-agent runtime time-cap.** §6.3 explicitly does not cap sub-agent runtime. If a sub-agent hangs (vs taking long), the only recovery is operator interrupt. If hangs become a recurring problem, add a wall-clock cap with hard-escalation on cap. For now, defer.
 - **Auto-merge on CI green.** `finalisation-coordinator` does NOT auto-merge after CI green. Operator merges manually via the GitHub UI. If the merge step becomes the bottleneck, consider extending finalisation to auto-merge; this requires a CI-green-detection loop and PR auto-merge wiring.
 - **Spec-coordinator handling Standard-class briefs.** Currently Standard briefs run through the full Phase 1. If this is too heavy for small features (e.g. typo fixes, single-file additions), add a fast-path in spec-coordinator that skips mockup-detection, skips chatgpt-spec-review, and produces a thin "spec" that is really just an architect-ready brief. For now, the operator handles Trivial/Standard outside the pipeline (per §1.6).
