@@ -124,3 +124,47 @@ None — all 6 findings auto-rejected as duplicates of Round 1 decisions.
 
 ---
 
+## Round 3 — 2026-05-01T06:14:00Z
+
+### ChatGPT Feedback (raw)
+Verdict: Not ready yet. Close, but not final.
+
+Still blocking:
+1. RLS policy still fails silently — repeat of Round 1/2 F1; recommends removing `, true` (missing_ok flag).
+2. Unsafe tool guard is still TODO — repeat of Round 1/2 F2 (E-D4).
+
+Improved since previous diff (acknowledged):
+- REQUIRED_INTEGRATION_SLUGS now single source of truth
+- Soft-delete enforcement guideline added to DEVELOPMENT_GUIDELINES.md
+- leftJoin soft-delete filter correctly placed in ON clause
+- Stub source handling aligned across type/validator/generator/UI
+- Soft-delete join cleanup consistent
+- (F3 thread-context lifecycle no longer flagged — implicit acknowledgment that prior concerns were resolved or unfounded)
+
+Still worth tightening (not blocking):
+4. findActiveConnection subaccount-vs-org precedence — repeat of Round 1/2 F4.
+5. externalDocumentReferences 403 → 422 — repeat of Round 1/2 F5.
+6. Integration block tests mutate ACTION_REGISTRY — repeat of Round 1/2 F6.
+
+Final call: Fix RLS fail-fast and unsafe tool guard, then approve.
+
+### Triage notes
+All 5 surfaced findings are substantive duplicates of Round 1 decisions. ChatGPT dropped F3 (thread-context lifecycle) from the blocker list, implicitly acknowledging the existing implementation is correct — this is the only forward motion across three rounds. No new evidence on remaining items. Per `feedback_chatgpt_review_duplicate_findings.md`, auto-applying prior decisions.
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 (R3) RLS NULL guard | technical | reject | auto (reject) — duplicate of Round 1/2 F1 | high | Codebase canonical pattern; targeted hardening PR scope; no new evidence |
+| F2 (R3) E-D4 idempotency TODO | technical | reject | auto (reject) — duplicate of Round 1/2 F2 | high | Explicitly deferred per plan Task 2 Step 1; no new evidence |
+| F4 (R3) Connection precedence | technical | reject | auto (reject) — duplicate of Round 1/2 F4 | medium | Already deferred to tasks/todo.md R1/F4; no new evidence |
+| F5 (R3) 403 → 422 status | technical | reject | auto (reject) — duplicate of Round 1/2 F5 | medium | Spec-driven fix per plan Task 9 §2.5; no new evidence |
+| F6 (R3) Test ACTION_REGISTRY mutation | technical | reject | auto (reject) — duplicate of Round 1/2 F6 | low | Already deferred to tasks/todo.md R1/F6; no new evidence |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+None — all 5 findings auto-rejected as duplicates of prior round decisions.
+
+### Net new findings this round: 0
+### Net acknowledgments this round: 1 (F3 thread-context lifecycle dropped from blocker list)
+
+---
+
