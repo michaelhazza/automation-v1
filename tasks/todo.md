@@ -2167,3 +2167,19 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+---
+
+## Deferred spec decisions — dev-pipeline-coordinators
+
+**Source:** spec-reviewer iteration 1, 2026-05-01
+
+### [AUTO-DECIDED - reject] §6.2 "frontmatter description MUST include Step 1 TodoWrite skeleton"
+
+The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton in its frontmatter `description`". However, YAML frontmatter `description` fields are by convention single-line strings — embedding a multi-step skeleton would break YAML parsing. All agents defined in this spec already have body-level "Step 1 — TodoWrite list" sections, which satisfy the spirit of the requirement.
+
+**Decision:** AUTO-DECIDED reject. The §6.2 wording is an overspecification — the body Step 1 sections in each agent definition are the correct place for the skeleton, not the YAML description field. The spec text at §6.2 should be updated to say "body Step 1 section" instead of "frontmatter description".
+
+**Rationale:** Prefer spec as-is (body Step 1 sections present in all agents); YAML description field cannot hold multi-step skeletons without breaking YAML parsing.
+
+**Action if human agrees:** Clarify §6.2 wording to say "each agent's body MUST include a Step 1 — TodoWrite list section" rather than referencing the frontmatter description field.

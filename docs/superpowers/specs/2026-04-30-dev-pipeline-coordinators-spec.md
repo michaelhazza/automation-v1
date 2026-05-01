@@ -130,19 +130,22 @@ Before any work, read in order:
 3. `docs/spec-context.md` — framing ground truth (pre-production, rapid evolution, etc.)
 4. `docs/spec-authoring-checklist.md` — pre-authoring rubric the spec must satisfy
 5. `docs/frontend-design-principles.md` — read IF the brief mentions UI / page / screen / surface (for the UI-detect step)
-6. `tasks/current-focus.md` — verify no other phase is in flight (status must be `NONE` or `MERGED`)
+6. `tasks/current-focus.md` — verify no other phase is in flight (status must be `NONE` or `MERGED`); then immediately write `status: PLANNING` to acquire the concurrency lock before any other work begins
+
 7. `tasks/todo.md` — scan for deferred items the brief may close
 8. `tasks/lessons.md` — past lessons applicable to this domain
+
+The PLANNING status write (item 6) must happen before the TodoWrite list is emitted — it is the concurrency gate. If the write fails because status is already `BUILDING` or `REVIEWING`, refuse and tell the operator.
 
 ### §1.4 Step 1 — Top-level TodoWrite list
 
 Emit a TodoWrite list with one item per phase step. Update items in real time. The list is the operator's visible progress indicator and must include:
 
-1. Context loading (this step)
+1. Context loading + set current-focus.md → PLANNING (this step, done in §1.3)
 2. Branch-sync **S0** + freshness check (see §8)
 3. Brief intake + UI-touch detection
-4. Mockup loop (conditional on UI-detect)
-5. Build slug derivation + `tasks/builds/{slug}/` directory creation
+4. Build slug derivation + `tasks/builds/{slug}/` directory creation
+5. Mockup loop (conditional on UI-detect)
 6. Spec authoring
 7. `spec-reviewer` invocation
 8. `chatgpt-spec-review` (MANUAL mode) invocation
@@ -168,9 +171,17 @@ If `ui_touch == true`, prompt the operator:
 > This brief looks UI-touching. Generate hi-fi clickable prototypes first? Mockups become the design source of truth for the spec.
 > Reply: **yes** or **no**.
 
-Proceed based on the reply. If `no`, skip §1.7 entirely and jump to §1.8. If `yes`, run §1.7 in full before authoring the spec.
+Proceed based on the reply. If `no`, skip §1.8 entirely and jump to §1.9. If `yes`, run §1.8 in full before authoring the spec.
 
-### §1.7 Step 4 — Mockup loop (conditional)
+### §1.7 Step 4 — Build slug derivation + directory creation
+
+Derive a kebab-case slug from the brief title (e.g. brief "Add live agent execution log" → slug `live-agent-execution-log`). If the proposed slug clashes with an existing `tasks/builds/<slug>/` directory, append a date suffix (`-2026-04-30`) and warn the operator.
+
+Create `tasks/builds/{slug}/` if it doesn't exist. Create `tasks/builds/{slug}/progress.md` with an initial header and the phase-1 status table.
+
+**Why before mockup loop:** the slug and directory must exist before invoking `mockup-designer`, which writes to `prototypes/{slug}/` and `tasks/builds/{slug}/mockup-log.md`.
+
+### §1.8 Step 5 — Mockup loop (conditional)
 
 Invoke `mockup-designer` (see §4.2) as a sub-agent. The sub-agent:
 
@@ -188,12 +199,6 @@ The coordinator then enters an **open-ended manual loop**:
 The loop has **no iteration cap**. Operator decides when it's done. Each round's input/output is appended to `tasks/builds/{slug}/mockup-log.md` so the audit trail survives.
 
 When the loop exits, the final mockup paths are recorded in `tasks/builds/{slug}/handoff.md` under a `mockups:` field and become the design source of truth for the spec authoring step.
-
-### §1.8 Step 5 — Build slug derivation + directory creation
-
-Derive a kebab-case slug from the brief title (e.g. brief "Add live agent execution log" → slug `live-agent-execution-log`). If the proposed slug clashes with an existing `tasks/builds/<slug>/` directory, append a date suffix (`-2026-04-30`) and warn the operator.
-
-Create `tasks/builds/{slug}/` if it doesn't exist. Create `tasks/builds/{slug}/progress.md` with an initial header and the phase-1 status table.
 
 ### §1.9 Step 6 — Spec authoring
 
@@ -1401,7 +1406,7 @@ Per `CLAUDE.md` user-preferences: the main session does NOT auto-commit or auto-
 
 **Coordinator commit rules:**
 
-- **`spec-coordinator`** — auto-commits at end of Phase 1: the spec file, the prototype directory if any, the handoff.md, the updated current-focus.md, the mockup-log.md. Pushes to the current branch. Justification: the operator has opted in to the review-agent commit pattern, and spec-coordinator is the topmost orchestrator of Phase 1; without auto-commit-and-push, the next session starting on a different machine or after a context compaction would not see Phase 1's work.
+- **`spec-coordinator`** — auto-commits at end of Phase 1: the spec file, the prototype directory if any, the handoff.md, the updated current-focus.md, `tasks/builds/{slug}/progress.md`, and `tasks/builds/{slug}/mockup-log.md` (if a mockup loop ran). Pushes to the current branch. Justification: the operator has opted in to the review-agent commit pattern, and spec-coordinator is the topmost orchestrator of Phase 1; without auto-commit-and-push, the next session starting on a different machine or after a context compaction would not see Phase 1's work.
 - **`feature-coordinator`** — auto-commits per chunk (after each successful chunk + G1) AND at end of Phase 2 (after branch-level review pass + doc-sync). Pushes to the current branch after each commit. Justification: chunk-level commits are recovery points; if Phase 2 is interrupted, the operator can resume from the last committed chunk.
 - **`finalisation-coordinator`** — auto-commits at end of Phase 3 (after doc-sync sweep + KNOWLEDGE.md + todo.md cleanup). Pushes to the current branch. Justification: same as the existing `chatgpt-pr-review` finalisation contract.
 - **Sub-agents (`builder`, `mockup-designer`, `chatgpt-plan-review`)** — never commit. They edit files; the parent coordinator commits at its boundary.
@@ -1614,22 +1619,23 @@ echo "Branch is ${COMMITS_BEHIND} commits behind main"
 
 # Step 3 — apply freshness threshold (see §8.4)
 
-# Step 4 — attempt merge with conflict detection
-git merge origin/main --no-commit --no-ff
-MERGE_EXIT=$?
-
-if [ $MERGE_EXIT -eq 0 ] && git diff --cached --quiet; then
-  # No new content from main — abort the merge cleanly
-  git merge --abort
+# Step 4 — check if already up to date (avoids starting an in-progress merge we'd need to abort)
+if git merge-base --is-ancestor origin/main HEAD; then
   echo "Already up to date with main — no merge needed"
-elif [ $MERGE_EXIT -eq 0 ]; then
-  # Clean merge — commit it
-  git commit -m "chore(sync): merge main into <branch> (S{0|1|2})"
 else
-  # Conflict — pause and prompt (see §8.5)
-  echo "Merge conflicts present:"
-  git diff --name-only --diff-filter=U
-  # Coordinator pauses here for operator resolution
+  # Step 5 — attempt merge with conflict detection
+  git merge origin/main --no-commit --no-ff
+  MERGE_EXIT=$?
+
+  if [ $MERGE_EXIT -eq 0 ]; then
+    # Clean merge — commit it
+    git commit -m "chore(sync): merge main into <branch> (S{0|1|2})"
+  else
+    # Conflict — pause and prompt (see §8.5)
+    echo "Merge conflicts present:"
+    git diff --name-only --diff-filter=U
+    # Coordinator pauses here for operator resolution
+  fi
 fi
 ```
 
@@ -1638,13 +1644,30 @@ fi
 Run as part of every sync gate. Before the merge attempt:
 
 ```bash
-# Find migrations on origin/main that don't exist on the current branch
-git log origin/main --oneline -- 'migrations/*.sql' | head -20
-# Find migrations on the current branch that don't exist on origin/main
-git log HEAD --oneline -- 'migrations/*.sql' | head -20
+# Extract numeric prefixes from migrations on origin/main (not on current branch)
+MAIN_PREFIXES=$(git diff HEAD...origin/main --name-only -- 'migrations/*.sql' \
+  | xargs -I{} basename {} | grep -oP '^\d+' | sort)
+
+# Extract numeric prefixes from migrations on current branch (not on origin/main)
+BRANCH_PREFIXES=$(git diff origin/main...HEAD --name-only -- 'migrations/*.sql' \
+  | xargs -I{} basename {} | grep -oP '^\d+' | sort)
+
+# Find any prefix appearing on both sides — that is a collision
+COLLISIONS=$(comm -12 <(echo "$MAIN_PREFIXES") <(echo "$BRANCH_PREFIXES"))
+
+if [ -n "$COLLISIONS" ]; then
+  echo "Migration-number collision(s) detected: $COLLISIONS"
+  # Enumerate the specific files for each colliding prefix
+  for PREFIX in $COLLISIONS; do
+    MAIN_FILE=$(git diff HEAD...origin/main --name-only -- "migrations/${PREFIX}*.sql")
+    BRANCH_FILE=$(git diff origin/main...HEAD --name-only -- "migrations/${PREFIX}*.sql")
+    echo "  origin/main: $MAIN_FILE"
+    echo "  this branch: $BRANCH_FILE"
+  done
+fi
 ```
 
-If two migrations have the same numeric prefix (e.g. both `0244-...`) but different filenames or content, surface the collision explicitly:
+If collisions are found, surface the collision explicitly:
 
 > **Migration-number collision detected.**
 >
