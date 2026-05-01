@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { logger } from '../lib/logger.js';
 import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
-import { ACTION_REGISTRY, getActionDefinition } from '../config/actionRegistry.js';
+import { getActionDefinition } from '../config/actionRegistry.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 
 // Closed list of known OAuth provider slugs. Any value outside this set is a
