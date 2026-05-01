@@ -118,11 +118,13 @@
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  /* Loop-back arrow visual */
-  .loopback-line {
-    position:absolute; left:-40px; top: 14px; bottom: -200px; width: 30px;
-    border-left: 1.5px dashed #ea580c; border-bottom: 1.5px dashed #ea580c;
-    border-radius: 0 0 0 12px; pointer-events:none;
+  /* Loop-back arrow visual — vertical SVG line with arrowhead from step 5 up to step 4 */
+  .loopback-arrow { position:absolute; left:-32px; top:-128px; width: 28px; height: 138px; pointer-events:none; }
+  .loopback-arrow .label {
+    position:absolute; top: 50%; left: -62px; transform: translateY(-50%) rotate(-90deg);
+    transform-origin: right center;
+    font-size: 9.5px; font-weight: 600; color:#ea580c; letter-spacing: .08em;
+    text-transform: uppercase; white-space: nowrap;
   }
 </style>
 </head>
@@ -257,8 +259,12 @@
   <div class="grid grid-cols-2 gap-6">
     <div class="flex flex-col items-center">
       <div style="position:relative;">
-        <!-- on-reject loop arrow back to step 4 (draft email) -->
-        <div class="loopback-line" style="bottom:auto; top:-100px; height:90px; border-radius:12px 0 0 0; border-top:1.5px dashed #ea580c; border-bottom:none;"></div>
+        <!-- on-reject loop arrow: vertical SVG up to step 4 with arrowhead -->
+        <svg class="loopback-arrow" viewBox="0 0 28 138">
+          <path d="M 14 138 L 14 10" stroke="#ea580c" stroke-width="1.75" stroke-dasharray="4 3" fill="none" stroke-linecap="round"/>
+          <path d="M 8 16 L 14 4 L 20 16" stroke="#ea580c" stroke-width="1.75" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="loopback-arrow-label" style="position:absolute; top:-80px; left:-90px; font-size:9.5px; font-weight:700; color:#ea580c; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; transform: rotate(-90deg); transform-origin: right center;">on reject ↑</span>
         <div class="step-card a-approval selected" style="width: 300px;">
           <div class="icn-wrap">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>

@@ -2,108 +2,213 @@
 <!--
   Workflow Studio · 06 — Open task view (combined: brief layout + workflow task)
   =============================================================================
-  Combines two existing patterns the user has built and validated:
+  v3 — addresses user feedback:
 
-    1. The brief-endtoend.html layout: full-width, chat on the left,
-       org-chart "live view" on the right showing which agents are
-       working right now, activity feed with VIEW/EDIT chips for in-
-       context entities (CRM records, docs, rules).
+    1. Chat narrower (~30%) — divider in the middle didn't read well;
+       the chat doesn't need to be that wide. Chat carries the
+       narrative; the right panel carries the *work*.
+    2. Right panel wider (~70%) — gives Live (org chart) and Files
+       (reader pane) the space they need.
+    3. All four tabs are now functional. Click any tab to switch
+       between Live / Flow / Activity / Files. Pure-CSS state
+       switching via hidden radios + sibling selectors.
+    4. Files tab: split view. Left = file list, right = reader pane
+       (A4-paper-style) showing the selected file. Click any file
+       in the list to load it in the reader.
 
-    2. The task surface from prior mock 06: tabs across multiple
-       contextual views, inline approval cards in the chat, action
-       buttons for Pause / Cancel.
+  Tab purposes (sharply distinct):
 
-  Result: one task surface that works for BOTH brief-style ad-hoc
-  work (started from Ask Anything) AND workflow-fired tasks (started
-  by a schedule). Same data, same UI.
+    Live      — Who is doing what RIGHT NOW (org chart + status)
+    Flow      — The SHAPE of the work (planned route through agents
+                + gates; for ad-hoc tasks: the orchestrator's plan)
+    Activity  — What HAPPENED (chronological log + view/edit chips
+                on every linked entity — CRM records, docs, rules)
+    Files     — What was PRODUCED (list + reader pane with viewer)
 
-  Layout principles (per user direction):
-    - FULL WIDTH always — no max-width constraint on the workspace
-    - Chat ~50% / right panel ~50%
-    - Right panel has tabs: Live | Flow | Activity | Files
-    - Live tab default — most distinctive, most operational
-    - Activity entries carry VIEW/EDIT chips on linked entities
-    - Naming: this surface is called "Task" (not "Brief") — Brief is
-      retired as a noun in the UI
-
-  Scenario rendered: "Acme renewal proposal" — brief-style task with
-  a COO orchestrator agent that has pulled in three teams (Sales,
-  Research, Operations) with one specialist agent each. Currently
-  working; one approval pending.
+  Same surface for ad-hoc and workflow-fired tasks. "Brief" retired
+  as a UI noun.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>Task — Acme renewal proposal</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; margin:0; }
   .num { font-variant-numeric: tabular-nums; }
 
-  /* Four A's tokens — consistent with mocks 04 / 05 */
+  /* Hide all state radios */
+  input[name="task-tab"], input[name="active-file"] { display: none; }
+
+  /* Four A's tokens */
   .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
   .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
   .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
   .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
   .a-pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:9.5px; font-weight:600; border:1px solid var(--aborder); text-transform:uppercase; letter-spacing:.04em; }
 
-  /* Status colours pulled from WorkflowRunDetailPage */
-  .st-awaiting  { background:#fef3c7; color:#92400e; }
-
   .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  /* Org-chart node styles (matches brief-endtoend.html visual language) */
+  /* Org-chart node styles */
   .org-node {
     background: white; border: 1.5px solid #e5e7eb; border-radius: 10px;
-    padding: 8px 12px; min-width: 150px;
-    box-shadow: 0 1px 3px rgba(15,23,42,0.06);
-    position: relative;
+    padding: 10px 14px; min-width: 170px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.06); position: relative;
   }
   .org-node.done    { border-color: #a7f3d0; }
   .org-node.active  { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 0 0 3px rgba(59,130,246,0.10); }
   .org-node.idle    { border-color: #e2e8f0; opacity: 0.65; border-style: dashed; }
-  .org-node .role    { font-size: 12px; font-weight: 600; color: #0f172a; display:flex; align-items:center; gap:6px; }
-  .org-node .what    { font-size: 10.5px; color: #64748b; margin-top: 2px; }
+  .org-node .role  { font-size: 13px; font-weight: 600; color: #0f172a; display:flex; align-items:center; gap:6px; }
+  .org-node .what  { font-size: 11.5px; color: #64748b; margin-top: 2px; }
   .status-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; }
   .status-dot.done   { background: #10b981; }
   .status-dot.active { background: #3b82f6; animation: pulse-dot 1.6s ease-in-out infinite; }
   .status-dot.idle   { background: #cbd5e1; }
   @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.45); } 50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); } }
-
-  /* Connector edges between org-chart cards */
   .edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
   .edge.flow { stroke: #93c5fd; stroke-width: 1.5; stroke-dasharray: 4 3; animation: flow 1.2s linear infinite; }
   @keyframes flow { to { stroke-dashoffset: -14; } }
   .edge.done { stroke: #a7f3d0; }
 
-  /* Tab nav */
-  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; }
+  /* Tab state */
+  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; }
   .tab-btn:hover { color: #0f172a; }
-  .tab-btn.active { color: #0f172a; border-bottom-color: #4f46e5; font-weight: 600; }
   .tab-btn .count { margin-left: 4px; font-size: 10.5px; color: #94a3b8; }
+  #tab-live:checked     ~ .body label[for="tab-live"],
+  #tab-flow:checked     ~ .body label[for="tab-flow"],
+  #tab-activity:checked ~ .body label[for="tab-activity"],
+  #tab-files:checked    ~ .body label[for="tab-files"] { color: #0f172a; border-bottom-color: #4f46e5; font-weight: 600; }
 
-  /* Activity entry chips (matches brief style) */
-  .ref-chip {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 1px 6px 1px 5px; background:#eef2ff; border:1px solid #c7d2fe;
-    border-radius: 4px; font-size: 11px; color:#3730a3;
-  }
+  .tab-content { display: none; flex: 1 1 auto; min-height: 0; }
+  #tab-live:checked     ~ .body .tc-live     { display: flex; flex-direction: column; }
+  #tab-flow:checked     ~ .body .tc-flow     { display: flex; flex-direction: column; }
+  #tab-activity:checked ~ .body .tc-activity { display: flex; flex-direction: column; }
+  #tab-files:checked    ~ .body .tc-files    { display: flex; }
+
+  /* Activity entry chips */
+  .ref-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px 1px 5px; border:1px solid; border-radius: 4px; font-size: 11px; }
   .ref-chip.doc { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
   .ref-chip.crm { background:#dcfce7; border-color:#a7f3d0; color:#065f46; }
   .ref-chip.rule { background:#fef3c7; border-color:#fde68a; color:#92400e; }
   .ref-chip.memory { background:#fce7f3; border-color:#f9a8d4; color:#9d174d; }
-  .ref-link { font-size: 10.5px; color: #4f46e5; cursor:pointer; text-decoration:none; font-weight: 500; padding: 0 4px; }
+  .ref-link { font-size: 10.5px; color: #4f46e5; cursor:pointer; font-weight: 500; padding: 0 4px; }
   .ref-link:hover { text-decoration: underline; }
   .activity-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; margin-top: 6px; }
   .activity-dot.done { background:#10b981; }
   .activity-dot.active { background:#3b82f6; }
   .activity-dot.note { background:#cbd5e1; }
+
+  /* Files tab — top thumbnail strip + full-width reader below */
+  .files-strip {
+    background: #f1f5f9; border-bottom: 1px solid #e5e7eb;
+    padding: 16px 24px; display: flex; gap: 14px; align-items: flex-end;
+    overflow-x: auto; flex-shrink: 0;
+  }
+  .files-strip::-webkit-scrollbar { height: 6px; }
+  .files-strip::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+
+  .file-thumb {
+    flex-shrink: 0; cursor: pointer; position: relative;
+    transition: transform .12s ease;
+  }
+  .file-thumb:hover { transform: translateY(-2px); }
+  .file-thumb .page {
+    background: white; border: 1.5px solid #e2e8f0; border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.08);
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding: 8px 6px;
+    transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .file-thumb.portrait .page { width: 70px; height: 90px; }
+  .file-thumb.landscape .page { width: 96px; height: 70px; }
+
+  .file-thumb .page .icon { width: 26px; height: 26px; border-radius: 5px; display:flex; align-items:center; justify-content:center; margin-bottom: 4px; }
+  .file-thumb .page .lines { width: 100%; padding: 0 4px; }
+  .file-thumb .page .lines .line { background: #e2e8f0; height: 2px; margin-bottom: 3px; border-radius: 1px; }
+  .file-thumb .page .lines .line.short { width: 60%; }
+  .file-thumb .page .ext-badge { position:absolute; bottom:-4px; right:-4px; font-size: 8px; font-weight:700; padding: 1px 4px; border-radius: 3px; background:#1e293b; color:white; }
+
+  .file-thumb .name {
+    margin-top: 6px; font-size: 10.5px; color: #475569;
+    text-align: center; line-height: 1.3;
+    max-width: 96px; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+
+  /* Selected state — driven by sibling radios */
+  #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .page,
+  #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .page,
+  #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .page,
+  #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .page,
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
+  #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .name,
+  #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .name,
+  #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .name,
+  #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .name,
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name { color: #4f46e5; font-weight: 600; }
+
+  /* Tooltip on hover */
+  .file-thumb .tooltip {
+    position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+    background: #1e293b; color: white; font-size: 11px; padding: 4px 10px; border-radius: 4px;
+    white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease;
+    z-index: 10;
+  }
+  .file-thumb:hover .tooltip { opacity: 1; }
+
+  /* Reader pane content swap */
+  .reader-content { display: none; }
+  #file-proposal:checked  ~ .body .rc-proposal  { display: block; }
+  #file-competitor:checked ~ .body .rc-competitor { display: block; }
+  #file-annex:checked     ~ .body .rc-annex     { display: block; }
+  #file-stripe:checked    ~ .body .rc-stripe    { display: block; }
+  #file-paypal:checked    ~ .body .rc-paypal    { display: block; }
+
+  /* Reader paper styling */
+  .reader-paper {
+    background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06);
+    margin: 24px auto; padding: 56px 64px;
+    width: 720px; max-width: calc(100% - 48px);
+    border-radius: 4px;
+    font-family: 'Lora', Georgia, serif;
+    color: #1e293b; line-height: 1.65;
+  }
+  .reader-paper h1 { font-family: 'Inter', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .reader-paper h2 { font-family: 'Inter', sans-serif; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin: 28px 0 8px; color: #0f172a; }
+  .reader-paper p  { font-size: 14.5px; margin: 0 0 14px; color: #334155; }
+  .reader-paper ul { font-size: 14px; padding-left: 22px; margin: 0 0 14px; }
+  .reader-paper li { margin-bottom: 5px; color: #334155; }
+  .reader-paper table { width:100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 12.5px; margin: 8px 0 16px; }
+  .reader-paper th, .reader-paper td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+  .reader-paper th { font-weight: 600; color: #0f172a; background: #f8fafc; }
+  .reader-paper .meta { font-family: 'Inter', sans-serif; font-size: 11.5px; color: #94a3b8; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+
+  .step-card {
+    background:white; border:1px solid #e5e7eb; border-radius:10px;
+    padding: 12px 14px; display:flex; align-items:center; gap:12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .icn-wrap { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:var(--abg); color:var(--aaccent); }
+  .connector { width: 1.5px; background: #cbd5e1; margin: 0 auto; }
+
 </style>
 </head>
 <body class="min-h-screen">
+
+<!-- Hidden tab + active-file radios -->
+<input type="radio" name="task-tab" id="tab-live" checked>
+<input type="radio" name="task-tab" id="tab-flow">
+<input type="radio" name="task-tab" id="tab-activity">
+<input type="radio" name="task-tab" id="tab-files">
+
+<input type="radio" name="active-file" id="file-proposal" checked>
+<input type="radio" name="active-file" id="file-competitor">
+<input type="radio" name="active-file" id="file-annex">
+<input type="radio" name="active-file" id="file-stripe">
+<input type="radio" name="active-file" id="file-paypal">
 
 <!-- App bar -->
 <div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
@@ -120,7 +225,7 @@
   </div>
 </div>
 
-<!-- Task header (full width) -->
+<!-- Task header -->
 <div class="bg-white border-b border-slate-200 px-6 py-3.5">
   <div class="flex items-start gap-4">
     <div class="flex-1 min-w-0">
@@ -142,230 +247,574 @@
   </div>
 </div>
 
-<!-- Main two-pane layout — FULL WIDTH, no max-width -->
-<div class="flex" style="height: calc(100vh - 110px); min-height: 720px;">
+<!-- Main body — full-width, chat ~30% / right panel ~70% -->
+<div class="body flex" style="height: calc(100vh - 110px); min-height: 720px;">
 
-  <!-- ========================== LEFT: CHAT/CONVERSATION (50%) ========================== -->
-  <div class="flex-1 min-w-0 flex flex-col bg-white border-r border-slate-200" style="flex-basis: 50%;">
+  <!-- ========================== LEFT: CHAT (30%) ========================== -->
+  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 30%; min-width: 360px;">
 
-    <div class="flex-1 overflow-y-auto scroll px-8 py-6 space-y-5 text-[13px] leading-relaxed">
+    <div class="flex-1 overflow-y-auto scroll px-5 py-5 space-y-4 text-[13px] leading-relaxed">
 
-      <!-- User's original ask -->
       <div class="flex justify-end">
-        <div class="max-w-[80%]">
-          <div class="bg-indigo-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-md">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
+        <div class="max-w-[92%]">
+          <div class="bg-indigo-600 text-white px-3.5 py-2.5 rounded-2xl rounded-tr-md text-[13px]">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
           <div class="text-[10.5px] text-slate-400 mt-1 text-right">Mike · 38s ago</div>
         </div>
       </div>
 
-      <!-- COO orchestrator response -->
-      <div class="flex gap-3">
-        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
-            <span class="text-[13px] font-semibold text-slate-900">COO</span>
+      <div class="flex gap-2.5">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[10.5px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <span class="text-[12.5px] font-semibold text-slate-900">COO</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="text-[11px] text-slate-400">orchestrator · just now</span>
           </div>
-          <div class="text-slate-700">On it — I've pulled in three teams to work on this. The Sales team will draft the proposal body, Research will gather competitor pricing, and Ops will build the pricing annex. I'll consolidate when they're done and ask for your approval.</div>
-
-          <!-- Inline status card -->
-          <div class="mt-2 border border-slate-200 rounded-lg bg-slate-50 px-3 py-2.5 text-[12.5px]">
-            <div class="flex items-center gap-2">
-              <div class="w-2.5 h-2.5 rounded-full bg-blue-500" style="animation: pulse-dot 1.6s ease-in-out infinite;"></div>
-              <span class="font-medium text-slate-800">Working across 3 teams</span>
-              <span class="text-slate-400">·</span>
-              <span class="text-slate-500">Sales, Research, Operations</span>
-            </div>
-          </div>
+          <div class="text-slate-700 text-[12.5px]">On it — I've pulled in three teams to work on this. Sales drafts the body, Research gathers competitor pricing, Ops builds the annex. I'll consolidate when they're done and ask for your approval.</div>
         </div>
       </div>
 
-      <!-- System note: handoff -->
       <div class="flex justify-center">
-        <div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-          Handed off to Head of Sales, Head of Research, Head of Operations
-        </div>
+        <div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">Handed off to 3 teams</div>
       </div>
 
-      <!-- Head of Sales: drafted proposal body -->
-      <div class="flex gap-3">
-        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
-            <span class="text-[13px] font-semibold text-slate-900">Head of Sales</span>
+      <div class="flex gap-2.5">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[10.5px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <span class="text-[12.5px] font-semibold text-slate-900">Head of Sales</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="text-[11px] text-slate-400">28s ago · 4.2s · $0.018</span>
+            <span class="text-[10.5px] text-slate-400">28s ago</span>
           </div>
-          <div class="text-slate-700">Proposal body drafted. Pulled SDR-1 in for the account context (last quarter's MRR, contract terms, expansion conversations).</div>
-          <div class="mt-2 flex items-center gap-2">
-            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">Open proposal draft →</button>
-          </div>
+          <div class="text-slate-700 text-[12.5px]">Proposal body drafted. Pulled SDR-1 for last quarter's MRR + contract terms.</div>
+          <a class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium mt-0.5 inline-block">Open draft →</a>
         </div>
       </div>
 
-      <!-- Head of Research: ongoing -->
-      <div class="flex gap-3">
-        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+      <div class="flex gap-2.5">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[10.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
           HR
           <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
         </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
-            <span class="text-[13px] font-semibold text-slate-900">Head of Research</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <span class="text-[12.5px] font-semibold text-slate-900">Head of Research</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="text-[11px] text-blue-600 font-medium">working now · 4s ago</span>
+            <span class="text-[10.5px] text-blue-600 font-medium">working now</span>
           </div>
-          <div class="text-slate-700">Scanning 4 competitor rate cards. Will return a pricing comparison and positioning recommendation.</div>
+          <div class="text-slate-700 text-[12.5px]">Scanning 4 competitor rate cards.</div>
         </div>
       </div>
 
-      <!-- Pricing rule applied (system-generated activity) -->
-      <div class="flex gap-3">
-        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0" style="background:#fef3c7; color:#92400e;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <div class="flex gap-2.5">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#fef3c7; color:#92400e;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
         </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
-            <span class="text-[13px] font-medium text-slate-700">Applied pricing rule</span>
-            <span class="text-[11px] text-slate-400">22s ago · automatic</span>
-          </div>
-          <div class="text-slate-700 flex items-center gap-1.5 flex-wrap">
-            Minimum 15% margin on renewals
-            <span class="ref-chip rule">
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 11l3 3L22 4"/></svg>
-              Pricing rule
-            </span>
-            <a class="ref-link">View</a>
-            <a class="ref-link">Edit</a>
-          </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-slate-700 text-[12.5px]">Applied rule · <span class="font-medium">15% min margin on renewals</span></div>
+          <div class="text-[10.5px] text-slate-400">22s ago</div>
         </div>
       </div>
 
-      <!-- Head of Ops: drafting -->
-      <div class="flex gap-3">
-        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+      <div class="flex gap-2.5">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[10.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
           HO
           <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
         </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
-            <span class="text-[13px] font-semibold text-slate-900">Head of Operations</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <span class="text-[12.5px] font-semibold text-slate-900">Head of Operations</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="text-[11px] text-blue-600 font-medium">working now · just now</span>
+            <span class="text-[10.5px] text-blue-600 font-medium">working now</span>
           </div>
-          <div class="text-slate-700">Drafting pricing annex — pulling line items, payment terms, and renewal credits.</div>
+          <div class="text-slate-700 text-[12.5px]">Drafting pricing annex — line items, payment terms, renewal credits.</div>
         </div>
       </div>
 
     </div>
 
-    <!-- Composer -->
-    <div class="border-t border-slate-200 px-8 py-3">
+    <div class="border-t border-slate-200 px-5 py-3">
       <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
-        <textarea rows="1" placeholder="Add a note, ask a question, or steer the agents…" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
+        <textarea rows="1" placeholder="Add a note or steer the agents…" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
         <button class="m-1.5 p-1.5 rounded bg-slate-900 hover:bg-black text-white">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
     </div>
 
   </div>
 
-  <!-- ========================== RIGHT: TABBED CONTEXTUAL PANEL (50%) ========================== -->
-  <div class="flex-1 min-w-0 flex flex-col bg-white" style="flex-basis: 50%;">
+  <!-- ========================== RIGHT: TABBED PANEL (70%) ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-white">
 
     <!-- Tab nav -->
     <div class="px-6 border-b border-slate-200 flex items-center gap-1">
-      <a class="tab-btn active">Live</a>
-      <a class="tab-btn">Flow</a>
-      <a class="tab-btn">Activity <span class="count num">12</span></a>
-      <a class="tab-btn">Files <span class="count num">2</span></a>
+      <label for="tab-live"     class="tab-btn">Live</label>
+      <label for="tab-flow"     class="tab-btn">Flow</label>
+      <label for="tab-activity" class="tab-btn">Activity <span class="count num">12</span></label>
+      <label for="tab-files"    class="tab-btn">Files <span class="count num">5</span></label>
       <span class="ml-auto text-[11.5px] text-slate-400 self-center">Updates automatically</span>
     </div>
 
-    <!-- Tab content: Live (default) -->
-    <div class="flex-1 overflow-y-auto scroll px-6 py-6">
+    <!-- Tab: LIVE -->
+    <div class="tab-content tc-live overflow-y-auto scroll px-8 py-8">
+      <div class="flex items-center justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-800">Who is doing what right now</div>
+        <div class="flex items-center gap-3 text-[10.5px] text-slate-500">
+          <span class="flex items-center gap-1"><span class="status-dot done"></span>done</span>
+          <span class="flex items-center gap-1"><span class="status-dot active"></span>working</span>
+          <span class="flex items-center gap-1"><span class="status-dot idle"></span>waiting</span>
+        </div>
+      </div>
+      <div class="text-[11.5px] text-slate-500 mb-6">Live snapshot · use Flow for the planned route, Activity for the full history, Files for what's been produced.</div>
 
-      <!-- Org chart — sole content of the Live tab -->
-      <div>
-        <div class="flex items-center justify-between mb-1">
-          <div class="text-[13px] font-semibold text-slate-800">Who is doing what right now</div>
-          <div class="flex items-center gap-3 text-[10.5px] text-slate-500">
-            <span class="flex items-center gap-1"><span class="status-dot done"></span>done</span>
-            <span class="flex items-center gap-1"><span class="status-dot active"></span>working</span>
-            <span class="flex items-center gap-1"><span class="status-dot idle"></span>waiting</span>
+      <div style="position:relative; width:100%; max-width: 880px; margin: 0 auto; height:380px;">
+        <svg width="100%" height="100%" viewBox="0 0 760 380" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
+          <path class="edge done" d="M 380 80 L 380 120 L 130 120 L 130 160" />
+          <path class="edge flow" d="M 380 80 L 380 160" />
+          <path class="edge flow" d="M 380 80 L 380 120 L 630 120 L 630 160" />
+          <path class="edge done" d="M 130 230 L 130 290" />
+          <path class="edge flow" d="M 380 230 L 380 290" />
+          <path class="edge" d="M 630 230 L 630 290" stroke-dasharray="3 3" />
+        </svg>
+
+        <div style="position:absolute; left:50%; top:14px; transform:translateX(-50%);">
+          <div class="org-node done" style="text-align:center;">
+            <div class="role" style="justify-content:center;"><span class="status-dot done"></span>COO</div>
+            <div class="what">Orchestrator</div>
           </div>
         </div>
-        <div class="text-[11.5px] text-slate-500 mb-4">Live snapshot · use Flow for the planned route, Activity for the full history, Files for what's been produced.</div>
-
-        <!-- SVG-laid org chart -->
-        <div style="position:relative; width:100%; height:340px;">
-          <svg width="100%" height="100%" viewBox="0 0 580 340" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
-            <!-- Edges -->
-            <!-- COO → Sales -->
-            <path class="edge done" d="M 290 70 L 290 100 L 110 100 L 110 130" />
-            <!-- COO → Research -->
-            <path class="edge flow" d="M 290 70 L 290 130" />
-            <!-- COO → Operations -->
-            <path class="edge flow" d="M 290 70 L 290 100 L 470 100 L 470 130" />
-            <!-- Sales → SDR -->
-            <path class="edge done" d="M 110 195 L 110 245" />
-            <!-- Research → Analyst -->
-            <path class="edge flow" d="M 290 195 L 290 245" />
-            <!-- Operations → Pricing Specialist -->
-            <path class="edge" d="M 470 195 L 470 245" stroke-dasharray="3 3" />
-          </svg>
-
-          <!-- Cards positioned absolutely -->
-          <div style="position:absolute; left:50%; top:8px; transform:translateX(-50%);">
-            <div class="org-node done" style="text-align:center;">
-              <div class="role"><span class="status-dot done"></span>COO</div>
-              <div class="what">Orchestrator</div>
-            </div>
+        <div style="position:absolute; left:24px; top:160px;">
+          <div class="org-node done">
+            <div class="role"><span class="status-dot done"></span>Head of Sales</div>
+            <div class="what">Proposal body · done</div>
           </div>
-
-          <div style="position:absolute; left:8px; top:130px;">
-            <div class="org-node done">
-              <div class="role"><span class="status-dot done"></span>Head of Sales</div>
-              <div class="what">Proposal body</div>
-            </div>
+        </div>
+        <div style="position:absolute; left:50%; top:160px; transform:translateX(-50%);">
+          <div class="org-node active">
+            <div class="role"><span class="status-dot active"></span>Head of Research</div>
+            <div class="what">Competitor pricing</div>
           </div>
-          <div style="position:absolute; left:50%; top:130px; transform:translateX(-50%);">
-            <div class="org-node active">
-              <div class="role"><span class="status-dot active"></span>Head of Research</div>
-              <div class="what">Competitor pricing</div>
-            </div>
+        </div>
+        <div style="position:absolute; right:24px; top:160px;">
+          <div class="org-node active">
+            <div class="role"><span class="status-dot active"></span>Head of Operations</div>
+            <div class="what">Pricing annex</div>
           </div>
-          <div style="position:absolute; right:8px; top:130px;">
-            <div class="org-node active">
-              <div class="role"><span class="status-dot active"></span>Head of Operations</div>
-              <div class="what">Pricing annex</div>
-            </div>
+        </div>
+        <div style="position:absolute; left:24px; top:290px;">
+          <div class="org-node done">
+            <div class="role"><span class="status-dot done"></span>SDR 1</div>
+            <div class="what">Account context · done</div>
           </div>
-
-          <div style="position:absolute; left:8px; top:245px;">
-            <div class="org-node done">
-              <div class="role"><span class="status-dot done"></span>SDR 1</div>
-              <div class="what">Account context</div>
-            </div>
+        </div>
+        <div style="position:absolute; left:50%; top:290px; transform:translateX(-50%);">
+          <div class="org-node active">
+            <div class="role"><span class="status-dot active"></span>Research Analyst</div>
+            <div class="what">Scanning 4 competitors</div>
           </div>
-          <div style="position:absolute; left:50%; top:245px; transform:translateX(-50%);">
-            <div class="org-node active">
-              <div class="role"><span class="status-dot active"></span>Research Analyst</div>
-              <div class="what">Scanning 4 competitors</div>
-            </div>
-          </div>
-          <div style="position:absolute; right:8px; top:245px;">
-            <div class="org-node idle">
-              <div class="role"><span class="status-dot idle"></span>Pricing Specialist</div>
-              <div class="what">Waiting for research</div>
-            </div>
+        </div>
+        <div style="position:absolute; right:24px; top:290px;">
+          <div class="org-node idle">
+            <div class="role"><span class="status-dot idle"></span>Pricing Specialist</div>
+            <div class="what">Waiting for research</div>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Tab: FLOW -->
+    <div class="tab-content tc-flow overflow-y-auto scroll px-8 py-8">
+      <div class="text-[14px] font-semibold text-slate-800 mb-1">The shape of this work</div>
+      <div class="text-[11.5px] text-slate-500 mb-6">What the COO planned · current step in indigo. Ad-hoc task — agent's plan, not a workflow template.</div>
+
+      <div class="mx-auto" style="max-width: 720px;">
+
+        <!-- Phase 1: parallel work -->
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 1 — research &amp; draft (parallel)</div>
+        <div class="grid grid-cols-3 gap-3 mb-1">
+          <div class="step-card a-agent" style="opacity:1;">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[12.5px] font-medium text-slate-900 truncate">Sales: proposal body</div>
+              <div class="text-[10.5px] text-emerald-700">✓ done · 28s ago</div>
+            </div>
+          </div>
+          <div class="step-card a-agent" style="border-color:#4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.10);">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[12.5px] font-medium text-slate-900 truncate">Research: pricing</div>
+              <div class="text-[10.5px] text-blue-600 font-medium">working now</div>
+            </div>
+          </div>
+          <div class="step-card a-agent" style="border-color:#4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.10);">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[12.5px] font-medium text-slate-900 truncate">Ops: pricing annex</div>
+              <div class="text-[10.5px] text-blue-600 font-medium">working now</div>
+            </div>
+          </div>
+        </div>
+        <div class="connector" style="height:32px;"></div>
+
+        <!-- Phase 2: COO consolidates -->
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 2 — consolidate</div>
+        <div class="flex justify-center">
+          <div class="step-card a-agent" style="opacity:0.55; width:280px;">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-medium text-slate-900 truncate">COO consolidates final proposal</div>
+              <div class="text-[10.5px] text-slate-400">queued · waits for phase 1</div>
+            </div>
+            <span class="a-pill a-agent">Agent</span>
+          </div>
+        </div>
+        <div class="connector" style="height:32px;"></div>
+
+        <!-- Phase 3: approval -->
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 3 — review &amp; deliver</div>
+        <div class="flex justify-center">
+          <div class="step-card a-approval" style="opacity:0.55; width:280px;">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-medium text-slate-900 truncate">Mike approves final proposal</div>
+              <div class="text-[10.5px] text-slate-400">queued</div>
+            </div>
+            <span class="a-pill a-approval">Approval</span>
+          </div>
+        </div>
+        <div class="connector" style="height:24px;"></div>
+        <div class="flex justify-center">
+          <div class="step-card a-action" style="opacity:0.55; width:280px;">
+            <div class="icn-wrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-medium text-slate-900 truncate">Send proposal to Acme</div>
+              <div class="text-[10.5px] text-slate-400">queued · email + GHL contact</div>
+            </div>
+            <span class="a-pill a-action">Action</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Tab: ACTIVITY -->
+    <div class="tab-content tc-activity overflow-y-auto scroll px-8 py-8">
+      <div class="text-[14px] font-semibold text-slate-800 mb-1">Full history of this task</div>
+      <div class="text-[11.5px] text-slate-500 mb-6">Newest first · click View on a chip to open the linked entity</div>
+
+      <div class="space-y-3 max-w-[820px]">
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot active mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">just now</span><span class="font-medium text-slate-900">Head of Operations</span><span class="a-pill a-agent">Agent</span></div>
+            <div class="text-slate-700 mt-0.5">Drafting pricing annex — pulling line items, payment terms, renewal credits.</div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot active mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">4s ago</span><span class="font-medium text-slate-900">Research Analyst</span><span class="a-pill a-agent">Agent</span></div>
+            <div class="text-slate-700 mt-0.5">Scanning 4 competitor rate cards.</div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot note mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2 flex-wrap"><span class="num text-[11px] text-slate-400">8s ago</span><span class="text-slate-700">Fetched 2 competitor rate cards</span></div>
+            <div class="mt-1 inline-flex items-center gap-1.5 flex-wrap">
+              <span class="ref-chip doc"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Stripe rate card</span>
+              <span class="ref-chip doc"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> PayPal rate card</span>
+              <a class="ref-link">View</a>
+              <a class="ref-link">Edit</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">14s ago</span><span class="font-medium text-slate-900">SDR 1</span><span class="text-slate-700">pulled CRM account context</span><span class="text-emerald-600">✓</span></div>
+            <div class="mt-1 inline-flex items-center gap-1.5">
+              <span class="ref-chip crm"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg> Acme · CRM record</span>
+              <a class="ref-link">View</a>
+              <a class="ref-link">Edit</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot note mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">22s ago</span><span class="text-slate-700">Applied rule</span><span class="text-slate-500">— minimum 15% margin on renewals</span></div>
+            <div class="mt-1 inline-flex items-center gap-1.5">
+              <span class="ref-chip rule"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 11l3 3L22 4"/></svg> Pricing rule</span>
+              <a class="ref-link">View</a>
+              <a class="ref-link">Edit</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2 flex-wrap"><span class="num text-[11px] text-slate-400">28s ago</span><span class="font-medium text-slate-900">Head of Sales</span><span class="a-pill a-agent">Agent</span><span class="text-slate-700">drafted proposal body</span><span class="text-emerald-600">✓</span></div>
+            <div class="mt-1 inline-flex items-center gap-1.5">
+              <span class="ref-chip doc"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Acme renewal proposal</span>
+              <a class="ref-link">View</a>
+              <a class="ref-link">Edit</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2 flex-wrap"><span class="num text-[11px] text-slate-400">30s ago</span><span class="text-slate-700">Memory consulted</span><span class="text-slate-500">— Acme onboarding context, last QBR notes</span></div>
+            <div class="mt-1 inline-flex items-center gap-1.5">
+              <span class="ref-chip memory"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.4 2.6"/><path d="M21 4v6h-6"/></svg> 3 memory blocks</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">34s ago</span><span class="font-medium text-slate-900">COO</span><span class="a-pill a-agent">Agent</span><span class="text-slate-700">delegated to 3 teams</span></div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">36s ago</span><span class="text-slate-700">Routed to <span class="font-medium text-slate-900">COO</span></span></div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3 text-[12.5px]">
+          <span class="activity-dot done mt-1.5"></span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2"><span class="num text-[11px] text-slate-400">38s ago</span><span class="font-medium text-slate-900">Mike H.</span><span class="text-slate-700">created task via Ask Anything</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Tab: FILES — top strip + full-width reader below -->
+    <div class="tab-content tc-files" style="flex-direction: column;">
+
+      <!-- Top thumbnail strip -->
+      <div class="files-strip">
+
+        <label for="file-proposal" class="block">
+          <div class="file-thumb portrait">
+            <div class="tooltip">Acme renewal proposal · authored by Head of Sales</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#eef2ff; color:#4f46e5;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </div>
+              <div class="lines">
+                <div class="line"></div>
+                <div class="line short"></div>
+                <div class="line"></div>
+                <div class="line"></div>
+                <div class="line short"></div>
+              </div>
+              <span class="ext-badge">DOC</span>
+            </div>
+            <div class="name">Acme renewal proposal</div>
+          </div>
+        </label>
+
+        <label for="file-competitor" class="block">
+          <div class="file-thumb portrait">
+            <div class="tooltip">Competitor pricing analysis · authored by Research Analyst</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#ecfdf5; color:#059669;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              </div>
+              <div class="lines">
+                <div class="line"></div>
+                <div class="line short"></div>
+                <div class="line"></div>
+                <div class="line short"></div>
+              </div>
+              <span class="ext-badge" style="background:#059669;">CSV</span>
+            </div>
+            <div class="name">Competitor pricing</div>
+          </div>
+        </label>
+
+        <label for="file-annex" class="block">
+          <div class="file-thumb portrait">
+            <div class="tooltip">Pricing annex · authored by Head of Operations</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#fffbeb; color:#d97706;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+              </div>
+              <div class="lines">
+                <div class="line"></div>
+                <div class="line"></div>
+                <div class="line short"></div>
+              </div>
+              <span class="ext-badge" style="background:#d97706;">XLS</span>
+            </div>
+            <div class="name">Pricing annex</div>
+          </div>
+        </label>
+
+        <!-- Divider between produced and fetched -->
+        <div style="width:1px; background:#cbd5e1; height:80px; margin: 0 8px;"></div>
+
+        <label for="file-stripe" class="block">
+          <div class="file-thumb portrait">
+            <div class="tooltip">Stripe rate card · fetched from stripe.com</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#f1f5f9; color:#475569;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+              </div>
+              <div class="lines">
+                <div class="line"></div>
+                <div class="line"></div>
+                <div class="line short"></div>
+              </div>
+              <span class="ext-badge" style="background:#64748b;">PDF</span>
+            </div>
+            <div class="name">Stripe rate card</div>
+          </div>
+        </label>
+
+        <label for="file-paypal" class="block">
+          <div class="file-thumb portrait">
+            <div class="tooltip">PayPal rate card · fetched from paypal.com</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#f1f5f9; color:#475569;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+              </div>
+              <div class="lines">
+                <div class="line"></div>
+                <div class="line short"></div>
+                <div class="line"></div>
+              </div>
+              <span class="ext-badge" style="background:#64748b;">PDF</span>
+            </div>
+            <div class="name">PayPal rate card</div>
+          </div>
+        </label>
+
+      </div>
+
+      <!-- Reader pane (full width below the strip) -->
+      <div class="flex-1 min-w-0 overflow-y-auto scroll" style="background:#f1f5f9;">
+
+        <!-- File: Acme renewal proposal -->
+        <div class="reader-content rc-proposal">
+          <div class="reader-paper">
+            <div class="meta">Acme renewal proposal · Draft v1 · authored by Head of Sales · 28s ago</div>
+            <h1>Acme — Q3 Renewal Proposal</h1>
+            <p>Acme has been a customer since Q2 2024. Over the past four quarters they've moved from initial-pilot tier to mid-market tier, with $48K ARR and 23% NRR expansion driven primarily by additional seats and the upgrade to the Pro Workflows package in February.</p>
+            <h2>Renewal terms</h2>
+            <p>We propose extending Acme's current contract for a further twelve months at a 9% list-price increase, offset by a 3% loyalty credit and twelve months of priority support. Net effect on Acme's invoice: a 6% increase, in line with their internal 7% benchmark for mission-critical SaaS.</p>
+            <h2>Why we believe this works</h2>
+            <ul>
+              <li>Acme's usage has grown 23% YoY; pricing should reflect realised value.</li>
+              <li>Competitor pricing (see annex) sits ~12% above our proposed renewal.</li>
+              <li>Our minimum-margin policy (15% on renewals) is comfortably met at this rate.</li>
+            </ul>
+            <h2>What we're asking for</h2>
+            <p>Mike's sign-off on the body of this proposal and the pricing annex (separate document). On approval, the COO consolidates and the SDR sends through the Acme primary contact in GHL.</p>
+          </div>
+        </div>
+
+        <!-- File: Competitor pricing analysis -->
+        <div class="reader-content rc-competitor">
+          <div class="reader-paper">
+            <div class="meta">Competitor pricing analysis · Draft · authored by Research Analyst · still updating</div>
+            <h1>Competitor pricing — Q3 2026</h1>
+            <p>Pulled from public rate cards on the four competitors most frequently mentioned by Acme during the contract negotiation. All figures normalised to per-seat per-month, billed annually, US list pricing.</p>
+            <table>
+              <thead><tr><th>Competitor</th><th>List $/seat/mo</th><th>Effective $/seat/mo</th><th>Vs us</th></tr></thead>
+              <tbody>
+                <tr><td>Stripe (Pro tier)</td><td>$78</td><td>$72 (with annual)</td><td>+14%</td></tr>
+                <tr><td>PayPal (Plus)</td><td>$84</td><td>$76 (with annual)</td><td>+19%</td></tr>
+                <tr><td>Square (Pro)</td><td>$69</td><td>$66 (with annual)</td><td>+4%</td></tr>
+                <tr><td>Adyen (Mid)</td><td>$92</td><td>$84 (with annual)</td><td>+33%</td></tr>
+              </tbody>
+            </table>
+            <h2>Recommendation</h2>
+            <p>Position our renewal as the value option for the segment. The 9% increase keeps us well below Stripe and PayPal, our two closest peers in the tooling category. Square is cheaper but lacks the workflow surface Acme uses heavily. Adyen is overpriced for Acme's volume.</p>
+          </div>
+        </div>
+
+        <!-- File: Pricing annex -->
+        <div class="reader-content rc-annex">
+          <div class="reader-paper">
+            <div class="meta">Pricing annex · Draft · authored by Head of Operations · still updating</div>
+            <h1>Pricing annex — Acme renewal</h1>
+            <p>Line-item breakdown of the proposed renewal terms.</p>
+            <table>
+              <thead><tr><th>Line item</th><th>Quantity</th><th>Unit price</th><th>Subtotal</th></tr></thead>
+              <tbody>
+                <tr><td>Pro Workflows · annual</td><td>22 seats</td><td>$60.00 / seat / mo</td><td>$15,840</td></tr>
+                <tr><td>Priority support</td><td>1 plan</td><td>$4,800 / yr</td><td>$4,800</td></tr>
+                <tr><td>API allowance (50M req/mo)</td><td>1 tier</td><td>$2,400 / yr</td><td>$2,400</td></tr>
+                <tr><td>Loyalty credit (3%)</td><td>—</td><td>—</td><td>−$687</td></tr>
+              </tbody>
+            </table>
+            <h2>Total</h2>
+            <p><strong>$22,353 / year</strong> (vs current $20,640 — an effective 8.3% increase, less than the 9% nominal list-price increase due to the loyalty credit).</p>
+            <h2>Renewal credits</h2>
+            <ul>
+              <li>3% loyalty credit applied annually for the duration of the renewal term.</li>
+              <li>Two free quarterly business reviews (normally $2,400 / yr).</li>
+              <li>Carry-over of unused API requests up to 10M.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- File: Stripe rate card -->
+        <div class="reader-content rc-stripe">
+          <div class="reader-paper">
+            <div class="meta">Stripe rate card · External reference · fetched from stripe.com · 8s ago</div>
+            <h1>Stripe — Pro tier (excerpt)</h1>
+            <p><em>Source: stripe.com/pricing — fetched 8s ago. Auto-extracted by the Research Analyst agent. Read-only reference.</em></p>
+            <table>
+              <thead><tr><th>Plan</th><th>Per seat / mo</th><th>Annual discount</th></tr></thead>
+              <tbody>
+                <tr><td>Pro</td><td>$78</td><td>~7.5%</td></tr>
+                <tr><td>Pro + Workflows</td><td>$96</td><td>~7.5%</td></tr>
+                <tr><td>Enterprise</td><td>contact sales</td><td>—</td></tr>
+              </tbody>
+            </table>
+            <p>Stripe's Pro tier closely matches our Pro Workflows package on feature parity. Their effective annual price ($72) sits 14% above our proposed renewal rate ($60).</p>
+          </div>
+        </div>
+
+        <!-- File: PayPal rate card -->
+        <div class="reader-content rc-paypal">
+          <div class="reader-paper">
+            <div class="meta">PayPal rate card · External reference · fetched from paypal.com · 8s ago</div>
+            <h1>PayPal — Plus tier (excerpt)</h1>
+            <p><em>Source: paypal.com/business/pricing — fetched 8s ago. Auto-extracted by the Research Analyst agent. Read-only reference.</em></p>
+            <table>
+              <thead><tr><th>Plan</th><th>Per seat / mo</th><th>Annual discount</th></tr></thead>
+              <tbody>
+                <tr><td>Plus</td><td>$84</td><td>~9.5%</td></tr>
+                <tr><td>Premium</td><td>$104</td><td>~9.5%</td></tr>
+              </tbody>
+            </table>
+            <p>PayPal Plus is the closest comparator. Effective annual ($76) is 19% above our proposed renewal — gives us comfortable headroom to position as the value option.</p>
+          </div>
+        </div>
+
+      </div>
 
     </div>
+
   </div>
 
 </div>
