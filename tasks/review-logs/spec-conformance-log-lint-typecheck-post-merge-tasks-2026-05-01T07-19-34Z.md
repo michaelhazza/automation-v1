@@ -7,6 +7,7 @@
 **Scope:** all-of-spec against full changed-code set (caller confirmed completed implementation, no chunked plan)
 **Changed-code set:** 208 files (committed); 0 staged / 0 unstaged / 0 untracked
 **Run at:** 2026-05-01T07-19-34Z
+**Commit at finish:** `d6e226eb`
 
 ---
 
@@ -108,4 +109,4 @@ This is the kind of judgment call that the conservative MECHANICAL_GAP → DIREC
 
 **CONFORMANT_AFTER_FIXES** — one mechanical gap was closed in-session (JSDoc on `computeFingerprint`). The change is small and isolated to `server/services/incidentIngestorPure.ts`. The diff has already been seen by `pr-reviewer` in earlier rounds (PR #248 reviewer pass produced the S/N findings this branch addresses); the JSDoc addition does not change the runtime contract or any external surface. Re-running `pr-reviewer` on the expanded changed-code set is recommended but low-priority — the change is documentation-only. Given this branch already has an open PR (#249), the PR reviewer flow takes care of the next pass.
 
-**Commit at finish:** (recorded after auto-commit step below)
+**Commit at finish:** `d6e226eb` (pushed to `origin/lint-typecheck-post-merge-tasks`).
