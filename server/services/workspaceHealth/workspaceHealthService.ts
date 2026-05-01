@@ -263,8 +263,8 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
       scheduleCron: subaccountAgents.scheduleCron,
     })
     .from(subaccountAgents)
-    .innerJoin(subaccounts, eq(subaccounts.id, subaccountAgents.subaccountId))
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(subaccounts, and(eq(subaccounts.id, subaccountAgents.subaccountId), isNull(subaccounts.deletedAt)))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(eq(subaccountAgents.organisationId, organisationId));
 
   const subaccountAgentsCtx = linkRows.map((r) => ({
@@ -314,7 +314,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
       connectionKey: automationConnectionMappings.connectionKey,
     })
     .from(automationConnectionMappings)
-    .innerJoin(subaccounts, eq(subaccounts.id, automationConnectionMappings.subaccountId))
+    .innerJoin(subaccounts, and(eq(subaccounts.id, automationConnectionMappings.subaccountId), isNull(subaccounts.deletedAt)))
     .where(eq(automationConnectionMappings.organisationId, organisationId));
 
   const mappingsCtx = mappingRows.map((m) => ({

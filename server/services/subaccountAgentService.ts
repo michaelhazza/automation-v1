@@ -7,6 +7,13 @@ import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
 import { logger } from '../lib/logger.js';
 
+// ─── Soft-delete defence-in-depth ──────────────────────────────────────────
+function assertNotSoftDeleted(record: { deletedAt: Date | null }, label: string): void {
+  if (record.deletedAt !== null) {
+    throw new Error(`soft_deleted_${label}_leak`);
+  }
+}
+
 // ─── Last-root invariant ────────────────────────────────────────────────────
 // Invariant: every subaccount that has ever had a root agent must always have
 // at least one active root (parent_subaccount_agent_id IS NULL AND is_active =
@@ -233,9 +240,10 @@ export const subaccountAgentService = {
         agentModelId: agents.modelId,
         agentDefaultSkillSlugs: agents.defaultSkillSlugs,
         agentWorkspaceActorId: agents.workspaceActorId,
+        agentDeletedAt: agents.deletedAt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.id, linkId),
@@ -246,6 +254,7 @@ export const subaccountAgentService = {
       .limit(1);
 
     if (!row) throw { statusCode: 404, message: 'Agent link not found' };
+    assertNotSoftDeleted({ deletedAt: row.agentDeletedAt }, 'agent');
 
     const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs, agentWorkspaceActorId } = row;
     return {
@@ -399,7 +408,7 @@ export const subaccountAgentService = {
         agentMasterPrompt: agents.masterPrompt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(and(
         eq(subaccountAgents.organisationId, organisationId),
         eq(subaccountAgents.subaccountId, subaccountId)
