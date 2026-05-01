@@ -45,3 +45,26 @@ Executive summary: strong, execution-ready spec. Deterministic, scoped, clear su
 
 Top themes: sequencing enforcement (F1/F4), fail-fast discipline (F2), config verification (F5), silent regression prevention (F12).
 
+## Round 2 — 2026-05-01T02:45:00Z
+
+### ChatGPT Feedback (raw)
+Materially tighter, execution-ready. All Round 1 key improvements confirmed solid. Remaining: test over-assertion guard (re-raised), Task 2.4 stop condition strengthening, CI trigger converted_to_draft (re-raised), CI execution UI verification, exhaustiveness guard validation (re-raised), grep portability (no-op). Verdict: APPROVED ("This is ready to run").
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F1 | Test over-assertion guard (>3 `!` per test case) | technical | reject | auto (reject) | low | Round 1 F3 re-raised; fail-fast rule + existing guidance sufficient; arbitrary threshold |
+| F2 | Strengthen Task 2.4 to explicit stop condition | technical | apply | auto (apply) | medium | Symmetric with Task 3 pre-condition; consistent "stop" language throughout |
+| F3 | CI trigger: add `converted_to_draft` | technical | reject | auto (reject) | low | Round 1 F7 re-raised; fires on backward lifecycle transition; `ready_for_review` covers the forward path |
+| F4 | Add CI execution UI verification note to Task 6.1 | technical | apply | auto (apply) | low | Valid gap: valid YAML can silently not trigger; post-push UI check added as note (not Verification table) |
+| F5 | Exhaustiveness guard: temporarily remove case to verify | technical | reject | auto (reject) | low | Round 1 F6 re-raised; standard TS pattern; spec already says "run typecheck to confirm" |
+| F6 | grep portability note | technical | reject | auto (reject) | low | ChatGPT explicitly flagged as "not worth changing" |
+
+### Applied
+- [auto] F2: Task 2.4 now explicit stop condition — "If non-zero, stop — do not proceed to Task 3"
+- [auto] F4: Added post-push GitHub Actions UI verification note to Task 6.1
+
+Top themes: stop-condition symmetry (F2), CI trigger coverage (F3/F4 split: reject re-raised backward-lifecycle, apply post-push UI check).
+
+

@@ -92,7 +92,7 @@ Error: `Type 'string | null | undefined' is not assignable to type 'string | nul
 
 ### 2.4 — Confirm all production errors cleared
 
-- [ ] Run `npx tsc --noEmit -p server/tsconfig.json 2>&1 | grep "error TS" | grep -v "__tests__\|\.test\.\|\.spec\."` — must return 0 lines.
+- [ ] Run `npx tsc --noEmit -p server/tsconfig.json 2>&1 | grep "error TS" | grep -v "__tests__\|\.test\.\|\.spec\."` — must return 0 lines. **If non-zero, stop — do not proceed to Task 3.** Fix remaining production errors first.
 
 
 ## Task 3 — Fix test file typecheck errors
@@ -410,6 +410,7 @@ File: `.github/workflows/ci.yml`
   ```bash
   node -e "const fs=require('fs');const yaml=require('yaml');try{yaml.parse(fs.readFileSync('.github/workflows/ci.yml','utf8'));console.log('valid');}catch(e){console.error(e.message);process.exit(1);}"
   ```
+- [ ] After pushing the branch and opening a PR, confirm the `lint_and_typecheck` job appears in the GitHub Actions UI and both `npm run lint` and `npm run typecheck` steps execute. A syntactically valid YAML that silently never triggers is a silent failure.
 
 ### 6.2 — Update CLAUDE.md verification table
 
