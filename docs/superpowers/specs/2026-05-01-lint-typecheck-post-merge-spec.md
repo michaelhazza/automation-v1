@@ -5,7 +5,7 @@
 **Branch:** `lint-typecheck-post-merge-tasks`  
 **Authored:** 2026-05-01  
 **Prerequisite:** PR #246 (lint-typecheck-baseline) merged to main — ESLint installed, scripts exist, infrastructure is ready.  
-**Goal:** Drive `npm run typecheck` and `npm run lint` to exit 0 on main in a single session, wire the CI gate, address all open review findings, and close out deferred test items. All 8 tasks are designed to be executed sequentially in one pass.
+**Goal:** Drive `npm run typecheck` and `npm run lint` to exit 0 on main in a single session, wire the CI gate, address all open review findings, and route deferred test items to `tasks/todo.md`. All 8 tasks are designed to be executed sequentially in one pass.
 
 **Reference docs:**
 - Error inventory with exact line numbers: `tasks/builds/lint-typecheck-baseline/remaining-work.md`
@@ -265,15 +265,22 @@ File: `server/services/principal/visibilityPredicatePure.ts:14`
 
 File: `server/services/__tests__/visibilityPredicatePure.test.ts`
 
-The existing test file imports `buildUserPrincipal`, `buildServicePrincipal`, `buildDelegatedPrincipal` from `server/services/principal/principalContext.ts`. There is **no** `buildSystemPrincipal` builder — the runtime helper is `getSystemPrincipal()` in `server/services/principal/systemPrincipal.ts` and it returns a `Promise<SystemPrincipal>`, which is unsuitable for a synchronous pure-function test fixture. Construct a `SystemPrincipal` literal directly per the type at `server/services/principal/types.ts:30`.
+The existing test file imports `buildUserPrincipal`, `buildServicePrincipal`, `buildDelegatedPrincipal` from `server/services/principal/principalContext.ts`. There is **no** `buildSystemPrincipal` builder — the runtime helper is `getSystemPrincipal()` in `server/services/principal/systemPrincipal.ts` and it returns a `Promise<SystemPrincipal>`, which is unsuitable for a synchronous test fixture. Construct a `SystemPrincipal` literal directly per the type at `server/services/principal/types.ts:30-37`.
 
-- [ ] Read the existing tests to confirm the fixture pattern (the test file uses tsx-style assertions, not vitest).
+`SystemPrincipal` requires all of: `type: 'system'`, `id: string`, `organisationId: string`, `subaccountId: null`, `teamIds: string[]`, `isSystemPrincipal: true`. Omitting any field is a type error.
+
+- [ ] Read the existing test file to confirm the fixture pattern. Note: the file imports `expect, test` from `vitest` (line 11) and is runnable via `npx tsx server/services/__tests__/visibilityPredicatePure.test.ts` per the file's header comment.
 - [ ] Add a test that asserts the policy pinned in S2 (system principal returns `true` for any visibility scope when org matches; returns `false` when org mismatches — covering the org gate at line 12 as well as the new `case 'system'`):
   ```typescript
+  import type { SystemPrincipal } from '../principal/types.js';
+
   test('system principal granted visibility when org matches', () => {
     const principal: SystemPrincipal = {
       type: 'system',
-      organisationId: ORG_1,
+      id: 'system-principal',
+      organisationId: ORG_A,
+      subaccountId: null,
+      teamIds: [],
       isSystemPrincipal: true,
     };
     expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), principal)).toBe(true);
@@ -283,13 +290,16 @@ The existing test file imports `buildUserPrincipal`, `buildServicePrincipal`, `b
   test('system principal denied when org mismatches', () => {
     const principal: SystemPrincipal = {
       type: 'system',
-      organisationId: ORG_2,
+      id: 'system-principal',
+      organisationId: ORG_B,
+      subaccountId: null,
+      teamIds: [],
       isSystemPrincipal: true,
     };
-    expect(isVisibleTo(row({ visibilityScope: 'shared_org' /* org=ORG_1 */ }), principal)).toBe(false);
+    expect(isVisibleTo(row({ visibilityScope: 'shared_org' /* row org = ORG_A */ }), principal)).toBe(false);
   });
   ```
-- [ ] Adapt to the actual constants and `row()` helper in the file. Import `SystemPrincipal` from `../principal/types.js`.
+- [ ] Adapt to the actual constant names (`ORG_A`/`ORG_B`/`USER_2`) and the `row()` helper already in the file.
 - [ ] Run the test file via `npx tsx server/services/__tests__/visibilityPredicatePure.test.ts` to confirm both cases pass.
 
 ### 5.4 — N1: Dead branch comment in `llmRouter.ts`
@@ -323,6 +333,8 @@ File: `server/services/incidentIngestorPure.ts` (~line 37)
 ## Task 6 — CI gate and doc updates
 
 **Goal:** make `npm run lint` and `npm run typecheck` mandatory blocking checks on every PR, and update documentation to reflect that these scripts are now operational.
+
+**Scope boundary.** "Mandatory blocking" here means: an unconditional CI job that fails the workflow run when either script exits non-zero. Branch-protection rules / required-status-check configuration on the GitHub repo are a separate repo-admin concern and are **out of scope** for this spec — they are not a code change and require repo-owner permissions.
 
 ### 6.1 — Add `lint_and_typecheck` job to CI
 
@@ -360,7 +372,10 @@ File: `.github/workflows/ci.yml`
   ```
 - [ ] Do NOT add an `if:` label gate — this job must run unconditionally on every PR event the workflow triggers on.
 - [ ] Do NOT add `continue-on-error: true` — the job must be blocking.
-- [ ] Validate YAML: `npx js-yaml .github/workflows/ci.yml > /dev/null && echo valid`.
+- [ ] Validate YAML using the installed `yaml` dep (NOT `js-yaml` — not in `package.json`):
+  ```bash
+  node -e "const fs=require('fs');const yaml=require('yaml');try{yaml.parse(fs.readFileSync('.github/workflows/ci.yml','utf8'));console.log('valid');}catch(e){console.error(e.message);process.exit(1);}"
+  ```
 
 ### 6.2 — Update CLAUDE.md verification table
 
@@ -381,10 +396,10 @@ Read each agent file first; add checks to the relevant verification/post-impleme
 
 **Status:** the original draft of this task proposed two DB-backed integration tests (F14 — migration compatibility for null `agentDiagnosis` rows; F28 — idempotency double-tap on `executeWriteDiagnosis`). Both violate the project's testing posture in `docs/spec-context.md` (`runtime_tests: pure_function_only`, `e2e_tests_of_own_app: none_for_now`). They are deferred out of this spec rather than re-shaped into pure-function tests, because the value of both tests is exactly the DB round-trip behaviour they assert — a pure-function rewrite would not exercise what F14/F28 were raised to catch.
 
-- [ ] Add F14 and F28 to `tasks/todo.md` under `## Deferred — testing posture (lint-typecheck-post-merge spec)`, with one line each:
-  - **F14 (migration compatibility):** integration test that asserts `agentDiagnosisRunId` / `agentDiagnosis` read as `null` for legacy pre-migration rows and `diagnosisStatus = 'none'` is the canonical presence indicator. Originating file inventory: `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts` (to be created if/when the testing posture changes).
-  - **F28 (idempotency double-tap):** integration test that calls `executeWriteDiagnosis` twice with the same `(incidentId, agentRunId)`, asserts the second call returns `{ success: true, suppressed: false }` (per the actual contract at `server/services/systemMonitor/skills/writeDiagnosis.ts:62–63, 124–127` — the spec's earlier draft asserted `suppressed: true`, which was wrong; `suppressed: true` only fires on the terminal-transition race), and asserts only one `diagnosis` event exists. Originating file inventory: `server/services/systemMonitor/skills/__tests__/writeDiagnosis.test.ts` (to be created later).
-- [ ] No code is written for F14 or F28 in this spec. Mark this task complete once the two `tasks/todo.md` rows are added.
+- [ ] **Ensure** F14 and F28 rows exist in `tasks/todo.md` under the heading `## Deferred — testing posture (lint-typecheck-post-merge spec)`. The rows were added by the spec-reviewer agent during Iteration 1 and are already present (the heading and rows live near the bottom of `tasks/todo.md`). Verify with `grep -n "Deferred — testing posture (lint-typecheck-post-merge spec)" tasks/todo.md` — exactly one heading should exist with two rows beneath it.
+- [ ] **Collapse the older PR #246 routing.** The same F14/F28 items also appear in `tasks/todo.md` under `### PR #246 — lint-typecheck-baseline (2026-05-01)` (the earlier ChatGPT pr-review session routed them with sparser detail). Delete those two `[ ] F14: ...` and `[ ] F28: ...` lines from the PR #246 section so there is exactly one entry per item, anchored to the richer Iter 1 entry. Leave the F5 and F7 rows in the PR #246 section untouched.
+- [ ] If for any reason the heading or rows under `## Deferred — testing posture (lint-typecheck-post-merge spec)` are missing, add them — but do NOT add a second copy. Idempotency is the rule.
+- [ ] No code is written for F14 or F28 in this spec. Mark this task complete once the dedup is done and the heading + 2 rows are present exactly once.
 
 **Why this is the right call:** the testing-posture deferral is the canonical pattern in this codebase (see `docs/spec-context.md` — `composition_tests: defer_until_stabilisation`, `migration_safety_tests: defer_until_live_data_exists`). When live data exists or the testing posture matures, F14 + F28 are picked up from `tasks/todo.md` together with whatever other deferred tests have accumulated.
 
@@ -412,7 +427,15 @@ Same file: `docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md`
 
 - [ ] Invoke `pr-reviewer`: `"pr-reviewer: review all changes on branch lint-typecheck-post-merge-tasks vs main"`.
 - [ ] Address any **strong** findings raised before marking this spec complete.
-- [ ] Route **non-blocking** findings to `tasks/todo.md` under `## PR Review deferred items / PR #<N>`.
+- [ ] Route **non-blocking** findings to `tasks/todo.md` using the literal heading shape already in use in that file:
+  ```markdown
+  ## PR Review deferred items
+
+  ### PR #<N> — <branch-slug> (<YYYY-MM-DD>)
+
+  - [ ] <one-line finding> [auto] | [user]
+  ```
+  Do NOT use `## PR Review deferred items / PR #<N>` as a single heading line — that pattern is not used anywhere in the file and creates an inconsistent section shape.
 
 
 ## Verification
@@ -423,7 +446,7 @@ Run all checks before marking this spec complete. Every item must pass.
 |-------|---------|----------------|
 | TypeScript clean | `npm run typecheck` | Exit 0, 0 error lines |
 | Lint clean | `npm run lint` | Exit 0, 0 error lines (warnings ok) |
-| CI YAML valid | `npx js-yaml .github/workflows/ci.yml > /dev/null && echo valid` | Prints `valid` |
+| CI YAML valid | `node -e "const fs=require('fs');const yaml=require('yaml');yaml.parse(fs.readFileSync('.github/workflows/ci.yml','utf8'));console.log('valid');"` | Prints `valid` |
 | S2 switch exhaustive | `npm run typecheck` | No `TS2322` on `never` in visibilityPredicatePure |
 | S3 test passes | Run visibilityPredicatePure test file | All tests pass |
 | F14 + F28 deferred | Inspect `tasks/todo.md` | Two new rows under `## Deferred — testing posture (lint-typecheck-post-merge spec)` |

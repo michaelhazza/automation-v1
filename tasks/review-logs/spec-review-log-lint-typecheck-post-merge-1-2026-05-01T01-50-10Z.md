@@ -57,4 +57,4 @@
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0 (the framing-rejection has a clear resolution path; no judgment-call routing to todo.md needed beyond the deferred-test entries which are the resolution itself, not undecided escalations)
-- Spec commit after iteration:   (filled by Step 8b commit)
+- Spec commit after iteration:   `c2c6ff00`
