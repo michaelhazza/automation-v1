@@ -1,0 +1,565 @@
+<!doctype html>
+<!--
+  Workflow Studio · 01 — Chat-driven authoring with live visual preview
+  =====================================================================
+  Question this mock answers:
+    "While I'm chatting to author a workflow, how do I see what's actually
+     being built so I can sanity-check the structure before I run it?"
+
+  Answer:
+    A 3-pane workspace.
+      LEFT   — chat with the Studio agent (the authoring conversation)
+      CENTRE — live DAG canvas, updates as the conversation progresses
+      RIGHT  — step inspector, opens when a step is clicked (or auto-opens
+               on the most recently added step so the user sees what just
+               changed)
+
+  Design notes:
+    - The canvas is the "preview" — the user never has to read or write
+      JSON to understand the shape of their workflow.
+    - The most recently changed step has an indigo ring + a "Just added"
+      pill so the user can connect chat actions to canvas changes.
+    - Validation runs continuously; warnings/errors surface inline on
+      the affected step + summarised at the top of the canvas.
+    - Parallel branches are rendered as a fork, matching how the engine
+      will actually dispatch them.
+    - Each step shows: type icon, name, est. cost, side-effect badge.
+      That's enough surface to spot structural mistakes without opening
+      the inspector.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workflow Studio — chat with live preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; color:#1e293b; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Connector line between steps */
+  .connector { width: 2px; height: 20px; background: #cbd5e1; margin: 0 auto; }
+  .connector-fork-line { width: 2px; background: #cbd5e1; }
+
+  /* Pulse for "just added" step */
+  @keyframes ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18); }
+    50%      { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.08); }
+  }
+  .ring-recent { animation: ring-pulse 2.4s ease-in-out infinite; }
+
+  /* Step-type icon backgrounds */
+  .icn-skill   { background:#eef2ff; color:#4338ca; }
+  .icn-agent   { background:#faf5ff; color:#6b21a8; }
+  .icn-fork    { background:#fef3c7; color:#92400e; }
+  .icn-wait    { background:#f1f5f9; color:#475569; }
+  .icn-approve { background:#fff7ed; color:#9a3412; }
+  .icn-extern  { background:#ecfdf5; color:#047857; }
+
+  /* Side-effect badges */
+  .se-none        { background:#f1f5f9; color:#475569; }
+  .se-idempotent  { background:#dbeafe; color:#1e40af; }
+  .se-reversible  { background:#fef3c7; color:#92400e; }
+  .se-irreversible{ background:#fee2e2; color:#b91c1c; }
+
+  .chat-scroll, .canvas-scroll, .inspector-scroll {
+    scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent;
+  }
+  .chat-scroll::-webkit-scrollbar, .canvas-scroll::-webkit-scrollbar, .inspector-scroll::-webkit-scrollbar { width: 6px; }
+  .chat-scroll::-webkit-scrollbar-thumb, .canvas-scroll::-webkit-scrollbar-thumb, .inspector-scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Top app bar (simplified) -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Workflows</a>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Studio</span>
+  <div class="ml-auto text-[12px] text-slate-500">acme-org · sysadmin</div>
+</div>
+
+<!-- Page header -->
+<div class="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-4">
+  <div class="flex-1 min-w-0">
+    <div class="flex items-center gap-2">
+      <h1 class="text-[15px] font-semibold text-slate-900">Weekly Lead Re-engagement</h1>
+      <span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-amber-100 text-amber-800 uppercase tracking-wide">Draft</span>
+    </div>
+    <div class="text-[11.5px] text-slate-500 mt-0.5">Org template · forked from <span class="text-slate-700">system/lead-reengagement v3</span> · saved 14s ago</div>
+  </div>
+  <div class="flex items-center gap-2">
+    <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md flex items-center gap-1.5">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+      Validate
+    </button>
+    <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md flex items-center gap-1.5">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Simulate
+    </button>
+    <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md flex items-center gap-1.5">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      Estimate cost
+    </button>
+    <div class="w-px h-5 bg-slate-200 mx-1"></div>
+    <button class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded-md flex items-center gap-1.5">
+      Save &amp; open PR
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Main 3-column workspace -->
+<div class="flex" style="height: calc(100vh - 96px); min-height: 720px;">
+
+  <!-- ========================== LEFT: CHAT ========================== -->
+  <div class="w-[380px] flex-shrink-0 border-r border-slate-200 bg-white flex flex-col">
+
+    <!-- Chat header -->
+    <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center">S</div>
+        <div>
+          <div class="text-[12.5px] font-semibold text-slate-900 leading-tight">Studio agent</div>
+          <div class="text-[10.5px] text-slate-500">Authoring · session #4f3a</div>
+        </div>
+      </div>
+      <button class="text-slate-400 hover:text-slate-700">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+      </button>
+    </div>
+
+    <!-- Conversation -->
+    <div class="flex-1 overflow-y-auto chat-scroll px-4 py-4 space-y-4 text-[13px] leading-relaxed">
+
+      <!-- Agent: opening turn -->
+      <div class="flex gap-2.5">
+        <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">S</div>
+        <div class="flex-1">
+          <div class="text-slate-800">Forked the system <span class="font-medium">lead-reengagement v3</span>. The base flow finds stale leads, classifies them, and drafts an email. What would you like to change?</div>
+          <div class="text-[10.5px] text-slate-400 mt-1">9:14am</div>
+        </div>
+      </div>
+
+      <!-- User -->
+      <div class="flex gap-2.5 flex-row-reverse">
+        <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">M</div>
+        <div class="flex-1 max-w-[280px]">
+          <div class="bg-indigo-600 text-white px-3 py-2 rounded-lg rounded-tr-sm">Split it after classify so cold leads go to nurture, hot ones get a personal email.</div>
+          <div class="text-[10.5px] text-slate-400 mt-1 text-right">9:15am</div>
+        </div>
+      </div>
+
+      <!-- Agent: action -->
+      <div class="flex gap-2.5">
+        <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">S</div>
+        <div class="flex-1">
+          <div class="text-slate-800">Added a fork after step 2 (<span class="font-medium">Classify by fit</span>) on <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">output.tier</code>:</div>
+          <div class="mt-1.5 border border-slate-200 rounded-md bg-slate-50 px-2.5 py-2 text-[12px] space-y-0.5">
+            <div class="flex items-center gap-1.5"><span class="text-slate-500">→</span> <span class="font-medium text-slate-800">hot</span> <span class="text-slate-500">: Draft personal email</span></div>
+            <div class="flex items-center gap-1.5"><span class="text-slate-500">→</span> <span class="font-medium text-slate-800">cold</span> <span class="text-slate-500">: Add to nurture list</span></div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 mt-1">9:15am</div>
+        </div>
+      </div>
+
+      <!-- User -->
+      <div class="flex gap-2.5 flex-row-reverse">
+        <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">M</div>
+        <div class="flex-1 max-w-[280px]">
+          <div class="bg-indigo-600 text-white px-3 py-2 rounded-lg rounded-tr-sm">Send the hot email through Mailchimp, not GHL.</div>
+          <div class="text-[10.5px] text-slate-400 mt-1 text-right">9:18am</div>
+        </div>
+      </div>
+
+      <!-- Agent: action -->
+      <div class="flex gap-2.5">
+        <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">S</div>
+        <div class="flex-1">
+          <div class="text-slate-800">Replaced the send step with an <span class="font-medium">Invoke Automation</span> call to <span class="font-medium">Mailchimp · campaigns/send</span>. Marked it irreversible — sending email is one-way.</div>
+          <div class="text-[10.5px] text-slate-400 mt-1">9:18am</div>
+        </div>
+      </div>
+
+      <!-- User -->
+      <div class="flex gap-2.5 flex-row-reverse">
+        <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">M</div>
+        <div class="flex-1 max-w-[280px]">
+          <div class="bg-indigo-600 text-white px-3 py-2 rounded-lg rounded-tr-sm">Add a human approval before the send. I want to eyeball the email list each week.</div>
+          <div class="text-[10.5px] text-slate-400 mt-1 text-right">9:21am</div>
+        </div>
+      </div>
+
+      <!-- Agent: latest action (matches the "just added" step on canvas) -->
+      <div class="flex gap-2.5">
+        <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">S</div>
+        <div class="flex-1">
+          <div class="text-slate-800">Inserted an <span class="font-medium">Approval</span> step between <span class="font-medium">Draft personal email</span> and <span class="font-medium">Send via Mailchimp</span>. The approver will see the drafted email and the recipient list.</div>
+          <div class="mt-2 flex items-center gap-2 text-[11.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>1 warning — review on the canvas (step 5).</span>
+          </div>
+          <div class="text-[10.5px] text-slate-400 mt-1">9:21am · just now</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Quick-action chips -->
+    <div class="px-4 pt-3 pb-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+      <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Add a step</button>
+      <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Estimate cost</button>
+      <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Explain step 5</button>
+      <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Diff vs published</button>
+    </div>
+
+    <!-- Input -->
+    <div class="px-4 pb-4 pt-1">
+      <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
+        <textarea rows="2" placeholder="Describe a change…" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
+        <button class="m-1.5 p-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== CENTRE: CANVAS ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-slate-50">
+
+    <!-- Validation summary bar -->
+    <div class="px-6 py-2.5 border-b border-slate-200 bg-white flex items-center gap-4 text-[12px]">
+      <div class="flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+        <span class="text-slate-700"><span class="font-semibold">1 warning</span> · 0 errors</span>
+      </div>
+      <div class="w-px h-4 bg-slate-200"></div>
+      <div class="text-slate-600"><span class="num font-semibold text-slate-900">6</span> steps · <span class="num font-semibold text-slate-900">1</span> fork · <span class="num font-semibold text-slate-900">1</span> approval</div>
+      <div class="w-px h-4 bg-slate-200"></div>
+      <div class="text-slate-600">Est. cost <span class="num font-semibold text-slate-900">$0.084</span> / run</div>
+      <div class="w-px h-4 bg-slate-200"></div>
+      <div class="text-slate-600">Est. duration <span class="num font-semibold text-slate-900">~26m</span></div>
+      <div class="ml-auto flex items-center gap-3 text-[11.5px] text-slate-500">
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-slate-300"></span>Skill</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-purple-300"></span>Agent</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-orange-300"></span>Approval</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-emerald-300"></span>Automation</span>
+      </div>
+    </div>
+
+    <!-- DAG canvas -->
+    <div class="flex-1 overflow-y-auto canvas-scroll px-6 py-8">
+      <div class="mx-auto" style="max-width: 720px;">
+
+        <!-- Step 1 -->
+        <div class="flex justify-center">
+          <div class="w-[300px] bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+            <div class="px-3.5 py-2.5 flex items-start gap-3">
+              <div class="w-8 h-8 rounded-md icn-skill flex items-center justify-center flex-shrink-0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10.5px] font-semibold text-slate-400 num">1</span>
+                  <span class="text-[13px] font-medium text-slate-900 truncate">Find stale leads</span>
+                </div>
+                <div class="text-[11.5px] text-slate-500 truncate">Skill · ghl.contacts.search</div>
+              </div>
+              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                <span class="num text-[10.5px] text-slate-500">$0.001</span>
+                <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-idempotent">idempotent</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="connector"></div>
+
+        <!-- Step 2 -->
+        <div class="flex justify-center">
+          <div class="w-[300px] bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+            <div class="px-3.5 py-2.5 flex items-start gap-3">
+              <div class="w-8 h-8 rounded-md icn-agent flex items-center justify-center flex-shrink-0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10.5px] font-semibold text-slate-400 num">2</span>
+                  <span class="text-[13px] font-medium text-slate-900 truncate">Classify by fit</span>
+                </div>
+                <div class="text-[11.5px] text-slate-500 truncate">Agent · copywriter · output: tier</div>
+              </div>
+              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                <span class="num text-[10.5px] text-slate-500">$0.012</span>
+                <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-none">none</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fork node -->
+        <div class="flex justify-center">
+          <div class="connector" style="height:14px;"></div>
+        </div>
+        <div class="flex justify-center">
+          <div class="w-9 h-9 rounded-full bg-amber-50 border-2 border-amber-300 flex items-center justify-center" title="Conditional branch on output.tier">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2.2"><polyline points="6 3 6 15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          </div>
+        </div>
+        <div class="text-center text-[10.5px] text-slate-500 mt-1 font-medium">Branch on <code class="bg-slate-100 px-1 py-0.5 rounded">output.tier</code></div>
+
+        <!-- Fork lines -->
+        <div class="grid grid-cols-2 gap-8 mt-3 mb-1" style="position:relative;">
+          <!-- left branch line -->
+          <div class="flex flex-col items-end">
+            <div class="text-[10.5px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 mb-1.5">tier = "hot"</div>
+            <div class="connector-fork-line" style="height:8px; margin-right:50%; transform:translateX(50%);"></div>
+          </div>
+          <div class="flex flex-col items-start">
+            <div class="text-[10.5px] font-semibold text-slate-700 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 mb-1.5">tier = "cold"</div>
+            <div class="connector-fork-line" style="height:8px; margin-left:50%; transform:translateX(-50%);"></div>
+          </div>
+        </div>
+
+        <!-- Branch row 1: step 3 (hot) and step 4 (cold) side by side -->
+        <div class="grid grid-cols-2 gap-8">
+
+          <!-- Step 3 (hot path) -->
+          <div class="flex justify-end">
+            <div class="w-[280px] bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <div class="px-3.5 py-2.5 flex items-start gap-3">
+                <div class="w-8 h-8 rounded-md icn-agent flex items-center justify-center flex-shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10.5px] font-semibold text-slate-400 num">3</span>
+                    <span class="text-[13px] font-medium text-slate-900 truncate">Draft personal email</span>
+                  </div>
+                  <div class="text-[11.5px] text-slate-500 truncate">Agent · copywriter</div>
+                </div>
+                <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                  <span class="num text-[10.5px] text-slate-500">$0.058</span>
+                  <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-none">none</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4 (cold path) -->
+          <div class="flex justify-start">
+            <div class="w-[280px] bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <div class="px-3.5 py-2.5 flex items-start gap-3">
+                <div class="w-8 h-8 rounded-md icn-skill flex items-center justify-center flex-shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10.5px] font-semibold text-slate-400 num">4</span>
+                    <span class="text-[13px] font-medium text-slate-900 truncate">Add to nurture list</span>
+                  </div>
+                  <div class="text-[11.5px] text-slate-500 truncate">Skill · ghl.tags.add</div>
+                </div>
+                <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                  <span class="num text-[10.5px] text-slate-500">$0.001</span>
+                  <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-reversible">reversible</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connector down (hot path only — cold path terminates) -->
+        <div class="grid grid-cols-2 gap-8 mt-1">
+          <div class="flex justify-end pr-[140px]"><div class="connector"></div></div>
+          <div class="flex justify-start pl-[140px]">
+            <div class="text-[10.5px] text-slate-400 italic mt-2">— end of cold path —</div>
+          </div>
+        </div>
+
+        <!-- Step 5 (newly added — highlighted) -->
+        <div class="grid grid-cols-2 gap-8">
+          <div class="flex justify-end">
+            <div class="w-[280px] bg-white border-2 border-indigo-500 rounded-lg shadow-md ring-recent cursor-pointer relative">
+              <div class="absolute -top-2.5 left-3 px-1.5 py-0.5 bg-indigo-600 text-white text-[10px] font-semibold uppercase tracking-wider rounded">Just added</div>
+              <div class="absolute -top-2.5 right-3 px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-semibold uppercase tracking-wider rounded flex items-center gap-1">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Warning
+              </div>
+              <div class="px-3.5 py-2.5 flex items-start gap-3 mt-1">
+                <div class="w-8 h-8 rounded-md icn-approve flex items-center justify-center flex-shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10.5px] font-semibold text-indigo-500 num">5</span>
+                    <span class="text-[13px] font-semibold text-slate-900 truncate">Approval before send</span>
+                  </div>
+                  <div class="text-[11.5px] text-slate-500 truncate">Approval · any team member</div>
+                </div>
+                <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                  <span class="num text-[10.5px] text-slate-500">—</span>
+                  <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-none">none</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div></div>
+        </div>
+        <div class="grid grid-cols-2 gap-8">
+          <div class="flex justify-end pr-[140px]"><div class="connector"></div></div>
+          <div></div>
+        </div>
+
+        <!-- Step 6 -->
+        <div class="grid grid-cols-2 gap-8">
+          <div class="flex justify-end">
+            <div class="w-[280px] bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <div class="px-3.5 py-2.5 flex items-start gap-3">
+                <div class="w-8 h-8 rounded-md icn-extern flex items-center justify-center flex-shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10.5px] font-semibold text-slate-400 num">6</span>
+                    <span class="text-[13px] font-medium text-slate-900 truncate">Send via Mailchimp</span>
+                  </div>
+                  <div class="text-[11.5px] text-slate-500 truncate">Automation · mailchimp.campaigns.send</div>
+                </div>
+                <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                  <span class="num text-[10.5px] text-slate-500">$0.012</span>
+                  <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wide se-irreversible">irreversible</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div></div>
+        </div>
+
+        <!-- End-of-flow marker -->
+        <div class="grid grid-cols-2 gap-8 mt-3">
+          <div class="flex justify-end">
+            <div class="text-[11px] text-slate-500 italic">— end of flow —</div>
+          </div>
+          <div></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== RIGHT: STEP INSPECTOR ========================== -->
+  <div class="w-[340px] flex-shrink-0 border-l border-slate-200 bg-white flex flex-col">
+
+    <!-- Inspector header -->
+    <div class="px-4 py-3 border-b border-slate-200">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 5</span>
+        <span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-semibold">Selected</span>
+      </div>
+      <div class="text-[14px] font-semibold text-slate-900">Approval before send</div>
+      <div class="text-[11.5px] text-slate-500 mt-0.5">Approval gate · added by Studio agent · 9:21am</div>
+    </div>
+
+    <!-- Inspector body -->
+    <div class="flex-1 overflow-y-auto inspector-scroll px-4 py-3 text-[12.5px] space-y-4">
+
+      <!-- Warning callout -->
+      <div class="bg-amber-50 border border-amber-200 rounded-md p-3 flex gap-2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2" class="flex-shrink-0 mt-0.5"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div class="flex-1">
+          <div class="font-semibold text-amber-900 text-[12px] mb-0.5">No approver group set</div>
+          <div class="text-[11.5px] text-amber-800 leading-snug">This step will fall back to "any organisation member" which means the run can sit idle. Pick a group below.</div>
+        </div>
+      </div>
+
+      <!-- Approver -->
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Approver</div>
+        <div class="border border-slate-300 rounded-md px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:border-slate-400">
+          <span class="text-slate-500 text-[12.5px]">— select a group —</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-1">Falls back to org-wide if unset.</div>
+      </div>
+
+      <!-- What approver sees -->
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Approver will see</div>
+        <div class="bg-slate-50 border border-slate-200 rounded-md p-2.5 space-y-1.5">
+          <div class="flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <span class="text-slate-700">Email body from step 3</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="text-slate-700">Recipient list (count + sample of 5)</span>
+          </div>
+        </div>
+        <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 mt-1.5">+ Add a field to the review card</button>
+      </div>
+
+      <!-- Depends on -->
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Depends on</div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-slate-700">
+            <span class="num text-[10.5px] text-slate-400 w-5">3</span>
+            <span class="font-medium">Draft personal email</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- On reject -->
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">On reject</div>
+        <div class="border border-slate-300 rounded-md px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:border-slate-400">
+          <span class="text-slate-800 text-[12.5px]">Skip step 6 (Send via Mailchimp)</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+
+      <!-- Side-effect -->
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Side effect</div>
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide se-none">none</span>
+        <div class="text-[11px] text-slate-500 mt-1">Approvals don't change external systems.</div>
+      </div>
+
+      <!-- Raw JSON disclosure -->
+      <details class="border-t border-slate-100 pt-3">
+        <summary class="text-[11.5px] text-slate-500 cursor-pointer hover:text-slate-800 select-none">View raw definition</summary>
+        <pre class="mt-2 text-[10.5px] leading-snug bg-slate-900 text-slate-100 rounded p-2.5 overflow-x-auto"><code>{
+  "id": "approval_before_send",
+  "type": "approval",
+  "dependsOn": ["draft_personal_email"],
+  "approverGroup": null,
+  "onReject": "skip:send_via_mailchimp",
+  "review": {
+    "fields": [
+      "steps.draft_personal_email.output.body",
+      "steps.find_stale_leads.output.recipients"
+    ]
+  }
+}</code></pre>
+      </details>
+
+    </div>
+
+    <!-- Inspector footer -->
+    <div class="px-4 py-3 border-t border-slate-200 flex items-center gap-2">
+      <button class="flex-1 px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md">Test in isolation</button>
+      <button class="px-2.5 py-1.5 border border-red-200 hover:bg-red-50 text-red-700 text-[12px] font-medium rounded-md flex items-center gap-1.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Remove
+      </button>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
