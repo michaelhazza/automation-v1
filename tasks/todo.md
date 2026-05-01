@@ -2189,3 +2189,9 @@ Flag if: you wanted this category to track *workflow templates* specifically (in
 spec-authoring-checklist Section 1 expects a one-paragraph rationale comparing the new primitive against the closest existing primitives. Added a paragraph after §6.1 listing `system_incidents`, `feature_requests`, and `org_memories` / `workspace_memory` and explaining why none fit the recommendations lifecycle (operator-facing rows that dedupe by stable finding keys, render plain-English copy, acknowledge/dismiss in the UI without notifying anyone).
 
 Flag if: you intended a tighter mapping to one of those existing tables and the paragraph misframes the design-review decision.
+
+### F2-AD-3: Sub-account-settings UI for `optimiser_enabled` deferred (iter 2)
+
+Iter-2 Codex finding #6: spec called the opt-out a "toggle on sub-account settings" but only added the DB column. Downgraded the prose to "backend boolean column flipped via admin SQL or Configuration Assistant" and added a Deferred Items entry calling out the missing settings UI. v1 has no operator-visible toggle.
+
+Flag if: you intended an operator-visible UI in v1 (in which case settings page + route + schema entry need to be specced) rather than a backend-only flag.
