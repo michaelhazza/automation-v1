@@ -2293,3 +2293,11 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **`tier-1-ui-uplift.html` migration scope.** Spec §10.1.1 only names `org-chart-redesign.html`; `tier-1-ui-uplift.html` was also migrated to satisfy the directory removal. Additive but unspecced — add a note to §9.3 to explicitly name both files if the spec is ever revised. [editorial]
 - [ ] **`chatgpt-plan-review.md` extra context loading.** Agent prepends CLAUDE.md + architecture.md + DEVELOPMENT_GUIDELINES.md before On Start (not specified in §4.3.4). Acceptable by convention; add to spec if formal review of §4.3.4 is done. [editorial]
 - [ ] **`feature-coordinator.md` per-chunk push as bare prose.** Step 6 says "push after each chunk commit" in prose with no fenced `git push` block. Add explicit `git push` command block for clarity. [minor]
+
+## Deferred spec decisions — pr-249-followups (2026-05-01)
+
+**Captured:** 2026-05-01T23-04-17Z by `spec-reviewer` iteration 2
+**Source log:** `tasks/review-logs/spec-review-log-pr-249-followups-2-2026-05-01T23-04-17Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md`
+
+- [ ] **F6 (`Record<string, unknown>` audit) volume re-scope.** Codex flagged the per-callsite audit scope (`server/ client/ shared/ scripts/ worker/ tools/`) as "hundreds to over a thousand" matches; verified at 510 occurrences across 200 files. Spec keeps the per-callsite framing because acceptance criteria (A/B/C tallies + out-of-scope carve-out for the discriminated-union refactor) still bound the work. **If execution proves intractable in one PR**, consider re-scoping to a bounded subset (e.g. only newly-added casts, only F6 backlog files, or only `as Record<string, unknown>` casts where `as` is the cast operator) and split the remainder into a follow-up spec. Decision intentionally deferred to execution time so the operator can use real progress data. [user]

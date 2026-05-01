@@ -10,7 +10,7 @@
 
 **Goal:** close the actionable items from the PR #249 review backlog in one focused cleanup branch. Mostly mechanical, one operator-decided UX restoration (live-agents badge), one per-callsite audit (`Record<string, unknown>` review). Designed to ship as a single PR after the full review pipeline.
 
-**Classification:** Standard. 5 tasks, single concern (cleanup), no new patterns introduced. No architect pass needed.
+**Classification:** Standard. 7 tasks (5 backlog items + pre-flight + doc-sync), single concern (cleanup), no new patterns introduced. No architect pass needed.
 
 ---
 
@@ -153,10 +153,11 @@ If any of those have been removed since this spec was authored, treat the task a
 - [ ] Run `grep -rn "eslint-disable-next-line" --include="*.ts" --include="*.tsx" --include="*.cjs" --include="*.js" -- server/ client/ shared/ scripts/ worker/ tools/ 2>/dev/null` to list all current uses.
 - [ ] Exclude any matches under `tasks/review-logs/` (those are captured agent output, not source code).
 
-The PR #249 baseline added 12 disables across:
-- 3× `no-namespace` (Express `Request` augmentation in `server/middleware/auth.ts`, `correlation.ts`, `subdomainResolution.ts`)
-- 5× `no-useless-assignment` (TS-narrowing patterns in `server/jobs/skillAnalyzerJob.ts`, `server/services/llmRouter.ts`, `server/services/mcpClientManager.ts` ×2, `worker/src/loop/executionLoop.ts` ×3)
-- 4× pre-existing (older code; sample for legitimacy as part of this audit)
+The inventory grep is the source of truth for what's audited — do not anchor on historical counts (they have drifted as surrounding work has landed). For context, the families that have shown up in recent reviews:
+
+- `no-namespace` — Express `Request` augmentation in middleware (`auth.ts`, `correlation.ts`, `subdomainResolution.ts`).
+- `no-useless-assignment` — TypeScript-narrowing patterns in `server/jobs/skillAnalyzerJob.ts`, `server/services/llmRouter.ts`, `server/services/mcpClientManager.ts`, `worker/src/loop/executionLoop.ts`.
+- Older pre-existing disables across `client/`, `server/`, and test files (mixture of `react-hooks/exhaustive-deps`, `no-explicit-any`, `no-require-imports`, etc.) — sample for legitimacy as part of this audit.
 
 ### 5.2 — Verdict per disable
 
@@ -169,7 +170,7 @@ For each match in the inventory:
 ### 5.3 — Verify
 
 - [ ] After cleanup, re-run lint: `npm run lint` must exit 0 with no new errors.
-- [ ] `grep -c "eslint-disable-next-line" $(git ls-files '*.ts' '*.tsx' '*.cjs' '*.js' | grep -vE '^(tasks/|node_modules/|dist/)')` — record the final count and document the change in the task self-review (e.g. "12 → 9; removed 3 redundant, kept 9 with one-line justifications").
+- [ ] `grep -c "eslint-disable-next-line" $(git ls-files '*.ts' '*.tsx' '*.cjs' '*.js' | grep -vE '^(tasks/|node_modules/|dist/)')` — record initial vs final counts and document the delta in the F4 audit tallies row of the Self-review section (see *Self-review against backlog source* below). Format: `<initial> → <final>; removed <N> redundant, kept <N> with one-line justifications`.
 
 **Risk:** low. Each disable is a separate decision; lint must stay clean throughout.
 
@@ -209,7 +210,7 @@ The ClientPulse intervention-payload type system would benefit from a **discrimi
 
 - [ ] After the per-callsite pass: `npm run typecheck` exits 0.
 - [ ] `npm run lint` exits 0 with no new errors.
-- [ ] Document the final tallies in the task self-review: `<inventory> → A: <removed N>, B: <narrowed N>, C: <kept N> (plus any new comments)`.
+- [ ] Record the final tallies in the F6 audit tallies row of the Self-review section (see *Self-review against backlog source* below). Format: `<initial inventory> → A: <removed N>, B: <narrowed N>, C: <kept N> (plus any new comments)`.
 
 **Risk:** medium. Per-callsite judgment can introduce real type errors if a "narrow" decision misses a polymorphic case. Run typecheck after each file's changes, not just at the end.
 
@@ -271,6 +272,30 @@ Items deliberately NOT included in this spec, with rationale:
 | F6-cgpt Record<string, unknown> | chatgpt-pr-review R1 | Task 6 (rescoped to per-callsite audit) | ✓ |
 | N-1 IdempotencyContract plumbing | pr-reviewer | — | deferred (out of scope, not premature) |
 | N-3 ?.id deviation note | pr-reviewer | — | deferred (one-sentence note in next spec) |
+
+### F4 audit tallies
+
+Fill these in as Task 5.3 completes:
+
+| Metric | Initial | Final | Delta notes |
+|--------|---------|-------|-------------|
+| Total `eslint-disable-next-line` count (per the §5.3 grep) | <fill> | <fill> | e.g. "removed 3 redundant; added one-line justifications to 9 surviving" |
+| Removed because rule no longer fires | — | <fill> | files / rules touched |
+| Removed because underlying issue fixed | — | <fill> | files / rules touched |
+| Kept with new one-line justification | — | <fill> | files / rules touched |
+| Kept with existing inline comment (no change) | — | <fill> | files / rules touched |
+
+### F6 audit tallies
+
+Fill these in as Task 6.4 completes:
+
+| Metric | Count | Notes |
+|--------|-------|-------|
+| Initial inventory (Task 6.1 grep) | <fill> | total `Record<string, unknown>` matches across `server/ client/ shared/ scripts/ worker/ tools/` |
+| Category A — redundant cast removed | <fill> | typecheck still clean; example files |
+| Category B — narrowed with adjacent interface | <fill> | new interfaces introduced; example files |
+| Category C — kept (genuinely polymorphic) | <fill> | reason comments added where naming wasn't self-evident |
+| Net `Record<string, unknown>` count after pass | <fill> | initial − A − B (C count unchanged) |
 
 ---
 
