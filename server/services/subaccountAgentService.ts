@@ -517,7 +517,7 @@ export const subaccountAgentService = {
     const [row] = await db
       .select({ systemAgentSlug: systemAgents.slug })
       .from(agents)
-      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+      .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
     return row?.systemAgentSlug ?? null;
   },

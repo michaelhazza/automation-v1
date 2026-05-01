@@ -24,7 +24,7 @@
  *                      config_history.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations } from '../db/schema/organisations.js';
 import { systemHierarchyTemplates } from '../db/schema/systemHierarchyTemplates.js';
@@ -56,7 +56,7 @@ export async function resolvePortfolioHealthAgentId(
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
     .where(and(eq(agents.organisationId, organisationId), eq(systemAgents.slug, 'portfolio-health-agent')))
     .limit(1);
   return row?.id ?? null;
