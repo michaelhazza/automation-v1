@@ -6,6 +6,7 @@
 - PR: #247 — https://github.com/michaelhazza/automation-v1/pull/247
 - Mode: manual
 - Started: 2026-05-01T01:46:26Z
+- **Verdict:** APPROVED (3 rounds)
 
 ---
 
@@ -53,3 +54,58 @@ Overall verdict: APPROVED (with the 5 listed tweaks).
 Injection path consistency (F2, F3), join-filter placement precision (F4, F5), boundary validation gaps (F6, F10).
 
 ---
+
+## Round 2 — 2026-05-01T02:10:00Z
+
+### ChatGPT Feedback (raw)
+"This is it. You've closed every meaningful gap." Overall verdict: APPROVED. Two remaining tweaks: (1) Drive guard hard-locks all connections as subaccount-scoped — fix with null-safe check. (2) Thread context growth unconstrained despite ~500 token guideline — add deterministic MAX_ITEMS = 20 cap with slice().
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2-F1 — Drive guard: forward-safe null check | user-facing | apply | apply (user: as recommended) | medium | Resolves R1/F6 defer; null check preserves org-level connection validity without behaviour change for subaccount-scoped connections |
+| R2-F2 — Thread context MAX_ITEMS=20 cap | technical-escalated (previously user-deferred R1/F8) | apply | apply (user: as recommended) | medium | Mechanism changed from "token counting" (heuristic) to "item counting" (deterministic) — no longer YAGNI |
+
+### Applied
+- [user] §2.5: guard updated to `if (conn.subaccountId && conn.subaccountId !== subaccountId)` with explicit org-level note
+- [user] §2.2: `formatThreadContextBlock` now has `const MAX_ITEMS = 20` with `slice(0, MAX_ITEMS)` on tasks and decisions
+
+### Top themes
+R1 deferred items resolved with concrete mechanisms; no new gaps surfaced.
+
+---
+
+## Round 3 — 2026-05-01T02:15:00Z
+
+### ChatGPT Feedback (raw)
+"Stop iterating the spec. Move to build." One tiny inconsistency: §2.5 acceptance criteria still says `conn.subaccountId === subaccountId` guard; should match the null-safe guard now in the implementation section.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R3-F1 — §2.5 acceptance criteria wording mismatch | technical | apply | auto (apply) | low | Mechanical wording inconsistency — criteria didn't reflect the null-safe guard applied in R2 |
+
+### Applied
+- [auto] §2.5 acceptance criteria: updated to "conn.subaccountId must be null (org-level) or match subaccountId"
+
+### Top themes
+Wording consistency — no functional gaps remaining.
+
+---
+
+## Final Summary
+- Rounds: 3
+- Auto-accepted (technical): 5 applied | 2 rejected | 0 deferred
+- User-decided: 3 applied | 1 rejected | 2 deferred (both resolved as applies in R2 — net 0 remaining)
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / deferred-items-pre-launch: none (R1 defers resolved in R2)
+- KNOWLEDGE.md updated: yes (2 entries — subaccount null-safe guard pattern; spec step-shorthand side-effect pattern)
+- architecture.md updated: n/a
+- capabilities.md updated: n/a
+- integration-reference.md updated: no — no new integration scope, capability, or status changed; §2.1 wires enforcement for existing integrations only
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a
+- spec-context.md updated: no — spec aligns with existing framing; no new accepted_primitives or convention_rejection changes implied
+- frontend-design-principles.md updated: n/a
+- PR: #247 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/247

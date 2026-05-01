@@ -1704,6 +1704,14 @@ In `agentResumeService.ts`, the first resume call cleared `integration_resume_to
 
 The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
 
+### [2026-05-01] Pattern — Subaccount scope guards must use null-safe checks to preserve org-level connection validity
+
+Route guards checking `conn.subaccountId !== subaccountId` wrongly reject connections where `subaccountId` is `null` (org-level connections) — `null !== 'some-uuid'` evaluates to `true`. The correct form is `if (conn.subaccountId && conn.subaccountId !== subaccountId)`. Apply this pattern to any route guard that scopes a shared resource (connection, credential, shared integration) to a subaccount while leaving org-level access open. Source: deferred-items-pre-launch spec review R2/F1.
+
+### [2026-05-01] Pattern — Spec step-shorthand ("same injection as above") silently drops side-effect writes
+
+When a spec uses shorthand like "apply the same injection (same two lines)" to describe a repeat call, implementers often copy the primary lines (build + format + prepend) but miss secondary side-effects (like writing `runMetadata.threadContextVersionAtStart`). Always enumerate every side-effect explicitly in each step — shorthand saves spec words but generates implementation bugs. Found in deferred-items-pre-launch spec review R1/F2 (§2.2 Step 3 resume path).
+
 ### [2026-05-01] Correction — chatgpt-spec-review manual mode prints spec as a copy-paste payload
 
 In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy into ChatGPT ---` block per the agent design. If the user has already submitted the spec to ChatGPT independently, this block looks like instruction-dumping. Future sessions should briefly state "printing the ChatGPT payload" before the block so the user understands its purpose and can skip it if they submitted manually.
