@@ -5,6 +5,7 @@
 - PR: #247 — https://github.com/michaelhazza/automation-v1/pull/247
 - Mode: manual
 - Started: 2026-05-01T05:52:16Z
+- **Verdict:** APPROVED (3 rounds, 2 implement / 4 reject / 4 defer; rounds 2 and 3 produced 0 net new findings — all 11 surfaced items were duplicates of round 1 decisions)
 
 ---
 
@@ -167,4 +168,30 @@ None — all 5 findings auto-rejected as duplicates of prior round decisions.
 ### Net acknowledgments this round: 1 (F3 thread-context lifecycle dropped from blocker list)
 
 ---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 2 implemented (F7, F9) | 12 rejected (F8 + 6 R2 duplicates + 5 R3 duplicates) | 0 deferred
+- User-decided: 0 implemented | 3 rejected (F1, F2, F5) | 4 deferred (F3a, F3b, F4, F6)
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #247:
+  - [user] R1/F3a: Resume path 500ms thread-context build timeout follow-up — `agentResumeService.ts:96` lacks the timeout `executeRun` uses
+  - [user] R1/F3b: Thread-context version persistence drift consideration — fire-and-forget DB write, fail-open by design
+  - [user] R1/F4: Subaccount-vs-org connection precedence specification — current ordering is `updatedAt DESC` only
+  - [user] R1/F6: Refactor `integrationBlockServicePure.test.ts` to dependency-injection / `vi.spyOn` — current pattern mutates `ACTION_REGISTRY`
+- Architectural items surfaced to screen (user decisions):
+  - F1 RLS NULL guard pattern — reject (codebase canonical, documented at architecture.md §Canonical org-isolation policy template)
+  - F2 E-D4 unsafe-tool guard — reject (intentionally deferred per implementation plan Task 2 Step 1)
+  - F3 thread-context race / lifecycle — defer (split into F3a + F3b above)
+  - F5 403 → 422 status standardisation — reject (spec-driven per plan Task 9 §2.5)
+- KNOWLEDGE.md updated: yes (2 entries — Correction on chatgpt-pr-review duplicate handling; Pattern on external-reviewer RLS misread)
+- architecture.md updated: no — RLS canonical template already documented at §Canonical org-isolation policy template (lines 1451-1474); F1's "missing-doc" reading was incorrect
+- capabilities.md updated: n/a — no product/agency capability surface change in this PR
+- integration-reference.md updated: n/a — `requiredIntegration` tagging on existing actions does not change the integration-reference catalogue (no new providers, scopes, or capability slugs)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (DEVELOPMENT_GUIDELINES.md §3 Schema layer rules — added soft-delete enforcement-layer bullet from F9)
+- frontend-design-principles.md updated: n/a — no UI pattern, hard rule, or worked example introduced
+- PR: #247 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/247
+
+
 
