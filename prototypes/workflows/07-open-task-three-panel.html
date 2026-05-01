@@ -1,0 +1,667 @@
+<!doctype html>
+<!--
+  Workflow Studio · 07 — Open task view (alternate: 3-panel with collapsible activity)
+  ===================================================================================
+  Companion to mock 06. Tests the user's intuition: split activity out
+  of the right-panel tabs and put it in its OWN persistent column, so
+  the operator can see chat + activity + (live/flow/files) all at once.
+
+  Layout (when Activity is expanded):
+    Chat 25% · Activity 25% · Tabs 50% (Live/Flow/Files)
+
+  Layout (when Activity is minimised):
+    Chat 25% · Activity 36px strip · Tabs ~71%
+
+  Pure CSS state switching for both:
+    - Tab state: live / flow / files
+    - Activity state: expanded / minimised (toggle button on the strip)
+
+  Mockup controls at top let you flip between Activity-expanded and
+  Activity-minimised so you can compare against mock 06.
+
+  Trade-off: the user named it themselves — "your UI is a little bit
+  busy". With three columns plus tabs the screen is dense. But the
+  win is real-time visibility into chat narrative + activity log +
+  visual context, all simultaneously.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Task — 3-panel layout with collapsible activity</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; margin:0; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  input[name="task-tab"], input[name="active-file"], input[name="activity-state"] { display: none; }
+
+  .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
+  .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
+  .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
+  .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
+  .a-pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:9.5px; font-weight:600; border:1px solid var(--aborder); text-transform:uppercase; letter-spacing:.04em; }
+
+  .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+
+  /* Org-chart node styles (Live tab) */
+  .org-node { background: white; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; min-width: 170px; box-shadow: 0 1px 3px rgba(15,23,42,0.06); }
+  .org-node.done    { border-color: #a7f3d0; }
+  .org-node.active  { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 0 0 3px rgba(59,130,246,0.10); }
+  .org-node.idle    { border-color: #e2e8f0; opacity: 0.65; border-style: dashed; }
+  .org-node .role  { font-size: 13px; font-weight: 600; color: #0f172a; display:flex; align-items:center; gap:6px; }
+  .org-node .what  { font-size: 11.5px; color: #64748b; margin-top: 2px; }
+  .status-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; }
+  .status-dot.done   { background: #10b981; }
+  .status-dot.active { background: #3b82f6; animation: pulse-dot 1.6s ease-in-out infinite; }
+  .status-dot.idle   { background: #cbd5e1; }
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.45); } 50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); } }
+  .edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
+  .edge.flow { stroke: #93c5fd; stroke-width: 1.5; stroke-dasharray: 4 3; animation: flow 1.2s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -14; } }
+  .edge.done { stroke: #a7f3d0; }
+
+  /* Tab state */
+  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; }
+  .tab-btn:hover { color: #0f172a; }
+  #tab-live:checked  ~ .body label[for="tab-live"],
+  #tab-flow:checked  ~ .body label[for="tab-flow"],
+  #tab-files:checked ~ .body label[for="tab-files"] { color: #0f172a; border-bottom-color: #4f46e5; font-weight: 600; }
+
+  .tab-content { display: none; flex: 1 1 auto; min-height: 0; }
+  #tab-live:checked  ~ .body .tc-live  { display: flex; flex-direction: column; }
+  #tab-flow:checked  ~ .body .tc-flow  { display: flex; flex-direction: column; }
+  #tab-files:checked ~ .body .tc-files { display: flex; }
+
+  /* Activity panel state */
+  .activity-panel { background: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; transition: width .15s ease; flex-shrink: 0; }
+  .activity-panel-strip { display: none; }
+  .activity-panel-content { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+
+  /* Default: expanded — width 25% via inline style */
+  #activity-expanded:checked  ~ .body .activity-panel-content { display: flex; }
+  #activity-expanded:checked  ~ .body .activity-panel { width: 25%; }
+  #activity-minimised:checked ~ .body .activity-panel { width: 36px; cursor: pointer; }
+  #activity-minimised:checked ~ .body .activity-panel-strip { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 16px; height: 100%; }
+
+  /* Activity entry styling (compact for narrow column) */
+  .ref-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px 1px 5px; border:1px solid; border-radius: 4px; font-size: 10.5px; }
+  .ref-chip.doc { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
+  .ref-chip.crm { background:#dcfce7; border-color:#a7f3d0; color:#065f46; }
+  .ref-chip.rule { background:#fef3c7; border-color:#fde68a; color:#92400e; }
+  .ref-chip.memory { background:#fce7f3; border-color:#f9a8d4; color:#9d174d; }
+  .ref-link { font-size: 10px; color: #4f46e5; cursor:pointer; font-weight: 500; padding: 0 3px; }
+  .ref-link:hover { text-decoration: underline; }
+  .activity-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; margin-top: 5px; }
+  .activity-dot.done { background:#10b981; }
+  .activity-dot.active { background:#3b82f6; }
+  .activity-dot.note { background:#cbd5e1; }
+
+  /* Files thumbnail strip */
+  .files-strip { background: #f1f5f9; border-bottom: 1px solid #e5e7eb; padding: 14px 20px; display: flex; gap: 12px; align-items: flex-end; overflow-x: auto; flex-shrink: 0; }
+  .file-thumb { flex-shrink: 0; cursor: pointer; position: relative; transition: transform .12s ease; }
+  .file-thumb:hover { transform: translateY(-2px); }
+  .file-thumb .page { background: white; border: 1.5px solid #e2e8f0; border-radius: 4px; box-shadow: 0 2px 6px rgba(15,23,42,0.08); display: flex; flex-direction: column; align-items: center; padding: 8px 6px; transition: border-color .12s ease, box-shadow .12s ease; position: relative; width: 60px; height: 78px; }
+  .file-thumb .icon { width: 22px; height: 22px; border-radius: 5px; display:flex; align-items:center; justify-content:center; margin-bottom: 4px; }
+  .file-thumb .lines { width: 100%; padding: 0 4px; }
+  .file-thumb .lines .line { background: #e2e8f0; height: 2px; margin-bottom: 3px; border-radius: 1px; }
+  .file-thumb .lines .line.short { width: 60%; }
+  .file-thumb .ext-badge { position:absolute; bottom:-4px; right:-4px; font-size: 7.5px; font-weight:700; padding: 1px 4px; border-radius: 3px; background:#1e293b; color:white; }
+  .file-thumb .name { margin-top: 5px; font-size: 10px; color: #475569; text-align: center; line-height: 1.3; max-width: 80px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .file-thumb .tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: #1e293b; color: white; font-size: 11px; padding: 4px 10px; border-radius: 4px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease; z-index: 10; }
+  .file-thumb:hover .tooltip { opacity: 1; }
+
+  #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .page,
+  #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .page,
+  #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .page,
+  #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .page,
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
+  #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .name,
+  #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .name,
+  #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .name,
+  #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .name,
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name { color: #4f46e5; font-weight: 600; }
+
+  .reader-content { display: none; }
+  #file-proposal:checked  ~ .body .rc-proposal  { display: block; }
+  #file-competitor:checked ~ .body .rc-competitor { display: block; }
+  #file-annex:checked     ~ .body .rc-annex     { display: block; }
+  #file-stripe:checked    ~ .body .rc-stripe    { display: block; }
+  #file-paypal:checked    ~ .body .rc-paypal    { display: block; }
+
+  .reader-paper { background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06); margin: 20px auto; padding: 40px 48px; max-width: calc(100% - 48px); border-radius: 4px; font-family: 'Lora', Georgia, serif; color: #1e293b; line-height: 1.6; }
+  .reader-paper h1 { font-family: 'Inter', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .reader-paper h2 { font-family: 'Inter', sans-serif; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; margin: 22px 0 6px; color: #0f172a; }
+  .reader-paper p  { font-size: 13.5px; margin: 0 0 12px; color: #334155; }
+  .reader-paper ul { font-size: 13px; padding-left: 22px; margin: 0 0 12px; }
+  .reader-paper li { margin-bottom: 4px; color: #334155; }
+  .reader-paper table { width:100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 11.5px; margin: 6px 0 14px; }
+  .reader-paper th, .reader-paper td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+  .reader-paper th { font-weight: 600; color: #0f172a; background: #f8fafc; }
+  .reader-paper .meta { font-family: 'Inter', sans-serif; font-size: 10.5px; color: #94a3b8; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+
+  .step-card { background:white; border:1px solid #e5e7eb; border-radius:10px; padding: 12px 14px; display:flex; align-items:center; gap:12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .icn-wrap { width:28px; height:28px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:var(--abg); color:var(--aaccent); }
+  .connector { width: 1.5px; background: #cbd5e1; margin: 0 auto; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<input type="radio" name="task-tab" id="tab-live" checked>
+<input type="radio" name="task-tab" id="tab-flow">
+<input type="radio" name="task-tab" id="tab-files">
+
+<input type="radio" name="active-file" id="file-proposal" checked>
+<input type="radio" name="active-file" id="file-competitor">
+<input type="radio" name="active-file" id="file-annex">
+<input type="radio" name="active-file" id="file-stripe">
+<input type="radio" name="active-file" id="file-paypal">
+
+<input type="radio" name="activity-state" id="activity-expanded" checked>
+<input type="radio" name="activity-state" id="activity-minimised">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">acme-sub</a>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Tasks</a>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Acme renewal proposal</span>
+  <div class="ml-auto flex items-center gap-2 text-[12px] text-slate-500">
+    <span>acme-org · Mike H.</span>
+  </div>
+</div>
+
+<!-- Mock controls -->
+<div class="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center gap-3 text-[12px]">
+  <span class="text-[10.5px] uppercase tracking-wider font-semibold text-amber-800">Preview state</span>
+  <label for="activity-expanded" style="cursor:pointer;" class="px-2 py-1 rounded border border-amber-300 bg-white text-slate-700 hover:bg-amber-50">Activity expanded</label>
+  <label for="activity-minimised" style="cursor:pointer;" class="px-2 py-1 rounded border border-amber-300 bg-white text-slate-700 hover:bg-amber-50">Activity minimised</label>
+  <span class="ml-auto text-[10.5px] text-amber-800 italic">Mock controls — toggle to see both states</span>
+</div>
+
+<!-- Task header -->
+<div class="bg-white border-b border-slate-200 px-6 py-3.5">
+  <div class="flex items-start gap-4">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+        <h1 class="text-[16px] font-semibold text-slate-900">Acme renewal proposal</h1>
+        <span class="px-2 py-0.5 rounded-full text-[10.5px] font-semibold" style="background:#dbeafe; color:#1e40af;">Working · 1 approval pending</span>
+      </div>
+      <div class="text-[12px] text-slate-500 flex items-center gap-3">
+        <span>Started <span class="text-slate-700">38s ago</span> by <span class="text-slate-700">Mike H.</span> via Ask Anything</span>
+        <span class="text-slate-300">·</span>
+        <span>3 agents engaged · 1 approval pending</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md">Pause</button>
+      <button class="px-2.5 py-1.5 border border-red-200 hover:bg-red-50 text-red-700 text-[12px] font-medium rounded-md">Cancel task</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3-panel body -->
+<div class="body flex" style="height: calc(100vh - 144px); min-height: 720px;">
+
+  <!-- ========================== CHAT (25%) ========================== -->
+  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 25%; min-width: 320px;">
+
+    <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
+      <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Chat</span>
+      <span class="ml-auto text-[10.5px] text-slate-400 italic">narrative</span>
+    </div>
+
+    <div class="flex-1 overflow-y-auto scroll px-4 py-4 space-y-3.5 text-[12.5px] leading-relaxed">
+
+      <div class="flex justify-end">
+        <div class="max-w-[92%]">
+          <div class="bg-indigo-600 text-white px-3 py-2 rounded-2xl rounded-tr-md text-[12.5px]">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
+          <div class="text-[10px] text-slate-400 mt-0.5 text-right">Mike · 38s ago</div>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-[12px] font-semibold text-slate-900">COO</span>
+            <span class="a-pill a-agent">Agent</span>
+          </div>
+          <div class="text-slate-700 text-[12px] mt-0.5">On it — pulled in three teams. Sales: body, Research: pricing, Ops: annex. I'll consolidate then ask you.</div>
+        </div>
+      </div>
+
+      <div class="flex justify-center">
+        <div class="text-[10.5px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5">Handed off to 3 teams</div>
+      </div>
+
+      <div class="flex gap-2">
+        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-[12px] font-semibold text-slate-900">Head of Sales</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[10px] text-slate-400">28s</span>
+          </div>
+          <div class="text-slate-700 text-[12px] mt-0.5">Proposal body drafted. Pulled SDR-1 for last quarter MRR + terms.</div>
+          <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium">Open draft →</a>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+          HR
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-[12px] font-semibold text-slate-900">Head of Research</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[10px] text-blue-600 font-medium">working</span>
+          </div>
+          <div class="text-slate-700 text-[12px] mt-0.5">Scanning 4 competitor rate cards.</div>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+          HO
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1 flex-wrap">
+            <span class="text-[12px] font-semibold text-slate-900">Head of Operations</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[10px] text-blue-600 font-medium">working</span>
+          </div>
+          <div class="text-slate-700 text-[12px] mt-0.5">Drafting pricing annex — line items, terms, credits.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="border-t border-slate-200 px-4 py-2.5">
+      <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
+        <textarea rows="1" placeholder="Add a note or steer the agents…" class="flex-1 resize-none px-2.5 py-1.5 text-[12.5px] outline-none bg-transparent"></textarea>
+        <button class="m-1 p-1.5 rounded bg-slate-900 hover:bg-black text-white">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ========================== ACTIVITY (collapsible) ========================== -->
+  <div class="activity-panel">
+
+    <!-- Strip view (when minimised) -->
+    <label for="activity-expanded" class="activity-panel-strip" style="cursor: pointer;">
+      <div class="flex flex-col items-center gap-3 mt-2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span style="font-size: 10.5px; font-weight: 600; color:#475569; letter-spacing: .08em; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); margin-top: 4px;">Activity</span>
+        <span class="num" style="font-size: 10px; font-weight: 700; color: white; background: #4f46e5; border-radius: 999px; padding: 1px 6px; margin-top: 8px;">12</span>
+      </div>
+      <div class="mt-auto mb-3 flex flex-col items-center gap-1" style="color:#94a3b8;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        <span style="font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg);">expand</span>
+      </div>
+    </label>
+
+    <!-- Expanded content -->
+    <div class="activity-panel-content">
+      <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
+        <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Activity</span>
+        <span class="text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 num font-semibold">12</span>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">live</span>
+        <label for="activity-minimised" class="ml-1 p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer" title="Minimise">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </label>
+      </div>
+
+      <div class="flex-1 overflow-y-auto scroll px-3 py-3 space-y-2.5">
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot active mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">just now</span><span class="font-medium text-slate-900">Head of Operations</span></div>
+            <div class="text-slate-700 mt-0.5">Drafting pricing annex.</div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot active mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">4s</span><span class="font-medium text-slate-900">Research Analyst</span></div>
+            <div class="text-slate-700 mt-0.5">Scanning competitors.</div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot note mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">8s</span><span class="text-slate-700">Fetched 2 rate cards</span></div>
+            <div class="mt-1 inline-flex items-center gap-1 flex-wrap">
+              <span class="ref-chip doc">Stripe</span>
+              <span class="ref-chip doc">PayPal</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">14s</span><span class="font-medium text-slate-900">SDR 1</span><span class="text-slate-700">CRM context ✓</span></div>
+            <div class="mt-1 inline-flex items-center gap-1">
+              <span class="ref-chip crm">Acme · CRM</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot note mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">22s</span><span class="text-slate-700">Applied rule</span></div>
+            <div class="text-[11px] text-slate-500 mt-0.5">15% min margin on renewals</div>
+            <div class="mt-1 inline-flex items-center gap-1">
+              <span class="ref-chip rule">Pricing rule</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">28s</span><span class="font-medium text-slate-900">Head of Sales</span><span class="text-slate-700">drafted body ✓</span></div>
+            <div class="mt-1 inline-flex items-center gap-1">
+              <span class="ref-chip doc">Acme proposal</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">30s</span><span class="text-slate-700">Memory consulted</span></div>
+            <div class="mt-1 inline-flex items-center gap-1">
+              <span class="ref-chip memory">3 blocks</span>
+              <a class="ref-link">View</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">34s</span><span class="font-medium text-slate-900">COO</span><span class="text-slate-700">delegated to 3 teams</span></div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">36s</span><span class="text-slate-700">Routed to <span class="font-medium">COO</span></span></div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">38s</span><span class="font-medium text-slate-900">Mike H.</span><span class="text-slate-700">created task</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== TABS PANEL (Live / Flow / Files) ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-white">
+
+    <div class="px-6 border-b border-slate-200 flex items-center gap-1">
+      <label for="tab-live"  class="tab-btn">Live</label>
+      <label for="tab-flow"  class="tab-btn">Flow</label>
+      <label for="tab-files" class="tab-btn">Files <span class="num text-[10.5px] text-slate-400 ml-1">5</span></label>
+      <span class="ml-auto text-[11.5px] text-slate-400 self-center">Updates automatically</span>
+    </div>
+
+    <!-- Live -->
+    <div class="tab-content tc-live overflow-y-auto scroll px-6 py-6">
+      <div class="text-[14px] font-semibold text-slate-800 mb-1">Who is doing what right now</div>
+      <div class="text-[11.5px] text-slate-500 mb-5">Live snapshot of agents working on this task.</div>
+
+      <div style="position:relative; width:100%; max-width: 720px; margin: 0 auto; height:340px;">
+        <svg width="100%" height="100%" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
+          <path class="edge done" d="M 360 70 L 360 110 L 130 110 L 130 150" />
+          <path class="edge flow" d="M 360 70 L 360 150" />
+          <path class="edge flow" d="M 360 70 L 360 110 L 590 110 L 590 150" />
+          <path class="edge done" d="M 130 220 L 130 280" />
+          <path class="edge flow" d="M 360 220 L 360 280" />
+          <path class="edge" d="M 590 220 L 590 280" stroke-dasharray="3 3" />
+        </svg>
+
+        <div style="position:absolute; left:50%; top:8px; transform:translateX(-50%);">
+          <div class="org-node done" style="text-align:center;">
+            <div class="role" style="justify-content:center;"><span class="status-dot done"></span>COO</div>
+            <div class="what">Orchestrator</div>
+          </div>
+        </div>
+        <div style="position:absolute; left:8px; top:150px;">
+          <div class="org-node done"><div class="role"><span class="status-dot done"></span>Head of Sales</div><div class="what">Body · done</div></div>
+        </div>
+        <div style="position:absolute; left:50%; top:150px; transform:translateX(-50%);">
+          <div class="org-node active"><div class="role"><span class="status-dot active"></span>Head of Research</div><div class="what">Competitor pricing</div></div>
+        </div>
+        <div style="position:absolute; right:8px; top:150px;">
+          <div class="org-node active"><div class="role"><span class="status-dot active"></span>Head of Operations</div><div class="what">Pricing annex</div></div>
+        </div>
+        <div style="position:absolute; left:8px; top:280px;">
+          <div class="org-node done"><div class="role"><span class="status-dot done"></span>SDR 1</div><div class="what">Account ctx · done</div></div>
+        </div>
+        <div style="position:absolute; left:50%; top:280px; transform:translateX(-50%);">
+          <div class="org-node active"><div class="role"><span class="status-dot active"></span>Research Analyst</div><div class="what">Scanning 4</div></div>
+        </div>
+        <div style="position:absolute; right:8px; top:280px;">
+          <div class="org-node idle"><div class="role"><span class="status-dot idle"></span>Pricing Specialist</div><div class="what">Waiting</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flow -->
+    <div class="tab-content tc-flow overflow-y-auto scroll px-6 py-6">
+      <div class="text-[14px] font-semibold text-slate-800 mb-1">The shape of this work</div>
+      <div class="text-[11.5px] text-slate-500 mb-5">What the COO planned · current step in indigo.</div>
+
+      <div class="mx-auto" style="max-width: 600px;">
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 1 — research &amp; draft (parallel)</div>
+        <div class="grid grid-cols-3 gap-3 mb-1">
+          <div class="step-card a-agent"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12px] font-medium text-slate-900 truncate">Sales: body</div><div class="text-[10px] text-emerald-700">✓ done</div></div></div>
+          <div class="step-card a-agent" style="border-color:#4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.10);"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12px] font-medium text-slate-900 truncate">Research: pricing</div><div class="text-[10px] text-blue-600 font-medium">working</div></div></div>
+          <div class="step-card a-agent" style="border-color:#4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.10);"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12px] font-medium text-slate-900 truncate">Ops: annex</div><div class="text-[10px] text-blue-600 font-medium">working</div></div></div>
+        </div>
+        <div class="connector" style="height:28px;"></div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 2 — consolidate</div>
+        <div class="flex justify-center"><div class="step-card a-agent" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">COO consolidates</div><div class="text-[10px] text-slate-400">queued</div></div></div></div>
+        <div class="connector" style="height:28px;"></div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 3 — review &amp; deliver</div>
+        <div class="flex justify-center"><div class="step-card a-approval" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">Mike approves</div><div class="text-[10px] text-slate-400">queued</div></div></div></div>
+        <div class="connector" style="height:20px;"></div>
+        <div class="flex justify-center"><div class="step-card a-action" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">Send to Acme</div><div class="text-[10px] text-slate-400">queued</div></div></div></div>
+      </div>
+    </div>
+
+    <!-- Files -->
+    <div class="tab-content tc-files" style="flex-direction: column;">
+      <div class="files-strip">
+
+        <label for="file-proposal" class="block">
+          <div class="file-thumb">
+            <div class="tooltip">Acme renewal proposal · Head of Sales</div>
+            <div class="page">
+              <div class="icon" style="background:#eef2ff; color:#4f46e5;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+              <div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div><div class="line short"></div></div>
+              <span class="ext-badge">DOC</span>
+            </div>
+            <div class="name">Acme proposal</div>
+          </div>
+        </label>
+
+        <label for="file-competitor" class="block">
+          <div class="file-thumb">
+            <div class="tooltip">Competitor pricing analysis · Research Analyst</div>
+            <div class="page">
+              <div class="icon" style="background:#ecfdf5; color:#059669;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+              <div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div>
+              <span class="ext-badge" style="background:#059669;">CSV</span>
+            </div>
+            <div class="name">Competitor pricing</div>
+          </div>
+        </label>
+
+        <label for="file-annex" class="block">
+          <div class="file-thumb">
+            <div class="tooltip">Pricing annex · Head of Operations</div>
+            <div class="page">
+              <div class="icon" style="background:#fffbeb; color:#d97706;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></div>
+              <div class="lines"><div class="line"></div><div class="line"></div><div class="line short"></div></div>
+              <span class="ext-badge" style="background:#d97706;">XLS</span>
+            </div>
+            <div class="name">Pricing annex</div>
+          </div>
+        </label>
+
+        <div style="width:1px; background:#cbd5e1; height:60px; margin: 0 6px;"></div>
+
+        <label for="file-stripe" class="block">
+          <div class="file-thumb">
+            <div class="tooltip">Stripe rate card · stripe.com</div>
+            <div class="page">
+              <div class="icon" style="background:#f1f5f9; color:#475569;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+              <div class="lines"><div class="line"></div><div class="line"></div><div class="line short"></div></div>
+              <span class="ext-badge" style="background:#64748b;">PDF</span>
+            </div>
+            <div class="name">Stripe</div>
+          </div>
+        </label>
+
+        <label for="file-paypal" class="block">
+          <div class="file-thumb">
+            <div class="tooltip">PayPal rate card · paypal.com</div>
+            <div class="page">
+              <div class="icon" style="background:#f1f5f9; color:#475569;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
+              <div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div>
+              <span class="ext-badge" style="background:#64748b;">PDF</span>
+            </div>
+            <div class="name">PayPal</div>
+          </div>
+        </label>
+
+      </div>
+
+      <div class="flex-1 min-w-0 overflow-y-auto scroll" style="background:#f1f5f9;">
+
+        <div class="reader-content rc-proposal">
+          <div class="reader-paper">
+            <div class="meta">Acme renewal proposal · Draft v1 · Head of Sales · 28s ago</div>
+            <h1>Acme — Q3 Renewal Proposal</h1>
+            <p>Acme has been a customer since Q2 2024, moving from pilot to mid-market with $48K ARR and 23% NRR expansion.</p>
+            <h2>Renewal terms</h2>
+            <p>Twelve-month extension at a 9% list-price increase, offset by a 3% loyalty credit and twelve months of priority support.</p>
+            <h2>Why we believe this works</h2>
+            <ul>
+              <li>Acme's usage has grown 23% YoY.</li>
+              <li>Competitor pricing sits ~12% above our proposed renewal.</li>
+              <li>15% minimum-margin policy is met.</li>
+            </ul>
+            <h2>What we're asking for</h2>
+            <p>Mike's sign-off on the proposal body and the pricing annex.</p>
+          </div>
+        </div>
+
+        <div class="reader-content rc-competitor">
+          <div class="reader-paper">
+            <div class="meta">Competitor pricing analysis · Research Analyst · still updating</div>
+            <h1>Competitor pricing — Q3 2026</h1>
+            <table>
+              <thead><tr><th>Competitor</th><th>List $/seat/mo</th><th>Effective</th><th>Vs us</th></tr></thead>
+              <tbody>
+                <tr><td>Stripe Pro</td><td>$78</td><td>$72</td><td>+14%</td></tr>
+                <tr><td>PayPal Plus</td><td>$84</td><td>$76</td><td>+19%</td></tr>
+                <tr><td>Square Pro</td><td>$69</td><td>$66</td><td>+4%</td></tr>
+                <tr><td>Adyen Mid</td><td>$92</td><td>$84</td><td>+33%</td></tr>
+              </tbody>
+            </table>
+            <h2>Recommendation</h2>
+            <p>Position our renewal as the value option — well below Stripe and PayPal.</p>
+          </div>
+        </div>
+
+        <div class="reader-content rc-annex">
+          <div class="reader-paper">
+            <div class="meta">Pricing annex · Head of Operations · still updating</div>
+            <h1>Pricing annex — Acme renewal</h1>
+            <table>
+              <thead><tr><th>Line item</th><th>Qty</th><th>Unit</th><th>Subtotal</th></tr></thead>
+              <tbody>
+                <tr><td>Pro Workflows · annual</td><td>22 seats</td><td>$60 / seat / mo</td><td>$15,840</td></tr>
+                <tr><td>Priority support</td><td>1</td><td>$4,800 / yr</td><td>$4,800</td></tr>
+                <tr><td>API allowance (50M req/mo)</td><td>1</td><td>$2,400 / yr</td><td>$2,400</td></tr>
+                <tr><td>Loyalty credit (3%)</td><td>—</td><td>—</td><td>−$687</td></tr>
+              </tbody>
+            </table>
+            <h2>Total</h2>
+            <p><strong>$22,353 / year</strong> — effective 8.3% increase.</p>
+          </div>
+        </div>
+
+        <div class="reader-content rc-stripe">
+          <div class="reader-paper">
+            <div class="meta">Stripe rate card · External · fetched 8s ago</div>
+            <h1>Stripe — Pro tier</h1>
+            <p><em>Source: stripe.com/pricing — auto-extracted by Research Analyst.</em></p>
+            <table>
+              <thead><tr><th>Plan</th><th>Per seat / mo</th><th>Annual disc.</th></tr></thead>
+              <tbody>
+                <tr><td>Pro</td><td>$78</td><td>~7.5%</td></tr>
+                <tr><td>Pro + Workflows</td><td>$96</td><td>~7.5%</td></tr>
+                <tr><td>Enterprise</td><td>contact</td><td>—</td></tr>
+              </tbody>
+            </table>
+            <p>Stripe's Pro tier matches our Pro Workflows on parity.</p>
+          </div>
+        </div>
+
+        <div class="reader-content rc-paypal">
+          <div class="reader-paper">
+            <div class="meta">PayPal rate card · External · fetched 8s ago</div>
+            <h1>PayPal — Plus tier</h1>
+            <p><em>Source: paypal.com/business/pricing — auto-extracted.</em></p>
+            <table>
+              <thead><tr><th>Plan</th><th>Per seat / mo</th><th>Annual disc.</th></tr></thead>
+              <tbody>
+                <tr><td>Plus</td><td>$84</td><td>~9.5%</td></tr>
+                <tr><td>Premium</td><td>$104</td><td>~9.5%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>

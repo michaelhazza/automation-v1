@@ -33,10 +33,18 @@
 
     <a href="06-open-task-view.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
       <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[14px] font-semibold text-slate-900">06 · Open task view</div>
-        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface</div>
+        <div class="text-[14px] font-semibold text-slate-900">06 · Open task view (2-panel: chat + tabs)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface · option A</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Combines brief-endtoend.html's layout (full-width, chat + org-chart Live view + activity with linked-entity chips) with the task surface. Same view for ad-hoc and workflow-fired tasks — "Brief" is retired as a separate noun. Right panel has four distinct tabs: <strong>Live</strong> (who is working right now — org chart of agents) · <strong>Flow</strong> (the planned shape — step DAG or delegation tree) · <strong>Activity</strong> (full chronological history — view/edit chips on linked CRM records, docs, rules) · <strong>Files</strong> (artifacts produced). Renders the "Acme renewal proposal" brief-style task with COO orchestrating Sales / Research / Operations teams.</div>
+      <div class="text-[12.5px] text-slate-600">Full-width, chat (~30%) + tabbed right panel (~70%). Activity is one of four tabs. Right panel: <strong>Live</strong> (org chart) · <strong>Flow</strong> (planned route) · <strong>Activity</strong> (chronological log + view/edit chips on linked CRM records, docs, rules) · <strong>Files</strong> (top thumbnail strip + full-width reader pane). Renders the "Acme renewal proposal" brief-style task. Same surface for ad-hoc and workflow-fired tasks — "Brief" retired as a noun.</div>
+    </a>
+
+    <a href="07-open-task-three-panel.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">07 · Open task view (3-panel: chat + activity + tabs)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface · option B</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Alternative layout. Chat (25%) + Activity panel (25%, collapsible) + Tabbed right panel (50%, with Live / Flow / Files only — Activity moved out of tabs). Lets the user see chat + activity log + visual context simultaneously. Activity panel can minimise to a 36px strip (click to expand back) — when minimised, the right panel widens. Toggle preview state at the top. Trade-off: more dense (3 columns + tabs) but better for real-time monitoring of multi-agent tasks. Compare against 06 to pick the direction.</div>
     </a>
 
   </div>

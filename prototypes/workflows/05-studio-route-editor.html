@@ -118,13 +118,12 @@
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  /* Loop-back arrow visual — vertical SVG line with arrowhead from step 5 up to step 4 */
-  .loopback-arrow { position:absolute; left:-32px; top:-128px; width: 28px; height: 138px; pointer-events:none; }
-  .loopback-arrow .label {
-    position:absolute; top: 50%; left: -62px; transform: translateY(-50%) rotate(-90deg);
-    transform-origin: right center;
-    font-size: 9.5px; font-weight: 600; color:#ea580c; letter-spacing: .08em;
-    text-transform: uppercase; white-space: nowrap;
+  /* On-reject loop indicator — labelled chip, no drawn line */
+  .reject-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; padding: 4px 10px; border-radius: 999px;
+    background: #fff7ed; border: 1px dashed #fb923c; color: #9a3412;
+    font-size: 11px; font-weight: 500; white-space: nowrap;
   }
 </style>
 </head>
@@ -259,23 +258,22 @@
   <div class="grid grid-cols-2 gap-6">
     <div class="flex flex-col items-center">
       <div style="position:relative;">
-        <!-- on-reject loop arrow: vertical SVG up to step 4 with arrowhead -->
-        <svg class="loopback-arrow" viewBox="0 0 28 138">
-          <path d="M 14 138 L 14 10" stroke="#ea580c" stroke-width="1.75" stroke-dasharray="4 3" fill="none" stroke-linecap="round"/>
-          <path d="M 8 16 L 14 4 L 20 16" stroke="#ea580c" stroke-width="1.75" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span class="loopback-arrow-label" style="position:absolute; top:-80px; left:-90px; font-size:9.5px; font-weight:700; color:#ea580c; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; transform: rotate(-90deg); transform-origin: right center;">on reject ↑</span>
         <div class="step-card a-approval selected" style="width: 300px;">
           <div class="icn-wrap">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
           </div>
           <div class="flex-1 min-w-0">
             <div class="text-[13.5px] font-medium text-slate-900 truncate">Marketing review</div>
-            <div class="text-[11.5px] text-slate-500 truncate">2 approvers · on reject → step 4</div>
+            <div class="text-[11.5px] text-slate-500 truncate">2 approvers · Marketing team</div>
           </div>
           <span class="a-pill a-approval">Approval</span>
           <div class="text-[10.5px] text-slate-400 num ml-1">5</div>
         </div>
+      </div>
+      <!-- On-reject indicator chip — clear and unambiguous, no drawn line -->
+      <div class="reject-chip">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+        <span>On reject — loops back to step 4 (Draft personal email)</span>
       </div>
     </div>
     <div></div>
