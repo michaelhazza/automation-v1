@@ -80,9 +80,9 @@
   .activity-panel-strip { display: none; }
   .activity-panel-content { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 
-  /* Default: expanded — width 25% via inline style */
+  /* Default: expanded — width 23% (chat is 27%, slight skew toward chat) */
   #activity-expanded:checked  ~ .body .activity-panel-content { display: flex; }
-  #activity-expanded:checked  ~ .body .activity-panel { width: 25%; }
+  #activity-expanded:checked  ~ .body .activity-panel { width: 23%; }
   #activity-minimised:checked ~ .body .activity-panel { width: 36px; cursor: pointer; }
   #activity-minimised:checked ~ .body .activity-panel-strip { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 16px; height: 100%; }
 
@@ -103,7 +103,11 @@
   .files-strip { background: #f1f5f9; border-bottom: 1px solid #e5e7eb; padding: 14px 20px; display: flex; gap: 12px; align-items: flex-end; overflow-x: auto; flex-shrink: 0; }
   .file-thumb { flex-shrink: 0; cursor: pointer; position: relative; transition: transform .12s ease; }
   .file-thumb:hover { transform: translateY(-2px); }
-  .file-thumb .page { background: white; border: 1.5px solid #e2e8f0; border-radius: 4px; box-shadow: 0 2px 6px rgba(15,23,42,0.08); display: flex; flex-direction: column; align-items: center; padding: 8px 6px; transition: border-color .12s ease, box-shadow .12s ease; position: relative; width: 60px; height: 78px; }
+  .file-thumb .page { background: white; border: 1.5px solid #e2e8f0; border-radius: 4px; box-shadow: 0 2px 6px rgba(15,23,42,0.08); display: flex; flex-direction: column; align-items: center; padding: 8px 6px; transition: border-color .12s ease, box-shadow .12s ease; position: relative; }
+  .file-thumb.portrait .page,
+  .file-thumb:not(.landscape) .page { width: 60px; height: 78px; }
+  .file-thumb.landscape .page { width: 96px; height: 60px; }
+  .file-thumb.landscape .name { max-width: 96px; }
   .file-thumb .icon { width: 22px; height: 22px; border-radius: 5px; display:flex; align-items:center; justify-content:center; margin-bottom: 4px; }
   .file-thumb .lines { width: 100%; padding: 0 4px; }
   .file-thumb .lines .line { background: #e2e8f0; height: 2px; margin-bottom: 3px; border-radius: 1px; }
@@ -117,12 +121,14 @@
   #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .page,
   #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .page,
   #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .page,
-  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page,
+  #file-deck:checked      ~ .body label[for="file-deck"]      .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
   #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .name,
   #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .name,
   #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .name,
   #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .name,
-  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name { color: #4f46e5; font-weight: 600; }
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name,
+  #file-deck:checked      ~ .body label[for="file-deck"]      .file-thumb .name { color: #4f46e5; font-weight: 600; }
 
   .reader-content { display: none; }
   #file-proposal:checked  ~ .body .rc-proposal  { display: block; }
@@ -130,8 +136,11 @@
   #file-annex:checked     ~ .body .rc-annex     { display: block; }
   #file-stripe:checked    ~ .body .rc-stripe    { display: block; }
   #file-paypal:checked    ~ .body .rc-paypal    { display: block; }
+  #file-deck:checked      ~ .body .rc-deck      { display: block; }
 
-  .reader-paper { background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06); margin: 20px auto; padding: 40px 48px; max-width: calc(100% - 48px); border-radius: 4px; font-family: 'Lora', Georgia, serif; color: #1e293b; line-height: 1.6; }
+  .reader-paper { background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06); margin: 20px auto; padding: 40px 48px; border-radius: 4px; font-family: 'Lora', Georgia, serif; color: #1e293b; line-height: 1.6; }
+  .reader-paper.portrait { width: 540px; max-width: calc(100% - 48px); min-height: 760px; }
+  .reader-paper.landscape { width: 880px; max-width: calc(100% - 48px); min-height: 500px; }
   .reader-paper h1 { font-family: 'Inter', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
   .reader-paper h2 { font-family: 'Inter', sans-serif; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; margin: 22px 0 6px; color: #0f172a; }
   .reader-paper p  { font-size: 13.5px; margin: 0 0 12px; color: #334155; }
@@ -158,6 +167,7 @@
 <input type="radio" name="active-file" id="file-annex">
 <input type="radio" name="active-file" id="file-stripe">
 <input type="radio" name="active-file" id="file-paypal">
+<input type="radio" name="active-file" id="file-deck">
 
 <input type="radio" name="activity-state" id="activity-expanded" checked>
 <input type="radio" name="activity-state" id="activity-minimised">
@@ -211,7 +221,7 @@
 <div class="body flex" style="height: calc(100vh - 144px); min-height: 720px;">
 
   <!-- ========================== CHAT (25%) ========================== -->
-  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 25%; min-width: 320px;">
+  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 27%; min-width: 320px;">
 
     <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
       <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Chat</span>
@@ -540,6 +550,21 @@
           </div>
         </label>
 
+        <label for="file-deck" class="block">
+          <div class="file-thumb landscape">
+            <div class="tooltip">Q3 sales review deck · landscape · Head of Sales</div>
+            <div class="page">
+              <div class="icon" style="background:#fef3c7; color:#92400e;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="lines" style="display:flex; gap:3px;">
+                <div style="flex:1;"><div class="line"></div><div class="line short"></div></div>
+                <div style="flex:1;"><div class="line"></div><div class="line short"></div></div>
+              </div>
+              <span class="ext-badge" style="background:#92400e;">PPT</span>
+            </div>
+            <div class="name">Q3 sales review</div>
+          </div>
+        </label>
+
         <div style="width:1px; background:#cbd5e1; height:60px; margin: 0 6px;"></div>
 
         <label for="file-stripe" class="block">
@@ -571,7 +596,7 @@
       <div class="flex-1 min-w-0 overflow-y-auto scroll" style="background:#f1f5f9;">
 
         <div class="reader-content rc-proposal">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Acme renewal proposal · Draft v1 · Head of Sales · 28s ago</div>
             <h1>Acme — Q3 Renewal Proposal</h1>
             <p>Acme has been a customer since Q2 2024, moving from pilot to mid-market with $48K ARR and 23% NRR expansion.</p>
@@ -589,7 +614,7 @@
         </div>
 
         <div class="reader-content rc-competitor">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Competitor pricing analysis · Research Analyst · still updating</div>
             <h1>Competitor pricing — Q3 2026</h1>
             <table>
@@ -607,7 +632,7 @@
         </div>
 
         <div class="reader-content rc-annex">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Pricing annex · Head of Operations · still updating</div>
             <h1>Pricing annex — Acme renewal</h1>
             <table>
@@ -625,7 +650,7 @@
         </div>
 
         <div class="reader-content rc-stripe">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Stripe rate card · External · fetched 8s ago</div>
             <h1>Stripe — Pro tier</h1>
             <p><em>Source: stripe.com/pricing — auto-extracted by Research Analyst.</em></p>
@@ -642,7 +667,7 @@
         </div>
 
         <div class="reader-content rc-paypal">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">PayPal rate card · External · fetched 8s ago</div>
             <h1>PayPal — Plus tier</h1>
             <p><em>Source: paypal.com/business/pricing — auto-extracted.</em></p>
@@ -653,6 +678,42 @@
                 <tr><td>Premium</td><td>$104</td><td>~9.5%</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Q3 sales review deck — LANDSCAPE -->
+        <div class="reader-content rc-deck">
+          <div class="reader-paper landscape">
+            <div class="meta">Q3 sales review · Slide deck · landscape · Head of Sales</div>
+            <h1>Q3 — Renewal book in numbers</h1>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 16px;">
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 10.5px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;">Renewals due Q3</div>
+                <div style="font-family: Inter, sans-serif; font-size: 32px; font-weight: 700; color: #0f172a;">14</div>
+                <p style="font-size: 11.5px; color: #64748b; margin-top: 4px;">$483K total ARR up for renewal.</p>
+              </div>
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 10.5px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;">Acme alone</div>
+                <div style="font-family: Inter, sans-serif; font-size: 32px; font-weight: 700; color: #4f46e5;">$48K</div>
+                <p style="font-size: 11.5px; color: #64748b; margin-top: 4px;">Largest single renewal.</p>
+              </div>
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 10.5px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;">Forecast NRR</div>
+                <div style="font-family: Inter, sans-serif; font-size: 32px; font-weight: 700; color: #059669;">112%</div>
+                <p style="font-size: 11.5px; color: #64748b; margin-top: 4px;">Conservative — Acme accepts.</p>
+              </div>
+            </div>
+            <h2>Cohort breakdown</h2>
+            <table>
+              <thead><tr><th>Status</th><th>Customers</th><th>ARR</th><th>Win-rate</th></tr></thead>
+              <tbody>
+                <tr><td>Quoted, awaiting</td><td class="num">6</td><td class="num">$214K</td><td class="num">75%</td></tr>
+                <tr><td>In negotiation</td><td class="num">5</td><td class="num">$181K</td><td class="num">85%</td></tr>
+                <tr><td>Drafting (Acme)</td><td class="num">1</td><td class="num">$48K</td><td class="num">90%</td></tr>
+                <tr><td>Auto-renew</td><td class="num">2</td><td class="num">$40K</td><td class="num">100%</td></tr>
+              </tbody>
+            </table>
+            <p style="font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 16px;">Slide 3 of 8</p>
           </div>
         </div>
 

@@ -123,7 +123,8 @@
     transition: border-color .12s ease, box-shadow .12s ease;
   }
   .file-thumb.portrait .page { width: 70px; height: 90px; }
-  .file-thumb.landscape .page { width: 96px; height: 70px; }
+  .file-thumb.landscape .page { width: 110px; height: 70px; }
+  .file-thumb.landscape .name { max-width: 110px; }
 
   .file-thumb .page .icon { width: 26px; height: 26px; border-radius: 5px; display:flex; align-items:center; justify-content:center; margin-bottom: 4px; }
   .file-thumb .page .lines { width: 100%; padding: 0 4px; }
@@ -143,12 +144,14 @@
   #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .page,
   #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .page,
   #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .page,
-  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .page,
+  #file-deck:checked      ~ .body label[for="file-deck"]      .file-thumb .page { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 4px 10px rgba(15,23,42,0.10); }
   #file-proposal:checked  ~ .body label[for="file-proposal"]  .file-thumb .name,
   #file-competitor:checked ~ .body label[for="file-competitor"] .file-thumb .name,
   #file-annex:checked     ~ .body label[for="file-annex"]     .file-thumb .name,
   #file-stripe:checked    ~ .body label[for="file-stripe"]    .file-thumb .name,
-  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name { color: #4f46e5; font-weight: 600; }
+  #file-paypal:checked    ~ .body label[for="file-paypal"]    .file-thumb .name,
+  #file-deck:checked      ~ .body label[for="file-deck"]      .file-thumb .name { color: #4f46e5; font-weight: 600; }
 
   /* Tooltip on hover */
   .file-thumb .tooltip {
@@ -166,15 +169,29 @@
   #file-annex:checked     ~ .body .rc-annex     { display: block; }
   #file-stripe:checked    ~ .body .rc-stripe    { display: block; }
   #file-paypal:checked    ~ .body .rc-paypal    { display: block; }
+  #file-deck:checked      ~ .body .rc-deck      { display: block; }
 
-  /* Reader paper styling */
+  /* Reader paper styling — proportions match document orientation */
   .reader-paper {
     background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06);
-    margin: 24px auto; padding: 56px 64px;
-    width: 720px; max-width: calc(100% - 48px);
+    margin: 24px auto; padding: 48px 56px;
     border-radius: 4px;
     font-family: 'Lora', Georgia, serif;
     color: #1e293b; line-height: 1.65;
+  }
+  /* Portrait — A4-ish, max ~580px wide so the page reads like a real document */
+  .reader-paper.portrait {
+    width: 580px; max-width: calc(100% - 48px);
+    min-height: 820px; /* A4 ratio — content extends below if longer */
+  }
+  /* Landscape — wider, shorter, like a 16:9 slide / dashboard */
+  .reader-paper.landscape {
+    width: 960px; max-width: calc(100% - 48px);
+    min-height: 540px;
+  }
+  /* Wrapper for horizontal scroll when landscape doc is wider than panel */
+  .reader-scroll {
+    overflow: auto;
   }
   .reader-paper h1 { font-family: 'Inter', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
   .reader-paper h2 { font-family: 'Inter', sans-serif; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin: 28px 0 8px; color: #0f172a; }
@@ -209,6 +226,7 @@
 <input type="radio" name="active-file" id="file-annex">
 <input type="radio" name="active-file" id="file-stripe">
 <input type="radio" name="active-file" id="file-paypal">
+<input type="radio" name="active-file" id="file-deck">
 
 <!-- App bar -->
 <div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
@@ -667,6 +685,23 @@
           </div>
         </label>
 
+        <label for="file-deck" class="block">
+          <div class="file-thumb landscape">
+            <div class="tooltip">Q3 sales review deck · authored by Head of Sales (landscape)</div>
+            <div class="page" style="position:relative;">
+              <div class="icon" style="background:#fef3c7; color:#92400e;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              </div>
+              <div class="lines" style="display:flex; gap:4px;">
+                <div style="flex:1;"><div class="line" style="height:3px;"></div><div class="line short" style="height:3px;"></div></div>
+                <div style="flex:1;"><div class="line" style="height:3px;"></div><div class="line short" style="height:3px;"></div></div>
+              </div>
+              <span class="ext-badge" style="background:#92400e;">PPT</span>
+            </div>
+            <div class="name">Q3 sales review</div>
+          </div>
+        </label>
+
         <!-- Divider between produced and fetched -->
         <div style="width:1px; background:#cbd5e1; height:80px; margin: 0 8px;"></div>
 
@@ -713,7 +748,7 @@
 
         <!-- File: Acme renewal proposal -->
         <div class="reader-content rc-proposal">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Acme renewal proposal · Draft v1 · authored by Head of Sales · 28s ago</div>
             <h1>Acme — Q3 Renewal Proposal</h1>
             <p>Acme has been a customer since Q2 2024. Over the past four quarters they've moved from initial-pilot tier to mid-market tier, with $48K ARR and 23% NRR expansion driven primarily by additional seats and the upgrade to the Pro Workflows package in February.</p>
@@ -732,7 +767,7 @@
 
         <!-- File: Competitor pricing analysis -->
         <div class="reader-content rc-competitor">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Competitor pricing analysis · Draft · authored by Research Analyst · still updating</div>
             <h1>Competitor pricing — Q3 2026</h1>
             <p>Pulled from public rate cards on the four competitors most frequently mentioned by Acme during the contract negotiation. All figures normalised to per-seat per-month, billed annually, US list pricing.</p>
@@ -752,7 +787,7 @@
 
         <!-- File: Pricing annex -->
         <div class="reader-content rc-annex">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Pricing annex · Draft · authored by Head of Operations · still updating</div>
             <h1>Pricing annex — Acme renewal</h1>
             <p>Line-item breakdown of the proposed renewal terms.</p>
@@ -778,7 +813,7 @@
 
         <!-- File: Stripe rate card -->
         <div class="reader-content rc-stripe">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">Stripe rate card · External reference · fetched from stripe.com · 8s ago</div>
             <h1>Stripe — Pro tier (excerpt)</h1>
             <p><em>Source: stripe.com/pricing — fetched 8s ago. Auto-extracted by the Research Analyst agent. Read-only reference.</em></p>
@@ -796,7 +831,7 @@
 
         <!-- File: PayPal rate card -->
         <div class="reader-content rc-paypal">
-          <div class="reader-paper">
+          <div class="reader-paper portrait">
             <div class="meta">PayPal rate card · External reference · fetched from paypal.com · 8s ago</div>
             <h1>PayPal — Plus tier (excerpt)</h1>
             <p><em>Source: paypal.com/business/pricing — fetched 8s ago. Auto-extracted by the Research Analyst agent. Read-only reference.</em></p>
@@ -808,6 +843,42 @@
               </tbody>
             </table>
             <p>PayPal Plus is the closest comparator. Effective annual ($76) is 19% above our proposed renewal — gives us comfortable headroom to position as the value option.</p>
+          </div>
+        </div>
+
+        <!-- File: Q3 sales review deck (LANDSCAPE) -->
+        <div class="reader-content rc-deck">
+          <div class="reader-paper landscape">
+            <div class="meta">Q3 sales review · Slide deck · landscape · Head of Sales</div>
+            <h1>Q3 — Renewal book in numbers</h1>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 16px;">
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 11px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 4px;">Renewals due Q3</div>
+                <div style="font-family: Inter, sans-serif; font-size: 36px; font-weight: 700; color: #0f172a;">14</div>
+                <p style="font-size: 12px; color: #64748b; margin-top: 4px;">$483K total ARR up for renewal across mid-market customers.</p>
+              </div>
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 11px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 4px;">Acme alone</div>
+                <div style="font-family: Inter, sans-serif; font-size: 36px; font-weight: 700; color: #4f46e5;">$48K</div>
+                <p style="font-size: 12px; color: #64748b; margin-top: 4px;">Largest single renewal in the cohort. 23% NRR expansion.</p>
+              </div>
+              <div>
+                <div style="font-family: Inter, sans-serif; font-size: 11px; color:#94a3b8; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 4px;">Forecast NRR (Q3)</div>
+                <div style="font-family: Inter, sans-serif; font-size: 36px; font-weight: 700; color: #059669;">112%</div>
+                <p style="font-size: 12px; color: #64748b; margin-top: 4px;">Conservative — assumes Acme accepts at proposed terms.</p>
+              </div>
+            </div>
+            <h2>Cohort breakdown — by status</h2>
+            <table>
+              <thead><tr><th>Status</th><th>Customers</th><th>ARR</th><th>Win-rate target</th></tr></thead>
+              <tbody>
+                <tr><td>Quoted, awaiting decision</td><td class="num">6</td><td class="num">$214K</td><td class="num">75%</td></tr>
+                <tr><td>In negotiation</td><td class="num">5</td><td class="num">$181K</td><td class="num">85%</td></tr>
+                <tr><td>Drafting (Acme)</td><td class="num">1</td><td class="num">$48K</td><td class="num">90%</td></tr>
+                <tr><td>Auto-renew (no touch)</td><td class="num">2</td><td class="num">$40K</td><td class="num">100%</td></tr>
+              </tbody>
+            </table>
+            <p style="font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 24px;">Slide 3 of 8 · use ← → to navigate (presentation mode)</p>
           </div>
         </div>
 

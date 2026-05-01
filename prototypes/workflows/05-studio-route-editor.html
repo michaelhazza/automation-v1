@@ -118,13 +118,10 @@
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  /* On-reject loop indicator — labelled chip, no drawn line */
-  .reject-chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    margin-top: 10px; padding: 4px 10px; border-radius: 999px;
-    background: #fff7ed; border: 1px dashed #fb923c; color: #9a3412;
-    font-size: 11px; font-weight: 500; white-space: nowrap;
-  }
+  /* Reject loop visual: SVG dashed line drawn over a wrapper that
+     contains both step 4 and step 5, so coords are predictable. */
+  .reject-wrapper { position: relative; }
+  .reject-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 </style>
 </head>
 <body class="min-h-screen pb-32">
@@ -213,6 +210,9 @@
     </div>
   </div>
 
+  <!-- Wrap branch + ends + step 5 in a relative container so the dashed reject SVG can span both step 4 and step 5 -->
+  <div class="reject-wrapper">
+
   <!-- Two paths -->
   <div class="grid grid-cols-2 gap-6 mt-3">
     <div class="flex flex-col items-center gap-2">
@@ -270,14 +270,31 @@
           <div class="text-[10.5px] text-slate-400 num ml-1">5</div>
         </div>
       </div>
-      <!-- On-reject indicator chip — clear and unambiguous, no drawn line -->
-      <div class="reject-chip">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-        <span>On reject — loops back to step 4 (Draft personal email)</span>
-      </div>
     </div>
     <div></div>
   </div>
+
+  <!-- Dashed reject loop — drawn as SVG positioned over the wrapper.
+       Coords (in the 720-wide canvas):
+         step 4 left edge ≈ x=24 (300-wide card centered in 348-wide left col)
+         step 5 top-left ≈ (24, 158)
+         step 4 middle ≈ (24, 96)
+       Path: from step 5 top-left → LEFT → UP → RIGHT to step 4 left edge.
+       Arrowhead at the right-end pointing into step 4. -->
+  <svg class="reject-svg">
+    <path d="M 22 158 L 6 158 L 6 96 L 20 96"
+          stroke="#ea580c" stroke-width="1.75" stroke-dasharray="5 3"
+          fill="none" stroke-linecap="round" />
+    <!-- Arrowhead pointing right at step 4 left edge -->
+    <path d="M 14 90 L 22 96 L 14 102"
+          stroke="#ea580c" stroke-width="1.75"
+          fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- ON REJECT label, vertical along the line -->
+    <text x="-1" y="138" font-family="Inter, sans-serif" font-size="9" font-weight="700" fill="#ea580c" letter-spacing="1" transform="rotate(-90, -1, 138)">ON REJECT</text>
+  </svg>
+
+  </div>
+  <!-- end reject-wrapper -->
 
   <div class="grid grid-cols-2 gap-6">
     <div class="flex flex-col items-center"><div class="connector" style="height:24px;"></div></div>
