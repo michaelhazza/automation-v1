@@ -31,8 +31,8 @@ user can audit after the fact.
 
 ## Configuration
 
-**MODE** — set per invocation, not per session.
-- `manual` — you copy the spec into the ChatGPT UI and paste the response back. No API key required.
+**MODE** — set per invocation, not per session. Default is `manual` — only use `automated` if the user explicitly says "automated".
+- `manual` (default) — you copy the spec into the ChatGPT UI and paste the response back. No API key required.
 - `automated` — the agent calls the OpenAI API via `scripts/chatgpt-review.ts`. Requires `OPENAI_API_KEY`.
 
 **HUMAN_IN_LOOP: yes** — default for automated sessions only. Has no effect in manual mode (the user is already in the loop by definition).
@@ -58,9 +58,8 @@ When the user says "run chatgpt-spec-review" (or equivalent):
 
 **First: determine MODE from the invocation.**
 
-- If the invocation contains "manual" → MODE = manual
 - If the invocation contains "automated" → MODE = automated
-- If neither → ask: "Manual (you copy the spec into ChatGPT UI and paste the response back — no API cost) or automated (calls OpenAI API, requires OPENAI_API_KEY)? Reply: manual or automated." Wait for reply before proceeding.
+- Otherwise (invocation contains "manual", or neither keyword appears) → MODE = manual. Do NOT ask — default silently to manual. Only invoke automated mode when the user explicitly says "automated".
 
 MODE is recorded in the session log Session Info block and restored on resume.
 
@@ -71,8 +70,10 @@ Run: `ls tasks/review-logs/chatgpt-spec-review-*.md 2>/dev/null | sort | tail -1
   - If resuming: read the `Mode:` field from the log's Session Info block to restore MODE. If the MODE from the invocation differs from the log's MODE, warn: "Session was started in [log-mode] mode; current invocation specifies [invocation-mode]. Using [log-mode] to match the existing session."
 - If no log exists: run the full On Start sequence below.
 
-1. Auto-detect the spec file:
-   - Run `git diff main...HEAD --name-only` to list changed files
+1. Run `git fetch origin main` to ensure `origin/main` is current before computing any diffs — the local `main` pointer may be stale.
+
+2. Auto-detect the spec file:
+   - Run `git diff origin/main...HEAD --name-only` to list changed files
    - Filter for files matching tasks/**/*.md or docs/**/*.md (recursive —
      includes nested paths like docs/superpowers/specs/*.md), excluding:
      CLAUDE.md, architecture.md, capabilities.md, tasks/review-logs/**,

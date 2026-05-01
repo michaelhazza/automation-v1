@@ -31,6 +31,10 @@ export interface IncidentInput {
   // Integrations with a domain-stable identifier pass it here to bypass
   // stack-derived fingerprinting. Must match FINGERPRINT_OVERRIDE_RE.
   fingerprintOverride?: string;
+
+  // Caller-supplied deduplication key; overrides stack-derived fingerprinting
+  // for sweep and synthetic check callers that have domain-stable identifiers.
+  idempotencyKey?: string;
 }
 
 // ---------------------------------------------------------------------------

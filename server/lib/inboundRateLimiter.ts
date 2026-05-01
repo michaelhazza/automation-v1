@@ -64,7 +64,7 @@ export function setRateLimitDeniedHeaders(res: import('express').Response, reset
   res.set('X-RateLimit-Policy', RATE_LIMIT_POLICY_HEADER_VALUE);
 }
 
-interface CheckRow {
+interface CheckRow extends Record<string, unknown> {
   current_count: number;
   curr_window_start: Date;
   prev_count: number;

@@ -15,8 +15,8 @@ Every finding is triaged into one of the two buckets. Every triage decision, eve
 
 ## Configuration
 
-**MODE** — set per invocation, not per session.
-- `manual` — you copy the diff into the ChatGPT UI and paste the response back. No API key required.
+**MODE** — set per invocation, not per session. Default is `manual` — only use `automated` if the user explicitly says "automated".
+- `manual` (default) — you copy the diff into the ChatGPT UI and paste the response back. No API key required.
 - `automated` — the agent calls the OpenAI API via `scripts/chatgpt-review.ts`. Requires `OPENAI_API_KEY`.
 
 **HUMAN_IN_LOOP: yes** — default for automated sessions only. Has no effect in manual mode (the user is already in the loop by definition).
@@ -42,9 +42,8 @@ When the user says "run chatgpt-pr-review" (or equivalent):
 
 **First: determine MODE from the invocation.**
 
-- If the invocation contains "manual" → MODE = manual
 - If the invocation contains "automated" → MODE = automated
-- If neither → ask: "Manual (you copy the diff into ChatGPT UI and paste the response back — no API cost) or automated (calls OpenAI API, requires OPENAI_API_KEY)? Reply: manual or automated." Wait for reply before proceeding.
+- Otherwise (invocation contains "manual", or neither keyword appears) → MODE = manual. Do NOT ask — default silently to manual. Only invoke automated mode when the user explicitly says "automated".
 
 MODE is recorded in the session log Session Info block and restored on resume.
 
@@ -57,8 +56,9 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 - If no log exists: run the full On Start sequence below.
 
 1. Run `git branch --show-current` to get the current branch name
-2. Run `git diff origin/main...HEAD` to get the full diff
-3. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
+2. Run `git fetch origin main` to ensure the local `origin/main` ref is current — the local `main` pointer may be stale if you have not switched to that branch recently.
+3. Run `git diff origin/main...HEAD` to get the full diff (always use `origin/main`, never the local `main` ref)
+4. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
    - If the command returns nothing (no PR): run `gh pr create --fill` to create one
 4. Always print the PR URL as a prominent standalone line — whether just created or already existing:
 

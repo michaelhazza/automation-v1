@@ -2148,6 +2148,15 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 - [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
 - [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
 
+## PR Review deferred items
+
+### PR #246 — lint-typecheck-baseline (2026-05-01)
+
+- [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
+- [ ] F7: update plan doc to reflect that `agentDiagnosis` column is `jsonb` not `text` — JSONB is the correct type for structured diagnosis data and is already used by `writeDiagnosis.ts`; plan was written before the type decision was finalised. [auto]
+- [ ] F14: add migration compatibility test — `it('handles null agentDiagnosis for legacy rows')` covering null agentDiagnosisRunId / agentDiagnosis (pre-migration rows); see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [user]
+- [ ] F28: add idempotency double-tap test for writeDiagnosis — run same (incidentId, agentRunId) pair twice and verify no duplicate rows, no divergent state; see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [auto]
+
 ## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
 
 **PR:** #242 (claude/agency-email-sharing-hMdTA)

@@ -135,7 +135,7 @@ router.post(
 
       res.status(201).json({
         ...result.message,
-        ...buildConversationFollowUpResponseExtras({ route: result.route, fastPathDecision: result.fastPathDecision }),
+        ...buildConversationFollowUpResponseExtras({ route: result.route, fastPathDecision: result.fastPathDecision as unknown as { route: string; [k: string]: unknown } }),
       });
       return;
     }
