@@ -147,7 +147,7 @@ All sources below are already shipped except the cross-tenant median view (built
 | Agent runs | `agent_runs` | Yes | budget, routing_uncertainty (via join) |
 | Step events | `agent_execution_events` | Yes | skill.slow (timing extraction) |
 | Cost aggregates | `cost_aggregates` | Yes (multi-scope) | agent.over_budget |
-| HITL escalations | `review_items` joined to `actions` | Yes | playbook.escalation_rate, escalation.repeat_phrase |
+| HITL escalations | `review_items` joined to `actions`; modal escalating step from `flow_step_outputs` (`flow_run_id`, `step_id`, `status='failed'`) joined to `flow_runs` | Yes | playbook.escalation_rate, escalation.repeat_phrase |
 | Health snapshots | `client_pulse_health_snapshots` | Yes | context only, not direct trigger |
 | Workflow last-run | `flow_runs` | Yes | playbook.escalation_rate |
 | Scheduled sub-account agents | `subaccount_agents` (`scheduleEnabled`, `scheduleCron`, `scheduleTimezone`) joined to `agent_runs` (last started_at per `subaccountAgentId`) | Yes | inactive.workflow |
@@ -175,6 +175,11 @@ New agent definition file: `companies/automation-os/agents/subaccount-optimiser/
 - **Role:** `subaccount-optimiser`
 - **Scope:** `subaccount` (mirrors all 15+ business agents per migration 0106)
 - **Schedule:** daily at sub-account local 06:00 (cron derived from sub-account's `timezone`). Stored on the sub-account agent's existing `subaccount_agents.scheduleCron` / `scheduleEnabled` / `scheduleTimezone` columns — no new schedule surface. Overriding the cron is the same operation as overriding any other sub-account agent's schedule (via `agentScheduleService.updateSchedule`).
+- **Sub-account-agent row bootstrap.** Schedule writes presuppose a `subaccount_agents` row linking the optimiser org agent (role `subaccount-optimiser`) to each sub-account where `subaccounts.optimiser_enabled = true`. Two paths ensure that row exists:
+  - **Backfill at deploy time** — the Phase 2 backfill script (`scripts/backfill-optimiser-schedules.ts`) does an idempotent `INSERT … ON CONFLICT DO NOTHING` of the `subaccount_agents` link before issuing the schedule write. Re-running the backfill is safe.
+  - **New sub-accounts after deploy** — `subaccountService.create` (or the equivalent admin onboarding path) gets a hook that creates the optimiser link + schedule when `optimiser_enabled = true` (the column defaults to true, so this fires by default). A sub-account that opts out skips both.
+
+  Without these two paths, the daily cron has nothing to bind to and the optimiser silently no-ops for that sub-account.
 - **Default-on:** yes. Opt-out is a backend boolean column `subaccounts.optimiser_enabled` (default true). v1 has no operator-visible UI toggle — the column is flipped via admin SQL or a Configuration Assistant prompt that writes it. A dedicated subaccount-settings UI surface is deferred (see Deferred Items).
 
 System prompt (draft):
@@ -222,6 +227,7 @@ CREATE TABLE agent_recommendations (
   action_hint TEXT,
   dedupe_key TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- set on insert; bumped on every update_in_place, acknowledge, dismiss
   acknowledged_at TIMESTAMPTZ,
   dismissed_at TIMESTAMPTZ,
   dismissed_reason TEXT
@@ -232,7 +238,7 @@ CREATE UNIQUE INDEX agent_recommendations_dedupe
   WHERE dismissed_at IS NULL;
 
 CREATE INDEX agent_recommendations_open_by_scope
-  ON agent_recommendations(scope_type, scope_id, created_at DESC)
+  ON agent_recommendations(scope_type, scope_id, updated_at DESC)
   WHERE dismissed_at IS NULL AND acknowledged_at IS NULL;
 
 CREATE INDEX agent_recommendations_org
@@ -268,7 +274,7 @@ New skill defined in `server/skills/output/recommend.md`, executor in `server/se
 
 **Output:** `{ recommendation_id: string, was_new: boolean, reason?: 'cap_reached' | 'updated_in_place' }`.
 - `was_new=true` — new row inserted.
-- `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` AND the new `evidence_hash` differs from the stored `evidence_hash`. Executor updates `title`, `body`, `evidence`, `evidence_hash`, `severity`, and `action_hint` on the existing row in place; `created_at` is preserved; `acknowledged_at` is set to `NULL` (re-surface the row to the operator since something material changed); `recommendation_id` returned is the existing row's id.
+- `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` AND the new `evidence_hash` differs from the stored `evidence_hash`. Executor updates `title`, `body`, `evidence`, `evidence_hash`, `severity`, `action_hint`, and `updated_at` (= `now()`) on the existing row in place; `created_at` is preserved; `acknowledged_at` is set to `NULL` (re-surface the row to the operator since something material changed); `recommendation_id` returned is the existing row's id.
 - `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations. Insert refused; `recommendation_id` returned is `''`. Cap is enforced inside the executor via `pg_advisory_xact_lock(hashtext('output.recommend.cap:' || scope_type || ':' || scope_id || ':' || producing_agent_id))` taken before the `SELECT count(*)` that gates the insert. The advisory lock serialises insert decisions per `(scope, producing_agent_id)` triple within a transaction, eliminating the count-then-insert TOCTOU race. Pattern lifted from `feature_requests` (per architecture.md → "Feature request pipeline" → `pg_advisory_xact_lock(orgId + dedupeHash)` inside the insert transaction).
 - `was_new=false` (no `reason`) — open match existed and `evidence_hash` matches; no write performed. The operator-facing copy and the row's `acknowledged_at` state are preserved.
 
@@ -281,6 +287,8 @@ New skill defined in `server/skills/output/recommend.md`, executor in `server/se
 **Retry classification.** `output.recommend` is `safe` (key-based idempotency); callers may retry on transport failure without further coordination. The acknowledge / dismiss HTTP routes are `guarded` — both use `UPDATE agent_recommendations SET … WHERE id = $1 AND dismissed_at IS NULL` (or `acknowledged_at IS NULL` for acknowledge); a second call lands as a 200-idempotent-no-op rather than a 409.
 
 **Permission:** any agent with `output.recommend` in its skill manifest can call it. The executor enforces that `scope_id` belongs to the agent's organisation by resolving `scope_id → organisation_id` and comparing to `req.orgId` / the agent's organisation.
+
+**`producing_agent_id` provenance.** `producing_agent_id` is NOT part of the `output.recommend` input contract — it is derived from the calling agent's execution context inside the executor (`SkillExecutionContext.agentId`). Callers cannot supply or override it. Non-agent invocations of `output.recommend` (e.g. a route handler trying to call the skill directly outside an `agent_runs` context) are rejected with `failure(FailureReason.InvalidInput, 'output.recommend requires an agent execution context')`. This guarantees the cap-lock key `(scope_type, scope_id, producing_agent_id)` is always honestly populated and prevents one agent from saturating another's slot in the open-rec cap.
 
 **Category naming:** convention only, no schema validation. Convention is `<area>.<finding>` (e.g. `agent.over_budget`, `health.churn_risk_high`). The primitive doesn't enforce a registry — agents own their category namespaces. If two agents pick the same `(scope, category, dedupe_key)`, dedupe will treat them as the same finding; agents should namespace categories to avoid collisions in practice.
 
@@ -313,9 +321,9 @@ New React component at `client/src/components/recommendations/AgentRecommendatio
 }
 ```
 
-Renders a vertical list of open recommendations for the given scope, sorted by severity (critical / warn / info) then by `created_at desc`. Each row: severity dot, plain-English title, one-sentence body, "Help me fix this →" link (deep-links to Configuration Assistant pre-loaded with the recommendation's `action_hint`; clicking this link also fires the acknowledge endpoint as fire-and-forget per §6.5), small × dismiss with reason input.
+Renders a vertical list of open recommendations for the given scope, sorted by severity (critical / warn / info) then by `updated_at desc` (so re-rendered findings rise to the top — the row's freshness, not its first-seen-time, drives ordering). Each row: severity dot, plain-English title, one-sentence body, "Help me fix this →" link (deep-links to Configuration Assistant pre-loaded with the recommendation's `action_hint`; clicking this link also fires the acknowledge endpoint as fire-and-forget per §6.5), small × dismiss with reason input.
 
-**Row-data contract from the hook.** `useAgentRecommendations` returns rows shaped as `{ id, scope_type, scope_id, subaccount_display_name?: string, category, severity, title, body, action_hint, evidence, created_at, acknowledged_at, dismissed_at }`. `subaccount_display_name` is populated ONLY for `scope_type='subaccount'` rows fetched in org-rollup mode (`includeDescendantSubaccounts=true`); the hook joins to `subaccounts.name` server-side and returns the resolved string. Sub-account scope and org-only-row queries omit the field.
+**Row-data contract from the hook.** `useAgentRecommendations` returns rows shaped as `{ id, scope_type, scope_id, subaccount_display_name?: string, category, severity, title, body, action_hint, evidence, created_at, updated_at, acknowledged_at, dismissed_at }`. `subaccount_display_name` is populated ONLY for `scope_type='subaccount'` rows fetched in org-rollup mode (`includeDescendantSubaccounts=true`); the hook joins to `subaccounts.name` server-side and returns the resolved string. Sub-account scope and org-only-row queries omit the field.
 
 **Org-rollup row label.** When `scope_type='subaccount'` rows are rendered in org-rollup mode, the row prepends a small slate-500 label `<subaccount_display_name> · ` before the operator-facing title (e.g. "Smith Dental · Reporting Agent is spending more than expected"). In single-scope mode (sub-account context, or `includeDescendantSubaccounts=false`), the label is omitted.
 
@@ -358,6 +366,7 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
     "action_hint": "configuration-assistant://agent/agent-uuid?focus=budget",
     "dedupe_key": "agent-uuid",
     "created_at": "2026-05-02T06:00:00Z",
+    "updated_at": "2026-05-02T06:00:00Z",
     "acknowledged_at": null,
     "dismissed_at": null,
     "dismissed_reason": null
@@ -367,14 +376,40 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
 **`output.recommend` input/output** — already pinned in §6.2 (input contract + output discriminated by `was_new` and `reason`). Producer: any agent with the skill in its manifest. Consumer: `skillExecutor.ts`.
 
 **Read endpoint** (the GET that `useAgentRecommendations` calls).
-- `GET /api/recommendations?scopeType=org|subaccount&scopeId=<uuid>&includeDescendantSubaccounts=<bool>&limit=<int>` — returns `{ rows: AgentRecommendationRow[], total: number }` where `AgentRecommendationRow` matches the §6.3 row-data contract (including the `subaccount_display_name` field populated only for rolled-up sub-account rows). Default `limit=20`; cap at 100. Sort: severity desc → created_at desc. Filters out `acknowledged_at IS NOT NULL` and `dismissed_at IS NOT NULL` rows by default (no query param to surface them in v1).
+- `GET /api/recommendations?scopeType=org|subaccount&scopeId=<uuid>&includeDescendantSubaccounts=<bool>&limit=<int>` — returns `{ rows: AgentRecommendationRow[], total: number }` where `AgentRecommendationRow` matches the §6.3 row-data contract (including the `subaccount_display_name` field populated only for rolled-up sub-account rows). Default `limit=20`; cap at 100. Sort: severity desc → `updated_at` desc (so a recently-re-rendered finding bubbles to the top of the list). Filters out `acknowledged_at IS NOT NULL` and `dismissed_at IS NOT NULL` rows by default (no query param to surface them in v1).
+- `total` is the post-RLS open-row count for the requested scope, NOT clamped to `limit`. The `<AgentRecommendationsList>` component fires `onTotalChange(total)` so the parent can render "See all N →" with the real N.
 - Auth-gated (`authenticate`); RLS scopes rows to the caller's org. When `scopeType=org AND includeDescendantSubaccounts=true`, the route does a single SQL with `OR (scope_type='subaccount' AND scope_id IN (SELECT id FROM subaccounts WHERE organisation_id = $orgId))` — RLS does the per-subaccount visibility filter automatically, no app-layer permission filter.
 - 404 when `scopeId` doesn't exist or isn't visible to the caller. 422 on bad `scopeType`/`scopeId` shape.
 
 **Acknowledge / dismiss HTTP endpoints.**
 - `POST /api/recommendations/:recId/acknowledge` — request body `{}`; response `{ success: true, alreadyAcknowledged: boolean }`. Idempotent: a second call returns `alreadyAcknowledged: true` rather than 409. 404 when `:recId` doesn't exist or isn't visible to the caller (RLS-filtered).
 - `POST /api/recommendations/:recId/dismiss` — request body `{ reason: string }` (`reason` max 500 chars). Response `{ success: true, alreadyDismissed: boolean }`. Idempotent on the dismiss path; the second call's `reason` is ignored. 404 same as above.
-- Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. Idempotency is state-based, not key-based: each route runs `UPDATE agent_recommendations SET acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL` (or the dismiss equivalent) inside a transaction; a row-count of `0` means the row is already in the target state and the route returns 200 with `alreadyAcknowledged: true` / `alreadyDismissed: true` rather than retrying. No unique-constraint edge applies; `23505` is not part of the contract.
+- Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. Idempotency is state-based, not key-based, and the route distinguishes "row missing / RLS-hidden" from "already in target state" via a two-step CTE pattern:
+
+  ```sql
+  WITH existing AS (
+    SELECT id, acknowledged_at, dismissed_at
+    FROM agent_recommendations
+    WHERE id = $1
+    FOR UPDATE
+  ),
+  updated AS (
+    UPDATE agent_recommendations
+    SET acknowledged_at = now(), updated_at = now()
+    WHERE id = $1 AND acknowledged_at IS NULL
+    RETURNING id
+  )
+  SELECT
+    (SELECT count(*) FROM existing) AS existed,
+    (SELECT count(*) FROM updated)  AS updated_rows;
+  ```
+
+  Decision matrix:
+  - `existed = 0` → 404 (row absent or RLS-hidden — RLS makes the row invisible to a non-owning org so 404 is the correct response, not 403).
+  - `existed = 1, updated_rows = 0` → 200 `{ alreadyAcknowledged: true }` (target state already reached; no-op).
+  - `existed = 1, updated_rows = 1` → 200 `{ alreadyAcknowledged: false }` (this call performed the transition).
+
+  Same shape for dismiss with `acknowledged_at` swapped for `dismissed_at` and `reason` recorded in `dismissed_reason`. `updated_at` is bumped on both transitions. No `23505` edge applies — there is no unique-constraint involvement on the UPDATE path.
 
 **Implicit acknowledge on deep-link click.** The "Help me fix this →" UI affordance triggers the acknowledge endpoint client-side as a fire-and-forget `POST` immediately after the deep-link navigation begins (the user has acted on the recommendation, so it should leave the operator's list). The dismiss × button is the only explicitly-visible alternate row action in v1 — there is no separate visible "Acknowledge" button. This keeps the row contract clean (one primary action + one dismiss) per the frontend design principles. If the user does NOT click the deep-link and instead returns to the dashboard later, the recommendation remains visible.
 
@@ -417,7 +452,7 @@ Both render the same component with the same layout. Only the data scope changes
 
 Section header: **"A few things to look at"** (h2, matches the `text-[17px] font-bold text-slate-900 tracking-tight mb-3.5` style of sibling sections).
 
-Sub-header line (12.5px, slate-500): "Updated this morning" + a sec-link "See all N →" on the right when there are more than 3 open recommendations. The N comes from the `onTotalChange` callback fired by `<AgentRecommendationsList>` after each fetch (per §6.3). DashboardPage holds `[mode, setMode] = useState<'collapsed'|'expanded'>('collapsed')` and `[total, setTotal] = useState(0)`; clicking the "See all N →" link calls `setMode('expanded')` to flip the same component into expanded mode in place — no navigation in v1.
+Sub-header line (12.5px, slate-500): the freshness label, plus a sec-link "See all N →" on the right when there are more than 3 open recommendations. The freshness label is rendered from the maximum `updated_at` across the rows in the current scope (e.g. "Updated this morning" if the most-recent `updated_at` was within the last 4 hours; "Updated yesterday" otherwise — exact thresholds in `client/src/lib/relativeTime.ts`). The N comes from the `onTotalChange` callback fired by `<AgentRecommendationsList>` after each fetch (per §6.3). DashboardPage holds `[mode, setMode] = useState<'collapsed'|'expanded'>('collapsed')` and `[total, setTotal] = useState(0)`; clicking the "See all N →" link calls `setMode('expanded')` to flip the same component into expanded mode in place — no navigation in v1. Expanded mode fetches `limit=100` (the GET endpoint's hard cap); if `total > 100`, the truncation is acknowledged in the UI ("Showing 100 of N — see /suggestions for the full list" — the standalone page is a v1.1 deferred item).
 
 Body: top 3 open recommendations rendered by `<AgentRecommendationsList limit={3} mode={mode} onTotalChange={setTotal} … />` with the props above. Each row: severity dot, plain-English title (operator copy), one-sentence detail (operator copy with concrete numbers), "Help me fix this →" deep-link to Configuration Assistant.
 
@@ -475,7 +510,7 @@ Builds reusable infrastructure that survives beyond the optimiser.
 
 - [ ] Author 8 query modules under `server/services/optimiser/queries/`:
   - `agentBudget.ts` (reads `cost_aggregates`)
-  - `escalationRate.ts` (joins `flow_runs` + `review_items` + `actions`)
+  - `escalationRate.ts` (joins `flow_runs` + `flow_step_outputs` + `review_items` + `actions`; aggregates by `workflow_id` for run/escalation counts and uses modal `flow_step_outputs.stepId` of the escalating runs as `common_step_id` for the §6.5 `step=` deep-link parameter)
   - `skillLatency.ts` (per-sub-account p95 over 7 days from `agent_execution_events`)
   - `inactiveWorkflows.ts` (joins `subaccount_agents` rows where `scheduleEnabled=true AND scheduleCron IS NOT NULL` to `agent_runs.startedAt` last-run; expected cadence computed via `scheduleCalendarServicePure.computeNextHeartbeatAt`)
   - `escalationPhrases.ts` (tokenises `review_items.reviewPayloadJson`; ships the regex-based tokeniser, stopword filter, and n-gram counter required by `escalation.repeat_phrase` — no separate later phase)
@@ -493,7 +528,8 @@ Builds reusable infrastructure that survives beyond the optimiser.
 - [ ] Author 8 evaluator modules under `server/services/optimiser/recommendations/` — pure functions taking query output and emitting `Recommendation[]` shapes ready for `output.recommend`.
 - [ ] LLM-render step in agent runtime: small prompt that takes raw evidence + category → 2-3 sentence operator-facing copy. Cached by `(category, dedupe_key, evidence_hash)`. Uses Sonnet (cheap, no need for Opus).
 - [ ] Schedule registration: extend `agentScheduleService.registerSubaccountSchedule` invocation point; daily cron at sub-account local 06:00.
-- [ ] Backfill: on first deploy, register schedules for all existing sub-accounts where `optimiser_enabled=true` (one-shot script). Stagger by `created_at` hash across 6-hour window to avoid pg-boss storm.
+- [ ] Backfill (`scripts/backfill-optimiser-schedules.ts`): for every sub-account where `subaccounts.optimiser_enabled=true`, idempotently `INSERT INTO subaccount_agents (...) ON CONFLICT DO NOTHING` to create the optimiser link, then call `agentScheduleService.updateSchedule(linkId, { scheduleCron, scheduleEnabled: true, scheduleTimezone })`. Re-running is safe. Stagger by `created_at` hash across 6-hour window to avoid pg-boss storm.
+- [ ] Hook in `subaccountService.create` (or the canonical admin onboarding path): when a new sub-account is created with `optimiser_enabled=true` (the default), create the optimiser `subaccount_agents` link + register its schedule. Idempotent (same `INSERT … ON CONFLICT DO NOTHING` shape as the backfill).
 - [ ] Integration test: full run end-to-end against test sub-account with seeded telemetry, assert recommendation rows appear with expected dedupe_keys.
 
 ### Phase 3 — Home dashboard wiring (~3h)
@@ -549,6 +585,7 @@ Builds reusable infrastructure that survives beyond the optimiser.
 - `server/services/optimiser/recommendations/{agentBudget,playbookEscalation,skillSlow,inactiveWorkflow,repeatPhrase,memoryCitation,routingUncertainty,cacheEfficiency}.ts` (8 new evaluator modules)
 - `server/services/skillExecutor.ts` (8 cases for scan skills)
 - `server/services/agentScheduleService.ts` (register optimiser schedule for sub-accounts)
+- `server/services/subaccountService.ts` (extend — hook into sub-account creation to create the optimiser `subaccount_agents` link + register its schedule when `optimiser_enabled=true`; idempotent insert)
 - `server/jobs/refreshOptimiserPeerMedians.ts` (new)
 - `scripts/backfill-optimiser-schedules.ts` (new) — one-shot script registering daily schedules for existing sub-accounts where `subaccounts.optimiser_enabled = true`; staggered by `created_at` hash across 6-hour window
 - `migrations/0267a_optimiser_peer_medians.sql` (+ `.down.sql`) — cross-tenant materialised view `optimiser_skill_peer_medians` over `agent_execution_events`
