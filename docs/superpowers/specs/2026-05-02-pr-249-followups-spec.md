@@ -204,7 +204,7 @@ For each match, classify:
 
 ### 6.3 — Out-of-scope reframe (do NOT pull this into the cleanup PR)
 
-The ClientPulse intervention-payload type system would benefit from a **discriminated union** (`type InterventionPayload = CreateTaskPayload | FireAutomationPayload | ...` with `actionType` as the discriminator). This is a substantive type-design refactor touching many editor components — it is **out of scope** for this cleanup spec and should be a separate spec when the operator chooses to tackle it. Note the deferred work under the F6 task self-review.
+The ClientPulse intervention-payload type system would benefit from a **discriminated union** (`type InterventionPayload = CreateTaskPayload | FireAutomationPayload | ...` with `actionType` as the discriminator). This is a substantive type-design refactor touching many editor components — it is **out of scope** for this cleanup spec and should be a separate spec when the operator chooses to tackle it. The deferred consideration is recorded in `tasks/todo.md` § *Deferred spec decisions — pr-249-followups* (alongside the F6 volume re-scope option) — that file is the canonical record; no new self-review note is required in this spec.
 
 ### 6.4 — Verify
 
@@ -230,7 +230,9 @@ Reference doc update triggers (per `docs/doc-sync.md`):
 - [ ] **KNOWLEDGE.md** — append a single Pattern entry if the F6 audit surfaces a notable convention (e.g. "polymorphic payloads keyed by `actionType` use `Record<string, unknown>` with a discriminator comment"). Otherwise n/a.
 - [ ] **docs/spec-context.md** — n/a (not a spec-review session).
 
-**Verdict format per doc:** record `yes — <summary>` or `no — <reason>` per the `docs/doc-sync.md § Verdict rule`. Bare `no` verdicts are treated as missing.
+**Verdict format per doc:** record one of `yes (sections X, Y)` / `no — <rationale>` / `n/a` per `docs/doc-sync.md § Verdict rule`. A bare `no` (without rationale) or a missing verdict is treated as missing per CLAUDE.md §11.
+
+**Investigation procedure:** for every doc above, run `docs/doc-sync.md § Investigation procedure` (read the doc, derive a candidate-stale-reference set from this branch's diff, grep the doc for each candidate, fix stale hits in this same finalisation pass, then assign a verdict). The pre-labelled `n/a` annotations above are starting hypotheses — they hold only when the investigation procedure produces zero candidates relevant to that doc's update trigger.
 
 ---
 
