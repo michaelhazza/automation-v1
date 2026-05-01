@@ -51,8 +51,8 @@ test('repeat emit for the same key calls logger.debug with repeated=true (not lo
   const warnCalls = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
   const debugCalls = (logger.debug as unknown as { mock: { calls: unknown[][] } }).mock.calls;
 
-  expect(warnCalls.length).toBe(1, 'WARN fires only on the first call');
-  expect(debugCalls.length).toBe(1, 'DEBUG fires on the repeat');
+  expect(warnCalls.length, 'WARN fires only on the first call').toBe(1);
+  expect(debugCalls.length, 'DEBUG fires on the repeat').toBe(1);
   expect(debugCalls[0]).toEqual([
     'data_dependency_missing',
     {
@@ -116,6 +116,6 @@ test('_resetWarnedKeysForTesting clears state so the next call is WARN again', (
 
   const warnCallsAfter = (logger.warn as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
   const debugCallsAfter = (logger.debug as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
-  expect(warnCallsAfter).toBe(2, 'first call after reset is WARN');
-  expect(debugCallsAfter).toBe(1, 'no extra DEBUG after reset');
+  expect(warnCallsAfter, 'first call after reset is WARN').toBe(2);
+  expect(debugCallsAfter, 'no extra DEBUG after reset').toBe(1);
 });
