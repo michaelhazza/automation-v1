@@ -3,7 +3,7 @@
 ## Session Info
 - Spec: `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md`
 - Branch: `pr-249-followups`
-- PR: _TBD — created after Round 1 commit (no diff existed at session start because the spec was committed directly to `main` across 5 prior `spec-reviewer` iterations)_
+- PR: #251 — https://github.com/michaelhazza/automation-v1/pull/251 (created after Round 1 commit because no diff existed at session start; the spec had been committed directly to `main` across 5 prior `spec-reviewer` iterations)
 - Mode: manual
 - Started: 2026-05-01T23:48:20Z
 
