@@ -102,7 +102,7 @@ export async function maybeAutoEscalate(incidentId: string, now: Date = new Date
   }
 
   try {
-    await systemIncidentService.escalateIncidentToAgent(incidentId, SYSTEM_ACTOR_ID, 'system');
+    await systemIncidentService.escalateIncidentToAgent(incidentId, SYSTEM_ACTOR_ID);
 
     // Mark as auto-escalated (separate from the standard 'escalation' event written by escalateIncidentToAgent)
     await db.insert(systemIncidentEvents).values({

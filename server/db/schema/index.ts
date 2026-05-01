@@ -234,6 +234,15 @@ export * from './delegationOutcomes.js';
 export * from './systemIncidents.js';
 export * from './systemIncidentEvents.js';
 export * from './systemIncidentSuppressions.js';
+export * from './systemMonitorHeuristicFires.js';
+export * from './systemMonitorBaselines.js';
 
 // Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
 export * from './rateLimitBuckets';
+
+// Live External Document References — document cache + fetch audit log (migration 0262)
+export * from './documentCache';
+export * from './documentFetchEvents';
+
+// Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
+export * from './conversationThreadContext';

@@ -2,6 +2,15 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import api from '../lib/api';
 import Modal from './Modal';
 import { TaskChatPane } from './task-chat/TaskChatPane.js';
+import { DriveFilePicker, type DriveFile } from './DriveFilePicker';
+import { ExternalDocumentRebindModal } from './ExternalDocumentRebindModal';
+import {
+  attachExternalReference,
+  listExternalReferences,
+  removeExternalReference,
+  setFailurePolicy,
+  type ExternalDocumentReference,
+} from '../api/externalDocumentReferences';
 
 interface Agent {
   id: string;
@@ -129,6 +138,36 @@ const activityIcons: Record<string, string> = {
 const inputCls = 'px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none w-full';
 const labelCls = 'text-xs font-semibold text-slate-500';
 
+function humanFileType(mimeType: string): string {
+  if (mimeType === 'application/vnd.google-apps.document') return 'Doc';
+  if (mimeType === 'application/vnd.google-apps.spreadsheet') return 'Sheet';
+  if (mimeType === 'application/pdf') return 'PDF';
+  return 'File';
+}
+
+function relativeTime(iso: string | null | undefined): string {
+  if (!iso) return 'never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hr ago`;
+  return `${Math.floor(h / 24)} d ago`;
+}
+
+function plainEnglishFailureReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'auth_revoked': return 'The Google Drive connection no longer has access to this file.';
+    case 'file_deleted': return 'This file has been deleted from Google Drive.';
+    case 'rate_limited': return 'Drive temporarily rate-limited the platform; the file is unavailable for this run.';
+    case 'unsupported_content': return 'The file is empty or in an unsupported format.';
+    case 'quota_exceeded': return 'The file is too large to fetch.';
+    case 'network_error': return 'Could not reach Google Drive.';
+    default: return 'The file could not be fetched.';
+  }
+}
+
 export default function TaskModal({ subaccountId, itemId, agents, columns, onClose, onSaved }: Props) {
   const [task, setTask] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,6 +198,16 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
   const [myVotes, setMyVotes] = useState<Record<string, MyVote>>({});
   const [votingId, setVotingId] = useState<string | null>(null);
 
+  // Drive external references state
+  const [driveRefs, setDriveRefs] = useState<ExternalDocumentReference[]>([]);
+  const [driveConnections, setDriveConnections] = useState<Array<{ id: string; label?: string | null; ownerEmail?: string | null }>>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [fetchFailurePolicy, setFetchFailurePolicy] = useState<'tolerant' | 'strict' | 'best_effort'>('tolerant');
+  const [rebindReference, setRebindReference] = useState<ExternalDocumentReference | null>(null);
+
+  // Derived
+  const brokenCount = driveRefs.filter(r => r.state === 'broken').length;
+
   const loadAttachments = useCallback(async () => {
     setAttachmentsLoading(true);
     try {
@@ -185,6 +234,24 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
       // ignore
     }
   }, []);
+
+  const loadDriveRefs = useCallback(async () => {
+    try {
+      const result = await listExternalReferences(subaccountId, itemId);
+      setDriveRefs(result.refs);
+      setFetchFailurePolicy(result.fetchFailurePolicy);
+    } catch { /* ignore */ }
+  }, [subaccountId, itemId]);
+
+  const loadDriveConnections = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/api/subaccounts/${subaccountId}/connections`);
+      setDriveConnections(
+        (data as Array<{ id: string; providerType: string; connectionStatus: string; label?: string | null; ownerEmail?: string | null }>)
+          .filter(c => c.providerType === 'google_drive' && c.connectionStatus === 'active')
+      );
+    } catch { /* ignore */ }
+  }, [subaccountId]);
 
   const load = async () => {
     setLoading(true);
@@ -217,7 +284,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     }
   };
 
-  useEffect(() => { load(); loadAttachments(); }, [itemId]);
+  useEffect(() => { load(); loadAttachments(); loadDriveRefs(); loadDriveConnections(); }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleAgent = (agentId: string) => {
     setSelectedAgentIds(prev =>
@@ -315,6 +382,35 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     }
   };
 
+  const handlePick = useCallback(async (file: DriveFile, connectionId: string) => {
+    try {
+      await attachExternalReference(subaccountId, itemId, {
+        connectionId,
+        fileId: file.id,
+        fileName: file.name,
+        mimeType: file.mimeType,
+      });
+      await loadDriveRefs();
+    } catch (err: any) {
+      const code = err?.response?.data?.error;
+      if (code === 'per_task_quota_exceeded') alert('You can attach up to 20 references per task.');
+      else if (code === 'per_subaccount_quota_exceeded') alert('Subaccount quota reached.');
+      else if (code === 'reference_already_attached') alert('This file is already attached.');
+    } finally {
+      setPickerOpen(false);
+    }
+  }, [subaccountId, itemId, loadDriveRefs]);
+
+  const handleClosePicker = useCallback(() => setPickerOpen(false), []);
+
+  const handleRemoveDriveRef = async (referenceId: string) => {
+    try {
+      await removeExternalReference(subaccountId, itemId, referenceId);
+      setDriveRefs(prev => prev.filter(r => r.id !== referenceId));
+      setRebindReference(prev => prev?.id === referenceId ? null : prev);
+    } catch { /* ignore */ }
+  };
+
   const handleVote = async (activityId: string, vote: 'up' | 'down', agentId?: string) => {
     const existing = myVotes[activityId];
     setVotingId(activityId);
@@ -380,6 +476,12 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
       {tab === 'details' && (
         <div className="flex flex-col gap-3 px-1">
           {error && <div className="text-red-500 text-[13px]">{error}</div>}
+          {brokenCount > 0 && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+              <span className="font-medium">{brokenCount} reference{brokenCount > 1 ? 's' : ''} require{brokenCount > 1 ? '' : 's'} attention</span>
+              <span className="text-red-600"> · task will not run</span>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <label className={labelCls}>Title</label>
@@ -455,7 +557,8 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
 
           <button
             onClick={handleSave}
-            disabled={saving || !title}
+            disabled={saving || !title || brokenCount > 0}
+            title={brokenCount > 0 ? 'Resolve broken references before saving' : undefined}
             className={`mt-2 px-5 py-2.5 bg-indigo-500 text-white border-0 rounded-lg cursor-pointer text-sm font-semibold transition-opacity ${saving ? 'opacity-60' : 'hover:bg-indigo-600'} disabled:cursor-not-allowed`}
           >
             {saving ? 'Saving...' : 'Save Changes'}
@@ -551,6 +654,15 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
               onChange={(e) => handleUploadFile(e.target.files)}
               className="hidden"
             />
+            {driveConnections.length > 0 && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
+                onClick={() => setPickerOpen(true)}
+              >
+                Google Drive
+              </button>
+            )}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
@@ -620,6 +732,69 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
               </button>
             </div>
           ))}
+
+          {/* Drive external references */}
+          {driveRefs.map(ref => (
+            <div
+              key={ref.id}
+              className={`rounded-lg border p-3 flex items-center gap-3 ${
+                ref.state === 'degraded' ? 'border-amber-200 bg-amber-50' :
+                ref.state === 'broken'   ? 'border-red-200 bg-red-50' :
+                'border-slate-200 bg-slate-50'
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate font-medium text-sm">{ref.name}</span>
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                    ref.state === 'active'   ? 'bg-emerald-100 text-emerald-700' :
+                    ref.state === 'degraded' ? 'bg-amber-100 text-amber-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>{ref.state}</span>
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  Google Drive · Fetched {relativeTime(ref.lastFetchedAt)}
+                </div>
+                {ref.state === 'broken' && (
+                  <div className="mt-2 border-t border-red-200 pt-2 text-sm text-red-800">
+                    <p>{plainEnglishFailureReason(ref.failureReason)}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setRebindReference(ref)}
+                        className="rounded-md bg-red-600 px-3 py-1.5 text-white text-sm hover:bg-red-700"
+                      >
+                        Re-attach using another connection
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => handleRemoveDriveRef(ref.id)} aria-label="Remove" className="text-slate-400 hover:text-red-600 text-lg leading-none">×</button>
+            </div>
+          ))}
+
+          {/* Failure policy */}
+          {driveRefs.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+              <span>If a Drive file can't be fetched:</span>
+              <select
+                className="rounded-md border border-slate-200 px-2 py-1 text-sm"
+                value={fetchFailurePolicy}
+                onChange={async e => {
+                  const policy = e.target.value as 'tolerant' | 'strict' | 'best_effort';
+                  setFetchFailurePolicy(policy);
+                  try {
+                    await setFailurePolicy(subaccountId, itemId, policy);
+                  } catch { /* ignore */ }
+                }}
+              >
+                <option value="tolerant">Use saved copy and continue (default)</option>
+                <option value="strict">Stop the run</option>
+                <option value="best_effort">Skip the file and continue</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
 
@@ -627,6 +802,28 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
         <div className="px-1">
           <TaskChatPane taskId={itemId} />
         </div>
+      )}
+
+      <DriveFilePicker
+        connections={driveConnections}
+        isOpen={pickerOpen}
+        onClose={handleClosePicker}
+        onPick={handlePick}
+      />
+      {rebindReference && (
+        <ExternalDocumentRebindModal
+          subaccountId={subaccountId}
+          taskId={itemId}
+          reference={rebindReference}
+          connections={driveConnections}
+          isOpen={!!rebindReference}
+          onClose={() => setRebindReference(null)}
+          onRebound={(updated) => {
+            setDriveRefs(prev => prev.map(r => r.id === updated.id ? updated : r));
+            setRebindReference(null);
+          }}
+          onRemove={() => handleRemoveDriveRef(rebindReference!.id)}
+        />
       )}
     </Modal>
   );

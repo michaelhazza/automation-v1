@@ -85,6 +85,7 @@ import agentExecutionLogRouter from './routes/agentExecutionLog.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
+import googleDriveRouter from './routes/integrations/googleDrive.js';
 import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
@@ -159,6 +160,7 @@ import rulesRouter from './routes/rules.js';
 import { delegationOutcomesRouter } from './routes/delegationOutcomes.js';
 import referenceDocumentsRouter from './routes/referenceDocuments.js';
 import documentBundlesRouter from './routes/documentBundles.js';
+import externalDocumentReferencesRouter from './routes/externalDocumentReferences.js';
 import systemIncidentsRouter from './routes/systemIncidents.js';
 import { recordIncident } from './services/incidentIngestor.js';
 import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
@@ -167,6 +169,10 @@ import workspaceRouter from './routes/workspace.js';
 import workspaceMailRouter from './routes/workspaceMail.js';
 import workspaceCalendarRouter from './routes/workspaceCalendar.js';
 import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
+// Suggested action chip dispatch
+import suggestedActionsRouter from './routes/suggestedActions.js';
+// Thread Context — per-conversation living doc (Chunk A)
+import conversationThreadContextRouter from './routes/conversationThreadContext.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -321,6 +327,7 @@ app.use(agentExecutionLogRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
+app.use(googleDriveRouter);
 app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
@@ -369,10 +376,13 @@ app.use(crmQueryPlannerRouter);
 app.use(delegationOutcomesRouter);
 app.use(referenceDocumentsRouter);
 app.use(documentBundlesRouter);
+app.use(externalDocumentReferencesRouter);
 app.use(systemIncidentsRouter);
 app.use(workspaceRouter);
 app.use(workspaceMailRouter);
 app.use(workspaceCalendarRouter);
+app.use(suggestedActionsRouter);
+app.use(conversationThreadContextRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -530,7 +540,7 @@ async function start() {
       // (terminal attempt). Earlier-attempt throws rethrow without emitting.
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        const retryCount = getRetryCount(job as { retrycount?: number } & Record<string, unknown>);
+        const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
         await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
       });
     } catch (err) {

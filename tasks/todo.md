@@ -349,6 +349,17 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ## PR Review deferred items
 
+### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 / 2026-05-01 — ChatGPT review rounds 1–3)
+
+- [ ] [user] **R5/F5: Optimistic "Connected! Continuing execution…" copy precedes Sprint 3B guarantee** — `InlineIntegrationCard.tsx:81` shows "Connected! Continuing execution…" as soon as OAuth popup succeeds, but execution restart (Sprint 3B) isn't wired. Fix: either land Sprint 3B first, or soften copy to "Connected — run will resume shortly." and add a WebSocket run-state listener to transition the card away from optimistic state once Sprint 3B ships. Source: ChatGPT PR review round 5 — user decision: defer.
+- [ ] [user] **R5/F9: Dismissed integration card state lost on reload** — `InlineIntegrationCard.tsx:54` has `// TODO(v2): persist dismissed=true via PATCH /api/.../messages/:id/meta`. In-memory only; card reappears after reload. Already scoped as v2 work by the author. Source: ChatGPT PR review round 5 — user decision: defer.
+- [ ] [auto] **R5/F8: useOAuthPopup postMessage origin check may fail in split-origin deployments** — `useOAuthPopup.ts:15` uses `event.origin !== window.location.origin` which is correct for same-origin setups but blocks messages if the OAuth callback is served from a different subdomain (e.g. `api.example.com` vs `app.example.com`). Fix: replace `window.location.origin` with a configured `VITE_API_ORIGIN` env var, validated against an explicit allowlist. Do NOT loosen to a substring check — that opens a postMessage spoofing vector. Source: ChatGPT PR review round 5.
+- [ ] [user] **R4/F1: Execution restart (Sprint 3B) not wired — resume route never re-enqueues the blocked run** — `resumeFromIntegrationConnect()` clears the blocked state but no executor is restarted and `resumeAgentRun()` is never called. The PR shipped Sprint 3A (blocked-state infrastructure + resume service) without Sprint 3B (execution restart wiring). Result: OAuth connect flow shows success but the run never continues. Sprint 3B must land before this feature is customer-facing. PR description must document this gap. Severity: critical. Source: ChatGPT PR review round 4 — user decision: defer.
+- [ ] [user] **R4/F5: Thread context panel is UI-only — LLM does not receive thread context at run start or resume** — `worker/src/loop/systemPrompt.ts` has no reference to `conversationThreadContextService`. The spec labels the service "Chunk A — Thread Context doc + plan checklist"; injection into the system prompt is Chunk B. Acceptable staged rollout if PR description documents that the context panel is display-only until Chunk B ships. Severity: medium. Source: ChatGPT PR review round 4 — user decision: defer.
+- [ ] [auto] **R4/F6: Cost model diverges from plan** — `conversationCostService` sums per-message `cost_cents` from `agent_messages`; plan expected run-linked `cost_aggregates` table (schema exists). Current implementation is functional but the spec/plan must be amended or the implementation aligned before the cost layer scales. Severity: medium. Source: ChatGPT PR review round 4.
+- [ ] [auto] **R3/F11: Observability gaps in resume + patch paths** — `run_resumed` log (`agentResumeService.ts:144`) has `conversationId: ''` with TODO(v2) marker; `applyPatch` has no start log before DB reads; race-condition retry path doesn't log retry count. Low severity — consistent with existing codebase logging patterns, not a correctness issue. Fix: store `conversationId` on `agent_runs` at block time, add it to the log; optionally add a `thread_context_patch_start` log and a `thread_context_race_retry` log for the retry path. Source: ChatGPT PR review round 3.
+- [ ] [auto] **F8: Integration tests still mix real DB + mocks (test-strategy posture)** — Severity low, scope architectural. ChatGPT round 1 explicitly flagged this as "not a blocker, but note it." Concern: false confidence on transaction boundaries, RLS behaviour, and idempotency invariants when mocks stand in for the DB inside otherwise-integration tests. Out of scope for this PR — overlaps with the existing TI-005 follow-up (`docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md`) and PR #239 round-1 deferred items F1/F4/F6 above. Fold into the integration-test harness PR. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-claude-improve-ui-design-2F5Mg-2026-04-30T20-13-29Z.md`. PR #244 — https://github.com/michaelhazza/automation-v1/pull/244.
+
 ### PR #239 — vitest-migration-2026-04-29 (2026-04-30 — ChatGPT review round 1)
 
 All four items are technical and recommended for the TI-005 follow-up branch. The brief at `docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md` already scopes most of this work.
@@ -1901,6 +1912,156 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 - Linked: blocks flipping `.github/workflows/ci.yml` integration job from
   `continue-on-error: true` → `false`.
 
+## Deferred from spec-conformance review — tier-1-ui-uplift (2026-04-30)
+
+**Captured:** 2026-04-30T10:51:32Z
+**Source log:** `tasks/review-logs/spec-conformance-log-tier-1-ui-uplift-2026-04-30T10-51-32Z.md`
+**Spec:** `tasks/brief-tier-1-ui-uplift.md` (operationalised by `tasks/builds/tier-1-ui-uplift/plan.md`)
+
+These are directional gaps where the implementation diverges from the plan in ways that need a human design decision (keep the new approach and amend the plan, or restore the planned approach). None are mechanical fixes; all require triage before merge.
+
+- [ ] **B-D1 — Cost rollup approach diverges from canonical I-5 pattern.**
+  - Spec section: plan §1 I-5; §4.3 (canonical SQL block); brief §5 (run→conversation linkage)
+  - Gap: Plan I-5 mandates `SELECT DISTINCT triggered_run_id FROM agent_messages` JOINed to `cost_aggregates` as the single allowed implementation. The implementation instead added new columns (`cost_cents`, `tokens_in`, `tokens_out`, `model_id`) directly on `agent_messages` (migration 0262) and reads cost from those — bypassing both `triggered_run_id` and `cost_aggregates`.
+  - Suggested approach: Decide whether (a) the on-row approach is better and amend plan §1 I-5 to declare it canonical (then update §11 deferred items to drop `triggered_run_id` enforcement); or (b) revert to the canonical query, drop migration 0262's columns, and add `triggered_run_id` to `agent_messages` per plan §11 backlog item. Picking (a) is faster and avoids a backfill but locks future cost surfaces (per-skill, org-wide) into the same pattern; picking (b) preserves the plan's "single canonical implementation" intent.
+
+- [ ] **B-D2 — `ConversationCostResponse.runCount` field renamed to `messageCount`.**
+  - Spec section: plan §4.3 TypeScript interface
+  - Gap: plan defines `runCount` (count of distinct runs that produced ≥1 user-visible message); implementation returns `messageCount` (count of assistant messages). Per-model breakdown shape also differs (`messageCount` vs `runCount`).
+  - Suggested approach: tie this to B-D1 — if (a) is chosen, the field name change is acceptable but needs the plan amended; if (b) is chosen, restore `runCount` to match the canonical implementation.
+
+- [ ] **A-D1 — Thread Context not injected at run start; resume re-injection missing.**
+  - Spec section: plan §6.2 ("Modify `agentExecutionService.ts`"), §2.4 E-7, §7.3 ("re-inject `buildThreadContextReadModel(conversationId, orgId)`")
+  - Gap: `buildThreadContextReadModel` is exported and consumed by the `GET /thread-context` route, but **not** called inside `agentExecutionService.ts`. As a result the LLM never sees the conversation's tasks/approach/decisions during execution; the right-pane display works in isolation. `runMetadata.threadContextVersionAtStart` is also never written. Resume path (Chunk E) similarly does not re-inject.
+  - Suggested approach: at run start (after the system prompt is assembled), call `buildThreadContextReadModel(conversationId, orgId)` and prepend its formatted projection as a system message. Capture `version` into `runMetadata.threadContextVersionAtStart`. Mirror the same call inside `resumeFromIntegrationConnect` after the optimistic UPDATE succeeds, before re-executing the blocked tool call. This is the highest-impact fix in the list — without it Chunk A's LLM-side value is missing entirely.
+
+- [ ] **A-D2 — Concurrency guard does not use `version = ?` predicate.**
+  - Spec section: plan §6.5 ("Concurrency guard: patch application is wrapped in `BEGIN; SELECT … FOR UPDATE; UPDATE … WHERE id = ? AND version = ?; COMMIT`")
+  - Gap: `applyPatch` does a plain UPDATE-by-id without the version predicate. The race-retry path on insert collision applies the patch to the concurrent row's state (which is correct), but the UPDATE path on existing rows is non-versioned, so two concurrent writers on an existing row can produce a silent lost write.
+  - Suggested approach: wrap the existing-row UPDATE in `WHERE id = ? AND version = ?` with the snapshot version captured at the start of `applyPatch`. On 0 rows updated (lost race), reload, re-apply, retry once. After 2 failures throw `CONCURRENT_PATCH_FAILURE` per plan. Acceptance test from §6.7 needs to exercise the failure path.
+
+- [ ] **A-D3 — Migration 0264 RLS policy uses single combined `USING` clause.**
+  - Spec section: plan §6.4 ("Three-layer policy (`organisation_id = app.organisation_id`)")
+  - Gap: migration creates `CREATE POLICY conv_thread_ctx_org_isolation … USING (organisation_id = current_setting('app.organisation_id', true)::uuid)` — single policy, no separate `WITH CHECK`. Architecture.md § Row-Level Security canonical template typically separates `USING` and `WITH CHECK` for INSERT vs SELECT enforcement.
+  - Suggested approach: align with the canonical template in `architecture.md § Row-Level Security` — most existing tenant tables use a paired `USING` + `WITH CHECK` policy. Confirm the canonical template and either add a corrective migration or document why a single combined clause is sufficient here.
+
+- [ ] **E-D1 — `agent_runs.status` enum extended despite plan rejecting this approach.**
+  - Spec section: plan §2.4 E-1 ("Parallel `blocked_reason` + `integration_resume_token` columns; status enum NOT extended … Rejected: extending the `status` enum")
+  - Gap: `'blocked_awaiting_integration'` was added to the `agentRuns.status` type union (`server/db/schema/agentRuns.ts:92`) and is set by `agentExecutionService.ts` at lines 285, 1375, 2823. This contradicts the explicit "rejected" decision in the plan. The parallel `blocked_reason` column is also set, so both are now used.
+  - Suggested approach: pick one approach and document. If keeping the status-extension, amend plan §2.4 E-1 (and document why every status-switching consumer was reviewed for the new value); also remove the redundant `blocked_reason = 'integration_required'` writes since the status is enough. If reverting, drop the new status value, restore the parallel-column-only pattern, and audit consumers (workspace health, dashboards) for any switch on the new status.
+
+- [ ] **E-D2 — Resume already-resumed validation incomplete.**
+  - Spec section: plan §7.5 ("validates both `runMetadata.lastResumeTokenHash === sha256(submittedToken)` and `runMetadata.lastResumeBlockSequence === token.blockSequence`")
+  - Gap: `agentResumeService.ts:78` checks only `candidateMeta.lastResumeTokenHash === tokenHash`. The submitted token's `blockSequence` is not extracted (the token is a 32-byte random string with no embedded blockSequence) and not validated against `runMetadata.lastResumeBlockSequence`. As a result a stale token from block N could match the idempotent-success path even when block N+1 is currently active.
+  - Suggested approach: either (a) bind the blockSequence into the token (e.g. `${blockSequence}.${randomHex}` and parse on resume), or (b) accept the gap and document it as a v1 limitation in plan §7.5. The gap is currently shielded by the optimistic-predicate UPDATE clearing `integration_resume_token` on resume — so a stale token from a *prior block* would not match the candidate read either, because the column is NULL after resume. Re-verify whether the actual replay-attack class is reachable before committing to a fix.
+
+- [ ] **E-D3 — `integrationBlockService` is a stub; the entire block-on-integration feature is inert.**
+  - Spec section: plan §7.2 ("Files to create"), §7.7 ("acceptance criteria — first row")
+  - Gap: `integrationBlockService.checkRequiredIntegration` always returns `{ shouldBlock: false }` (file lines 67-75). The TODO comment on lines 52-66 describes the intended ACTION_REGISTRY-lookup logic. Consequence: the integration-block branch in `agentExecutionService.ts:2756` never fires in production — runs do not pause for missing integrations, no integration_card messages are emitted to conversations, the OAuth resume flow is unreachable from the agent loop. The infrastructure (token issuing, optimistic-resume UPDATE, expiry sweep) is correct but unused.
+  - Suggested approach: implement the body of `checkRequiredIntegration` per the TODO. (i) Add a `requiredIntegration?: string` field to `ActionDefinition` in `actionRegistry.ts`. (ii) Tag the actions known to require external connections (Notion, Gmail, GHL, Slack, etc.). (iii) In `checkRequiredIntegration`, look up the action's `requiredIntegration`, query `integration_connections` for `(organisation_id, provider_type, connection_status='active', oauth_status='active')`, and call `generateBlockDecision(...)` if absent. This is roughly half a day of work and unblocks the entire feature.
+
+- [ ] **E-D4 — `tool_not_resumable` enforcement missing for `unsafe` strategies.**
+  - Spec section: plan §7.5 ("`unsafe` strategies are NOT permitted to participate in blocking — if a tool whose handler is `unsafe` ends up in `runMetadata.blockedToolCall`, the resume rejects with `errorCode: 'TOOL_NOT_RESUMABLE'`")
+  - Gap: `integrationBlockService.ts:62-65` has TODO comment only. Currently no `unsafe` actions exist (every entry declares `'read_only' | 'keyed_write' | 'locked'`), so the gap is theoretical until a future action is registered with `unsafe`. But the plan explicitly named this as the safety guard.
+  - Suggested approach: add the check inside `checkRequiredIntegration` once E-D3 is closed. Throw `{ statusCode: 409, errorCode: 'TOOL_NOT_RESUMABLE', toolName }` and have the caller catch it in `agentExecutionService.ts`, transition the run to `cancelled` with `cancelReason: 'tool_not_resumable'`, and emit a non-card error message. Pair with a unit test that registers a fake `unsafe` action and asserts the cancellation path.
+
+- [ ] **E-D5 — OAuth callback does not pass `conversationId` to `resumeFromIntegrationConnect`.**
+  - Spec section: plan §7.3 (resume endpoint receives `conversationId`); §7.4 (resume validates `agent_conversations.user_id === req.user.id`)
+  - Gap: `oauthIntegrations.ts:273` calls `resumeFromIntegrationConnect({ resumeToken, organisationId })` without `conversationId`. The `payload.conversationId` is destructured from JWT into the cast type but discarded. `agentResumeService.ts:44` accepts `conversationId?` but never uses it. Net effect: the OAuth-callback resume path bypasses any conversation-ownership check at the resume boundary.
+  - Suggested approach: pass `payload.conversationId` through to the resume service. In `agentResumeService.ts`, when a `conversationId` is provided, additionally validate that the run's conversation matches and that the conversation owner matches the OAuth-callback user (the JWT's user). The popup-postMessage path through `POST /api/agent-runs/resume-from-integration` already has user-auth via `requireOrgPermission(AGENTS_CHAT)`; this gap is specific to the server-side OAuth-callback path.
+
+- [ ] **E-D6 — `dismissed` state is client-local only; no PATCH endpoint persists it.**
+  - Spec section: plan §7.3 ("Only `dismissed` is persisted"), §7.7 ("Click `Dismiss` → card collapses to a 1-line stub")
+  - Gap: `InlineIntegrationCard.tsx:54` has `// TODO(v2): persist dismissed=true via PATCH /api/.../messages/:id/meta`. Local React state holds the dismissed flag for the session; on page reload the card returns to its undismissed state. Dismiss is therefore not durable.
+  - Suggested approach: add `PATCH /api/agents/:agentId/conversations/:convId/messages/:messageId/meta` route accepting `{ dismissed: true }` and updating `agent_messages.meta.dismissed`. RLS-protected via the existing conversation ownership check. Or document that v1 ships with session-only dismissal and amend plan §7.3 accordingly.
+
+- [ ] **D-D1 — Email tile renders placeholder instead of inline config UI.**
+  - Spec section: plan §8.1 ("Click expands to show the existing email/mailbox config UI"), §8.6 acceptance criteria
+  - Gap: `InvocationsCard.tsx:626-637` shows static placeholder text instead of an embedded mailbox/inbound-email editor. The other channels (Scheduled, Webhook) host their existing UIs inline.
+  - Suggested approach: confirm with the brief author whether per-agent email config currently exists. If yes, embed it. If no (email is workspace-wide-only), update plan §8.1 to clarify that Email is a "view-only / managed elsewhere" tile in v1 — the placeholder text then becomes a feature, not a gap.
+
+- [ ] **Cross-1 — Plan §11 deferred item `triggered_run_id` write-layer enforcement is moot under the implemented approach.**
+  - Spec section: plan §11 ("`triggered_run_id` write-layer enforcement (B)")
+  - Gap: this item assumed cost rollup would key off `triggered_run_id`. With the implemented on-row cost approach (B-D1), `triggered_run_id` is no longer load-bearing for cost. The §11 backlog item should either be retired or rescoped to a different surface that relies on it.
+  - Suggested approach: tie to the B-D1 decision. If (a) is chosen, drop §11's `triggered_run_id` enforcement item; if (b) is chosen, keep it as planned. Either way the plan needs an amendment so future readers do not chase a deferred item that no longer maps to the code.
+
+---
+
+## Deferred from spec-conformance review — external-doc-references (2026-04-30)
+
+**Captured:** 2026-04-30T11:21:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-external-doc-references-2026-04-30T11-21-30Z.md`
+**Spec:** `docs/external-document-references-spec.md`
+
+- [ ] REQ #C1 — `runContextData.externalDocumentBlocks` is computed but never injected into the system prompt
+  - Spec section: §9.1 "Where external references inject" + §13.6 "agentExecutionService.ts add 'google_drive' branch"
+  - Gap: `loadExternalDocumentBlocks` returns assembled provenance+content blocks on `runContextData.externalDocumentBlocks`, but `agentExecutionService.executeRun()` never reads or appends them. The Knowledge Base block in `buildSystemPrompt` only consumes `runContextData.eager`. As a result, attached Drive references resolve, write `document_fetch_events` rows, and update `attachment_state` — but their content never reaches the LLM.
+  - Suggested approach: extend `agentExecutionService` to merge `externalDocumentBlocks` into the prompt (either folded into `dataSourceContents` as pseudo-sources, or as a sibling section after the Knowledge Base block). Decide whether the existing 60K-token Knowledge-Base budget governs the merged set or only the eager sources. Document the choice in the spec or an addendum.
+
+- [ ] REQ #C2 — Resolver write atomicity contract not honoured
+  - Spec section: §17.8 "Resolver write atomicity"
+  - Gap: spec mandates the cache upsert + `document_fetch_events` append + `reference_documents.attachment_state` update execute in a single transaction using the caller's scoped DB client. Implementation in `externalDocumentResolverService.ts` opens its own `db.transaction(...)` only around the cache upsert; the audit-log insert and `transitionState` happen on module-level `db` outside any transaction. `params.db` is accepted but unused.
+  - Suggested approach: thread the caller's scoped DB client through every write, or document an explicit deviation from §17.8 in the spec. The current single-flight + advisory-lock arrangement is intentional per plan invariant #1, so the deviation may be defensible — but it must be made explicit and the log/audit-row consistency surfaced (e.g., what happens if cache upsert succeeds and audit insert fails).
+
+- [ ] REQ #C3 — Route paths and permission keys diverge from spec §10.2 / §12.2
+  - Spec section: §10.2, §12.2, §13.7
+  - Gap: spec lists routes as `POST /api/tasks/:taskId/external-references` etc. with permission `org.tasks.manage`. Implementation registers `POST /api/subaccounts/:subaccountId/tasks/:taskId/external-references` etc. with `WORKSPACE_MANAGE`. The route shape is consistent with the broader codebase's subaccount-scoped convention, and `WORKSPACE_MANAGE` may be the correct local equivalent of `org.tasks.manage`. Both need an explicit decision.
+  - Suggested approach: amend the spec to acknowledge the codebase's actual `/api/subaccounts/:subaccountId/...` convention, or migrate the routes to match the spec verbatim. Either way, document the permission-key mapping (`org.tasks.manage` → `WORKSPACE_MANAGE`?) in `architecture.md` so the next reviewer doesn't re-flag it.
+
+- [ ] REQ #C4 — Picker-token and verify-access routes lack permission guard
+  - Spec section: §12.2 "Route guards"
+  - Gap: spec requires `requirePermission('org.integrations.manage')` on `GET /api/integrations/google-drive/picker-token` and `GET /api/integrations/google-drive/verify-access`. Implementation only has `authenticate` — anyone authenticated against the org can mint a picker token or probe Drive metadata for any connection in the org.
+  - Suggested approach: add the missing permission middleware. Verify the equivalent local permission key (likely `INTEGRATIONS_MANAGE` or similar) and apply it to both routes.
+
+- [ ] REQ #C5 — Per-task connection_id validation does not check subaccount scope
+  - Spec section: §10.4, §12.2
+  - Gap: attach + scheduledTasks + agents data-source routes call `getOrgConnectionWithToken(connectionId, req.orgId!)` and check `providerType === 'google_drive'` and `connectionStatus === 'active'`. They do not verify that the connection belongs to the *caller's subaccount*. A user attaching to subaccount A could supply a connection_id that belongs to subaccount B in the same org.
+  - Suggested approach: add a subaccount equality check (`conn.subaccountId === subaccountId`) on every attach path. Return `422 invalid_connection_id` per spec §17.6 when the check fails.
+
+- [ ] REQ #C6 — `invalid_connection_id` error code not used
+  - Spec section: §17.6 "Unique constraint HTTP mapping"
+  - Gap: spec mandates `{ "error": "invalid_connection_id" }` for invalid-connection cases. Implementation returns `connection_not_found` (404) or `connection_not_active` (422) instead. Splitting into two error codes loses information for the client and diverges from the contract.
+  - Suggested approach: either adopt the spec's single `invalid_connection_id` code (matching §17.6 verbatim) or amend the spec to allow the more granular pair. Pick one and align both server + client.
+
+- [ ] REQ #C7 — `ExternalDocumentRebindModal` missing "Remove reference instead" button
+  - Spec section: §10.5 "Re-attach modal"
+  - Gap: spec lists five elements of the modal, including a "Remove reference instead" text button. Implementation has Cancel + Re-attach only. A user who realises mid-rebind that they don't want the reference at all has to close, scroll back to the broken row, and click delete.
+  - Suggested approach: add a tertiary "Remove reference instead" button in the modal footer that calls `removeExternalReference(...)` and closes both the modal and (if applicable) refreshes the parent's reference list.
+
+- [ ] REQ #C8 — `cache_minutes` / TTL fallback path for null-revisionId not exercised
+  - Spec section: §7.2 "Null revisionId path"
+  - Gap: spec defines a TTL-based freshness fallback when `checkRevision()` returns null (provider offered no revision token). Implementation in `externalDocumentResolverService.doResolve` treats null revisionId the same as a mismatched revision (always refetches), with no TTL check. This produces a permanent cache-miss loop for any provider/file that has no revisionId — the exact failure mode §7.2 was written to prevent.
+  - Suggested approach: add the spec's null-revisionId branch — if `meta.revisionId === null` and the cache row's `revision_id` is also null, compare `cacheRow.fetchedAt` against `now() - cache_ttl_minutes` (default 60 minutes per §7.2) and serve cached content if within TTL. Otherwise refetch. Pull the TTL value from the spec's named constant (add it to `server/lib/constants.ts` if not present).
+
+- [ ] REQ #C9 — `EXTERNAL_DOC_RESOLVER_VERSION` constant referenced by plan but absent
+  - Spec section: §13.6 implementation notes; plan Phase 2 task list
+  - Gap: plan Phase 2 task list (line 1113) names `EXTERNAL_DOC_RESOLVER_VERSION` as a constant to add to `server/lib/constants.ts`. Spec §6.3 explicitly says "no separate global constant" — the resolver's own `resolverVersion` property is the source of truth. Implementation matches the spec (no global constant, resolver carries `resolverVersion: 1`). The plan disagrees with the spec.
+  - Suggested approach: spec is authoritative; this is informational. Update the plan to remove the misleading line so future contributors don't add a redundant constant.
+
+- [ ] REQ #C10 — `loadExternalDocumentBlocks` injects placeholder lines that are not part of the spec's provenance contract
+  - Spec section: §9.3 "Provenance metadata", invariant #10 "Deterministic ordering under failure"
+  - Gap: implementation emits `[External document "{name}" skipped: {reason}]` for skipped/over-quota/budget-blown references. Plan invariant #10 specifies a specific shape: `--- Document: <name>\nStatus: skipped (reason: <reason>)\n---`. Current placeholders use a different format that mixes square brackets and colon-separated reasons rather than the document-block shape that mirrors the success case.
+  - Suggested approach: align the placeholder format with invariant #10's prescribed shape. Reuse `buildProvenanceHeader` or extract a sibling helper so a future schema change to the header propagates uniformly.
+
+- [ ] REQ #C11 — Wall-clock budget enforcement does not write `document_fetch_events` rows
+  - Spec section: §6.5 "Provider call timeouts" / plan invariant #2 "Hard-fail timeout"
+  - Gap: when `EXTERNAL_DOC_MAX_TOTAL_RESOLVER_MS` is exceeded mid-loop, `loadExternalDocumentBlocks` pushes a placeholder string into `blocks` and continues. No `document_fetch_events` row with `failure_reason = 'budget_exceeded'` is written for the skipped reference. Spec §17.5 ("no-silent-partial-success") requires every failure path to produce a visible audit trace.
+  - Suggested approach: when the wall-clock budget is exceeded, write a `document_fetch_events` row directly (or call a helper on the resolver) with `failure_reason = 'budget_exceeded'`, `cache_hit = false`, `tokens_used = 0` for each skipped reference. Same treatment for the over-quota loop at the bottom of the function.
+
+- [ ] REQ #C12 — Spec authoritative path mismatch with user invocation
+  - Spec section: §13.7 — file inventory
+  - Gap: user's invocation listed expected files including `client/src/lib/externalDocumentReferences.ts` (api client) and `client/src/components/GoogleDrivePickerButton.tsx`. Actual files are `client/src/api/externalDocumentReferences.ts` and `client/src/components/DriveFilePicker.tsx`. The actual paths are consistent with the spec (§13.9 names `DriveFilePicker.tsx`); the user's invocation message had stale names. Informational only — not a code gap.
+  - Suggested approach: no action; flagged so future readers of this log can reconcile the user's invocation text with the actual file paths.
+
+- [ ] PDF support requires `pdf-parse` dependency declaration (dual-reviewer 2026-04-30)
+  - Source: dual-reviewer Codex P2 finding on `client/src/components/DriveFilePicker.tsx:4-7`
+  - Spec section: §9.3 "MIME types" — PDF (`application/pdf`) is listed as Supported (line 384)
+  - Gap: `server/services/resolvers/googleDriveResolver.ts` PDF branch dynamically imports `pdf-parse`, but the package is not declared in `package.json` dependencies. Every PDF picked through `DriveFilePicker.tsx` will fetch bytes and then fall into `unsupported_content` at run time, marking the reference `broken`.
+  - Why deferred: dual-reviewer cannot edit `package.json` without explicit human approval (config-protection hook). Two fixes are possible:
+    - **Preferred (spec-aligned):** add `"pdf-parse": "^1.1.1"` to `package.json` dependencies. Verify the dynamic import path matches the package's main export. This requires HITL approval to edit `package.json`.
+    - **Alternative (capability-aligned):** drop `'application/pdf'` from `SUPPORTED_MIME_TYPES` in `client/src/components/DriveFilePicker.tsx` and from the resolver's `SUPPORTED_MIME_TYPES` set, plus update spec §9.3 to mark PDF as deferred to a follow-up.
+  - Recommended action: take the preferred fix (add pdf-parse to package.json) on the next manual session; spec already promises PDF support.
+
 ---
 
 ## Deferred: agentic-engineering-notes follow-ups (2026-04-30)
@@ -1925,6 +2086,49 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
 ---
 
+## Deferred from ChatGPT PR review — external-doc-references (2026-05-01)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review
+
+### D-GPT-1: Retry suppression is process-local — multi-instance stampede risk
+
+`server/services/externalDocumentRetrySuppression.ts` — `RetrySuppressor` uses an in-memory `Map`. Under multi-node deployment each instance suppresses independently; a failing document gets hammered once per instance per suppression window instead of once globally.
+
+Options:
+- Lightweight: read `document_fetch_events` for the reference and check `fetched_at > now() - suppression_window` before retrying. Adds one DB read per resolve call on the hot path.
+- Preferred: persist `suppressUntil` to a shared cache (Redis or a `document_suppression` table). Requires infra decision.
+- Minimum viable: note the single-node assumption in a code comment so future multi-node work doesn't miss this.
+
+### D-GPT-2: Token counting uses character-approximation throughout
+
+`server/services/externalDocumentResolverPure.ts` — `countTokensApprox` uses `Math.ceil(charCount / 4)`. Final prompt assembly re-uses the same approximation, so in theory the assembled prompt could exceed a model's true token limit by the approximation error margin (typically ±5–10% for structured data).
+
+Fix when real token budget accuracy matters: add `tiktoken` or `@anthropic-ai/tokenizer` for a final boundary check after prompt assembly. Keep the approximation for all pre-checks (it's fast and conservative enough there).
+
+### D-GPT-3: attachment_order defaults to 0 — ordering relies on created_at tiebreaker
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `attachment_order DEFAULT 0`. All newly attached references land at order 0, so ordering falls back to `created_at` ascending. This is deterministic but not semantically meaningful.
+
+Address when a reordering UI is added: expose explicit `attachment_order` assignment on insert (e.g., `MAX(attachment_order) + 1` per bundle) and add an API endpoint for reorder operations.
+
+### D-GPT-4: Additional observability signals missing
+
+The `document_fetch_events` table is well-designed but the following runtime signals are not emitted:
+- Retry suppression hits (when `shouldSuppress` returns true — currently silent)
+- Single-flight collisions (when a duplicate key is already in-flight)
+- Resolver timeout vs. failure distinction (network timeout vs. provider error)
+
+Add structured log lines for each when the observability layer is extended.
+
+### D-GPT-5: failure_reason is untyped at DB level
+
+`migrations/0262_external_doc_refs_google_drive.sql` — `failure_reason varchar(64)` with no CHECK constraint. TypeScript `FetchFailureReason` union provides compile-time safety, but nothing prevents invalid strings via direct SQL.
+
+Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','network_error','quota_exceeded','budget_exceeded','unsupported_content'))` in a future migration. Low urgency — TS types already enforce this on all code paths.
+
+---
+
 ## Doc drift backlog (audit 2026-05-01)
 
 - [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
@@ -1943,3 +2147,23 @@ without `??=` or restore hook. Currently 282 files scanned, 0 violations.
 
 - [ ] F4: feature-coordinator — add optional lightweight per-chunk doc-sync drift detection (read-only, no writes) after each chunk completes, so drift is surfaced early rather than accumulated until D.5. Current D.5 end-of-pipeline gate catches everything; this is a future refinement for long multi-chunk pipelines. [user]
 - [ ] R3-F2: add lightweight validator script for doc-sync verdict format — reject bare `no` (no rationale), `yes` without section names, and missing fields. Extend or complement the existing `scripts/verify-doc-sync-parity.ts` queued item. Would make enforcement machine-verified rather than convention-enforced. [user]
+
+## PR Review deferred items
+
+### PR #246 — lint-typecheck-baseline (2026-05-01)
+
+- [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
+- [ ] F7: update plan doc to reflect that `agentDiagnosis` column is `jsonb` not `text` — JSONB is the correct type for structured diagnosis data and is already used by `writeDiagnosis.ts`; plan was written before the type decision was finalised. [auto]
+- [ ] F14: add migration compatibility test — `it('handles null agentDiagnosis for legacy rows')` covering null agentDiagnosisRunId / agentDiagnosis (pre-migration rows); see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [user]
+- [ ] F28: add idempotency double-tap test for writeDiagnosis — run same (incidentId, agentRunId) pair twice and verify no duplicate rows, no divergent state; see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [auto]
+
+## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
+
+**PR:** #242 (claude/agency-email-sharing-hMdTA)
+**Source:** ChatGPT Round 1 review — 2026-05-01
+
+### D-R1-F5: Rebind modal does not verify access before confirm
+
+`RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
+
+Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.

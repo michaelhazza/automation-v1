@@ -6,12 +6,13 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { tasks } from './tasks';
+import { agentRuns } from './agentRuns';
 
 export type SystemIncidentSource = 'route' | 'job' | 'agent' | 'connector' | 'skill' | 'llm' | 'synthetic' | 'self';
 export type SystemIncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type SystemIncidentClassification = 'user_fault' | 'system_fault' | 'persistent_defect';
 export type SystemIncidentStatus = 'open' | 'investigating' | 'remediating' | 'resolved' | 'suppressed' | 'escalated';
-export type SystemIncidentTriageStatus = 'pending' | 'running' | 'failed' | 'completed';
+export type SystemIncidentTriageStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SystemIncidentDiagnosisStatus = 'none' | 'valid' | 'partial' | 'invalid';
 
 export const systemIncidents = pgTable(
@@ -76,6 +77,8 @@ export const systemIncidents = pgTable(
     triageStatus: text('triage_status').notNull().default('pending').$type<SystemIncidentTriageStatus>(),
     diagnosisStatus: text('diagnosis_status').notNull().default('none').$type<SystemIncidentDiagnosisStatus>(),
     lastTriageJobId: text('last_triage_job_id'),
+    agentDiagnosisRunId: uuid('agent_diagnosis_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    agentDiagnosis: jsonb('agent_diagnosis'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

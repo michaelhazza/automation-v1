@@ -55,6 +55,9 @@ read_capabilities:
   - slug: page_read
     aliases: [read_page, document_read, doc_read]
     description: Read pages or documents
+  - slug: spreadsheet_read
+    aliases: [read_spreadsheet, sheet_read, sheets_read, csv_read]
+    description: Read rows or cell data from a spreadsheet
   - slug: database_read
     aliases: [read_database, records_read, rows_read]
     description: Read records from a structured database
@@ -659,5 +662,47 @@ client_specific_patterns:
   - Per-org overrides live on hierarchy_templates.operational_config
 implemented_since: "2026-04-19"
 last_verified: "2026-04-19"
+owner: platform-team
+```
+
+### Google Drive
+
+```yaml integration
+slug: google_drive
+name: Google Drive
+provider_type: oauth
+status: partial
+visibility: public
+read_capabilities:
+  - page_read
+  - spreadsheet_read
+write_capabilities: []
+skills_enabled: []
+primitives_required:
+  - oauth_connection
+auth_method: oauth2
+required_scopes:
+  - https://www.googleapis.com/auth/drive.readonly
+  - https://www.googleapis.com/auth/drive.metadata.readonly
+setup_steps_summary: Connect a Google account and approve Drive read-only access. Files are attached per-task via the Drive picker and resolved at run time.
+setup_doc_link: null
+typical_use_cases:
+  - Attach a Google Doc as live context for an agent run
+  - Reference a Sheets budget or data table during task execution
+  - Attach a PDF for the agent to read and summarise
+broadly_useful_patterns:
+  - Live document injection into agent context
+  - Spreadsheet data access at run time
+  - Cross-task document reuse via shared Drive files
+known_gaps:
+  - Write operations (create, update, delete files) not yet supported
+  - Folder-level browsing not exposed in picker V1
+  - PDF support requires pdf-parse dependency (deferred — see tasks/todo.md)
+  - Retry suppression is process-local; multi-instance retry storms possible at scale
+client_specific_patterns:
+  - Per-client Drive folders attached as agent data sources
+  - Task-specific document attachments (briefs, SOWs, reports)
+implemented_since: "2026-04-30"
+last_verified: "2026-05-01"
 owner: platform-team
 ```

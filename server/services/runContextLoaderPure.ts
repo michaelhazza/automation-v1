@@ -12,6 +12,8 @@ import {
   MAX_EAGER_BUDGET,
   MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT,
 } from '../config/limits.js';
+import { EXTERNAL_DOC_FRAGMENTATION_THRESHOLD } from '../lib/constants.js';
+import type { FetchFailureReason } from '../db/schema/documentFetchEvents.js';
 
 // ---------------------------------------------------------------------------
 // Phase 1D: Two-pass context reranking — score data sources by relevance
@@ -184,5 +186,120 @@ export function processContextPool(
     manifestForPrompt,
     manifestElidedCount,
     suppressed,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// External document reference helpers (live external doc references feature)
+// ---------------------------------------------------------------------------
+
+export interface MergedReference {
+  kind: 'reference_document' | 'agent_data_source';
+  id: string;
+  attachmentOrder: number;
+  createdAt: string;
+}
+
+export interface ResolvedDocumentLite {
+  id: string;
+  tokensUsed: number;
+  failureReason: FetchFailureReason | null;
+}
+
+/**
+ * Sort a mixed list of reference_document and agent_data_source entries by
+ * attachment_order ascending, with created_at ascending as a tiebreaker.
+ */
+export function mergeAndOrderReferences(refs: MergedReference[]): MergedReference[] {
+  return [...refs].sort((a, b) => {
+    if (a.attachmentOrder !== b.attachmentOrder) return a.attachmentOrder - b.attachmentOrder;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+export interface BudgetResult {
+  included: ResolvedDocumentLite[];
+  skipped: { id: string; reason: 'budget_exceeded' }[];
+}
+
+/**
+ * Walk the ordered resolved documents and enforce the per-run token budget.
+ * Documents that have a failureReason are skipped entirely (they do not
+ * consume budget and are not included in the output).
+ * Once the budget is breached, all subsequent documents are marked skipped.
+ */
+export function enforceRunBudget(resolved: ResolvedDocumentLite[], runTokenBudget: number): BudgetResult {
+  let cumulative = 0;
+  const included: ResolvedDocumentLite[] = [];
+  const skipped: { id: string; reason: 'budget_exceeded' }[] = [];
+  let breached = false;
+  for (const doc of resolved) {
+    if (doc.failureReason) continue;
+    if (breached) {
+      skipped.push({ id: doc.id, reason: 'budget_exceeded' });
+      continue;
+    }
+    if (cumulative + doc.tokensUsed > runTokenBudget) {
+      breached = true;
+      skipped.push({ id: doc.id, reason: 'budget_exceeded' });
+      continue;
+    }
+    cumulative += doc.tokensUsed;
+    included.push(doc);
+  }
+  return { included, skipped };
+}
+
+export type FailurePolicyAction =
+  | { action: 'inject_active' }
+  | { action: 'serve_stale_with_warning' }
+  | { action: 'serve_stale_silent' }
+  | { action: 'skip_reference' }
+  | { action: 'block_run' };
+
+/**
+ * Determine what to do with a reference given the configured failure policy
+ * and the current fetch state of the document.
+ *
+ * | state    | strict              | tolerant                 | best_effort        |
+ * |----------|---------------------|--------------------------|--------------------|
+ * | active   | inject_active       | inject_active            | inject_active      |
+ * | degraded | block_run           | serve_stale_with_warning | serve_stale_silent |
+ * | broken   | block_run           | block_run                | skip_reference     |
+ */
+export function applyFailurePolicy(
+  policy: 'tolerant' | 'strict' | 'best_effort',
+  ctx: { state: 'active' | 'degraded' | 'broken' }
+): FailurePolicyAction {
+  if (ctx.state === 'active') return { action: 'inject_active' };
+  if (ctx.state === 'degraded') {
+    if (policy === 'strict')   return { action: 'block_run' };
+    if (policy === 'tolerant') return { action: 'serve_stale_with_warning' };
+    return                       { action: 'serve_stale_silent' };
+  }
+  if (policy === 'best_effort') return { action: 'skip_reference' };
+  return                          { action: 'block_run' };
+}
+
+export interface FragmentationWarning {
+  fragmentedCount: number;
+  totalCount: number;
+  message: string;
+}
+
+/**
+ * Return a warning when more than half of the successfully resolved documents
+ * are below the fragmentation threshold, indicating the context may be noisy.
+ * Returns null when the condition is not met.
+ */
+export function smallDocumentFragmentationWarning(resolved: ResolvedDocumentLite[]): FragmentationWarning | null {
+  const successful = resolved.filter(r => r.failureReason === null);
+  if (successful.length === 0) return null;
+  const small = successful.filter(r => r.tokensUsed < EXTERNAL_DOC_FRAGMENTATION_THRESHOLD).length;
+  if (small <= successful.length / 2) return null;
+  return {
+    fragmentedCount: small,
+    totalCount: successful.length,
+    message: `${small} of ${successful.length} references contained fewer than ${EXTERNAL_DOC_FRAGMENTATION_THRESHOLD} tokens; context may be fragmented`,
   };
 }

@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>External Document References — Mockups v2</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 13.5px;
+      color: #1e293b;
+      background: #d9dfe9;
+      min-height: 100vh;
+    }
+
+    /* ── Viewer chrome ─────────────────────────────── */
+    #viewer-header {
+      position: sticky; top: 0; z-index: 100;
+      background: #0f172a;
+      display: flex; align-items: center; gap: 20px;
+      padding: 0 24px;
+      border-bottom: 1px solid #1e293b;
+    }
+    #viewer-title {
+      font-size: 11px; font-weight: 600; color: #475569;
+      white-space: nowrap; padding: 14px 0; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    #screen-tabs { display: flex; gap: 0; overflow-x: auto; }
+    .stab {
+      padding: 14px 15px; font-size: 12px; font-weight: 500; color: #64748b;
+      border: none; border-bottom: 2px solid transparent;
+      cursor: pointer; white-space: nowrap; background: none;
+      font-family: 'Inter', sans-serif; transition: all 0.15s;
+    }
+    .stab:hover { color: #e2e8f0; }
+    .stab.active { color: #a5b4fc; border-bottom-color: #6366f1; font-weight: 600; }
+
+    /* ── Screens ─────────────────────────────────── */
+    .screen { display: none; padding: 28px 24px; min-height: calc(100vh - 49px); }
+    .screen.active { display: block; }
+    .screen-label {
+      font-size: 10.5px; font-weight: 600; color: #94a3b8;
+      letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 14px;
+    }
+
+    /* ── App outer shell ─────────────────────────── */
+    .app-shell {
+      background: #f8fafc;
+      border-radius: 12px; overflow: hidden;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.09), 0 1px 4px rgba(0,0,0,0.05);
+      max-width: 1020px; margin: 0 auto;
+    }
+    .app-topnav {
+      background: white; border-bottom: 1px solid #e2e8f0;
+      padding: 0 24px; height: 50px; display: flex; align-items: center; gap: 24px;
+    }
+    .app-logo { font-size: 14px; font-weight: 700; color: #1e293b; letter-spacing: -0.02em; }
+    .app-logo em { color: #6366f1; font-style: normal; }
+    .page-content { padding: 24px 28px; }
+
+    /* ── Real page elements ──────────────────────── */
+    /* IntegrationsAndCredentialsPage styling */
+    .page-h1 { font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 24px; }
+    /* Active tab: border-slate-800 text-slate-800 (as in the real code) */
+    .page-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+    .page-tab {
+      padding: 8px 16px; font-size: 14px; font-weight: 500; color: #64748b;
+      border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+      cursor: pointer; background: none; font-family: 'Inter', sans-serif; transition: all 0.15s;
+    }
+    .page-tab.active { border-bottom-color: #1e293b; color: #1e293b; }
+    .page-tab:hover:not(.active) { color: #374151; }
+
+    /* ── CredentialsTab real styling ─────────────── */
+    .cred-section-h2 { font-size: 14px; font-weight: 600; color: #374151; }
+    .cred-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .conn-list { border: 1px solid #e2e8f0; border-radius: 8px; background: white; overflow: hidden; }
+    .conn-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
+    .conn-row:last-child { border-bottom: none; }
+    .conn-name { font-size: 14px; font-weight: 500; color: #1e293b; }
+    .conn-label { font-size: 12px; color: #94a3b8; margin-left: 8px; }
+    .conn-actions { display: flex; align-items: center; gap: 8px; }
+    /* Status badges match real STATUS_STYLES */
+    .badge-active-conn { font-size: 12px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; background: #dcfce7; color: #166534; }
+    .badge-revoked-conn { font-size: 12px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; background: #fee2e2; color: #991b1b; }
+    .badge-expired-conn { font-size: 12px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; background: #fef9c3; color: #854d0e; }
+    .conn-action-link { font-size: 12px; color: #64748b; cursor: pointer; text-decoration: underline; }
+    .conn-action-link:hover { color: #1e293b; }
+    .conn-revoke { font-size: 12px; color: #f87171; cursor: pointer; text-decoration: none; }
+    .conn-revoke:hover { color: #dc2626; }
+    /* Provider dropdown */
+    .provider-menu {
+      position: absolute; right: 0; top: calc(100% + 4px); width: 256px;
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1); z-index: 20; padding: 4px 0;
+    }
+    .provider-item { width: 100%; text-align: left; padding: 10px 16px; cursor: pointer; background: none; border: none; font-family: 'Inter', sans-serif; display: block; }
+    .provider-item:hover { background: #f8fafc; }
+    .provider-item-name { font-size: 14px; font-weight: 500; color: #1e293b; display: block; }
+    .provider-item-desc { font-size: 12px; color: #94a3b8; display: block; margin-top: 1px; }
+    .provider-item.new-item { background: #fafbff; }
+    .provider-item.new-item .provider-item-name { color: #4f46e5; }
+
+    /* ── Buttons (matching real btn classes) ─────── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; font-family: 'Inter', sans-serif; font-weight: 500; cursor: pointer; border: none; border-radius: 8px; transition: all 0.15s; white-space: nowrap; font-size: 13px; }
+    .btn-primary   { background: #4f46e5; color: white; padding: 8px 14px; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-secondary { background: white; color: #374151; padding: 8px 14px; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #f9fafb; }
+    .btn-ghost     { background: transparent; color: #64748b; padding: 6px 10px; border-radius: 6px; }
+    .btn-ghost:hover { background: #f1f5f9; color: #1e293b; }
+    .btn-danger-ghost { background: transparent; color: #dc2626; padding: 6px 10px; border-radius: 6px; }
+    .btn-danger-ghost:hover { background: #fef2f2; }
+    .btn-sm  { padding: 5px 10px; font-size: 12px; border-radius: 6px; font-weight: 600; }
+    .btn-xs  { padding: 3px 8px; font-size: 11px; border-radius: 5px; font-weight: 600; }
+    /* Exact btn-sm btn-primary from CredentialsTab */
+    .btn-sm-primary { background: #4f46e5; color: white; padding: 6px 12px; font-size: 12px; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-sm-primary:hover { background: #4338ca; }
+
+    /* ── Modal ───────────────────────────────────── */
+    .modal-wrap {
+      position: relative; min-height: 580px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #e2e8f0, #d9dfe9);
+    }
+    .modal-backdrop {
+      position: absolute; inset: 0; background: rgba(15,23,42,0.55); backdrop-filter: blur(2px);
+    }
+    .modal-box {
+      position: relative; z-index: 10; background: white; border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.1); overflow: hidden;
+    }
+    .modal-header {
+      padding: 18px 24px 16px; border-bottom: 1px solid #f1f5f9;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; }
+    .modal-body { padding: 18px 24px; }
+    .modal-footer {
+      padding: 13px 24px; border-top: 1px solid #f1f5f9;
+      display: flex; align-items: center; justify-content: flex-end; gap: 8px; background: #fafbff;
+    }
+    .close-btn {
+      width: 28px; height: 28px; border-radius: 6px; background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .close-btn:hover { background: #f1f5f9; color: #1e293b; }
+
+    /* ── TaskModal exact styling ─────────────────── */
+    /* Tabs: px-4 py-2 border-b-2 border-indigo-500 text-indigo-500 font-semibold */
+    .task-tabs { display: flex; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
+    .task-tab {
+      padding: 8px 16px; font-size: 13px; border: none; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; background: none; cursor: pointer; font-family: 'Inter', sans-serif;
+      transition: all 0.15s; color: #64748b; font-weight: 400;
+    }
+    .task-tab:hover { color: #374151; }
+    .task-tab.active { border-bottom-color: #6366f1; color: #6366f1; font-weight: 600; }
+    /* Attachment rows: flex items-center gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg */
+    .att-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+      margin-bottom: 6px;
+    }
+    .att-row:last-child { margin-bottom: 0; }
+    /* AttachmentTypeIcon: inline-flex items-center justify-center w-8 h-8 rounded-lg text-[10px] font-bold uppercase shrink-0 */
+    .att-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; border-radius: 8px; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; flex-shrink: 0;
+    }
+    .att-icon-pdf  { background: #fee2e2; color: #b91c1c; }
+    .att-icon-img  { background: #d1fae5; color: #065f46; }
+    .att-icon-txt  { background: #e0f2fe; color: #0369a1; }
+    .att-icon-file { background: #f1f5f9; color: #475569; }
+    /* Drive source icon badge */
+    .att-icon-drive { background: #eff6ff; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; }
+    .att-name  { font-size: 13px; font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .att-meta  { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .att-right { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+    /* Icon buttons in attachment row */
+    .att-btn {
+      background: transparent; border: none; cursor: pointer; color: #94a3b8;
+      padding: 4px; border-radius: 4px; transition: color 0.15s; display: inline-flex; align-items: center;
+    }
+    .att-btn-dl:hover { color: #4f46e5; }
+    .att-btn-del:hover { color: #ef4444; }
+    /* State badges (small, inline) */
+    .state-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 9999px; border: 1px solid; white-space: nowrap; flex-shrink: 0;
+    }
+    .state-active   { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+    .state-degraded { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+    .state-broken   { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+
+    /* ── Forms ───────────────────────────────────── */
+    /* inputCls from real code: w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 */
+    .form-input {
+      width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 13px; font-family: 'Inter', sans-serif; color: #1e293b; background: white; outline: none;
+    }
+    .form-input:focus { border-color: transparent; box-shadow: 0 0 0 2px #6366f1; }
+    .form-input::placeholder { color: #9ca3af; }
+    .form-select {
+      width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 13px; font-family: 'Inter', sans-serif; color: #1e293b; background: white; outline: none; cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
+    }
+    .form-select:focus { border-color: transparent; box-shadow: 0 0 0 2px #6366f1; }
+    .form-label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+
+    /* ── DataSourceManager exact styling ─────────── */
+    .dsm { background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    .dsm-header { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .dsm-header-label { font-size: 13px; font-weight: 600; color: #374151; }
+    .dsm-add-btn { padding: 6px 12px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; }
+    .dsm-add-btn:hover { background: #4338ca; }
+    .dsm-form { padding: 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    .dsm-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .dsm-form-full { grid-column: 1 / -1; }
+    .dsm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .dsm-table th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    .dsm-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .dsm-table tr:last-child td { border-bottom: none; }
+    .dsm-table tr:hover td { background: #f8fafc; }
+    .dsm-ds-name { font-weight: 500; color: #1e293b; font-size: 13px; }
+    .dsm-ds-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    /* mode badge: text-[11px] px-2 py-0.5 rounded font-semibold */
+    .mode-eager { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; background: #e0e7ff; color: #3730a3; }
+    .mode-lazy  { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; background: #fef3c7; color: #92400e; }
+    /* action buttons from real code */
+    .dsm-btn-edit   { padding: 4px 8px; background: #f1f5f9; border: none; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; }
+    .dsm-btn-edit:hover { background: #e2e8f0; }
+    .dsm-btn-test   { padding: 4px 8px; background: #e0f2fe; color: #0369a1; border: none; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; }
+    .dsm-btn-test:hover { background: #bae6fd; }
+    .dsm-btn-delete { padding: 4px 8px; background: #fee2e2; color: #dc2626; border: none; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; }
+    .dsm-btn-delete:hover { background: #fecaca; }
+    /* Status text */
+    .status-ok      { font-size: 11px; color: #15803d; }
+    .status-error   { font-size: 11px; color: #dc2626; }
+    .status-pending { font-size: 11px; color: #64748b; }
+    .status-dash    { font-size: 11px; color: #94a3b8; }
+
+    /* ── File picker ─────────────────────────────── */
+    .file-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: background 0.1s; }
+    .file-row:hover { background: #f8fafc; }
+    .file-row.selected { background: #eef2ff; }
+
+    /* ── Policy options ──────────────────────────── */
+    .policy-opt {
+      display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+      border: 1.5px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all 0.15s; margin-bottom: 6px;
+    }
+    .policy-opt:hover { border-color: #c7d2fe; background: #fafbff; }
+    .policy-opt.selected { border-color: #6366f1; background: #eef2ff; }
+    .radio { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #cbd5e1; margin-top: 1px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .policy-opt.selected .radio { border-color: #6366f1; background: #6366f1; }
+    .radio-dot { width: 6px; height: 6px; border-radius: 50%; background: white; }
+    .policy-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+    .policy-desc { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+
+    /* ── Alerts ──────────────────────────────────── */
+    .alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 13px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+    .alert-error   { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .alert-warning { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; }
+    .alert-info    { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+
+    /* ── Breadcrumb ──────────────────────────────── */
+    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #64748b; margin-bottom: 12px; }
+    .bc-link { color: #4f46e5; cursor: pointer; font-weight: 500; }
+    .bc-sep { color: #cbd5e1; }
+
+    /* ── Divider ─────────────────────────────────── */
+    .divider { height: 1px; background: #f1f5f9; margin: 14px 0; }
+
+    /* ── Broken outer box ────────────────────────── */
+    .broken-box { border: 1px solid #fecaca; border-radius: 8px; background: #fff8f8; overflow: hidden; margin-bottom: 6px; }
+    .degraded-box { border: 1px solid #fde68a; border-radius: 8px; background: #fffdf5; overflow: hidden; margin-bottom: 6px; }
+    .broken-detail {
+      padding: 8px 12px; border-top: 1px solid #fecaca; background: #fef2f2;
+      font-size: 12px; color: #991b1b; line-height: 1.5;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ Viewer header ═══════════════════════════════════════════════════════ -->
+<div id="viewer-header">
+  <div id="viewer-title">External Doc References · Mockups v2 (based on real code)</div>
+  <div id="screen-tabs">
+    <button class="stab active" onclick="show(0)">1 · Drive Connection</button>
+    <button class="stab" onclick="show(1)">2 · Task Attachments</button>
+    <button class="stab" onclick="show(2)">3 · File Picker</button>
+    <button class="stab" onclick="show(3)">4 · Degraded &amp; Broken</button>
+    <button class="stab" onclick="show(4)">5 · Scheduled task</button>
+    <button class="stab" onclick="show(5)">6 · Re-bind</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 1: Integrations & Credentials — Drive connection
+     Based on: IntegrationsAndCredentialsPage.tsx + CredentialsTab.tsx
+     Note: page tabs use border-slate-800 (not indigo) per real code
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen active" id="s0">
+  <p class="screen-label">Screen 1 of 6 — Integrations &amp; Credentials · OAuth Connections · "Add Connection" dropdown showing Google Drive</p>
+  <div class="app-shell">
+    <div class="app-topnav">
+      <span class="app-logo">Automation<em>OS</em></span>
+    </div>
+    <div class="page-content">
+      <!-- Real page: <h1 className="text-xl font-semibold text-slate-800 mb-6"> -->
+      <h1 class="page-h1">Integrations &amp; Credentials</h1>
+
+      <!-- Real tabs: border-slate-800 text-slate-800 when active -->
+      <div class="page-tabs">
+        <button class="page-tab active">Credentials</button>
+        <button class="page-tab">Integrations</button>
+      </div>
+
+      <!-- CredentialsTab render starts here -->
+      <div style="display:flex;flex-direction:column;gap:32px;">
+
+        <!-- OAuth Connections section -->
+        <section>
+          <div class="cred-section-head">
+            <h2 class="cred-section-h2">OAuth Connections</h2>
+            <!-- "Add Connection" button with dropdown open -->
+            <div style="position:relative;">
+              <button class="btn-sm-primary">+ Add Connection</button>
+              <!-- Dropdown: w-64, right-0, border-slate-200, rounded-lg, shadow-lg -->
+              <div class="provider-menu">
+                <button class="provider-item">
+                  <span class="provider-item-name">Slack</span>
+                  <span class="provider-item-desc">Team messaging and notifications</span>
+                </button>
+                <button class="provider-item">
+                  <span class="provider-item-name">Gmail</span>
+                  <span class="provider-item-desc">Send and read emails</span>
+                </button>
+                <button class="provider-item">
+                  <span class="provider-item-name">HubSpot</span>
+                  <span class="provider-item-desc">CRM contacts and deals</span>
+                </button>
+                <button class="provider-item">
+                  <span class="provider-item-name">GoHighLevel</span>
+                  <span class="provider-item-desc">Contacts and opportunities</span>
+                </button>
+                <button class="provider-item">
+                  <span class="provider-item-name">Teamwork</span>
+                  <span class="provider-item-desc">Project management</span>
+                </button>
+                <!-- ★ NEW: Google Drive added to this list -->
+                <div style="height:1px;background:#f1f5f9;margin:4px 0;"></div>
+                <button class="provider-item new-item">
+                  <span class="provider-item-name" style="display:flex;align-items:center;gap:7px;">
+                    <svg width="12" height="11" viewBox="0 0 48 43" fill="none">
+                      <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                      <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                      <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+                    </svg>
+                    Google Drive
+                  </span>
+                  <span class="provider-item-desc">Attach Drive files as live document references</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Connections list — showing Gmail (existing) + Drive (newly connected) -->
+          <div class="conn-list">
+            <div class="conn-row">
+              <div>
+                <span class="conn-name">Gmail</span>
+                <span class="conn-label">workspace@acme.com</span>
+              </div>
+              <div class="conn-actions">
+                <span class="badge-active-conn">active</span>
+                <span class="conn-revoke">Revoke</span>
+              </div>
+            </div>
+
+            <!-- ★ NEW: Google Drive row — just connected -->
+            <div class="conn-row" style="background:#fafbff;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <svg width="14" height="12" viewBox="0 0 48 43" fill="none">
+                  <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                  <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                  <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+                </svg>
+                <span class="conn-name">Google Drive</span>
+                <span class="conn-label">workspace@acme.com · Connected just now</span>
+              </div>
+              <div class="conn-actions">
+                <span class="badge-active-conn">active</span>
+                <span class="conn-revoke">Revoke</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Note about Drive scope — shown after first Drive connection -->
+          <div style="margin-top:10px;padding:10px 13px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#1e40af;line-height:1.5;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <strong>Shared across this subaccount.</strong> Any admin can attach Drive files using this connection. The connection is not tied to your personal account, so it survives if you leave the team. Agents access files on behalf of this connection, not their own identity.
+            </div>
+          </div>
+        </section>
+
+        <!-- Web Login Credentials section (existing, unchanged) -->
+        <section>
+          <div class="cred-section-head">
+            <div>
+              <h2 class="cred-section-h2">Web Login Credentials</h2>
+              <p style="font-size:12px;color:#94a3b8;margin-top:2px;">Stored logins agents use to access paywalled content (e.g. 42macro.com)</p>
+            </div>
+            <button class="btn-sm-primary">+ Add Login</button>
+          </div>
+          <p style="font-size:14px;color:#64748b;">No web login credentials saved.</p>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 2: TaskModal — Attachments tab (healthy Drive refs)
+     Based on: TaskModal.tsx attachments tab — exact class names preserved
+     Changes: added "Pick from Drive" button; Drive refs in existing row style
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen" id="s1">
+  <p class="screen-label">Screen 2 of 6 — TaskModal · Attachments tab · one upload + two healthy Drive references · "Google Drive" button is dynamic: one button appears per connected file store (Google Drive, OneDrive, etc.) based on subaccount OAuth connections</p>
+  <div class="app-shell">
+    <div class="app-topnav"><span class="app-logo">Automation<em>OS</em></span></div>
+    <div class="modal-wrap">
+      <div class="modal-backdrop"></div>
+      <div class="modal-box" style="width:640px;">
+        <!-- Modal header (Modal component: px-6 py-5) -->
+        <div style="padding:18px 24px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+          <span class="modal-title">Weekly Competitive Summary</span>
+          <button class="close-btn">×</button>
+        </div>
+
+        <!-- Task tabs (exact classes from real code) -->
+        <div class="task-tabs" style="padding:0 24px;margin-bottom:0;">
+          <button class="task-tab">Details</button>
+          <button class="task-tab">Activity (8)</button>
+          <button class="task-tab">Deliverables (0)</button>
+          <button class="task-tab active">Attachments (3)</button>
+          <button class="task-tab">Conversation</button>
+        </div>
+
+        <!-- Attachments tab content (exact real structure + Drive additions) -->
+        <div style="padding:16px 24px 20px;display:flex;flex-direction:column;gap:12px;">
+
+          <!-- Upload area row — MODIFIED: added "Pick from Drive" button next to existing Upload -->
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <!-- Existing upload button — unchanged -->
+            <button style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#6366f1;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload file
+            </button>
+            <!-- ★ NEW: Pick from Drive button -->
+            <button style="display:inline-flex;align-items:center;gap:7px;padding:7px 13px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;">
+              <svg width="13" height="12" viewBox="0 0 48 43" fill="none">
+                <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+              </svg>
+              Google Drive
+            </button>
+            <span style="font-size:11px;color:#94a3b8;">PNG, JPEG, GIF, WebP, PDF, TXT, Markdown (max 10 MB)</span>
+          </div>
+
+          <!-- Attachments list -->
+          <div>
+            <!-- Existing upload: bg-slate-50 border border-slate-200 rounded-lg — unchanged -->
+            <div class="att-row">
+              <span class="att-icon att-icon-pdf">pdf</span>
+              <div style="flex:1;min-width:0;">
+                <div class="att-name">Brand Guidelines 2025.pdf</div>
+                <div class="att-meta">2.1 MB</div>
+              </div>
+              <div class="att-right">
+                <button class="att-btn att-btn-dl" title="Download">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <button class="att-btn att-btn-del" title="Delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- ★ NEW: Drive reference — active (same row container, new icon + meta) -->
+            <div class="att-row">
+              <div class="att-icon-drive">
+                <svg width="16" height="14" viewBox="0 0 48 43" fill="none">
+                  <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                  <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                  <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+                </svg>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px;">
+                  <span class="att-name">Company Overview</span>
+                  <span class="state-badge state-active">
+                    <svg width="5" height="5" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#10b981"/></svg>
+                    active
+                  </span>
+                </div>
+                <div class="att-meta">Google Drive · Google Doc · Fetched 4 min ago · 3,241 tokens</div>
+              </div>
+              <div class="att-right">
+                <button class="att-btn att-btn-del" title="Remove">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- ★ NEW: Drive reference — active (sheet) -->
+            <div class="att-row">
+              <div class="att-icon-drive">
+                <svg width="16" height="14" viewBox="0 0 48 43" fill="none">
+                  <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                  <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                  <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+                </svg>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px;">
+                  <span class="att-name">Revenue Forecast Q1</span>
+                  <span class="state-badge state-active">
+                    <svg width="5" height="5" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#10b981"/></svg>
+                    active
+                  </span>
+                </div>
+                <div class="att-meta">Google Drive · Google Sheet · Fetched 4 min ago · 12,847 tokens</div>
+              </div>
+              <div class="att-right">
+                <button class="att-btn att-btn-del" title="Remove">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ★ NEW: Failure policy — single compact select -->
+          <div style="display:flex;align-items:center;gap:8px;padding-top:2px;border-top:1px solid #f1f5f9;padding-top:10px;">
+            <span style="font-size:12.5px;color:#64748b;white-space:nowrap;flex-shrink:0;">If a Drive file can't be fetched:</span>
+            <select style="padding:5px 28px 5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12.5px;font-family:'Inter',sans-serif;color:#1e293b;background:white;cursor:pointer;appearance:none;background-image:url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%2364748b%27 stroke-width=%272%27%3E%3Cpolyline points=%276 9 12 15 18 9%27/%3E%3C/svg%3E');background-repeat:no-repeat;background-position:right 8px center;">
+              <option selected>Use saved copy and continue (default)</option>
+              <option>Stop the run</option>
+              <option>Skip the file and continue</option>
+            </select>
+          </div>
+
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 3: Drive file picker modal
+     New UI — triggered when user clicks "Pick from Drive"
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen" id="s2">
+  <p class="screen-label">Screen 3 of 6 — "Pick from Google Drive" modal — triggered from TaskModal or DataSourceManager</p>
+  <div class="app-shell">
+    <div class="app-topnav"><span class="app-logo">Automation<em>OS</em></span></div>
+    <div class="modal-wrap" style="min-height:600px;">
+      <div class="modal-backdrop"></div>
+      <!-- Dimmed TaskModal behind -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0.12;">
+        <div style="width:640px;height:500px;background:white;border-radius:14px;"></div>
+      </div>
+      <!-- File picker modal -->
+      <div class="modal-box" style="width:620px;">
+        <div class="modal-header">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <div style="width:26px;height:26px;border-radius:6px;background:#eff6ff;display:flex;align-items:center;justify-content:center;">
+              <svg width="14" height="12" viewBox="0 0 48 43" fill="none">
+                <polygon points="0,43 8,29 24,43" fill="#34a853"/>
+                <polygon points="24,0 40,29 8,29" fill="#4285f4"/>
+                <polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/>
+              </svg>
+            </div>
+            <span class="modal-title">Pick from Google Drive</span>
+          </div>
+          <button class="close-btn">×</button>
+        </div>
+
+        <div class="modal-body" style="padding:14px 20px;">
+          <!-- Account chip -->
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;margin-bottom:12px;">
+            <div style="width:20px;height:20px;border-radius:50%;background:#6366f1;display:flex;align-items:center;justify-content:center;color:white;font-size:8px;font-weight:700;">WA</div>
+            <span style="font-size:12.5px;font-weight:500;color:#374151;">workspace@acme.com</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" style="margin-left:auto;"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+
+          <!-- Search -->
+          <div style="position:relative;margin-bottom:12px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="form-input" placeholder="Search files and folders…" style="padding-left:30px;font-size:13px;" />
+          </div>
+
+          <!-- Breadcrumb -->
+          <div class="breadcrumb">
+            <span class="bc-link">My Drive</span>
+            <span class="bc-sep">›</span>
+            <span class="bc-link">Acme Operations</span>
+            <span class="bc-sep">›</span>
+            <span style="color:#1e293b;font-weight:500;">Marketing</span>
+          </div>
+
+          <!-- File list -->
+          <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+            <!-- Column headers -->
+            <div style="display:grid;grid-template-columns:1fr 110px 130px;gap:0;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+              <div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Name</div>
+              <div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Type</div>
+              <div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Modified</div>
+            </div>
+            <!-- Folder -->
+            <div class="file-row" style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="16" viewBox="0 0 24 20" fill="#f59e0b"><path d="M10 4H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+                <span style="font-size:13px;font-weight:500;color:#1e293b;">Q1 Planning</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;align-self:center;">Folder</span>
+              <span style="font-size:12px;color:#94a3b8;align-self:center;">Jan 28</span>
+            </div>
+            <!-- Doc — selected -->
+            <div class="file-row selected" style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#4285f4"/><rect x="7" y="7" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="10" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="13" width="7" height="1.5" rx="0.75" fill="white" opacity="0.8"/></svg>
+                <span style="font-size:13px;font-weight:600;color:#4f46e5;">Company Overview</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;align-self:center;">Google Doc</span>
+              <div style="display:flex;align-items:center;justify-content:space-between;align-self:center;">
+                <span style="font-size:12px;color:#94a3b8;">2 hours ago</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+            </div>
+            <!-- Doc -->
+            <div class="file-row" style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#4285f4"/><rect x="7" y="7" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="10" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="13" width="7" height="1.5" rx="0.75" fill="white" opacity="0.8"/></svg>
+                <span style="font-size:13px;font-weight:500;color:#1e293b;">Brand Guidelines 2025</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;align-self:center;">Google Doc</span>
+              <span style="font-size:12px;color:#94a3b8;align-self:center;">Jan 12</span>
+            </div>
+            <!-- Sheet -->
+            <div class="file-row" style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#34a853"/><rect x="6" y="7" width="12" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="6" y="10.5" width="12" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="6" y="14" width="12" height="1.5" rx="0.75" fill="white" opacity="0.8"/><line x1="10" y1="6" x2="10" y2="17" stroke="white" stroke-width="1" opacity="0.5"/><line x1="14" y1="6" x2="14" y2="17" stroke="white" stroke-width="1" opacity="0.5"/></svg>
+                <span style="font-size:13px;font-weight:500;color:#1e293b;">Revenue Forecast Q1</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;align-self:center;">Google Sheet</span>
+              <span style="font-size:12px;color:#94a3b8;align-self:center;">3 days ago</span>
+            </div>
+            <!-- PDF -->
+            <div class="file-row" style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#ef4444"/><text x="12" y="15" text-anchor="middle" font-size="6" font-weight="700" fill="white" font-family="Inter,sans-serif">PDF</text></svg>
+                <span style="font-size:13px;font-weight:500;color:#1e293b;">Client Onboarding SOP</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;align-self:center;">PDF</span>
+              <span style="font-size:12px;color:#94a3b8;align-self:center;">Jan 8</span>
+            </div>
+            <!-- Slides — unsupported -->
+            <div style="display:grid;grid-template-columns:1fr 110px 130px;padding:8px 10px;opacity:0.4;cursor:not-allowed;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <svg width="18" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#fbbc04"/><rect x="6" y="6" width="12" height="8" rx="1" fill="white" opacity="0.6"/></svg>
+                <span style="font-size:13px;color:#94a3b8;">Q1 Kickoff Slides</span>
+              </div>
+              <span style="font-size:12px;color:#94a3b8;align-self:center;">Google Slides</span>
+              <div style="display:flex;align-items:center;justify-content:space-between;align-self:center;">
+                <span style="font-size:12px;color:#94a3b8;">Dec 15</span>
+                <span style="font-size:10.5px;font-weight:600;color:#94a3b8;">Not supported</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="justify-content:space-between;">
+          <span style="font-size:12.5px;color:#64748b;"><strong style="color:#1e293b;">1 file</strong> selected</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary">Cancel</button>
+            <button class="btn btn-primary">Attach "Company Overview"</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 4: TaskModal — Degraded & Broken states
+     Based on: TaskModal.tsx exact styling, degraded/broken states
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen" id="s3">
+  <p class="screen-label">Screen 4 of 6 — TaskModal · Attachments tab · degraded (stale cache) and broken (connection revoked) states</p>
+  <div class="app-shell">
+    <div class="app-topnav"><span class="app-logo">Automation<em>OS</em></span></div>
+    <div class="modal-wrap" style="min-height:680px;">
+      <div class="modal-backdrop"></div>
+      <div class="modal-box" style="width:640px;">
+        <div style="padding:18px 24px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <span class="modal-title">Weekly Competitive Summary</span>
+            <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#dc2626;margin-top:3px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              1 reference requires attention · task will not run
+            </div>
+          </div>
+          <button class="close-btn">×</button>
+        </div>
+
+        <div class="task-tabs" style="padding:0 24px;margin-bottom:0;">
+          <button class="task-tab">Details</button>
+          <button class="task-tab">Activity (8)</button>
+          <button class="task-tab">Deliverables (0)</button>
+          <button class="task-tab active">Attachments (3)</button>
+          <button class="task-tab">Conversation</button>
+        </div>
+
+        <div style="padding:16px 24px 20px;display:flex;flex-direction:column;gap:10px;">
+
+          <!-- Upload row (unchanged) -->
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#6366f1;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload file
+            </button>
+            <button style="display:inline-flex;align-items:center;gap:7px;padding:7px 13px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;">
+              <svg width="13" height="12" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+              Google Drive
+            </button>
+          </div>
+
+          <!-- Active upload row (unchanged) -->
+          <div class="att-row">
+            <span class="att-icon att-icon-pdf">pdf</span>
+            <div style="flex:1;min-width:0;">
+              <div class="att-name">Brand Guidelines 2025.pdf</div>
+              <div class="att-meta">2.1 MB</div>
+            </div>
+            <div class="att-right">
+              <button class="att-btn att-btn-dl"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+              <button class="att-btn att-btn-del"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            </div>
+          </div>
+
+          <!-- Degraded Drive reference -->
+          <div class="degraded-box">
+            <div class="att-row" style="margin-bottom:0;border-radius:0;border:none;background:transparent;padding:10px 12px;">
+              <div class="att-icon-drive">
+                <svg width="16" height="14" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px;">
+                  <span class="att-name">Revenue Forecast Q1</span>
+                  <span class="state-badge state-degraded">
+                    <svg width="5" height="5" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#f59e0b"/></svg>
+                    degraded
+                  </span>
+                </div>
+                <div class="att-meta">Google Drive · Google Sheet · Using cached content (3h 22m old) · Last fetch failed: rate_limited</div>
+              </div>
+              <div class="att-right">
+                <button class="att-btn att-btn-del"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Broken Drive reference -->
+          <div class="broken-box">
+            <div class="att-row" style="margin-bottom:0;border-radius:0;border:none;background:transparent;padding:10px 12px;">
+              <div class="att-icon-drive">
+                <svg width="16" height="14" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px;">
+                  <span class="att-name" style="color:#dc2626;">Client Brief March 2025.pdf</span>
+                  <span class="state-badge state-broken">
+                    <svg width="5" height="5" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#ef4444"/></svg>
+                    broken
+                  </span>
+                </div>
+                <div class="att-meta" style="color:#b91c1c;">Connection revoked · Cache expired · Task will not run</div>
+              </div>
+              <div class="att-right">
+                <button style="padding:3px 8px;background:#dc2626;color:white;border:none;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">Re-attach</button>
+                <button class="att-btn att-btn-del"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+              </div>
+            </div>
+            <div class="broken-detail">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <div>
+                <strong>Connection revoked.</strong> workspace@acme.com · Google Drive was disconnected. Cache has expired. The task will not run until this reference is re-attached or removed.
+                <div style="margin-top:8px;display:flex;gap:6px;">
+                  <button style="padding:4px 10px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">Re-attach using another connection</button>
+                  <button style="padding:4px 10px;background:transparent;color:#dc2626;border:none;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;">Remove reference</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Failure policy — compact -->
+          <div style="display:flex;align-items:center;gap:8px;border-top:1px solid #f1f5f9;padding-top:10px;">
+            <span style="font-size:12.5px;color:#64748b;white-space:nowrap;flex-shrink:0;">If a Drive file can't be fetched:</span>
+            <select style="padding:5px 28px 5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12.5px;font-family:'Inter',sans-serif;color:#1e293b;background:white;cursor:pointer;appearance:none;background-image:url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%2364748b%27 stroke-width=%272%27%3E%3Cpolyline points=%276 9 12 15 18 9%27/%3E%3C/svg%3E');background-repeat:no-repeat;background-position:right 8px center;">
+              <option selected>Use saved copy and continue (default)</option>
+              <option>Stop the run</option>
+              <option>Skip the file and continue</option>
+            </select>
+            <span style="font-size:11.5px;color:#94a3b8;">· Broken refs always block regardless</span>
+          </div>
+
+          <div class="alert alert-error">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div><strong>Task will not run.</strong> Resolve or remove all broken references to re-enable scheduling.</div>
+          </div>
+
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-primary" style="opacity:0.45;cursor:not-allowed;">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 5: DataSourceManager — Google Drive connected source type
+     Based on: DataSourceManager.tsx exact styling
+     Context: Scheduled task detail page (also used on agent config)
+     Shows: existing sources + new google_drive row + inline form with Drive picker
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen" id="s4">
+  <p class="screen-label">Screen 5 of 6 — Scheduled Task detail page · "Data Sources" section · This is where scheduled tasks and agents get their data context. The "Google Drive (OAuth)" type is new: it replaces the URL input with a file picker. Regular tasks use the Attachments tab (screens 2–4) instead.</p>
+  <div class="app-shell">
+    <div class="app-topnav"><span class="app-logo">Automation<em>OS</em></span></div>
+    <div class="page-content">
+      <!-- Simulate ScheduledTaskDetailPage breadcrumb + section -->
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;">
+        Scheduled Tasks › <span style="color:#64748b;font-weight:500;">Weekly Competitive Summary</span>
+      </div>
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+        <h2 style="font-size:14px;font-weight:600;color:#374151;">Data Sources</h2>
+        <span style="font-size:12px;color:#94a3b8;">Context injected into every run of this task</span>
+      </div>
+
+      <!-- DataSourceManager component: bg-white border border-slate-200 rounded-xl overflow-hidden -->
+      <div class="dsm">
+        <!-- Header -->
+        <div class="dsm-header">
+          <span class="dsm-header-label">3 sources</span>
+          <!-- Add Source button -->
+          <button class="dsm-add-btn">+ Add Source</button>
+        </div>
+
+        <!-- ★ Inline form (shown, source type = Google Drive via OAuth selected) -->
+        <div class="dsm-form">
+          <div class="dsm-form-grid">
+            <div class="dsm-form-full">
+              <label class="form-label">Name *</label>
+              <input class="form-input" value="Company Overview" />
+            </div>
+            <div class="dsm-form-full">
+              <label class="form-label">Description</label>
+              <input class="form-input" placeholder="Optional hint shown alongside the source" />
+            </div>
+            <div class="dsm-form-full">
+              <label class="form-label">Source</label>
+              <select class="form-select">
+                <option>HTTP URL</option>
+                <option>Google Docs (URL)</option>
+                <option selected>Google Drive</option>
+                <option>Dropbox</option>
+                <option>Cloudflare R2</option>
+                <option>AWS S3</option>
+                <option>File upload</option>
+              </select>
+            </div>
+            <!-- When source = Google Drive, show file picker -->
+            <div class="dsm-form-full">
+              <label class="form-label">File *</label>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button style="display:inline-flex;align-items:center;gap:7px;padding:7px 12px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Inter',sans-serif;">
+                  <svg width="13" height="12" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+                  Google Drive
+                </button>
+                <span style="font-size:12.5px;color:#374151;display:flex;align-items:center;gap:6px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="1" width="18" height="22" rx="2" fill="#4285f4"/><rect x="7" y="7" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="10" width="10" height="1.5" rx="0.75" fill="white" opacity="0.8"/><rect x="7" y="13" width="7" height="1.5" rx="0.75" fill="white" opacity="0.8"/></svg>
+                  Company Overview
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:16px;">
+            <button style="padding:8px 16px;background:#4f46e5;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;">Add Source</button>
+            <button style="padding:8px 16px;background:#f1f5f9;color:#374151;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Existing sources table -->
+        <table class="dsm-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Existing HTTP source -->
+            <tr>
+              <td>
+                <div class="dsm-ds-name">42 Macro Glossary</div>
+                <div class="dsm-ds-desc">Sector and macro terminology</div>
+              </td>
+              <td style="font-size:12px;color:#64748b;">http_url</td>
+              <td><span class="status-ok">ok</span></td>
+              <td>
+                <div style="display:flex;gap:4px;">
+                  <button class="dsm-btn-edit">Edit</button>
+                  <button class="dsm-btn-test">Test</button>
+                  <button class="dsm-btn-delete">Delete</button>
+                </div>
+              </td>
+            </tr>
+            <!-- Existing google_docs (URL-based, already existed) -->
+            <tr>
+              <td>
+                <div class="dsm-ds-name">Macro Watchlist</div>
+                <div class="dsm-ds-desc">Weekly indicators doc</div>
+              </td>
+              <td style="font-size:12px;color:#64748b;">google_docs</td>
+              <td><span class="status-ok">ok</span></td>
+              <td>
+                <div style="display:flex;gap:4px;">
+                  <button class="dsm-btn-edit">Edit</button>
+                  <button class="dsm-btn-test">Test</button>
+                  <button class="dsm-btn-delete">Delete</button>
+                </div>
+              </td>
+            </tr>
+            <!-- ★ NEW: google_drive_oauth (connected, active) -->
+            <tr style="background:#fafbff;">
+              <td>
+                <div style="display:flex;align-items:center;gap:7px;">
+                  <svg width="12" height="11" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+                  <div class="dsm-ds-name">Company Overview</div>
+                </div>
+                <div class="dsm-ds-desc" style="padding-left:19px;">Google Drive · workspace@acme.com</div>
+              </td>
+              <td style="font-size:12px;color:#64748b;">google_drive</td>
+              <td>
+                <span class="status-ok">active</span>
+                <div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">Fetched 6m ago</div>
+              </td>
+              <td>
+                <div style="display:flex;gap:4px;">
+                  <button class="dsm-btn-edit">Edit</button>
+                  <button class="dsm-btn-test">Test</button>
+                  <button class="dsm-btn-delete">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Screen 6: Re-bind broken reference
+     New modal — triggered by "Re-attach" button in TaskModal or DataSourceManager
+═════════════════════════════════════════════════════════════════════════════ -->
+<div class="screen" id="s5">
+  <p class="screen-label">Screen 6 of 6 — Re-bind modal · triggered by "Re-attach" button on a broken reference</p>
+  <div class="app-shell">
+    <div class="app-topnav"><span class="app-logo">Automation<em>OS</em></span></div>
+    <div class="modal-wrap" style="min-height:600px;">
+      <div class="modal-backdrop"></div>
+      <!-- Dimmed parent modal -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0.12;">
+        <div style="width:640px;height:500px;background:white;border-radius:14px;"></div>
+      </div>
+
+      <div class="modal-box" style="width:500px;">
+        <div class="modal-header">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <div style="width:26px;height:26px;border-radius:6px;background:#fef2f2;display:flex;align-items:center;justify-content:center;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </div>
+            <span class="modal-title">Re-attach document</span>
+          </div>
+          <button class="close-btn">×</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Document chip -->
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:16px;">
+            <svg width="16" height="14" viewBox="0 0 48 43" fill="none"><polygon points="0,43 8,29 24,43" fill="#34a853"/><polygon points="24,0 40,29 8,29" fill="#4285f4"/><polygon points="24,0 48,43 32,43 8,29" fill="#fbbc04"/></svg>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:#991b1b;">Client Brief March 2025.pdf</div>
+              <div style="font-size:11.5px;color:#b91c1c;margin-top:1px;">Google Drive · PDF · broken</div>
+            </div>
+          </div>
+
+          <!-- Reason -->
+          <div style="margin-bottom:16px;">
+            <div class="form-label">What happened</div>
+            <div class="alert alert-error" style="font-size:12.5px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <div>The Google Drive connection used to attach this file (<strong>workspace@acme.com</strong>) was revoked. The cache has expired. The task will not run until this reference is re-attached or removed.</div>
+            </div>
+          </div>
+
+          <!-- Connection selector -->
+          <div style="margin-bottom:16px;">
+            <div class="form-label">Select a connection that has access to this file</div>
+            <select class="form-select" style="margin-bottom:7px;">
+              <option value="">Choose a Google Drive connection…</option>
+              <option selected>ops@acme.com · Connected Jan 2025</option>
+              <option>admin@acme.com · Connected Mar 2025</option>
+            </select>
+            <div style="font-size:12px;color:#64748b;line-height:1.5;">The selected connection must have read access to this file. Permission is checked at attachment time.</div>
+          </div>
+
+          <!-- Access verified -->
+          <div style="padding:10px 12px;background:#f0fdf4;border:1px solid #a7f3d0;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span style="font-size:12.5px;color:#065f46;"><strong>ops@acme.com</strong> has access to this file</span>
+          </div>
+
+          <!-- Or remove -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <div style="flex:1;height:1px;background:#f1f5f9;"></div>
+            <span style="font-size:11.5px;font-weight:600;color:#94a3b8;">or</span>
+            <div style="flex:1;height:1px;background:#f1f5f9;"></div>
+          </div>
+          <div style="padding:10px 13px;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#374151;">Remove this reference</div>
+              <div style="font-size:12px;color:#64748b;margin-top:2px;">The document won't be included as context.</div>
+            </div>
+            <button class="btn btn-danger-ghost btn-sm" style="flex-shrink:0;margin-left:12px;font-size:12px;">Remove</button>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="justify-content:space-between;">
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-primary">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Re-attach via ops@acme.com
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function show(n) {
+    document.querySelectorAll('.screen').forEach(function(s, i) { s.classList.toggle('active', i === n); });
+    document.querySelectorAll('.stab').forEach(function(t, i) { t.classList.toggle('active', i === n); });
+    window.scrollTo(0, 0);
+  }
+</script>
+</body>
+</html>

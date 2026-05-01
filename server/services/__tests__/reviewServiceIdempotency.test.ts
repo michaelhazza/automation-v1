@@ -31,7 +31,7 @@ interface SeedIds {
 
 describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
   let db: Awaited<typeof import('../../db/index.js')>['db'];
-  let client: Awaited<typeof import('../../db/index.js')>['client'];
+  let client: Awaited<typeof import('../../db/index.js')>['client'] | undefined;
   let sql: Awaited<typeof import('drizzle-orm')>['sql'];
   let eq: Awaited<typeof import('drizzle-orm')>['eq'];
   let and: Awaited<typeof import('drizzle-orm')>['and'];
