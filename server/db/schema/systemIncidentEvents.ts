@@ -4,6 +4,7 @@ import { systemIncidents } from './systemIncidents';
 import { users } from './users';
 import { agentRuns } from './agentRuns';
 
+// invariant: canonical event taxonomy — all emitters must use these exact strings, no ad-hoc values
 export type SystemIncidentEventType =
   | 'occurrence'                // the fingerprint fired again
   | 'status_change'             // lifecycle transition

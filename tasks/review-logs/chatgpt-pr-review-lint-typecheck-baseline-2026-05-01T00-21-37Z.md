@@ -43,3 +43,40 @@ Final verdict: APPROVED WITH FIXES. Must fix P1.1 and P1.2. Strongly recommended
 - [auto] Added `parentOrganisationId` null guard in `server/services/agentRunFinalizationService.ts:398` — combined with existing `!parentIsSubAgent` check
 
 ---
+
+## Round 2 — 2026-05-01T01:10:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: Basically there. One additional P1 (subtle) and small tightening points.
+
+🔴 P1.3 Migration nullability gap — agentDiagnosisRunId/agentDiagnosis columns nullable with no explicit backfill contract; new code may assume presence; filters like `WHERE agentDiagnosisRunId IS NOT NULL` silently exclude historical data.
+🟠 F10: Event taxonomy has no ownership boundary — add canonical invariant comment.
+🟠 F11: ESLint + tsconfig mismatch risk — suggest `project: true` or multi-path.
+🟠 F12: Implicit coupling diagnosis ↔ incident events — add invariant comment.
+🟠 F13: Double-cast pattern repeating — create a helper to localise unsafe boundary.
+🟠 F14: No explicit test for migration compatibility (null diagnosis for legacy rows).
+🟠 F15: CI sequencing subtlety — migrations → typecheck → lint → tests.
+🟡 F16: Naming consistency — drop "agent" prefix from column names.
+🟡 F17: Future-proof JSONB field — add shape expectation comment.
+
+Final verdict: READY TO MERGE after P1 fixes.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F9: Migration nullability gap (P1.3) | technical | reject | auto (reject) | medium | Nullable IS the correct design. `diagnosisStatus` is the canonical presence indicator. TypeScript null safety enforces correct handling at every read site. Not a bug. |
+| F10: Event taxonomy invariant comment | technical | implement | auto (implement) | low | One-line comment; locks emitter contract, prevents drift. |
+| F11: ESLint tsconfig mismatch risk | technical | reject | auto (reject) | low | Explicit per-context tsconfig paths are correct for dual-tsconfig repo (server/ vs client/). `project: true` would be less precise. Type-aware rules deliberately deferred for baseline. |
+| F12: diagnosis ↔ events coupling comment | technical | reject | auto (reject) | low | Relationship is implied by schema design. Comment-only, no structural benefit. Out of scope for baseline PR. |
+| F13: Double-cast helper | technical | reject | auto (reject) | low | Casts are at well-defined SQL boundaries, pre-existing throughout codebase. Helper adds abstraction without value; shapes vary per cast site. |
+| F14: Migration compatibility test | technical | defer | defer | low | Valid future test. Out of scope for lint/typecheck baseline. Added to plan post-merge section and tasks/todo.md. Escalated (defer). User: defer. |
+| F15: CI sequencing | technical | reject | auto (reject) | low | CI ordering is pre-existing pipeline config, not a code change for this PR. |
+| F16: Naming consistency (drop "agent" prefix) | technical | reject | auto (reject) | low | Renaming DB columns requires a new migration and is high-scope. "agent" prefix is contextually accurate in systemIncidents. |
+| F17: JSONB shape comment | technical | reject | auto (reject) | low | Diagnosis shape is `Record<string, unknown>` — agent-defined free-form JSON. A fixed shape comment would be inaccurate. |
+
+### Implemented
+- [auto] Added canonical invariant comment to `SystemIncidentEventType` in `server/db/schema/systemIncidentEvents.ts`
+
+---
