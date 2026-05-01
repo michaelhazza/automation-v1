@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { logger } from '../lib/logger.js';
 import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
-import { ACTION_REGISTRY } from '../config/actionRegistry.js';
+import { ACTION_REGISTRY, getActionDefinition } from '../config/actionRegistry.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 
 // Closed list of known OAuth provider slugs. Any value outside this set is a
@@ -49,7 +49,10 @@ export async function checkRequiredIntegration(
     currentBlockSequence: number;
   },
 ): Promise<IntegrationBlockDecision> {
-  const action = ACTION_REGISTRY[toolName];
+  // TODO(E-D4): if the action's strategy is 'unsafe', throw TOOL_NOT_RESUMABLE
+  // before evaluating the integration requirement — allows hard-blocking tools
+  // that must never execute mid-run regardless of connection state.
+  const action = getActionDefinition(toolName);
   if (!action?.requiredIntegration) {
     logger.debug('integration_block_check.no_requirement', { toolName, runId: ctx.runId });
     return { shouldBlock: false };
@@ -82,10 +85,6 @@ export async function checkRequiredIntegration(
     runId: ctx.runId,
     currentBlockSequence: ctx.currentBlockSequence,
   });
-
-  // TODO(E-D4): look up ACTION_REGISTRY[toolName]?.idempotencyStrategy here.
-  // If idempotencyStrategy === 'unsafe', throw TOOL_NOT_RESUMABLE before
-  // evaluating shouldBlock so the caller can cancel the run cleanly.
 }
 
 /**
