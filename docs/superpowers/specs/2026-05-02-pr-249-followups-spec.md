@@ -1,0 +1,276 @@
+# PR #249 Follow-ups — Cleanup Spec
+
+> **For agentic workers:** use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to execute this spec task-by-task. Steps use checkbox syntax for tracking.
+
+**Build slug:** `pr-249-followups`
+**Branch (when built):** `pr-249-followups` (off `main`)
+**Authored:** 2026-05-02
+**Author:** main session — operator-directed
+**Source:** post-PR-#249 review-pipeline backlog. Items collected from `pr-reviewer` (post-build pass, 2026-05-01T07:36 UTC) and `chatgpt-pr-review` (3 rounds, 2026-05-01).
+
+**Goal:** close the actionable items from the PR #249 review backlog in one focused cleanup branch. Mostly mechanical, one operator-decided UX restoration (live-agents badge), one per-callsite audit (`Record<string, unknown>` review). Designed to ship as a single PR after the full review pipeline.
+
+**Classification:** Standard. 5 tasks, single concern (cleanup), no new patterns introduced. No architect pass needed.
+
+---
+
+## Reference docs
+
+- PR #249 (merged): https://github.com/michaelhazza/automation-v1/pull/249 — squash commit `9e751566`
+- pr-reviewer log: `tasks/review-logs/pr-reviewer-log-lint-typecheck-post-merge-tasks-2026-05-01T07-36-42Z.md`
+- chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`
+- KNOWLEDGE.md ChatGPT-diff-misreading rule (relevant to F6 audit — verify each callsite, don't trust the "42 to replace" framing)
+
+---
+
+## Contents
+
+1. [Task 1 — Pre-flight](#task-1--pre-flight)
+2. [Task 2 — N-2: drop `await await` typo (2 test files)](#task-2--n-2-drop-await-await-typo-2-test-files)
+3. [Task 3 — N-4: remove `void _b;` dead-code line](#task-3--n-4-remove-void-_b-dead-code-line)
+4. [Task 4 — F3: restore `liveAgentCount` Dashboard badge](#task-4--f3-restore-liveagentcount-dashboard-badge)
+5. [Task 5 — F4: audit existing `eslint-disable-next-line` comments](#task-5--f4-audit-existing-eslint-disable-next-line-comments)
+6. [Task 6 — F6: per-callsite audit of `Record<string, unknown>` casts](#task-6--f6-per-callsite-audit-of-recordstring-unknown-casts)
+7. [Task 7 — Doc-sync](#task-7--doc-sync)
+8. [Verification](#verification)
+9. [Out of scope](#out-of-scope)
+10. [Self-review against backlog source](#self-review-against-backlog-source)
+11. [Definition of Done](#definition-of-done)
+
+---
+
+## Task 1 — Pre-flight
+
+**Goal:** confirm the environment is clean before touching code.
+
+- [ ] `git status --short` — must return empty output. A dirty tree is a stop condition.
+- [ ] `git checkout main && git pull --ff-only` — sync to current main first.
+- [ ] `git checkout -b pr-249-followups` — branch off latest main.
+- [ ] `npm install` — vitest and other deps may not be in node_modules after a fresh clone.
+- [ ] Record baseline: `npm run lint 2>&1 | grep -c " error "` should be **0** (PR #249 closed lint cleanly). `npm run typecheck` should exit 0.
+
+**Success condition:** branch created off main, lint and typecheck baseline confirmed clean.
+
+---
+
+## Task 2 — N-2: drop `await await` typo (2 test files)
+
+**Goal:** fix two pre-existing harmless typos in test files. Both are `await await expect(...).rejects.toThrow(...)` — the inner `await expect(...).rejects.X` already returns a Promise that resolves; the outer `await` is redundant.
+
+**Source:** pr-reviewer log §"Non-Blocking Improvements" N-2.
+
+**Files:**
+- [ ] `server/services/__tests__/llmRouterTimeoutPure.test.ts:70`
+- [ ] `server/services/__tests__/canonicalDataService.principalContext.test.ts` (one occurrence — grep for `await await` to locate)
+
+**Action:** drop the outer `await` on each. Verification: `grep -rn "await await" server/services/__tests__/` must return zero matches after the fix.
+
+**Risk:** zero. The semantics are identical.
+
+---
+
+## Task 3 — N-4: remove `void _b;` dead-code line
+
+**Goal:** drop a redundant `void _b;` line that was added to satisfy `no-unused-vars` despite the `_` prefix already excluding the variable per `varsIgnorePattern: '^_'` (`eslint.config.js:26`).
+
+**Source:** pr-reviewer log §"Non-Blocking Improvements" N-4.
+
+**File:** `server/services/dropZoneService.ts` (around line 280)
+
+- [ ] Read the file around line 280 to confirm the pattern is `const { buffer: _b, ...rest } = cached; void _b;`.
+- [ ] Remove the `void _b;` statement.
+- [ ] Verify: `npm run lint -- server/services/dropZoneService.ts` exits 0 and does not flag `_b` as unused.
+
+**Risk:** zero. The `varsIgnorePattern: '^_'` already excludes `_b`.
+
+---
+
+## Task 4 — F3: restore `liveAgentCount` Dashboard badge
+
+**Goal:** re-render the Dashboard nav item's "N live" indicator. Operator (2026-05-02) chose **restore** over remove — they like the ambient awareness signal. The state machinery is already in place; only the JSX was removed in a prior commit.
+
+**Source:** chatgpt-pr-review log §F3 (R1) + operator decision after sidebar-badges mockup review (2026-05-02).
+
+**File:** `client/src/components/Layout.tsx`
+
+### 4.1 — Locate the Dashboard `NavItem`
+
+The current Layout has multiple `NavItem` calls. The Dashboard one is the entry routing to `/` with `Icons.dashboard` (search for `to="/"` and `Icons.dashboard` together — there are also `Home`/`Inbox` nav items routing to `/`). Per [client/src/components/Layout.tsx](../../client/src/components/Layout.tsx) the Dashboard nav historically had this shape (re-introduce it):
+
+```tsx
+<NavItem
+  to="/"
+  exact
+  icon={<Icons.dashboard />}
+  label="Dashboard"
+  badge={liveAgentCount > 0 ? liveAgentCount : undefined}
+  badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined}
+/>
+```
+
+- [ ] Find the Dashboard `NavItem` (the one currently renders without badge props).
+- [ ] Add the `badge=` and `badgeLabel=` props matching the snippet above. The `NavItem` component (`Layout.tsx:135-179`) already handles these props — `badgeLabel` takes precedence over `badge` and renders the blue-dot + pulse + text style; `badge` alone renders the indigo numeric pill. With both passed, the operator sees "● 3 live" (blue, pulses) when at least one agent is running, and the badge disappears when the count is 0.
+
+**Sanity-check while editing:** confirm the Dashboard nav item is actually rendered for the operator persona that has a `subaccountId` selected (the `liveAgentCount` only updates when `activeClientId` is truthy). If the Dashboard nav is gated behind a permission, ensure that gate is consistent with how `liveAgentCount` is sourced.
+
+### 4.2 — Verify the state pipeline is intact
+
+The polling-and-socket machinery is already in place from pre-existing code (PR #249 left it as dead state). Confirm before claiming done:
+
+- [ ] Initial fetch on subaccount switch — `Layout.tsx:407-410` (the `useEffect` triggered by `activeClientId`).
+- [ ] Reconnect resync — `Layout.tsx:416` inside `resyncBadges`, called via the `useSocketRoom` reconnect callback.
+- [ ] Socket increments — `Layout.tsx:431-432` (`live:agent_started` / `live:agent_completed`).
+
+If any of those have been removed since this spec was authored, treat the task as **NEEDS PLAN** — they're a prerequisite for the badge to be useful, and re-adding the state without them produces a permanent zero.
+
+### 4.3 — Visual verification
+
+- [ ] Start dev server (`npm run dev`).
+- [ ] Switch to a subaccount where at least one agent run is in flight (or trigger one). Confirm the Dashboard nav item shows "● N live" with the blue dot pulsing.
+- [ ] Wait for the agent to finish (or terminate it). Confirm the badge disappears at 0.
+- [ ] Hard-refresh the page while a run is in flight. Confirm the badge re-appears with the correct count after the initial fetch (proves the on-mount sync works).
+
+**Risk:** very low. The component already manages the state; only the JSX is being added back. No backend changes.
+
+---
+
+## Task 5 — F4: audit existing `eslint-disable-next-line` comments
+
+**Goal:** verify each `// eslint-disable-next-line ...` in the codebase remains justified. This is hygiene, not correctness — chatgpt-pr-review framed it as "normalised bypass" which the post-merge state did not actually exhibit, but a periodic audit is good practice.
+
+**Source:** chatgpt-pr-review log §F4 (R1).
+
+### 5.1 — Inventory
+
+- [ ] Run `grep -rn "eslint-disable-next-line" --include="*.ts" --include="*.tsx" --include="*.cjs" --include="*.js" -- server/ client/ shared/ scripts/ worker/ tools/ 2>/dev/null` to list all current uses.
+- [ ] Exclude any matches under `tasks/review-logs/` (those are captured agent output, not source code).
+
+The PR #249 baseline added 12 disables across:
+- 3× `no-namespace` (Express `Request` augmentation in `server/middleware/auth.ts`, `correlation.ts`, `subdomainResolution.ts`)
+- 5× `no-useless-assignment` (TS-narrowing patterns in `server/jobs/skillAnalyzerJob.ts`, `server/services/llmRouter.ts`, `server/services/mcpClientManager.ts` ×2, `worker/src/loop/executionLoop.ts` ×3)
+- 4× pre-existing (older code; sample for legitimacy as part of this audit)
+
+### 5.2 — Verdict per disable
+
+For each match in the inventory:
+
+- [ ] **Read the disabled line and the rule.** If the rule still genuinely fires on legitimate code (e.g. namespace declaration for module augmentation, narrowing patterns the rule false-positives on), add a one-line `// reason: <why>` comment on the line ABOVE the disable, OR confirm an existing inline comment is sufficient.
+- [ ] **If the underlying issue is fixable**, fix it and remove the disable. Example: a `no-unused-vars` disable on a destructured field that should just be deleted.
+- [ ] **If the rule has changed semantics** since the disable was added (e.g. updated `varsIgnorePattern` makes the disable redundant), remove the disable.
+
+### 5.3 — Verify
+
+- [ ] After cleanup, re-run lint: `npm run lint` must exit 0 with no new errors.
+- [ ] `grep -c "eslint-disable-next-line" $(git ls-files '*.ts' '*.tsx' '*.cjs' '*.js' | grep -vE '^(tasks/|node_modules/|dist/)')` — record the final count and document the change in the task self-review (e.g. "12 → 9; removed 3 redundant, kept 9 with one-line justifications").
+
+**Risk:** low. Each disable is a separate decision; lint must stay clean throughout.
+
+---
+
+## Task 6 — F6: per-callsite audit of `Record<string, unknown>` casts
+
+**Goal:** review each `Record<string, unknown>` cast to decide one of three outcomes per callsite. **This is NOT a mechanical sweep** — chatgpt-pr-review framed it as "42 to replace with named interfaces" but a sample reveals many are legitimate polymorphic-payload uses where `Record<string, unknown>` is correct (intervention payloads varying by action type, generic deep-walk helpers, JSON.parse return types).
+
+**Source:** chatgpt-pr-review log §F6 (R1). KNOWLEDGE.md "ChatGPT diff-misreading" pattern applies — verify the actual callsite usage rather than trusting the framing.
+
+### 6.1 — Inventory
+
+- [ ] Run `grep -rn "Record<string, unknown>" --include="*.ts" --include="*.tsx" -- server/ client/ shared/ scripts/ 2>/dev/null` and count. Exclude matches in `tasks/review-logs/` and `docs/`.
+
+### 6.2 — Three-way classification
+
+For each match, classify:
+
+**Category A — Redundant cast over already-typed value.** Example: `db.execute<{ slug: string }>` already types the result; a subsequent `(r: Record<string, unknown>) => r.slug` cast is redundant. **Action:** remove the cast, use the inferred type or an inline `(r) => r.slug` if context is clear.
+
+**Category B — Could narrow with a small adjacent interface.** Example: `JSON.parse` of a known-shape API response that's currently typed `Record<string, unknown>`. **Action:** introduce a `type FooResponse = { ... }` adjacent to the callsite, replace the cast.
+
+**Category C — Genuinely polymorphic / unstructured.** Examples that came up in the sample:
+- ClientPulse intervention payloads vary by `actionType` (`createTask` / `fireAutomation` / `notifyOperator` / `sendEmail` / `sendSms` — different shapes per type)
+- deep-walk helpers (`differsFromTemplate.ts`)
+- generic event/warning context payloads (`agentRunLog/eventRowPure.ts WarnSink`)
+- `JSON.parse` results when the shape is genuinely unknown
+
+**Action:** keep the cast. Add a one-line `// polymorphic by <discriminator>` comment if absent and the polymorphism isn't obvious from naming.
+
+### 6.3 — Out-of-scope reframe (do NOT pull this into the cleanup PR)
+
+The ClientPulse intervention-payload type system would benefit from a **discriminated union** (`type InterventionPayload = CreateTaskPayload | FireAutomationPayload | ...` with `actionType` as the discriminator). This is a substantive type-design refactor touching many editor components — it is **out of scope** for this cleanup spec and should be a separate spec when the operator chooses to tackle it. Note the deferred work under the F6 task self-review.
+
+### 6.4 — Verify
+
+- [ ] After the per-callsite pass: `npm run typecheck` exits 0.
+- [ ] `npm run lint` exits 0 with no new errors.
+- [ ] Document the final tallies in the task self-review: `<inventory> → A: <removed N>, B: <narrowed N>, C: <kept N> (plus any new comments)`.
+
+**Risk:** medium. Per-callsite judgment can introduce real type errors if a "narrow" decision misses a polymorphic case. Run typecheck after each file's changes, not just at the end.
+
+---
+
+## Task 7 — Doc-sync
+
+**Goal:** keep docs in sync with the cleanup. Most items are mechanical and don't touch docs, but F4 might surface an `eslint-disable-next-line` that's referenced elsewhere, and F6 might introduce new named interfaces worth documenting.
+
+Reference doc update triggers (per `docs/doc-sync.md`):
+
+- [ ] **architecture.md** — update only if F6 introduces a new shared row interface or pattern that other code should follow. Otherwise n/a.
+- [ ] **docs/capabilities.md** — n/a (no capability/skill/integration changes).
+- [ ] **docs/integration-reference.md** — n/a (no integration behaviour changes).
+- [ ] **CLAUDE.md / DEVELOPMENT_GUIDELINES.md** — n/a (no build-discipline / convention changes).
+- [ ] **docs/frontend-design-principles.md** — n/a (F3 restoration follows the existing pattern, doesn't introduce a new one).
+- [ ] **KNOWLEDGE.md** — append a single Pattern entry if the F6 audit surfaces a notable convention (e.g. "polymorphic payloads keyed by `actionType` use `Record<string, unknown>` with a discriminator comment"). Otherwise n/a.
+- [ ] **docs/spec-context.md** — n/a (not a spec-review session).
+
+**Verdict format per doc:** record `yes — <summary>` or `no — <reason>` per the `docs/doc-sync.md § Verdict rule`. Bare `no` verdicts are treated as missing.
+
+---
+
+## Verification
+
+Run all checks before marking this spec complete. Every item must pass.
+
+| Check | Command | Required result |
+|-------|---------|----------------|
+| Lint | `npm run lint` | exit 0, 0 errors (warnings ok) |
+| Typecheck | `npm run typecheck` | exit 0, 0 errors |
+| N-2 fix | `grep -rn "await await" server/services/__tests__/` | 0 matches |
+| N-4 fix | `grep -n "void _b;" server/services/dropZoneService.ts` | 0 matches |
+| F3 restored | manual visual check per Task 4.3 | badge appears when count > 0, disappears at 0 |
+| F4 audit complete | `grep -rn "eslint-disable-next-line"` count + per-disable comment | every surviving disable has a justification (existing comment OR added one-line reason) |
+| F6 audit complete | typecheck + lint clean + tallies recorded in self-review | A/B/C counts documented, no `Record<string, unknown>` removed where polymorphism existed |
+
+---
+
+## Out of scope
+
+Items deliberately NOT included in this spec, with rationale:
+
+- **N-1** (`IdempotencyContract` not yet wired into `ActionDefinition`): premature. The interface exists with the four fields per the PR #246 review; wiring it through `ActionDefinition` requires an actual idempotency-aware action to test against. Do this as part of the next idempotency-relevant feature, not as standalone cleanup.
+- **N-3** (`?.id` → `!.id` deviation note): one-sentence note in any future spec that touches the affected routes. Not worth its own action.
+- **N-5** (drive-by `worker/.eslintrc.cjs` ignore line): already resolved in PR #249's S-1 fix (rule ported to flat config; legacy file deleted; ignore line removed).
+- **ClientPulse intervention-payload discriminated-union refactor** (referenced in Task 6.3): substantive type-design change touching many editor components. Worth its own spec when prioritised.
+
+---
+
+## Self-review against backlog source
+
+| Backlog item | Source | Task | Covered |
+|--------------|--------|------|---------|
+| N-2 await await | pr-reviewer | Task 2 | ✓ |
+| N-4 void _b dead code | pr-reviewer | Task 3 | ✓ |
+| F3-cgpt liveAgentCount badge | chatgpt-pr-review R1 | Task 4 (operator: restore) | ✓ |
+| F4-cgpt eslint-disable hygiene | chatgpt-pr-review R1 | Task 5 | ✓ |
+| F6-cgpt Record<string, unknown> | chatgpt-pr-review R1 | Task 6 (rescoped to per-callsite audit) | ✓ |
+| N-1 IdempotencyContract plumbing | pr-reviewer | — | deferred (out of scope, not premature) |
+| N-3 ?.id deviation note | pr-reviewer | — | deferred (one-sentence note in next spec) |
+
+---
+
+## Definition of Done
+
+- [ ] All 7 tasks above complete and verified.
+- [ ] `npm run lint` exits 0 with 0 errors.
+- [ ] `npm run typecheck` exits 0.
+- [ ] Branch pushed; PR opened against `main`.
+- [ ] Full review pipeline (`spec-conformance` → `pr-reviewer` → `dual-reviewer` → `chatgpt-pr-review`) per CLAUDE.md run before merge.
+- [ ] tasks/todo.md backlog entries for N-2, N-4, F3-cgpt, F4-cgpt, F6-cgpt marked `[x]` or removed.
