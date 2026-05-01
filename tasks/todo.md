@@ -2154,8 +2154,7 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 - [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
 - [ ] F7: update plan doc to reflect that `agentDiagnosis` column is `jsonb` not `text` — JSONB is the correct type for structured diagnosis data and is already used by `writeDiagnosis.ts`; plan was written before the type decision was finalised. [auto]
-- [ ] F14: add migration compatibility test — `it('handles null agentDiagnosis for legacy rows')` covering null agentDiagnosisRunId / agentDiagnosis (pre-migration rows); see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [user]
-- [ ] F28: add idempotency double-tap test for writeDiagnosis — run same (incidentId, agentRunId) pair twice and verify no duplicate rows, no divergent state; see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [auto]
+- F14 + F28: see `## Deferred — testing posture (lint-typecheck-post-merge spec)` near the bottom of this file — those rows supersede the earlier sparse routing.
 
 ## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
 
@@ -2167,3 +2166,10 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+## Deferred — testing posture (lint-typecheck-post-merge spec)
+
+**Source:** spec-reviewer agent — review of `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` Iteration 1, 2026-05-01. F14 and F28 were drafted as integration tests inside Task 7 of that spec, then auto-rejected on framing grounds (`docs/spec-context.md` `runtime_tests: pure_function_only`). Both are real tests worth writing — just not under the current testing posture. Picked up when posture changes (live data, integration-test budget approved, etc.).
+
+- [ ] **F14 — migration compatibility test for null `agentDiagnosis` rows.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts`. Asserts that `agentDiagnosisRunId` and `agentDiagnosis` read as `null` for legacy pre-migration rows and that `diagnosisStatus = 'none'` is the canonical presence indicator (never filter on `agentDiagnosisRunId IS NOT NULL`). DB-backed integration test — not pure-function. [auto - spec-reviewer]
+- [ ] **F28 — idempotency double-tap for `executeWriteDiagnosis`.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosis.test.ts`. Asserts that two calls with the same `(incidentId, agentRunId)` produce only one `diagnosis` event and a single row update. **Important contract correction:** the second call returns `{ success: true, suppressed: false }` per the actual implementation at `server/services/systemMonitor/skills/writeDiagnosis.ts:62-63, 124-127`; `suppressed: true` is reserved for the terminal-transition race path. Earlier draft of the test in the post-merge spec had this wrong — fix at write-time. [auto - spec-reviewer]

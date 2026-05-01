@@ -45,4 +45,4 @@ None this round. All 10 findings classify as mechanical-accept or mechanical-rej
 - Ambiguous findings:            0
 - Reclassified → directional:    0
 - Autonomous decisions (directional/ambiguous): 0
-- Spec commit after iteration:   (filled by Step 8b)
+- Spec commit after iteration:   `aa4b8763`

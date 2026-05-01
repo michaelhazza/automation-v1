@@ -47,4 +47,4 @@ None this round. All 9 findings classify cleanly as mechanical-accept or mechani
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   (filled by Step 8b)
+- Spec commit after iteration:   `d058b859`
