@@ -225,6 +225,8 @@ last_updated: {YYYY-MM-DD}
 -->
 ```
 
+Update the prose body below the mission-control block to match. Status enum transitions `PLANNING → BUILDING`. Per the existing prose-canonical rule: if prose and block disagree, prose wins — keep them in sync.
+
 If status was already `BUILDING` or `REVIEWING` for a different slug, refuse and prompt the operator (concurrent-feature collision). Do not overwrite a different slug's state.
 
 ## Step 11 — End-of-phase prompt

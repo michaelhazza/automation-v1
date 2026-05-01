@@ -255,7 +255,7 @@ if [ ! -x "$CODEX_BIN" ] && [ ! -f "$CODEX_BIN" ]; then
 fi
 ```
 
-- Codex available → invoke `dual-reviewer` normally (existing 3-iteration cap applies). After any fixes, run G3 once more.
+- Codex available → invoke `dual-reviewer` with the build slug so its log lands at `tasks/review-logs/dual-review-log-{slug}-{timestamp}.md`, consistent with the other branch-level review logs. Existing 3-iteration cap applies. After any fixes, run G3 once more.
 - Codex unavailable → skip; record `REVIEW_GAP: Codex CLI unavailable` in `progress.md`. Do NOT block.
 
 After §8.5 completes (or is skipped), run G3 once more to confirm integrated state is clean.
@@ -329,6 +329,8 @@ last_updated: {YYYY-MM-DD}
 ```
 
 Keep `active_spec`, `active_plan`, `build_slug`, and `branch` unchanged. Only `status` and `last_updated` change.
+
+Update the prose body below the mission-control block to match. Status enum transitions `BUILDING → REVIEWING`. Per the existing prose-canonical rule: if prose and block disagree, prose wins — keep them in sync.
 
 ## Step 12 — End-of-phase prompt
 

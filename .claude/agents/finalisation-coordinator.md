@@ -56,28 +56,50 @@ Emit a TodoWrite list before doing any other work. Update items in real time as 
 
 Per §8 of the spec. Operator just typed "launch finalisation" and is at the keyboard — pause-and-prompt on conflicts is safe.
 
-**Sync sequence:**
+**Canonical sync sequence (spec §8.2 / §8.4):**
 
 ```bash
-git fetch origin main
-git merge origin/main
+git fetch origin
+COMMITS_BEHIND=$(git rev-list --count HEAD..origin/main)
+echo "Branch is ${COMMITS_BEHIND} commits behind main"
+```
+
+**Freshness thresholds (§8.4):**
+- 0–10 commits behind → green, continue silently
+- 11–30 commits behind → yellow, print warning, continue
+- 31+ commits behind → **red**: refuse to start without explicit operator override. Print: "Branch is ${COMMITS_BEHIND} commits behind main — drift exceeds the safe threshold. Reply **force** to override, or **abort** to exit and rebase manually." On `force` → continue. On `abort` → exit (do NOT set current-focus.md to NONE here — the status is REVIEWING and the operator must manually decide). On any other input → ask to clarify.
+
+```bash
+if git merge-base --is-ancestor origin/main HEAD; then
+  echo "Already up to date with main — no merge needed"
+else
+  git merge origin/main --no-commit --no-ff
+  MERGE_EXIT=$?
+  if [ $MERGE_EXIT -eq 0 ]; then
+    git commit -m "chore(sync): merge main into <branch> (S2)"
+  else
+    echo "Merge conflicts present:"
+    git diff --name-only --diff-filter=U
+    # Coordinator pauses here for operator resolution
+  fi
+fi
 ```
 
 **Migration-number collision detection** runs as part of S2 (same logic as S1): list `migrations/*.sql` files on `origin/main` vs the current branch, flag any number that appears on both sides with different content.
 
-**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` after the sync so the operator can see what landed. Then compute file overlap between main and the feature branch:
+**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` after the sync so the operator can see what landed. Then compute file overlap:
 
 ```bash
 git diff origin/main...HEAD --name-only
 ```
 
-If overlapping files are found between main and the feature branch, **require explicit operator confirmation** before G4 runs:
+If overlapping files are found, **require explicit operator confirmation** before G4 runs:
 
 > Overlapping files detected: {list}. Type **continue** to proceed to G4 or **inspect** to pause.
 
-Do not proceed until the operator types "continue". If no overlap is found, continue to G4 silently.
+Do not proceed until the operator types "continue". If no overlap, continue silently.
 
-**Conflict handling:** if `git merge` exits with conflicts, pause and prompt the operator. Do not attempt to auto-resolve conflicts. After the operator resolves and signals "continue", resume.
+**Conflict handling:** if `git merge --no-commit --no-ff` exits non-zero, pause and prompt per the conflict protocol in spec §8.5. Print conflicting files, instruct operator to resolve and `git add`, then type "continue". On "abort": run `git merge --abort` and exit.
 
 ## Step 3 — G4 regression guard
 
@@ -209,12 +231,31 @@ The `last_merge_ready_*` fields are added so the audit trail survives — they r
 
 Update the prose body to match. Status enum transitions `REVIEWING → MERGE_READY`.
 
-**Auto-commit** after doc-sync sweep + KNOWLEDGE.md + todo.md cleanup. Stage and commit:
+**Do NOT commit yet.** Step 9 only writes `tasks/current-focus.md`. The auto-commit happens after Step 10 once the `ready-to-merge` label timestamp is captured.
 
+## Step 10 — Apply ready-to-merge label
+
+```bash
+gh pr edit <pr-number> --add-label "ready-to-merge"
+LABEL_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+```
+
+This label is the operator's existing convention — labelling triggers CI, which runs G5 (full lint + typecheck + test gates) as the pre-merge backstop.
+
+If the label add fails (label doesn't exist, permissions, network): surface the exact error and pause. Do not attempt force-merge or any other workaround. Operator resolves.
+
+**After the label is applied, write and commit in this order (abort-write-order invariant from §6.4.2):**
+
+1. Append the Phase 3 handoff section to `tasks/builds/{slug}/handoff.md` (with the `LABEL_TIMESTAMP` captured above).
+2. Commit all Phase 3 files:
+
+Stage and commit:
 - Updated `KNOWLEDGE.md`
 - Updated `tasks/todo.md`
 - Updated `tasks/current-focus.md`
-- Updated `tasks/builds/{slug}/handoff.md` (Phase 3 section appended — see template below)
+- Updated `tasks/builds/{slug}/handoff.md` (Phase 3 section just appended)
+
+**Write order invariant:** `tasks/builds/{slug}/handoff.md` MUST be written before `tasks/current-focus.md` is updated to MERGE_READY. In this flow, Step 9 has already written `tasks/current-focus.md`. If the process is interrupted between Step 9 and Step 10, `tasks/current-focus.md` will be MERGE_READY but `handoff.md` will have no Phase 3 section. The next session that detects this mismatch must surface a warning to the operator before proceeding. (Normal uninterrupted flow: both are committed together in one atomic commit after Step 10, so they will always be consistent in git history.)
 
 Commit message:
 
@@ -226,7 +267,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 Push to branch. Never `--no-verify`, never `--amend`.
 
-**Phase 3 handoff section** — append to existing `tasks/builds/{slug}/handoff.md` under `## Phase 3 (FINALISATION) — complete` before committing:
+**Phase 3 handoff section** — append to existing `tasks/builds/{slug}/handoff.md` under `## Phase 3 (FINALISATION) — complete`:
 
 ```markdown
 ## Phase 3 (FINALISATION) — complete
@@ -237,18 +278,8 @@ Push to branch. Never `--no-verify`, never `--amend`.
 **Doc-sync sweep verdicts:** [verdict per doc]
 **KNOWLEDGE.md entries added:** N
 **tasks/todo.md items removed:** N
-**ready-to-merge label applied at:** {ISO timestamp}
+**ready-to-merge label applied at:** {ISO timestamp from LABEL_TIMESTAMP}
 ```
-
-## Step 10 — Apply ready-to-merge label
-
-```bash
-gh pr edit <pr-number> --add-label "ready-to-merge"
-```
-
-This label is the operator's existing convention — labelling triggers CI, which runs G5 (full lint + typecheck + test gates) as the pre-merge backstop.
-
-If the label add fails (label doesn't exist, permissions, network): surface the exact error and pause. Do not attempt force-merge or any other workaround. Operator resolves.
 
 ## Step 11 — End-of-phase prompt
 

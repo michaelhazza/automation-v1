@@ -2220,3 +2220,14 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **Mid-run architecture checkpoint at 50% of chunks.** Re-invoke architect mid-build to catch slow architectural drift. Re-evaluation trigger: multi-month builds surface architectural drift as a recurring issue. [auto]
 - [ ] **Simplification pass at end of Phase 2.** "What can be removed, merged, or simplified?" pass after all chunks built. Re-evaluation trigger: when builder surgical-changes rule + review stack prove insufficient for complexity control. [auto]
 - [ ] **Confidence score per chunk (`confidence: HIGH/MEDIUM/LOW` in builder return).** Informational field only (no auto-trigger); operator uses it to decide manual review cadence. Re-evaluation trigger: when operator finds they regularly want to spot-review specific chunks based on complexity. [auto]
+
+## Deferred from pr-reviewer — dev-pipeline-coordinators (2026-05-01)
+
+**Captured:** 2026-05-01T17:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-dev-pipeline-coordinators-2026-05-01T17-30-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`
+
+- [ ] **Status-enum transition test coverage.** Author `tests/agents/dev-pipeline-coordinator-status-enum.test.ts` that reads all coordinator agent files, extracts every `status:` assignment, and asserts each is in the allowed-transition table from spec §6.1.1. Deferred: `docs/spec-context.md` sets `testing_posture: static_gates_primary`; revisit when posture changes. [auto-trigger: `testing_posture` changes]
+- [ ] **`tier-1-ui-uplift.html` migration scope.** Spec §10.1.1 only names `org-chart-redesign.html`; `tier-1-ui-uplift.html` was also migrated to satisfy the directory removal. Additive but unspecced — add a note to §9.3 to explicitly name both files if the spec is ever revised. [editorial]
+- [ ] **`chatgpt-plan-review.md` extra context loading.** Agent prepends CLAUDE.md + architecture.md + DEVELOPMENT_GUIDELINES.md before On Start (not specified in §4.3.4). Acceptable by convention; add to spec if formal review of §4.3.4 is done. [editorial]
+- [ ] **`feature-coordinator.md` per-chunk push as bare prose.** Step 6 says "push after each chunk commit" in prose with no fenced `git push` block. Add explicit `git push` command block for clarity. [minor]
