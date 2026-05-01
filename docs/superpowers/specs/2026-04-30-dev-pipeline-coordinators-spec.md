@@ -131,14 +131,19 @@ Before any work, read in order:
 4. `docs/spec-authoring-checklist.md` — pre-authoring rubric the spec must satisfy
 5. `docs/frontend-design-principles.md` — read IF the brief mentions UI / page / screen / surface (for the UI-detect step)
 6. `tasks/current-focus.md` — check status:
-   - If `NONE` or `MERGED`: write `status: PLANNING` to acquire the concurrency lock before any other work begins.
-   - If `PLANNING` AND `tasks/builds/{slug}/handoff.md` exists with `phase_status: PHASE_1_PAUSED` for the same slug: enter **resume mode** — skip Brief intake (§1.6) and jump to the paused step in the mockup loop or spec authoring. Do not write PLANNING again (it is already set).
+   - If `NONE` or `MERGED`: write an initial mission-control block with `status: PLANNING` and `build_slug: none` (placeholder; actual slug is derived in §1.7 and written back then). This acquires the concurrency lock before any other work begins.
+   - If `PLANNING`:
+     - Read `build_slug` from the existing mission-control block.
+     - If `build_slug` is set and `tasks/builds/{build_slug}/handoff.md` exists with `phase_status: PHASE_1_PAUSED`: enter **resume mode** — skip Brief intake (§1.6) and jump to the paused step. The PLANNING status and build_slug are already set; do not overwrite.
+     - Otherwise (PLANNING with no matching paused handoff, or build_slug: none from a crashed run, or a different slug already in PLANNING): refuse with a message naming the current PLANNING slug (if any) and instruct the operator to either: (a) abort the stuck session manually (`git stash` + reset `tasks/current-focus.md` to `NONE`) and restart, or (b) re-launch the other feature's coordinator to close it first.
    - If `BUILDING`, `REVIEWING`, or `MERGE_READY`: refuse and tell the operator the current status. Do not proceed.
+
+After §1.7 derives the actual slug, write it back to current-focus.md: update `build_slug: none` → `build_slug: {slug}` so the concurrency lock is complete.
 
 7. `tasks/todo.md` — scan for deferred items the brief may close
 8. `tasks/lessons.md` — past lessons applicable to this domain
 
-The PLANNING status write (item 6) must happen before the TodoWrite list is emitted — it is the concurrency gate. Resume mode skips the status write since PLANNING is already set.
+The PLANNING status write (item 6) must happen before the TodoWrite list is emitted — it is the concurrency gate. Resume mode skips the overwrite since PLANNING + slug are already set.
 
 ### §1.4 Step 1 — Top-level TodoWrite list
 
@@ -1943,11 +1948,11 @@ Step 3 — This pipeline's PR lands on main:
     — documentation updates (§10.1.4)
     — housekeeping (§10.1.5)
 Step 4 — Smoke test (operator-driven; §10.2.6)
-Step 5 — Existing in-flight Phase 2 builds resume on the NEW feature-coordinator
-         (the handoff contract for `tasks/builds/{slug}/handoff.md` is preserved;
-         see §10.3.2 for the backwards-compat story — per-chunk review work already
-         done is lost, but the new coordinator re-reviews at branch level, which is
-         the intended end state anyway)
+Step 5 — Existing in-flight Phase 2 builds restart on the NEW feature-coordinator
+         (architect re-runs from scratch; progress.md is NOT consulted to skip
+         already-built chunks; per §10.3.2, this is acceptable — the new coordinator
+         re-reviews at branch level anyway, and the handoff.md contract is preserved
+         so the spec path and branch context carry over)
 Step 6 — All new features start on the NEW pipeline
 ```
 

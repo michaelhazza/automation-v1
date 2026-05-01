@@ -93,4 +93,4 @@ N/A: #R6
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             1 (see tasks/todo.md for details)
-- Spec commit after iteration:   [to be set after commit]
+- Spec commit after iteration:   976588ef
