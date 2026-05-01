@@ -347,6 +347,13 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ---
 
+### deferred-items-pre-launch (2026-05-01)
+
+- [ ] F6: Drive guard — clarify whether `integration_connections.subaccountId` can be NULL (org-level connection). If yes, the guard in §2.5 must be `if (conn.subaccountId && conn.subaccountId !== subaccountId)` to avoid blocking valid org-level connections. Current guard `conn.subaccountId !== subaccountId` would wrongly reject null-subaccountId connections. Verify data model and update guard if nulls exist. [user]
+- [ ] F8: Thread context token truncation — add enforcement for the ~500 token guideline in §2.2. `formatThreadContextBlock` currently has no ceiling; a truncation heuristic (truncate tasks list first, then decisions) should be added before the block is returned. Defer until prompt sizes become measurable in production. [user]
+
+---
+
 ## PR Review deferred items
 
 ### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 / 2026-05-01 — ChatGPT review rounds 1–3)

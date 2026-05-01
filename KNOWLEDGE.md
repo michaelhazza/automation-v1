@@ -1704,6 +1704,10 @@ In `agentResumeService.ts`, the first resume call cleared `integration_resume_to
 
 The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
 
+### [2026-05-01] Correction — chatgpt-spec-review manual mode prints spec as a copy-paste payload
+
+In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy into ChatGPT ---` block per the agent design. If the user has already submitted the spec to ChatGPT independently, this block looks like instruction-dumping. Future sessions should briefly state "printing the ChatGPT payload" before the block so the user understands its purpose and can skip it if they submitted manually.
+
 ### [2026-05-01] Pattern — Pre-submit access verification prevents silent rebind failures
 
 When a UI action binds a new credential to a resource (e.g. rebinding a broken Drive reference to a new connection), calling a lightweight access-check endpoint on connection select — rather than waiting for the full submit — surfaces failures at decision time instead of after the user commits. `ExternalDocumentRebindModal` now calls `verifyAccess(connId, fileId)` on the connection `<select>` onChange, shows an inline error, and disables the confirm button until access is confirmed. **Rule:** for any "bind credential to resource" flow, add a verify-before-confirm step using any existing lightweight probe endpoint; post-submit failures confuse users because the error arrives after they have mentally moved on. Source: ChatGPT PR #242 review Round 2 F4.
