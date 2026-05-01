@@ -1287,10 +1287,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // payloadInsertStatus='failed' fallback in the catch handler.
     terminalStatus = callStatus;
     if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
-      // Cast widens from null (narrowed by the outer !providerResponse guard) back to
-      // ProviderResponse | null — adapters can set providerResponse to a partial
-      // result before throwing, so the guard can be false at the TS-narrowing level
-      // while providerResponse is actually non-null at runtime (streaming abort path).
+      // defensive dead branch — capturedProviderResponse is always null here;
+      // kept as a guard against future refactors that might make this path reachable
       const capturedProviderResponse = providerResponse as import('./providers/types.js').ProviderResponse | null;
       const partialResponse: Record<string, unknown> | null =
         capturedProviderResponse !== null

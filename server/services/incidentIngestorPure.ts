@@ -138,10 +138,11 @@ export function topFrameSignature(stack: string | undefined): string {
     .slice(0, 200);
 }
 
-export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorCode' | 'summary' | 'stack' | 'affectedResourceKind' | 'fingerprintOverride'>): string {
+export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorCode' | 'summary' | 'stack' | 'affectedResourceKind' | 'fingerprintOverride' | 'idempotencyKey'>): string {
   if (input.fingerprintOverride) {
     return hashFingerprint(input.fingerprintOverride);
   }
+  if (input.idempotencyKey) return input.idempotencyKey; // caller-supplied dedup seed
   const parts = [
     input.source,
     input.errorCode ?? 'no_code',
