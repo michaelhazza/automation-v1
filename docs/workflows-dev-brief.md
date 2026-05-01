@@ -158,19 +158,234 @@ The corollary that makes the operator surface tractable: **a Task is always one 
 
 ## 5. Branching, parallel, loops
 
+These three are the only "control flow" primitives in the workflow vocabulary. Each was chosen against a real scenario (lead re-engagement, event-creation, customer onboarding, support ticket triage, six-week campaign) to confirm it covers the actual cases.
+
+### 5.1 Branching — output property of any step
+
+Branching is **not** a step type. It's a property of any step that produces a value. Author specifies: *"on output `X` is `Y`, go to step `Z`"*.
+
+This works the same across all four A's:
+
+| Step type | What you can branch on |
+|---|---|
+| **Agent** | Any field the agent returned (e.g., classification result `tier = hot`/`cold`) |
+| **Action** | Success / failure, returned status code, any field from the response |
+| **Ask** | Any form-field value the human entered |
+| **Approval** | `approved` / `rejected` (and on reject, optionally route back — see loops) |
+
+Default is linear (continue to the next step). Branching is opt-in. Visualised on the canvas as a small "Branch on `field`" chip below the producing step, with branch labels on each path.
+
+### 5.2 Parallel — fan-out, fan-in only
+
+Real workflows need parallel work. The `event-creation` system template already has it (hero copy + email both depend on positioning, run in parallel). A six-week campaign has multiple parallel workstreams.
+
+Two patterns allowed:
+
+- **Fan-out**: a step has multiple "next" arrows; the engine dispatches the targets in parallel
+- **Fan-in**: multiple steps converge into one "next"; the engine waits for all upstream to complete
+
+What's NOT allowed: deeply nested parallel sub-graphs. The shape stays flat enough to read on the canvas.
+
+Any of the four A's can be a parallel leg. An Approval step can fan out to multiple approvers (different from quorum — that's multiple approvers on the same step). Multiple Agent steps can run in parallel after a single Ask.
+
+### 5.3 Loops — only Approval-on-reject
+
+The only place a workflow can go backward. An Approval step's "on reject" can route to a previous step ("reviewer rejects → back to copywriter for revision").
+
+This handles ~95% of the real loop cases (review → revise → re-review). Other "loops" are engine-level, not user-visible:
+
+- **Action retry on failure** — handled by `retryPolicy`, not a workflow shape the user designs
+- **Agent re-think mid-step** — handled inside the agent's own logic, not a workflow construct
+- **General `while` loops** — explicitly disallowed. Removes a whole class of authoring footguns.
+
+Visualised on the canvas as a dashed orange line going backward from the Approval step to the route-back target, with an arrowhead and an "ON REJECT" label.
+
 ## 6. Operator surface — the open task view
+
+This is the most important screen in the product. It's where 95% of operator time is spent. Mockup: [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html).
 
 ### 6.1 Layout
 
+Full-width, three columns:
+
+| Column | Width | Purpose |
+|---|---|---|
+| **Chat** | 26% | Narrative — agent updates, user notes, handoff messages, the human-readable story of the task |
+| **Activity** (collapsible) | 22% expanded · 36px minimised | Live event log — every event with timestamp + actor + linked-entity chips. Click the chevron to minimise; click the minimised strip to expand |
+| **Right panel — tabs** | 52% (when activity expanded) · ~74% (when activity minimised) | Visual context — Live / Flow / Files |
+
+The Activity column is collapsible because for some tasks (long-running, mostly observed) the operator wants the maximum room for the right panel. For others (active multi-agent collaboration, debugging) they want to see chat + activity + visual all at once.
+
 ### 6.2 The four right-panel tabs
+
+Sharply distinct purposes — each tab answers one question:
+
+| Tab | Question it answers | Content |
+|---|---|---|
+| **Live** | *Who is doing what RIGHT NOW?* | Org chart of agents involved in this task with status dots (done / working / waiting). The "snapshot of current state" view. Best for multi-agent tasks. |
+| **Flow** | *What's the SHAPE of this work?* | The planned route. For a workflow-fired task: the step DAG with the four A's. For an ad-hoc task: the orchestrator's plan (e.g., "Sales drafts → Research adds pricing → Approval → Send"). Where we are in the sequence and what's coming next. |
+| **Activity** | *What HAPPENED?* | Chronological event log (Activity is also the dedicated left-of-right-panel column when expanded; the Activity tab shows the full version). View / Edit chips on every linked entity (CRM records, docs, rules, memory blocks). |
+| **Files** | *What was PRODUCED?* | Top thumbnail strip (one card per file with icon, type badge, orientation) + reader pane below. Click any thumbnail to load it in the reader. Document toolbar (download, open in new window) sticky at the top. Portrait files render at A4-like proportions; landscape files render at 16:9-like proportions. |
+
+The Activity column on the left and the Activity tab on the right show the same data. Why both? Because the column is always visible (when expanded) and gives a glanceable feed; the tab gives a fuller, scrollable history if the user wants to dig in. They're not duplicates of *purpose* — they're two density levels of the same source.
 
 ### 6.3 What changed from prior brief work
 
+The mockup builds on `prototypes/brief-endtoend.html` (the existing brief surface) and the live `client/src/pages/AgentChatPage.tsx`. The visual language (org chart with status dots, activity feed with View/Edit chips on linked entities, ref-chip styling) is preserved exactly.
+
+Three meaningful changes from the brief mockup:
+
+1. **Three columns instead of two**, with Activity broken out from the right panel into its own collapsible column. Lets the operator see chat + activity + visual context simultaneously.
+2. **Tabs in the right panel** with sharply distinct purposes (Live / Flow / Files). Files is new (the brief mockup didn't have a file viewer).
+3. **"Brief" retired as a noun.** The breadcrumb is now `Tasks › Acme renewal proposal`, not `Briefs › Acme renewal proposal`. Same data, one user-facing concept.
+
+The 3-panel layout is denser than the brief — the user explicitly named this trade-off ("your UI is a little bit busy"). The collapsible activity column is the release valve when density gets in the way.
+
+
+
 ## 7. Authoring surface — the Studio
+
+The Studio is where org admins / power users edit the structure of a workflow template. Mockups: [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) (the four A's per-step inspectors) and [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) (the canvas + inspector).
+
+### 7.1 Where it lives
+
+**Admin / power-user nav. Not in the operator's primary nav.** Most operators describe what they want in chat, the orchestrator drafts the workflow, they approve, and the workflow runs. They never open the Studio.
+
+The path to Studio is typically:
+
+- From a Task: "edit the workflow template that fired this task"
+- From the Workflows library (admin nav): browse templates, click one to edit
+- From the orchestrator handoff: "I drafted a workflow for this — review and publish?"
+
+If the Studio becomes the operator's primary entry point, we've drifted. The orchestrator must remain the dominant creator of workflows.
+
+### 7.2 Layout — canvas-first with chat as a docked tool
+
+Hard-learned design lesson from the brainstorm: **chat-first authoring (where the user types instructions and the agent updates the canvas) felt like Zapier with a chat overlay**. We rejected three iterations of that direction. The canvas-first pattern that landed:
+
+| Element | Behaviour |
+|---|---|
+| **Canvas** | The whole working surface. Vertical step cards, branching shown as forks, parallel as side-by-side. Click a step to edit; hover a connector to insert. Direct manipulation handles 80% of edits — rename, swap a skill, change an approver, delete a step. |
+| **Inspector** (slide-out) | Opens on the right when you click a step. Shows fields specific to that step type (see 7.3). Closes when you click empty canvas. One side panel at a time — no permanent multi-pane chrome. |
+| **Chat (Studio agent)** | Docked pill bottom-left of the canvas. Click or `⌘K` to expand into a left side-panel. Used for big restructures: *"add an approval before every irreversible step"*, *"split this into hot/cold paths after the classify step"*. The agent proposes a diff card; the user clicks Apply or Discard. No silent edits. |
+| **Bottom action bar** | Floating pill, centered on the canvas. Shows validation status (`1 issue` / `All checks pass`), estimated cost per run, and the single primary action (`Publish v4`). |
+
+### 7.3 The four A's inspectors
+
+When a step is selected, the inspector shows fields specific to that step type. From mock 04:
+
+- **Agent** — Name, agent reference (picks from system / org agents), free-form instruction textarea, optional branching on output (e.g., `tier → hot/cold`), side-effect class
+- **Action** — Name, type radio (Skill / External automation), the picked skill or automation, input fields (templated from previous step outputs), on-failure routing, side-effect class (defaults to whatever the skill declared)
+- **Ask** — Name, prompt to user, form schema (named fields with types and required flags), who can submit (Task requester / anyone in org / specific people / a team), optional auto-fill from last completed run
+- **Approval** — Name, what approvers see (which step outputs to render to the reviewer), approver routing (humans-only — see Section 8), quorum (N approvers required), if-approved routing, if-rejected routing (with the loop-back option)
+
+### 7.4 Publishing
+
+Org workflow templates are versioned via `workflow_template_versions`. Publishing creates a new immutable version. Tasks already running on the previous version continue on that version (they were locked to `templateVersionId` at start). The next firing uses the new version.
+
+The bottom-bar primary action says `Publish vN` (e.g., `Publish v4`). The current published version is shown in the page header (`Forked from system / lead-reengagement v3 · saved 14s ago`). No GitHub PR involved for org templates — that's only the system-template authoring flow.
+
+A small open question for the spec: should publishing prompt for a version note / changelog? Schema has room. Could be a one-line input on the publish modal. Worth deciding before build.
 
 ## 8. Approvals
 
+Approvals are how a workflow gates a human decision before something irreversible. Currently the engine has the step type (`approval`) and the review-recording table (`workflow_step_reviews`) but **no approver routing**. Anyone with access can decide. We need to add the routing.
+
+### 8.1 Humans-only
+
+Approvals are human-only by design.
+
+The reasoning: the whole point of an Approval step is human oversight before something irreversible. If an agent is signing off, that's just another LLM call — it doesn't add the trust layer that approvals exist for. "Agent reviews before send" is a real pattern, but it's structurally an **Agent step that returns yes/no** with the next step **branching** on its output. Same outcome, cleaner semantics.
+
+This keeps the four A's clean: Approval = human gate. Agent = anything an agent does, including review.
+
+### 8.2 The approver picker
+
+Four options, mapped to existing schema where possible:
+
+| Option | Maps to | Notes |
+|---|---|---|
+| **Specific people** | `users` table; multi-select | Pick one or more named users. Engine accepts the union — any of them can decide (or all, if quorum > 1). |
+| **A team** | `teams` + `team_members` tables (already in schema) | Pick a team; anyone in the team can decide. Requires building the team CRUD page in Org settings (see 8.4). |
+| **Task requester** | `tasks.created_by_user_id` | Whoever started the task. The most common case for "I want to review this myself" workflows. |
+| **Org admin** | Existing role check | Anyone with the `org_admin` role. Catch-all for compliance-shaped flows. |
+
+Plus a **quorum** field — number of approvers required (default 1). The engine waits until N approvals have come in before continuing. If quorum > approvers-pool-size, the validator rejects at publish time.
+
+### 8.3 Engine changes required
+
+Currently the `approval` step type only has `approvalPrompt` and `approvalSchema`. We need to add:
+
+```ts
+approverGroup: {
+  kind: 'specific_users' | 'team' | 'task_requester' | 'org_admin';
+  userIds?: string[];        // when kind = specific_users
+  teamId?: string;           // when kind = team
+}
+quorum: number;              // default 1
+```
+
+Plus engine enforcement: when an approval decision is submitted, check the deciding user is in the allowed pool; reject with 403 otherwise. Currently any authenticated user can decide on any approval — that's a real bug we need to fix as part of this work.
+
+### 8.4 Team management page
+
+Schema for teams exists; UI doesn't. The existing `SubaccountTeamPage` is about subaccount *members with permission sets*, not team groupings. We need a small Org-settings page:
+
+- List teams (name, member count, created date)
+- Create team (name, description)
+- Add / remove members
+- Rename team
+- Soft-delete (uses existing `deletedAt` column)
+
+Estimated half a day. Required for the team-based approver picker to be usable.
+
 ## 9. Files and conversational editing
+
+Files are the artifacts a task produces — drafted documents, gathered data, fetched references, slide decks. The Files tab in the open task view is where the operator sees and acts on them.
+
+### 9.1 The Files tab
+
+Two parts (mock 07 Files state):
+
+- **Top thumbnail strip** — one card per file with icon (color-coded by type / author), document orientation (portrait or landscape), file extension badge (`DOC` / `CSV` / `XLS` / `PDF` / `PPT`), and the file name. Horizontally scrollable. A subtle vertical divider separates files **produced by the task** (drafts, analyses, annexes) from **fetched references** (external rate cards, regulatory docs, anything the agent pulled in for context).
+- **Reader pane below** — full panel width. A4-like proportions for portrait files, 16:9-like for landscape. Document toolbar sticky at the top showing the current file's name + meta (DOC · 2 pages · Head of Sales · 28s ago) and two icon actions: **Download** and **Open in new window**. Click any thumbnail to swap the reader content.
+
+### 9.2 Conversational editing — in scope
+
+The operator can ask the agent to refine a file via the chat panel:
+
+> *"Make the proposal body more concise — cut the section on competitor positioning by half."*
+
+The agent reads the current file, makes the requested change, and commits it as a new version. The version history is preserved (the file is `referenceDocuments` / `executionFiles` — versioned in schema). The reader pane updates to show the latest version. Earlier versions remain accessible via a version dropdown on the document toolbar (small UI add — not heavy).
+
+This is the only editing path for the operator. Rationale:
+
+- **Audit trail preserved.** Every change has a who/what/when (the agent did X because the user asked Y at time Z).
+- **No undoing the agent's work.** If the agent made a mistake, the operator describes the fix; the agent does it; the audit log captures both.
+- **Same primitive for refining and re-drafting.** "Make this concise", "rewrite this section in a more formal tone", "add a paragraph about Q4 expansion plans" — all the same path.
+
+### 9.3 Inline human editing — out of scope (V1)
+
+The operator cannot click into the reader paper and type directly. Reasoning:
+
+- Inline editing breaks the "produced by agents, audited end-to-end" story unless every keystroke is logged
+- The Download action gives the operator an escape hatch if they truly need to edit locally
+- Most editing requests are conceptual ("make this shorter", "change the tone") — a single chat message accomplishes more than ten minutes of inline editing
+- If demand emerges in production, we can add it later; out of scope is reversible
+
+### 9.4 What this enables
+
+A typical interaction loop on the Files tab:
+
+1. Operator opens the task, clicks Files
+2. Sees the proposal draft in the reader pane
+3. Reads through, doesn't like one section
+4. Switches to the Chat panel: *"the section about pricing is too long — cut it to one paragraph"*
+5. Agent updates the file as a new version
+6. Reader pane shows the updated draft
+7. Operator approves the workflow's next step
+
+Compared to chat-only file refinement (where the operator never sees the file), this loop preserves the *I am reading what was produced and asking for what I want* feel of editing, without the audit risks of direct editing.
 
 ## 10. Integration story
 
