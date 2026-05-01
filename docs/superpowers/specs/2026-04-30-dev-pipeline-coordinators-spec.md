@@ -47,7 +47,7 @@
 - **Not fully eliminating ChatGPT-web rounds.** The operator has stated explicit preference for ChatGPT-web over the OpenAI API for richer feedback. `chatgpt-spec-review`, `chatgpt-plan-review`, and `chatgpt-pr-review` therefore auto-fire in MANUAL mode — the operator must be present for each round.
 - **Not auto-launching one coordinator from another.** The operator opens a fresh Claude Code session for each phase. The previous phase writes a handoff to disk; the next phase reads it.
 - **Not changing the existing `architect`, `spec-reviewer`, `spec-conformance`, `pr-reviewer` agent contracts.** They remain as-is; only their invocation point changes.
-- **Not introducing feature-flagged rollout.** Per `docs/spec-context.md` (`feature_flags: only_for_behaviour_modes`), this is a commit-and-revert pipeline change. The rollout dependency on the lint/typecheck cleanup branch (§10.3) is the only sequencing constraint.
+- **Not introducing feature-flagged rollout.** Per `docs/spec-context.md` (`feature_flags: only_for_behaviour_modes`), this is a commit-and-revert pipeline change. The lint/typecheck baseline dependency (§7.6, §10.3) was satisfied by PR #246 — there are no remaining hard sequencing constraints.
 - **Not introducing automated mid-build branch sync.** Operator-triggered manual sync remains an escape hatch (§8) but is never default.
 - **Not adding a `plan-reviewer` (Codex-on-plan) agent.** Specs already get Codex review via `spec-reviewer`; running Codex on the derived plan is high overlap. Deferred (see Deferred items).
 
@@ -1485,13 +1485,26 @@ Concretely:
 | G4 | `npm run lint` (full) | `npm run typecheck` (full) |
 | G5 | CI runs full | CI runs full |
 
-### §7.5 Performance posture (mandatory)
+### §7.5 Performance posture
 
-To make G1–G4 viable as a 5-gate flow, two cache enablements are **required** before this pipeline ships:
+#### §7.5.1 Measured baseline (post PR #246 merge)
 
-#### §7.5.1 TypeScript incremental cache
+Wall-clock measurements taken on this dev environment after merging `origin/main` (commit `becf20ba`, includes PR #246 lint-typecheck-baseline):
 
-Add `"incremental": true` to **both** tsconfigs:
+| Check | Cold time | Notes |
+|---|---|---|
+| `tsc --noEmit -p server/tsconfig.json` | ~12s | 1700+ TS files, server-only |
+| `tsc --noEmit -p tsconfig.json` (client) | ~5s | client-only |
+| Combined `npm run typecheck` | ~17s | sequential, no cache |
+| `npm run lint` (`eslint .`) | not measured here, ~20–40s expected on full project | flat config with type-aware rules |
+
+**Total cold per gate:** ~30–60s. **5 gates × cold:** ~2.5–5 min total per feature.
+
+This is materially better than the ~10 min figure assumed at original spec authoring time. The cache enablement below is therefore **optional, not blocking** — it shifts the experience from "tolerable" to "fast", but the pipeline is shippable without it.
+
+#### §7.5.2 TypeScript incremental cache (recommended)
+
+Add `"incremental": true` to **both** tsconfigs. Not yet present on `main` as of `becf20ba`:
 
 ```jsonc
 // tsconfig.json
@@ -1515,13 +1528,13 @@ Add `"incremental": true` to **both** tsconfigs:
 }
 ```
 
-Add `node_modules/.cache/` to `.gitignore` if not already.
+`.gitignore` already excludes `node_modules/` (verified at `becf20ba`), so `node_modules/.cache/` is implicitly ignored. No `.gitignore` change needed.
 
-Effect: first run cold (~60s); subsequent runs warm (~5–10s).
+Effect: warm runs drop from ~17s → ~3–8s for typecheck combined.
 
-#### §7.5.2 ESLint cache
+#### §7.5.3 ESLint cache (recommended)
 
-Update the `lint` script in `package.json`:
+Update the `lint` script in `package.json`. Current script (post-PR #246) is `eslint .`:
 
 ```jsonc
 {
@@ -1531,34 +1544,32 @@ Update the `lint` script in `package.json`:
 }
 ```
 
-Effect: first run cold (~30s); subsequent runs warm (~3–5s).
+Effect: warm runs drop from ~20–40s → ~3–8s.
 
-#### §7.5.3 Estimated total cost per feature
+#### §7.5.4 Estimated total cost per feature
 
-With both caches enabled:
+| State | Per-gate cold | Per-gate warm | 5 gates total |
+|---|---|---|---|
+| No caches (post PR #246, today) | ~30–60s | n/a | ~2.5–5 min |
+| With caches (after follow-up) | ~30–60s | ~5–15s | ~1–1.5 min |
 
-- One cold run (~2 min) the first time the feature touches each gate
-- All subsequent runs warm (~10–15s each)
+Either is acceptable. Cache enablement is a small follow-up PR — preferred but not gating.
 
-5 gates × (1 cold + 4 warm) = ~3 min total per feature. Acceptable.
+### §7.6 Rollout dependency
 
-Without caches: 5 gates × ~2 min cold = ~10 min total. Not acceptable for the user experience this pipeline is targeting.
+PR #246 (`lint-typecheck-baseline`) merged to `main` at commit `eb39ac3e`. As of that merge:
 
-### §7.6 Rollout dependency on cleanup branch
+- `eslint.config.js` (flat config, type-aware on server + client) shipped
+- 64 server typecheck errors fixed
+- `lint` and `typecheck` scripts in `package.json` shipped
+- Server `tsconfig.json` `lib` extended to `ES2020/2021/2022`
 
-The coordinators in this spec assume `main` is **green on lint and typecheck** at pipeline shipment time. The user is currently working on a separate branch (off-spec, ahead of this work) to fix existing lint and typecheck issues across the codebase.
+**Remaining prerequisites before this pipeline ships:**
 
-**Pre-shipment gate (mandatory):**
+1. **None blocking.** The pipeline can ship against the post-PR #246 baseline. Per-gate cold cost is ~30–60s; 5 gates per feature is ~2.5–5 min — acceptable.
+2. **Optional follow-up:** the cache enablement (§7.5.2, §7.5.3). Shrinks per-feature gate cost to ~1–1.5 min. A single small PR.
 
-1. The lint/typecheck cleanup branch lands on `main` and CI is green
-2. The cache enablement (§7.5.1, §7.5.2) lands — either as part of the cleanup branch or as a small follow-up PR
-3. THEN this pipeline ships (the new agent files land)
-
-If shipment is sequenced incorrectly:
-
-- Coordinators will trip G1 / G2 / G4 on inherited debt every run
-- Builder will hit G1 cap on chunks that didn't introduce the failure
-- Operator wastes cycles fixing things this branch didn't break
+If the operator wants the cache enablement before shipping the pipeline, sequence: cache PR lands → pipeline PR lands. If not, ship the pipeline now and add caches when convenient.
 
 The rollout sequence is enforced in §10.3.
 
@@ -1804,19 +1815,19 @@ In the same commit that lands this spec:
 | `tasks/mockups/org-chart-redesign.html` | Migrated to `prototypes/org-chart-redesign.html` per §9.3 |
 | `tasks/mockups/` (empty directory) | Retired per §9.3 |
 
-#### §10.1.6 Pre-shipment dependencies (separate PRs / branches)
+#### §10.1.6 Pre-shipment dependencies (separate PRs)
 
-These MUST land before the agent files in §10.1.1–10.1.3:
+| Path / change | Status | Purpose |
+|---|---|---|
+| Lint/typecheck cleanup | **DONE** — landed in PR #246 (`eb39ac3e`) | `main` is green on `npm run lint` and `npm run typecheck` |
+| `eslint.config.js` (flat config, type-aware) | **DONE** — landed in PR #246 | Shared lint config for server + client |
+| `lint` and `typecheck` npm scripts | **DONE** — landed in PR #246 | `npm run lint`, `npm run typecheck` available |
+| `tsconfig.json` `incremental: true` + `tsBuildInfoFile` | **OPTIONAL** — recommended follow-up (§7.5.2) | Faster warm typecheck runs |
+| `server/tsconfig.json` `incremental: true` + `tsBuildInfoFile` | **OPTIONAL** — recommended follow-up (§7.5.2) | Faster warm typecheck runs |
+| `package.json` `lint` script with `--cache --cache-location` | **OPTIONAL** — recommended follow-up (§7.5.3) | Faster warm lint runs |
+| `.gitignore` `node_modules/.cache/` entry | **NOT NEEDED** | `node_modules/` already excluded |
 
-| Path / change | Purpose |
-|---|---|
-| Lint/typecheck cleanup branch (operator-stated; not authored here) | `main` must be green on `npm run lint` and `npm run typecheck` before pipeline ships |
-| `tsconfig.json` `incremental: true` + `tsBuildInfoFile` | TypeScript cache (§7.5.1) |
-| `server/tsconfig.json` `incremental: true` + `tsBuildInfoFile` | TypeScript cache (§7.5.1) |
-| `package.json` `lint` script with `--cache --cache-location` | ESLint cache (§7.5.2) |
-| `.gitignore` `node_modules/.cache/` entry | Prevent caching artifacts from being committed |
-
-These can land in a single small follow-up PR off the cleanup branch, or can be folded into the cleanup branch itself.
+The OPTIONAL items can land in a single small follow-up PR. They are not gating — the pipeline ships against the post-PR #246 baseline at ~30–60s per gate cold cost.
 
 ### §10.2 Acceptance criteria
 
@@ -1855,14 +1866,20 @@ Each criterion below is deterministic — checkable by file inspection or a shor
   # Expected output: empty
   ```
 
-#### §10.2.5 Pre-shipment dependencies satisfied
+#### §10.2.5 Pre-shipment baseline satisfied
+
+Required (must be true before the pipeline PR merges):
+
+- [x] On `main`, `npm run lint` exits 0 — satisfied by PR #246
+- [x] On `main`, `npm run typecheck` exits 0 — satisfied by PR #246
+- [x] `eslint.config.js` exists at repo root — satisfied by PR #246
+- [x] `lint` and `typecheck` scripts in `package.json` — satisfied by PR #246
+
+Optional (recommended follow-up, not gating):
 
 - [ ] `tsconfig.json` contains `"incremental": true` and `"tsBuildInfoFile"`
 - [ ] `server/tsconfig.json` contains `"incremental": true` and `"tsBuildInfoFile"`
 - [ ] `package.json` `lint` script contains `--cache --cache-location`
-- [ ] `.gitignore` contains `node_modules/.cache/` (or equivalent)
-- [ ] On `main`, `npm run lint` exits 0
-- [ ] On `main`, `npm run typecheck` exits 0
 
 #### §10.2.6 Smoke test (post-shipment, optional)
 
@@ -1892,16 +1909,21 @@ The smoke test is operator-driven; this spec does not automate it.
 #### §10.3.1 Sequencing
 
 ```
-Step 1 — Lint/typecheck cleanup branch lands on main (operator's existing work)
-Step 2 — Cache enablement PR lands on main (§10.1.6) — can be folded into Step 1
+Step 1 — Lint/typecheck cleanup — DONE (PR #246, merged at eb39ac3e)
+Step 2 — Cache enablement PR — OPTIONAL follow-up (§7.5.2, §7.5.3)
+         Can land before, with, or after Step 3. Not gating.
 Step 3 — This pipeline's PR lands on main:
     — agent files (§10.1.1, §10.1.2, §10.1.3)
     — documentation updates (§10.1.4)
     — housekeeping (§10.1.5)
 Step 4 — Smoke test (operator-driven; §10.2.6)
-Step 5 — Existing in-flight features finish on the OLD feature-coordinator (their handoff state remains valid; the rewrite preserves the contract for `tasks/builds/{slug}/handoff.md`)
+Step 5 — Existing in-flight features finish on the OLD feature-coordinator
+         (their handoff state remains valid; the rewrite preserves the contract
+         for `tasks/builds/{slug}/handoff.md`)
 Step 6 — All new features start on the NEW pipeline
 ```
+
+**Operator decision point:** ship Step 3 immediately against the post-PR #246 baseline (~30–60s per gate cold), or wait for Step 2 cache enablement (drops warm runs to ~5–15s). Recommendation: ship Step 3 now; cache enablement can land any time after — the pipeline keeps working either way.
 
 #### §10.3.2 Backwards compatibility
 
