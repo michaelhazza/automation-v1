@@ -828,12 +828,14 @@ export const agentExecutionService = {
         const _threadCtxStart = Date.now();
         let threadCtx: ThreadContextReadModel | null = null;
         try {
+          let _threadCtxTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
           const ctxResult = await Promise.race<ThreadContextReadModel | typeof THREAD_CTX_TIMEOUT>([
             buildThreadContextReadModel(runConvId, request.organisationId),
-            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) =>
-              setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500),
-            ),
+            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) => {
+              _threadCtxTimeoutHandle = setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500);
+            }),
           ]);
+          if (_threadCtxTimeoutHandle !== undefined) clearTimeout(_threadCtxTimeoutHandle);
           if (ctxResult === THREAD_CTX_TIMEOUT) {
             logger.warn('thread_ctx.timeout', { runId: run.id });
           } else {
@@ -850,6 +852,17 @@ export const agentExecutionService = {
           const threadBlock = formatThreadContextBlock(threadCtx);
           if (threadBlock) {
             effectiveBasePrompt = threadBlock + '\n\n' + basePrompt;
+            // Persist version for drift detection — fire-and-forget, best-effort
+            void db
+              .update(agentRuns)
+              .set({
+                runMetadata: {
+                  ...(run.runMetadata ?? {}),
+                  threadContextVersionAtStart: threadCtx.version,
+                },
+              })
+              .where(eq(agentRuns.id, run.id))
+              .catch(() => {});
           }
         }
       }
