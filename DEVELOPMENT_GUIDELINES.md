@@ -51,6 +51,7 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 - **Schema files are leaves.** `server/db/schema/**` may only import from `drizzle-orm`, `shared/types/**`, and other schema files — never from `services/`, `lib/`, `routes/`, or `middleware/`. One violation drove 175 circular cycles in the 2026-04-25 audit.
 - **Types crossing the schema/service boundary live in `shared/types/`.** If a type is used by both a schema file (as a JSONB column) and a service (as a return type), put it in `shared/types/` and have services re-export for backward compat.
 - **Partial unique indexes on soft-deletable tables must include `AND deleted_at IS NULL`.** Without it, re-inserting a soft-deleted row permanently fails with a unique constraint violation — the record is logically gone but still occupies the index.
+- **Soft-delete enforcement is two-layered: SQL exclusion is the rule, runtime assertion is defence-in-depth.** Joins against soft-deletable tables (`agents`, `systemAgents`, etc.) carry `isNull(table.deletedAt)` in the join `ON` clause — never in `WHERE` for `leftJoin`s, since that converts outer to inner semantics. `assertNotSoftDeleted(record, label)` may be called on hot paths after fetch as a regression catcher; it is supplementary, not a replacement for the SQL filter.
 
 ---
 

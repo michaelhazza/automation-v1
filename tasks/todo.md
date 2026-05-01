@@ -355,7 +355,20 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ---
 
+### deferred-items-pre-launch (2026-05-01)
+
+*(R1 deferred items F6 and F8 resolved in Round 2 — applied to spec)*
+
+---
+
 ## PR Review deferred items
+
+### PR #247 — claude-deferred-items-pre-launch-5Kx9P (2026-05-01 — ChatGPT review round 1)
+
+- [ ] [user] **R1/F3a: Resume path lacks 500ms thread-context build timeout** — `agentResumeService.ts:96` calls `buildThreadContextReadModel(resumeConvId, organisationId)` without the 500ms `Promise.race` timeout that `agentExecutionService.ts:832` uses. A slow context build during resume could delay the run. Fix: extract the timeout pattern into a small helper (`buildThreadContextWithTimeout(convId, orgId, timeoutMs = 500)`) and call it from both sites. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F3b: Thread-context version persistence is fire-and-forget** — `agentExecutionService.ts:856` writes `threadContextVersionAtStart` via `void db.update(...).catch(() => {})`. If the write fails, the prompt still injected the context but the DB has no record. Spec §2.2 invariant 3 (fail-open) makes this intentional, but drift detection downstream may misfire. Consider: either accept the drift (close as wontfix) or move version persistence into the same transactional boundary as run-start. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F4: `findActiveConnection` ordering does not prefer subaccount-specific over org-level** — `integrationConnectionService.ts` orders by `updatedAt DESC, createdAt DESC, id DESC`. ChatGPT suggests `(subaccount_id IS NOT NULL) DESC` as primary sort to prefer subaccount connections. No spec or contract documents the expected precedence; current single caller (`integrationBlockService`) only tests `if (conn)` so ordering has no behavioural effect today. If the policy is "subaccount-specific overrides org-level for the same provider", spec it first then implement. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F6: `integrationBlockServicePure.test.ts` mutates `ACTION_REGISTRY` for setup** — Tests cast and mutate the global registry then restore. Vitest's default sequential file-level execution makes this safe today, but parallel test runs would flake. Refactor to dependency-injection (pass action lookup as a parameter) or `vi.spyOn` once the test architecture is revisited. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
 
 ### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 / 2026-05-01 — ChatGPT review rounds 1–3)
 
@@ -2158,6 +2171,12 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 ## PR Review deferred items
 
+### PR #248 — claude-audit-dev-agents-Op4XW (2026-05-01)
+
+- [ ] F4: introduce a coordinator gate-type taxonomy (HARD BLOCK / SOFT BLOCK / WARNING) and audit every existing gate (G1/G2/G3/G4, doc-sync, environment snapshot drift, overlap detection, freshness thresholds, S2-conflict, plan-gate abort, etc.) to label each with its type. Real pattern, but the right implementation audits all existing gates at the same time as introducing the taxonomy — better as a scoped follow-up than tacked onto this PR. [user]
+
+## PR Review deferred items
+
 ### PR #246 — lint-typecheck-baseline (2026-05-01)
 
 - [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
@@ -2190,3 +2209,67 @@ Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on 
 - [ ] N-2: combine the two `import type` lines for `PrincipalContext` and `SystemPrincipal` in `visibilityPredicatePure.test.ts:14-15`. [auto]
 - [ ] N-3: tighten `registerProviderAdapter` local type in `fakeProviderAdapter.test.ts:159` from `(key, a: unknown)` back to `(key, a: LLMProviderAdapter)`. [auto]
 - [ ] N-4: codemod sweep -- replace `npx tsx server/...` in Vitest test docstrings with `npx vitest run server/...` per DEVELOPMENT_GUIDELINES.md §7. [user]
+
+---
+
+## Deferred spec decisions — dev-pipeline-coordinators
+
+**Source:** spec-reviewer iteration 1, 2026-05-01
+
+### [AUTO-DECIDED - reject] §6.2 "frontmatter description MUST include Step 1 TodoWrite skeleton"
+
+The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton in its frontmatter `description`". However, YAML frontmatter `description` fields are by convention single-line strings — embedding a multi-step skeleton would break YAML parsing. All agents defined in this spec already have body-level "Step 1 — TodoWrite list" sections, which satisfy the spirit of the requirement.
+
+**Decision:** AUTO-DECIDED reject. The §6.2 wording is an overspecification — the body Step 1 sections in each agent definition are the correct place for the skeleton, not the YAML description field. The spec text at §6.2 should be updated to say "body Step 1 section" instead of "frontmatter description".
+
+**Rationale:** Prefer spec as-is (body Step 1 sections present in all agents); YAML description field cannot hold multi-step skeletons without breaking YAML parsing.
+
+**Action if human agrees:** Clarify §6.2 wording to say "each agent's body MUST include a Step 1 — TodoWrite list section" rather than referencing the frontmatter description field.
+
+### [AUTO-DECIDED - reject] Open Questions §1 — main-branch protection design question
+
+**Source:** spec-reviewer iteration 2, 2026-05-01
+**Finding:** Codex flagged that if the operator starts spec-coordinator on main/master/develop, all coordinator auto-commits and auto-pushes (§6.5) would land directly on main, bypassing the PR/CI flow. This is a real risk.
+
+**Decision:** AUTO-DECIDED reject (close the open question as deferred). The spec explicitly lists this as Open Question #1 for chatgpt-spec-review and the operator. The two options ("refuse on integration branch" vs "auto-create feature branch") each have trade-offs the operator must evaluate. Auto-resolving this in a mechanical spec review would be out of scope — it is a product design decision.
+
+**Rationale:** Prefer spec as-is; the open question is intentionally open and flagged for operator review. The risk is acknowledged in the spec.
+
+**Action for operator:** Resolve Open Question #1 before the pipeline ships. Recommended decision: add a guard at spec-coordinator entry that refuses to start if the current branch is main/master/develop and prompts the operator to switch to a feature branch first. This is the safer option (no destructive auto-branch) and matches the commit-and-revert rollout model.
+
+### [AUTO-DECIDED - accept] §2.16/§6.4.2 — Phase 2 hard-escalation current-focus.md state should be NONE
+
+**Source:** spec-reviewer iteration 5, 2026-05-01
+**Finding:** §6.4.2 says hard escalations "set tasks/current-focus.md status appropriately" but this is undefined for PHASE_2_PAUSED_PLAN and other Phase 2 paused states. Codex found that §2.3's entry check (BUILDING required) is inconsistent with the hard-escalation reset.
+
+**Decision:** AUTO-DECIDED accept (minor clarification needed). Hard-escalation paths in §2.16 should explicitly set current-focus.md to `NONE` (not BUILDING) so the next re-launch sees NONE and can re-enter Phase 2 cleanly by re-setting BUILDING at entry. The §2.3 entry check remains correct (BUILDING = valid, anything else = refuse; re-launch writes BUILDING before starting).
+
+**Rationale:** Phase 2 restart-not-resume posture means hard escalations should leave the repo in a clean state (NONE) rather than a stuck state (BUILDING). "Appropriately" in §6.4.2 should be interpreted as NONE for all Phase 2 PAUSED* escalations.
+
+**Action if human agrees:** Add a line to each hard-escalation path in §2.16 specifying `current-focus.md → NONE`. Minor spec clarification; non-blocking for implementation.
+
+---
+
+## Spec Review deferred items
+
+### dev-pipeline-coordinators (2026-05-01)
+
+Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec-review-dev-pipeline-coordinators-2026-05-01T02-20-30Z.md`). All items have explicit re-evaluation triggers.
+
+- [ ] **Per-phase cost and time budgeting.** Optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Re-evaluation trigger: `live_users: yes` in `docs/spec-context.md`. [user]
+- [ ] **Overgrown progress.md compression.** Keep last N detailed entries; summarize older entries. Re-evaluation trigger: builds consistently exceed 20+ chunks. [user]
+- [ ] **Runtime smoke check for routes/schema/integration chunks.** Lightweight runtime verification (hit endpoint, verify response shape) after chunks touching API routes, DB schema, or integration points. Re-evaluation trigger: `api_contract_tests: not none` in `docs/spec-context.md` (i.e. when `live_users: yes`). [auto]
+- [ ] **Mid-run architecture checkpoint at 50% of chunks.** Re-invoke architect mid-build to catch slow architectural drift. Re-evaluation trigger: multi-month builds surface architectural drift as a recurring issue. [auto]
+- [ ] **Simplification pass at end of Phase 2.** "What can be removed, merged, or simplified?" pass after all chunks built. Re-evaluation trigger: when builder surgical-changes rule + review stack prove insufficient for complexity control. [auto]
+- [ ] **Confidence score per chunk (`confidence: HIGH/MEDIUM/LOW` in builder return).** Informational field only (no auto-trigger); operator uses it to decide manual review cadence. Re-evaluation trigger: when operator finds they regularly want to spot-review specific chunks based on complexity. [auto]
+
+## Deferred from pr-reviewer — dev-pipeline-coordinators (2026-05-01)
+
+**Captured:** 2026-05-01T17:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-dev-pipeline-coordinators-2026-05-01T17-30-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`
+
+- [ ] **Status-enum transition test coverage.** Author `tests/agents/dev-pipeline-coordinator-status-enum.test.ts` that reads all coordinator agent files, extracts every `status:` assignment, and asserts each is in the allowed-transition table from spec §6.1.1. Deferred: `docs/spec-context.md` sets `testing_posture: static_gates_primary`; revisit when posture changes. [auto-trigger: `testing_posture` changes]
+- [ ] **`tier-1-ui-uplift.html` migration scope.** Spec §10.1.1 only names `org-chart-redesign.html`; `tier-1-ui-uplift.html` was also migrated to satisfy the directory removal. Additive but unspecced — add a note to §9.3 to explicitly name both files if the spec is ever revised. [editorial]
+- [ ] **`chatgpt-plan-review.md` extra context loading.** Agent prepends CLAUDE.md + architecture.md + DEVELOPMENT_GUIDELINES.md before On Start (not specified in §4.3.4). Acceptable by convention; add to spec if formal review of §4.3.4 is done. [editorial]
+- [ ] **`feature-coordinator.md` per-chunk push as bare prose.** Step 6 says "push after each chunk commit" in prose with no fenced `git push` block. Add explicit `git push` command block for clarity. [minor]
