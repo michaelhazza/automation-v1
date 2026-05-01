@@ -2210,6 +2210,15 @@ Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on 
 - [ ] N-3: tighten `registerProviderAdapter` local type in `fakeProviderAdapter.test.ts:159` from `(key, a: unknown)` back to `(key, a: LLMProviderAdapter)`. [auto]
 - [ ] N-4: codemod sweep -- replace `npx tsx server/...` in Vitest test docstrings with `npx vitest run server/...` per DEVELOPMENT_GUIDELINES.md §7. [user]
 
+### PR #249 — lint-typecheck-post-merge-tasks — chatgpt-pr-review round 1 (2026-05-01T08:50 UTC)
+
+**Source:** ChatGPT-web review (manual mode); operator drove rounds inline in main session. Verdict: 3 auto-reject, 3 defer, 1 awaiting user. Log: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+
+- [ ] **F3-cgpt:** `liveAgentCount` in `client/src/components/Layout.tsx:266` is set in 5 places (initial fetch, refresh, polling, two socket handlers) but the JSX that rendered it as a Dashboard badge was removed in a prior commit. Pre-existing dead state — not introduced by PR #249. Lint rule is `'warn'` so CI passes. Either restore the Dashboard badge JSX (`<NavItem ... badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? \`${liveAgentCount} live\` : undefined} />`) or remove the state + setter + polling + socket handlers wholesale. [auto - chatgpt-pr-review]
+- [ ] **F4-cgpt:** Hygiene audit of all `// eslint-disable-next-line` comments in the codebase — ensure each remains justified and the rule it disables hasn't been resolved upstream. Periodic; not introduced by PR #249. [auto - chatgpt-pr-review]
+- [ ] **F6-cgpt:** Replace inline `Record<string, unknown>` casts with named row interfaces (~42 occurrences). Suggested per-file pass: introduce a small `type FooRow = { ... }` near each callsite where it's used, replace the cast. Mostly in `db.execute<T>()` callbacks. Out of scope for the lint cleanup spec (would expand the change set significantly). [auto - chatgpt-pr-review]
+- [ ] **F7-cgpt:** UX polish for silent UI catches — `client/src/pages/McpServersPage.tsx:317` sync button currently swallows errors. Add a toast or inline alert on failure so the operator knows when sync fails. PR #249 only added the `/* fire and forget */` comment to satisfy `no-empty`; behavior is unchanged from pre-PR `catch {}`. **User-facing — pending operator decision on whether to fix in PR #249 or defer.** [user - chatgpt-pr-review]
+
 ### PR #249 — lint-typecheck-post-merge-tasks — post-build pr-reviewer pass (2026-05-01T07:36 UTC)
 
 **Source:** post-build pr-reviewer agent. Verdict APPROVED (0 blocking, 1 strong, 4 non-blocking). Log: `tasks/review-logs/pr-reviewer-log-lint-typecheck-post-merge-tasks-2026-05-01T07-36-42Z.md`. S-1 was the only Strong finding; routed here because the only fix path requires editing `eslint.config.js`, which is a HITL-protected config file and the user is away from the keyboard at review time.
