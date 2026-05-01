@@ -167,11 +167,13 @@ Sub-steps may be added once context loaded (e.g. one item per mockup round). Ite
 
 Per §8. Run before any other work so the brief is read against current `main`. Pause-and-prompt on conflicts; freshness check is informational unless 30+ commits behind, in which case refuse to start without `force=true` override.
 
+**Early-exit rule:** if the 30+ commits-behind check triggers and the operator does NOT provide `force=true`, reset `tasks/current-focus.md` to `NONE` (release the PLANNING lock) before exiting. Print: `PLANNING lock released — tasks/current-focus.md reset to NONE.` so the operator knows the state is clean.
+
 ### §1.6 Step 3 — Brief intake and UI-touch detection
 
 Read the brief (provided in the invocation, or read from a file the operator names). Classify the brief along two axes:
 
-- **Scope class.** `Trivial | Standard | Significant | Major` per `CLAUDE.md` Task Classification. `spec-coordinator` runs the full Phase 1 only for Significant or Major. Standard briefs may skip mockups and skip `chatgpt-spec-review` if the operator confirms. Trivial briefs do NOT need a spec — coordinator stops and tells the operator to implement directly.
+- **Scope class.** `Trivial | Standard | Significant | Major` per `CLAUDE.md` Task Classification. `spec-coordinator` runs the full Phase 1 only for Significant or Major. Standard briefs may skip mockups and skip `chatgpt-spec-review` if the operator confirms. Trivial briefs do NOT need a spec — coordinator resets `tasks/current-focus.md` to `NONE` (releasing the PLANNING lock), tells the operator to implement directly, and stops.
 - **UI-touch.** Does the brief mention any of: a new page, a new screen, a new dialog, a new flow, a redesign, a layout change, a new control, visible copy, a new dashboard, or a new admin surface? If yes, set `ui_touch = true`.
 
 If `ui_touch == true`, prompt the operator:
@@ -1415,7 +1417,7 @@ Per `CLAUDE.md` user-preferences: the main session does NOT auto-commit or auto-
 **Coordinator commit rules:**
 
 - **`spec-coordinator`** — auto-commits at end of Phase 1: the spec file, the prototype directory if any, the handoff.md, the updated current-focus.md, `tasks/builds/{slug}/progress.md`, and `tasks/builds/{slug}/mockup-log.md` (if a mockup loop ran). Pushes to the current branch. Justification: the operator has opted in to the review-agent commit pattern, and spec-coordinator is the topmost orchestrator of Phase 1; without auto-commit-and-push, the next session starting on a different machine or after a context compaction would not see Phase 1's work.
-- **`feature-coordinator`** — auto-commits per chunk (after each successful chunk + G1) AND at end of Phase 2 (after branch-level review pass + doc-sync). Pushes to the current branch after each commit. Justification: chunk-level commits are recovery points; if Phase 2 is interrupted, the operator can resume from the last committed chunk.
+- **`feature-coordinator`** — auto-commits per chunk (after each successful chunk + G1) AND at end of Phase 2 (after branch-level review pass + doc-sync). Pushes to the current branch after each commit. Justification: chunk-level commits preserve incremental work on the branch; if Phase 2 is interrupted, the operator can restart `feature-coordinator` on the same branch — architect re-runs from scratch, but already-built code changes persist on the branch and are visible to the new plan.
 - **`finalisation-coordinator`** — auto-commits at end of Phase 3 (after doc-sync sweep + KNOWLEDGE.md + todo.md cleanup). Pushes to the current branch. Justification: same as the existing `chatgpt-pr-review` finalisation contract.
 - **Sub-agents (`builder`, `mockup-designer`, `chatgpt-plan-review`)** — never commit. They edit files; the parent coordinator commits at its boundary.
 - **Existing review agents (`spec-reviewer`, `dual-reviewer`)** — keep their existing auto-commit behaviour. `pr-reviewer` and `adversarial-reviewer` remain read-only.
