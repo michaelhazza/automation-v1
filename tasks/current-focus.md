@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md
-active_plan: docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md
-build_slug: lint-typecheck-post-merge-tasks
-branch: lint-typecheck-post-merge-tasks
-status: MERGE_READY
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: NONE
 last_updated: 2026-05-01
 -->
 
@@ -19,23 +19,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** [docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md](../docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md)
-**Active plan:** [docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md](../docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md)
-**Active branch:** `lint-typecheck-post-merge-tasks` (PR [#249](https://github.com/michaelhazza/automation-v1/pull/249))
-**Status:** **MERGE_READY** — full review pipeline closed.
+**Status:** **NONE** — no active spec in flight. Pick the next item from the queue at the bottom of this file or open a fresh brief.
 
-- spec-conformance: CONFORMANT_AFTER_FIXES (1 mechanical JSDoc fix on `computeFingerprint`).
-- pr-reviewer: APPROVED (1 strong S-1 + 4 non-blocking; S-1 resolved at finalisation, N-5 resolved with it; N-1 through N-4 routed to backlog as low-priority cleanup).
-- dual-reviewer (Codex): APPROVED, 0 findings.
-- chatgpt-pr-review: closed at 3 rounds (1 implement R1 F7 toast on McpServersPage sync; 12 reject; 3 defer R1 F3/F4/F6; 1 no-op R2 F5). Diminishing returns hit cleanly at end of R2.
-- doc-sync sweep: 2 stale references to legacy `worker/.eslintrc.cjs` updated (`docs/reporting-agent-handoff.md:114`, `docs/reporting-agent-paywall-workflow-spec.md:942`); architecture.md / capabilities.md / integration-reference.md / DEVELOPMENT_GUIDELINES.md / frontend-design-principles.md all n/a; CLAUDE.md / KNOWLEDGE.md updated within the PR.
-- KNOWLEDGE.md: 3 durable patterns extracted (ChatGPT diff-misreading rule, post-increment-on-dead-store no-op, chatgpt-pr-review close after 2 unproductive rounds).
+**Just merged:** PR [#249](https://github.com/michaelhazza/automation-v1/pull/249) — lint-typecheck-post-merge-tasks (squash merge `9e751566`, merged 2026-05-01T09:33:13Z). Drives `npm run lint` and `npm run typecheck` to exit 0; wires `lint_and_typecheck` as a blocking unconditional CI gate. Closes PR #246 review findings (S1 IdempotencyContract four fields, S2 visibilityPredicatePure 'system' case, S3 SystemPrincipal test coverage, N1/N3/N4). Worker T8 `no-restricted-imports` rule ported from legacy `worker/.eslintrc.cjs` (deleted) into `eslint.config.js` flat config. McpServersPage sync button now surfaces failures via `toast.error`. **Pipeline:** spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED (1 strong + 4 non-blocking; S-1/N-5 resolved at finalisation, others backlogged) → dual-reviewer (Codex) APPROVED 0 findings → chatgpt-pr-review CLOSED at 3 rounds (1 implement / 12 reject / 3 defer / 1 no-op) → doc-sync sweep PASS (2 stale refs fixed in `docs/reporting-agent-handoff.md` and `docs/reporting-agent-paywall-workflow-spec.md`) → MERGED. **KNOWLEDGE.md additions (4 patterns):** ChatGPT diff-misreading rule (grep-verify duplicate claims); post-increment-on-dead-store is a no-op; chatgpt-pr-review close after 2 unproductive rounds; **Correction** — `gh pr edit --add-label ready-to-merge` must be paired with `ScheduleWakeup(90-120s)` per CLAUDE.md §12.
 
-**Next:** apply `ready-to-merge` label on PR #249 to fire `unit_tests` and `integration_tests` CI gates; await CI green; merge.
-
-**Sister branch:** `claude/deferred-items-pre-launch-5Kx9P` (deferred-items-pre-launch — Significant; 6 fixes per spec) was the previous active spec while this lint+typecheck cleanup ran. Operator returns to it after PR #249 merges.
-
-**Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
+**Recently merged (on main):** PR #248 (three-coordinator dev pipeline spec — 2026-05-01T07:07Z), PR #247 (deferred-items-pre-launch implementation plan — 2026-05-01T06:23Z), PR #246 (lint-typecheck-baseline — 2026-05-01T01:22Z), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 **Last updated:** 2026-05-01
 
 ---
