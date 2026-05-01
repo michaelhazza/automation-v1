@@ -2,19 +2,19 @@
  * integrationBlockService — determines whether a tool call requires a missing
  * integration and generates the block-state payload when it does.
  *
- * v1: the block decision always returns `shouldBlock: false` by default.
- * The interface and token-generation logic are fully wired so the calling
- * path in agentExecutionService is complete and will activate as soon as
- * ACTION_REGISTRY entries declare a `requiredIntegration` field and the
- * connectivity check is enabled.
- *
- * TODO(v2): read ACTION_REGISTRY.requiredIntegration + query integration_connections
+ * E-D3: reads ACTION_REGISTRY.requiredIntegration and queries integration_connections
  *   to return shouldBlock: true when the required integration is not connected.
  */
 
 import crypto from 'crypto';
 import { logger } from '../lib/logger.js';
 import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
+import { ACTION_REGISTRY } from '../config/actionRegistry.js';
+import { integrationConnectionService } from './integrationConnectionService.js';
+
+// Closed list of known OAuth provider slugs. Any value outside this set is a
+// misconfigured registry entry — log and fail-open rather than silently blocking.
+const VALID_INTEGRATION_PROVIDERS = ['google_drive', 'gmail', 'slack', 'notion', 'ghl'] as const;
 
 export type IntegrationBlockDecision =
   | { shouldBlock: false }
@@ -49,30 +49,43 @@ export async function checkRequiredIntegration(
     currentBlockSequence: number;
   },
 ): Promise<IntegrationBlockDecision> {
-  // TODO(v2): look up ACTION_REGISTRY entry for toolName.
-  // If ACTION_REGISTRY[toolName]?.requiredIntegration is set, query
-  // integration_connections WHERE organisation_id = ctx.organisationId
-  // AND (subaccount_id = ctx.subaccountId OR subaccount_id IS NULL)
-  // AND provider_type = requiredIntegration
-  // AND connection_status = 'active'
-  // AND oauth_status = 'active'
-  // to determine if the integration is already connected.
-  //
-  // If not connected, call _generateBlockDecision(...) and return it.
+  const action = ACTION_REGISTRY[toolName];
+  if (!action?.requiredIntegration) {
+    logger.debug('integration_block_check.no_requirement', { toolName, runId: ctx.runId });
+    return { shouldBlock: false };
+  }
 
-  // TODO(v2): look up ACTION_REGISTRY[toolName]?.idempotencyStrategy here.
-  // If idempotencyStrategy === 'unsafe', throw TOOL_NOT_RESUMABLE before
-  // evaluating shouldBlock so the caller can cancel the run cleanly.
-  // Guard omitted in v1 because ACTION_REGISTRY is not yet wired.
+  const provider = action.requiredIntegration;
 
-  // v1 safe-default: never block.
-  logger.debug('integration_block_check.skipped', {
-    toolName,
-    runId: ctx.runId,
-    note: 'v1: ACTION_REGISTRY.requiredIntegration not yet wired',
+  if (!VALID_INTEGRATION_PROVIDERS.includes(provider as typeof VALID_INTEGRATION_PROVIDERS[number])) {
+    logger.error('integration_block_check.invalid_provider', { toolName, provider, runId: ctx.runId });
+    return { shouldBlock: false }; // fail-open — bad registry slug must not break runs
+  }
+
+  const conn = await integrationConnectionService.findActiveConnection({
+    organisationId: ctx.organisationId,
+    subaccountId: ctx.subaccountId,
+    providerType: provider,
   });
 
-  return { shouldBlock: false };
+  if (conn) {
+    logger.debug('integration_block_check.connected', { toolName, provider, runId: ctx.runId });
+    return { shouldBlock: false };
+  }
+
+  logger.info('integration_block_check.blocking', { toolName, provider, runId: ctx.runId });
+  logger.info('metric.integration_blocked', { provider: String(provider) });
+
+  return generateBlockDecision({
+    toolName,
+    integrationId: provider,
+    runId: ctx.runId,
+    currentBlockSequence: ctx.currentBlockSequence,
+  });
+
+  // TODO(E-D4): look up ACTION_REGISTRY[toolName]?.idempotencyStrategy here.
+  // If idempotencyStrategy === 'unsafe', throw TOOL_NOT_RESUMABLE before
+  // evaluating shouldBlock so the caller can cancel the run cleanly.
 }
 
 /**
