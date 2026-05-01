@@ -56,7 +56,7 @@ Run these after every non-trivial change. No task is complete until all relevant
 | Trigger | Command | Max auto-fix attempts |
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
-| Any TypeScript change | `npm run typecheck` (or `npx tsc --noEmit`) | 3 |
+| Any TypeScript change | `npm run typecheck` | 3 |
 | Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
 | Client change | `npm run build:client` | 2 |
@@ -81,7 +81,7 @@ Full test-gate suites and whole-repo verification scripts DO NOT run in any loca
 - Any "regression sanity check", "quick re-verify everything", "confirm no regression" framing — these are dressed-up gate runs.
 
 **Allowed locally:**
-- `npm run lint`, `npm run typecheck` (or `npx tsc --noEmit`).
+- `npm run lint`, `npm run typecheck`.
 - `npm run build:server` / `npm run build:client` when the change touches the build surface.
 - **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Point: confirm the new test runs and passes. Not to re-run anything else.
 

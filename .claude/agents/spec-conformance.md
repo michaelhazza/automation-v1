@@ -280,7 +280,7 @@ Log PASSes, MECHANICAL_GAPs, and DIRECTIONAL_GAPs to the scratch file alongside 
 
 ### Step 5 — Re-verification pass on applied fixes
 
-After applying all mechanical fixes, re-verify each fix by re-reading the affected file and confirming the change matches the spec's named requirement. This is not a re-enumeration of gaps — just a sanity check that Step 4a landed cleanly.
+After applying all mechanical fixes, run `npm run lint && npm run typecheck` to confirm the mechanical fixes did not introduce lint errors or type failures. Then re-verify each fix by re-reading the affected file and confirming the change matches the spec's named requirement. This is not a re-enumeration of gaps — just a sanity check that Step 4a landed cleanly.
 
 If any re-verification fails, reclassify the affected REQ as DIRECTIONAL_GAP, revert the fix attempt, and append to the todo routing.
 

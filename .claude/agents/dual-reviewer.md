@@ -93,6 +93,8 @@ For each accepted recommendation:
 - Keep changes minimal — fix the issue, nothing more
 - Do not refactor surrounding code opportunistically
 
+After applying all accepted changes in this iteration, run `npm run lint && npm run typecheck` to confirm no lint errors or type failures were introduced.
+
 ### Step 4 — Check termination
 
 - If Codex output contains no findings (phrases like "no issues", "looks good", "nothing to report") → break (done)
