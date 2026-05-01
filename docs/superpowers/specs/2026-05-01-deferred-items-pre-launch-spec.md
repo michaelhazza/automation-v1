@@ -149,22 +149,23 @@ Use whichever `integrationConnectionService` method already queries `integration
 ```typescript
 export function formatThreadContextBlock(ctx: ThreadContextReadModel | null): string {
   if (!ctx) return '';
+  const MAX_ITEMS = 20;
   const lines: string[] = [];
   if (ctx.tasks?.length) {
     lines.push('Tasks:');
-    ctx.tasks.forEach((t) => lines.push(`  - ${t}`));
+    ctx.tasks.slice(0, MAX_ITEMS).forEach((t) => lines.push(`  - ${t}`));
   }
   if (ctx.approach) lines.push(`Approach: ${ctx.approach}`);
   if (ctx.decisions?.length) {
     lines.push('Decisions:');
-    ctx.decisions.forEach((d) => lines.push(`  - ${d}`));
+    ctx.decisions.slice(0, MAX_ITEMS).forEach((d) => lines.push(`  - ${d}`));
   }
   if (!lines.length) return '';
   return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
 }
 ```
 
-Keep the formatted block under ~500 tokens for a typical context. If all fields are empty/null, return `''` and the caller skips injection entirely.
+`MAX_ITEMS = 20` is a deterministic guard against prompt bloat as tasks and decisions accumulate over time. Tasks are capped first, then decisions. If all fields are empty/null, return `''` and the caller skips injection entirely.
 
 **Step 2 — Inject in `executeRun()`** in `server/services/agentExecutionService.ts`. After the existing `buildSystemPrompt(...)` call, add:
 
@@ -317,12 +318,14 @@ Find all Drive attach routes that call `getOrgConnectionWithToken(connectionId, 
 
 After the connection is resolved, add:
 ```typescript
-if (conn.subaccountId !== subaccountId) {
+if (conn.subaccountId && conn.subaccountId !== subaccountId) {
   return res.status(422).json({ error: 'invalid_connection_id' });
 }
 ```
 
 This guard goes after the existing `providerType` and `connectionStatus` checks, before any further processing. Apply it to every attach path — task external-reference, agent data-source, and scheduled-task data-source (if present).
+
+The null check (`conn.subaccountId &&`) is intentional: connections with `subaccountId = null` are org-level connections and are considered valid for any subaccount in the org. Do not omit the null check — without it, org-level connections would be wrongly rejected.
 
 Error shape: `422 { error: 'invalid_connection_id' }` — matches spec §17.6 vocabulary.
 
