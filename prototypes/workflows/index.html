@@ -10,55 +10,83 @@
 <body class="min-h-screen">
 <div class="max-w-[760px] mx-auto p-10">
   <h1 class="text-[20px] font-semibold text-slate-900 mb-1">Workflows · UI prototypes</h1>
-  <p class="text-[13px] text-slate-500 mb-8">Brainstorming the Phase-2 UI for the workflows feature. Backend (engine, schema, routes, step types including <code class="text-[12px] bg-slate-100 px-1 rounded">invoke_automation</code> for n8n / Make / Zapier / GHL) is already built — these mocks explore the operator surface.</p>
+  <p class="text-[13px] text-slate-500 mb-8">Brainstorming the Phase-2 UI for the workflows feature. Backend (engine, schema, routes) is already built — these mocks explore the operator surface, the Studio authoring surface, and the open-task surface.</p>
 
-  <div class="space-y-3">
+  <h2 class="text-[12px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Current direction (the four A's)</h2>
+  <div class="space-y-3 mb-8">
 
-    <a href="01-studio-chat-with-live-preview.html" class="block bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg p-5 transition">
+    <a href="04-four-as-step-types.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
       <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[14px] font-semibold text-slate-900">01 · Chat-driven Studio with live preview</div>
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Rejected as too busy</div>
+        <div class="text-[14px] font-semibold text-slate-900">04 · The four A's (step type showcase)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Foundation</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Three-pane workspace: chat / canvas / inspector all permanently visible. Per-step cost and side-effect badges. Multi-metric validation summary. Felt like Zapier with a chat overlay — violated frontend principles (≥2 primary actions, KPI chrome by default).</div>
+      <div class="text-[12.5px] text-slate-600">Single page establishing the visual language. Workflow steps collapsed from eight engine types to four user-visible categories: <strong>Agent · Action · Ask · Approval</strong>. Branching is a property of the producing step (not its own type), parallel allowed via fan-out / fan-in, loops only on Approval-reject. Sample workflow at the bottom shows all four working together.</div>
     </a>
 
-    <a href="02-studio-canvas-first.html" class="block bg-white border border-indigo-300 hover:border-indigo-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-indigo-100">
+    <a href="05-studio-route-editor.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
       <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[14px] font-semibold text-slate-900">02 · Canvas-first, chat collapsed</div>
-        <div class="text-[11px] text-indigo-600 uppercase tracking-wider font-semibold">Recommended · resting state</div>
+        <div class="text-[14px] font-semibold text-slate-900">05 · Studio — route editor</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Recommended</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Canvas is the whole screen. Direct manipulation handles 80% of edits — click to edit, hover-to-insert "+" between steps. Chat is a docked pill bottom-left, opens on demand for big restructures. Step cards show only icon, name, action verb. Cost rolls up to one bottom-bar number. Only irreversible steps wear a flag. Inspector is a slide-out, not a permanent column.</div>
+      <div class="text-[12.5px] text-slate-600">Replaces mocks 02 / 03. Same canvas-first layout (chat as a docked pill, slide-out inspector, inline insert "+", floating bottom action bar) but step cards now use the four A's vocabulary. Branching shown as an inline "Branch on X" chip below an Agent step. Approval-on-reject visualised as a dashed back-arrow to a previous step. The selected step (Marketing review) demonstrates the loop-back configuration in the inspector.</div>
     </a>
 
-    <a href="03-studio-chat-active.html" class="block bg-white border border-indigo-300 hover:border-indigo-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-indigo-100">
+    <a href="06-open-task-view.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
       <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[14px] font-semibold text-slate-900">03 · Canvas-first, chat activated</div>
-        <div class="text-[11px] text-indigo-600 uppercase tracking-wider font-semibold">Recommended · activated state</div>
+        <div class="text-[14px] font-semibold text-slate-900">06 · Open task view</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Same workspace as 02 once "Ask Studio" / ⌘K is invoked. Chat slides in from the left as a workspace panel; canvas shrinks but stays primary; inspector closes (one side panel at a time). Demonstrates the "big move" use case: one sentence proposes a multi-field edit that would take several clicks. Agent never silently applies — every change renders as a diff card the user must Apply or Discard, with the canvas previewing the affected step in indigo.</div>
+      <div class="text-[12.5px] text-slate-600">Models off the existing AgentChatPage layout (chat left, contextual right panel). The user-facing surface for any task in flight, whether it came from Ask Anything one-off or a scheduled workflow. Renders the lead re-engagement workflow from mock 05 mid-run, paused at the Marketing review approval — drafts done, 1 of 2 approvers signed off, irreversible Mailchimp send waiting. Right panel has tabs for Flow / Activity / Files; default Flow tab shows the route through agents and gates with done / current / pending state per leg.</div>
     </a>
 
   </div>
 
-  <div class="mt-10 p-4 border border-dashed border-slate-300 rounded-lg text-[12.5px] text-slate-600">
-    <div class="font-semibold text-slate-800 mb-1">Next, if 02's direction lands:</div>
+  <div class="p-4 border border-dashed border-slate-300 rounded-lg text-[12.5px] text-slate-600 mb-8">
+    <div class="font-semibold text-slate-800 mb-1">Next mockups (in recommended order):</div>
     <ul class="list-disc pl-5 space-y-0.5">
-      <li>Empty-state Studio (first time on a fresh fork)</li>
-      <li>Step picker drawer when "+" is clicked (skill / agent / approval / wait / automation)</li>
-      <li>Diff vs published version</li>
-      <li>Workflow Run detail / live execution view</li>
-      <li>Workflows library (replaces today's table)</li>
+      <li>07 · Task list / kanban (the surface that lists tasks for a subaccount)</li>
+      <li>08 · Schedule editor (pick what to fire, pick the cadence — wraps existing SchedulePicker)</li>
+      <li>09 · Orchestrator handoff (Ask Anything → "do once vs set up to repeat" prompt → either inline run or Studio open with draft)</li>
     </ul>
   </div>
 
-  <div class="mt-6 p-4 border border-slate-200 bg-white rounded-lg text-[12.5px] text-slate-600">
+  <h2 class="text-[12px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Earlier exploration (for reference)</h2>
+  <div class="space-y-3 mb-8">
+
+    <a href="01-studio-chat-with-live-preview.html" class="block bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg p-5 transition opacity-80">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">01 · Chat-driven Studio with live preview</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Rejected — too busy</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Three-pane workspace with chat as the primary surface. Felt like Zapier with a chat overlay. Violated frontend principles.</div>
+    </a>
+
+    <a href="02-studio-canvas-first.html" class="block bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg p-5 transition opacity-80">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">02 · Canvas-first, chat collapsed</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Superseded by 05</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">First canvas-first attempt. Layout pattern correct but used the eight-step-type taxonomy. Replaced by mock 05 with the four A's vocabulary.</div>
+    </a>
+
+    <a href="03-studio-chat-active.html" class="block bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg p-5 transition opacity-80">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">03 · Canvas-first, chat activated</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Superseded by 05</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Chat-active state for mock 02. Pattern (chat panel slides in from left, canvas shrinks, inspector closes, agent-proposed changes render as diff cards) carries forward to mock 05's chat experience.</div>
+    </a>
+
+  </div>
+
+  <div class="p-4 border border-slate-200 bg-white rounded-lg text-[12.5px] text-slate-600">
     <div class="font-semibold text-slate-800 mb-2">Include in the full workflows set (lives in <code class="text-[12px] bg-slate-100 px-1 rounded">prototypes/riley-observations/</code>)</div>
     <p class="text-[12px] text-slate-500 mb-2">Already-built mockups that belong with the workflows feature when assembling the complete picture. Not duplicated here — keep the originals as the single source.</p>
     <ul class="space-y-1.5">
-      <li><a href="../riley-observations/06-automation-picker-drawer.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 06 · Automation picker drawer</a> — chooser surface for the <code class="text-[11.5px] bg-slate-100 px-1 rounded">invoke_automation</code> step type (n8n / Make / Zapier / GHL / custom webhook)</li>
+      <li><a href="../riley-observations/06-automation-picker-drawer.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 06 · Automation picker drawer</a> — chooser surface invoked when an Action step picks an external automation (n8n / Make / Zapier / GHL / custom webhook)</li>
       <li><a href="../riley-observations/07-invoke-automation-run-detail.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 07 · Invoke-automation run detail</a> — how an external-automation step renders during a live run</li>
-      <li><a href="../riley-observations/05-workflow-studio-step-picker.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 05 · Studio step picker</a> — earlier menu pattern for adding a step; superseded for canvas-first authoring but useful as reference for the picker that opens from the "+" affordance in 02</li>
-      <li><a href="../riley-observations/08-workflows-library.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 08 · Workflows library</a> — earlier library page; will need a refresh once the canvas-first authoring direction is locked</li>
+      <li><a href="../riley-observations/05-workflow-studio-step-picker.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 05 · Studio step picker</a> — menu pattern that opens from the inline "+" affordance; needs a refresh to show the four A's instead of the older taxonomy</li>
+      <li><a href="../riley-observations/08-workflows-library.html" class="text-indigo-600 hover:text-indigo-800">riley-observations / 08 · Workflows library</a> — earlier library page; will need a refresh once the four A's direction is locked</li>
     </ul>
   </div>
 </div>

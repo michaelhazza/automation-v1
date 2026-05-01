@@ -1,0 +1,323 @@
+<!doctype html>
+<!--
+  Workflow Studio · 04 — The four A's (step type showcase)
+  ========================================================
+  Establishes the visual language for the four step types every
+  subsequent mockup will use. Single source of truth for icon,
+  colour, label, and example for each.
+
+  Step types are reduced from the engine's eight to four user-visible
+  categories:
+
+    Agent     — hand the work to an agent (agent picks skills at runtime)
+    Action    — do one specific deterministic thing (skill call OR
+                external automation)
+    Ask       — pause and ask a human for input via a form
+    Approval  — pause for a human yes/no gate
+
+  Branching is a property of a step's output (not its own type).
+  Parallel allowed via fan-out / fan-in. Loops only on Approval-reject
+  back to a previous step.
+
+  Colour assignments (matched to existing app status colours):
+    Agent    indigo  — matches AgentPill bg-indigo-50 / border-indigo-200
+    Action   emerald — matches "completed/done" feel of deterministic ops
+    Ask      amber   — matches awaiting_input status colour
+    Approval orange  — differentiates from Ask while staying in the
+                       awaiting-human family
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workflow Studio — the four A's</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Step-type colours — used across all mockups */
+  .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
+  .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
+  .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
+  .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
+
+  .icn { width:36px; height:36px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:var(--abg); color:var(--aaccent); }
+  .a-pill { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:10.5px; font-weight:600; border:1px solid var(--aborder); }
+  .a-card { border:1px solid #e5e7eb; border-radius:12px; background:white; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+  .a-card .top { border-top:3px solid var(--aaccent); border-radius:12px 12px 0 0; }
+
+  /* Mini-step in the example flow */
+  .mini-step { width:280px; background:white; border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .mini-icn { width:28px; height:28px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:var(--abg); color:var(--aaccent); }
+  .connector { width:1.5px; background:#cbd5e1; margin: 4px auto; height: 18px; }
+</style>
+</head>
+<body class="min-h-screen pb-16">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Workflow step types</span>
+</div>
+
+<!-- Page header -->
+<div class="max-w-[1200px] mx-auto px-6 pt-8 pb-4">
+  <h1 class="text-[22px] font-semibold text-slate-900">The four A's</h1>
+  <p class="text-[13.5px] text-slate-600 mt-1 max-w-[720px]">Every step in a workflow is one of four types. Memorise these four and you have the whole authoring vocabulary — branching and parallel work are properties of these steps, not separate concepts.</p>
+</div>
+
+<!-- Four step-type cards -->
+<div class="max-w-[1200px] mx-auto px-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+  <!-- AGENT -->
+  <div class="a-card a-agent">
+    <div class="top px-5 pt-5 pb-3">
+      <div class="flex items-center gap-2.5 mb-3">
+        <div class="icn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+        </div>
+        <div>
+          <div class="text-[16px] font-semibold text-slate-900">Agent</div>
+          <div class="text-[11.5px] text-slate-500">Hand it to an employee</div>
+        </div>
+      </div>
+      <p class="text-[13px] text-slate-700 leading-snug">Delegate the step to an agent with a free-form instruction. The agent picks the skills, integrations, and sub-tasks it needs at runtime.</p>
+    </div>
+    <div class="px-5 py-4 border-t border-slate-100 space-y-3 text-[12px] text-slate-600">
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">When to use</div>
+        <div>Anything that needs judgement, writing, classification, or a sequence the agent should figure out.</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Example</div>
+        <div class="italic">"Copywriter drafts a personalised follow-up email using the lead's history."</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Output you can branch on</div>
+        <div>Anything the agent returns — classification, tier, status, count.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACTION -->
+  <div class="a-card a-action">
+    <div class="top px-5 pt-5 pb-3">
+      <div class="flex items-center gap-2.5 mb-3">
+        <div class="icn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div>
+          <div class="text-[16px] font-semibold text-slate-900">Action</div>
+          <div class="text-[11.5px] text-slate-500">Do one exact thing</div>
+        </div>
+      </div>
+      <p class="text-[13px] text-slate-700 leading-snug">A specific deterministic operation — call one skill (Slack message, GHL email, HubSpot update) or trigger one external automation (n8n, Make, Zapier, GHL flow).</p>
+    </div>
+    <div class="px-5 py-4 border-t border-slate-100 space-y-3 text-[12px] text-slate-600">
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">When to use</div>
+        <div>You know exactly what should happen. No agent judgement needed. Faster, cheaper, predictable.</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Example</div>
+        <div class="italic">"Add the contact to the GHL nurture-list tag."</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Output you can branch on</div>
+        <div>Success / failure, return code, or a field from the response.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ASK -->
+  <div class="a-card a-ask">
+    <div class="top px-5 pt-5 pb-3">
+      <div class="flex items-center gap-2.5 mb-3">
+        <div class="icn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div>
+          <div class="text-[16px] font-semibold text-slate-900">Ask</div>
+          <div class="text-[11.5px] text-slate-500">Get input from a human</div>
+        </div>
+      </div>
+      <p class="text-[13px] text-slate-700 leading-snug">Pause the workflow and present a form. Whoever's running the task fills it in; the values are available to subsequent steps.</p>
+    </div>
+    <div class="px-5 py-4 border-t border-slate-100 space-y-3 text-[12px] text-slate-600">
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">When to use</div>
+        <div>You need information that only a human has — venue, target audience, choice between options.</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Example</div>
+        <div class="italic">"Confirm event venue, capacity, and ticket price before drafting copy."</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Output you can branch on</div>
+        <div>The form-field values the human entered.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPROVAL -->
+  <div class="a-card a-approval">
+    <div class="top px-5 pt-5 pb-3">
+      <div class="flex items-center gap-2.5 mb-3">
+        <div class="icn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+        </div>
+        <div>
+          <div class="text-[16px] font-semibold text-slate-900">Approval</div>
+          <div class="text-[11.5px] text-slate-500">Yes / no gate</div>
+        </div>
+      </div>
+      <p class="text-[13px] text-slate-700 leading-snug">Pause for a human's explicit yes / no. Optionally route back to a previous step on rejection (the only place a workflow can loop).</p>
+    </div>
+    <div class="px-5 py-4 border-t border-slate-100 space-y-3 text-[12px] text-slate-600">
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">When to use</div>
+        <div>Before something irreversible — sending a campaign, publishing, charging a card, posting publicly.</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Example</div>
+        <div class="italic">"Marketing reviews the email + recipient list before send."</div>
+      </div>
+      <div>
+        <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Output you can branch on</div>
+        <div>approve · reject (and on reject: route back to a previous step).</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Section: how they look in a real workflow -->
+<div class="max-w-[1200px] mx-auto px-6 mt-12">
+  <h2 class="text-[16px] font-semibold text-slate-900">How they fit together</h2>
+  <p class="text-[13px] text-slate-600 mt-1 max-w-[720px]">A weekly lead re-engagement workflow uses all four. Each card below is a step in the real flow — same icons, same colours, same pill labels you'll see on the canvas and in the activity log.</p>
+
+  <div class="mt-6 mx-auto" style="max-width: 360px;">
+
+    <!-- Step 1 — Action -->
+    <div class="mini-step a-action">
+      <div class="mini-icn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10.5px] num text-slate-400">1</span>
+          <span class="text-[13px] font-medium text-slate-900 truncate">Find stale leads</span>
+        </div>
+        <div class="text-[11.5px] text-slate-500 truncate">GHL · contacts.search</div>
+      </div>
+      <span class="a-pill a-action">Action</span>
+    </div>
+    <div class="connector"></div>
+
+    <!-- Step 2 — Agent (with branch property) -->
+    <div class="mini-step a-agent">
+      <div class="mini-icn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10.5px] num text-slate-400">2</span>
+          <span class="text-[13px] font-medium text-slate-900 truncate">Classify by fit</span>
+        </div>
+        <div class="text-[11.5px] text-slate-500 truncate">Copywriter · returns <code class="text-[11px] bg-slate-100 px-1 rounded">tier</code></div>
+      </div>
+      <span class="a-pill a-agent">Agent</span>
+    </div>
+
+    <!-- Branch indicator (output property) -->
+    <div class="mt-2 mb-2 mx-auto bg-slate-50 border border-dashed border-slate-300 rounded-md px-3 py-1.5 text-[11.5px] text-slate-600 text-center" style="width:280px;">
+      Branch on <code class="text-[11px] bg-white border border-slate-200 px-1 rounded font-medium">tier</code>
+    </div>
+
+    <!-- Two paths -->
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <div class="text-center text-[10.5px] font-semibold text-amber-700 mb-1">hot</div>
+        <div class="mini-step a-agent" style="width:135px; padding:8px 10px;">
+          <div class="mini-icn" style="width:22px; height:22px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11.5px] font-medium text-slate-900 truncate">Draft email</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="text-center text-[10.5px] font-semibold text-slate-600 mb-1">cold</div>
+        <div class="mini-step a-action" style="width:135px; padding:8px 10px;">
+          <div class="mini-icn" style="width:22px; height:22px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11.5px] font-medium text-slate-900 truncate">Add to nurture</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hot path continues -->
+    <div class="grid grid-cols-2 gap-2 mt-1">
+      <div class="flex justify-center"><div class="connector"></div></div>
+      <div class="flex justify-center"><span class="text-[10.5px] text-slate-400 italic mt-2">— ends —</span></div>
+    </div>
+
+    <!-- Step 4 — Approval (with on-reject loop indicator) -->
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <div class="mini-step a-approval relative" style="width:135px; padding:8px 10px;">
+          <div class="mini-icn" style="width:22px; height:22px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11.5px] font-medium text-slate-900 truncate">Approve send</div>
+          </div>
+        </div>
+        <div class="text-[10px] text-slate-400 italic mt-1 text-center" style="width:135px;">on reject → back to draft</div>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 mt-1">
+      <div class="flex justify-center"><div class="connector"></div></div>
+      <div></div>
+    </div>
+
+    <!-- Step 5 — Action (irreversible) -->
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <div class="mini-step a-action" style="width:135px; padding:8px 10px; border-color:#fecaca;">
+          <div class="mini-icn" style="width:22px; height:22px; position:relative;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Irreversible"></span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11.5px] font-medium text-slate-900 truncate">Send via Mailchimp</div>
+          </div>
+        </div>
+      </div>
+      <div></div>
+    </div>
+
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-6 max-w-[640px] mx-auto text-center">
+    Five steps, all four A's. Branching is shown inline as a property of the Agent step. Approval routes backward on reject. Irreversibility shown as a red dot on the icon — the only side-effect class the user has to spot at a glance.
+  </p>
+
+</div>
+
+<!-- Footer note -->
+<div class="max-w-[1200px] mx-auto px-6 mt-12 pt-6 border-t border-slate-200 text-[11.5px] text-slate-500">
+  Visual language used by mocks 05 (Studio route editor) and 06 (open task view). Step types align to engine taxonomy: Agent ↔ <code class="text-[11px] bg-slate-100 px-1 rounded">agent_call</code> + <code class="text-[11px] bg-slate-100 px-1 rounded">prompt</code>; Action ↔ <code class="text-[11px] bg-slate-100 px-1 rounded">action_call</code> + <code class="text-[11px] bg-slate-100 px-1 rounded">invoke_automation</code>; Ask ↔ <code class="text-[11px] bg-slate-100 px-1 rounded">user_input</code>; Approval ↔ <code class="text-[11px] bg-slate-100 px-1 rounded">approval</code>. Branching collapses <code class="text-[11px] bg-slate-100 px-1 rounded">conditional</code> + <code class="text-[11px] bg-slate-100 px-1 rounded">agent_decision</code> into a property on the producing step.
+</div>
+
+</body>
+</html>

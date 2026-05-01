@@ -1,0 +1,431 @@
+<!doctype html>
+<!--
+  Workflow Studio · 06 — Open task view
+  ======================================
+  The user-facing surface for a task in flight. Models off the
+  existing AgentChatPage two-pane layout (chat left, contextual
+  right panel), per the explore catalogue.
+
+  The user named this exact pattern: "on the Ask Anything dialogue,
+  when you type something in there, it comes up with a chat, and on
+  the right-hand side it's got the org flow… run log… file history.
+  So that's really the task, isn't it?"
+
+  This mockup makes that explicit: a Task is the unified open surface
+  whether the work was started from Ask Anything (one-off) or fired
+  by a scheduled workflow (templated). Same layout. Same feel.
+
+  Scenario rendered: the Weekly Lead Re-engagement workflow from
+  mock 05, mid-run for acme-sub. Steps 1-4 complete, currently
+  paused at step 5 (Marketing review approval).
+
+  Right-panel tabs:
+    Flow      — vertical handoff chain (agents involved, status per leg)
+    Activity  — event log (matches existing UnifiedActivityFeed pattern)
+    Files     — artifacts produced by the run (drafted emails, lists, etc.)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Task — Weekly Lead Re-engagement (in progress)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
+  .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
+  .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
+  .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
+
+  .a-pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:9.5px; font-weight:600; border:1px solid var(--aborder); text-transform:uppercase; letter-spacing:.04em; }
+
+  /* Status colours from existing WorkflowRunDetailPage */
+  .st-running   { background:#dbeafe; color:#1e40af; }
+  .st-completed { background:#d1fae5; color:#065f46; }
+  .st-awaiting  { background:#fef3c7; color:#92400e; }
+  .st-pending   { background:#f1f5f9; color:#475569; }
+
+  .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+
+  .agent-pill-inline {
+    display:inline-flex; align-items:center; gap:4px;
+    background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3;
+    font-size:11px; font-weight:500;
+    padding:1px 8px 1px 4px; border-radius:999px;
+  }
+  .agent-pill-inline .dot { width:4px; height:4px; border-radius:999px; background:#4f46e5; margin-left:2px; }
+  .agent-pill-inline .avatar { width:14px; height:14px; border-radius:999px; background:#c7d2fe; color:#3730a3; font-size:8.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+
+  /* Flow tab: handoff chain card */
+  .flow-row { display:flex; gap:10px; align-items:flex-start; }
+  .flow-rail { width:20px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; }
+  .flow-rail .dot {
+    width:18px; height:18px; border-radius:999px; border:2px solid white;
+    box-shadow: 0 0 0 2px #cbd5e1; background:white; color:#475569;
+    display:flex; align-items:center; justify-content:center; font-size:9.5px; font-weight:700;
+  }
+  .flow-rail.done .dot { background:#10b981; color:white; box-shadow: 0 0 0 2px #10b981; }
+  .flow-rail.current .dot { background:white; color:#ea580c; box-shadow: 0 0 0 2px #ea580c; animation: pulse-ring 2s ease-in-out infinite; }
+  .flow-rail.pending .dot { background:white; color:#94a3b8; box-shadow: 0 0 0 2px #cbd5e1; }
+  .flow-rail .line { width:2px; flex:1; min-height:18px; background:#cbd5e1; margin:2px 0; }
+  .flow-rail.done .line { background:#10b981; }
+
+  @keyframes pulse-ring { 0%,100% { box-shadow: 0 0 0 2px #ea580c, 0 0 0 4px rgba(234,88,12,0.15); } 50% { box-shadow: 0 0 0 2px #ea580c, 0 0 0 8px rgba(234,88,12,0.05); } }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">acme-sub</a>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Tasks</a>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Weekly Lead Re-engagement</span>
+  <div class="ml-auto flex items-center gap-2 text-[12px] text-slate-500">
+    <span>acme-org · Mike H.</span>
+  </div>
+</div>
+
+<!-- Task header -->
+<div class="bg-white border-b border-slate-200 px-6 py-3.5">
+  <div class="flex items-start gap-4">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+        <h1 class="text-[16px] font-semibold text-slate-900">Weekly Lead Re-engagement · acme-sub</h1>
+        <span class="px-2 py-0.5 rounded-full text-[10.5px] font-semibold st-awaiting">Awaiting approval</span>
+      </div>
+      <div class="text-[12px] text-slate-500 flex items-center gap-3">
+        <span>Started <span class="text-slate-700">Mon 09:00</span> by <span class="text-slate-700">schedule</span></span>
+        <span class="text-slate-300">·</span>
+        <span>From workflow <span class="text-slate-700">Weekly Lead Re-engagement</span> <span class="text-[10.5px] text-slate-400">(v3)</span></span>
+        <span class="text-slate-300">·</span>
+        <span>4 of 6 steps complete</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md">Pause</button>
+      <button class="px-2.5 py-1.5 border border-red-200 hover:bg-red-50 text-red-700 text-[12px] font-medium rounded-md">Cancel run</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main two-pane layout -->
+<div class="flex" style="height: calc(100vh - 110px); min-height: 720px;">
+
+  <!-- ========================== LEFT: CHAT/CONVERSATION ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-white border-r border-slate-200">
+
+    <!-- Conversation -->
+    <div class="flex-1 overflow-y-auto scroll px-6 py-6 space-y-5 text-[13px] leading-relaxed">
+
+      <!-- System: schedule fired -->
+      <div class="flex justify-center">
+        <div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+          Mon 09:00 · Schedule fired the Weekly Lead Re-engagement workflow
+        </div>
+      </div>
+
+      <!-- Step 1 (Ask) — auto-filled from prior runs -->
+      <div class="flex gap-3">
+        <div class="w-7 h-7 rounded-md a-ask flex items-center justify-center flex-shrink-0" style="background:#fffbeb; color:#d97706;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <span class="a-pill a-ask">Ask</span>
+            <span class="text-[11.5px] text-slate-500">Step 1 · auto-filled from last run</span>
+          </div>
+          <div class="text-slate-700 mt-1">Audience: <span class="text-slate-900 font-medium">B2B prospects</span> · Tone: <span class="text-slate-900 font-medium">Professional, warm</span></div>
+        </div>
+      </div>
+
+      <!-- Step 2 (Action) -->
+      <div class="flex gap-3">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#ecfdf5; color:#059669;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <span class="a-pill a-action">Action</span>
+            <span class="text-[11.5px] text-slate-500">Step 2 · GHL · contacts.search · 1.4s</span>
+          </div>
+          <div class="text-slate-700 mt-1">Found <span class="text-slate-900 font-semibold num">247</span> stale leads (last contacted &gt; 30 days).</div>
+        </div>
+      </div>
+
+      <!-- Step 3 (Agent) — copywriter classifies -->
+      <div class="flex gap-3">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#eef2ff; color:#4f46e5;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="a-pill a-agent">Agent</span>
+            <span class="agent-pill-inline"><span class="avatar">C</span>Copywriter<span class="dot"></span></span>
+            <span class="text-[11.5px] text-slate-500">Step 3 · 14.2s · $0.012</span>
+          </div>
+          <div class="text-slate-700 mt-1">Classified the 247 leads:</div>
+          <div class="mt-2 inline-flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-[12px]">
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span class="text-slate-700">hot</span> <span class="num font-semibold text-slate-900">38</span></span>
+            <span class="text-slate-300">·</span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-slate-400"></span><span class="text-slate-700">cold</span> <span class="num font-semibold text-slate-900">209</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Branch happened — system note -->
+      <div class="flex justify-center">
+        <div class="text-[11px] text-slate-500 italic">→ branched on tier · hot path continues, cold path completed</div>
+      </div>
+
+      <!-- Step 4b (Action, cold path) — done -->
+      <div class="flex gap-3 opacity-90">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#ecfdf5; color:#059669;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <span class="a-pill a-action">Action</span>
+            <span class="text-[11.5px] text-slate-500">Step 4b (cold path) · GHL · tags.add · 0.8s</span>
+          </div>
+          <div class="text-slate-700 mt-1">Tagged <span class="num font-semibold text-slate-900">209</span> cold leads with <code class="text-[11.5px] bg-slate-100 px-1 rounded">nurture-q2</code>.</div>
+        </div>
+      </div>
+
+      <!-- Step 4 (Agent, hot path) — copywriter drafts -->
+      <div class="flex gap-3">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#eef2ff; color:#4f46e5;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="a-pill a-agent">Agent</span>
+            <span class="agent-pill-inline"><span class="avatar">C</span>Copywriter<span class="dot"></span></span>
+            <span class="text-[11.5px] text-slate-500">Step 4 (hot path) · 4m 12s · $0.058</span>
+          </div>
+          <div class="text-slate-700 mt-1">Drafted <span class="num font-semibold text-slate-900">38</span> personalised follow-up emails. Each draft references the lead's last interaction and a relevant case study.</div>
+          <div class="mt-2 flex items-center gap-2">
+            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">View 38 drafts →</button>
+            <span class="text-slate-300">·</span>
+            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">Open in Files</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 (Approval) — current state, awaiting -->
+      <div class="flex gap-3">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ring-2 ring-orange-300 ring-offset-2 ring-offset-white" style="background:#fff7ed; color:#ea580c;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="a-pill a-approval">Approval</span>
+            <span class="text-[11.5px] text-slate-500">Step 5 · awaiting Marketing team (2 of 2 needed)</span>
+          </div>
+          <!-- Approval card inline -->
+          <div class="mt-2 border border-orange-200 bg-orange-50/30 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 border-b border-orange-100 bg-orange-50">
+              <div class="text-[13px] font-semibold text-slate-900">Marketing review</div>
+              <div class="text-[11.5px] text-slate-600 mt-0.5">Approve to proceed with the Mailchimp send. Reject to send the drafts back to the copywriter for revision.</div>
+            </div>
+            <div class="px-4 py-3 space-y-2 text-[12.5px]">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">Drafts ready</span>
+                <span class="num font-semibold text-slate-900">38</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">Recipients</span>
+                <span class="text-slate-900">38 hot leads (B2B prospects)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">Approvers</span>
+                <span class="text-slate-900">Marketing team · 2 required</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-600">Approved so far</span>
+                <span class="text-slate-900">1 of 2 (Sarah · 11:04)</span>
+              </div>
+            </div>
+            <div class="px-4 py-3 bg-white border-t border-orange-100 flex items-center gap-2">
+              <button class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold rounded-md flex items-center gap-1.5">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Approve
+              </button>
+              <button class="px-3 py-1.5 border border-red-200 text-red-700 hover:bg-red-50 text-[12.5px] font-semibold rounded-md">Reject &amp; send back</button>
+              <button class="ml-auto text-[11.5px] text-slate-500 hover:text-slate-800">Review the 38 drafts</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6 (Action, irreversible) — pending -->
+      <div class="flex gap-3 opacity-50">
+        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 relative" style="background:#ecfdf5; color:#059669;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Irreversible"></span>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <span class="a-pill a-action">Action</span>
+            <span class="text-[11.5px] text-slate-500">Step 6 · waiting on approval · Mailchimp · campaigns.send</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom: free-form input (ad-hoc messages on this task) -->
+    <div class="border-t border-slate-200 px-6 py-3">
+      <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
+        <textarea rows="1" placeholder="Add a note to this task… (visible to agents and approvers)" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
+        <button class="m-1.5 p-1.5 rounded bg-slate-900 hover:bg-black text-white">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ========================== RIGHT: TABBED CONTEXT PANEL ========================== -->
+  <div class="w-[400px] flex-shrink-0 flex flex-col bg-white">
+
+    <!-- Tabs -->
+    <div class="px-4 border-b border-slate-200 flex items-center gap-1">
+      <a class="inline-block px-3 py-3 text-[12.5px] font-semibold text-slate-900 border-b-2 border-indigo-600">Flow</a>
+      <a class="inline-block px-3 py-3 text-[12.5px] font-medium text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Activity <span class="ml-1 text-[10.5px] num text-slate-400">12</span></a>
+      <a class="inline-block px-3 py-3 text-[12.5px] font-medium text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Files <span class="ml-1 text-[10.5px] num text-slate-400">38</span></a>
+    </div>
+
+    <!-- Flow tab content — handoff chain visualisation -->
+    <div class="flex-1 overflow-y-auto scroll px-4 py-5 space-y-3">
+
+      <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Route through agents &amp; gates</div>
+
+      <!-- Step 1 (Ask) — done -->
+      <div class="flow-row">
+        <div class="flow-rail done">
+          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <div class="line"></div>
+        </div>
+        <div class="flex-1 pt-px pb-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="a-pill a-ask">Ask</span>
+            <span class="text-[12.5px] font-medium text-slate-800">Confirm campaign target</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5">auto-filled · 09:00</div>
+        </div>
+      </div>
+
+      <!-- Step 2 (Action) — done -->
+      <div class="flow-row">
+        <div class="flow-rail done">
+          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <div class="line"></div>
+        </div>
+        <div class="flex-1 pt-px pb-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="a-pill a-action">Action</span>
+            <span class="text-[12.5px] font-medium text-slate-800">Find stale leads</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5">GHL · 247 leads · 09:00</div>
+        </div>
+      </div>
+
+      <!-- Step 3 (Agent) — done -->
+      <div class="flow-row">
+        <div class="flow-rail done">
+          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <div class="line"></div>
+        </div>
+        <div class="flex-1 pt-px pb-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[12.5px] font-medium text-slate-800">Classify by fit</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+            <span class="agent-pill-inline" style="font-size:10px; padding: 0 6px 0 3px;"><span class="avatar" style="width:11px; height:11px; font-size:7px;">C</span>Copywriter</span>
+            <span>· branched on tier · 09:01</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Branch — render two parallel rails for hot/cold -->
+      <div class="flex gap-3 -mt-2">
+        <div style="width:20px; flex-shrink:0; display:flex; flex-direction:column; align-items:center;">
+          <div style="width:2px; height:20px; background:#10b981;"></div>
+        </div>
+        <div class="flex-1 grid grid-cols-2 gap-3 pb-2">
+          <div>
+            <div class="text-[10.5px] font-semibold text-amber-700 mb-1">hot path · 38</div>
+            <div class="bg-emerald-50 border border-emerald-200 rounded-md px-2.5 py-1.5 text-[11.5px] text-emerald-800">
+              <div class="flex items-center gap-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Drafted (step 4)</div>
+            </div>
+          </div>
+          <div>
+            <div class="text-[10.5px] font-semibold text-slate-600 mb-1">cold path · 209</div>
+            <div class="bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5 text-[11.5px] text-slate-700">
+              <div class="flex items-center gap-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Tagged (step 4b) · ends</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 (Approval) — current -->
+      <div class="flow-row">
+        <div class="flow-rail current">
+          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="3"/></svg></div>
+          <div class="line"></div>
+        </div>
+        <div class="flex-1 pt-px pb-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="a-pill a-approval">Approval</span>
+            <span class="text-[12.5px] font-semibold text-slate-900">Marketing review</span>
+            <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold st-awaiting">CURRENT</span>
+          </div>
+          <div class="text-[11px] text-slate-600 mt-1">1 of 2 approvers signed off · waiting on second approver</div>
+          <div class="text-[10.5px] text-orange-700 mt-1 flex items-center gap-1">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            On reject → loops back to step 4 (re-draft)
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6 (Action) — pending -->
+      <div class="flow-row">
+        <div class="flow-rail pending">
+          <div class="dot">6</div>
+        </div>
+        <div class="flex-1 pt-px">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="a-pill a-action">Action</span>
+            <span class="text-[12.5px] font-medium text-slate-500">Send via Mailchimp</span>
+            <span class="w-2 h-2 rounded-full bg-red-500" title="Irreversible"></span>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-0.5">pending approval</div>
+        </div>
+      </div>
+
+      <!-- Run summary -->
+      <div class="mt-6 pt-4 border-t border-slate-100 space-y-1.5 text-[11.5px]">
+        <div class="flex justify-between"><span class="text-slate-500">Run cost so far</span><span class="num font-semibold text-slate-900">$0.071</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Estimated remaining</span><span class="num text-slate-700">~$0.013</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Elapsed</span><span class="num text-slate-700">2h 14m</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Workflow version</span><a class="text-indigo-600 hover:text-indigo-800">v3 · open in Studio →</a></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
