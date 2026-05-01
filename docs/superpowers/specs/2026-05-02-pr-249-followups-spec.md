@@ -61,9 +61,9 @@
 
 **Files:**
 - [ ] `server/services/__tests__/llmRouterTimeoutPure.test.ts:70`
-- [ ] `server/services/__tests__/canonicalDataService.principalContext.test.ts` (one occurrence — grep for `await await` to locate)
+- [ ] `server/services/__tests__/canonicalDataService.principalContext.test.ts` (multiple occurrences — remove every match in the file; the zero-match grep below is the source of truth)
 
-**Action:** drop the outer `await` on each. Verification: `grep -rn "await await" server/services/__tests__/` must return zero matches after the fix.
+**Action:** drop the outer `await` on each match. Verification: `grep -rn "await await" server/services/__tests__/` must return zero matches after the fix.
 
 **Risk:** zero. The semantics are identical.
 
@@ -95,11 +95,17 @@
 
 ### 4.1 — Locate the Dashboard `NavItem`
 
-The current Layout has multiple `NavItem` calls. The Dashboard one is the entry routing to `/` with `Icons.dashboard` (search for `to="/"` and `Icons.dashboard` together — there are also `Home`/`Inbox` nav items routing to `/`). Per [client/src/components/Layout.tsx](../../client/src/components/Layout.tsx) the Dashboard nav historically had this shape (re-introduce it):
+The current Layout has multiple `NavItem` calls. The Dashboard one is the **ClientPulse** Dashboard, routing to `/clientpulse` with `Icons.dashboard` (search for `to="/clientpulse"` and `Icons.dashboard` together — note that `to="/"` is the Home/Inbox nav item, not Dashboard). The current shape at `Layout.tsx:848` is:
+
+```tsx
+<NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+```
+
+Restore the badge props to produce:
 
 ```tsx
 <NavItem
-  to="/"
+  to="/clientpulse"
   exact
   icon={<Icons.dashboard />}
   label="Dashboard"
@@ -108,10 +114,10 @@ The current Layout has multiple `NavItem` calls. The Dashboard one is the entry 
 />
 ```
 
-- [ ] Find the Dashboard `NavItem` (the one currently renders without badge props).
+- [ ] Find the ClientPulse Dashboard `NavItem` at `Layout.tsx:848` (the one currently rendering without badge props).
 - [ ] Add the `badge=` and `badgeLabel=` props matching the snippet above. The `NavItem` component (`Layout.tsx:135-179`) already handles these props — `badgeLabel` takes precedence over `badge` and renders the blue-dot + pulse + text style; `badge` alone renders the indigo numeric pill. With both passed, the operator sees "● 3 live" (blue, pulses) when at least one agent is running, and the badge disappears when the count is 0.
 
-**Sanity-check while editing:** confirm the Dashboard nav item is actually rendered for the operator persona that has a `subaccountId` selected (the `liveAgentCount` only updates when `activeClientId` is truthy). If the Dashboard nav is gated behind a permission, ensure that gate is consistent with how `liveAgentCount` is sourced.
+**Sanity-check while editing:** the entire ClientPulse nav section (including Dashboard) is gated by `hasOrgContext && hasSidebarItem('clientpulse')` at `Layout.tsx:845`. Confirm the verification org has the ClientPulse module enabled — if `hasSidebarItem('clientpulse')` is false, the Dashboard nav (and therefore the badge) will not render at all. Also confirm `liveAgentCount` is sourced for the active subaccount (`activeClientId` truthy).
 
 ### 4.2 — Verify the state pipeline is intact
 
@@ -125,8 +131,10 @@ If any of those have been removed since this spec was authored, treat the task a
 
 ### 4.3 — Visual verification
 
+**Prerequisite:** verify in an org/subaccount where the ClientPulse module is enabled (so `hasSidebarItem('clientpulse')` resolves true and the Dashboard nav actually renders). In an org without ClientPulse, the Dashboard nav is hidden entirely — that is expected behaviour, not a badge bug.
+
 - [ ] Start dev server (`npm run dev`).
-- [ ] Switch to a subaccount where at least one agent run is in flight (or trigger one). Confirm the Dashboard nav item shows "● N live" with the blue dot pulsing.
+- [ ] Switch to a subaccount in a ClientPulse-enabled org where at least one agent run is in flight (or trigger one). Confirm the Dashboard nav item shows "● N live" with the blue dot pulsing.
 - [ ] Wait for the agent to finish (or terminate it). Confirm the badge disappears at 0.
 - [ ] Hard-refresh the page while a run is in flight. Confirm the badge re-appears with the correct count after the initial fetch (proves the on-mount sync works).
 
@@ -175,7 +183,7 @@ For each match in the inventory:
 
 ### 6.1 — Inventory
 
-- [ ] Run `grep -rn "Record<string, unknown>" --include="*.ts" --include="*.tsx" -- server/ client/ shared/ scripts/ 2>/dev/null` and count. Exclude matches in `tasks/review-logs/` and `docs/`.
+- [ ] Run `grep -rn "Record<string, unknown>" --include="*.ts" --include="*.tsx" -- server/ client/ shared/ scripts/ worker/ tools/ 2>/dev/null` and count. Exclude matches in `tasks/review-logs/` and `docs/`. (Scope mirrors the F4 inventory at §5.1; `worker/` has live occurrences and must be in scope for a true per-callsite audit.)
 
 ### 6.2 — Three-way classification
 
