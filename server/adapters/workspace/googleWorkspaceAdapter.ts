@@ -284,7 +284,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
       cc: params.ccAddresses,
       subject: params.subject,
       bodyText: params.bodyText,
-      bodyHtml: params.bodyHtml,
+      bodyHtml: params.bodyHtml ?? null,
       inReplyTo: params.inReplyToExternalId,
       references: params.inReplyToExternalId ?? undefined,
     });

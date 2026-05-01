@@ -42,7 +42,7 @@ export async function validateSystemAgentRegistry(): Promise<void> {
     WHERE  deleted_at IS NULL
       AND  status     = 'active'
   `);
-  const dbSlugs = rows.rows.map((r) => r.slug);
+  const dbSlugs = [...rows].map((r) => (r as { slug: string }).slug);
   const codeSlugs = Array.from(SYSTEM_AGENT_BY_SLUG.keys());
 
   const drift = diffRegistry(dbSlugs, codeSlugs);

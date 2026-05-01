@@ -6,6 +6,8 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { externalDocFlags } from '../lib/featureFlags.js';
 import { toExternalDocumentViewModel } from '../api/types/externalDocumentViewModel.js';
+import type { AttachmentState } from '../db/schema/referenceDocuments.js';
+import type { FetchFailureReason } from '../db/schema/documentFetchEvents.js';
 import { referenceDocuments, documentBundleAttachments, documentFetchEvents, tasks } from '../db/schema/index.js';
 import { eq, and, isNull, desc, count } from 'drizzle-orm';
 import * as documentBundleService from '../services/documentBundleService.js';
@@ -94,9 +96,9 @@ router.get(
     const viewModels = enriched.map((item) => toExternalDocumentViewModel({
       id: item.id,
       externalFileName: item.externalFileName,
-      attachmentState: item.attachmentState,
+      attachmentState: item.attachmentState as AttachmentState | null,
       lastFetchEvent: item.latestFetchEvent
-        ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason ?? null }
+        ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason as FetchFailureReason | null }
         : null,
     }));
     return res.json({
@@ -417,9 +419,9 @@ router.patch(
     const viewModel = toExternalDocumentViewModel({
       id: updated.id,
       externalFileName: updated.externalFileName,
-      attachmentState: updated.attachmentState,
+      attachmentState: updated.attachmentState as AttachmentState | null,
       lastFetchEvent: latestEvent
-        ? { fetchedAt: latestEvent.fetchedAt, failureReason: latestEvent.failureReason ?? null }
+        ? { fetchedAt: latestEvent.fetchedAt, failureReason: latestEvent.failureReason as FetchFailureReason | null }
         : null,
     });
     return res.json(viewModel);
