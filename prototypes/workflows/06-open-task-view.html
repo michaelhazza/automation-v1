@@ -1,80 +1,106 @@
 <!doctype html>
 <!--
-  Workflow Studio · 06 — Open task view
-  ======================================
-  The user-facing surface for a task in flight. Models off the
-  existing AgentChatPage two-pane layout (chat left, contextual
-  right panel), per the explore catalogue.
+  Workflow Studio · 06 — Open task view (combined: brief layout + workflow task)
+  =============================================================================
+  Combines two existing patterns the user has built and validated:
 
-  The user named this exact pattern: "on the Ask Anything dialogue,
-  when you type something in there, it comes up with a chat, and on
-  the right-hand side it's got the org flow… run log… file history.
-  So that's really the task, isn't it?"
+    1. The brief-endtoend.html layout: full-width, chat on the left,
+       org-chart "live view" on the right showing which agents are
+       working right now, activity feed with VIEW/EDIT chips for in-
+       context entities (CRM records, docs, rules).
 
-  This mockup makes that explicit: a Task is the unified open surface
-  whether the work was started from Ask Anything (one-off) or fired
-  by a scheduled workflow (templated). Same layout. Same feel.
+    2. The task surface from prior mock 06: tabs across multiple
+       contextual views, inline approval cards in the chat, action
+       buttons for Pause / Cancel.
 
-  Scenario rendered: the Weekly Lead Re-engagement workflow from
-  mock 05, mid-run for acme-sub. Steps 1-4 complete, currently
-  paused at step 5 (Marketing review approval).
+  Result: one task surface that works for BOTH brief-style ad-hoc
+  work (started from Ask Anything) AND workflow-fired tasks (started
+  by a schedule). Same data, same UI.
 
-  Right-panel tabs:
-    Flow      — vertical handoff chain (agents involved, status per leg)
-    Activity  — event log (matches existing UnifiedActivityFeed pattern)
-    Files     — artifacts produced by the run (drafted emails, lists, etc.)
+  Layout principles (per user direction):
+    - FULL WIDTH always — no max-width constraint on the workspace
+    - Chat ~50% / right panel ~50%
+    - Right panel has tabs: Live | Flow | Activity | Files
+    - Live tab default — most distinctive, most operational
+    - Activity entries carry VIEW/EDIT chips on linked entities
+    - Naming: this surface is called "Task" (not "Brief") — Brief is
+      retired as a noun in the UI
+
+  Scenario rendered: "Acme renewal proposal" — brief-style task with
+  a COO orchestrator agent that has pulled in three teams (Sales,
+  Research, Operations) with one specialist agent each. Currently
+  working; one approval pending.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Task — Weekly Lead Re-engagement (in progress)</title>
+<title>Task — Acme renewal proposal</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#1e293b; margin:0; }
   .num { font-variant-numeric: tabular-nums; }
 
+  /* Four A's tokens — consistent with mocks 04 / 05 */
   .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
   .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
   .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
   .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
-
   .a-pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:9.5px; font-weight:600; border:1px solid var(--aborder); text-transform:uppercase; letter-spacing:.04em; }
 
-  /* Status colours from existing WorkflowRunDetailPage */
-  .st-running   { background:#dbeafe; color:#1e40af; }
-  .st-completed { background:#d1fae5; color:#065f46; }
+  /* Status colours pulled from WorkflowRunDetailPage */
   .st-awaiting  { background:#fef3c7; color:#92400e; }
-  .st-pending   { background:#f1f5f9; color:#475569; }
 
   .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  .agent-pill-inline {
-    display:inline-flex; align-items:center; gap:4px;
-    background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3;
-    font-size:11px; font-weight:500;
-    padding:1px 8px 1px 4px; border-radius:999px;
+  /* Org-chart node styles (matches brief-endtoend.html visual language) */
+  .org-node {
+    background: white; border: 1.5px solid #e5e7eb; border-radius: 10px;
+    padding: 8px 12px; min-width: 150px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+    position: relative;
   }
-  .agent-pill-inline .dot { width:4px; height:4px; border-radius:999px; background:#4f46e5; margin-left:2px; }
-  .agent-pill-inline .avatar { width:14px; height:14px; border-radius:999px; background:#c7d2fe; color:#3730a3; font-size:8.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+  .org-node.done    { border-color: #a7f3d0; }
+  .org-node.active  { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 0 0 3px rgba(59,130,246,0.10); }
+  .org-node.idle    { border-color: #e2e8f0; opacity: 0.65; border-style: dashed; }
+  .org-node .role    { font-size: 12px; font-weight: 600; color: #0f172a; display:flex; align-items:center; gap:6px; }
+  .org-node .what    { font-size: 10.5px; color: #64748b; margin-top: 2px; }
+  .status-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; }
+  .status-dot.done   { background: #10b981; }
+  .status-dot.active { background: #3b82f6; animation: pulse-dot 1.6s ease-in-out infinite; }
+  .status-dot.idle   { background: #cbd5e1; }
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.45); } 50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); } }
 
-  /* Flow tab: handoff chain card */
-  .flow-row { display:flex; gap:10px; align-items:flex-start; }
-  .flow-rail { width:20px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; }
-  .flow-rail .dot {
-    width:18px; height:18px; border-radius:999px; border:2px solid white;
-    box-shadow: 0 0 0 2px #cbd5e1; background:white; color:#475569;
-    display:flex; align-items:center; justify-content:center; font-size:9.5px; font-weight:700;
+  /* Connector edges between org-chart cards */
+  .edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
+  .edge.flow { stroke: #93c5fd; stroke-width: 1.5; stroke-dasharray: 4 3; animation: flow 1.2s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -14; } }
+  .edge.done { stroke: #a7f3d0; }
+
+  /* Tab nav */
+  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; }
+  .tab-btn:hover { color: #0f172a; }
+  .tab-btn.active { color: #0f172a; border-bottom-color: #4f46e5; font-weight: 600; }
+  .tab-btn .count { margin-left: 4px; font-size: 10.5px; color: #94a3b8; }
+
+  /* Activity entry chips (matches brief style) */
+  .ref-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 6px 1px 5px; background:#eef2ff; border:1px solid #c7d2fe;
+    border-radius: 4px; font-size: 11px; color:#3730a3;
   }
-  .flow-rail.done .dot { background:#10b981; color:white; box-shadow: 0 0 0 2px #10b981; }
-  .flow-rail.current .dot { background:white; color:#ea580c; box-shadow: 0 0 0 2px #ea580c; animation: pulse-ring 2s ease-in-out infinite; }
-  .flow-rail.pending .dot { background:white; color:#94a3b8; box-shadow: 0 0 0 2px #cbd5e1; }
-  .flow-rail .line { width:2px; flex:1; min-height:18px; background:#cbd5e1; margin:2px 0; }
-  .flow-rail.done .line { background:#10b981; }
-
-  @keyframes pulse-ring { 0%,100% { box-shadow: 0 0 0 2px #ea580c, 0 0 0 4px rgba(234,88,12,0.15); } 50% { box-shadow: 0 0 0 2px #ea580c, 0 0 0 8px rgba(234,88,12,0.05); } }
+  .ref-chip.doc { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
+  .ref-chip.crm { background:#dcfce7; border-color:#a7f3d0; color:#065f46; }
+  .ref-chip.rule { background:#fef3c7; border-color:#fde68a; color:#92400e; }
+  .ref-chip.memory { background:#fce7f3; border-color:#f9a8d4; color:#9d174d; }
+  .ref-link { font-size: 10.5px; color: #4f46e5; cursor:pointer; text-decoration:none; font-weight: 500; padding: 0 4px; }
+  .ref-link:hover { text-decoration: underline; }
+  .activity-dot { width:8px; height:8px; border-radius:999px; flex-shrink:0; margin-top: 6px; }
+  .activity-dot.done { background:#10b981; }
+  .activity-dot.active { background:#3b82f6; }
+  .activity-dot.note { background:#cbd5e1; }
 </style>
 </head>
 <body class="min-h-screen">
@@ -88,205 +114,156 @@
   <div class="text-slate-400">/</div>
   <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Tasks</a>
   <div class="text-slate-400">/</div>
-  <span class="text-slate-900 font-medium">Weekly Lead Re-engagement</span>
+  <span class="text-slate-900 font-medium">Acme renewal proposal</span>
   <div class="ml-auto flex items-center gap-2 text-[12px] text-slate-500">
     <span>acme-org · Mike H.</span>
   </div>
 </div>
 
-<!-- Task header -->
+<!-- Task header (full width) -->
 <div class="bg-white border-b border-slate-200 px-6 py-3.5">
   <div class="flex items-start gap-4">
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 mb-1">
-        <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-        <h1 class="text-[16px] font-semibold text-slate-900">Weekly Lead Re-engagement · acme-sub</h1>
-        <span class="px-2 py-0.5 rounded-full text-[10.5px] font-semibold st-awaiting">Awaiting approval</span>
+        <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+        <h1 class="text-[16px] font-semibold text-slate-900">Acme renewal proposal</h1>
+        <span class="px-2 py-0.5 rounded-full text-[10.5px] font-semibold" style="background:#dbeafe; color:#1e40af;">Working · 1 approval pending</span>
       </div>
       <div class="text-[12px] text-slate-500 flex items-center gap-3">
-        <span>Started <span class="text-slate-700">Mon 09:00</span> by <span class="text-slate-700">schedule</span></span>
+        <span>Started <span class="text-slate-700">38s ago</span> by <span class="text-slate-700">Mike H.</span> via Ask Anything</span>
         <span class="text-slate-300">·</span>
-        <span>From workflow <span class="text-slate-700">Weekly Lead Re-engagement</span> <span class="text-[10.5px] text-slate-400">(v3)</span></span>
-        <span class="text-slate-300">·</span>
-        <span>4 of 6 steps complete</span>
+        <span>3 agents engaged · 1 approval pending</span>
       </div>
     </div>
     <div class="flex items-center gap-2">
       <button class="px-2.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded-md">Pause</button>
-      <button class="px-2.5 py-1.5 border border-red-200 hover:bg-red-50 text-red-700 text-[12px] font-medium rounded-md">Cancel run</button>
+      <button class="px-2.5 py-1.5 border border-red-200 hover:bg-red-50 text-red-700 text-[12px] font-medium rounded-md">Cancel task</button>
     </div>
   </div>
 </div>
 
-<!-- Main two-pane layout -->
+<!-- Main two-pane layout — FULL WIDTH, no max-width -->
 <div class="flex" style="height: calc(100vh - 110px); min-height: 720px;">
 
-  <!-- ========================== LEFT: CHAT/CONVERSATION ========================== -->
-  <div class="flex-1 min-w-0 flex flex-col bg-white border-r border-slate-200">
+  <!-- ========================== LEFT: CHAT/CONVERSATION (50%) ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-white border-r border-slate-200" style="flex-basis: 50%;">
 
-    <!-- Conversation -->
-    <div class="flex-1 overflow-y-auto scroll px-6 py-6 space-y-5 text-[13px] leading-relaxed">
+    <div class="flex-1 overflow-y-auto scroll px-8 py-6 space-y-5 text-[13px] leading-relaxed">
 
-      <!-- System: schedule fired -->
+      <!-- User's original ask -->
+      <div class="flex justify-end">
+        <div class="max-w-[80%]">
+          <div class="bg-indigo-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-md">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
+          <div class="text-[10.5px] text-slate-400 mt-1 text-right">Mike · 38s ago</div>
+        </div>
+      </div>
+
+      <!-- COO orchestrator response -->
+      <div class="flex gap-3">
+        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[13px] font-semibold text-slate-900">COO</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[11px] text-slate-400">orchestrator · just now</span>
+          </div>
+          <div class="text-slate-700">On it — I've pulled in three teams to work on this. The Sales team will draft the proposal body, Research will gather competitor pricing, and Ops will build the pricing annex. I'll consolidate when they're done and ask for your approval.</div>
+
+          <!-- Inline status card -->
+          <div class="mt-2 border border-slate-200 rounded-lg bg-slate-50 px-3 py-2.5 text-[12.5px]">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-blue-500" style="animation: pulse-dot 1.6s ease-in-out infinite;"></div>
+              <span class="font-medium text-slate-800">Working across 3 teams</span>
+              <span class="text-slate-400">·</span>
+              <span class="text-slate-500">Sales, Research, Operations</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- System note: handoff -->
       <div class="flex justify-center">
         <div class="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-          Mon 09:00 · Schedule fired the Weekly Lead Re-engagement workflow
+          Handed off to Head of Sales, Head of Research, Head of Operations
         </div>
       </div>
 
-      <!-- Step 1 (Ask) — auto-filled from prior runs -->
+      <!-- Head of Sales: drafted proposal body -->
       <div class="flex gap-3">
-        <div class="w-7 h-7 rounded-md a-ask flex items-center justify-center flex-shrink-0" style="background:#fffbeb; color:#d97706;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </div>
+        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
         <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="a-pill a-ask">Ask</span>
-            <span class="text-[11.5px] text-slate-500">Step 1 · auto-filled from last run</span>
-          </div>
-          <div class="text-slate-700 mt-1">Audience: <span class="text-slate-900 font-medium">B2B prospects</span> · Tone: <span class="text-slate-900 font-medium">Professional, warm</span></div>
-        </div>
-      </div>
-
-      <!-- Step 2 (Action) -->
-      <div class="flex gap-3">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#ecfdf5; color:#059669;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="a-pill a-action">Action</span>
-            <span class="text-[11.5px] text-slate-500">Step 2 · GHL · contacts.search · 1.4s</span>
-          </div>
-          <div class="text-slate-700 mt-1">Found <span class="text-slate-900 font-semibold num">247</span> stale leads (last contacted &gt; 30 days).</div>
-        </div>
-      </div>
-
-      <!-- Step 3 (Agent) — copywriter classifies -->
-      <div class="flex gap-3">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#eef2ff; color:#4f46e5;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[13px] font-semibold text-slate-900">Head of Sales</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="agent-pill-inline"><span class="avatar">C</span>Copywriter<span class="dot"></span></span>
-            <span class="text-[11.5px] text-slate-500">Step 3 · 14.2s · $0.012</span>
+            <span class="text-[11px] text-slate-400">28s ago · 4.2s · $0.018</span>
           </div>
-          <div class="text-slate-700 mt-1">Classified the 247 leads:</div>
-          <div class="mt-2 inline-flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-[12px]">
-            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span class="text-slate-700">hot</span> <span class="num font-semibold text-slate-900">38</span></span>
-            <span class="text-slate-300">·</span>
-            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-slate-400"></span><span class="text-slate-700">cold</span> <span class="num font-semibold text-slate-900">209</span></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Branch happened — system note -->
-      <div class="flex justify-center">
-        <div class="text-[11px] text-slate-500 italic">→ branched on tier · hot path continues, cold path completed</div>
-      </div>
-
-      <!-- Step 4b (Action, cold path) — done -->
-      <div class="flex gap-3 opacity-90">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#ecfdf5; color:#059669;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="a-pill a-action">Action</span>
-            <span class="text-[11.5px] text-slate-500">Step 4b (cold path) · GHL · tags.add · 0.8s</span>
-          </div>
-          <div class="text-slate-700 mt-1">Tagged <span class="num font-semibold text-slate-900">209</span> cold leads with <code class="text-[11.5px] bg-slate-100 px-1 rounded">nurture-q2</code>.</div>
-        </div>
-      </div>
-
-      <!-- Step 4 (Agent, hot path) — copywriter drafts -->
-      <div class="flex gap-3">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style="background:#eef2ff; color:#4f46e5;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="a-pill a-agent">Agent</span>
-            <span class="agent-pill-inline"><span class="avatar">C</span>Copywriter<span class="dot"></span></span>
-            <span class="text-[11.5px] text-slate-500">Step 4 (hot path) · 4m 12s · $0.058</span>
-          </div>
-          <div class="text-slate-700 mt-1">Drafted <span class="num font-semibold text-slate-900">38</span> personalised follow-up emails. Each draft references the lead's last interaction and a relevant case study.</div>
+          <div class="text-slate-700">Proposal body drafted. Pulled SDR-1 in for the account context (last quarter's MRR, contract terms, expansion conversations).</div>
           <div class="mt-2 flex items-center gap-2">
-            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">View 38 drafts →</button>
-            <span class="text-slate-300">·</span>
-            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">Open in Files</button>
+            <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">Open proposal draft →</button>
           </div>
         </div>
       </div>
 
-      <!-- Step 5 (Approval) — current state, awaiting -->
+      <!-- Head of Research: ongoing -->
       <div class="flex gap-3">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ring-2 ring-orange-300 ring-offset-2 ring-offset-white" style="background:#fff7ed; color:#ea580c;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+          HR
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
         </div>
         <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="a-pill a-approval">Approval</span>
-            <span class="text-[11.5px] text-slate-500">Step 5 · awaiting Marketing team (2 of 2 needed)</span>
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[13px] font-semibold text-slate-900">Head of Research</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[11px] text-blue-600 font-medium">working now · 4s ago</span>
           </div>
-          <!-- Approval card inline -->
-          <div class="mt-2 border border-orange-200 bg-orange-50/30 rounded-lg overflow-hidden">
-            <div class="px-4 py-3 border-b border-orange-100 bg-orange-50">
-              <div class="text-[13px] font-semibold text-slate-900">Marketing review</div>
-              <div class="text-[11.5px] text-slate-600 mt-0.5">Approve to proceed with the Mailchimp send. Reject to send the drafts back to the copywriter for revision.</div>
-            </div>
-            <div class="px-4 py-3 space-y-2 text-[12.5px]">
-              <div class="flex items-center justify-between">
-                <span class="text-slate-600">Drafts ready</span>
-                <span class="num font-semibold text-slate-900">38</span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-slate-600">Recipients</span>
-                <span class="text-slate-900">38 hot leads (B2B prospects)</span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-slate-600">Approvers</span>
-                <span class="text-slate-900">Marketing team · 2 required</span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-slate-600">Approved so far</span>
-                <span class="text-slate-900">1 of 2 (Sarah · 11:04)</span>
-              </div>
-            </div>
-            <div class="px-4 py-3 bg-white border-t border-orange-100 flex items-center gap-2">
-              <button class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold rounded-md flex items-center gap-1.5">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                Approve
-              </button>
-              <button class="px-3 py-1.5 border border-red-200 text-red-700 hover:bg-red-50 text-[12.5px] font-semibold rounded-md">Reject &amp; send back</button>
-              <button class="ml-auto text-[11.5px] text-slate-500 hover:text-slate-800">Review the 38 drafts</button>
-            </div>
+          <div class="text-slate-700">Scanning 4 competitor rate cards. Will return a pricing comparison and positioning recommendation.</div>
+        </div>
+      </div>
+
+      <!-- Pricing rule applied (system-generated activity) -->
+      <div class="flex gap-3">
+        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0" style="background:#fef3c7; color:#92400e;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[13px] font-medium text-slate-700">Applied pricing rule</span>
+            <span class="text-[11px] text-slate-400">22s ago · automatic</span>
+          </div>
+          <div class="text-slate-700 flex items-center gap-1.5 flex-wrap">
+            Minimum 15% margin on renewals
+            <span class="ref-chip rule">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 11l3 3L22 4"/></svg>
+              Pricing rule
+            </span>
+            <a class="ref-link">View</a>
+            <a class="ref-link">Edit</a>
           </div>
         </div>
       </div>
 
-      <!-- Step 6 (Action, irreversible) — pending -->
-      <div class="flex gap-3 opacity-50">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 relative" style="background:#ecfdf5; color:#059669;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Irreversible"></span>
+      <!-- Head of Ops: drafting -->
+      <div class="flex gap-3">
+        <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[11.5px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
+          HO
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
         </div>
         <div class="flex-1">
-          <div class="flex items-center gap-2">
-            <span class="a-pill a-action">Action</span>
-            <span class="text-[11.5px] text-slate-500">Step 6 · waiting on approval · Mailchimp · campaigns.send</span>
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[13px] font-semibold text-slate-900">Head of Operations</span>
+            <span class="a-pill a-agent">Agent</span>
+            <span class="text-[11px] text-blue-600 font-medium">working now · just now</span>
           </div>
+          <div class="text-slate-700">Drafting pricing annex — pulling line items, payment terms, and renewal credits.</div>
         </div>
       </div>
 
     </div>
 
-    <!-- Bottom: free-form input (ad-hoc messages on this task) -->
-    <div class="border-t border-slate-200 px-6 py-3">
+    <!-- Composer -->
+    <div class="border-t border-slate-200 px-8 py-3">
       <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
-        <textarea rows="1" placeholder="Add a note to this task… (visible to agents and approvers)" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
+        <textarea rows="1" placeholder="Add a note, ask a question, or steer the agents…" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
         <button class="m-1.5 p-1.5 rounded bg-slate-900 hover:bg-black text-white">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
@@ -295,131 +272,97 @@
 
   </div>
 
-  <!-- ========================== RIGHT: TABBED CONTEXT PANEL ========================== -->
-  <div class="w-[400px] flex-shrink-0 flex flex-col bg-white">
+  <!-- ========================== RIGHT: TABBED CONTEXTUAL PANEL (50%) ========================== -->
+  <div class="flex-1 min-w-0 flex flex-col bg-white" style="flex-basis: 50%;">
 
-    <!-- Tabs -->
-    <div class="px-4 border-b border-slate-200 flex items-center gap-1">
-      <a class="inline-block px-3 py-3 text-[12.5px] font-semibold text-slate-900 border-b-2 border-indigo-600">Flow</a>
-      <a class="inline-block px-3 py-3 text-[12.5px] font-medium text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Activity <span class="ml-1 text-[10.5px] num text-slate-400">12</span></a>
-      <a class="inline-block px-3 py-3 text-[12.5px] font-medium text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Files <span class="ml-1 text-[10.5px] num text-slate-400">38</span></a>
+    <!-- Tab nav -->
+    <div class="px-6 border-b border-slate-200 flex items-center gap-1">
+      <a class="tab-btn active">Live</a>
+      <a class="tab-btn">Flow</a>
+      <a class="tab-btn">Activity <span class="count num">12</span></a>
+      <a class="tab-btn">Files <span class="count num">2</span></a>
+      <span class="ml-auto text-[11.5px] text-slate-400 self-center">Updates automatically</span>
     </div>
 
-    <!-- Flow tab content — handoff chain visualisation -->
-    <div class="flex-1 overflow-y-auto scroll px-4 py-5 space-y-3">
+    <!-- Tab content: Live (default) -->
+    <div class="flex-1 overflow-y-auto scroll px-6 py-6">
 
-      <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Route through agents &amp; gates</div>
-
-      <!-- Step 1 (Ask) — done -->
-      <div class="flow-row">
-        <div class="flow-rail done">
-          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="line"></div>
-        </div>
-        <div class="flex-1 pt-px pb-3">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="a-pill a-ask">Ask</span>
-            <span class="text-[12.5px] font-medium text-slate-800">Confirm campaign target</span>
-          </div>
-          <div class="text-[11px] text-slate-500 mt-0.5">auto-filled · 09:00</div>
-        </div>
-      </div>
-
-      <!-- Step 2 (Action) — done -->
-      <div class="flow-row">
-        <div class="flow-rail done">
-          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="line"></div>
-        </div>
-        <div class="flex-1 pt-px pb-3">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="a-pill a-action">Action</span>
-            <span class="text-[12.5px] font-medium text-slate-800">Find stale leads</span>
-          </div>
-          <div class="text-[11px] text-slate-500 mt-0.5">GHL · 247 leads · 09:00</div>
-        </div>
-      </div>
-
-      <!-- Step 3 (Agent) — done -->
-      <div class="flow-row">
-        <div class="flow-rail done">
-          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="line"></div>
-        </div>
-        <div class="flex-1 pt-px pb-3">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="a-pill a-agent">Agent</span>
-            <span class="text-[12.5px] font-medium text-slate-800">Classify by fit</span>
-          </div>
-          <div class="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
-            <span class="agent-pill-inline" style="font-size:10px; padding: 0 6px 0 3px;"><span class="avatar" style="width:11px; height:11px; font-size:7px;">C</span>Copywriter</span>
-            <span>· branched on tier · 09:01</span>
+      <!-- Org chart — sole content of the Live tab -->
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-[13px] font-semibold text-slate-800">Who is doing what right now</div>
+          <div class="flex items-center gap-3 text-[10.5px] text-slate-500">
+            <span class="flex items-center gap-1"><span class="status-dot done"></span>done</span>
+            <span class="flex items-center gap-1"><span class="status-dot active"></span>working</span>
+            <span class="flex items-center gap-1"><span class="status-dot idle"></span>waiting</span>
           </div>
         </div>
-      </div>
+        <div class="text-[11.5px] text-slate-500 mb-4">Live snapshot · use Flow for the planned route, Activity for the full history, Files for what's been produced.</div>
 
-      <!-- Branch — render two parallel rails for hot/cold -->
-      <div class="flex gap-3 -mt-2">
-        <div style="width:20px; flex-shrink:0; display:flex; flex-direction:column; align-items:center;">
-          <div style="width:2px; height:20px; background:#10b981;"></div>
-        </div>
-        <div class="flex-1 grid grid-cols-2 gap-3 pb-2">
-          <div>
-            <div class="text-[10.5px] font-semibold text-amber-700 mb-1">hot path · 38</div>
-            <div class="bg-emerald-50 border border-emerald-200 rounded-md px-2.5 py-1.5 text-[11.5px] text-emerald-800">
-              <div class="flex items-center gap-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Drafted (step 4)</div>
+        <!-- SVG-laid org chart -->
+        <div style="position:relative; width:100%; height:340px;">
+          <svg width="100%" height="100%" viewBox="0 0 580 340" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
+            <!-- Edges -->
+            <!-- COO → Sales -->
+            <path class="edge done" d="M 290 70 L 290 100 L 110 100 L 110 130" />
+            <!-- COO → Research -->
+            <path class="edge flow" d="M 290 70 L 290 130" />
+            <!-- COO → Operations -->
+            <path class="edge flow" d="M 290 70 L 290 100 L 470 100 L 470 130" />
+            <!-- Sales → SDR -->
+            <path class="edge done" d="M 110 195 L 110 245" />
+            <!-- Research → Analyst -->
+            <path class="edge flow" d="M 290 195 L 290 245" />
+            <!-- Operations → Pricing Specialist -->
+            <path class="edge" d="M 470 195 L 470 245" stroke-dasharray="3 3" />
+          </svg>
+
+          <!-- Cards positioned absolutely -->
+          <div style="position:absolute; left:50%; top:8px; transform:translateX(-50%);">
+            <div class="org-node done" style="text-align:center;">
+              <div class="role"><span class="status-dot done"></span>COO</div>
+              <div class="what">Orchestrator</div>
             </div>
           </div>
-          <div>
-            <div class="text-[10.5px] font-semibold text-slate-600 mb-1">cold path · 209</div>
-            <div class="bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5 text-[11.5px] text-slate-700">
-              <div class="flex items-center gap-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Tagged (step 4b) · ends</div>
+
+          <div style="position:absolute; left:8px; top:130px;">
+            <div class="org-node done">
+              <div class="role"><span class="status-dot done"></span>Head of Sales</div>
+              <div class="what">Proposal body</div>
+            </div>
+          </div>
+          <div style="position:absolute; left:50%; top:130px; transform:translateX(-50%);">
+            <div class="org-node active">
+              <div class="role"><span class="status-dot active"></span>Head of Research</div>
+              <div class="what">Competitor pricing</div>
+            </div>
+          </div>
+          <div style="position:absolute; right:8px; top:130px;">
+            <div class="org-node active">
+              <div class="role"><span class="status-dot active"></span>Head of Operations</div>
+              <div class="what">Pricing annex</div>
+            </div>
+          </div>
+
+          <div style="position:absolute; left:8px; top:245px;">
+            <div class="org-node done">
+              <div class="role"><span class="status-dot done"></span>SDR 1</div>
+              <div class="what">Account context</div>
+            </div>
+          </div>
+          <div style="position:absolute; left:50%; top:245px; transform:translateX(-50%);">
+            <div class="org-node active">
+              <div class="role"><span class="status-dot active"></span>Research Analyst</div>
+              <div class="what">Scanning 4 competitors</div>
+            </div>
+          </div>
+          <div style="position:absolute; right:8px; top:245px;">
+            <div class="org-node idle">
+              <div class="role"><span class="status-dot idle"></span>Pricing Specialist</div>
+              <div class="what">Waiting for research</div>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- Step 5 (Approval) — current -->
-      <div class="flow-row">
-        <div class="flow-rail current">
-          <div class="dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="3"/></svg></div>
-          <div class="line"></div>
-        </div>
-        <div class="flex-1 pt-px pb-3">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="a-pill a-approval">Approval</span>
-            <span class="text-[12.5px] font-semibold text-slate-900">Marketing review</span>
-            <span class="px-1.5 py-0.5 rounded text-[9.5px] font-semibold st-awaiting">CURRENT</span>
-          </div>
-          <div class="text-[11px] text-slate-600 mt-1">1 of 2 approvers signed off · waiting on second approver</div>
-          <div class="text-[10.5px] text-orange-700 mt-1 flex items-center gap-1">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-            On reject → loops back to step 4 (re-draft)
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 6 (Action) — pending -->
-      <div class="flow-row">
-        <div class="flow-rail pending">
-          <div class="dot">6</div>
-        </div>
-        <div class="flex-1 pt-px">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="a-pill a-action">Action</span>
-            <span class="text-[12.5px] font-medium text-slate-500">Send via Mailchimp</span>
-            <span class="w-2 h-2 rounded-full bg-red-500" title="Irreversible"></span>
-          </div>
-          <div class="text-[11px] text-slate-400 mt-0.5">pending approval</div>
-        </div>
-      </div>
-
-      <!-- Run summary -->
-      <div class="mt-6 pt-4 border-t border-slate-100 space-y-1.5 text-[11.5px]">
-        <div class="flex justify-between"><span class="text-slate-500">Run cost so far</span><span class="num font-semibold text-slate-900">$0.071</span></div>
-        <div class="flex justify-between"><span class="text-slate-500">Estimated remaining</span><span class="num text-slate-700">~$0.013</span></div>
-        <div class="flex justify-between"><span class="text-slate-500">Elapsed</span><span class="num text-slate-700">2h 14m</span></div>
-        <div class="flex justify-between"><span class="text-slate-500">Workflow version</span><a class="text-indigo-600 hover:text-indigo-800">v3 · open in Studio →</a></div>
       </div>
 
     </div>

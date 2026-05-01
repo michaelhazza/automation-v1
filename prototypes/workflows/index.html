@@ -17,10 +17,10 @@
 
     <a href="04-four-as-step-types.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
       <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[14px] font-semibold text-slate-900">04 · The four A's (step type showcase)</div>
+        <div class="text-[14px] font-semibold text-slate-900">04 · Four A's — per-step-type inspector showcase</div>
         <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Foundation</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Single page establishing the visual language. Workflow steps collapsed from eight engine types to four user-visible categories: <strong>Agent · Action · Ask · Approval</strong>. Branching is a property of the producing step (not its own type), parallel allowed via fan-out / fan-in, loops only on Approval-reject. Sample workflow at the bottom shows all four working together.</div>
+      <div class="text-[12.5px] text-slate-600">Single page with four state-switch buttons at the top (Agent · Action · Ask · Approval) — click each to see that step type selected in a real workflow with its inspector showing fields specific to that type. Same canvas across all four states; only the selected step + inspector content change. Approval state demonstrates the new humans-only approver picker (Specific people / A team / Task requester / Org admin) with quorum.</div>
     </a>
 
     <a href="05-studio-route-editor.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
@@ -28,7 +28,7 @@
         <div class="text-[14px] font-semibold text-slate-900">05 · Studio — route editor</div>
         <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Recommended</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Replaces mocks 02 / 03. Same canvas-first layout (chat as a docked pill, slide-out inspector, inline insert "+", floating bottom action bar) but step cards now use the four A's vocabulary. Branching shown as an inline "Branch on X" chip below an Agent step. Approval-on-reject visualised as a dashed back-arrow to a previous step. The selected step (Marketing review) demonstrates the loop-back configuration in the inspector.</div>
+      <div class="text-[12.5px] text-slate-600">Canvas-first authoring (chat as a docked pill, slide-out inspector, hover-to-insert "+", floating bottom action bar). Step cards use the four A's vocabulary. Branching as an inline "Branch on X" chip below an Agent step. Approval-on-reject as a dashed back-arrow to a previous step. Selected step is the Marketing review approval — inspector shows the new humans-only approver picker with quorum + loop-back-on-reject configuration.</div>
     </a>
 
     <a href="06-open-task-view.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
@@ -36,7 +36,7 @@
         <div class="text-[14px] font-semibold text-slate-900">06 · Open task view</div>
         <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">Models off the existing AgentChatPage layout (chat left, contextual right panel). The user-facing surface for any task in flight, whether it came from Ask Anything one-off or a scheduled workflow. Renders the lead re-engagement workflow from mock 05 mid-run, paused at the Marketing review approval — drafts done, 1 of 2 approvers signed off, irreversible Mailchimp send waiting. Right panel has tabs for Flow / Activity / Files; default Flow tab shows the route through agents and gates with done / current / pending state per leg.</div>
+      <div class="text-[12.5px] text-slate-600">Combines brief-endtoend.html's layout (full-width, chat + org-chart Live view + activity with linked-entity chips) with the task surface. Same view for ad-hoc and workflow-fired tasks — "Brief" is retired as a separate noun. Right panel has four distinct tabs: <strong>Live</strong> (who is working right now — org chart of agents) · <strong>Flow</strong> (the planned shape — step DAG or delegation tree) · <strong>Activity</strong> (full chronological history — view/edit chips on linked CRM records, docs, rules) · <strong>Files</strong> (artifacts produced). Renders the "Acme renewal proposal" brief-style task with COO orchestrating Sales / Research / Operations teams.</div>
     </a>
 
   </div>
