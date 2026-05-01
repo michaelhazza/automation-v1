@@ -93,7 +93,7 @@ System-monitoring is reactive fault detection (something broke). The optimiser i
 
 ## §2 Recommendation taxonomy
 
-8 categories. Each scan skill returns raw evidence; the agent renders user-facing copy via a small LLM prompt cached by `dedupe_key`.
+8 categories. Each scan skill returns raw evidence; the agent renders user-facing copy via a small LLM prompt. The render output is cached by `(category, dedupe_key, evidence_hash)` — re-runs with byte-equal evidence reuse the cached copy; an evidence change invalidates the cache and triggers re-render.
 
 **Category slugs are internal vocabulary.** They appear in `agent_recommendations.category`, in skill manifests, and in deferred-items routing. They MUST NOT appear in operator-facing UI — the agent renders plain English titles and details.
 
@@ -119,7 +119,7 @@ Each recommendation row has: `category`, `severity` (`info` / `warn` / `critical
 
 ### Per-category evaluator modules
 
-Each category has a template module under `server/services/optimiser/recommendations/<category>.ts` exporting `evaluate(subaccountContext): Recommendation[]`. Pure functions; agent calls them sequentially via scan skills. The render step (raw evidence → operator copy) is a separate small LLM call cached by `dedupe_key`.
+Each category has a template module under `server/services/optimiser/recommendations/<category>.ts` exporting `evaluate(subaccountContext): Recommendation[]`. Pure functions; agent calls them sequentially via scan skills. The render step (raw evidence → operator copy) is a separate small LLM call whose output is cached by `(category, dedupe_key, evidence_hash)` (see §6.2 for the hash definition).
 
 ### Dedupe keys
 
@@ -174,7 +174,7 @@ New agent definition file: `companies/automation-os/agents/subaccount-optimiser/
 
 - **Role:** `subaccount-optimiser`
 - **Scope:** `subaccount` (mirrors all 15+ business agents per migration 0106)
-- **Schedule:** daily at sub-account local 06:00 (cron derived from sub-account's `timezone`); configurable
+- **Schedule:** daily at sub-account local 06:00 (cron derived from sub-account's `timezone`). Stored on the sub-account agent's existing `subaccount_agents.scheduleCron` / `scheduleEnabled` / `scheduleTimezone` columns — no new schedule surface. Overriding the cron is the same operation as overriding any other sub-account agent's schedule (via `agentScheduleService.updateSchedule`).
 - **Default-on:** yes. Opt-out is a backend boolean column `subaccounts.optimiser_enabled` (default true). v1 has no operator-visible UI toggle — the column is flipped via admin SQL or a Configuration Assistant prompt that writes it. A dedicated subaccount-settings UI surface is deferred (see Deferred Items).
 
 System prompt (draft):
@@ -189,7 +189,7 @@ System prompt (draft):
 | Skill slug | Description | Side-effects | Returns |
 |------------|-------------|--------------|---------|
 | `optimiser.scan_agent_budget` | Per agent: current month + previous month cost vs budget. Flag > 1.3× for 2 months. | None | `Array<{agent_id, this_month, last_month, budget, top_cost_driver}>` |
-| `optimiser.scan_workflow_escalations` | Per workflow: run + escalation counts over 14 days. Flag > 60% rate. | None | `Array<{workflow_id, run_count, escalation_count, common_step}>` |
+| `optimiser.scan_workflow_escalations` | Per workflow: run + escalation counts over 14 days. Flag > 60% rate. | None | `Array<{workflow_id, run_count, escalation_count, common_step_id}>` (the modal `flow_step_outputs.stepId` of escalating runs; populates the `step=` parameter of the `playbook.escalation_rate` action_hint per §6.5) |
 | `optimiser.scan_skill_latency` | Per skill in last 7 days: p95 vs cross-tenant median. Flag > 4× ratio. | None | `Array<{skill_slug, latency_p95_ms, peer_p95_ms, ratio}>` |
 | `optimiser.scan_inactive_workflows` | Scheduled sub-account agents (`subaccount_agents.scheduleEnabled = true AND scheduleCron IS NOT NULL`) whose most recent `agent_runs.startedAt` is older than 1.5× expected cadence (computed via `scheduleCalendarServicePure`). | None | `Array<{subaccount_agent_id, agent_id, agent_name, expected_cadence, last_run_at}>` |
 | `optimiser.scan_escalation_phrases` | Tokenise `review_items.reviewPayloadJson` over 7 days, group, flag phrases ≥ 3 occurrences. | None | `Array<{phrase, count, sample_escalation_ids}>` |
@@ -269,7 +269,7 @@ New skill defined in `server/skills/output/recommend.md`, executor in `server/se
 **Output:** `{ recommendation_id: string, was_new: boolean, reason?: 'cap_reached' | 'updated_in_place' }`.
 - `was_new=true` — new row inserted.
 - `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` AND the new `evidence_hash` differs from the stored `evidence_hash`. Executor updates `title`, `body`, `evidence`, `evidence_hash`, `severity`, and `action_hint` on the existing row in place; `created_at` is preserved; `acknowledged_at` is set to `NULL` (re-surface the row to the operator since something material changed); `recommendation_id` returned is the existing row's id.
-- `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations. Insert refused; `recommendation_id` returned is `''`. Cap is enforced inside the executor via a `SELECT count(*)` taken in the same transaction as the insert.
+- `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations. Insert refused; `recommendation_id` returned is `''`. Cap is enforced inside the executor via `pg_advisory_xact_lock(hashtext('output.recommend.cap:' || scope_type || ':' || scope_id || ':' || producing_agent_id))` taken before the `SELECT count(*)` that gates the insert. The advisory lock serialises insert decisions per `(scope, producing_agent_id)` triple within a transaction, eliminating the count-then-insert TOCTOU race. Pattern lifted from `feature_requests` (per architecture.md → "Feature request pipeline" → `pg_advisory_xact_lock(orgId + dedupeHash)` inside the insert transaction).
 - `was_new=false` (no `reason`) — open match existed and `evidence_hash` matches; no write performed. The operator-facing copy and the row's `acknowledged_at` state are preserved.
 
 **Evidence hash.** `evidence_hash = sha256(canonical_json(evidence))` where `canonical_json` is RFC 8785 (or equivalent) — recursive sort of object keys, no insignificant whitespace, lowercase hex digest. Computed inside the skill executor before any DB call. Hash compares the full `evidence` value (including numeric values), not just its shape. A delta of `{ "this_month": 7300 }` → `{ "this_month": 7400 }` is a hash change and triggers update-in-place + acknowledged_at clear; rerunning the same scan with byte-equal evidence is a no-op.
@@ -296,8 +296,19 @@ New React component at `client/src/components/recommendations/AgentRecommendatio
                                           // When true, the hook's fetch query also returns
                                           // scope_type='subaccount' rows for every sub-account
                                           // the caller can read (RLS-gated; no app-layer filter).
-  limit?: number,            // default 3 — for top-N "see all" pattern
+  mode?: 'collapsed' | 'expanded', // default 'collapsed'. 'collapsed' renders only the first
+                                   // `limit` rows; 'expanded' ignores `limit` and renders all
+                                   // visible rows. Parent controls toggle via state.
+  limit?: number,            // default 3 — used only when mode='collapsed'.
   emptyState?: 'hide' | 'show', // default 'hide' — section disappears when empty
+  onTotalChange?: (total: number) => void, // fires after each fetch with the full
+                                           // (post-RLS) row count. Lets the parent render
+                                           // "See all N →" with the real N instead of guessing.
+  onExpandRequest?: () => void,            // fires when the "See all N →" affordance is clicked
+                                           // inside the component (the parent flips mode to
+                                           // 'expanded'). If the parent renders its own affordance,
+                                           // this callback is never used and the parent handles
+                                           // its own toggle.
   onDismiss?: (recId: string) => void,
 }
 ```
@@ -363,7 +374,7 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
 **Acknowledge / dismiss HTTP endpoints.**
 - `POST /api/recommendations/:recId/acknowledge` — request body `{}`; response `{ success: true, alreadyAcknowledged: boolean }`. Idempotent: a second call returns `alreadyAcknowledged: true` rather than 409. 404 when `:recId` doesn't exist or isn't visible to the caller (RLS-filtered).
 - `POST /api/recommendations/:recId/dismiss` — request body `{ reason: string }` (`reason` max 500 chars). Response `{ success: true, alreadyDismissed: boolean }`. Idempotent on the dismiss path; the second call's `reason` is ignored. 404 same as above.
-- Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. A `23505` from a racing dismiss is mapped to a 200 idempotent-no-op.
+- Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. Idempotency is state-based, not key-based: each route runs `UPDATE agent_recommendations SET acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL` (or the dismiss equivalent) inside a transaction; a row-count of `0` means the row is already in the target state and the route returns 200 with `alreadyAcknowledged: true` / `alreadyDismissed: true` rather than retrying. No unique-constraint edge applies; `23505` is not part of the contract.
 
 **Implicit acknowledge on deep-link click.** The "Help me fix this →" UI affordance triggers the acknowledge endpoint client-side as a fire-and-forget `POST` immediately after the deep-link navigation begins (the user has acted on the recommendation, so it should leave the operator's list). The dismiss × button is the only explicitly-visible alternate row action in v1 — there is no separate visible "Acknowledge" button. This keeps the row contract clean (one primary action + one dismiss) per the frontend design principles. If the user does NOT click the deep-link and instead returns to the dashboard later, the recommendation remains visible.
 
@@ -397,7 +408,7 @@ One new section on the existing Home dashboard at `/` (`client/src/pages/Dashboa
 
 The section reads the active sidebar context from `Layout.tsx` (`activeClientId` from `getActiveClientId()`):
 
-- **Org context** (no sub-account selected) → `<AgentRecommendationsList scope={{ type: 'org', orgId: user.organisationId }} />` plus a virtual rollup that ALSO includes `scope_type='subaccount'` rows for every sub-account the user has access to. Effectively: cross-client view.
+- **Org context** (no sub-account selected) → `<AgentRecommendationsList scope={{ type: 'org', orgId: user.organisationId }} includeDescendantSubaccounts={true} />`. The `includeDescendantSubaccounts={true}` prop is what produces the cross-client rollup — without it, only `scope_type='org'` rows would render. RLS scopes the descendant rows to sub-accounts the user can read.
 - **Sub-account context** (sub-account selected in sidebar) → `<AgentRecommendationsList scope={{ type: 'subaccount', subaccountId: activeClientId }} />`. Single-client view.
 
 Both render the same component with the same layout. Only the data scope changes.
@@ -406,9 +417,9 @@ Both render the same component with the same layout. Only the data scope changes
 
 Section header: **"A few things to look at"** (h2, matches the `text-[17px] font-bold text-slate-900 tracking-tight mb-3.5` style of sibling sections).
 
-Sub-header line (12.5px, slate-500): "Updated this morning" + a sec-link "See all 12 →" on the right when there are more than 3 open recommendations.
+Sub-header line (12.5px, slate-500): "Updated this morning" + a sec-link "See all N →" on the right when there are more than 3 open recommendations. The N comes from the `onTotalChange` callback fired by `<AgentRecommendationsList>` after each fetch (per §6.3). DashboardPage holds `[mode, setMode] = useState<'collapsed'|'expanded'>('collapsed')` and `[total, setTotal] = useState(0)`; clicking the "See all N →" link calls `setMode('expanded')` to flip the same component into expanded mode in place — no navigation in v1.
 
-Body: top 3 open recommendations rendered by `<AgentRecommendationsList limit={3}>`. Each row: severity dot, plain-English title (operator copy), one-sentence detail (operator copy with concrete numbers), "Help me fix this →" deep-link to Configuration Assistant.
+Body: top 3 open recommendations rendered by `<AgentRecommendationsList limit={3} mode={mode} onTotalChange={setTotal} … />` with the props above. Each row: severity dot, plain-English title (operator copy), one-sentence detail (operator copy with concrete numbers), "Help me fix this →" deep-link to Configuration Assistant.
 
 **Hidden when empty.** Zero open recommendations for the current scope = entire section is not rendered. No "Nothing to optimise" empty state — the section simply isn't there.
 
@@ -430,7 +441,7 @@ Both faithful to current `DashboardPage.tsx` structure with the new section inse
 
 ## §8 Cost model
 
-8 categories × 1 daily run × pure SQL scans + 1 LLM render call per new recommendation × ~200 tokens (cached by `dedupe_key`).
+8 categories × 1 daily run × pure SQL scans + 1 LLM render call per new-or-evidence-changed recommendation × ~200 tokens. Render output cached by `(category, dedupe_key, evidence_hash)` so byte-equal re-runs incur zero LLM spend.
 
 | Scenario | Daily LLM cost per sub-account | Monthly cost |
 |----------|---------------------------------|--------------|
@@ -444,7 +455,7 @@ Default-on. Opt-out is the backend boolean `subaccounts.optimiser_enabled` (defa
 
 ## §9 Build chunks
 
-Total ~28h. Phase 0 builds the reusable primitive; Phases 1-5 are the optimiser as the first consumer.
+Total ~25h. Phase 0 builds the reusable primitive; Phases 1-4 are the optimiser as the first consumer (the previous Phase 4 phrase tokeniser was folded into Phase 1 since the work is part of the same query module — see §9 / Phase 1 / `escalationPhrases.ts`).
 
 ### Phase 0 — Generic agent-output primitive (~6h)
 
@@ -467,20 +478,20 @@ Builds reusable infrastructure that survives beyond the optimiser.
   - `escalationRate.ts` (joins `flow_runs` + `review_items` + `actions`)
   - `skillLatency.ts` (per-sub-account p95 over 7 days from `agent_execution_events`)
   - `inactiveWorkflows.ts` (joins `subaccount_agents` rows where `scheduleEnabled=true AND scheduleCron IS NOT NULL` to `agent_runs.startedAt` last-run; expected cadence computed via `scheduleCalendarServicePure.computeNextHeartbeatAt`)
-  - `escalationPhrases.ts` (tokenises `review_items.reviewPayloadJson`)
+  - `escalationPhrases.ts` (tokenises `review_items.reviewPayloadJson`; ships the regex-based tokeniser, stopword filter, and n-gram counter required by `escalation.repeat_phrase` — no separate later phase)
   - `memoryCitation.ts` (reads `memory_citation_scores`) — **NEW**
   - `routingUncertainty.ts` (reads `fast_path_decisions`) — **NEW**
   - `cacheEfficiency.ts` (reads `llm_requests` cache columns) — **NEW**
 - [ ] Cross-tenant materialised view migration: `migrations/0267a_optimiser_peer_medians.sql` (separate from 0267 so the generic primitive can ship before the optimiser-specific view is needed). Refreshed nightly via pg-boss job. Minimum-tenant threshold of 5 enforced inside the view definition (HAVING clause), not just application logic.
 - [ ] pg-boss job `refresh_optimiser_peer_medians` registered + nightly schedule.
-- [ ] Each query has its own pure unit test against fixture data (8 test files).
+- [ ] Each query has its own pure unit test against fixture data (8 test files). The `escalationPhrases.ts` test file is the source-of-truth for ~10 fixture phrase-extraction cases (n-gram counting, stopword filtering, threshold detection).
 
 ### Phase 2 — Optimiser agent definition + scan skills (~6h)
 
 - [ ] Author `companies/automation-os/agents/subaccount-optimiser/AGENTS.md` with role, system prompt, skill manifest (8 scan skills + `output.recommend`).
 - [ ] Author 8 scan skill markdown specs in `server/skills/optimiser/`. Each maps to a query module from Phase 1.
 - [ ] Author 8 evaluator modules under `server/services/optimiser/recommendations/` — pure functions taking query output and emitting `Recommendation[]` shapes ready for `output.recommend`.
-- [ ] LLM-render step in agent runtime: small prompt that takes raw evidence + category → 2-3 sentence operator-facing copy. Cached by `dedupe_key`. Uses Sonnet (cheap, no need for Opus).
+- [ ] LLM-render step in agent runtime: small prompt that takes raw evidence + category → 2-3 sentence operator-facing copy. Cached by `(category, dedupe_key, evidence_hash)`. Uses Sonnet (cheap, no need for Opus).
 - [ ] Schedule registration: extend `agentScheduleService.registerSubaccountSchedule` invocation point; daily cron at sub-account local 06:00.
 - [ ] Backfill: on first deploy, register schedules for all existing sub-accounts where `optimiser_enabled=true` (one-shot script). Stagger by `created_at` hash across 6-hour window to avoid pg-boss storm.
 - [ ] Integration test: full run end-to-end against test sub-account with seeded telemetry, assert recommendation rows appear with expected dedupe_keys.
@@ -489,22 +500,14 @@ Builds reusable infrastructure that survives beyond the optimiser.
 
 - [ ] Add new section to `client/src/pages/DashboardPage.tsx` between "Pending your approval" and "Your workspaces". Section header: "A few things to look at".
 - [ ] Wire `<AgentRecommendationsList>` with scope derived from `Layout.tsx` `activeClientId`:
-  - `activeClientId === null` → `scope={ type: 'org', orgId: user.organisationId }`
-  - `activeClientId !== null` → `scope={ type: 'subaccount', subaccountId: activeClientId }`
-- [ ] Org-scope rollup: list expansion query that includes `scope_type='subaccount'` rows for sub-accounts the user can read (RLS-gated; no application-layer permission filtering needed). Operator sees per-client items rolled up.
+  - `activeClientId === null` → `scope={ type: 'org', orgId: user.organisationId } includeDescendantSubaccounts={true}`
+  - `activeClientId !== null` → `scope={ type: 'subaccount', subaccountId: activeClientId }` (no `includeDescendantSubaccounts` — not meaningful in single-subaccount scope)
+- [ ] Org-scope rollup verified: with `includeDescendantSubaccounts={true}`, the GET endpoint returns `scope_type='subaccount'` rows for every sub-account the user can read (RLS-gated; no application-layer permission filtering needed) plus any `scope_type='org'` rows. Operator sees per-client items rolled up.
 - [ ] Hide section entirely when zero open recs for current scope.
 - [ ] "See all N →" link expands inline (no navigation in v1).
 - [ ] Socket subscription: emit `dashboard.recommendations.changed` from `output.recommend` insert + acknowledge/dismiss endpoints; client refetches on event per the existing reactivity pattern.
 
-### Phase 4 — Phrase tokeniser implementation (for `escalation.repeat_phrase`) (~3h)
-
-This phase is the implementation work for the `escalation.repeat_phrase` category whose query module (`escalationPhrases.ts`) and evaluator module (`repeatPhrase.ts`) are declared in Phase 1/2. The threshold (≥ 3 occurrences in 7 days) and the `action_hint` deep-link target are already pinned in §2 and §12; Phase 4 delivers the tokeniser + phrase-grouping logic that those modules call.
-
-- [ ] Tokeniser: simple regex/normalisation, no ML. Strips stopwords, lowercases, splits on punctuation.
-- [ ] Phrase grouping: count occurrences per token / bigram / trigram in `review_items.reviewPayloadJson` over 7 days.
-- [ ] Pure tests with fixture escalation reason text (~10 cases).
-
-### Phase 5 — Verification (~2h)
+### Phase 4 — Verification (~2h)
 
 - [ ] `npm run lint`, `npm run typecheck` clean.
 - [ ] Targeted unit + integration test files authored for this build pass via `npx tsx <path-to-test>`. Full gate suites are CI-only per CLAUDE.md.
@@ -528,7 +531,9 @@ This phase is the implementation work for the `escalation.repeat_phrase` categor
 - `server/db/canonicalDictionary.ts` (entry)
 - `server/skills/output/recommend.md` (new generic skill spec)
 - `server/services/skillExecutor.ts` (new case for `output.recommend`)
-- `server/routes/agentRecommendations.ts` (new — acknowledge / dismiss endpoints)
+- `server/routes/agentRecommendations.ts` (new — list / acknowledge / dismiss endpoints per §6.5)
+- `server/websocket/emitters.ts` (extend — add `dashboard.recommendations.changed` emitter alongside the existing `dashboard.*` emitters from PR #218)
+- `server/index.ts` (extend — mount the new `agentRecommendations.ts` router on `/api`)
 
 **Client:**
 - `client/src/components/recommendations/AgentRecommendationsList.tsx` (new)
@@ -561,10 +566,10 @@ This phase is the implementation work for the `escalation.repeat_phrase` categor
 
 - Per-query unit tests (8 files)
 - Per-evaluator unit tests (8 files)
-- Phrase-tokeniser tests (~10 cases)
+- Phrase-tokeniser tests (~10 cases) — folded into the `escalationPhrases.ts` query unit-test file
 - Integration test for full optimiser run
 
-### Docs (Phase 5 closeout)
+### Docs (Phase 4 closeout)
 
 - `docs/capabilities.md` — sub-account observability + reusable agent recommendations primitive
 - `architecture.md` — cross-tenant median view, `agent_recommendations` primitive
@@ -619,7 +624,7 @@ W3 (`context.assembly.complete` event in `agentExecutionService.ts`) would emit 
 | `context.gap.persistent` | Same gap flag fires > 50% of runs over 7 days for an agent |
 | `context.token_pressure` | `pressure='high'` fires consistently — recommend extracting workspace memory entries to reference docs |
 
-These are NOT in v1 scope. **Verified 2026-05-02 against `server/services/agentExecutionService.ts` — no `context.assembly.complete` emit exists today.** When Riley W3 ships, add these as a Phase 6 follow-up to this build (or as v1.1).
+These are NOT in v1 scope. **Verified 2026-05-02 against `server/services/agentExecutionService.ts` — no `context.assembly.complete` emit exists today.** When Riley W3 ships, add these as a Phase 5 follow-up to this build (or as v1.1).
 
 ---
 
@@ -632,7 +637,7 @@ Aggregated from prose markers throughout the spec ("deferred", "later", "v1.1", 
 - **Standalone `/suggestions` page.** v1 expands the section inline via "See all N →". v1.1 ships a dedicated page with severity / category / sub-account filters and grouping (§7).
 - **Brand-voice ML classification beyond keyword/phrase frequency.** v1 is regex tokeniser + n-gram counts. ML-driven classification deferred until volume justifies (§1).
 - **Wider Home dashboard scope-awareness.** Sibling widgets ("Clients Needing Attention", "Active Agents") remain org-scoped today and don't cleanly handle sub-account context. v2 follow-up spec — not solved here (§1, §7, §13).
-- **Riley W3 telemetry-dependent categories.** `context.gap.persistent` and `context.token_pressure` become trivial once `context.assembly.complete` ships in `agentExecutionService.ts`; add as Phase 6 follow-up (§15).
+- **Riley W3 telemetry-dependent categories.** `context.gap.persistent` and `context.token_pressure` become trivial once `context.assembly.complete` ships in `agentExecutionService.ts`; add as Phase 5 follow-up (§15).
 - **`agent_recommendations` primitive extensions.** Per §6.4: widget registry, layout engine, charts/KPI tiles, per-agent renderer customisation, multi-step actions, threaded discussion. Deferred indefinitely — separate scope each.
 - **Notification surfaces for recommendations** (Slack, email, in-app push). Recommendations are pull-only in v1; future spec can add notification routing on `dashboard.recommendations.changed` events.
 - **Sub-account-settings UI toggle for `subaccounts.optimiser_enabled`.** v1 ships the column only; flipping it is admin-SQL or via a Configuration Assistant prompt. A proper settings page (whether a sub-account preferences panel or an integration into existing admin tooling) is deferred until the broader sub-account-settings surface is designed (out of scope here).
