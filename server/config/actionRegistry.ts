@@ -52,7 +52,12 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
-export type RequiredIntegrationSlug = 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl';
+// Closed list of valid OAuth provider slugs for `requiredIntegration` on actions.
+// Single source of truth — both the type below and `VALID_INTEGRATION_PROVIDERS`
+// in integrationBlockService derive from this constant.
+export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'slack', 'notion', 'ghl'] as const;
+
+export type RequiredIntegrationSlug = typeof REQUIRED_INTEGRATION_SLUGS[number];
 
 export interface IdempotencyContract {
   ttlClass: 'permanent' | 'long' | 'short';
