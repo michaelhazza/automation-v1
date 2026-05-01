@@ -169,6 +169,8 @@ Per §8. Run before any other work so the brief is read against current `main`. 
 
 **Early-exit rule:** if the 30+ commits-behind check triggers and the operator does NOT provide `force=true`, reset `tasks/current-focus.md` to `NONE` (release the PLANNING lock) before exiting. Print: `PLANNING lock released — tasks/current-focus.md reset to NONE.` so the operator knows the state is clean.
 
+**Post-merge typecheck:** if the §8.2 sync produced a merge commit (i.e. the branch was not already up to date), run `npm run typecheck` before continuing. If it fails, surface the full diagnostic and pause — the operator must decide whether to fix type errors introduced by main before proceeding, or abort. Typecheck failure here means main is broken, not the spec branch.
+
 ### §1.6 Step 3 — Brief intake and UI-touch detection
 
 Read the brief (provided in the invocation, or read from a file the operator names). Classify the brief along two axes:
@@ -355,6 +357,7 @@ Before any work, read in order:
 5. `tasks/builds/{slug}/handoff.md` — restore Phase 1 context
 6. The spec at the path named in the handoff
 7. `tasks/lessons.md`
+8. `tasks/builds/{slug}/progress.md` — detect completed chunks; if any chunks are recorded as `done`, the coordinator was interrupted mid-build and resumes from the first incomplete chunk (see §2.9 per-chunk loop)
 
 If `tasks/current-focus.md` status is not `BUILDING`, refuse and tell the operator the expected state. Do not proceed past this step with mismatched state.
 
@@ -383,6 +386,8 @@ Per §8. Operator just typed "launch feature coordinator" and is at the keyboard
 
 Migration-number collision detection runs as part of S1: list `migrations/*.sql` files on `origin/main` vs the current branch, flag any number that appears on both sides with different content.
 
+**Post-merge typecheck:** if the §8.2 sync produced a merge commit, run `npm run typecheck` before invoking architect. Type errors from main must be resolved before the build starts — architect plans against the post-merge state, and broken types will cascade into every chunk.
+
 ### §2.6 Step 3 — architect
 
 Invoke `architect` as a sub-agent with the spec path. The sub-agent:
@@ -399,8 +404,11 @@ The coordinator reviews the plan for:
 - Chunks too large for one focused builder session — ask architect to split
 - Awkward dependency order — ask architect to re-order
 - Missing contracts or error-handling strategy — ask architect to fill in
+- Chunks missing spec-section references — each chunk must cite the spec section(s) it implements (e.g. `spec_sections: [§4.1, §4.2]`); ask architect to add them
 
 Plan-revision rounds capped at **3**. On the fourth, escalate to the operator.
+
+**Chunk sizing guideline:** a well-sized chunk modifies ≤5 files OR represents ≤1 logical responsibility (one service layer, one data shape, one UI component). Chunks exceeding both limits must be split. Coordinator enforces this in the plan-review step above; architect should apply it proactively.
 
 ### §2.7 Step 4 — chatgpt-plan-review (MANUAL mode auto-fire)
 
@@ -438,6 +446,8 @@ Operator reply handling:
 
 Process chunks **one at a time** in plan order. For each chunk:
 
+**Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If the chunk is already recorded as `done`, skip builder invocation, mark the TodoWrite item complete, and move to the next chunk. This makes feature-coordinator re-entrant: re-launching after an interruption resumes from the first incomplete chunk without re-building completed work.
+
 #### §2.9.1 Builder invocation
 
 Invoke `builder` as a sub-agent (§4.1) with the prompt:
@@ -457,6 +467,8 @@ If builder reports a plan gap:
 #### §2.9.3 Chunk completion
 
 Once builder reports success and G1 passes:
+
+**Commit-integrity invariant:** the coordinator commits immediately after builder returns SUCCESS, before any other coordinator-level work. Sequence: (1) builder returns SUCCESS + G1 passes, (2) `git add <files changed> && git commit`, (3) update `progress.md`, (4) mark TodoWrite item complete, (5) next chunk. No file edits may occur between builder returning and the commit.
 
 - Update `tasks/builds/{slug}/progress.md` — chunk status `done`, files changed list, builder log path if any
 - Mark the chunk's TodoWrite item complete
@@ -546,7 +558,17 @@ Record verdicts in `tasks/builds/{slug}/progress.md` under a `## Doc Sync gate` 
 
 A `no` verdict requires a rationale; a bare `no` is treated as missing.
 
+**Enforcement invariant:** before recording the gate as complete, the coordinator reads `docs/doc-sync.md` and counts the registered docs. The verdict table must have exactly that many rows. Any shortfall is a gate failure — not a review comment.
+
 ### §2.13 Step 10 — Handoff write
+
+**Phase 2 completion invariant** — verify ALL of the following before writing the handoff. If any item is not met, do NOT proceed; surface the gap and escalate per §6.4:
+
+- [ ] All chunks have status `done` in `tasks/builds/{slug}/progress.md`
+- [ ] G2 passed (lint + typecheck on integrated branch state)
+- [ ] `spec-conformance` verdict is `CONFORMANT` or `CONFORMANT_AFTER_FIXES`
+- [ ] `pr-reviewer` verdict is `APPROVED`
+- [ ] Doc-sync gate verdicts recorded for all registered docs (§2.12 enforcement invariant met)
 
 Update `tasks/builds/{slug}/handoff.md` (it was created by spec-coordinator; this is an append/update, not a replacement). Add a Phase 2 section:
 
@@ -562,7 +584,7 @@ Update `tasks/builds/{slug}/handoff.md` (it was created by spec-coordinator; thi
 **adversarial-reviewer verdict:** {verdict or "skipped (no auto-trigger surface match)"} ({log path or n/a})
 **pr-reviewer verdict:** {verdict} ({log path})
 **Fix-loop iterations:** N
-**dual-reviewer verdict:** {verdict or "skipped (Codex CLI unavailable)"} ({log path or n/a})
+**dual-reviewer verdict:** {verdict} | `REVIEW_GAP: Codex CLI unavailable` ({log path or n/a})
 **Doc-sync gate:** [verdict per doc]
 **Open issues for finalisation:** [list of non-blocking findings deferred to ChatGPT review]
 ```
@@ -603,7 +625,8 @@ Mark final TodoWrite item complete and stop.
 - **architect plan-revision rounds exceed 3** → escalate, write `phase_status: PHASE_2_PAUSED_PLAN` to handoff.md, exit.
 - **chatgpt-plan-review hits an unresolved finding** → its existing rules apply; the sub-agent decides loop vs exit.
 - **plan-gate operator says "abort"** → write `phase_status: PHASE_2_ABORTED` to handoff.md, set current-focus to `NONE`, exit. Operator restarts from spec-coordinator if needed.
-- **Per-chunk plan-gap rounds exceed 2** → escalate for that chunk; do not start later chunks.
+- **Per-chunk plan-gap rounds exceed 2** → freeze all remaining chunks; write `phase_status: PHASE_2_PAUSED_PLANGAP` and `paused_at_chunk: {chunk-name}` to handoff.md; hard-escalate per §6.4.2. Recovery message to operator: "Re-launch feature-coordinator — it will re-invoke architect from §2.6 with the full spec + current branch diff to produce a revised plan for the remaining chunks."
+- **Per-chunk rollback:** if a chunk is found to have corrupted earlier work, the recovery path is: `git revert <chunk-commit-sha>`, mark the chunk as `FAILED` in `progress.md`, require a plan revision (re-run from §2.6) before continuing. The per-chunk git commits (§6.5) are what make this safe.
 - **G1 / G2 / G3 attempts exceed 3** → escalate with full diagnostics.
 - **spec-conformance NON_CONFORMANT after 2 rounds** → escalate; do not proceed to pr-reviewer.
 - **pr-reviewer fix-loop exceeds 3** → escalate; mark unresolved findings in handoff.
@@ -725,6 +748,8 @@ For each registered doc:
 Record verdicts in the chatgpt-pr-review session log under `## Final Summary` (per the existing format in `docs/doc-sync.md`).
 
 A missing verdict blocks finalisation. A bare `no` is treated as missing — must include rationale.
+
+**Enforcement invariant:** coordinator reads `docs/doc-sync.md` and counts the registered docs. The verdict table must have exactly that many rows. Any shortfall is a gate failure.
 
 ### §3.10 Step 7 — KNOWLEDGE.md pattern extraction
 
@@ -907,6 +932,7 @@ Return to caller:
 ```
 Verdict: SUCCESS | PLAN_GAP | G1_FAILED
 Files changed: [list]
+Spec sections: [list of §section numbers from the spec this chunk implements, e.g. §4.1, §4.2]
 What was implemented: [one paragraph summary]
 Plan gap (if any): [description]
 G1 attempts (per check): {lint: N, typecheck: N, build:server: N, build:client: N, targeted tests: N}
@@ -1344,6 +1370,8 @@ The timeout pattern: a sub-agent runs for tens of minutes with no surface-visibl
 3. **Spec-conformance plays back to parent (existing).** `spec-conformance` is uniquely run as a playbook in the parent session, NOT as a sub-agent (per its existing definition). Its TodoWrite list appears in the operator's main UI directly. This is preserved.
 
 **Hard rule:** every sub-agent definition created or modified by this spec MUST include a Step 1 TodoWrite skeleton in its frontmatter `description` and a `Step 1 — TodoWrite list` section in its body. This is enforced at acceptance (§10.2).
+
+**Authority:** `tasks/builds/{slug}/progress.md` is the authoritative record for chunk status, gate attempt counts, and review verdicts. The TodoWrite list is a real-time UI indicator only. If the two disagree (e.g. after a hard-interrupted session where TodoWrite was not updated), `progress.md` wins. Coordinators that detect a discrepancy must reconcile by writing `progress.md` first, then updating TodoWrite.
 
 ### §6.3 Timeout / cap rules
 
@@ -1991,6 +2019,7 @@ The OLD `feature-coordinator.md` is fully replaced in the same commit that intro
 - **Automated mid-build sync.** §8.6 documents a manual escape hatch but no automated mid-build sync. If feature-coordinator runs become long enough that drift during Phase 2 causes frequent S2 conflicts, consider adding an auto-sync at chunk boundaries (with the same pause-and-prompt rule). For now, defer.
 - **Replacing manual ChatGPT-web with automated OpenAI API for plan review.** `chatgpt-plan-review` is manual-only by design (operator stated explicit preference for ChatGPT-web feedback richness). If the API quality reaches parity, the agent gains an automated mode mirroring `chatgpt-spec-review`'s.
 - **`builder` parallelism within a chunk.** Builder runs sequentially file-by-file. If chunks grow large enough that parallel implementation would help, consider invoking multiple builders in parallel. Risk: parallel builders could produce conflicting edits to the same file. Defer.
+- **Per-phase cost and time budgeting.** Add optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Deferred: cost budgeting is a post-live-agency concern; revisit when first client onboards and `docs/spec-context.md` framing updates to `live_users: yes`.
 - **Sub-agent runtime time-cap.** §6.3 explicitly does not cap sub-agent runtime. If a sub-agent hangs (vs taking long), the only recovery is operator interrupt. If hangs become a recurring problem, add a wall-clock cap with hard-escalation on cap. For now, defer.
 - **Auto-merge on CI green.** `finalisation-coordinator` does NOT auto-merge after CI green. Operator merges manually via the GitHub UI. If the merge step becomes the bottleneck, consider extending finalisation to auto-merge; this requires a CI-green-detection loop and PR auto-merge wiring.
 - **Spec-coordinator handling Standard-class briefs.** Currently Standard briefs run through the full Phase 1. If this is too heavy for small features (e.g. typo fixes, single-file additions), add a fast-path in spec-coordinator that skips mockup-detection, skips chatgpt-spec-review, and produces a thin "spec" that is really just an architect-ready brief. For now, the operator handles Trivial/Standard outside the pipeline (per §1.6).
