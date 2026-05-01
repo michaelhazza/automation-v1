@@ -389,12 +389,190 @@ Compared to chat-only file refinement (where the operator never sees the file), 
 
 ## 10. Integration story
 
+The biggest single source of confusion in the brainstorm was where integrations live. Restating the answer cleanly:
+
+### 10.1 Three layers, not two
+
+| Layer | What it is | Built by | Used by |
+|---|---|---|---|
+| **Skills / Actions** | First-party integration primitives — one external call each. Atomic. | Us, shipped with the platform | Agents (in chat) AND workflow Action steps |
+| **Workflows** | Orchestration of skills + agents + approvals + conditionals. | Customer (org), via Studio handoff from orchestrator | Subaccount runs (i.e., Tasks) |
+| **Automations** | Customer's existing multi-step external flows. | Customer, in n8n / Make / Zapier / GHL | Workflows, via the `invoke_automation` Action when needed |
+
+### 10.2 Skills are the universal vocabulary
+
+The same `slack.message.send` skill that an agent calls in chat is the same skill a workflow Action step calls. One catalogue, used everywhere. This is what prevents us from becoming n8n — agents and workflows speak the same integration language. No "node library" vs "tool library" split. Adding a skill grows what both can do; it doesn't grow the user's authoring surface.
+
+The skill catalogue can (and should) be hundreds of items deep. Slack, GHL, HubSpot, Mailchimp, Stripe, Salesforce, Gmail, Calendar, Sheets, etc. The number of *step types* the user picks from stays at four; the number of *skills the agent can use* is unbounded.
+
+### 10.3 The line — when to use what
+
+Test for any given integration request:
+
+| Request shape | Answer |
+|---|---|
+| One external API call (send Slack message, create HubSpot contact, push row to Sheets) | **Skill** — we ship it. Used by agents and Action steps. Never `invoke_automation`. |
+| Sequence of API calls with intelligence and humans in it | **Workflow** — composes skills + agents + approvals + Actions |
+| Sequence of external API calls the customer already built somewhere else | **Automation** — invoked from a workflow Action step via `invoke_automation`. Reserved for: (a) pre-existing customer flows, (b) long-tail integrations we don't ship a skill for, (c) customers who prefer their own tool for orchestration |
+
+The discipline: we never add a "Slack node", "HubSpot node", "Salesforce node". Those are skills. What we never reimplement is the customer's *existing multi-step orchestration in their tool of choice* — that gets `invoke_automation`.
+
+### 10.4 The two shapes of workflow already in production
+
+The cross-check from the brainstorm: two shapes already exist in the three system templates and they tell us this design is right.
+
+| Template | Shape | Step distribution | What this tells us |
+|---|---|---|---|
+| `event-creation.workflow.ts` | Org-chart handoff | 4 of 6 steps are agent calls | The "creative" workflow shape is naturally agent-driven. This is the dominant pattern operators will write. |
+| `weekly-digest.workflow.ts` | Data pipeline | 0 agent calls; 3 action_calls + 1 prompt | Some flows are genuinely deterministic plumbing. Forcing them through agents adds LLM cost for no value. |
+| `intelligence-briefing.workflow.ts` | Mostly data pipeline | 1 agent call (research), 3 action_calls, 1 prompt | Sits between the two — pipeline with one agent leg for judgement. |
+
+Implication: both shapes need to keep working. The Studio supports both. The four A's vocabulary covers both. The data-pipeline shape is mostly a system-template / admin authoring concern (operators rarely need to write these). The org-chart handoff shape is what the orchestrator drafts when an operator says *"set up something to repeat that does X, Y, then Z"*.
+
 ## 11. Build punch list
+
+Grouped by surface so it maps cleanly to spec sections later. Effort estimates are rough order-of-magnitude.
+
+### 11.1 Engine / schema
+
+| # | Item | Why | Effort |
+|---|---|---|---|
+| 1 | Add `approverGroup` (kind + userIds/teamId) and `quorum` fields to the `approval` step type | Currently no approver routing — anyone can decide. Required for the Approval inspector + the operator's "you can't approve this" gate. | ~1-2 days (schema + validator + engine enforcement + tests) |
+| 2 | Step-type validator: collapse user-visible vocabulary to the four A's | The eight engine types still exist; the validator + Studio inspector need to accept the four A's as the user-facing names and map to engine internals | ~1 day |
+| 3 | Branching as an output property of any step (replaces `conditional` and `agent_decision` step types in the user vocabulary) | Cleans up the vocabulary; engine already supports this conceptually — formalise the validator rule | ~half day |
+| 4 | Loop validator: only Approval-on-reject can route backward | Engine constraint enforcement | ~half day |
+| 5 | Workflow → workflow nesting check | Already enforced today (max depth 1); confirm the validator catches the cross-workflow case | ~few hours |
+
+### 11.2 New UI
+
+| # | Item | Mockup | Effort |
+|---|---|---|---|
+| 6 | Open task view (3-panel: chat / activity / tabs) | [`07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) | ~5-7 days |
+| 7 | Studio canvas + inspector (the four A's) | [`05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) and [`04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) | ~7-10 days |
+| 8 | Studio chat panel (docked, agent diffs) | [`03-studio-chat-active.html`](../prototypes/workflows/03-studio-chat-active.html) for the diff-card pattern | ~3-5 days |
+| 9 | Files tab — top thumbnail strip + reader pane + document toolbar | Inside [`07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) (Files tab state) | ~3 days |
+| 10 | Approver picker UI (specific people / team / requester / org admin + quorum) | Inside [`04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) (Approval state) | ~1-2 days |
+| 11 | Team management page in Org settings | Not mocked — small CRUD | ~half day |
+| 12 | Workflow library page (admin-only) | [`riley-observations/08-workflows-library.html`](../prototypes/riley-observations/08-workflows-library.html) needs refresh for the four A's | ~2 days |
+| 13 | Document toolbar with download + open-in-new-window | Inside the Files tab | included in #9 |
+
+### 11.3 Orchestrator changes
+
+| # | Item | Why | Effort |
+|---|---|---|---|
+| 14 | Ask Anything → "do once vs set up to repeat" prompt | Replaces auto-detection of workflow-shape. User picks. | ~1-2 days |
+| 15 | Studio handoff card (orchestrator drafts → user reviews) | The bridge from intent to authored workflow | ~2-3 days |
+| 16 | Workflow-as-tool for agents (`workflow.run.start` skill) | Lets any agent fire a saved workflow when intent matches | ~1 day |
+
+### 11.4 Conversational editing
+
+| # | Item | Why | Effort |
+|---|---|---|---|
+| 17 | Agent skill: "edit this file" — read current version, apply requested change, commit as new version | Operator → chat → agent updates file → reader pane refreshes | ~2-3 days |
+| 18 | Version dropdown on the document toolbar | Surface earlier versions of edited files | ~1 day |
+
+### 11.5 Naming cleanup
+
+| # | Item | Why | Effort |
+|---|---|---|---|
+| 19 | Retire "Brief" as a UI noun — rename Briefs nav to Tasks | One user-visible primitive. Schema unchanged. | ~half day (mostly find-and-replace + nav update) |
+| 20 | NewBriefModal renamed → NewTaskModal | Same rationale | ~few hours |
+
+**Rough total:** ~6-8 weeks of UI build + ~1-2 weeks engine / schema + ~1 week orchestrator + ~half week cleanup = **~9-12 weeks for V1**, parallelisable across UI and engine workstreams.
 
 ## 12. Out of scope (V1)
 
+Things we explicitly chose to defer. Each is reversible — we can add later if demand emerges.
+
+| Item | Why deferred | When to revisit |
+|---|---|---|
+| **Visual node-graph drag-and-drop builder** | Mismatch with our positioning. Operators don't start from blank canvas — they fork system templates. | Never — this is a permanent stance, not a deferral. |
+| **Inline human editing of files** | Breaks the audit story; conversational editing covers ~all real cases. Download is the escape hatch. | If customers explicitly ask for offline editing AND demonstrate the audit cost is acceptable. |
+| **Webhook triggers** (workflow fires on external event) | Schedule + manual trigger + Ask Anything cover V1. Webhooks add a real surface (registration, secrets, replay, idempotency on inbound). | Phase 2, when we have a concrete customer pull. |
+| **Workflow → workflow direct nesting** | Bounded blast radius. Workflow → agent → workflow remains allowed. | Probably never as a direct nesting; the agent-layer indirection is the right shape. |
+| **Mid-run output editing in the operator UI** | Engine supports it (output-hash firewall, step invalidation) but exposing it requires conflict-resolution UX. Keep engine capability, hide from operator. | Phase 2 if we hit cases where re-running the whole task is too expensive. |
+| **"Promote to workflow" from agent run history** ("you've done this 3 times — want to save it?") | Powerful pattern but speculative. Better to ship the orchestrator-driven creation path first and learn from usage. | Phase 2, informed by real telemetry. |
+| **Visual diff between published versions** | Useful but not blocking. Inspector's "View raw" + a future text diff covers the audit need. | Phase 2 when version churn becomes a pain point. |
+| **General `while` loops or do-until** | Removes a footgun class. Approval-on-reject + Action retry policy cover the legitimate cases. | Probably never — too much rope. |
+| **Multi-agent reviewer-style approval** (agent + human collectively decide) | Conflates "agent review" with "human approval". The cleaner path is Agent step (returns yes/no) → branch → Approval step (human gate). | Probably never — the existing primitives compose to handle this. |
+| **Workflow templates with input parameter UI** (the `paramsJson` field on `workflow_templates`) | Schema supports it; UI doesn't. Most V1 workflows can use Ask steps to gather input at runtime instead. | Phase 2 once we have workflows with frequent param variations across runs. |
+| **Cost dashboards** (per-workflow, per-template trends) | Per-run cost is on the open task view. Aggregate cost monitoring is a different surface. | Phase 2 when ops-cost surfaces become a customer ask. |
+| **Run-history search** (find all runs of workflow X across subaccounts in date range) | Workflow runs library exists per-subaccount. Cross-subaccount search is admin tooling. | Phase 2 / admin-only later. |
+
 ## 13. Considered and rejected
+
+These were genuine design directions explored in the brainstorm and then ruled out. Documenting so we don't relitigate.
+
+| Idea | Why rejected |
+|---|---|
+| **Wrap n8n on the backend, expose our UX on top** | n8n has no native concept of an agent (with persona / skills / memory / budget). HITL approval is webhook hacks, not first-class. Cost is platform-billing-level, not per-tenant-per-run. Side-effect classification, replay, output editing — none of it. Three-tier distribution doesn't map. We'd end up writing a translation layer for our entire data model into n8n's, then maintaining both. Easier to keep the engine we already built. |
+| **Visual drag-and-drop authoring (n8n-style)** | Optimises for "build from blank canvas" — the wrong primary verb for our product. Our dominant verb is "review what the orchestrator drafted". Visual canvas commits us to maintaining hundreds of integration nodes in perpetuity. The Studio canvas we landed on (mock 05) is *not* drag-and-drop — it's a vertical-list editor with hover-to-insert and click-to-edit. Different product category. |
+| **Chat-driven authoring as the primary surface** (mocks 01-03) | Three iterations rejected as too busy / too verbose / too slow for refinement. Chat is great for "scaffold a workflow from natural language" and "do a big restructure". Chat is bad for "rename this step", "swap the approver", "delete a step" — those are clicks, not sentences. Final design: canvas-first with chat as a docked power tool (mock 05's pattern). |
+| **Brief vs Task as separate concepts** | Confirmed via schema check — there is no `briefs` table, just `tasks` with a nullable `brief` text column. The dual naming was historical legacy. One word. |
+| **Auto-detection of "workflow-shaped intent"** | Was the original orchestrator design — *"if the user describes something with HITL gates and recurrence, automatically draft a workflow"*. Rejected: high false-positive risk creates confusing handoffs. Replaced with explicit prompt: *"do once, or set up to repeat?"* User picks. Removes a whole class of detection failure modes. |
+| **Workflow → workflow direct nesting** | Bounded blast radius. Workflow → agent → workflow remains allowed via the agent layer. The indirection is a feature, not a friction — it's where safety enforcement and composition decisions can live. |
+| **Inline file editing by humans** | Breaks the audit story (every keystroke would need logging). Conversational editing covers the real cases. Download is the escape hatch for the rare offline-edit case. |
+| **Skills as a separate user-visible concept** | Skills appear ONLY inside Action steps when the author explicitly picks one. They never appear in Agent steps (the agent picks them at runtime). Hiding skills from the broader user surface keeps the cognitive load on the four A's. |
+| **Approval that an agent can resolve** | Conflates "agent review" with "human gate". An agent reviewer is an Agent step that returns yes/no with a branch. An Approval step is a human gate. Keeping them distinct keeps the trust semantics clean. |
+| **Activity as a tab inside the right panel** (mock 06) | Tested as the alternative to mock 07's three-panel layout. Worked but lost the "see chat + activity + visual context all at once" feel. Mock 07 (3-panel with collapsible activity) ended up the master direction. Mock 06 deleted. |
+| **Drawn dashed reject loop arrow on the canvas in mock 05** | Three implementation attempts couldn't reliably draw a connecting line across grid-row boundaries. Final approach uses an SVG with explicit pixel coords inside a `position:relative` wrapper. If still fragile in practice, we drop the visual and rely on the Studio inspector's "If rejected → loop back to step 4" text. The intent is unambiguous in the spec regardless. |
+| **A "promote agent run to workflow" feature** | Speculative. Better to ship orchestrator-driven workflow creation first and see whether real usage signals a need for promotion. Deferred to Phase 2 (see Section 12). |
+| **Editing existing engine schema for the four A's collapse** | Not needed. The validator + Studio inspector accept the four A's as user-facing names; internally they emit the existing engine step-type strings. Existing system templates and runs keep working. The taxonomy migration is a UI / validator change, not a runtime change. |
 
 ## 14. Mockup references
 
+All mockups live in [`prototypes/workflows/`](../prototypes/workflows/index.html). Open the index for the full set with descriptions; the table below is the canonical reference for what each mockup is for.
+
+### 14.1 Master mockups (V1 build)
+
+| # | Mockup | Purpose | Section refs |
+|---|---|---|---|
+| 04 | [Four A's per-step inspector showcase](../prototypes/workflows/04-four-as-step-types.html) | The visual language. Click each of the four state buttons to see how Agent / Action / Ask / Approval render in a workflow with the inspector showing fields specific to that step type. | §4.2, §7.3 |
+| 05 | [Studio — route editor](../prototypes/workflows/05-studio-route-editor.html) | Canvas-first authoring. The four A's, branching as inline chips, parallel rendered as fork, Approval-on-reject as a dashed back-arrow. Inspector slide-out for the selected step. Floating bottom action bar with `Publish vN`. Chat as a docked pill bottom-left. | §7 |
+| 07 | [Open task view — 3-panel master](../prototypes/workflows/07-open-task-three-panel.html) | The operator surface. 26% chat / 22% activity (collapsible) / 52% tabs. Tabs: Live (org chart) / Flow (planned route) / Files (top thumbnail strip + reader pane with portrait + landscape support, document toolbar with download + open-in-new-window). | §6, §9 |
+
+### 14.2 Reference mockups (already in the repo, used for context)
+
+| Mockup | Why it's relevant |
+|---|---|
+| [`prototypes/brief-endtoend.html`](../prototypes/brief-endtoend.html) | The existing brief / task surface. Mock 07's three-panel layout builds on this. Status colours, activity-feed format, and ref-chip styling are preserved. |
+| [`prototypes/riley-observations/05-workflow-studio-step-picker.html`](../prototypes/riley-observations/05-workflow-studio-step-picker.html) | Earlier step picker pattern. Will need a refresh for the four A's vocabulary (currently shows the older taxonomy). |
+| [`prototypes/riley-observations/06-automation-picker-drawer.html`](../prototypes/riley-observations/06-automation-picker-drawer.html) | The drawer that opens when an Action step picks an external automation (n8n / Make / Zapier / GHL / custom webhook). Reuse for V1 Action step's "External automation" radio path. |
+| [`prototypes/riley-observations/07-invoke-automation-run-detail.html`](../prototypes/riley-observations/07-invoke-automation-run-detail.html) | How an external-automation step renders during a live run (in the Activity tab / Flow tab). Reuse for V1. |
+| [`prototypes/riley-observations/08-workflows-library.html`](../prototypes/riley-observations/08-workflows-library.html) | Workflows library page. Needs a refresh for the four A's once the spec is locked. |
+
+### 14.3 Earlier exploration (rejected, kept for reference)
+
+| Mockup | Status |
+|---|---|
+| [01 · Chat-driven Studio with live preview](../prototypes/workflows/01-studio-chat-with-live-preview.html) | Rejected — too busy. Three permanent panes. |
+| [02 · Canvas-first, chat collapsed](../prototypes/workflows/02-studio-canvas-first.html) | Superseded by 05 (used the older eight-step-type taxonomy). |
+| [03 · Canvas-first, chat activated](../prototypes/workflows/03-studio-chat-active.html) | Superseded by 05. The diff-card pattern in the chat panel still applies. |
+
+(Mock 06 — earlier 2-panel version of the open task view — was deleted after mock 07 became the master.)
+
 ## 15. Next steps
+
+1. **One round of stakeholder review on this brief.** Comment, push back, or sign off on the design decisions in §3-§10 and the build punch list in §11. This is the cheap moment to redirect — once we move to spec, the cost of changes climbs.
+2. **Write the spec.** A separate document (likely `docs/workflows-dev-spec.md`) covering:
+   - Schema deltas (the `approverGroup` + `quorum` fields, any related migrations)
+   - Validator rule additions (four A's mapping, branching as output property, loop-only-on-approval-reject, no workflow-to-workflow nesting)
+   - Engine enforcement changes (approver pool check, the `workflow.run.start` skill for agents)
+   - Detailed UX specs for each of the new UI surfaces (open task view, Studio, team management, document toolbar, conversational editing)
+   - Test plan
+   - Migration plan for existing system templates (already cleanly mapped — no runtime migration needed)
+   - Telemetry / observability additions
+3. **Spec review pass** with `spec-reviewer` agent (Codex review loop with Claude adjudication) before any implementation work starts.
+4. **Architect breakdown** — `architect` agent decomposes the spec into implementation chunks (likely 4-6 chunks given the punch list scope).
+5. **Build via `feature-coordinator`** orchestrating architect → spec-conformance → pr-reviewer per chunk.
+
+Open questions to resolve before spec lock:
+
+- Does publishing prompt for a version note / changelog? (mentioned in §7.4)
+- Does the document toolbar surface a version dropdown for files that have been edited multiple times via chat? (mentioned in §11.4)
+- For the Studio handoff card from the orchestrator, is there a "preview the workflow" intermediate step before opening Studio, or does the orchestrator just hand the user straight into Studio with the draft loaded?
+- How does the operator surface render Files tab content for tasks that produce 50+ files (long-running campaign tasks)? Pagination in the strip? Folder grouping? Defer until we see real usage, or design now?
+
+---
+
+_End of brief. Mockup index: [`prototypes/workflows/index.html`](../prototypes/workflows/index.html)._
