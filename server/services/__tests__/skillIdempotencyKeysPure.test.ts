@@ -81,7 +81,7 @@ test("ttlClassToExpiresAt('long') → Date roughly 30 days out", () => {
   const after = Date.now();
   expect(result instanceof Date).toBeTruthy();
   const expected = 30 * 24 * 60 * 60 * 1000;
-  const elapsed = result.getTime() - before;
+  const elapsed = result!.getTime() - before;
   const tolerance = after - before + 100; // account for test execution time
   expect(elapsed >= expected - 100).toBeTruthy();
   expect(elapsed <= expected + tolerance).toBeTruthy();
@@ -93,7 +93,7 @@ test("ttlClassToExpiresAt('short') → Date roughly 14 days out", () => {
   const after = Date.now();
   expect(result instanceof Date).toBeTruthy();
   const expected = 14 * 24 * 60 * 60 * 1000;
-  const elapsed = result.getTime() - before;
+  const elapsed = result!.getTime() - before;
   const tolerance = after - before + 100;
   expect(elapsed >= expected - 100).toBeTruthy();
   expect(elapsed <= expected + tolerance).toBeTruthy();
