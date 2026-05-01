@@ -230,6 +230,8 @@ For each round:
    - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
    - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
 
+1a. **Duplicate detection (rounds 2+).** Before triage, check whether each finding is a substantive duplicate of a decided finding from a prior round in this session. Substantive duplicate = same `finding_type` AND same file/code area (or same global concern), no new evidence — even when rephrased with stronger language ("must-fix", "not optional", "blocking"). For duplicates: auto-apply the prior round's decision regardless of triage; log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT proceed to step 2 (triage) and do NOT escalate to step 3b for this finding even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: KNOWLEDGE.md `[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`.
+
 2. Triage each finding into one of two buckets:
 
    - **`user-facing`** — the finding changes something an end-user, customer, or

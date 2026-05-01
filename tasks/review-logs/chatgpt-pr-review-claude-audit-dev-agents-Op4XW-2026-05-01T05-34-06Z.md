@@ -151,3 +151,32 @@ Markdown-only change. No code touched. Local lint/typecheck environment is broke
 This change was made AFTER ChatGPT round-2 verdict (APPROVE) was given, so the merged state is not covered by ChatGPT review. The change is user-directed and additive (tightens an existing gate, does not introduce new behaviour outside the gate) and was approved by the operator from lived experience of the failure mode. Not escalated through a fresh ChatGPT round per operator decision.
 
 ---
+
+## Post-merge finding (after S2 merge of origin/main) — 2026-05-01T06:30:00Z
+
+### Source
+
+S2 merge of origin/main into branch (33 commits behind). Operator requested a pre-finalisation review for anything that needs fixing. Investigation found one drift item.
+
+### Finding
+
+| Finding | Triage | Severity | Decision | Rationale |
+|---------|--------|----------|----------|-----------|
+| PM-1: KNOWLEDGE.md ↔ chatgpt-pr-review.md drift — main's PR #247 finalisation added a KNOWLEDGE entry (`[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`) but did not encode the rule into `.claude/agents/chatgpt-pr-review.md`. The agent definition does not mention duplicate-detection. | technical | medium | implement | Real drift exposed by the merge. Exactly the failure mode the user-directed doc-sync investigation procedure (UD-1 above) is designed to prevent. Encoding now closes the loop. |
+
+### Implemented (post-merge fix)
+
+- [auto] Added § 1a (Duplicate detection, rounds 2+) to `.claude/agents/chatgpt-pr-review.md` Per-Round Loop. The new step runs before triage; substantive duplicates (same `finding_type` + same file/code area, no new evidence) auto-apply the prior round's decision regardless of severity / defer / user-facing carveouts. Sources the rule explicitly to the KNOWLEDGE entry for traceability.
+
+### Other post-merge items considered and rejected
+
+- **4 KNOWLEDGE.md entries about our spec deleted on main, retained on branch** — auto-merge correct. Entries describe patterns our PR ships; keeping is the right outcome.
+- **`architecture.md` / `DEVELOPMENT_GUIDELINES.md` updates from main** — independent (thread-context panel index row, integration-block flow row, soft-delete two-layered enforcement bullet). No reference to our coordinator agent definitions.
+- **Stale symbol references in `.claude/agents/`** — none. Greps for `checkRequiredIntegration`, `formatThreadContextBlock`, `RequiredIntegrationSlug` returned zero hits.
+- **Duplicate sections in `tasks/todo.md`** — none. Auto-merge preserved structure.
+
+### Verification
+
+Markdown-only change. No code touched. Local lint/typecheck environment is broken pre-existing (markdown unaffected). CI runs canonical gate suite pre-merge.
+
+---
