@@ -124,12 +124,16 @@ Before invoking builder for each chunk, check `tasks/builds/{slug}/progress.md`.
 
 ### Environment snapshot check (for resume)
 
-Capture and compare against values stored in `progress.md`:
+Capture the current values:
 - `git rev-parse HEAD`
 - MD5 of `package-lock.json`
 - `ls migrations/*.sql | wc -l`
 
-If values differ, print "Environment changed since last run: {diffs}" — warn only, do not block.
+If `progress.md` already contains a `## Environment snapshot` section from a previous run, compare each value. If values differ, print "Environment changed since last run: {diffs}" — warn only, do not block.
+
+If no prior snapshot exists (fresh run, not a resume), skip the comparison — there is nothing to compare against.
+
+The snapshot is (re)written at the end of every chunk loop iteration (see "Chunk-completion progress write" below) so a subsequent resume always has a baseline.
 
 ### Builder invocation
 
@@ -164,7 +168,7 @@ After builder SUCCESS + G1 passes:
 1. Run `git diff --name-only HEAD` vs builder's "Files changed" list.
 2. If unexpected files appear → **hard fail**: print "Unexpected files in working tree: {list}. Commit blocked — investigate and revert unexpected changes before continuing." Do NOT commit; do NOT offer to stage only declared files. Operator must manually revert before coordinator resumes.
 3. Once only declared files remain: `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
-4. Update `tasks/builds/{slug}/progress.md`, mark TodoWrite complete, move to next chunk.
+4. Update `tasks/builds/{slug}/progress.md` (mark this chunk done; refresh the environment snapshot — see below), mark TodoWrite complete, move to next chunk.
 
 Commit message per chunk:
 
@@ -175,6 +179,21 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
 
 Push after each chunk commit.
+
+### Chunk-completion progress write (environment snapshot)
+
+When updating `tasks/builds/{slug}/progress.md` in step 4 above, write or replace a `## Environment snapshot` section so a subsequent resume run has a baseline for the resume-time comparison (see "Environment snapshot check" earlier in Step 6):
+
+```markdown
+## Environment snapshot
+- last_chunk_committed: {chunk-name}
+- head: {git rev-parse HEAD}
+- package_lock_md5: {md5sum package-lock.json}
+- migration_count: {ls migrations/*.sql | wc -l}
+- captured_at: {ISO 8601 UTC}
+```
+
+This section is rewritten in place each chunk — only the most recent snapshot is retained.
 
 ## Step 7 — G2 integrated-state gate
 
@@ -257,6 +276,16 @@ fi
 
 - Codex available → invoke `dual-reviewer` with the build slug so its log lands at `tasks/review-logs/dual-review-log-{slug}-{timestamp}.md`, consistent with the other branch-level review logs. Existing 3-iteration cap applies. After any fixes, run G3 once more.
 - Codex unavailable → skip; record `REVIEW_GAP: Codex CLI unavailable` in `progress.md`. Do NOT block.
+
+**Re-review check (only when dual-reviewer applied changes):** if dual-reviewer's verdict is `APPROVED` AND its log records any `[ACCEPT]` decisions that resulted in file edits (i.e. the "Changes Made" section of the dual-review log is non-empty), the post-dual-reviewer diff is no longer the diff that pr-reviewer approved. Re-invoke `pr-reviewer` on the updated branch diff so the final state has reviewer coverage. Treat the re-review verdict the same as §8.3:
+
+- `APPROVED` → continue
+- `CHANGES_REQUESTED` → enter the §8.4 fix-loop on the new findings (the original 3-round cap applies to this re-review pass independently)
+- `NEEDS_DISCUSSION` → escalate per failure paths
+
+If dual-reviewer applied no changes (no `[ACCEPT]` decisions or no resulting edits), skip the re-review — pr-reviewer's earlier APPROVED already covers the final diff.
+
+If dual-reviewer was skipped (Codex unavailable), no re-review is needed — pr-reviewer's earlier APPROVED is the authoritative verdict.
 
 After §8.5 completes (or is skipped), run G3 once more to confirm integrated state is clean.
 

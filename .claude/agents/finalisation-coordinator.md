@@ -72,7 +72,12 @@ echo "Branch is ${COMMITS_BEHIND} commits behind main"
 ```bash
 if git merge-base --is-ancestor origin/main HEAD; then
   echo "Already up to date with main — no merge needed"
+  OLD_BASE=$(git merge-base origin/main HEAD)
+  PRE_MERGE_HEAD=$(git rev-parse HEAD)
 else
+  # Capture pre-merge state for the overlap calculation that runs AFTER the merge.
+  OLD_BASE=$(git merge-base origin/main HEAD)
+  PRE_MERGE_HEAD=$(git rev-parse HEAD)
   git merge origin/main --no-commit --no-ff
   MERGE_EXIT=$?
   if [ $MERGE_EXIT -eq 0 ]; then
@@ -87,17 +92,25 @@ fi
 
 **Migration-number collision detection** runs as part of S2 (same logic as S1): list `migrations/*.sql` files on `origin/main` vs the current branch, flag any number that appears on both sides with different content.
 
-**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` after the sync so the operator can see what landed. Then compute file overlap:
+**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` after the sync so the operator can see what landed. Then compute the actual file overlap — files that BOTH the feature branch's own commits AND main's recent commits modified, since branch divergence:
 
 ```bash
-git diff origin/main...HEAD --name-only
+# Files the feature branch changed since divergence (pre-merge HEAD vs old merge-base).
+git diff $OLD_BASE..$PRE_MERGE_HEAD --name-only | sort -u > /tmp/branch-changed.txt
+# Files main changed since divergence (origin/main vs old merge-base).
+git diff $OLD_BASE..origin/main --name-only | sort -u > /tmp/main-changed.txt
+# Overlap = intersection.
+OVERLAP=$(comm -12 /tmp/branch-changed.txt /tmp/main-changed.txt)
+rm -f /tmp/branch-changed.txt /tmp/main-changed.txt
 ```
 
-If overlapping files are found, **require explicit operator confirmation** before G4 runs:
+`git diff origin/main...HEAD --name-only` (three-dot) is NOT the right calculation — it returns every file the feature branch changed, which is almost always non-empty and does not identify true overlap.
+
+If `$OVERLAP` is non-empty, **require explicit operator confirmation** before G4 runs:
 
 > Overlapping files detected: {list}. Type **continue** to proceed to G4 or **inspect** to pause.
 
-Do not proceed until the operator types "continue". If no overlap, continue silently.
+Do not proceed until the operator types "continue". If `$OVERLAP` is empty, continue silently.
 
 **Conflict handling:** if `git merge --no-commit --no-ff` exits non-zero, pause and prompt per the conflict protocol in spec §8.5. Print conflicting files, instruct operator to resolve and `git add`, then type "continue". On "abort": run `git merge --abort` and exit.
 
@@ -207,9 +220,9 @@ For each closed item: remove from `tasks/todo.md` (or move to a `## Closed by {s
 
 Items in `tasks/todo.md` that are NOT closed by this build remain untouched.
 
-## Step 9 — current-focus.md → MERGE_READY
+## Step 9 — current-focus.md → MERGE_READY (deferred write)
 
-Update the mission-control block at the top of `tasks/current-focus.md` to exactly:
+Compose — but do NOT yet write to disk — the new mission-control block for `tasks/current-focus.md`:
 
 ```html
 <!-- mission-control
@@ -229,9 +242,9 @@ The explicit clearing of `active_spec`, `active_plan`, `build_slug`, `branch` is
 
 The `last_merge_ready_*` fields are added so the audit trail survives — they record what just shipped, in case CI or merge fails and the operator needs to recover context.
 
-Update the prose body to match. Status enum transitions `REVIEWING → MERGE_READY`.
+Compose the matching prose body for the same file. Status enum transitions `REVIEWING → MERGE_READY`.
 
-**Do NOT commit yet.** Step 9 only writes `tasks/current-focus.md`. The auto-commit happens after Step 10 once the `ready-to-merge` label timestamp is captured.
+**Do NOT touch `tasks/current-focus.md` on disk yet.** Step 9 only prepares the new content in memory. The actual write — and the auto-commit — happen in Step 10 AFTER `tasks/builds/{slug}/handoff.md` has been updated. This preserves the abort-write-order invariant: handoff.md is always written before current-focus.md transitions to MERGE_READY.
 
 ## Step 10 — Apply ready-to-merge label
 
@@ -247,7 +260,8 @@ If the label add fails (label doesn't exist, permissions, network): surface the 
 **After the label is applied, write and commit in this order (abort-write-order invariant from §6.4.2):**
 
 1. Append the Phase 3 handoff section to `tasks/builds/{slug}/handoff.md` (with the `LABEL_TIMESTAMP` captured above).
-2. Commit all Phase 3 files:
+2. Write the new mission-control block + prose body to `tasks/current-focus.md` (composed in Step 9).
+3. Commit all Phase 3 files in a single commit:
 
 Stage and commit:
 - Updated `KNOWLEDGE.md`
@@ -255,7 +269,7 @@ Stage and commit:
 - Updated `tasks/current-focus.md`
 - Updated `tasks/builds/{slug}/handoff.md` (Phase 3 section just appended)
 
-**Write order invariant:** `tasks/builds/{slug}/handoff.md` MUST be written before `tasks/current-focus.md` is updated to MERGE_READY. In this flow, Step 9 has already written `tasks/current-focus.md`. If the process is interrupted between Step 9 and Step 10, `tasks/current-focus.md` will be MERGE_READY but `handoff.md` will have no Phase 3 section. The next session that detects this mismatch must surface a warning to the operator before proceeding. (Normal uninterrupted flow: both are committed together in one atomic commit after Step 10, so they will always be consistent in git history.)
+**Write order invariant:** `tasks/builds/{slug}/handoff.md` MUST be written to disk before `tasks/current-focus.md` is updated to MERGE_READY. Step 9 only composes the new `current-focus.md` content in memory; Step 10 writes handoff.md first, then current-focus.md, then commits both atomically. If the process is interrupted after handoff.md is written but before current-focus.md is updated, the operator sees a Phase 3 section in handoff.md with `tasks/current-focus.md` still at `REVIEWING` — a recoverable state where finalisation-coordinator can be re-run from Step 9. The reverse mid-state (current-focus.md at MERGE_READY without a Phase 3 handoff section) is ruled out by this ordering, which would otherwise leave the pipeline stuck (finalisation-coordinator's entry guard requires REVIEWING; spec-coordinator refuses MERGE_READY).
 
 Commit message:
 
