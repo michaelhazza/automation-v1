@@ -184,7 +184,7 @@ if (runMetadata.conversationId) {
 
 Import `buildThreadContextReadModel` and `formatThreadContextBlock` from `conversationThreadContextService`. If `conversationId` is absent (direct API run with no conversation), skip silently — no error.
 
-**Step 3 — Re-inject on resume** in `server/services/agentResumeService.ts`. After `resumeFromIntegrationConnect` clears the blocked state and before re-executing the blocked tool call, apply the same injection (same two lines — build model, format block, prepend if non-empty). The existing `runMetadata` object is already in scope in the resume service.
+**Step 3 — Re-inject on resume** in `server/services/agentResumeService.ts`. After `resumeFromIntegrationConnect` clears the blocked state and before re-executing the blocked tool call, apply the same injection — build model, format block, prepend if non-empty, and explicitly overwrite `runMetadata.threadContextVersionAtStart = threadCtx!.version`. The resume path must always reflect the latest context version, not the snapshot from the original run. The existing `runMetadata` object is already in scope in the resume service.
 
 ### Acceptance criteria
 
@@ -193,6 +193,10 @@ Import `buildThreadContextReadModel` and `formatThreadContextBlock` from `conver
 - Resume path re-injects context.
 - If `conversationId` is null, injection is silently skipped — no exception thrown.
 - Pure tests for `formatThreadContextBlock`: empty model → `''`; model with tasks → contains `<thread_context>`; model with approach/decisions → formatted correctly.
+
+### Prompt injection ordering invariant
+
+Thread context must be the first block prepended to the system prompt, before external doc blocks, memory blocks, or any other augmentation. This prevents nondeterministic prompt composition if other injection paths are added later. The `block + '\n\n' + systemPrompt` ordering in Step 2 defines the canonical position.
 
 ## §2.3 — Soft-delete gaps: 23 missing `isNull(deletedAt)` join filters
 
@@ -227,7 +231,9 @@ For each: add `isNull(agents.deletedAt)` (import from `drizzle-orm`) to the join
 | `server/services/scheduleCalendarService.ts` | ~123 |
 | `server/services/skillExecutor.ts` | ~3375, ~3589, ~3839 (3 sites) |
 
-For each: move the existing `isNull(agents.deletedAt)` from the `.where(...)` clause into the join `ON` condition. Query semantics are identical; this is convention alignment with the rest of the codebase.
+For each: move the existing `isNull(agents.deletedAt)` from the `.where(...)` clause into the join `ON` condition. Query semantics are identical for `innerJoin`; this is convention alignment with the rest of the codebase.
+
+**Null-safety checklist (Group B only):** Before moving each site, verify no downstream code in the same function tests `if (!agent)` or `if (agent == null)` to handle filtered-out rows. `WHERE` filtering returns zero rows; moving to `ON` causes the join to return a row with null columns on the right side instead. This distinction matters only if code branches on the agent being absent.
 
 **Group C — `systemAgents` join with no `deletedAt` filter (add it):**
 
@@ -241,6 +247,8 @@ For each: move the existing `isNull(agents.deletedAt)` from the `.where(...)` cl
 | `server/tools/config/configSkillHandlers.ts` | ~34 | innerJoin systemAgents |
 
 For each: add `isNull(systemAgents.deletedAt)` to the join `ON` condition. The `systemAgents` alias or the actual table name (whatever is used in context) must match — read the file before editing.
+
+**Left join semantics guard:** `subaccountAgentService.ts ~499` is a `leftJoin`. For all `leftJoin` sites, `isNull(deletedAt)` MUST be added to the ON clause only — never into WHERE. Adding it in WHERE converts the outer join to inner semantics: deleted-agent rows that should return null columns become invisible instead.
 
 ### Before you edit
 
@@ -337,7 +345,7 @@ Error shape: `422 { error: 'invalid_connection_id' }` — matches spec §17.6 vo
 
 2. **Change stub emissions** in `server/services/briefSimpleReplyGeneratorPure.ts` — any row where the data is a hardcoded placeholder string, change `source: 'canonical'` → `source: 'stub'`.
 
-3. **Handle `'stub'` in the client** — find wherever `BriefResultSource` drives visual rendering (badge label, colour, icon). If `'stub'` is not handled, add a fallback case that renders a neutral label (e.g. "Placeholder") rather than the canonical badge. A simple `default:` case or a `'stub'` explicit case is sufficient — do not design new UI.
+3. **Handle `'stub'` in the client** — find wherever `BriefResultSource` drives visual rendering (badge label, colour, icon). If `'stub'` is not handled, add a fallback case that renders a neutral label (e.g. "Placeholder") rather than the canonical badge. A simple `default:` case or a `'stub'` explicit case is sufficient — do not design new UI. `'stub'` must never render with the same visual style as `'canonical'` — a visual distinction must exist even if minimal (different label or badge colour).
 
 ### Acceptance criteria
 
