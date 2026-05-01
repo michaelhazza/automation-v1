@@ -294,16 +294,16 @@ After §8.5 completes (or is skipped), run G3 once more to confirm integrated st
 
 ## Step 9 — Doc-sync gate
 
-Read `docs/doc-sync.md` and count the registered docs. Run a doc-sync sweep against the cumulative change-set across all chunks (`git diff origin/main...HEAD`).
+Read `docs/doc-sync.md` and count the registered docs. For each registered doc, follow the **Investigation procedure** in `docs/doc-sync.md`: read the doc, derive a candidate-stale-reference set from the cumulative change-set across all chunks (`git diff origin/main...HEAD`) — file paths, symbols, behaviours, and any new names introduced — grep the doc for each candidate, and fix any stale references in this same Phase 2 close commit.
 
-For each registered doc, record one verdict:
+Record verdict per the **Verdict rule** in `docs/doc-sync.md`:
 - `yes (sections X, Y)` — doc was updated; cite actual headings edited
-- `no — <one-line rationale>` — scope touched but doc is already accurate
+- `no — <grep terms checked OR scope-not-touched rationale>` — investigation ran clean; rationale is mandatory and must cite either the terms searched or the specific reason the update trigger does not apply
 - `n/a` — scope of this doc was not touched
 
 The `docs/spec-context.md` entry does not apply to feature pipelines — record `n/a` for it.
 
-**Enforcement invariant:** Read `docs/doc-sync.md` and count the registered docs. The verdict table must have exactly that many rows. A missing verdict is a blocker — do not proceed. A bare `no` with no rationale is treated as missing.
+**Enforcement invariant:** the verdict table must have exactly as many rows as `docs/doc-sync.md` registers. A missing verdict is a blocker — do not proceed. A bare `no` with no rationale, or a `no` whose rationale doesn't cite grep terms or scope rationale, is treated as missing.
 
 Record verdicts in `tasks/builds/{slug}/progress.md` under `## Doc Sync gate`:
 

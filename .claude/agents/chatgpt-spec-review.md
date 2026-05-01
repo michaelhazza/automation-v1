@@ -484,17 +484,21 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
      dedup and silent-failure handling (same rules as PR agent — increment
      session-level `index_write_failures` counter on each failed write)
    - Enum enforcement: finding_type / category / severity must use predefined values
-5. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, diff against
-   the change-set shipped this session and update IN THE SAME finalisation commit
-   if its scope is touched. Scope definitions and update triggers live in that
-   file — read it before starting this step. All entries apply to spec-review
-   sessions, including `docs/spec-context.md`.
+5. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, follow the
+   **Investigation procedure** in that file: read the doc, derive a
+   candidate-stale-reference set from the spec diff (renamed/added/removed
+   sections, contracts, identifiers, behaviours, new names introduced), grep
+   the doc for each candidate, and fix any stale references in this same
+   finalisation commit. All entries apply to spec-review sessions, including
+   `docs/spec-context.md`.
 
    Failure to update a relevant doc is a blocker — escalate to the user, do not
    auto-defer.
 
-   For each doc, log one of: yes (sections X, Y) | no (scope touched but already
-   accurate) | n/a (scope not touched). "no" requires the rationale line.
+   Record verdict per the **Verdict rule** in `docs/doc-sync.md`:
+   `yes (sections X, Y)` | `no — <grep terms checked OR scope-not-touched rationale>` | `n/a`.
+   A `no` verdict that does not cite grep terms or scope rationale is treated as
+   missing.
 
 6. Deferred backlog: append all deferred items to tasks/todo.md. This includes
    BOTH user-decided defers (from step 3b) AND auto-applied technical defers

@@ -576,17 +576,19 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    Before each item scan for a similar existing entry (same finding_type OR
    same leading ~5 words) — skip if already present.
    Do NOT write to tasks/review-logs/_deferred.md.
-6. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, diff against
-   the change-set shipped this session and update IN THE SAME finalisation commit
-   if its scope is touched. Scope definitions and update triggers live in that
-   file — read it before starting this step. `docs/spec-context.md` applies to
-   spec-review sessions only — skip it here.
+6. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, follow the
+   **Investigation procedure** in that file: read the doc, derive a
+   candidate-stale-reference set from the branch diff (file paths, symbols,
+   behaviours, new names introduced), grep the doc for each candidate, and fix
+   any stale references in this same finalisation commit. Skip `docs/spec-context.md` — spec-review sessions only.
 
    Failure to update a relevant doc is a blocker — escalate to the user, do not
    auto-defer.
 
-   For each doc, log one of: yes (sections X, Y) | no (scope touched but already
-   accurate) | n/a (scope not touched). "no" requires the rationale line.
+   Record verdict per the **Verdict rule** in `docs/doc-sync.md`:
+   `yes (sections X, Y)` | `no — <grep terms checked OR scope-not-touched rationale>` | `n/a`.
+   A `no` verdict that does not cite grep terms or scope rationale is treated as
+   missing.
 
 7. Print the full session summary to screen. Break the totals down by decision
    source so the user sees what was auto-applied versus what they were asked

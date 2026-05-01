@@ -67,3 +67,87 @@ Typecheck: `npm run typecheck` — failed in local environment (`vitest` missing
 CI is the authoritative gate runner per `DEVELOPMENT_GUIDELINES.md §5` — full lint/typecheck/test-gate suite runs on the PR as a pre-merge gate.
 
 ---
+
+## Round 2 — 2026-05-01T05:55:00Z
+
+### ChatGPT Feedback (raw)
+
+> Verdict: APPROVE. Ready to ship.
+> No blockers. Remaining items are minor robustness and future-proofing.
+>
+> What improved (confirmed): time consistency invariant present and applied; gate classification clear; builder test execution guarded; chunk sequencing explicitly enforced; commit integrity + resume logic aligned; REVIEW_GAP visibility no longer lossy. All previously "real risks" resolved.
+>
+> Remaining minor tweaks:
+> 1. Resume logic still slightly brittle on renames (low risk) — use `git log --follow -- <file>`.
+> 2. Builder file list vs plan contract (clarity gap) — add explicit "builder must not introduce new files outside plan unless dependency-required or declared in implementation notes". Otherwise flag as deviation.
+> 3. `.chatgpt-diffs/` (if still present) — still not part of any pipeline, not consumed downstream. Remove entirely or move to `tasks/builds/{slug}/artifacts/`.
+> 4. Migration prefix regex (micro-hardening) — if not updated, change `^\d+` to `^\d{3,}`.
+> 5. Finalisation phase: missing "no-op commit guard" — if no files changed, skip commit and log NO_OP_BUILD.
+> 6. Very minor: terminology consistency — standardise "Plan = items, Execution = chunks". Optional cleanup.
+>
+> What you've achieved: deterministic execution; explicit state machine; strong recovery semantics; multi-agent coordination without hidden coupling; proper separation of planning / execution / validation / finalisation. That combination is rare.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2-1: Resume logic + renames (`git log --follow`) | technical | reject | auto (reject) | low | `--follow` only works with a single pathspec; current resume check uses multi-file pathspecs. Adopting verbatim would break the check. Existing logic handles renames correctly because rename commits surface in `git log` under both old and new paths within `origin/main...HEAD`. |
+| R2-2: Builder file list vs plan contract | technical | reject | auto (reject) | low | Round-1 F5 already locked plan-declared ⊇ builder-reported as strict invariant. The escape hatches ChatGPT now wants ("dependency resolution", "implementation notes") would re-introduce the ambiguity F5 closed. PLAN_GAP is the existing escape hatch. |
+| R2-3: `.chatgpt-diffs/` removal | technical | reject | auto (reject) | low | `.chatgpt-diffs/` is gitignored and actively used by chatgpt-pr-review (this session). Lifecycle is documented (mkdir at round 1, cleanup at finalisation step 14). Round-1 F2 removed the dead reference in chatgpt-plan-review only — chatgpt-pr-review's use is canonical. |
+| R2-4: Migration regex `^\d+` → `^\d{3,}` | technical | reject | auto (reject) | low | Already done in round 1 F8 (changed to `^\d{4,}`, stricter than ChatGPT's `^\d{3,}`, matching repo's 4-digit convention). |
+| R2-5: Finalisation no-op commit guard | technical | reject | auto (reject) | low | Empty-commit failure is preferable to silent NO_OP log. Per-chunk commits require non-empty changed-files; chatgpt-pr-review per-round commits already have explicit no-op skip. A builder SUCCESS with zero files is a bug to surface visibly, not silently skip. |
+| R2-6: Terminology consistency (chunk/item/task) | technical | reject | auto (reject) | low | Self-described as "very minor", "optional", "polish", "Not required". No specific instances cited. Vague polish items in the backlog are noise. |
+
+### Implemented
+
+None — all findings rejected with rationale.
+
+### Deferred
+
+None.
+
+### Top themes
+
+scope, naming, error_handling
+
+### Verification
+
+No code changes this round. No-op for lint and typecheck (markdown-only session log update). No commit per agent step-8 rule (skip when no implementation files changed).
+
+ChatGPT verdict: **APPROVE — ready to ship.**
+
+---
+
+## User-directed finding (between Round 2 and finalisation) — 2026-05-01T06:10:00Z
+
+### Source
+
+Operator-driven, not from ChatGPT review. Operator observed in another finalisation session that the doc-sync sweep declared `no — already accurate` for several reference docs without actually opening them. Stale references in `architecture.md` were missed until the operator explicitly prompted re-investigation; `capabilities.md` and `integration-reference.md` were never investigated despite being in scope. The trust-based verdict pattern was the failure mode.
+
+### Finding
+
+| Finding | Triage | Severity | Decision | Rationale |
+|---------|--------|----------|----------|-----------|
+| UD-1: Doc-sync sweep is trust-based — agents can declare "no — already accurate" without opening the doc, missing stale references the branch's changes invalidated | user-facing (changes how finalisation behaves; operator-experienced bug) | medium | implement | Real failure mode just observed in production. Fix is to make per-doc investigation mandatory and evidence-bearing (grep terms become the audit trail). |
+
+### Implemented (user-directed)
+
+Added a canonical **Investigation procedure** section to `docs/doc-sync.md` that mandates: (1) read the doc, (2) derive candidate-stale-reference set from the branch diff, (3) grep the doc for each candidate, (4) fix any stale references in the same finalisation pass, (5) record verdict only after steps 1–4. Tightened the **Verdict rule**: a `no` verdict must cite either the grep terms checked or the specific reason the doc's update trigger genuinely does not apply.
+
+Mirrored the procedure reference into all four enforcement sites:
+
+- [user] `docs/doc-sync.md` — added § Investigation procedure; tightened § Verdict rule to require grep-terms or scope-rationale citation in `no` verdicts
+- [user] `.claude/agents/finalisation-coordinator.md § Step 6` — replaced inline verdict instructions with reference to the canonical procedure
+- [user] `.claude/agents/chatgpt-pr-review.md § Finalization step 6` — same
+- [user] `.claude/agents/chatgpt-spec-review.md § Finalization step 5` — same
+- [user] `.claude/agents/feature-coordinator.md § Step 9` — same
+
+### Verification
+
+Markdown-only change. No code touched. Local lint/typecheck environment is broken pre-existing (markdown unaffected). CI runs canonical gate suite pre-merge.
+
+### Note on review coverage
+
+This change was made AFTER ChatGPT round-2 verdict (APPROVE) was given, so the merged state is not covered by ChatGPT review. The change is user-directed and additive (tightens an existing gate, does not introduce new behaviour outside the gate) and was approved by the operator from lived experience of the failure mode. Not escalated through a fresh ChatGPT round per operator decision.
+
+---

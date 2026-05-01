@@ -170,11 +170,7 @@ When the sub-agent returns, it has done its own KNOWLEDGE.md updates and doc-syn
 
 Run the doc-sync sweep across the full feature change-set per `docs/doc-sync.md`. This is the cross-check of the work `chatgpt-pr-review` did — both should agree, but `finalisation-coordinator` is the system of record.
 
-For each registered doc, log one of:
-
-- `yes (sections X, Y)`
-- `no — <one-line rationale>`
-- `n/a`
+**Mandatory per-doc procedure.** For each registered doc, follow the **Investigation procedure** in `docs/doc-sync.md` — read the doc, derive candidate-stale-reference set from the branch diff, grep the doc for each candidate, fix any stale references in this same pass, then record the verdict per **Verdict rule** in the same file. A `no` verdict that does not cite either the grep terms checked or the specific reason the update trigger does not apply is treated as missing — and missing verdicts block finalisation.
 
 Reference doc update triggers:
 
