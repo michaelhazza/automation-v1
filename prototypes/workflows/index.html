@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workflows — prototypes</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style> body { font-family: 'Inter', system-ui, sans-serif; background:#f8fafc; color:#1e293b; } </style>
+</head>
+<body class="min-h-screen">
+<div class="max-w-[760px] mx-auto p-10">
+  <h1 class="text-[20px] font-semibold text-slate-900 mb-1">Workflows · UI prototypes</h1>
+  <p class="text-[13px] text-slate-500 mb-8">Brainstorming the Phase-2 UI for the workflows feature. Backend (engine, schema, routes, step types including <code class="text-[12px] bg-slate-100 px-1 rounded">invoke_automation</code> for n8n / Make / Zapier / GHL) is already built — these mocks explore the operator surface.</p>
+
+  <div class="space-y-3">
+
+    <a href="01-studio-chat-with-live-preview.html" class="block bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg p-5 transition">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">01 · Chat-driven Studio with live preview</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider">Rejected as too busy</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Three-pane workspace: chat / canvas / inspector all permanently visible. Per-step cost and side-effect badges. Multi-metric validation summary. Felt like Zapier with a chat overlay — violated frontend principles (≥2 primary actions, KPI chrome by default).</div>
+    </a>
+
+    <a href="02-studio-canvas-first.html" class="block bg-white border border-indigo-300 hover:border-indigo-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-indigo-100">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">02 · Canvas-first with chat as a power tool</div>
+        <div class="text-[11px] text-indigo-600 uppercase tracking-wider font-semibold">Recommended</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Canvas is the whole screen. Direct manipulation handles 80% of edits — click to edit, hover-to-insert "+" between steps. Chat is a docked pill, opens on demand for big restructures. Step cards show only icon, name, action verb. Cost rolls up to one bottom-bar number. Only irreversible steps wear a flag. Inspector is a slide-out, not a permanent column.</div>
+    </a>
+
+  </div>
+
+  <div class="mt-10 p-4 border border-dashed border-slate-300 rounded-lg text-[12.5px] text-slate-600">
+    <div class="font-semibold text-slate-800 mb-1">Next, if 02's direction lands:</div>
+    <ul class="list-disc pl-5 space-y-0.5">
+      <li>Empty-state Studio (first time on a fresh fork)</li>
+      <li>Step picker drawer when "+" is clicked (skill / agent / approval / wait / automation)</li>
+      <li>Diff vs published version</li>
+      <li>Workflow Run detail / live execution view</li>
+      <li>Workflows library (replaces today's table)</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
