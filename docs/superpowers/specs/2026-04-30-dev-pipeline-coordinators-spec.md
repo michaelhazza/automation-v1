@@ -130,12 +130,15 @@ Before any work, read in order:
 3. `docs/spec-context.md` — framing ground truth (pre-production, rapid evolution, etc.)
 4. `docs/spec-authoring-checklist.md` — pre-authoring rubric the spec must satisfy
 5. `docs/frontend-design-principles.md` — read IF the brief mentions UI / page / screen / surface (for the UI-detect step)
-6. `tasks/current-focus.md` — verify no other phase is in flight (status must be `NONE` or `MERGED`); then immediately write `status: PLANNING` to acquire the concurrency lock before any other work begins
+6. `tasks/current-focus.md` — check status:
+   - If `NONE` or `MERGED`: write `status: PLANNING` to acquire the concurrency lock before any other work begins.
+   - If `PLANNING` AND `tasks/builds/{slug}/handoff.md` exists with `phase_status: PHASE_1_PAUSED` for the same slug: enter **resume mode** — skip Brief intake (§1.6) and jump to the paused step in the mockup loop or spec authoring. Do not write PLANNING again (it is already set).
+   - If `BUILDING`, `REVIEWING`, or `MERGE_READY`: refuse and tell the operator the current status. Do not proceed.
 
 7. `tasks/todo.md` — scan for deferred items the brief may close
 8. `tasks/lessons.md` — past lessons applicable to this domain
 
-The PLANNING status write (item 6) must happen before the TodoWrite list is emitted — it is the concurrency gate. If the write fails because status is already `BUILDING` or `REVIEWING`, refuse and tell the operator.
+The PLANNING status write (item 6) must happen before the TodoWrite list is emitted — it is the concurrency gate. Resume mode skips the status write since PLANNING is already set.
 
 ### §1.4 Step 1 — Top-level TodoWrite list
 
@@ -153,7 +156,7 @@ Emit a TodoWrite list with one item per phase step. Update items in real time. T
 10. `tasks/current-focus.md` update → status `BUILDING`
 11. End-of-phase prompt to operator
 
-Sub-steps may be added once context loaded (e.g. one item per mockup round). Item 4 (mockup loop) may expand into many sub-items.
+Sub-steps may be added once context loaded (e.g. one item per mockup round). Item 5 (mockup loop) may expand into many sub-items.
 
 ### §1.5 Step 2 — Branch-sync S0 + freshness check
 
@@ -1940,9 +1943,11 @@ Step 3 — This pipeline's PR lands on main:
     — documentation updates (§10.1.4)
     — housekeeping (§10.1.5)
 Step 4 — Smoke test (operator-driven; §10.2.6)
-Step 5 — Existing in-flight features finish on the OLD feature-coordinator
-         (their handoff state remains valid; the rewrite preserves the contract
-         for `tasks/builds/{slug}/handoff.md`)
+Step 5 — Existing in-flight Phase 2 builds resume on the NEW feature-coordinator
+         (the handoff contract for `tasks/builds/{slug}/handoff.md` is preserved;
+         see §10.3.2 for the backwards-compat story — per-chunk review work already
+         done is lost, but the new coordinator re-reviews at branch level, which is
+         the intended end state anyway)
 Step 6 — All new features start on the NEW pipeline
 ```
 

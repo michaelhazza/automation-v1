@@ -2183,3 +2183,14 @@ The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton i
 **Rationale:** Prefer spec as-is (body Step 1 sections present in all agents); YAML description field cannot hold multi-step skeletons without breaking YAML parsing.
 
 **Action if human agrees:** Clarify §6.2 wording to say "each agent's body MUST include a Step 1 — TodoWrite list section" rather than referencing the frontmatter description field.
+
+### [AUTO-DECIDED - reject] Open Questions §1 — main-branch protection design question
+
+**Source:** spec-reviewer iteration 2, 2026-05-01
+**Finding:** Codex flagged that if the operator starts spec-coordinator on main/master/develop, all coordinator auto-commits and auto-pushes (§6.5) would land directly on main, bypassing the PR/CI flow. This is a real risk.
+
+**Decision:** AUTO-DECIDED reject (close the open question as deferred). The spec explicitly lists this as Open Question #1 for chatgpt-spec-review and the operator. The two options ("refuse on integration branch" vs "auto-create feature branch") each have trade-offs the operator must evaluate. Auto-resolving this in a mechanical spec review would be out of scope — it is a product design decision.
+
+**Rationale:** Prefer spec as-is; the open question is intentionally open and flagged for operator review. The risk is acknowledged in the spec.
+
+**Action for operator:** Resolve Open Question #1 before the pipeline ships. Recommended decision: add a guard at spec-coordinator entry that refuses to start if the current branch is main/master/develop and prompts the operator to switch to a feature branch first. This is the safer option (no destructive auto-branch) and matches the commit-and-revert rollout model.
