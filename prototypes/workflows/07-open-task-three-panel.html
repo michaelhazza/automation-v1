@@ -80,9 +80,9 @@
   .activity-panel-strip { display: none; }
   .activity-panel-content { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
 
-  /* Default: expanded — width 23% (chat is 27%, slight skew toward chat) */
+  /* Default: expanded — width 22% (chat 26% / activity 22% / tabs 52%) */
   #activity-expanded:checked  ~ .body .activity-panel-content { display: flex; }
-  #activity-expanded:checked  ~ .body .activity-panel { width: 23%; }
+  #activity-expanded:checked  ~ .body .activity-panel { width: 22%; }
   #activity-minimised:checked ~ .body .activity-panel { width: 36px; cursor: pointer; }
   #activity-minimised:checked ~ .body .activity-panel-strip { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 16px; height: 100%; }
 
@@ -137,6 +137,31 @@
   #file-stripe:checked    ~ .body .rc-stripe    { display: block; }
   #file-paypal:checked    ~ .body .rc-paypal    { display: block; }
   #file-deck:checked      ~ .body .rc-deck      { display: block; }
+
+  /* Document toolbar — sits above the reader paper, sticky at top */
+  .doc-toolbar {
+    background: white; border-bottom: 1px solid #e5e7eb;
+    padding: 8px 16px; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; font-size: 12px; position: sticky; top: 0; z-index: 5;
+  }
+  .doc-toolbar .file-meta { color: #64748b; }
+  .doc-toolbar .actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .doc-toolbar .icon-btn {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #475569; cursor: pointer; transition: background .12s ease;
+    border: none; background: transparent;
+  }
+  .doc-toolbar .icon-btn:hover { background: #f1f5f9; color: #0f172a; }
+
+  /* Dynamic file-name label — only the one matching the active radio shows */
+  .dt-name { display: none; font-weight: 600; color: #0f172a; }
+  #file-proposal:checked  ~ .body .dt-proposal  { display: inline; }
+  #file-competitor:checked ~ .body .dt-competitor { display: inline; }
+  #file-annex:checked     ~ .body .dt-annex     { display: inline; }
+  #file-stripe:checked    ~ .body .dt-stripe    { display: inline; }
+  #file-paypal:checked    ~ .body .dt-paypal    { display: inline; }
+  #file-deck:checked      ~ .body .dt-deck      { display: inline; }
 
   .reader-paper { background: white; box-shadow: 0 4px 16px rgba(15,23,42,0.06); margin: 20px auto; padding: 40px 48px; border-radius: 4px; font-family: 'Lora', Georgia, serif; color: #1e293b; line-height: 1.6; }
   .reader-paper.portrait { width: 540px; max-width: calc(100% - 48px); min-height: 760px; }
@@ -221,7 +246,7 @@
 <div class="body flex" style="height: calc(100vh - 144px); min-height: 720px;">
 
   <!-- ========================== CHAT (25%) ========================== -->
-  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 27%; min-width: 320px;">
+  <div class="flex-shrink-0 flex flex-col bg-white border-r border-slate-200" style="width: 26%; min-width: 320px;">
 
     <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
       <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Chat</span>
@@ -594,6 +619,25 @@
       </div>
 
       <div class="flex-1 min-w-0 overflow-y-auto scroll" style="background:#f1f5f9;">
+
+        <!-- Document toolbar (sticky at top of reader pane) -->
+        <div class="doc-toolbar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="dt-name dt-proposal">Acme renewal proposal <span class="file-meta">· DOC · 2 pages · Head of Sales · 28s ago</span></span>
+          <span class="dt-name dt-competitor">Competitor pricing analysis <span class="file-meta">· CSV · Research Analyst · in progress</span></span>
+          <span class="dt-name dt-annex">Pricing annex <span class="file-meta">· XLS · Head of Operations · in progress</span></span>
+          <span class="dt-name dt-stripe">Stripe rate card <span class="file-meta">· PDF · external · stripe.com · 8s ago</span></span>
+          <span class="dt-name dt-paypal">PayPal rate card <span class="file-meta">· PDF · external · paypal.com · 8s ago</span></span>
+          <span class="dt-name dt-deck">Q3 sales review deck <span class="file-meta">· PPT · landscape · Head of Sales</span></span>
+          <div class="actions">
+            <button class="icon-btn" title="Download">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <button class="icon-btn" title="Open in new window">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </button>
+          </div>
+        </div>
 
         <div class="reader-content rc-proposal">
           <div class="reader-paper portrait">
