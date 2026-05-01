@@ -21,7 +21,7 @@
 4. [Task 4 — Fix lint errors](#task-4--fix-lint-errors)
 5. [Task 5 — Address pr-reviewer findings](#task-5--address-pr-reviewer-findings)
 6. [Task 6 — CI gate and doc updates](#task-6--ci-gate-and-doc-updates)
-7. [Task 7 — Deferred tests](#task-7--deferred-tests)
+7. [Task 7 — Deferred tests (F14 + F28) — route to `tasks/todo.md`](#task-7--deferred-tests-f14--f28--out-of-scope-route-to-taskstodomd)
 8. [Task 8 — Doc alignment and final review](#task-8--doc-alignment-and-final-review)
 9. [Verification](#verification)
 10. [Self-review against brief](#self-review-against-brief)
@@ -158,10 +158,10 @@ Files: `skillIdempotencyKeysPure.test.ts`, `logger.integration.test.ts`, `jobCon
 
 ### 4.2 — Fix `no-undef` root cause (125 errors)
 
-**Root cause:** `scripts/*.ts` and other top-level TS files hit the global ESLint config block which does not have `'no-undef': 'off'`. TypeScript already enforces undefined references; this rule is redundant across the whole codebase.
+**Root cause:** `eslint.config.js` already disables `'no-undef': 'off'` inside the `server/**` + `shared/**` block (line 19) and the `client/**` block (line 34). Files outside both globs — `scripts/*.ts`, root-level TS files, `tools/*.ts`, anything not matched by either `files:` selector — fall through to `js.configs.recommended` defaults where `no-undef` is `error`. TypeScript already enforces undefined references; this rule is redundant across the whole codebase.
 
 - [ ] Open `eslint.config.js`.
-- [ ] Add a global rules object before the `files`-scoped overrides:
+- [ ] Add a global rules object before the `files`-scoped overrides so unmatched files inherit the same suppression:
   ```javascript
   {
     rules: {
@@ -218,24 +218,22 @@ The ignore entry `server/db/migrations/**` matches nothing; migrations live at `
 
 ## Task 5 — Address pr-reviewer findings
 
-**Goal:** close the 3 strong findings (S1/S2/S3) and 3 non-blocking findings (N1/N3/N4) from the PR #246 review. N4 was handled in Task 4.8.
+**Goal:** close the 3 strong findings (S1/S2/S3) and 3 non-blocking findings (N1/N3/N4) from the PR #246 pr-reviewer pass. N4 was handled in Task 4.8.
 
-**Source log:** `tasks/review-logs/chatgpt-pr-review-lint-typecheck-baseline-2026-05-01T00-21-37Z.md`
+**Source log:** `tasks/builds/lint-typecheck-baseline/remaining-work.md` §6 (the table where S1/S2/S3/N1/N3/N4 are enumerated). The `chatgpt-pr-review-lint-typecheck-baseline-2026-05-01T00-21-37Z.md` log is a separate ChatGPT review pass that uses F1–F29 numbering and is NOT the source for the S/N IDs referenced here.
 
 ### 5.1 — S1: `IdempotencyContract` stub is incomplete
 
 File: `server/config/actionRegistry.ts` (~line 55)
 
-Per spec §588, `IdempotencyContract` should contain `keyShape`, `scope`, and `reclaimEligibility`.
+**Source contract:** `docs/superpowers/specs/2026-04-26-system-agents-v7-1-migration-spec.md` §588 — defines `IdempotencyContract` with four fields: `keyShape: string[]`, `scope: 'subaccount' | 'org'`, `ttlClass: 'permanent' | 'long' | 'short'`, `reclaimEligibility: 'eligible' | 'disabled'`.
 
-- [ ] Read `server/config/actionRegistry.ts` around line 55 to see the current stub definition.
-- [ ] Search `docs/superpowers/specs/` for the spec covering `IdempotencyContract` / §588.
-- [ ] If spec §588 defines all 3 fields with clear types: add them to the interface.
-- [ ] If spec is ambiguous or fields pull in large dependencies: add a comment marking the stub:
-  ```typescript
-  // typecheck-only stub — keyShape, scope, reclaimEligibility per spec §588 pending full implementation
-  ```
-- [ ] Either way: the interface must not silently misrepresent the contract.
+The current stub at `actionRegistry.ts:55–57` only declares `ttlClass`. The other three (`keyShape`, `scope`, `reclaimEligibility`) are missing.
+
+- [ ] Read `server/config/actionRegistry.ts` around line 55 to confirm the current stub shape.
+- [ ] Read the v7.1 spec lines 588–665 to confirm field types and JSDoc are still as documented above.
+- [ ] Add the three missing fields to the `IdempotencyContract` interface, matching the v7.1 spec types verbatim. Include a brief JSDoc on each field that points at v7.1 spec §588 for the canonical semantics — do not duplicate the full prose.
+- [ ] No comment-only fallback — a Strong-priority finding must close the contract drift, not paper over it.
 
 ### 5.2 — S2: `visibilityPredicatePure.ts` switch not exhaustive after `SystemPrincipal`
 
@@ -243,12 +241,15 @@ File: `server/services/principal/visibilityPredicatePure.ts:14`
 
 `SystemPrincipal` was added to the `PrincipalContext` union but the switch in `isVisibleTo` has no `'system'` case — it falls through to `return false` silently.
 
+**Policy decision (pinned, not implementer judgment):** the `'system'` case returns `true` unconditionally. Rationale: `SystemPrincipal` (defined at `server/services/principal/types.ts:30`) is constructed only via `getSystemPrincipal()` / `withSystemPrincipal()` (`server/services/principal/systemPrincipal.ts`), which exist precisely so background workers and system-initiated operations bypass tenant scoping. Every other tenant boundary in the codebase already treats system principals as unscoped; `isVisibleTo` must match that contract. The early `row.organisationId !== principal.organisationId` check at line 12 still applies — system principals carry an `organisationId` and are still org-scoped at that gate; the `case 'system': return true` is the visibility-scope decision *after* the org gate has passed.
+
 - [ ] Read the full switch statement.
-- [ ] Determine the correct policy: system-level code typically has full visibility (`true`) unless this function gates UI-only resources.
-- [ ] Add the `'system'` case with a documented policy comment:
+- [ ] Add the `'system'` case implementing the pinned policy:
   ```typescript
   case 'system':
-    // system principal has unrestricted visibility — bypasses user/org scoping
+    // SystemPrincipal bypasses visibility scoping by design — see
+    // server/services/principal/systemPrincipal.ts and the policy note
+    // in the spec for this task.
     return true;
   ```
 - [ ] Add a `default` exhaustiveness guard at the end of the switch:
@@ -264,16 +265,32 @@ File: `server/services/principal/visibilityPredicatePure.ts:14`
 
 File: `server/services/__tests__/visibilityPredicatePure.test.ts`
 
-- [ ] Read the existing tests to understand the fixture pattern for other principal types.
-- [ ] Add a test that asserts the policy chosen in S2:
+The existing test file imports `buildUserPrincipal`, `buildServicePrincipal`, `buildDelegatedPrincipal` from `server/services/principal/principalContext.ts`. There is **no** `buildSystemPrincipal` builder — the runtime helper is `getSystemPrincipal()` in `server/services/principal/systemPrincipal.ts` and it returns a `Promise<SystemPrincipal>`, which is unsuitable for a synchronous pure-function test fixture. Construct a `SystemPrincipal` literal directly per the type at `server/services/principal/types.ts:30`.
+
+- [ ] Read the existing tests to confirm the fixture pattern (the test file uses tsx-style assertions, not vitest).
+- [ ] Add a test that asserts the policy pinned in S2 (system principal returns `true` for any visibility scope when org matches; returns `false` when org mismatches — covering the org gate at line 12 as well as the new `case 'system'`):
   ```typescript
-  it('grants visibility to system principal', () => {
-    const result = isVisibleTo(buildSystemPrincipal(), someResource);
-    expect(result).toBe(true); // match the policy from S2
+  test('system principal granted visibility when org matches', () => {
+    const principal: SystemPrincipal = {
+      type: 'system',
+      organisationId: ORG_1,
+      isSystemPrincipal: true,
+    };
+    expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), principal)).toBe(true);
+    expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount' }), principal)).toBe(true);
+  });
+
+  test('system principal denied when org mismatches', () => {
+    const principal: SystemPrincipal = {
+      type: 'system',
+      organisationId: ORG_2,
+      isSystemPrincipal: true,
+    };
+    expect(isVisibleTo(row({ visibilityScope: 'shared_org' /* org=ORG_1 */ }), principal)).toBe(false);
   });
   ```
-- [ ] Use whatever fixture builder pattern the file already uses (adapt to actual helper names).
-- [ ] Run the test file to confirm it passes.
+- [ ] Adapt to the actual constants and `row()` helper in the file. Import `SystemPrincipal` from `../principal/types.js`.
+- [ ] Run the test file via `npx tsx server/services/__tests__/visibilityPredicatePure.test.ts` to confirm both cases pass.
 
 ### 5.4 — N1: Dead branch comment in `llmRouter.ts`
 
@@ -312,6 +329,19 @@ File: `server/services/incidentIngestorPure.ts` (~line 37)
 File: `.github/workflows/ci.yml`
 
 - [ ] Read the current `ci.yml` to understand existing job structure (runner, node version, cache strategy).
+- [ ] **Extend the workflow trigger.** The current top of the file is:
+  ```yaml
+  on:
+    pull_request:
+      types: [labeled, synchronize]
+  ```
+  Update it to:
+  ```yaml
+  on:
+    pull_request:
+      types: [opened, reopened, labeled, synchronize]
+  ```
+  Without this, the new job will not fire when a PR is opened — only after a label or push. The "mandatory on every PR" goal needs `opened` + `reopened` in the trigger list.
 - [ ] Add the following job (node 20, ubuntu-latest, matches existing CI jobs):
   ```yaml
   lint_and_typecheck:
@@ -328,7 +358,7 @@ File: `.github/workflows/ci.yml`
       - run: npm run lint
       - run: npm run typecheck
   ```
-- [ ] Do NOT add an `if:` label gate — this job must run unconditionally on every PR push.
+- [ ] Do NOT add an `if:` label gate — this job must run unconditionally on every PR event the workflow triggers on.
 - [ ] Do NOT add `continue-on-error: true` — the job must be blocking.
 - [ ] Validate YAML: `npx js-yaml .github/workflows/ci.yml > /dev/null && echo valid`.
 
@@ -347,82 +377,16 @@ Read each agent file first; add checks to the relevant verification/post-impleme
 - [ ] `.claude/agents/dual-reviewer.md` — add both commands to the per-round verification step; do not duplicate if they are already present.
 
 
-## Task 7 — Deferred tests
+## Task 7 — Deferred tests (F14 + F28) — out of scope, route to `tasks/todo.md`
 
-**Goal:** write the two tests deferred from the ChatGPT PR review session (F14 and F28). These verify correctness of the nullable schema columns and the idempotency contract.
+**Status:** the original draft of this task proposed two DB-backed integration tests (F14 — migration compatibility for null `agentDiagnosis` rows; F28 — idempotency double-tap on `executeWriteDiagnosis`). Both violate the project's testing posture in `docs/spec-context.md` (`runtime_tests: pure_function_only`, `e2e_tests_of_own_app: none_for_now`). They are deferred out of this spec rather than re-shaped into pure-function tests, because the value of both tests is exactly the DB round-trip behaviour they assert — a pure-function rewrite would not exercise what F14/F28 were raised to catch.
 
-### 7.1 — F14: Migration compatibility test (null agentDiagnosis for legacy rows)
+- [ ] Add F14 and F28 to `tasks/todo.md` under `## Deferred — testing posture (lint-typecheck-post-merge spec)`, with one line each:
+  - **F14 (migration compatibility):** integration test that asserts `agentDiagnosisRunId` / `agentDiagnosis` read as `null` for legacy pre-migration rows and `diagnosisStatus = 'none'` is the canonical presence indicator. Originating file inventory: `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts` (to be created if/when the testing posture changes).
+  - **F28 (idempotency double-tap):** integration test that calls `executeWriteDiagnosis` twice with the same `(incidentId, agentRunId)`, asserts the second call returns `{ success: true, suppressed: false }` (per the actual contract at `server/services/systemMonitor/skills/writeDiagnosis.ts:62–63, 124–127` — the spec's earlier draft asserted `suppressed: true`, which was wrong; `suppressed: true` only fires on the terminal-transition race), and asserts only one `diagnosis` event exists. Originating file inventory: `server/services/systemMonitor/skills/__tests__/writeDiagnosis.test.ts` (to be created later).
+- [ ] No code is written for F14 or F28 in this spec. Mark this task complete once the two `tasks/todo.md` rows are added.
 
-**Context:** `agentDiagnosisRunId` and `agentDiagnosis` were added as nullable columns via migrations 0233/0237/0239. Pre-migration rows have `NULL` in both. The `diagnosisStatus` field (defaulting to `'none'`) is the canonical presence indicator — code must never filter on `agentDiagnosisRunId IS NOT NULL` as a proxy for "has a diagnosis."
-
-- [ ] Find or create an appropriate test file. Look for existing integration tests for `systemIncidents` or `writeDiagnosis`; create `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts` if none fits.
-- [ ] Read an adjacent test file to understand the DB setup/teardown pattern and fixture helpers used in this part of the codebase.
-- [ ] Write the test:
-  ```typescript
-  it('handles null agentDiagnosis for legacy pre-migration rows', async () => {
-    // Create a row with null diagnosis fields (simulates pre-migration state)
-    const incident = await createTestIncident({
-      agentDiagnosisRunId: null,
-      agentDiagnosis: null,
-      diagnosisStatus: 'none',
-    });
-
-    // Reading the row must not throw and must return both columns as null
-    const rows = await db
-      .select()
-      .from(systemIncidents)
-      .where(eq(systemIncidents.id, incident.id));
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0].agentDiagnosisRunId).toBeNull();
-    expect(rows[0].agentDiagnosis).toBeNull();
-    expect(rows[0].diagnosisStatus).toBe('none');
-  });
-  ```
-- [ ] Adapt fixture names and DB helpers to match the actual test conventions.
-- [ ] Run the test to confirm it passes.
-
-### 7.2 — F28: Idempotency double-tap test for `writeDiagnosis`
-
-**Context:** `executeWriteDiagnosis` is idempotent on `(incidentId, agentRunId)`. If `agentDiagnosisRunId` already equals `agentRunId`, the function returns `{ success: true, suppressed: true }` without emitting a second `diagnosis` event or writing a duplicate row.
-
-- [ ] Find or create a test file adjacent to `server/services/systemMonitor/skills/writeDiagnosis.ts`. Check for `writeDiagnosis.test.ts` or similar.
-- [ ] Read the source of `executeWriteDiagnosis` to understand the return shape and the idempotency predicate.
-- [ ] Write the test:
-  ```typescript
-  it('is idempotent on repeated (incidentId, agentRunId) calls', async () => {
-    const ctx = buildTestSkillContext();
-    const input = {
-      incidentId: testIncident.id,
-      agentRunId: 'test-run-id-001',
-      diagnosis: { summary: 'test diagnosis', causes: [], actions: [] },
-    };
-
-    // First call — should write diagnosis and emit event
-    const first = await executeWriteDiagnosis(input, ctx);
-    expect(first.success).toBe(true);
-    expect((first as any).suppressed).toBeFalsy();
-
-    // Second call — same (incidentId, agentRunId) — must be a no-op
-    const second = await executeWriteDiagnosis(input, ctx);
-    expect(second.success).toBe(true);
-    expect((second as any).suppressed).toBe(true);
-
-    // Only one 'diagnosis' event should exist in the events table
-    const events = await db
-      .select()
-      .from(systemIncidentEvents)
-      .where(
-        and(
-          eq(systemIncidentEvents.incidentId, testIncident.id),
-          eq(systemIncidentEvents.eventType, 'diagnosis'),
-        ),
-      );
-    expect(events).toHaveLength(1);
-  });
-  ```
-- [ ] Adapt to the actual test helper conventions (incident setup, context builder, DB teardown).
-- [ ] Run the test to confirm it passes.
+**Why this is the right call:** the testing-posture deferral is the canonical pattern in this codebase (see `docs/spec-context.md` — `composition_tests: defer_until_stabilisation`, `migration_safety_tests: defer_until_live_data_exists`). When live data exists or the testing posture matures, F14 + F28 are picked up from `tasks/todo.md` together with whatever other deferred tests have accumulated.
 
 ## Task 8 — Doc alignment and final review
 
@@ -462,8 +426,7 @@ Run all checks before marking this spec complete. Every item must pass.
 | CI YAML valid | `npx js-yaml .github/workflows/ci.yml > /dev/null && echo valid` | Prints `valid` |
 | S2 switch exhaustive | `npm run typecheck` | No `TS2322` on `never` in visibilityPredicatePure |
 | S3 test passes | Run visibilityPredicatePure test file | All tests pass |
-| F14 test passes | Run new legacy-row test file | Passes |
-| F28 test passes | Run new idempotency test file | Passes |
+| F14 + F28 deferred | Inspect `tasks/todo.md` | Two new rows under `## Deferred — testing posture (lint-typecheck-post-merge spec)` |
 
 ---
 
@@ -492,8 +455,8 @@ Run all checks before marking this spec complete. Every item must pass.
 | CI lint_and_typecheck job | Task 6.1 | ✓ |
 | CLAUDE.md typecheck script update | Task 6.2 | ✓ |
 | Agent definition updates (pr-reviewer, spec-conformance, dual-reviewer) | Task 6.3 | ✓ |
-| F14 migration compatibility test (null diagnosis) | Task 7.1 | ✓ |
-| F28 idempotency double-tap test | Task 7.2 | ✓ |
+| F14 migration compatibility test (null diagnosis) | Task 7 | deferred — routed to `tasks/todo.md` (testing posture) |
+| F28 idempotency double-tap test | Task 7 | deferred — routed to `tasks/todo.md` (testing posture) |
 | F5 sideEffectClass doc alignment | Task 8.1 | ✓ |
 | F7 agentDiagnosis jsonb doc alignment | Task 8.2 | ✓ |
 | pr-reviewer final pass | Task 8.3 | ✓ |
