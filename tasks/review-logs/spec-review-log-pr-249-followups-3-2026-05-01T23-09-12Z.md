@@ -59,4 +59,4 @@ Fix applied: replace "note the deferred work under the F6 task self-review" with
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   <to be filled after edits>
+- Spec commit after iteration:   `75630605ce28e7ea6c54bfcdced63f3d930fee65`

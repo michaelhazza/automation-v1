@@ -105,4 +105,4 @@ Fix applied: extend the "Self-review against backlog source" section with two ne
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             1 (Finding #3 → routed to tasks/todo.md)
-- Spec commit after iteration:   <to be filled after edits>
+- Spec commit after iteration:   `8121453b6f75aaf6f806a598cb290a6b998ccac9`

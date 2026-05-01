@@ -113,4 +113,4 @@ Reason: CLAUDE.md explicitly establishes bash as the project's working shell. Th
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   <to be filled after edits>
+- Spec commit after iteration:   `dcd7159bc7368e60e5ca33477f00613192785a22`

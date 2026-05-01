@@ -59,4 +59,4 @@ Fix applied: replace the bare "N-2, N-4, F3-cgpt, F4-cgpt, F6-cgpt" reference wi
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   <to be filled after edits>
+- Spec commit after iteration:   `10a99d725ca87f75f3240bfc7fd2a701a578fe0a`
