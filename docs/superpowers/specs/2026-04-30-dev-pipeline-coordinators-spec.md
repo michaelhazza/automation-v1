@@ -171,6 +171,8 @@ Per §8. Run before any other work so the brief is read against current `main`. 
 
 **Post-merge typecheck:** if the §8.2 sync produced a merge commit (i.e. the branch was not already up to date), run `npm run typecheck` before continuing. If it fails, surface the full diagnostic and pause — the operator must decide whether to fix type errors introduced by main before proceeding, or abort. Typecheck failure here means main is broken, not the spec branch.
 
+**Post-merge diff summary:** after a successful merge, print `git log HEAD..origin/main --oneline` so the operator can see what landed. Then check whether any file in that range overlaps with the feature's committed change-set (`git diff origin/main...HEAD --name-only`) and flag any overlap explicitly: "These files from main overlap with your feature branch: {list}." Informational only — operator decides whether to investigate before proceeding.
+
 ### §1.6 Step 3 — Brief intake and UI-touch detection
 
 Read the brief (provided in the invocation, or read from a file the operator names). Classify the brief along two axes:
@@ -388,6 +390,8 @@ Migration-number collision detection runs as part of S1: list `migrations/*.sql`
 
 **Post-merge typecheck:** if the §8.2 sync produced a merge commit, run `npm run typecheck` before invoking architect. Type errors from main must be resolved before the build starts — architect plans against the post-merge state, and broken types will cascade into every chunk.
 
+**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` and flag files overlapping with the feature's change-set (`git diff origin/main...HEAD --name-only`). Informational — operator reviews before saying "proceed".
+
 ### §2.6 Step 3 — architect
 
 Invoke `architect` as a sub-agent with the spec path. The sub-agent:
@@ -446,7 +450,12 @@ Operator reply handling:
 
 Process chunks **one at a time** in plan order. For each chunk:
 
-**Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If the chunk is already recorded as `done`, skip builder invocation, mark the TodoWrite item complete, and move to the next chunk. This makes feature-coordinator re-entrant: re-launching after an interruption resumes from the first incomplete chunk without re-building completed work.
+**Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If the chunk is already recorded as `done`:
+1. Run `git log --oneline origin/main...HEAD -- <files listed for that chunk>` to verify a commit for those files exists on the branch.
+2. If a commit exists → skip builder invocation, mark the TodoWrite item complete, and move to the next chunk.
+3. If NO commit exists (progress.md was updated but the commit was interrupted) → treat the chunk as incomplete and re-run builder. Do NOT skip.
+
+This makes feature-coordinator re-entrant while preventing false-skips caused by progress.md updates that preceded a failed commit.
 
 #### §2.9.1 Builder invocation
 
@@ -468,7 +477,13 @@ If builder reports a plan gap:
 
 Once builder reports success and G1 passes:
 
-**Commit-integrity invariant:** the coordinator commits immediately after builder returns SUCCESS, before any other coordinator-level work. Sequence: (1) builder returns SUCCESS + G1 passes, (2) `git add <files changed> && git commit`, (3) update `progress.md`, (4) mark TodoWrite item complete, (5) next chunk. No file edits may occur between builder returning and the commit.
+**Commit-integrity invariant:** the coordinator commits immediately after builder returns SUCCESS, before any other coordinator-level work. Sequence:
+1. Builder returns SUCCESS + G1 passes, providing its "Files changed" list.
+2. Run `git diff --name-only HEAD` and compare against the declared file list. If unexpected files appear (tooling side-effects, formatter runs, etc.) → fail, print the diff, and soft-escalate: "Unexpected files in working tree: {list}. Stage only the declared files and re-confirm, or investigate before committing."
+3. `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
+4. Update `progress.md`, mark TodoWrite item complete, move to next chunk.
+
+No file edits may occur between builder returning and step 3.
 
 - Update `tasks/builds/{slug}/progress.md` — chunk status `done`, files changed list, builder log path if any
 - Mark the chunk's TodoWrite item complete
@@ -494,6 +509,16 @@ If either fails: route the diagnostics back to a fresh `builder` invocation with
 > Fix the failures. Do not refactor unrelated code. Re-run G2 before reporting done.
 
 Capped at **3 fix attempts**. On the fourth, escalate.
+
+**Post-G2 spec-validity checkpoint:** after G2 passes and before starting the branch-level review pass, print:
+
+> **G2 complete — all chunks built.**
+>
+> Before proceeding to branch-level review: has anything discovered during this build invalidated the spec? (E.g. a constraint that changes described behavior, a plan gap requiring a different implementation, an external API change.)
+>
+> Reply **continue** to proceed to the review pass. Or describe the issue — coordinator writes `phase_status: PHASE_2_SPEC_DRIFT_DETECTED` to handoff.md and pauses; the operator decides whether to re-run `spec-coordinator` for a targeted re-spec, or proceed with a documented deviation recorded in handoff.md under `spec_deviations:`.
+
+This gate is a one-line confirmation in the common case (no drift) and a recoverable pause in the rare case.
 
 ### §2.11 Step 8 — Branch-level review pass
 
@@ -602,6 +627,10 @@ Keep `active_spec`, `active_plan`, `build_slug`, `branch` unchanged — finalisa
 
 ### §2.15 Step 12 — End-of-phase prompt
 
+**Dual-reviewer skip warning:** if `handoff.md` contains `REVIEW_GAP: Codex CLI unavailable` in the `dual-reviewer verdict:` field, prepend the following to the Phase 2 complete message:
+
+> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex pass was unavailable. `chatgpt-pr-review` in Phase 3 will be the primary second-opinion pass; consider running `dual-reviewer` manually if Codex becomes available before merge.
+
 Print:
 
 > **Phase 2 (BUILD) complete.**
@@ -625,7 +654,7 @@ Mark final TodoWrite item complete and stop.
 - **architect plan-revision rounds exceed 3** → escalate, write `phase_status: PHASE_2_PAUSED_PLAN` to handoff.md, exit.
 - **chatgpt-plan-review hits an unresolved finding** → its existing rules apply; the sub-agent decides loop vs exit.
 - **plan-gate operator says "abort"** → write `phase_status: PHASE_2_ABORTED` to handoff.md, set current-focus to `NONE`, exit. Operator restarts from spec-coordinator if needed.
-- **Per-chunk plan-gap rounds exceed 2** → freeze all remaining chunks; write `phase_status: PHASE_2_PAUSED_PLANGAP` and `paused_at_chunk: {chunk-name}` to handoff.md; hard-escalate per §6.4.2. Recovery message to operator: "Re-launch feature-coordinator — it will re-invoke architect from §2.6 with the full spec + current branch diff to produce a revised plan for the remaining chunks."
+- **Per-chunk plan-gap rounds exceed 2** → freeze all remaining chunks; write `phase_status: PHASE_2_PAUSED_PLANGAP` and `paused_at_chunk: {chunk-name}` to handoff.md; hard-escalate per §6.4.2. Recovery message to operator: "Re-launch feature-coordinator — it will re-invoke architect from §2.6 with the full spec + current branch diff to produce a revised plan for the remaining chunks. **Architect MUST produce a complete revised plan for ALL remaining chunks — incremental patching of the existing plan is forbidden.** The full branch state is the input, not just the gap description."
 - **Per-chunk rollback:** if a chunk is found to have corrupted earlier work, the recovery path is: `git revert <chunk-commit-sha>`, mark the chunk as `FAILED` in `progress.md`, require a plan revision (re-run from §2.6) before continuing. The per-chunk git commits (§6.5) are what make this safe.
 - **G1 / G2 / G3 attempts exceed 3** → escalate with full diagnostics.
 - **spec-conformance NON_CONFORMANT after 2 rounds** → escalate; do not proceed to pr-reviewer.
@@ -684,6 +713,8 @@ Read in order:
 ### §3.5 Step 2 — Branch-sync S2
 
 Per §8. Operator just typed "launch finalisation" and is at the keyboard. Pause-and-prompt on conflicts is safe. Migration-number-collision detection runs as part of S2 (same logic as S1).
+
+**Post-merge diff summary:** after a successful merge, print `git log HEAD..origin/main --oneline` and flag files overlapping with the feature's change-set. Same informational pattern as S0/S1 — operator reviews before G4 runs.
 
 ### §3.6 Step 3 — G4 regression guard
 
@@ -882,7 +913,7 @@ Emit a TodoWrite list with:
 5. G1 gate — typecheck
 6. G1 gate — build:server (if server files touched)
 7. G1 gate — build:client (if client files touched)
-8. G1 gate — targeted unit tests (one item per new test file, if any)
+8. G1 gate — targeted unit tests (one item per new test file; required ONLY for new pure functions with no DB/network/filesystem side effects in new service or transformation logic — skip for route additions, schema migrations, and UI-only components)
 9. Return summary
 
 Items 4–8 are per-touched-area, not all five. Skip the ones that don't apply (e.g. pure-server change skips build:client).
@@ -945,6 +976,7 @@ Notes for caller: [anything the caller should know — e.g. "noticed a related i
 - Never run full test gates (`npm run test:gates`, `scripts/gates/*.sh`, etc.) — CI-only per `CLAUDE.md § Test gates are CI-only — never run locally`.
 - Never `--no-verify`, never skip a check, never amend a commit (builder doesn't commit anyway — it edits files; the caller commits at the chunk boundary).
 - Never write to `tasks/current-focus.md` or `tasks/builds/{slug}/handoff.md` — those are coordinator-owned.
+- Never implement a forward dependency — if the implementation requires a symbol, type, or file from a later chunk that does not yet exist on disk, return `PLAN_GAP` immediately. Do not create stubs or placeholders to work around the missing dependency.
 
 ---
 
@@ -1312,6 +1344,8 @@ last_merge_ready_branch: <branch>
 
 **Concurrency:** only one slug may be in flight (`PLANNING | BUILDING | REVIEWING`) at a time. The system supports parallel branches, but the global pointer tracks one feature; if the operator works on two features in parallel, they accept that mission-control reflects only one.
 
+**Single-threaded by design.** This is an intentional architectural choice, not a limitation — the pipeline is optimized for focused sequential feature delivery. This constraint is explicit and permanent at this stage; parallel-slug support is deferred (see Deferred items).
+
 #### §6.1.2 tasks/builds/{slug}/handoff.md — per-build context
 
 Created by spec-coordinator (§1.12), updated by feature-coordinator (§2.13), read by finalisation-coordinator (§3.3).
@@ -1340,9 +1374,12 @@ Created by spec-coordinator (§1.12), updated by feature-coordinator (§2.13), r
 - `adversarial-reviewer verdict:`
 - `pr-reviewer verdict:`
 - `Fix-loop iterations:`
-- `dual-reviewer verdict:`
+- `dual-reviewer verdict:` (format: `{verdict}` OR `REVIEW_GAP: Codex CLI unavailable`)
 - `Doc-sync gate:` verdicts
 - `Open issues for finalisation:`
+- `phase_status:` (optional — written only on abort/pause; values: `PHASE_2_PAUSED_PLAN | PHASE_2_PAUSED_PLANGAP | PHASE_2_ABORTED | PHASE_2_SPEC_DRIFT_DETECTED`)
+- `paused_at_chunk:` (optional — written with `PHASE_2_PAUSED_PLANGAP`)
+- `spec_deviations:` (optional — written when operator acknowledges spec drift at the post-G2 checkpoint; lists each deviation with a brief rationale)
 
 **Phase 3 fields (finalisation-coordinator-owned, appended under `## Phase 3 (FINALISATION) — complete`):**
 
@@ -1423,6 +1460,8 @@ After hard escalation, the operator either:
 - Resumes by re-launching the relevant coordinator (which detects the partial state and offers to continue or restart)
 - Manually edits state files and restarts (escape hatch — not the default path)
 
+**Abort invariant:** on any abort or hard-escalation path, `tasks/current-focus.md` MUST end in one of: `NONE` (full abort) OR a named status (`PLANNING | BUILDING | REVIEWING`) with a matching `phase_status: *_PAUSED | *_ABORTED` entry in `handoff.md`. Ambiguous state — non-NONE status with no matching handoff entry — is a pipeline bug and must never be left behind. If a coordinator cannot write the handoff cleanly before exiting, it MUST at minimum set `tasks/current-focus.md` to `NONE`.
+
 #### §6.4.3 Recovery path matrix
 
 | Failure point | Recovery |
@@ -1432,6 +1471,7 @@ After hard escalation, the operator either:
 | Phase 2 architect plan-revision cap | Hard escalation; operator reviews architect output, manually fixes plan, re-runs from §2.7 (chatgpt-plan-review) |
 | Phase 2 chunk plan-gap cap | Hard escalation; operator reviews the plan, may need to restart from architect with revised inputs |
 | Phase 2 G1/G2 cap | Hard escalation; operator inspects diagnostics, fixes manually, re-runs the gate |
+| Phase 2 spec drift detected (post-G2) | Soft escalation; operator describes the drift — coordinator records in `spec_deviations:` and continues, OR operator re-runs `spec-coordinator` for a targeted re-spec |
 | Phase 2 spec-conformance NON_CONFORMANT | Hard escalation; operator triages the deferred items section, decides whether to fix in-pipeline (re-run feature-coordinator from §2.11) or re-do the spec |
 | Phase 2 pr-reviewer fix-loop cap | Hard escalation; operator reviews unresolved findings, decides whether they're blocking or deferrable |
 | Phase 3 doc-sync verdict missing | Soft escalation; operator records the verdict and types `continue` |
@@ -1477,7 +1517,7 @@ chore(finalisation-coordinator): Phase 3 complete — doc-sync sweep + ready-to-
 
 | Gate | Position | Owner | Scope |
 |---|---|---|---|
-| **G1** | Per-chunk, inside `builder`, before reporting done | builder | Lint + typecheck + (build:server if server touched) + (build:client if client touched) + (targeted unit tests authored in this chunk) |
+| **G1** | Per-chunk, inside `builder`, before reporting done | builder | Lint + typecheck + (build:server if server touched) + (build:client if client touched) + (targeted unit tests for new pure functions only — skip for route additions, migrations, UI components) |
 | **G2** | feature-coordinator §2.10, after all chunks built, before branch-level review pass | feature-coordinator | Full lint + full typecheck on the integrated branch state |
 | **G3** | After every fix-loop iteration that edits code (pr-reviewer fix-loop, dual-reviewer fix-loop, chatgpt-pr-review fix-loop) | feature-coordinator / finalisation-coordinator | Full lint + full typecheck |
 | **G4** | finalisation-coordinator §3.6, regression guard at start of Phase 3 | finalisation-coordinator | Full lint + full typecheck |
@@ -2019,6 +2059,7 @@ The OLD `feature-coordinator.md` is fully replaced in the same commit that intro
 - **Automated mid-build sync.** §8.6 documents a manual escape hatch but no automated mid-build sync. If feature-coordinator runs become long enough that drift during Phase 2 causes frequent S2 conflicts, consider adding an auto-sync at chunk boundaries (with the same pause-and-prompt rule). For now, defer.
 - **Replacing manual ChatGPT-web with automated OpenAI API for plan review.** `chatgpt-plan-review` is manual-only by design (operator stated explicit preference for ChatGPT-web feedback richness). If the API quality reaches parity, the agent gains an automated mode mirroring `chatgpt-spec-review`'s.
 - **`builder` parallelism within a chunk.** Builder runs sequentially file-by-file. If chunks grow large enough that parallel implementation would help, consider invoking multiple builders in parallel. Risk: parallel builders could produce conflicting edits to the same file. Defer.
+- **Overgrown progress.md compression.** For large multi-month builds, `progress.md` may accumulate many chunk/gate entries that reduce machine readability. Consider keeping a detailed section for the last N entries and a summarized archive section for older ones. Deferred: pre-production build sizes are insufficient to trigger this; revisit when builds consistently exceed 20+ chunks.
 - **Per-phase cost and time budgeting.** Add optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Deferred: cost budgeting is a post-live-agency concern; revisit when first client onboards and `docs/spec-context.md` framing updates to `live_users: yes`.
 - **Sub-agent runtime time-cap.** §6.3 explicitly does not cap sub-agent runtime. If a sub-agent hangs (vs taking long), the only recovery is operator interrupt. If hangs become a recurring problem, add a wall-clock cap with hard-escalation on cap. For now, defer.
 - **Auto-merge on CI green.** `finalisation-coordinator` does NOT auto-merge after CI green. Operator merges manually via the GitHub UI. If the merge step becomes the bottleneck, consider extending finalisation to auto-merge; this requires a CI-green-detection loop and PR auto-merge wiring.
