@@ -147,6 +147,15 @@ export interface ActionDefinition {
    * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
    */
   isUniversal?: boolean;
+
+  /**
+   * OAuth provider this action requires. When set, agentExecutionService calls
+   * integrationBlockService.checkRequiredIntegration before dispatching the tool,
+   * blocking the run if no active connection exists.
+   * Slugs: 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl'
+   * Leave unset for first-party / internal-only actions.
+   */
+  requiredIntegration?: string;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -306,6 +315,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
+    requiredIntegration: 'gmail',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -330,6 +340,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
+    requiredIntegration: 'gmail',
   },
   create_task: {
     actionType: 'create_task',
@@ -1640,6 +1651,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
 
   // ── Finance Agent — auto-gated stubs + review-gated ─────────────────────
@@ -2665,6 +2677,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
   'crm.send_sms': {
     actionType: 'crm.send_sms',
@@ -2851,6 +2864,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     onFailure: 'skip',
+    requiredIntegration: 'ghl',
   },
 
   // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────

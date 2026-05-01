@@ -1,4 +1,4 @@
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, sql, isNull, or, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -398,6 +398,49 @@ export const integrationConnectionService = {
         }
       }
     }
+  },
+
+  /**
+   * Returns the first active connection for the given provider in this
+   * org/subaccount scope. Returns null (never throws) if none exists.
+   * Checks both subaccount-specific AND org-level (subaccountId IS NULL)
+   * connections per the connection-resolution contract.
+   * Used by integrationBlockService to decide whether to block a tool call.
+   * Assumes at most one "effective" active connection per provider per scope.
+   * If multiple exist, latest updatedAt wins (deterministic but not DB-enforced).
+   */
+  async findActiveConnection(params: {
+    organisationId: string;
+    subaccountId: string | null;
+    providerType: string;
+  }): Promise<IntegrationConnection | null> {
+    const { organisationId, subaccountId, providerType } = params;
+
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, organisationId),
+          eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+          eq(integrationConnections.connectionStatus, 'active'),
+          eq(integrationConnections.oauthStatus, 'active'),
+          subaccountId
+            ? or(
+                eq(integrationConnections.subaccountId, subaccountId),
+                isNull(integrationConnections.subaccountId),
+              )
+            : isNull(integrationConnections.subaccountId),
+        ),
+      )
+      .orderBy(
+        desc(integrationConnections.updatedAt),
+        desc(integrationConnections.createdAt),
+        desc(integrationConnections.id),
+      )
+      .limit(1);
+
+    return conn ?? null;
   },
 };
 
