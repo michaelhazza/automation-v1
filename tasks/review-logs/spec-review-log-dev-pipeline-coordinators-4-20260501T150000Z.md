@@ -78,4 +78,4 @@ No ambiguous findings.
   - AUTO-REJECT (convention): 1 (same open-question rule)
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED: 0
-- Spec commit after iteration:   [to be set after commit]
+- Spec commit after iteration:   1ecf106f

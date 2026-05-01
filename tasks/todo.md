@@ -2194,3 +2194,14 @@ The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton i
 **Rationale:** Prefer spec as-is; the open question is intentionally open and flagged for operator review. The risk is acknowledged in the spec.
 
 **Action for operator:** Resolve Open Question #1 before the pipeline ships. Recommended decision: add a guard at spec-coordinator entry that refuses to start if the current branch is main/master/develop and prompts the operator to switch to a feature branch first. This is the safer option (no destructive auto-branch) and matches the commit-and-revert rollout model.
+
+### [AUTO-DECIDED - accept] §2.16/§6.4.2 — Phase 2 hard-escalation current-focus.md state should be NONE
+
+**Source:** spec-reviewer iteration 5, 2026-05-01
+**Finding:** §6.4.2 says hard escalations "set tasks/current-focus.md status appropriately" but this is undefined for PHASE_2_PAUSED_PLAN and other Phase 2 paused states. Codex found that §2.3's entry check (BUILDING required) is inconsistent with the hard-escalation reset.
+
+**Decision:** AUTO-DECIDED accept (minor clarification needed). Hard-escalation paths in §2.16 should explicitly set current-focus.md to `NONE` (not BUILDING) so the next re-launch sees NONE and can re-enter Phase 2 cleanly by re-setting BUILDING at entry. The §2.3 entry check remains correct (BUILDING = valid, anything else = refuse; re-launch writes BUILDING before starting).
+
+**Rationale:** Phase 2 restart-not-resume posture means hard escalations should leave the repo in a clean state (NONE) rather than a stuck state (BUILDING). "Appropriately" in §6.4.2 should be interpreted as NONE for all Phase 2 PAUSED* escalations.
+
+**Action if human agrees:** Add a line to each hard-escalation path in §2.16 specifying `current-focus.md → NONE`. Minor spec clarification; non-blocking for implementation.

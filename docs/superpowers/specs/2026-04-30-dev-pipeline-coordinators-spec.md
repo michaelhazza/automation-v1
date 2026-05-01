@@ -1027,7 +1027,7 @@ chatgpt-plan-review (mode: manual) target=tasks/builds/{slug}/plan.md
 
 1. Detect plan path from invocation. If not provided, derive from `tasks/current-focus.md` `active_plan` field.
 2. Read the plan in full.
-3. Check for an existing session log: `ls tasks/review-logs/chatgpt-plan-review-*.md 2>/dev/null | sort | tail -1`. If one exists for this slug, resume from the last completed round.
+3. Check for an existing session log scoped to this slug: `ls tasks/review-logs/chatgpt-plan-review-{slug}-*.md 2>/dev/null | sort | tail -1`. If one exists for this slug, resume from the last completed round. (The glob MUST be scoped to the current slug — do not use the unscoped `chatgpt-plan-review-*.md` pattern, which would pick up logs from different features.)
 4. If no log exists: write the Session Info header, create `.chatgpt-diffs/` if needed, prepare round 1 (the plan content as a `.md` file the operator uploads to ChatGPT-web).
 5. Print the kickoff message:
 
@@ -1086,7 +1086,7 @@ This spec lands the deferred auto-invocation. The agent's existing finding label
 
 #### §5.1.2 Auto-trigger surface — full path-glob list
 
-The `feature-coordinator` runs the adversarial-reviewer step IF and ONLY IF the branch's full diff (committed + staged + unstaged + untracked) matches **any** of the following globs:
+The `feature-coordinator` runs the adversarial-reviewer step IF and ONLY IF the branch's committed diff against `origin/main` matches **any** of the following globs. (By the time this check runs — after G2 and all chunk commits — pipeline-authored changes are committed; staged/unstaged/untracked changes from manual operator edits are outside the pipeline's scope and are not checked here.)
 
 ```
 server/db/schema/**
