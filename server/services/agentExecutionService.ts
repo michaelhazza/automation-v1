@@ -98,6 +98,9 @@ import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 // Integration block service — pauses runs waiting for OAuth connections
 import { checkRequiredIntegration } from './integrationBlockService.js';
 import { agentMessages } from '../db/schema/index.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock } from './conversationThreadContextServicePure.js';
+import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -811,7 +814,47 @@ export const agentExecutionService = {
         runContextData.externalDocumentBlocks,
       );
 
-      const systemPromptParts = [basePrompt];
+      // ── Thread context injection (A-D1) ─────────────────────────────────────
+      // Prepended first — before external docs, memory blocks, and all other
+      // augmentation. Spec §2.2 ordering invariant. Fail-open: a build error
+      // skips injection rather than aborting the run.
+      let effectiveBasePrompt = basePrompt;
+      const THREAD_CTX_TIMEOUT = Symbol('timeout');
+      const runConvId =
+        request.conversationId ??
+        (request.triggerContext?.conversationId as string | undefined) ??
+        undefined;
+      if (runConvId) {
+        const _threadCtxStart = Date.now();
+        let threadCtx: ThreadContextReadModel | null = null;
+        try {
+          const ctxResult = await Promise.race<ThreadContextReadModel | typeof THREAD_CTX_TIMEOUT>([
+            buildThreadContextReadModel(runConvId, request.organisationId),
+            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) =>
+              setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500),
+            ),
+          ]);
+          if (ctxResult === THREAD_CTX_TIMEOUT) {
+            logger.warn('thread_ctx.timeout', { runId: run.id });
+          } else {
+            threadCtx = ctxResult;
+          }
+        } catch (err) {
+          logger.warn('thread_ctx.build_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        logger.debug('thread_ctx.build_ms', { ms: Date.now() - _threadCtxStart, runId: run.id });
+        if (threadCtx && typeof threadCtx.version === 'number') {
+          const threadBlock = formatThreadContextBlock(threadCtx);
+          if (threadBlock) {
+            effectiveBasePrompt = threadBlock + '\n\n' + basePrompt;
+          }
+        }
+      }
+
+      const systemPromptParts = [effectiveBasePrompt];
 
       // Layer 1b: System skill instructions
       if (systemSkillInstructions.length > 0) {

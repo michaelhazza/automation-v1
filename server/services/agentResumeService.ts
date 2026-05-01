@@ -20,6 +20,8 @@ import { eq, and, gt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock } from './conversationThreadContextServicePure.js';
 
 export interface ResumeResult {
   status: 'resumed' | 'already_resumed';
@@ -124,6 +126,22 @@ export async function resumeFromIntegrationConnect(params: {
       completedSeqs.push(currentSeq);
     }
 
+    // Keep threadContextVersionAtStart in sync with latest context so the DB
+    // record is consistent with the next executeRun() re-injection.
+    const resumeConvId = params.conversationId ?? (meta.conversationId as string | undefined);
+    let freshThreadContextVersion: number | undefined;
+    if (resumeConvId) {
+      try {
+        const threadCtx = await buildThreadContextReadModel(resumeConvId, organisationId);
+        const block = formatThreadContextBlock(threadCtx);
+        if (block) {
+          freshThreadContextVersion = threadCtx.version;
+        }
+      } catch {
+        // Fail-open — version sync is best-effort; skip if unavailable
+      }
+    }
+
     await tx
       .update(agentRuns)
       .set({
@@ -133,6 +151,9 @@ export async function resumeFromIntegrationConnect(params: {
           lastResumeBlockSequence: currentSeq,
           completedBlockSequences: completedSeqs,
           blockedReason: null,
+          ...(freshThreadContextVersion !== undefined
+            ? { threadContextVersionAtStart: freshThreadContextVersion }
+            : {}),
         },
         updatedAt: new Date(),
       })
