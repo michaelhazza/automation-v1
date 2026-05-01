@@ -3,7 +3,7 @@
 **Files reviewed:** all changes on branch `claude/deferred-items-pre-launch-5Kx9P` vs `main` (35 files, ~1083 insertions / 98 deletions)
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-01T05:33:57Z
-**Commit at finish:** f7f55c5a
+**Commit at finish:** a4fd2da2
 **Codex CLI:** `OpenAI Codex v0.118.0` (model `gpt-5.4`)
 **Mode:** `--base main` for iteration 1 (clean working tree); `--uncommitted` for iterations 2–3 (after edits applied).
 
