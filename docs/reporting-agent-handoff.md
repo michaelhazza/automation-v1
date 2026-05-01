@@ -111,7 +111,7 @@ Currently takes `(page: Page)`. Change to take `(page: ContractEnforcedPage)` â€
 
 ### 4. Lint rule
 
-Add to `worker/.eslintrc` (or equivalent) a rule that bans `import { integrationConnections }` outside `worker/src/persistence/`. Per T8 the worker connection access must go through `getWebLoginConnectionForRun` and nothing else.
+Add to `eslint.config.js` (flat config) a `files: ['worker/**/*.{ts,cjs,js}']` block with a `no-restricted-imports` rule that bans `import { integrationConnections }` outside `worker/src/persistence/`. Per T8 the worker connection access must go through `getWebLoginConnectionForRun` and nothing else. *(Implemented in PR #249 â€” the rule was originally in the legacy `worker/.eslintrc.cjs`, which ESLint v10 flat config does not auto-load; the file has been deleted and the rule lives in `eslint.config.js` only.)*
 
 ### 5. Tenant isolation tests
 
