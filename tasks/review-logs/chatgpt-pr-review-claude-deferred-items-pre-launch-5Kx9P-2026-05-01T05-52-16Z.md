@@ -76,3 +76,51 @@ Top finding_types: security, idempotency, architecture, error_handling, test_cov
 
 ---
 
+## Round 2 — 2026-05-01T06:08:00Z
+
+### ChatGPT Feedback (raw)
+Executive summary
+
+This round is tighter. You've addressed most structural concerns and the PR is now coherent across data, execution, and UI layers. There are 2 remaining real issues and 1 design gap.
+
+🔴 Must-fix before merge
+1. RLS policy still has "silent denial" behaviour — repeat of Round 1 F1; ChatGPT recommends removing `, true` (missing_ok flag).
+2. Integration gating still missing unsafe-tool guard — repeat of Round 1 F2 (E-D4).
+
+🟠 Important design gap
+3. Thread context version can still drift across run lifecycle — repeat of Round 1 F3; recommends update-only-if-inject (already in code) and resume timeout (already deferred).
+
+🟡 Medium / correctness improvements
+4. Connection resolution precedence still implicit — repeat of Round 1 F4.
+5. API semantics regression still present (403 → 422) — repeat of Round 1 F5.
+6. Test isolation issue still exists — repeat of Round 1 F6.
+
+🟢 What's now clean
+Integration gating, soft-delete fixes, thread context formatting, "stub" source propagation.
+
+Final verdict: APPROVE after 2 fixes (F1 RLS + F2 E-D4).
+
+Top themes: rls/security, idempotency, race-condition.
+
+Top finding_types: security, idempotency, architecture, error_handling, test_coverage.
+
+### Triage notes
+All 6 findings are substantive duplicates of Round 1 — same finding_type, same file/code area, no new evidence. ChatGPT rephrased Round 1 items with stronger framing ("must-fix", "not optional"). Per session feedback (memory: `feedback_chatgpt_review_duplicate_findings.md`), duplicate findings auto-apply per the prior round's decision rather than re-surfacing to the user.
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 (R2) RLS NULL guard pattern | technical | reject | auto (reject) — duplicate of Round 1 F1 | high | Codebase canonical pattern; out of scope for targeted hardening PR; no new evidence |
+| F2 (R2) E-D4 idempotency TODO | technical | reject | auto (reject) — duplicate of Round 1 F2 | high | Explicitly deferred per plan Task 2 Step 1; ships as separate chunk; no new evidence |
+| F3 (R2) Thread context lifecycle drift | technical | reject | auto (reject) — duplicate of Round 1 F3 | medium | Update-only-if-inject already in code (`agentExecutionService.ts:853` + `agentResumeService.ts:98`); resume timeout already deferred to tasks/todo.md R1/F3a; no new evidence |
+| F4 (R2) Connection precedence | technical | reject | auto (reject) — duplicate of Round 1 F4 | medium | Already deferred to tasks/todo.md R1/F4; no new evidence |
+| F5 (R2) 403 → 422 status | technical | reject | auto (reject) — duplicate of Round 1 F5 | medium | Spec-driven fix per plan Task 9 §2.5; standardises on existing 422 in scheduledTasks.ts; no new evidence |
+| F6 (R2) Test ACTION_REGISTRY mutation | technical | reject | auto (reject) — duplicate of Round 1 F6 | low | Already deferred to tasks/todo.md R1/F6; no new evidence |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+None — all 6 findings auto-rejected as duplicates of Round 1 decisions.
+
+### Net new findings this round: 0
+
+---
+
