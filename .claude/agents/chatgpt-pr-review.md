@@ -658,19 +658,29 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
 
 12. CI Monitor and Auto-Merge Loop — starts immediately after the label is applied.
 
-    **Goal:** poll CI status once per minute, auto-fix failures iteratively (max 3
-    remedy attempts), then merge when all checks pass. If 3 remedies all fail, stop
-    and surface a structured failure report for the user to investigate manually.
+    **Goal:** poll CI status, auto-fix failures iteratively (max 3 remedy attempts),
+    then merge when all checks pass. If 3 remedies all fail, stop and surface a
+    structured failure report for the user to investigate manually.
+
+    **Cadence:** poll every ~90s. CI on this repo typically completes in 1-2 min,
+    so 60s is too tight (poll-during-queuing waste) and 4-5 min is too loose
+    (pushes past a full cycle, delays merge). 90s catches a fast CI pass in ~1
+    poll without burning the prompt cache more than necessary. Use
+    `ScheduleWakeup` (Claude Code) or `Monitor` for the wait — long synchronous
+    `sleep` is runtime-blocked. See `CLAUDE.md § Async polling cadence`.
 
     **State:** `REMEDY_ATTEMPTS = 0`  `POLL_COUNT = 0`  `REMEDY_LOG = []`
 
-    **Initial wait** — GitHub Actions needs ~30 seconds to pick up the label event
-    and queue new runs. Avoid a spurious "no checks yet" read:
-    ```bash
-    sleep 30
+    **Initial wait** — GitHub Actions needs ~60-90 seconds to pick up the label
+    event, queue new runs, and let early checks complete. Avoid a spurious "still
+    queuing" read:
+    ```
+    Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or `sleep 60`
+    if running outside a Claude Code session.
     ```
 
-    **Poll loop** — repeat until resolved. Hard cap: 30 polls (30 minutes total).
+    **Poll loop** — repeat until resolved. Hard cap: 30 polls (~45 minutes total
+    at 90s cadence).
 
     a. Increment `POLL_COUNT`. Query the PR's current check status:
        ```bash
@@ -691,9 +701,10 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
     b. **`passed`** → all CI checks succeeded. Proceed to **Auto-Merge** below.
 
     c. **`pending`** → CI is still running. Print:
-       > CI in progress — <POLL_COUNT>m elapsed. Next poll in 60s...
-       ```bash
-       sleep 60
+       > CI in progress — <POLL_COUNT> polls elapsed. Next poll in 90s...
+       ```
+       Schedule a wakeup ~90s out (ScheduleWakeup delaySeconds=90), or
+       `sleep 90` if running outside a Claude Code session.
        ```
        Return to (a). If `POLL_COUNT >= 30` without conclusion, print:
        > CI has not concluded after 30 minutes — stopping monitor.
@@ -740,9 +751,10 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
          `REMEDY_LOG`.
 
     vi.  Print:
-         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 45s for CI to queue...
-         ```bash
-         sleep 45
+         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 60s for CI to queue...
+         ```
+         Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or
+         `sleep 60` if running outside a Claude Code session.
          ```
          Reset `POLL_COUNT = 0`. Return to poll loop step (a).
 

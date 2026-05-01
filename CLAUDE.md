@@ -169,6 +169,8 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 - `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
 - Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
 
+**Async polling cadence** — When polling external state (CI, builds, deployments, jobs) from a Claude Code session: default to 90-120s between polls, not 4-5 min. CI on this repo typically completes in 1-2 min, so a too-long cadence pushes past a full cycle and delays merge. Pick cadence to match expected event time, not to maximise prompt-cache hits — responsiveness wins for fast pollable signals. Use `ScheduleWakeup` or `Monitor`; long synchronous `sleep` commands are runtime-blocked.
+
 ---
 
 ## 13. Doc style: agent-facing is dense, human-facing is readable

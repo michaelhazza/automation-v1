@@ -205,3 +205,24 @@ Markdown-only change. No code touched. Local lint/typecheck environment is broke
 - **PR:** #248 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/248
 
 ---
+
+## Post-finalisation refinement — 2026-05-01T06:55:00Z
+
+After Final Summary was written and CI had passed for `d0583c7b`, operator observed that the CI poll cadence I used (270s ScheduleWakeup) was much longer than CI actually takes on this repo (1-2 min). Operator requested updating the baseline so future tasks don't wait 4-5 min unnecessarily.
+
+### Finding (post-finalisation)
+
+| Finding | Triage | Severity | Decision | Rationale |
+|---------|--------|----------|----------|-----------|
+| PF-1: Polling cadence too long for fast CI — agent's CI Monitor used 60s `sleep` (already runtime-blocked) and operator-observed 270s ScheduleWakeup pushed past a full CI cycle. Documentation should specify 90-120s cadence aligned with this repo's actual CI duration, and use `ScheduleWakeup` / `Monitor` rather than `sleep` (runtime blocks long sleeps). | technical | low | implement | Real misalignment between documented cadence (60s sleep — blocked) and observed cadence (270s wakeup — too long). Both wrong direction. Operator-driven correction. |
+
+### Implemented (post-finalisation refinement)
+
+- [user] `.claude/agents/chatgpt-pr-review.md § Step 12` — updated CI Monitor cadence: initial wait 30s → 60s; poll cadence 60s → 90s (with ScheduleWakeup-aware wording); post-remedy wait 45s → 60s; hard cap unchanged at 30 polls (now ~45 min total at 90s cadence).
+- [user] `CLAUDE.md § Context Management` — added `Async polling cadence` rule: default 90-120s, match cadence to expected event time, use ScheduleWakeup/Monitor (not sleep). Generalises beyond CI to any external-state polling.
+
+### Verification
+
+Markdown-only change. CI on this repo runs in ~1-2 min — the new 90s cadence catches a fast pass in ~1 poll; previous 270s pushed past a full cycle. Doc-sync sweep verdicts above remain accurate (no new docs touched outside the two updated; `CLAUDE.md` was already verdict `yes`).
+
+---
