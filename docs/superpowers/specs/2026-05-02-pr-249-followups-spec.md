@@ -234,6 +234,8 @@ Reference doc update triggers (per `docs/doc-sync.md`):
 
 **Investigation procedure:** for every doc above, run `docs/doc-sync.md § Investigation procedure` (read the doc, derive a candidate-stale-reference set from this branch's diff, grep the doc for each candidate, fix stale hits in this same finalisation pass, then assign a verdict). The pre-labelled `n/a` annotations above are starting hypotheses — they hold only when the investigation procedure produces zero candidates relevant to that doc's update trigger.
 
+**Verdict destination:** record the seven verdicts in the closing PR description under a `## Doc-sync verdicts` section, one verdict per line in the format `- <doc>: yes (sections X, Y) | no — <rationale> | n/a`. The PR description is the canonical post-build deliverable for this spec — verdicts survive in git history alongside the merge commit and are consistent with how PR #249's own doc-sync verdicts were recorded.
+
 ---
 
 ## Verification
@@ -308,4 +310,7 @@ Fill these in as Task 6.4 completes:
 - [ ] `npm run typecheck` exits 0.
 - [ ] Branch pushed; PR opened against `main`.
 - [ ] Full review pipeline (`spec-conformance` → `pr-reviewer` → `dual-reviewer` → `chatgpt-pr-review`) per CLAUDE.md run before merge.
-- [ ] tasks/todo.md backlog entries for N-2, N-4, F3-cgpt, F4-cgpt, F6-cgpt marked `[x]` or removed.
+- [ ] tasks/todo.md backlog entries closed (`[x]`) or removed for the specific post-build items this spec covers — disambiguate by source-log heading so the implementer doesn't check off unrelated `N-2`/`N-4` entries elsewhere in the file:
+  - Under `### PR #249 — lint-typecheck-post-merge-tasks — chatgpt-pr-review round 1 (2026-05-01T08:50 UTC)`: **F3-cgpt** (live-agent badge), **F4-cgpt** (eslint-disable hygiene audit), **F6-cgpt** (Record<string, unknown> per-callsite audit).
+  - Under `### PR #249 — lint-typecheck-post-merge-tasks — post-build pr-reviewer pass (2026-05-01T07:36 UTC)`: **N-2 (post-build)** (`await await` typo), **N-4 (post-build)** (`void _b;` dead-code line).
+  - Do NOT touch the unrelated `N-2`/`N-4` items earlier in `tasks/todo.md` (e.g. the `### PR — lint-typecheck-post-merge-tasks (2026-05-01)` section's `N-2: combine import type lines` and `N-4: codemod sweep`, or the older `N-2: measureInterventionOutcomeJob` and `N-4: Migration 0227 header` entries).
