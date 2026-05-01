@@ -186,7 +186,7 @@ None — all 5 findings auto-rejected as duplicates of prior round decisions.
   - F3 thread-context race / lifecycle — defer (split into F3a + F3b above)
   - F5 403 → 422 status standardisation — reject (spec-driven per plan Task 9 §2.5)
 - KNOWLEDGE.md updated: yes (2 entries — Correction on chatgpt-pr-review duplicate handling; Pattern on external-reviewer RLS misread)
-- architecture.md updated: no — RLS canonical template already documented at §Canonical org-isolation policy template (lines 1451-1474); F1's "missing-doc" reading was incorrect
+- architecture.md updated: yes (Key files per domain — thread context panel row + agent integration block/resume flow row updated to reflect implemented state; "deferred A-D1" / "currently a stub — deferred E-D3" language replaced with current behaviour). RLS canonical template at §Canonical org-isolation policy template was already accurate; no change there.
 - capabilities.md updated: n/a — no product/agency capability surface change in this PR
 - integration-reference.md updated: n/a — `requiredIntegration` tagging on existing actions does not change the integration-reference catalogue (no new providers, scopes, or capability slugs)
 - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (DEVELOPMENT_GUIDELINES.md §3 Schema layer rules — added soft-delete enforcement-layer bullet from F9)
