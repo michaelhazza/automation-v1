@@ -3277,13 +3277,12 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       agentDescription: agents.description,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 
