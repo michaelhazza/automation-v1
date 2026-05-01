@@ -80,3 +80,40 @@ Final verdict: READY TO MERGE after P1 fixes.
 - [auto] Added canonical invariant comment to `SystemIncidentEventType` in `server/db/schema/systemIncidentEvents.ts`
 
 ---
+
+## Round 3 — 2026-05-01T01:25:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: Diminishing returns — no new structural issues. Final operational hardening checklist.
+
+F18: Rollback validation — migrate up → run app → migrate down → run app.
+F19: Old + new code coexistence window — new fields must be optional, no assume-presence.
+F20: Logging completeness — can you reconstruct full incident from logs alone? Needs {runId, signalId, agentId, operation}.
+F21: Cardinality sanity check — is agentDiagnosisRunId 1:1 or 1:many with incidents?
+F22: Background job / async safety — do async workers read partially written rows?
+F23: Data growth awareness — does systemIncidents grow unbounded?
+F24: Query path audit — check agentDiagnosis/agentDiagnosisRunId for full-table-scan risk.
+F25: One real-world smoke test before merging.
+F26: Mental model check — Signal/Diagnosis/Events layers feel clean?
+
+Final verdict: ✅ READY TO MERGE — no blockers left.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F18: Rollback validation | technical | reject | auto (reject) | low | Migration only adds nullable columns — structurally safe by design. |
+| F19: Coexistence window | technical | reject | auto (reject) | low | Both conditions satisfied: fields are nullable; TypeScript null safety prevents assume-presence. |
+| F20: Logging completeness | technical | reject | auto (reject) | low | Logging patterns pre-existing and unchanged by this PR. Belongs in separate observability audit. |
+| F21: Cardinality 1:1 doc | technical | reject | auto (reject) | low | Self-evident from schema: FK on incidents table = one agentDiagnosisRunId per row. |
+| F22: Async/background safety | technical | reject | auto (reject) | low | `WHERE triage_status='running'` predicate in writeDiagnosis.ts IS the eventual-consistency guard. Already in place. |
+| F23: Data growth / TTL | technical | reject | auto (reject) | low | Archiving strategy is ops runbook scope, not this PR. |
+| F24: Query path audit | technical | reject | auto (reject) | low | Already verified round 1: only one read path (writeDiagnosis.ts) via indexed FK lookup. |
+| F25: Smoke test | technical | reject | auto (reject) | low | Deployment gate, not a code change. |
+| F26: Mental model check | technical | reject | auto (reject) | low | Signal/Diagnosis/Events model is well-separated. Not actionable as code. |
+
+### Implemented
+*(none — all findings rejected)*
+
+---
