@@ -53,7 +53,14 @@ export interface ParameterSchema {
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
 export interface IdempotencyContract {
+  /** Ordered ActionContext field names that together form the idempotency key. See v7.1 spec §588. */
+  keyShape: string[];
+  /** Dedup boundary. See v7.1 spec §588. */
+  scope: 'subaccount' | 'org';
+  /** Retention class before expiry. See v7.1 spec §588. */
   ttlClass: 'permanent' | 'long' | 'short';
+  /** Whether the lock record may be reclaimed after TTL. See v7.1 spec §588. */
+  reclaimEligibility: 'eligible' | 'disabled';
 }
 
 export interface ActionDefinition {
