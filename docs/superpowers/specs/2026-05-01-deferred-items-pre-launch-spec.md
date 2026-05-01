@@ -331,7 +331,7 @@ Error shape: `422 { error: 'invalid_connection_id' }` — matches spec §17.6 vo
 
 ### Acceptance criteria
 
-- Every Drive attach route that resolves a `connectionId` has the `conn.subaccountId === subaccountId` guard.
+- Every Drive attach route that resolves a `connectionId` has the forward-safe guard: `conn.subaccountId` must be `null` (org-level connection) or match `subaccountId` — implemented as `if (conn.subaccountId && conn.subaccountId !== subaccountId)`.
 - Returns 422 `invalid_connection_id` when the connection belongs to a different subaccount.
 - No new tests required (guard addition at route boundary).
 
