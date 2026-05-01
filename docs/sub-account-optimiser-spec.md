@@ -3,7 +3,7 @@
 **Status:** DRAFT (v2 — post-design-review 2026-05-02)
 **Build slug:** `subaccount-optimiser`
 **Branch:** `claude/subaccount-optimiser`
-**Migrations claimed:** `0267`
+**Migrations claimed:** `0267`, `0267a`
 **Concurrent peers:** F1 `subaccount-artefacts` (0266), F3 `baseline-capture` (0268-0270)
 
 **Related code:**
@@ -20,7 +20,7 @@
 - `docs/automation-os-system-agents-master-brief-v7.1.md`
 - `docs/riley-observations-dev-spec.md` (W3 telemetry would enrich this; not blocking)
 
-**Prototypes:** `prototypes/subaccount-optimiser/index.html`
+**Prototypes:** `prototypes/subaccount-optimiser/home-dashboard.html` (org context, cross-client rollup); `prototypes/subaccount-optimiser/home-dashboard-subaccount-context.html` (sub-account context, single-client view)
 
 ---
 
@@ -106,7 +106,7 @@ Each recommendation row has: `category`, `severity` (`info` / `warn` / `critical
 | `agent.over_budget` | critical | Agent monthly cost > 1.3× its budget for 2 consecutive months | "Reporting Agent is spending more than expected" / "It used $73 this month against a $50 budget. Same story last month." |
 | `playbook.escalation_rate` | critical | Workflow run escalates to HITL > 60% over 14 days | "An outreach workflow keeps needing your help" / "8 of the last 12 runs got stuck on the email step and asked a person to step in." |
 | `skill.slow` | warn | Skill p95 latency > 4× cross-tenant median for that skill, sustained 7 days | "Pulling contacts from GHL is slow" / "Around 12 seconds here, around 3 seconds for your other clients." |
-| `inactive.workflow` | warn | Workflow with `autoStartOnSchedule: true` hasn't run in (cadence × 1.5) days | "Portfolio Health check stopped running" / "Was scheduled weekly. Hasn't run since 17 April." |
+| `inactive.workflow` | warn | Sub-account agent with `subaccountAgents.scheduleEnabled = true AND scheduleCron IS NOT NULL` whose most recent `agent_runs` row is older than (1.5 × the expected cadence implied by `scheduleCron`, computed via `scheduleCalendarServicePure`) | "Portfolio Health check stopped running" / "Was scheduled weekly. Hasn't run since 17 April." |
 | `escalation.repeat_phrase` | info | Same prohibited phrase / brand-voice violation triggers ≥ 3 HITL escalations in 7 days | "Reviewers keep flagging the word 'guarantee'" / "It came up in 3 of the last 4 emails you reviewed. You might want to add it to your brand voice." |
 
 ### Added 3 categories (existing telemetry, not in v1 spec)
@@ -149,11 +149,12 @@ All sources below are already shipped except the cross-tenant median view (built
 | Cost aggregates | `cost_aggregates` | Yes (multi-scope) | agent.over_budget |
 | HITL escalations | `review_items` joined to `actions` | Yes | playbook.escalation_rate, escalation.repeat_phrase |
 | Health snapshots | `client_pulse_health_snapshots` | Yes | context only, not direct trigger |
-| Workflow last-run | `flow_runs` | Yes | inactive.workflow, playbook.escalation_rate |
+| Workflow last-run | `flow_runs` | Yes | playbook.escalation_rate |
+| Scheduled sub-account agents | `subaccount_agents` (`scheduleEnabled`, `scheduleCron`, `scheduleTimezone`) joined to `agent_runs` (last started_at per `subaccountAgentId`) | Yes | inactive.workflow |
 | **LLM requests** | `llm_requests` (`cachedPromptTokens`, `cacheCreationTokens`, `prefixHash`) | Yes | **llm.cache_poor_reuse** (new) |
 | **Memory citation scores** | `memory_citation_scores` (`finalScore` per injected entry per run) | Yes (via `agent_runs.subaccount_id`) | **memory.low_citation_waste** (new) |
 | **Fast-path decisions** | `fast_path_decisions` (`decidedConfidence`, `secondLookTriggered`, `downstreamOutcome`) | Yes | **agent.routing_uncertainty** (new) |
-| **Optimiser cross-tenant median** (peer baseline for `skill.slow`) | derived materialised view over `agent_runs` joined to `skill_instructions` | No (cross-tenant aggregate, sysadmin-bypassed RLS) | skill.slow |
+| **Optimiser cross-tenant median** (peer baseline for `skill.slow`) | derived materialised view `optimiser_skill_peer_medians` over `agent_execution_events` (skill_slug + duration extracted from the JSONB `payload` of `tool_call.completed` events) keyed by `skill_slug` | No (cross-tenant aggregate, sysadmin-bypassed RLS) | skill.slow |
 
 ### One spec correction from v1
 
@@ -161,9 +162,11 @@ The original §3 noted "review_items joined to tasks → skill_instructions" wit
 
 ### Cross-tenant median view
 
-The peer-median view computes p50/p95/p99 per `skill_slug` across all sub-accounts and exposes only the aggregate. No per-tenant rows leak. Documented in `architecture.md` as a sysadmin-bypassed read.
+`optimiser_skill_peer_medians` is a materialised view defined over `agent_execution_events` filtered to `event_type='tool_call.completed'`. Both `skill_slug` and the per-call duration are extracted from the event's JSONB `payload` (the discriminated-union shape pinned in `shared/types/agentExecutionLog.ts`). The view computes p50/p95/p99 per `skill_slug` across all sub-accounts and exposes only the aggregate. No per-tenant rows leak.
 
-**Minimum-tenant threshold:** the view returns no value for a `skill_slug` used by < 5 sub-accounts. Below threshold, `skill.slow` evaluator skips the recommendation entirely. Prevents single-tenant data leakage when a skill is used by 1-2 clients.
+**Access posture.** The view contains only cross-tenant aggregates and carries no `organisation_id` / `subaccount_id` columns. Read via `withAdminConnection()` from inside `server/services/optimiser/queries/skillLatency.ts`. Not added to `rlsProtectedTables.ts` because there are no per-tenant rows to protect — opt-out rationale documented in `architecture.md` per the §3 sysadmin-bypassed-read pattern.
+
+**Minimum-tenant threshold:** the view returns no value for a `skill_slug` used by < 5 sub-accounts. Below threshold, `skill.slow` evaluator skips the recommendation entirely. Prevents single-tenant data leakage when a skill is used by 1-2 clients. Threshold is enforced inside the view definition (HAVING clause), not just application logic.
 
 ## §4 Agent definition
 
@@ -172,7 +175,7 @@ New agent definition file: `companies/automation-os/agents/subaccount-optimiser/
 - **Role:** `subaccount-optimiser`
 - **Scope:** `subaccount` (mirrors all 15+ business agents per migration 0106)
 - **Schedule:** daily at sub-account local 06:00 (cron derived from sub-account's `timezone`); configurable
-- **Default-on:** yes, with opt-out toggle on sub-account settings (`subaccount_settings.optimiser_enabled` boolean, default true)
+- **Default-on:** yes, with opt-out toggle on sub-account settings (`subaccounts.optimiser_enabled` boolean, default true)
 
 System prompt (draft):
 > "You watch the telemetry of agents operating in this sub-account. Each day, run your evaluation skills, dedupe against open recommendations, render any new findings as plain operator-friendly copy, and write them via the `output.recommend` skill. You do not execute work. You do not modify configuration. You do not surface internal category names in your output — operators read your titles and details, not your slugs. Use concrete numbers in human terms ('$73 against a $50 budget', not '47% over budget')."
@@ -239,6 +242,10 @@ Plus RLS policies (per `0245_all_tenant_tables_rls.sql` pattern), `rlsProtectedT
 
 **Why generic, not `subaccount_recommendations`:** the table supports both `scope_type='org'` and `scope_type='subaccount'` from day one. Org-tier optimiser (deferred) would write `scope_type='org'` rows; today only sub-account rows exist. Schema cost is the same; future cost of retrofitting is high. Decision locked at design review.
 
+**Why not extend an existing primitive.** The closest existing primitives are (a) `system_incidents` (system-monitoring agent's surface — sysadmin-only, fault-detection lifecycle with severity tiers and auto-resolution), (b) `feature_requests` (Orchestrator's Path C/D output — keyed by capability slugs, fires Slack/email/Synthetos-task notifications, 30-day per-org dedupe), (c) `org_memories` / `workspace_memory` (Portfolio Health Agent's surface — long-form narrative insights stored as agent-readable memory, not operator-facing). Each carries a different lifecycle and audience: incidents resolve when the fault clears; feature requests notify external pipelines; memories are agent-context, not UI rows. Recommendations need a fourth lifecycle — operator-facing rows that dedupe by stable finding keys, render plain-English copy, and acknowledge/dismiss in the UI without notifying anyone — which doesn't fit any of the three. A new table is justified; the schema deliberately mirrors `system_incidents`'s dedupe + severity shape so future consolidation stays open.
+
+**Acknowledged-row semantics.** `acknowledged_at` marks "operator has seen this; don't surface it again until something changes" but DOES NOT clear the dedupe slot. The dedupe unique index keys on `WHERE dismissed_at IS NULL` deliberately — recreating an acknowledged finding behind the operator's back is worse than leaving it suppressed. The list view filters out acknowledged rows (already in the `agent_recommendations_open_by_scope` index predicate); the dedupe slot only frees when the row is dismissed.
+
 ### §6.2 Generic skill: `output.recommend`
 
 New skill defined in `server/skills/output/recommend.md`, executor in `server/services/skillExecutor.ts`.
@@ -258,9 +265,17 @@ New skill defined in `server/skills/output/recommend.md`, executor in `server/se
 }
 ```
 
-**Output:** `{ recommendation_id: string, was_new: boolean }`. `was_new=false` means an open recommendation already exists for `(scope_type, scope_id, category, dedupe_key)` and no row was inserted.
+**Output:** `{ recommendation_id: string, was_new: boolean, reason?: 'cap_reached' | 'updated_in_place' }`.
+- `was_new=true` — new row inserted.
+- `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` and the JSON-canonicalised `evidence` shape changed. Executor updates `title`, `body`, `evidence` on the existing row in place; `created_at` is preserved; `acknowledged_at` is cleared (re-surface the row to the operator); `recommendation_id` returned is the existing row's id.
+- `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations. Insert refused; `recommendation_id` returned is `''`. Cap is enforced inside the executor via a `SELECT count(*)` taken in the same transaction as the insert.
+- `was_new=false` (no `reason`) — open match existed and `evidence` is byte-equal; no write performed.
 
-**Permission:** any agent with `output.recommend` in its skill manifest can call it. The executor enforces that `scope_id` belongs to the agent's organisation.
+**Idempotency posture (per spec-authoring-checklist §10).** Key-based on `(scope_type, scope_id, category, dedupe_key) WHERE dismissed_at IS NULL`. Two agents racing on the same key resolve via the unique index — first commit wins; the loser catches Postgres `23505` and returns `{ was_new: false, recommendation_id: <existing row id> }` (looked up after the catch). Never bubbles `23505` as a 500. The skill executor maps the exception inside the transaction. Update-in-place path uses an optimistic `UPDATE … WHERE id = $existing AND dismissed_at IS NULL` predicate — 0 rows affected = a concurrent dismiss won; falls through to the no-op `was_new=false` path.
+
+**Retry classification.** `output.recommend` is `safe` (key-based idempotency); callers may retry on transport failure without further coordination. The acknowledge / dismiss HTTP routes are `guarded` — both use `UPDATE agent_recommendations SET … WHERE id = $1 AND dismissed_at IS NULL` (or `acknowledged_at IS NULL` for acknowledge); a second call lands as a 200-idempotent-no-op rather than a 409.
+
+**Permission:** any agent with `output.recommend` in its skill manifest can call it. The executor enforces that `scope_id` belongs to the agent's organisation by resolving `scope_id → organisation_id` and comparing to `req.orgId` / the agent's organisation.
 
 **Category naming:** convention only, no schema validation. Convention is `<area>.<finding>` (e.g. `agent.over_budget`, `health.churn_risk_high`). The primitive doesn't enforce a registry — agents own their category namespaces. If two agents pick the same `(scope, category, dedupe_key)`, dedupe will treat them as the same finding; agents should namespace categories to avoid collisions in practice.
 
@@ -272,6 +287,10 @@ New React component at `client/src/components/recommendations/AgentRecommendatio
 ```ts
 {
   scope: { type: 'org', orgId: string } | { type: 'subaccount', subaccountId: string },
+  includeDescendantSubaccounts?: boolean, // default false. Only meaningful when scope.type='org'.
+                                          // When true, the hook's fetch query also returns
+                                          // scope_type='subaccount' rows for every sub-account
+                                          // the caller can read (RLS-gated; no app-layer filter).
   limit?: number,            // default 3 — for top-N "see all" pattern
   emptyState?: 'hide' | 'show', // default 'hide' — section disappears when empty
   onDismiss?: (recId: string) => void,
@@ -279,6 +298,10 @@ New React component at `client/src/components/recommendations/AgentRecommendatio
 ```
 
 Renders a vertical list of open recommendations for the given scope, sorted by severity (critical / warn / info) then by `created_at desc`. Each row: severity dot, plain-English title, one-sentence body, "Help me fix this →" link (deep-links to Configuration Assistant pre-loaded with the recommendation's `action_hint`), small × dismiss with reason input.
+
+**Row-data contract from the hook.** `useAgentRecommendations` returns rows shaped as `{ id, scope_type, scope_id, subaccount_display_name?: string, category, severity, title, body, action_hint, evidence, created_at, acknowledged_at, dismissed_at }`. `subaccount_display_name` is populated ONLY for `scope_type='subaccount'` rows fetched in org-rollup mode (`includeDescendantSubaccounts=true`); the hook joins to `subaccounts.name` server-side and returns the resolved string. Sub-account scope and org-only-row queries omit the field.
+
+**Org-rollup row label.** When `scope_type='subaccount'` rows are rendered in org-rollup mode, the row prepends a small slate-500 label `<subaccount_display_name> · ` before the operator-facing title (e.g. "Smith Dental · Reporting Agent is spending more than expected"). In single-scope mode (sub-account context, or `includeDescendantSubaccounts=false`), the label is omitted.
 
 **No category labels in the UI.** No severity word labels. No timestamps on individual rows. Dot colour and ordering carry severity; the section header carries the timestamp ("Updated this morning").
 
@@ -292,6 +315,49 @@ The primitive intentionally does not include:
 - Multi-step actions or threaded discussion. Single-action only.
 
 Future spec can extend the primitive (e.g. add `acknowledge` semantics, add notification surfaces) but those are separate scopes.
+
+### §6.5 Contracts
+
+Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `agent_recommendations` row > evidence JSONB > socket event payload > UI render.
+
+**`agent_recommendations` row** (DB authoritative).
+- Producer: `output.recommend` skill executor (every agent) and the acknowledge / dismiss HTTP routes (mutation only).
+- Consumer: `useAgentRecommendations` hook, the optimiser's own dedupe pre-check, and any future UI surface.
+- Nullability: `acknowledged_at`, `dismissed_at`, `dismissed_reason`, `action_hint` are nullable. All other columns NOT NULL.
+- Defaults: `evidence` defaults to `'{}'::jsonb`, `created_at` defaults to `now()`, `id` defaults to `gen_random_uuid()`.
+- Example row:
+  ```json
+  {
+    "id": "9f3e…",
+    "organisation_id": "org-uuid",
+    "scope_type": "subaccount",
+    "scope_id": "sub-uuid",
+    "producing_agent_id": "agent-uuid",
+    "category": "agent.over_budget",
+    "severity": "critical",
+    "title": "Reporting Agent is spending more than expected",
+    "body": "It used $73 this month against a $50 budget. Same story last month.",
+    "evidence": { "agent_id": "agent-uuid", "this_month": 7300, "last_month": 6800, "budget": 5000, "top_cost_driver": "ghl.contacts.search" },
+    "action_hint": "configuration-assistant://agent/agent-uuid?focus=budget",
+    "dedupe_key": "agent-uuid",
+    "created_at": "2026-05-02T06:00:00Z",
+    "acknowledged_at": null,
+    "dismissed_at": null,
+    "dismissed_reason": null
+  }
+  ```
+
+**`output.recommend` input/output** — already pinned in §6.2 (input contract + output discriminated by `was_new` and `reason`). Producer: any agent with the skill in its manifest. Consumer: `skillExecutor.ts`.
+
+**Acknowledge / dismiss HTTP endpoints.**
+- `POST /api/recommendations/:recId/acknowledge` — request body `{}`; response `{ success: true, alreadyAcknowledged: boolean }`. Idempotent: a second call returns `alreadyAcknowledged: true` rather than 409. 404 when `:recId` doesn't exist or isn't visible to the caller (RLS-filtered).
+- `POST /api/recommendations/:recId/dismiss` — request body `{ reason: string }` (`reason` max 500 chars). Response `{ success: true, alreadyDismissed: boolean }`. Idempotent on the dismiss path; the second call's `reason` is ignored. 404 same as above.
+- Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. A `23505` from a racing dismiss is mapped to a 200 idempotent-no-op.
+
+**Socket event payload** (`dashboard.recommendations.changed`).
+- Emitted from `output.recommend` (after a `was_new=true` insert OR a `reason='updated_in_place'` update) AND from acknowledge / dismiss endpoints.
+- Payload: `{ recommendation_id: string, scope_type: 'org' | 'subaccount', scope_id: string, change: 'created' | 'updated' | 'acknowledged' | 'dismissed' }`.
+- Producer: skill executor + HTTP routes. Consumer: `useAgentRecommendations` hook (refetches on event per the existing `dashboard.*` reactivity pattern from PR #218).
 
 ---
 
@@ -344,7 +410,7 @@ Both faithful to current `DashboardPage.tsx` structure with the new section inse
 | Initial onboarding burst (8 new recs day 1) | ~$0.04 one-off | — |
 | 100 sub-accounts, steady | < $30/month total | well within margin |
 
-Default-on. Opt-out toggle on sub-account settings (`subaccount_settings.optimiser_enabled`, default true). Hard cap of 10 open recommendations per `(scope, producing_agent_id)` pair at any time (per §13 risk mitigation). Per-pair so multiple agents can each contribute up to 10 without one agent saturating the surface.
+Default-on. Opt-out toggle on sub-account settings (`subaccounts.optimiser_enabled`, default true). Hard cap of 10 open recommendations per `(scope, producing_agent_id)` pair at any time (per §13 risk mitigation). Per-pair so multiple agents can each contribute up to 10 without one agent saturating the surface.
 
 ---
 
@@ -356,7 +422,7 @@ Total ~28h. Phase 0 builds the reusable primitive; Phases 1-5 are the optimiser 
 
 Builds reusable infrastructure that survives beyond the optimiser.
 
-- [ ] Author migration `migrations/0267_agent_recommendations.sql` (+ `.down.sql`).
+- [ ] Author migration `migrations/0267_agent_recommendations.sql` (+ `.down.sql`). Same migration adds the boolean column `subaccounts.optimiser_enabled NOT NULL DEFAULT true` (the opt-out toggle referenced in §1, §4, §8, §9, §11). Not added as a separate migration because it's a single-column boolean conceptually owned by the optimiser feature; a dedicated migration would be heavier overhead than the primitive itself.
 - [ ] Add table to `server/db/schema/agentRecommendations.ts`.
 - [ ] Register in `rlsProtectedTables.ts` and `canonicalDictionary.ts`.
 - [ ] RLS policies migration entry per `0245_all_tenant_tables_rls.sql` pattern (folded into 0267).
@@ -372,12 +438,12 @@ Builds reusable infrastructure that survives beyond the optimiser.
   - `agentBudget.ts` (reads `cost_aggregates`)
   - `escalationRate.ts` (joins `flow_runs` + `review_items` + `actions`)
   - `skillLatency.ts` (per-sub-account p95 over 7 days from `agent_execution_events`)
-  - `inactiveWorkflows.ts` (`flow_runs` last_at by `workflow_id`)
+  - `inactiveWorkflows.ts` (joins `subaccount_agents` rows where `scheduleEnabled=true AND scheduleCron IS NOT NULL` to `agent_runs.startedAt` last-run; expected cadence computed via `scheduleCalendarServicePure.computeNextHeartbeatAt`)
   - `escalationPhrases.ts` (tokenises `review_items.reviewPayloadJson`)
   - `memoryCitation.ts` (reads `memory_citation_scores`) — **NEW**
   - `routingUncertainty.ts` (reads `fast_path_decisions`) — **NEW**
   - `cacheEfficiency.ts` (reads `llm_requests` cache columns) — **NEW**
-- [ ] Cross-tenant materialised view migration: `optimiser_skill_peer_medians` (folded into 0267 or 0267a). Refreshed nightly via pg-boss job. Minimum-tenant threshold of 5 enforced in view definition.
+- [ ] Cross-tenant materialised view migration: `migrations/0267a_optimiser_peer_medians.sql` (separate from 0267 so the generic primitive can ship before the optimiser-specific view is needed). Refreshed nightly via pg-boss job. Minimum-tenant threshold of 5 enforced inside the view definition (HAVING clause), not just application logic.
 - [ ] pg-boss job `refresh_optimiser_peer_medians` registered + nightly schedule.
 - [ ] Each query has its own pure unit test against fixture data (8 test files).
 
@@ -402,18 +468,18 @@ Builds reusable infrastructure that survives beyond the optimiser.
 - [ ] "See all N →" link expands inline (no navigation in v1).
 - [ ] Socket subscription: emit `dashboard.recommendations.changed` from `output.recommend` insert + acknowledge/dismiss endpoints; client refetches on event per the existing reactivity pattern.
 
-### Phase 4 — Brand-voice / phrase classifier (~3h)
+### Phase 4 — Phrase tokeniser implementation (for `escalation.repeat_phrase`) (~3h)
+
+This phase is the implementation work for the `escalation.repeat_phrase` category whose query module (`escalationPhrases.ts`) and evaluator module (`repeatPhrase.ts`) are declared in Phase 1/2. The threshold (≥ 3 occurrences in 7 days) and the `action_hint` deep-link target are already pinned in §2 and §12; Phase 4 delivers the tokeniser + phrase-grouping logic that those modules call.
 
 - [ ] Tokeniser: simple regex/normalisation, no ML. Strips stopwords, lowercases, splits on punctuation.
 - [ ] Phrase grouping: count occurrences per token / bigram / trigram in `review_items.reviewPayloadJson` over 7 days.
-- [ ] Threshold: ≥ 3 occurrences within 7 days triggers `escalation.repeat_phrase` recommendation.
-- [ ] Suggested-action text in `action_hint`: deep-link to Configuration Assistant pre-loaded with brand-voice context.
 - [ ] Pure tests with fixture escalation reason text (~10 cases).
 
 ### Phase 5 — Verification (~2h)
 
 - [ ] `npm run lint`, `npm run typecheck` clean.
-- [ ] All unit + integration tests pass locally.
+- [ ] Targeted unit + integration test files authored for this build pass via `npx tsx <path-to-test>`. Full gate suites are CI-only per CLAUDE.md.
 - [ ] Manual: enable optimiser on test sub-account with seeded telemetry, trigger run, verify recommendations appear in Home dashboard section in BOTH org and sub-account context, acknowledge/dismiss round-trip.
 - [ ] Cost-model sanity: run optimiser for 5 sub-accounts × 7 days, confirm < $0.10 LLM spend.
 - [ ] Update `docs/capabilities.md` § Sub-account observability — describe the optimiser AND the new generic primitive.
@@ -427,7 +493,8 @@ Builds reusable infrastructure that survives beyond the optimiser.
 ### Phase 0 — primitive (reusable)
 
 **Server:**
-- `migrations/0267_agent_recommendations.sql` (+ `.down.sql`) — table + RLS policies
+- `migrations/0267_agent_recommendations.sql` (+ `.down.sql`) — `agent_recommendations` table + RLS policies + `subaccounts.optimiser_enabled` boolean column (default true)
+- `server/db/schema/subaccounts.ts` — add `optimiser_enabled` column to existing schema export
 - `server/db/schema/agentRecommendations.ts` (new)
 - `server/db/rlsProtectedTables.ts` (entry)
 - `server/db/canonicalDictionary.ts` (entry)
@@ -450,7 +517,8 @@ Builds reusable infrastructure that survives beyond the optimiser.
 - `server/services/skillExecutor.ts` (8 cases for scan skills)
 - `server/services/agentScheduleService.ts` (register optimiser schedule for sub-accounts)
 - `server/jobs/refreshOptimiserPeerMedians.ts` (new)
-- `migrations/0267_agent_recommendations.sql` extended OR `0267a_optimiser_peer_medians.sql` — cross-tenant materialised view
+- `scripts/backfill-optimiser-schedules.ts` (new) — one-shot script registering daily schedules for existing sub-accounts where `subaccounts.optimiser_enabled = true`; staggered by `created_at` hash across 6-hour window
+- `migrations/0267a_optimiser_peer_medians.sql` (+ `.down.sql`) — cross-tenant materialised view `optimiser_skill_peer_medians` over `agent_execution_events`
 
 **Skills + agent:**
 - `companies/automation-os/agents/subaccount-optimiser/AGENTS.md` (new)
@@ -459,8 +527,7 @@ Builds reusable infrastructure that survives beyond the optimiser.
 ### Phase 3 — Home dashboard wiring
 
 **Client:**
-- `client/src/pages/DashboardPage.tsx` (new section between "Pending your approval" and "Your workspaces")
-- `client/src/components/Layout.tsx` (no change to nav; existing `activeClientId` consumed by the new section)
+- `client/src/pages/DashboardPage.tsx` (new section between "Pending your approval" and "Your workspaces"; reads `activeClientId` from the existing `Layout.tsx` context — no edit to `Layout.tsx`)
 
 ### Tests
 
@@ -507,7 +574,7 @@ Builds reusable infrastructure that survives beyond the optimiser.
 
 ## §14 Concurrent-build hygiene
 
-- Migration `0267` reserved here. Do not use elsewhere. Cross-tenant median view uses `0267` (folded into the same migration) or `0267a` if separated.
+- Migrations `0267` (table + RLS for `agent_recommendations`) and `0267a` (cross-tenant materialised view `optimiser_skill_peer_medians`) reserved here. Do not use elsewhere. Two-file split is deliberate — the primitive (Phase 0) and the optimiser-specific peer-median view (Phase 1) live on different migration boundaries because the primitive is intended to outlive the optimiser.
 - Branch `claude/subaccount-optimiser`. Worktree at `../automation-v1.subaccount-optimiser`.
 - Progress lives in `tasks/builds/subaccount-optimiser/progress.md`.
 - Touches `server/services/skillExecutor.ts` switch — F1 and F3 don't touch this; safe.
@@ -525,3 +592,18 @@ W3 (`context.assembly.complete` event in `agentExecutionService.ts`) would emit 
 | `context.token_pressure` | `pressure='high'` fires consistently — recommend extracting workspace memory entries to reference docs |
 
 These are NOT in v1 scope. **Verified 2026-05-02 against `server/services/agentExecutionService.ts` — no `context.assembly.complete` emit exists today.** When Riley W3 ships, add these as a Phase 6 follow-up to this build (or as v1.1).
+
+---
+
+## Deferred Items
+
+Aggregated from prose markers throughout the spec ("deferred", "later", "v1.1", "future", "out of scope here", "revisit after F2 ships").
+
+- **Org-tier optimiser meta-agent.** Portfolio Health Agent already occupies that role (§0.5). Revisit after F2 ships and operator behaviour with the sub-account optimiser is observed.
+- **Auto-execution of recommendations.** v1 is observation-only; operators act via Configuration Assistant deep-link. Out of scope to add an "auto-fix" path to recommendations.
+- **Standalone `/suggestions` page.** v1 expands the section inline via "See all N →". v1.1 ships a dedicated page with severity / category / sub-account filters and grouping (§7).
+- **Brand-voice ML classification beyond keyword/phrase frequency.** v1 is regex tokeniser + n-gram counts. ML-driven classification deferred until volume justifies (§1).
+- **Wider Home dashboard scope-awareness.** Sibling widgets ("Clients Needing Attention", "Active Agents") remain org-scoped today and don't cleanly handle sub-account context. v2 follow-up spec — not solved here (§1, §7, §13).
+- **Riley W3 telemetry-dependent categories.** `context.gap.persistent` and `context.token_pressure` become trivial once `context.assembly.complete` ships in `agentExecutionService.ts`; add as Phase 6 follow-up (§15).
+- **`agent_recommendations` primitive extensions.** Per §6.4: widget registry, layout engine, charts/KPI tiles, per-agent renderer customisation, multi-step actions, threaded discussion. Deferred indefinitely — separate scope each.
+- **Notification surfaces for recommendations** (Slack, email, in-app push). Recommendations are pull-only in v1; future spec can add notification routing on `dashboard.recommendations.changed` events.

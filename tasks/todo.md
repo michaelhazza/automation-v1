@@ -2167,3 +2167,25 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+
+---
+
+## Deferred spec decisions — subaccount-optimiser
+
+**Spec:** `docs/sub-account-optimiser-spec.md`
+**Source:** spec-reviewer iteration 1 — 2026-05-01
+
+Two AUTO-DECIDED items routed for human awareness. Both have already been applied to the spec; flag only if the decision feels wrong.
+
+### F2-AD-1: `inactive.workflow` category trigger redefined to use `subaccount_agents` schedule columns
+
+Original trigger referenced `autoStartOnSchedule: true` and a "(cadence × 1.5) days" rule, but neither exists on `workflowTemplates` or `flowRuns`. Rewrote the trigger to detect sub-account agents with `scheduleEnabled = true AND scheduleCron IS NOT NULL` whose most recent `agent_runs` row is older than 1.5× the expected cadence (computed via `scheduleCalendarServicePure`). This anchors the category against a real currently-shipped schedule mechanism.
+
+Flag if: you wanted this category to track *workflow templates* specifically (in which case it has to wait until workflow templates carry schedule metadata), not scheduled agents.
+
+### F2-AD-2: "Why not extend an existing primitive" paragraph added to §6
+
+spec-authoring-checklist Section 1 expects a one-paragraph rationale comparing the new primitive against the closest existing primitives. Added a paragraph after §6.1 listing `system_incidents`, `feature_requests`, and `org_memories` / `workspace_memory` and explaining why none fit the recommendations lifecycle (operator-facing rows that dedupe by stable finding keys, render plain-English copy, acknowledge/dismiss in the UI without notifying anyone).
+
+Flag if: you intended a tighter mapping to one of those existing tables and the paragraph misframes the design-review decision.
