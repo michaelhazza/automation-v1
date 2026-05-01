@@ -3,7 +3,7 @@
 **Status:** Plan finalised, pre-implementation.
 **Date:** 2026-04-30.
 **Source brief:** `tasks/brief-tier-1-ui-uplift.md` (read first; the brief is the substantive source of truth, this plan turns it into builder contracts).
-**Source mockups:** `tasks/mockups/tier-1-ui-uplift.html` (user-approved design direction).
+**Source mockups:** `prototypes/tier-1-ui-uplift.html` (user-approved design direction).
 **Sequencing:** B → C → A → E → D.
 
 ---
