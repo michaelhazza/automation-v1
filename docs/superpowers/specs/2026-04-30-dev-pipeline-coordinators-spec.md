@@ -390,7 +390,7 @@ Migration-number collision detection runs as part of S1: list `migrations/*.sql`
 
 **Post-merge typecheck:** if the §8.2 sync produced a merge commit, run `npm run typecheck` before invoking architect. Type errors from main must be resolved before the build starts — architect plans against the post-merge state, and broken types will cascade into every chunk.
 
-**Post-merge diff summary:** print `git log HEAD..origin/main --oneline` and flag files overlapping with the feature's change-set (`git diff origin/main...HEAD --name-only`). Informational — operator reviews before saying "proceed".
+**Post-merge diff summary:** print `git log HEAD..origin/main --oneline`. Then compute file overlap: `git diff origin/main...HEAD --name-only` intersected with the files changed on main. If overlapping files are found → **require explicit operator confirmation** before proceeding: "Overlapping files detected between main and your feature branch: {list}. Type **continue** to proceed or **inspect** to pause and review." Do not proceed until operator types "continue". If no overlap → print the log and continue silently.
 
 ### §2.6 Step 3 — architect
 
@@ -450,12 +450,16 @@ Operator reply handling:
 
 Process chunks **one at a time** in plan order. For each chunk:
 
-**Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If the chunk is already recorded as `done`:
+**Resume detection:** before invoking `builder` for each chunk, check `tasks/builds/{slug}/progress.md`. If ANY chunk is recorded as `done` (i.e. this is a resume run, not a fresh start):
+
+**Pre-resume typecheck:** run `npm run typecheck` ONCE before processing any chunks. If it fails: surface the diagnostics, pause, and require the operator to fix the failures before resume proceeds — do NOT skip any completed chunks while the integrated state is type-broken. Completed-chunk skipping is only safe when the branch typechecks cleanly.
+
+Then, for each chunk recorded as `done`:
 1. Run `git log --oneline origin/main...HEAD -- <files listed for that chunk>` to verify a commit for those files exists on the branch.
 2. If a commit exists → skip builder invocation, mark the TodoWrite item complete, and move to the next chunk.
 3. If NO commit exists (progress.md was updated but the commit was interrupted) → treat the chunk as incomplete and re-run builder. Do NOT skip.
 
-This makes feature-coordinator re-entrant while preventing false-skips caused by progress.md updates that preceded a failed commit.
+This makes feature-coordinator re-entrant while preventing false-skips caused by type drift from incomplete later chunks or progress.md updates that preceded a failed commit.
 
 #### §2.9.1 Builder invocation
 
@@ -479,8 +483,8 @@ Once builder reports success and G1 passes:
 
 **Commit-integrity invariant:** the coordinator commits immediately after builder returns SUCCESS, before any other coordinator-level work. Sequence:
 1. Builder returns SUCCESS + G1 passes, providing its "Files changed" list.
-2. Run `git diff --name-only HEAD` and compare against the declared file list. If unexpected files appear (tooling side-effects, formatter runs, etc.) → fail, print the diff, and soft-escalate: "Unexpected files in working tree: {list}. Stage only the declared files and re-confirm, or investigate before committing."
-3. `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
+2. Run `git diff --name-only HEAD` and compare against the declared file list. If unexpected files appear (tooling side-effects, formatter runs, etc.) → **hard fail**: print "Unexpected files in working tree: {list}. Commit blocked — investigate and revert unexpected changes before continuing." Do NOT commit; do NOT offer to stage only declared files. The operator must manually revert the unexpected changes (or escalate to architect if they represent a plan gap) before the coordinator resumes.
+3. Once only declared files remain in the working tree: `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
 4. Update `progress.md`, mark TodoWrite item complete, move to next chunk.
 
 No file edits may occur between builder returning and step 3.
@@ -696,6 +700,12 @@ Read in order:
 7. `tasks/builds/{slug}/progress.md`
 8. The spec at the path named in the handoff
 
+**REVIEW_GAP check:** after reading the handoff, check `dual-reviewer verdict:` for `REVIEW_GAP: Codex CLI unavailable`. If present, print immediately before any other output:
+
+> ⚠ **Dual-reviewer was skipped in Phase 2 — reduced review coverage.** `chatgpt-pr-review` in step 5 will be the primary second-opinion pass. Consider running `dual-reviewer` manually if Codex becomes available before merge.
+
+**Spec-deviations check:** check `spec_deviations:` in the handoff. If present, note them — they will be included in the chatgpt-pr-review kickoff context in step 5.
+
 ### §3.4 Step 1 — Top-level TodoWrite list
 
 1. Context loading (this step)
@@ -714,7 +724,7 @@ Read in order:
 
 Per §8. Operator just typed "launch finalisation" and is at the keyboard. Pause-and-prompt on conflicts is safe. Migration-number-collision detection runs as part of S2 (same logic as S1).
 
-**Post-merge diff summary:** after a successful merge, print `git log HEAD..origin/main --oneline` and flag files overlapping with the feature's change-set. Same informational pattern as S0/S1 — operator reviews before G4 runs.
+**Post-merge diff summary:** print `git log HEAD..origin/main --oneline`. If overlapping files are found between main and the feature branch → **require explicit operator confirmation** before G4 runs: "Overlapping files detected: {list}. Type **continue** to proceed to G4 or **inspect** to pause." Do not proceed until operator types "continue". If no overlap → continue to G4 silently.
 
 ### §3.6 Step 3 — G4 regression guard
 
@@ -748,7 +758,9 @@ This is the same persistence-and-print convention `chatgpt-pr-review` already us
 
 ### §3.8 Step 5 — chatgpt-pr-review (MANUAL mode auto-fire)
 
-Invoke `chatgpt-pr-review` as a sub-agent. MODE = **manual**. The sub-agent uses its existing contract:
+Invoke `chatgpt-pr-review` as a sub-agent. MODE = **manual**. Before invoking, check handoff.md for `spec_deviations:` — if present, include them in the sub-agent's kickoff context: "Note: the following spec deviations were recorded during Phase 2. Please review whether the implementation handles these correctly: {list}."
+
+The sub-agent uses its existing contract:
 
 - Prepares code-only diff (excluding spec / plan / review-log files already reviewed by other agents)
 - Captures operator's pasted ChatGPT responses
@@ -1385,6 +1397,7 @@ Created by spec-coordinator (§1.12), updated by feature-coordinator (§2.13), r
 
 - `PR number:`
 - `chatgpt-pr-review log:`
+- `spec_deviations reviewed:` (optional — "yes" if Phase 2 handoff had spec_deviations and they were reviewed in chatgpt-pr-review; "n/a" if no deviations)
 - `Doc-sync sweep verdicts:`
 - `KNOWLEDGE.md entries added:`
 - `tasks/todo.md items removed:`
@@ -1461,6 +1474,8 @@ After hard escalation, the operator either:
 - Manually edits state files and restarts (escape hatch — not the default path)
 
 **Abort invariant:** on any abort or hard-escalation path, `tasks/current-focus.md` MUST end in one of: `NONE` (full abort) OR a named status (`PLANNING | BUILDING | REVIEWING`) with a matching `phase_status: *_PAUSED | *_ABORTED` entry in `handoff.md`. Ambiguous state — non-NONE status with no matching handoff entry — is a pipeline bug and must never be left behind. If a coordinator cannot write the handoff cleanly before exiting, it MUST at minimum set `tasks/current-focus.md` to `NONE`.
+
+**Abort write order:** always write `handoff.md` first, then update `tasks/current-focus.md`. Never reverse this order. A crash between the two writes leaves current-focus.md pointing at a valid handoff (safe recovery) rather than an updated current-focus.md with no matching handoff entry (ambiguous, confusing).
 
 #### §6.4.3 Recovery path matrix
 

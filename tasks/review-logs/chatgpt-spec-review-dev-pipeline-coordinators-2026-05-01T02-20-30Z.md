@@ -105,3 +105,44 @@ Near-production-ready verdict. Remaining gaps are edge-case correctness and oper
 - Missing recovery row: PHASE_2_SPEC_DRIFT_DETECTED had no entry in §6.4.3 — auto-fixed
 
 ---
+
+## Round 3 — 2026-05-01T03:30:00Z
+
+**Top themes:** pre-resume typecheck + hard-fail commit guard + spec-drift in Phase 3 + overlap confirmation gate + abort write ordering
+
+### ChatGPT Feedback (raw)
+
+Extremely tight, production-grade spec. Final surgical pass: 7 of 13 findings were repeats of rounds 1/2 (already applied/deferred/rejected). Genuinely new: (1) pre-resume typecheck before skipping completed chunks, (2) hard fail on unexpected commit files, (3) spec_deviations must be surfaced in Phase 3 finalisation, (4) S1/S2 overlap requires explicit confirmation, (5) abort write order (handoff before current-focus), (6) REVIEW_GAP warning also at Phase 3 start. Verdict: READY TO SHIP.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1: Pre-resume typecheck before skipping completed chunks | technical-escalated (critical) | apply | apply (user) | critical | Added single pre-resume typecheck to §2.9; skipping only safe when branch typechecks cleanly |
+| F2: Unexpected-file detection should hard fail | technical-escalated (critical) | apply | apply (user) | critical | Changed §2.9.3 from soft-escalate to hard fail; operator must revert before coordinator resumes |
+| F3: Plan-gap regenerate-not-patch (repeat of round 2) | technical | reject | auto (reject) | critical | Already applied in round 2 — §2.16 already says "MUST produce complete revised plan, patching forbidden" |
+| F4: Spec drift must be surfaced in Phase 3 finalisation | technical-escalated (critical) | apply | apply (user) | critical | Added spec_deviations check to §3.3 + kickoff context in §3.8; added spec_deviations reviewed to Phase 3 handoff schema |
+| F5: S1/S2 overlap requires explicit confirmation | technical-escalated (critical) | apply (S1/S2 only) | apply (user) | critical | §2.5/§3.5 now gate on "continue" when overlapping files detected; S0 remains informational |
+| F6: Forward-dep ban (repeat of round 2) | technical | reject | auto (reject) | high | Already applied in round 2 — §4.1.9 has the explicit PLAN_GAP rule |
+| F7: Progress.md bloat (repeat of round 2 defer) | technical | defer | auto (reject/repeat) | high | Already deferred in round 2 |
+| F8: ChatGPT structured prompts (repeat of round 2) | user-facing | reject | auto (reject) | high | Already rejected in round 2 — §4.3.4 already specifies the plan review prompt |
+| F9: Abort ordering — handoff before current-focus | technical-escalated (high) | apply | apply (user) | high | Added "Abort write order" clause to §6.4.2 abort invariant |
+| F10: REVIEW_GAP warning at Phase 3 start | technical-escalated (high) | apply | apply (user) | high | Added REVIEW_GAP check + spec-deviations check to §3.3 context loading |
+| F11: G1 unit test trigger (repeat of round 2) | technical | reject | auto (reject) | medium | Already applied in round 2 — §4.1.4 and §7.1 have the "pure functions only" definition |
+| F12: Builder file discipline (repeat of round 2) | technical | reject | auto (reject) | low | Already rejected in round 2 — CLAUDE.md covers it |
+| F13: Single-threaded statement (repeat of round 2) | technical | reject | auto (reject) | low | Already applied in round 2 — §6.1.1 has the callout |
+
+### Applied (user-approved only — no new medium/low auto-applies this round)
+- [user] §2.9: pre-resume typecheck gates all chunk-skip decisions; fail = pause, no skipping allowed
+- [user] §2.9.3: unexpected-file detection changed to hard fail; no staging option offered
+- [user] §3.3: REVIEW_GAP warning + spec_deviations note added to Phase 3 context loading
+- [user] §3.8: spec_deviations from handoff included in chatgpt-pr-review kickoff context
+- [user] §2.5 (S1): overlap detected → explicit "continue" gate required before architect
+- [user] §3.5 (S2): overlap detected → explicit "continue" gate required before G4
+- [user] §6.4.2: abort write order added — handoff.md ALWAYS before current-focus.md
+- [integrity-check] §6.1.2 Phase 3 fields: added `spec_deviations reviewed:`
+
+### Integrity check: 1 issue found this round (auto: 1, escalated: 0)
+- Missing field: `spec_deviations reviewed:` absent from §6.1.2 Phase 3 handoff schema — auto-fixed
+
+---
