@@ -289,6 +289,59 @@ export function applyPatchToPureState(
   return { decisions, tasks, approach, createdIds, opsApplied, noOpRemovedIds };
 }
 
+// ── formatThreadContextBlock ──────────────────────────────────────────────────
+// MAX_ITEMS caps each list to prevent prompt bloat as tasks/decisions grow.
+const FORMAT_MAX_ITEMS = 20;
+
+/**
+ * Formats the thread context read model as a <thread_context> XML block for
+ * injection into the system prompt. Returns '' when ctx is null or all fields
+ * are empty — callers skip injection when this returns ''.
+ *
+ * Ordering invariant: this block must be prepended before all other system
+ * prompt augmentation (external doc blocks, memory blocks, skill instructions).
+ * Callers are responsible for honouring this position.
+ */
+export function formatThreadContextBlock(ctx: ThreadContextReadModel | null): string {
+  if (!ctx) return '';
+
+  const lines: string[] = [];
+
+  if (ctx.openTasks?.length) {
+    lines.push('Tasks:');
+    ctx.openTasks.slice(0, FORMAT_MAX_ITEMS).forEach((t) => lines.push(`  - ${t}`));
+  }
+
+  if (ctx.approach) {
+    lines.push(`Approach: ${ctx.approach}`);
+  }
+
+  if (ctx.decisions?.length) {
+    lines.push('Decisions:');
+    ctx.decisions.slice(0, FORMAT_MAX_ITEMS).forEach((d) => lines.push(`  - ${d}`));
+  }
+
+  if (!lines.length) return '';
+
+  return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
+}
+
+// ── prependThreadContextToBasePrompt ─────────────────────────────────────────
+
+/**
+ * Prepends a formatted thread-context block to the base system prompt.
+ * Returns basePrompt unchanged when threadBlock is empty — callers must not
+ * inject an empty block (creates an orphaned blank line at the start).
+ * This function is the single source of truth for the §2.2 ordering invariant.
+ */
+export function prependThreadContextToBasePrompt(
+  threadBlock: string,
+  basePrompt: string,
+): string {
+  if (!threadBlock) return basePrompt;
+  return `${threadBlock}\n\n${basePrompt}`;
+}
+
 // ── normalizePatch ────────────────────────────────────────────────────────────
 
 /**

@@ -144,8 +144,8 @@ router.post(
     if (conn.connectionStatus !== 'active') {
       return res.status(422).json({ error: 'connection_not_active' });
     }
-    if (conn.subaccountId !== null && conn.subaccountId !== subaccountId) {
-      return res.status(403).json({ error: 'connection_not_accessible' });
+    if (conn.subaccountId && conn.subaccountId !== subaccountId) {
+      return res.status(422).json({ error: 'invalid_connection_id' });
     }
 
     const db = getOrgScopedDb('externalDocumentReferences.create');
@@ -357,8 +357,8 @@ router.patch(
     if (conn.connectionStatus !== 'active') {
       return res.status(422).json({ error: 'connection_not_active' });
     }
-    if (conn.subaccountId !== null && conn.subaccountId !== subaccountId) {
-      return res.status(403).json({ error: 'connection_not_accessible' });
+    if (conn.subaccountId && conn.subaccountId !== subaccountId) {
+      return res.status(422).json({ error: 'invalid_connection_id' });
     }
 
     // Verify the reference is a member of this task's bundle — prevents

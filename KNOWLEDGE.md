@@ -1720,6 +1720,26 @@ In `agentResumeService.ts`, the first resume call cleared `integration_resume_to
 
 The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
 
+### [2026-05-01] Pattern — Subaccount scope guards must use null-safe checks to preserve org-level connection validity
+
+Route guards checking `conn.subaccountId !== subaccountId` wrongly reject connections where `subaccountId` is `null` (org-level connections) — `null !== 'some-uuid'` evaluates to `true`. The correct form is `if (conn.subaccountId && conn.subaccountId !== subaccountId)`. Apply this pattern to any route guard that scopes a shared resource (connection, credential, shared integration) to a subaccount while leaving org-level access open. Source: deferred-items-pre-launch spec review R2/F1.
+
+### [2026-05-01] Pattern — Spec step-shorthand ("same injection as above") silently drops side-effect writes
+
+When a spec uses shorthand like "apply the same injection (same two lines)" to describe a repeat call, implementers often copy the primary lines (build + format + prepend) but miss secondary side-effects (like writing `runMetadata.threadContextVersionAtStart`). Always enumerate every side-effect explicitly in each step — shorthand saves spec words but generates implementation bugs. Found in deferred-items-pre-launch spec review R1/F2 (§2.2 Step 3 resume path).
+
+### [2026-05-01] Correction — chatgpt-spec-review manual mode prints spec as a copy-paste payload
+
+In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy into ChatGPT ---` block per the agent design. If the user has already submitted the spec to ChatGPT independently, this block looks like instruction-dumping. Future sessions should briefly state "printing the ChatGPT payload" before the block so the user understands its purpose and can skip it if they submitted manually.
+
 ### [2026-05-01] Pattern — Pre-submit access verification prevents silent rebind failures
 
 When a UI action binds a new credential to a resource (e.g. rebinding a broken Drive reference to a new connection), calling a lightweight access-check endpoint on connection select — rather than waiting for the full submit — surfaces failures at decision time instead of after the user commits. `ExternalDocumentRebindModal` now calls `verifyAccess(connId, fileId)` on the connection `<select>` onChange, shows an inline error, and disables the confirm button until access is confirmed. **Rule:** for any "bind credential to resource" flow, add a verify-before-confirm step using any existing lightweight probe endpoint; post-submit failures confuse users because the error arrives after they have mentally moved on. Source: ChatGPT PR #242 review Round 2 F4.
+
+### [2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision
+
+When `chatgpt-pr-review` surfaces findings in Round N (N ≥ 2) that are substantive duplicates of decided findings from prior rounds (same finding_type + same file/code area, no new evidence — even when rephrased with stronger language like "must-fix" or "not optional"), auto-apply the prior round's decision and log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT re-surface to the user via the approval gate, even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: PR #247 round 2 — user feedback "these are all technical so shouldn't be surfaced to me, go with your recommendations" after I re-presented 6 round-1 duplicates with the same recommendations.
+
+### [2026-05-01] Pattern — External reviewers misread codebase canonical RLS without architecture.md context
+
+ChatGPT consistently flags the codebase canonical RLS pattern (`current_setting('app.organisation_id', true) IS NOT NULL AND ... <> '' AND organisation_id = current_setting(...)::uuid` with `, true`) as a "silent denial bug" and recommends removing `, true` for fail-fast behaviour. The pattern is intentional and documented at `architecture.md` §Canonical org-isolation policy template (lines 1451-1474). The `true` flag (`missing_ok = true`) returns NULL when the GUC is unset; the explicit NULL / empty guards then close the policy fail-closed. Admin paths bypass RLS entirely via `SET LOCAL ROLE admin_role` (BYPASSRLS), so the `true` flag avoids throwing on legitimate admin operations that don't set `app.organisation_id`. Surfaced 3× in PR #247 review (rounds 1, 2, 3). **Rule:** when this finding appears, reject and reference the architecture.md section; do NOT change the pattern unless undertaking a codebase-wide RLS convention audit.
