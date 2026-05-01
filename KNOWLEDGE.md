@@ -292,6 +292,22 @@ Closing out the cached-context spec after 5 rounds of external ChatGPT review + 
 
 **Rule for vocabulary drift:** when a user or reviewer observes that a spec is using two names for the same concept (backend name vs UI name), rename to the single preferred name immediately, at every layer (schema, services, routes, types, error codes, prose, mockups). Do not "defer to implementation" — vocabulary inconsistency compounds with every layer it survives into. This spec's pack → bundle rename fixed 390+ references across 6 files in one commit because it happened pre-implementation.
 
+### 2026-05-01 Convention — Coordinator handoff write ordering on abort (seen 1 time)
+
+On any coordinator abort or hard-escalation path: always write `handoff.md` FIRST, then update `tasks/current-focus.md`. Never reverse this order. A crash between the two writes leaves current-focus.md pointing at a valid handoff (recoverable) rather than an updated current-focus with no handoff (ambiguous state that every subsequent coordinator launch will reject as a bug). Applied in §6.4.2 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Generalises to any two-file state machine where the second write is the pointer.
+
+### 2026-05-01 Pattern — Commit file-scope invariant in coordinator-driven builds (seen 1 time)
+
+When a coordinator stages files after a builder sub-agent run: (1) capture the builder's declared "Files changed" list, (2) run `git diff --name-only HEAD`, (3) hard fail if unexpected files appear — do NOT offer to stage only declared files. The "stage only declared files" option allows a distracted operator to accidentally commit cross-chunk bleed. Hard fail forces investigation. Never use `git add .` or `git add -A` from a coordinator. Always `git add <explicit file list>`. Applied in §2.9.3 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Pattern — Pre-resume typecheck gate for coordinator resume runs (seen 1 time)
+
+When feature-coordinator resumes from an interrupted build (any chunk is `done` in progress.md): run one full `npm run typecheck` BEFORE processing any chunk-skip decisions. If it fails, do NOT skip any completed chunks — type drift from incomplete later chunks can make a previously-passing chunk look clean when it isn't. The typecheck gate is the cheapest way to catch integrated-state drift before acting on stale progress.md data. Applied in §2.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Convention — Doc-sync count enforcement (seen 1 time)
+
+When enforcing a doc-sync gate (coordinator or review agent): count the registered docs in `docs/doc-sync.md`, then verify the verdict table in progress.md / session log has exactly that many rows. A row count shortfall is a gate failure, not a review comment. "Missing verdict blocks finalisation" is only enforceable if you verify count, not just presence of some verdicts. Applied in §2.12 and §3.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
 **Rule for testing-posture framing in long specs:** if the spec inherits a framing default from a higher-level doc (e.g. `runtime_tests: pure_function_only` from `docs/spec-context.md`), and the spec defines tests that deviate from that default, declare the deviation explicitly in the spec's own framing-deviations section. Silence creates a cross-layer contradiction that reviewers will catch late. Caught in round 5 of this spec; worth doing proactively next time.
 
 Applies to any implementation-readiness spec review: API contracts, primitive rollouts, cross-cutting concerns.
@@ -1727,3 +1743,7 @@ When `chatgpt-pr-review` surfaces findings in Round N (N ≥ 2) that are substan
 ### [2026-05-01] Pattern — External reviewers misread codebase canonical RLS without architecture.md context
 
 ChatGPT consistently flags the codebase canonical RLS pattern (`current_setting('app.organisation_id', true) IS NOT NULL AND ... <> '' AND organisation_id = current_setting(...)::uuid` with `, true`) as a "silent denial bug" and recommends removing `, true` for fail-fast behaviour. The pattern is intentional and documented at `architecture.md` §Canonical org-isolation policy template (lines 1451-1474). The `true` flag (`missing_ok = true`) returns NULL when the GUC is unset; the explicit NULL / empty guards then close the policy fail-closed. Admin paths bypass RLS entirely via `SET LOCAL ROLE admin_role` (BYPASSRLS), so the `true` flag avoids throwing on legitimate admin operations that don't set `app.organisation_id`. Surfaced 3× in PR #247 review (rounds 1, 2, 3). **Rule:** when this finding appears, reject and reference the architecture.md section; do NOT change the pattern unless undertaking a codebase-wide RLS convention audit.
+
+### [2026-05-01] Pattern — Verdict-based gates need evidence-bearing verdicts, not trust-based ones
+
+When a finalisation gate enforces "for each X, declare yes/no/n/a" (doc-sync sweeps, conformance checks, security reviews), the agent can declare `no — already accurate` after a quick skim and miss issues the diff actually invalidated. The verdict format itself must require evidence: either grep terms checked against the target and found absent, or a specific reason the update trigger genuinely doesn't apply. Without an audit trail in the verdict, the gate becomes trust-based and degrades silently — the failure mode is "declared clean, actually stale" with no way to retroactively notice. **Rule:** any verdict-based gate must require the verdict to cite the evidence that justified it; bare or unsubstantiated verdicts are treated as missing. Applied to `docs/doc-sync.md` § Investigation procedure + § Verdict rule (PR #248). Source: operator-observed failure mode in PR #247 finalisation where stale `architecture.md` references were missed because the doc-sync sweep declared `no` without opening the doc.
