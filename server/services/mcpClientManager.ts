@@ -414,11 +414,13 @@ export const mcpClientManager = {
 
     // Variables declared before try so finally can access them in all paths.
     const callStart = Date.now();
-    let status: 'success' | 'error' | 'timeout' | 'budget_blocked';
+    // eslint-disable-next-line no-useless-assignment
+    let status: 'success' | 'error' | 'timeout' | 'budget_blocked' = 'error'; // safe default for finally
     let failureReason: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown' | undefined;
     let responseSizeBytes: number | undefined;
     let wasTruncated = false;
-    let durationMs: number;
+    // eslint-disable-next-line no-useless-assignment
+    let durationMs = 0; // safe default for finally
     // Set to true in the retry branch so finally skips the write (catch already wrote it)
     let wroteInCatch = false;
 
