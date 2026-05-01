@@ -395,8 +395,8 @@ export async function finaliseAgentRunFromIeeRun(
       failureReason: ieeRun.failureReason ?? null,
     });
 
-    if (!parentIsSubAgent) {
-      emitOrgUpdate(parentOrganisationId!, 'dashboard.activity.updated', {
+    if (!parentIsSubAgent && parentOrganisationId) {
+      emitOrgUpdate(parentOrganisationId, 'dashboard.activity.updated', {
         source: 'agent_run',
         runId: ieeRun.agentRunId,
         finalStatus: resolvedStatus,

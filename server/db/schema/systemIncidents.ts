@@ -79,8 +79,6 @@ export const systemIncidents = pgTable(
     lastTriageJobId: text('last_triage_job_id'),
     agentDiagnosisRunId: uuid('agent_diagnosis_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
     agentDiagnosis: jsonb('agent_diagnosis'),
-    promptWasUseful: boolean('prompt_was_useful'),
-    promptFeedbackText: text('prompt_feedback_text'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
