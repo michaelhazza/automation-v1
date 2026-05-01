@@ -52,6 +52,8 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
+export type RequiredIntegrationSlug = 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl';
+
 export interface IdempotencyContract {
   ttlClass: 'permanent' | 'long' | 'short';
 }
@@ -155,7 +157,7 @@ export interface ActionDefinition {
    * Slugs: 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl'
    * Leave unset for first-party / internal-only actions.
    */
-  requiredIntegration?: string;
+  requiredIntegration?: RequiredIntegrationSlug;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -2864,7 +2866,6 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     onFailure: 'skip',
-    requiredIntegration: 'ghl',
   },
 
   // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────

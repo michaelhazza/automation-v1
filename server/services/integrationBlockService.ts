@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { logger } from '../lib/logger.js';
 import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
-import { getActionDefinition } from '../config/actionRegistry.js';
+import { getActionDefinition, type RequiredIntegrationSlug } from '../config/actionRegistry.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 
 // Closed list of known OAuth provider slugs. Any value outside this set is a
@@ -60,7 +60,7 @@ export async function checkRequiredIntegration(
 
   const provider = action.requiredIntegration;
 
-  if (!VALID_INTEGRATION_PROVIDERS.includes(provider as typeof VALID_INTEGRATION_PROVIDERS[number])) {
+  if (!VALID_INTEGRATION_PROVIDERS.includes(provider as RequiredIntegrationSlug)) {
     logger.error('integration_block_check.invalid_provider', { toolName, provider, runId: ctx.runId });
     return { shouldBlock: false }; // fail-open — bad registry slug must not break runs
   }
