@@ -30,6 +30,8 @@ Read in order:
 
 **Entry guard:** if `tasks/current-focus.md` status is not `REVIEWING`, refuse and tell the operator the expected state. Do not proceed.
 
+**Time-source invariant:** every timestamp written by this coordinator (handoff sections, label timestamps, log entries, commit summaries) must be UTC ISO 8601 generated from `date -u` at execution time. Never substitute git commit time, DB time, or client-side time. Never mix sources within a run.
+
 **REVIEW_GAP check** — after reading the handoff, check `dual-reviewer verdict:` for `REVIEW_GAP: Codex CLI unavailable`. If present, print immediately before any other output:
 
 > ⚠ **Dual-reviewer was skipped in Phase 2 — reduced review coverage.** `chatgpt-pr-review` in step 5 will be the primary second-opinion pass. Consider running `dual-reviewer` manually if Codex becomes available before merge.

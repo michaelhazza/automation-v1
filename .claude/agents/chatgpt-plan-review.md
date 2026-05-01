@@ -26,7 +26,7 @@ When invoked with `chatgpt-plan-review (mode: manual) target=tasks/builds/{slug}
    ```
    **IMPORTANT:** the glob MUST be scoped to the current slug — do not use the unscoped `chatgpt-plan-review-*.md` pattern, which would pick up logs from different features.
 4. If a log exists for this slug → resume from the last completed round.
-5. If no log → create `tasks/review-logs/chatgpt-plan-review-{slug}-{YYYY-MM-DDThh-mm-ssZ}.md` with Session Info header (see Log Format below), create `.chatgpt-diffs/` if needed.
+5. If no log → create `tasks/review-logs/chatgpt-plan-review-{slug}-{YYYY-MM-DDThh-mm-ssZ}.md` with Session Info header (see Log Format below).
 6. Print kickoff message:
 
    > **Round 1 of chatgpt-plan-review (manual mode).**

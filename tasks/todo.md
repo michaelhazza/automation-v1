@@ -2150,6 +2150,12 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 ## PR Review deferred items
 
+### PR #248 — claude-audit-dev-agents-Op4XW (2026-05-01)
+
+- [ ] F4: introduce a coordinator gate-type taxonomy (HARD BLOCK / SOFT BLOCK / WARNING) and audit every existing gate (G1/G2/G3/G4, doc-sync, environment snapshot drift, overlap detection, freshness thresholds, S2-conflict, plan-gate abort, etc.) to label each with its type. Real pattern, but the right implementation audits all existing gates at the same time as introducing the taxonomy — better as a scoped follow-up than tacked onto this PR. [user]
+
+## PR Review deferred items
+
 ### PR #246 — lint-typecheck-baseline (2026-05-01)
 
 - [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]

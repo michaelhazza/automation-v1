@@ -20,6 +20,8 @@ Read in this order before doing anything else:
 
 **Entry guard:** If `tasks/current-focus.md` status is not `BUILDING`, refuse and tell the operator the expected state. Do not proceed.
 
+**Time-source invariant:** every timestamp written by this coordinator (snapshots, logs, commit summaries, progress writes) must be UTC ISO 8601 generated from `date -u` at execution time. Never substitute git commit time, DB time, or client-side time. Never mix sources within a run.
+
 ## Step 1 — Top-level TodoWrite list
 
 Immediately after context loading, emit a TodoWrite task list with exactly these 12 items (items 6 and 8 expand once architect returns):
@@ -47,9 +49,9 @@ Run the same sync logic as S0 (from spec §8): fetch origin, rebase or merge mai
 
 ```bash
 MAIN_PREFIXES=$(git diff HEAD...origin/main --name-only -- 'migrations/*.sql' \
-  | xargs -I{} basename {} | grep -oP '^\d+' | sort)
+  | xargs -I{} basename {} | grep -oP '^\d{4,}' | sort)
 BRANCH_PREFIXES=$(git diff origin/main...HEAD --name-only -- 'migrations/*.sql' \
-  | xargs -I{} basename {} | grep -oP '^\d+' | sort)
+  | xargs -I{} basename {} | grep -oP '^\d{4,}' | sort)
 COLLISIONS=$(comm -12 <(echo "$MAIN_PREFIXES") <(echo "$BRANCH_PREFIXES"))
 if [ -n "$COLLISIONS" ]; then
   echo "Migration-number collision(s) detected: $COLLISIONS"
@@ -163,12 +165,13 @@ If builder reports `PLAN_GAP`:
 
 ### Commit-integrity invariant
 
-After builder SUCCESS + G1 passes:
+The plan's declared files for the chunk are the canonical source of truth. The integrity chain is `plan-declared ⊇ builder-reported ⊇ working-tree`. After builder SUCCESS + G1 passes:
 
-1. Run `git diff --name-only HEAD` vs builder's "Files changed" list.
-2. If unexpected files appear → **hard fail**: print "Unexpected files in working tree: {list}. Commit blocked — investigate and revert unexpected changes before continuing." Do NOT commit; do NOT offer to stage only declared files. Operator must manually revert before coordinator resumes.
-3. Once only declared files remain: `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
-4. Update `tasks/builds/{slug}/progress.md` (mark this chunk done; refresh the environment snapshot — see below), mark TodoWrite complete, move to next chunk.
+1. Verify builder's "Files changed" list is a subset of the plan-declared files for this chunk. Any builder-reported file outside the planned set → **hard fail**: print "Builder modified files outside the chunk's declared scope: {list}. Commit blocked — investigate before continuing." Do NOT commit. (This catches builder scope-drift even when the working tree itself looks clean.)
+2. Run `git diff --name-only HEAD` vs builder's "Files changed" list.
+3. If unexpected files appear → **hard fail**: print "Unexpected files in working tree: {list}. Commit blocked — investigate and revert unexpected changes before continuing." Do NOT commit; do NOT offer to stage only declared files. Operator must manually revert before coordinator resumes.
+4. Once only declared files remain: `git add <declared files only>` (never `git add .` or `git add -A`) then `git commit`.
+5. Update `tasks/builds/{slug}/progress.md` (mark this chunk done; refresh the environment snapshot — see below), mark TodoWrite complete, move to next chunk.
 
 Commit message per chunk:
 
