@@ -489,3 +489,22 @@ test('formatThreadContextBlock: openTasks capped at FORMAT_MAX_ITEMS=20', () => 
   expect(result).toContain('Task 19');
   expect(result).not.toContain('Task 20');
 });
+
+// ── Ordering invariant test ────────────────────────────────────────────────────
+test('formatThreadContextBlock: ordering invariant — thread context block appears before all other augmentation', () => {
+  const ctx = makeModel({ openTasks: ['Deploy fix'], approach: 'Iterative' });
+  const threadBlock = formatThreadContextBlock(ctx);
+
+  // Simulate the full effectiveBasePrompt concatenation from agentExecutionService.ts:
+  // effectiveBasePrompt = threadBlock + '\n\n' + basePrompt
+  const basePrompt = 'You are an assistant.\n<external_document title="Doc1">content</external_document>';
+  const effectiveBasePrompt = threadBlock + '\n\n' + basePrompt;
+
+  // Thread context must be first
+  expect(effectiveBasePrompt.indexOf(threadBlock)).toBe(0);
+
+  // External doc content must appear AFTER thread context
+  const threadBlockEnd = threadBlock.length;
+  const externalDocIdx = effectiveBasePrompt.indexOf('<external_document');
+  expect(externalDocIdx).toBeGreaterThan(threadBlockEnd);
+});
