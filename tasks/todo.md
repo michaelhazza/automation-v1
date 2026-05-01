@@ -347,7 +347,20 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ---
 
+### deferred-items-pre-launch (2026-05-01)
+
+*(R1 deferred items F6 and F8 resolved in Round 2 — applied to spec)*
+
+---
+
 ## PR Review deferred items
+
+### PR #247 — claude-deferred-items-pre-launch-5Kx9P (2026-05-01 — ChatGPT review round 1)
+
+- [ ] [user] **R1/F3a: Resume path lacks 500ms thread-context build timeout** — `agentResumeService.ts:96` calls `buildThreadContextReadModel(resumeConvId, organisationId)` without the 500ms `Promise.race` timeout that `agentExecutionService.ts:832` uses. A slow context build during resume could delay the run. Fix: extract the timeout pattern into a small helper (`buildThreadContextWithTimeout(convId, orgId, timeoutMs = 500)`) and call it from both sites. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F3b: Thread-context version persistence is fire-and-forget** — `agentExecutionService.ts:856` writes `threadContextVersionAtStart` via `void db.update(...).catch(() => {})`. If the write fails, the prompt still injected the context but the DB has no record. Spec §2.2 invariant 3 (fail-open) makes this intentional, but drift detection downstream may misfire. Consider: either accept the drift (close as wontfix) or move version persistence into the same transactional boundary as run-start. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F4: `findActiveConnection` ordering does not prefer subaccount-specific over org-level** — `integrationConnectionService.ts` orders by `updatedAt DESC, createdAt DESC, id DESC`. ChatGPT suggests `(subaccount_id IS NOT NULL) DESC` as primary sort to prefer subaccount connections. No spec or contract documents the expected precedence; current single caller (`integrationBlockService`) only tests `if (conn)` so ordering has no behavioural effect today. If the policy is "subaccount-specific overrides org-level for the same provider", spec it first then implement. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F6: `integrationBlockServicePure.test.ts` mutates `ACTION_REGISTRY` for setup** — Tests cast and mutate the global registry then restore. Vitest's default sequential file-level execution makes this safe today, but parallel test runs would flake. Refactor to dependency-injection (pass action lookup as a parameter) or `vi.spyOn` once the test architecture is revisited. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
 
 ### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 / 2026-05-01 — ChatGPT review rounds 1–3)
 

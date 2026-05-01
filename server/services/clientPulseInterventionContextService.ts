@@ -6,7 +6,7 @@
  * "Routes call services only — never access `db` directly in a route".
  */
 
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { actions } from '../db/schema/actions.js';
@@ -363,7 +363,7 @@ export async function createOperatorProposal(
   const [agentRow] = await db
     .select({ id: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
     .where(
       and(eq(agents.organisationId, organisationId), eq(systemAgents.slug, PROPOSER_AGENT_SLUG)),
     )

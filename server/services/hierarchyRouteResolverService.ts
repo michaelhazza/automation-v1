@@ -55,7 +55,7 @@ async function resolveOrgLevelLink(organisationId: string): Promise<OrgLevelLink
       subaccountId: subaccountAgents.subaccountId,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+    .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
     .where(and(...baseConditions))
     .orderBy(subaccountAgents.createdAt, subaccountAgents.id)
     .limit(1);

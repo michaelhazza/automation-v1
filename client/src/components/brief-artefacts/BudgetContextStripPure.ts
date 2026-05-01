@@ -9,6 +9,7 @@
  * cost figure.
  *
  * Rules:
+ * - 'stub'      → always show (canned/template response; user needs context)
  * - 'hybrid'    → always show (mixed live + cached data; user needs context)
  * - 'canonical' → show only when data is stale (>60 s old), to flag drift risk
  * - anything else → hide
@@ -18,6 +19,7 @@ export function shouldShowSource(
   freshnessMs: number | undefined,
 ): boolean {
   if (!source) return false;
+  if (source === 'stub') return true;
   if (source === 'hybrid') return true;
   if (source === 'canonical' && freshnessMs !== undefined && freshnessMs > 60_000) return true;
   return false;
