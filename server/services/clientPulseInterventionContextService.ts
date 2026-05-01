@@ -496,7 +496,7 @@ export async function enqueueInterventionProposal(params: {
     metadata: params.metadata,
   });
 
-  let isNew = proposed.isNew;
+  const isNew = proposed.isNew;
   if (isNew) {
     const actionRow = await actionService.getAction(proposed.actionId, params.organisationId);
     await reviewService.createReviewItem(actionRow, {

@@ -60,7 +60,14 @@ export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'slack', 'no
 export type RequiredIntegrationSlug = typeof REQUIRED_INTEGRATION_SLUGS[number];
 
 export interface IdempotencyContract {
+  /** Ordered ActionContext field names that together form the idempotency key. See v7.1 spec §588. */
+  keyShape: string[];
+  /** Dedup boundary. See v7.1 spec §588. */
+  scope: 'subaccount' | 'org';
+  /** Retention class before expiry. See v7.1 spec §588. */
   ttlClass: 'permanent' | 'long' | 'short';
+  /** Whether the lock record may be reclaimed after TTL. See v7.1 spec §588. */
+  reclaimEligibility: 'eligible' | 'disabled';
 }
 
 export interface ActionDefinition {
@@ -3025,7 +3032,7 @@ export function resolveActionSlug(slug: string): string {
   if (canonical === undefined) return slug;
   if (!loggedAliasHits.has(slug)) {
     loggedAliasHits.add(slug);
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
     );

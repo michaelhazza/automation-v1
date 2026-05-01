@@ -11,7 +11,7 @@
 // the run is always written to a terminal status (§12.10).
 // ---------------------------------------------------------------------------
 
-import { z } from 'zod';
+
 import type { Observation } from '../../../shared/iee/observation.js';
 import {
   ExecutionAction,
@@ -100,10 +100,12 @@ export async function runExecutionLoop(input: ExecutionLoopInput): Promise<Execu
   const previousSteps: CompressedStep[] = [];
   const artifacts: string[] = [];
 
+  // eslint-disable-next-line no-useless-assignment
   let terminalStatus: 'completed' | 'failed' = 'failed';
+  // eslint-disable-next-line no-useless-assignment
   let terminalFailureReason: FailureReason | null = 'unknown';
+  // eslint-disable-next-line no-useless-assignment
   let terminalOutput: unknown = undefined;
-  let terminalSuccessSummary: string | undefined;
   let terminalConfidence: number | undefined;
 
   try {
@@ -243,7 +245,6 @@ export async function runExecutionLoop(input: ExecutionLoopInput): Promise<Execu
         terminalStatus = 'completed';
         terminalFailureReason = null;
         terminalOutput = action.summary;
-        terminalSuccessSummary = action.summary;
         terminalConfidence = action.confidence;
         break;
       }

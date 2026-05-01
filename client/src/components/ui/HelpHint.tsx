@@ -250,7 +250,7 @@ export function HelpHint(props: HelpHintProps) {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          open ? doClose() : doOpen();
+          if (open) { doClose(); } else { doOpen(); }
         }}
         onFocus={() => { if (!clickOnly) doOpen(); }}
         onBlur={handleBlur}

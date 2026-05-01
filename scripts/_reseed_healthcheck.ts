@@ -15,7 +15,7 @@ console.log(`  db: ${meta.rows[0].db} | ${meta.rows[0].version.split(',')[0]}`);
 console.log(`  now: ${meta.rows[0].now.toISOString()}`);
 
 const ext = await pool.query("SELECT extname FROM pg_extension ORDER BY extname");
-console.log(`  extensions: ${ext.rows.map((r: any) => r.extname).join(', ')}`);
+console.log(`  extensions: ${ext.rows.map((r: Record<string, unknown>) => r.extname).join(', ')}`);
 
 const tbl = await pool.query("SELECT COUNT(*)::int AS c FROM pg_tables WHERE schemaname='public'");
 console.log(`  public tables: ${tbl.rows[0].c}`);
@@ -27,7 +27,7 @@ console.log('\n--- users (login integrity) ---');
 const u = await pool.query('SELECT email, password_hash, role, status FROM users ORDER BY email');
 let allHashesPreserved = true;
 for (const row of u.rows) {
-  const b = backup.find((x: any) => x.email === row.email);
+  const b = backup.find((x: Record<string, unknown>) => x.email === row.email);
   let status: string;
   if (!b) {
     status = 'seeded (not in backup)';

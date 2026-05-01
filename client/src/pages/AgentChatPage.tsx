@@ -77,7 +77,7 @@ function renderAssistantContent(text: string): React.ReactNode[] {
     lastIndex = match.index + match[0].length;
   }
   const remaining = text.slice(lastIndex);
-  if (remaining) parts.push(...renderInlineMarkdown(remaining, keyIdx++));
+  if (remaining) parts.push(...renderInlineMarkdown(remaining, keyIdx));
   return parts;
 }
 
@@ -122,7 +122,7 @@ function renderBold(text: string, baseKey: number): React.ReactNode[] {
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < text.length) parts.push(<span key={`txt-${k++}`}>{text.slice(lastIndex)}</span>);
-  return parts.length ? parts : [<span key={`txt-${k++}`}>{text}</span>];
+  return parts.length ? parts : [<span key={`txt-${k}`}>{text}</span>];
 }
 
 const BOUNCE_DELAY_CLS = ['[animation-delay:0s]', '[animation-delay:0.2s]', '[animation-delay:0.4s]'];

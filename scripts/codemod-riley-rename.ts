@@ -22,7 +22,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');

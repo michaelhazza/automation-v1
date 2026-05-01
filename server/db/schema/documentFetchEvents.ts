@@ -19,7 +19,7 @@ export const documentFetchEvents = pgTable(
     tokensUsed:      integer('tokens_used').notNull(),
     tokensBeforeTruncation: integer('tokens_before_truncation'),
     resolverVersion: integer('resolver_version').notNull(),
-    failureReason:   varchar('failure_reason', { length: 64 }),
+    failureReason:   varchar('failure_reason', { length: 64 }).$type<FetchFailureReason>(),
     createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

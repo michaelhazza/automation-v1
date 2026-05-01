@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-01-deferred-items-pre-launch-spec.md
-active_plan: docs/superpowers/plans/2026-05-01-deferred-items-pre-launch.md
-build_slug: deferred-items-pre-launch
-branch: claude/deferred-items-pre-launch-5Kx9P
-status: REVIEWING
+active_spec: docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md
+active_plan: docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md
+build_slug: lint-typecheck-post-merge-tasks
+branch: lint-typecheck-post-merge-tasks
+status: MERGE_READY
 last_updated: 2026-05-01
 -->
 
@@ -19,13 +19,24 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** [docs/superpowers/specs/2026-05-01-deferred-items-pre-launch-spec.md](../docs/superpowers/specs/2026-05-01-deferred-items-pre-launch-spec.md)
-**Active plan:** [docs/superpowers/plans/2026-05-01-deferred-items-pre-launch.md](../docs/superpowers/plans/2026-05-01-deferred-items-pre-launch.md)
-**Active build slug:** deferred-items-pre-launch (branch `claude/deferred-items-pre-launch-5Kx9P`)
-**Status:** **BUILDING** — Significant (no architect pass needed; 6 well-specified fixes). Spec spot-checked against main at `eb39ac3e`. Items: E-D3 (integrationBlockService impl), A-D1 (thread context LLM injection), soft-delete gaps (23 join sites), A-D3 (RLS WITH CHECK migration), REQ C5 (Drive subaccount scope guard), S4 (cheap_answer source re-label). See spec §8 for DoD. Run `npm install` first — baseline typecheck is 134 errors (not 418) after deps are present. — Major (architect first; full review pipeline). Branch created from origin/main. Verification pass against the source brief found that 14 of the 17 listed items are already shipped on `main` (Phase 1 RLS DB hardening closed by migrations 0227 / 0228 / 0229; route+service refactors P3-C6/C7/C8/C9/C10/C11/H2/H3 closed in-tree). Spec narrowed to three phases: (1) `SC-2026-04-26-1` RLS protected-tables registry triage — bring `verify-rls-protected-tables.sh` to exit 0 (currently 67 violations: 63 unregistered tenant tables + 4 stale entries); (2) `CHATGPT-PR203-R2` `intervention_outcomes` UNIQUE index + `ON CONFLICT DO NOTHING` migration + job refactor; (3) `B10` per-org `withOrgTx` defense-in-depth on three maintenance jobs (optional, conditional on §5.5 budget rule — jobs are no longer silent no-ops, so this is defense-in-depth not correctness). Migration range `0244–0255` reserved (brief reserved 0241–0252 but `main` already shipped 0241/0242/0243). 14 brief items marked `[x]` in `tasks/todo.md` with closure citations. Sister branches `pre-prod-boundary-and-brief-api` and `pre-prod-workflow-and-delegation` own scoped-out paths (see §0.4 in the spec). **Next:** run `spec-reviewer` on the draft spec, then `architect` to decompose into chunks at `tasks/builds/pre-prod-tenancy/plan.md`. Stop at plan gate — operator switches model from Opus to Sonnet before execution per CLAUDE.md model-guidance rule.
+**Active spec:** [docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md](../docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md)
+**Active plan:** [docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md](../docs/superpowers/plans/2026-05-01-lint-typecheck-post-merge-plan.md)
+**Active branch:** `lint-typecheck-post-merge-tasks` (PR [#249](https://github.com/michaelhazza/automation-v1/pull/249))
+**Status:** **MERGE_READY** — full review pipeline closed.
+
+- spec-conformance: CONFORMANT_AFTER_FIXES (1 mechanical JSDoc fix on `computeFingerprint`).
+- pr-reviewer: APPROVED (1 strong S-1 + 4 non-blocking; S-1 resolved at finalisation, N-5 resolved with it; N-1 through N-4 routed to backlog as low-priority cleanup).
+- dual-reviewer (Codex): APPROVED, 0 findings.
+- chatgpt-pr-review: closed at 3 rounds (1 implement R1 F7 toast on McpServersPage sync; 12 reject; 3 defer R1 F3/F4/F6; 1 no-op R2 F5). Diminishing returns hit cleanly at end of R2.
+- doc-sync sweep: 2 stale references to legacy `worker/.eslintrc.cjs` updated (`docs/reporting-agent-handoff.md:114`, `docs/reporting-agent-paywall-workflow-spec.md:942`); architecture.md / capabilities.md / integration-reference.md / DEVELOPMENT_GUIDELINES.md / frontend-design-principles.md all n/a; CLAUDE.md / KNOWLEDGE.md updated within the PR.
+- KNOWLEDGE.md: 3 durable patterns extracted (ChatGPT diff-misreading rule, post-increment-on-dead-store no-op, chatgpt-pr-review close after 2 unproductive rounds).
+
+**Next:** apply `ready-to-merge` label on PR #249 to fire `unit_tests` and `integration_tests` CI gates; await CI green; merge.
+
+**Sister branch:** `claude/deferred-items-pre-launch-5Kx9P` (deferred-items-pre-launch — Significant; 6 fixes per spec) was the previous active spec while this lint+typecheck cleanup ran. Operator returns to it after PR #249 merges.
 
 **Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
-**Last updated:** 2026-04-29
+**Last updated:** 2026-05-01
 
 ---
 

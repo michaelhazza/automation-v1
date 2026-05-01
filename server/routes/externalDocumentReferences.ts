@@ -96,7 +96,7 @@ router.get(
       externalFileName: item.externalFileName,
       attachmentState: item.attachmentState,
       lastFetchEvent: item.latestFetchEvent
-        ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason ?? null }
+        ? { fetchedAt: item.latestFetchEvent.fetchedAt, failureReason: item.latestFetchEvent.failureReason }
         : null,
     }));
     return res.json({
@@ -419,7 +419,7 @@ router.patch(
       externalFileName: updated.externalFileName,
       attachmentState: updated.attachmentState,
       lastFetchEvent: latestEvent
-        ? { fetchedAt: latestEvent.fetchedAt, failureReason: latestEvent.failureReason ?? null }
+        ? { fetchedAt: latestEvent.fetchedAt, failureReason: latestEvent.failureReason }
         : null,
     });
     return res.json(viewModel);

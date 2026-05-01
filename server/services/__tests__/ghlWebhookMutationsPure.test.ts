@@ -33,10 +33,10 @@ test('ContactCreate → contact_created mutation with createdBy attribution', ()
     contact: { id: 'contact-1', createdBy: 'user-42' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'contact_created', 'mutationType');
-  assertEq(result.sourceEntity, 'contact', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-42', 'externalUserId');
-  assertEq(result.externalId, 'trace-abc', 'externalId prefers traceId');
+  assertEq(result!.mutationType, 'contact_created', 'mutationType');
+  assertEq(result!.sourceEntity, 'contact', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-42', 'externalUserId');
+  assertEq(result!.externalId, 'trace-abc', 'externalId prefers traceId');
 });
 
 test('ContactUpdate → contact_updated mutation with updatedBy attribution', () => {
@@ -48,8 +48,8 @@ test('ContactUpdate → contact_updated mutation with updatedBy attribution', ()
     contact: { id: 'contact-1', updatedBy: 'user-9' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'contact_updated', 'mutationType');
-  assertEq(result.externalUserId, 'user-9', 'externalUserId');
+  assertEq(result!.mutationType, 'contact_updated', 'mutationType');
+  assertEq(result!.externalUserId, 'user-9', 'externalUserId');
 });
 
 test('OpportunityStageUpdate → opportunity_stage_changed', () => {
@@ -60,9 +60,9 @@ test('OpportunityStageUpdate → opportunity_stage_changed', () => {
     opportunity: { id: 'opp-1', updatedBy: 'user-7' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'opportunity_stage_changed', 'mutationType');
-  assertEq(result.sourceEntity, 'opportunity', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-7', 'externalUserId');
+  assertEq(result!.mutationType, 'opportunity_stage_changed', 'mutationType');
+  assertEq(result!.sourceEntity, 'opportunity', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-7', 'externalUserId');
 });
 
 test('OpportunityStatusUpdate → opportunity_status_changed', () => {
@@ -73,8 +73,8 @@ test('OpportunityStatusUpdate → opportunity_status_changed', () => {
     opportunity: { id: 'opp-2', updatedBy: 'user-5' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'opportunity_status_changed', 'mutationType');
-  assertEq(result.externalUserId, 'user-5', 'externalUserId');
+  assertEq(result!.mutationType, 'opportunity_status_changed', 'mutationType');
+  assertEq(result!.externalUserId, 'user-5', 'externalUserId');
 });
 
 test('ConversationUpdated with outbound staff message → message_sent_outbound', () => {
@@ -86,9 +86,9 @@ test('ConversationUpdated with outbound staff message → message_sent_outbound'
     message: { id: 'msg-2', direction: 'outbound', userId: 'user-7' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'message_sent_outbound', 'mutationType');
-  assertEq(result.sourceEntity, 'conversation', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-7', 'externalUserId');
+  assertEq(result!.mutationType, 'message_sent_outbound', 'mutationType');
+  assertEq(result!.sourceEntity, 'conversation', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-7', 'externalUserId');
 });
 
 test('ConversationCreated with outbound staff message → message_sent_outbound', () => {
@@ -100,9 +100,9 @@ test('ConversationCreated with outbound staff message → message_sent_outbound'
     message: { id: 'msg-1', direction: 'outbound', userId: 'user-3' },
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'message_sent_outbound', 'mutationType');
-  assertEq(result.sourceEntity, 'conversation', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-3', 'externalUserId');
+  assertEq(result!.mutationType, 'message_sent_outbound', 'mutationType');
+  assertEq(result!.sourceEntity, 'conversation', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-3', 'externalUserId');
 });
 
 test('ConversationCreated inbound → no mutation', () => {
@@ -140,9 +140,9 @@ test('INSTALL event → app_installed mutation', () => {
     installedBy: 'agency-owner',
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'app_installed', 'mutationType');
-  assertEq(result.sourceEntity, 'location', 'sourceEntity');
-  assertEq(result.externalUserId, 'agency-owner', 'externalUserId');
+  assertEq(result!.mutationType, 'app_installed', 'mutationType');
+  assertEq(result!.sourceEntity, 'location', 'sourceEntity');
+  assertEq(result!.externalUserId, 'agency-owner', 'externalUserId');
 });
 
 test('UNINSTALL event → app_uninstalled mutation', () => {
@@ -153,7 +153,7 @@ test('UNINSTALL event → app_uninstalled mutation', () => {
     uninstalledBy: 'agency-owner',
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'app_uninstalled', 'mutationType');
+  assertEq(result!.mutationType, 'app_uninstalled', 'mutationType');
 });
 
 test('LocationCreate event → location_created mutation', () => {
@@ -164,8 +164,8 @@ test('LocationCreate event → location_created mutation', () => {
     createdBy: 'admin',
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'location_created', 'mutationType');
-  assertEq(result.externalUserId, 'admin', 'externalUserId');
+  assertEq(result!.mutationType, 'location_created', 'mutationType');
+  assertEq(result!.externalUserId, 'admin', 'externalUserId');
 });
 
 test('LocationUpdate event → location_updated mutation', () => {
@@ -176,7 +176,7 @@ test('LocationUpdate event → location_updated mutation', () => {
     updatedBy: 'admin',
   });
   expect(result !== null, 'should map').toBeTruthy();
-  assertEq(result.mutationType, 'location_updated', 'mutationType');
+  assertEq(result!.mutationType, 'location_updated', 'mutationType');
 });
 
 test('Unrecognised event type → null', () => {
@@ -197,7 +197,7 @@ test('Fallback externalId when traceId absent uses type + id + timestamp', () =>
     dateAdded: '2026-04-10T00:00:00Z',
   });
   expect(result !== null, 'should map').toBeTruthy();
-  expect(result.externalId.startsWith('ContactCreate:'), `fallback prefix: ${result.externalId}`).toBeTruthy();
+  expect(result!.externalId.startsWith('ContactCreate:'), `fallback prefix: ${result!.externalId}`).toBeTruthy();
 });
 
 // ── Outbound staff-message guard (isolated) ──────────────────────────────

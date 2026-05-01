@@ -12,6 +12,7 @@ import { expect, test } from 'vitest';
 import { isVisibleTo } from '../principal/visibilityPredicatePure.js';
 import type { VisibilityRow } from '../principal/visibilityPredicatePure.js';
 import type { PrincipalContext } from '../principal/types.js';
+import type { SystemPrincipal } from '../principal/types.js';
 import { buildUserPrincipal, buildServicePrincipal, buildDelegatedPrincipal } from '../principal/principalContext.js';
 
 // ---------------------------------------------------------------------------
@@ -356,3 +357,38 @@ test('delegated denied shared_subaccount even with null subaccount on row', () =
 });
 
 console.log('');
+
+// ---------------------------------------------------------------------------
+// System principal
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('system principal');
+
+test('system principal granted visibility when org matches', () => {
+  const principal: SystemPrincipal = {
+    type: 'system',
+    id: 'system-principal',
+    organisationId: ORG_A,
+    subaccountId: null,
+    teamIds: [],
+    isSystemPrincipal: true,
+  };
+  // private row, different owner — system bypasses ownership scoping
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), principal)).toBe(true);
+  // subaccount-scoped row — system bypasses subaccount scoping
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount' }), principal)).toBe(true);
+});
+
+test('system principal denied when org mismatches', () => {
+  const principal: SystemPrincipal = {
+    type: 'system',
+    id: 'system-principal',
+    organisationId: ORG_B,
+    subaccountId: null,
+    teamIds: [],
+    isSystemPrincipal: true,
+  };
+  // row belongs to ORG_A; system principal is from ORG_B — org gate must fire
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org' }), principal)).toBe(false);
+});

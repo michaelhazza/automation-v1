@@ -337,6 +337,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
   - [ ] [user] **Idempotency invariant for adversarial-reviewer** — Round 2 F1: add an explicit invariant guaranteeing that a second run of `adversarial-reviewer` against an unchanged diff produces identical findings (or a documented "no-op, already reviewed" log). Implementation cost too high for Phase 1 manual non-blocking — would require a finding-fingerprint scheme, parsing the prior log, comparing fingerprints, and skipping or no-op'ing on match. Defer until auto-invocation lands (re-running on every push amplifies the noise risk). **Home:** belongs in the cross-agent log-schema work above — idempotency is naturally expressed via the `findings[]` fingerprint field if the canonical schema is designed first.
   - [ ] [user] **Log header schema fields (`gitHeadSha`, `filesChanged`)** — Round 2 F4: ChatGPT proposed adding `gitHeadSha` and `filesChanged` to every review log's Session Info header so logs are self-contained snapshots of what was reviewed. Deferred for two reasons: (1) asymmetry — none of the existing review-log producers (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`) emit these fields today, so adding them only to `adversarial-reviewer` creates the schema drift the F5 standardisation is meant to prevent; (2) Mission Control's parser has no read-side consumer for either field — adding them to the producer with no reader is dead weight until the dashboard surfaces them. Bundle with the F5 standardisation work so the header schema is designed once across all seven agents.
 
+### lint-typecheck-post-merge-spec (2026-05-01)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-lint-typecheck-post-merge-spec-2026-05-01T02-26-36Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md`
+**Branch:** `lint-typecheck-post-merge-tasks`
+
+- [ ] [user] **Add concurrency guard to CI `lint_and_typecheck` job** — Round 1 ChatGPT finding: add `concurrency: group: lint-typecheck-${{ github.ref }}, cancel-in-progress: true` to prevent duplicate runs on rapid pushes. Out of scope for this spec's goal ("drive to exit 0, wire the gate"); valid CI optimization for a follow-up CI hygiene pass.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -2173,8 +2181,7 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 - [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
 - [ ] F7: update plan doc to reflect that `agentDiagnosis` column is `jsonb` not `text` — JSONB is the correct type for structured diagnosis data and is already used by `writeDiagnosis.ts`; plan was written before the type decision was finalised. [auto]
-- [ ] F14: add migration compatibility test — `it('handles null agentDiagnosis for legacy rows')` covering null agentDiagnosisRunId / agentDiagnosis (pre-migration rows); see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [user]
-- [ ] F28: add idempotency double-tap test for writeDiagnosis — run same (incidentId, agentRunId) pair twice and verify no duplicate rows, no divergent state; see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [auto]
+- F14 + F28: see `## Deferred — testing posture (lint-typecheck-post-merge spec)` near the bottom of this file — those rows supersede the earlier sparse routing.
 
 ## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
 
@@ -2186,6 +2193,42 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+## Deferred — testing posture (lint-typecheck-post-merge spec)
+
+**Source:** spec-reviewer agent — review of `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` Iteration 1, 2026-05-01. F14 and F28 were drafted as integration tests inside Task 7 of that spec, then auto-rejected on framing grounds (`docs/spec-context.md` `runtime_tests: pure_function_only`). Both are real tests worth writing — just not under the current testing posture. Picked up when posture changes (live data, integration-test budget approved, etc.).
+
+- [ ] **F14 — migration compatibility test for null `agentDiagnosis` rows.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts`. Asserts that `agentDiagnosisRunId` and `agentDiagnosis` read as `null` for legacy pre-migration rows and that `diagnosisStatus = 'none'` is the canonical presence indicator (never filter on `agentDiagnosisRunId IS NOT NULL`). DB-backed integration test — not pure-function. [auto - spec-reviewer]
+- [ ] **F28 — idempotency double-tap for `executeWriteDiagnosis`.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosis.test.ts`. Asserts that two calls with the same `(incidentId, agentRunId)` produce only one `diagnosis` event and a single row update. **Important contract correction:** the second call returns `{ success: true, suppressed: false }` per the actual implementation at `server/services/systemMonitor/skills/writeDiagnosis.ts:62-63, 124-127`; `suppressed: true` is reserved for the terminal-transition race path. Earlier draft of the test in the post-merge spec had this wrong — fix at write-time. [auto - spec-reviewer]
+
+## PR Review deferred items
+
+### PR — lint-typecheck-post-merge-tasks (2026-05-01)
+
+- [ ] N-1: remove redundant `'no-undef': 'off'` from per-pattern blocks in `eslint.config.js` (lines 24, 39); global block at line 14 already disables it. [auto]
+- [ ] N-2: combine the two `import type` lines for `PrincipalContext` and `SystemPrincipal` in `visibilityPredicatePure.test.ts:14-15`. [auto]
+- [ ] N-3: tighten `registerProviderAdapter` local type in `fakeProviderAdapter.test.ts:159` from `(key, a: unknown)` back to `(key, a: LLMProviderAdapter)`. [auto]
+- [ ] N-4: codemod sweep -- replace `npx tsx server/...` in Vitest test docstrings with `npx vitest run server/...` per DEVELOPMENT_GUIDELINES.md §7. [user]
+
+### PR #249 — lint-typecheck-post-merge-tasks — chatgpt-pr-review round 1 (2026-05-01T08:50 UTC)
+
+**Source:** ChatGPT-web review (manual mode); operator drove rounds inline in main session. Verdict: 3 auto-reject, 3 defer, 1 awaiting user. Log: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+
+- [ ] **F3-cgpt:** `liveAgentCount` in `client/src/components/Layout.tsx:266` is set in 5 places (initial fetch, refresh, polling, two socket handlers) but the JSX that rendered it as a Dashboard badge was removed in a prior commit. Pre-existing dead state — not introduced by PR #249. Lint rule is `'warn'` so CI passes. Either restore the Dashboard badge JSX (`<NavItem ... badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? \`${liveAgentCount} live\` : undefined} />`) or remove the state + setter + polling + socket handlers wholesale. [auto - chatgpt-pr-review]
+- [ ] **F4-cgpt:** Hygiene audit of all `// eslint-disable-next-line` comments in the codebase — ensure each remains justified and the rule it disables hasn't been resolved upstream. Periodic; not introduced by PR #249. [auto - chatgpt-pr-review]
+- [ ] **F6-cgpt:** Replace inline `Record<string, unknown>` casts with named row interfaces (~42 occurrences). Suggested per-file pass: introduce a small `type FooRow = { ... }` near each callsite where it's used, replace the cast. Mostly in `db.execute<T>()` callbacks. Out of scope for the lint cleanup spec (would expand the change set significantly). [auto - chatgpt-pr-review]
+- [x] **F7-cgpt:** UX polish for silent UI catches — `client/src/pages/McpServersPage.tsx:317` sync button. **Resolved in PR #249 (operator approved fix-in-PR):** added `toast.error(msg)` with the codebase's standard error-message extraction (matching `AgentRunCancelButton.tsx`). [user - chatgpt-pr-review]
+
+### PR #249 — lint-typecheck-post-merge-tasks — post-build pr-reviewer pass (2026-05-01T07:36 UTC)
+
+**Source:** post-build pr-reviewer agent. Verdict APPROVED (0 blocking, 1 strong, 4 non-blocking). Log: `tasks/review-logs/pr-reviewer-log-lint-typecheck-post-merge-tasks-2026-05-01T07-36-42Z.md`. S-1 was the only Strong finding; routed here because the only fix path requires editing `eslint.config.js`, which is a HITL-protected config file and the user is away from the keyboard at review time.
+
+- [x] **S-1 (Strong) — RESOLVED in PR #249 (operator approved at finalisation):** Worker T8 `no-restricted-imports` rule ported into `eslint.config.js` flat config (`files: ['worker/**/*.{ts,cjs,js}']` block at the bottom of the file); legacy `worker/.eslintrc.cjs` deleted; `'worker/.eslintrc.cjs'` ignore entry removed. Functionally verified — `ESLint.calculateConfigForFile('worker/src/loop/executionLoop.ts')` now returns the rule active; synthetic violation file produces the expected error `'../../server/db/schema/integrationConnections' import is restricted from being used by a pattern. Worker code must not import the integrationConnections table directly. ...` Stale doc references at `docs/reporting-agent-handoff.md:114` and `docs/reporting-agent-paywall-workflow-spec.md:942` updated in the same commit. [user]
+- [ ] **N-1 (post-build):** `IdempotencyContract` interface at `server/config/actionRegistry.ts:62-71` has all four S1 fields, but `ActionDefinition` doesn't yet carry `idempotencyContract?: IdempotencyContract`. Type-only contract — no caller validates it. Plumb through when the next idempotency-aware action is added. [auto]
+- [ ] **N-2 (post-build):** Pre-existing `await await expect(...).rejects.toThrow()` double-await typo in `server/services/__tests__/llmRouterTimeoutPure.test.ts:70` and `server/services/__tests__/canonicalDataService.principalContext.test.ts`. Drop the outer `await`. Harmless but confusing. [auto]
+- [ ] **N-3 (post-build):** Implementation chose `req.user!.id` (non-null assertion) over the spec's literal `req.user?.id` (optional chain) in `server/routes/workspace.ts` and `server/routes/suggestedActions.ts`. The `!` is correct because `authenticate` middleware always sets `req.user`; `?.` would propagate `undefined` into downstream services. Document the deviation in a future spec-self-review pass; no code change. [auto]
+- [ ] **N-4 (post-build):** `void _b;` dead-code noise at `server/services/dropZoneService.ts:280`. The `varsIgnorePattern: '^_'` already excludes `_b`; `void _b` is unnecessary. Drop in a future cleanup pass. [auto]
+- [x] **N-5 (post-build) — RESOLVED in PR #249:** `'worker/.eslintrc.cjs'` ignore entry removed from `eslint.config.js:8` together with S-1. The legacy file is deleted and the rule lives in the flat config. [auto]
 
 ---
 

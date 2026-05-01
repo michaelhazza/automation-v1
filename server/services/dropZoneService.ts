@@ -218,7 +218,7 @@ export async function confirm(input: ConfirmInput): Promise<ConfirmResult> {
     if (input.uploaderRole === 'client_contact') {
       await tx.execute(
         // Advance approvedCount atomically + flip trustedAt when threshold crossed
-        /* eslint-disable @typescript-eslint/no-explicit-any */
+         
         (await import('drizzle-orm')).sql`
           UPDATE subaccounts
              SET client_upload_trust_state = jsonb_set(

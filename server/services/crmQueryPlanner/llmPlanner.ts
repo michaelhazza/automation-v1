@@ -128,10 +128,9 @@ async function singleLlmCall(input: LlmCallInput): Promise<LlmCallOutput> {
   const { system, user } = extractSystemAndUser(messages);
 
   const started = Date.now();
-  let response: ProviderResponse;
   let parsedDraft: DraftQueryPlan | null = null;
 
-  response = await routeCall({
+  const response = await routeCall({
     messages: [{ role: 'user', content: user }],
     system,
     context: {

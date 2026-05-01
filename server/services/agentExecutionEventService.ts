@@ -203,8 +203,8 @@ async function persistEvent(
   // Critical events bypass the cap so lifecycle bookends always emit.
   // Non-critical events use the `< $cap` guard — empty RETURNING means we
   // short-circuit.
-  let nextSeq: number | null = null;
-  let runStartedAt: Date | null = null;
+  let nextSeq: number | null;
+  let runStartedAt: Date | null;
   if (critical) {
     const rows = await db
       .update(agentRuns)

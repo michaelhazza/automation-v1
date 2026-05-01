@@ -323,6 +323,10 @@ In `server/db/schema/systemIncidents.ts`, find `lastTriageJobId: text('last_tria
     agentDiagnosis: text('agent_diagnosis'),
 ```
 
+> `agentDiagnosis` is stored as `jsonb`, not the plan's original `text`. JSONB is correct
+> for structured diagnosis data (queryable, validates JSON). The type decision was made
+> after the plan was written.
+
 If `agentRuns` is not imported at the top, add:
 ```typescript
 import { agentRuns } from './agentRuns.js';
@@ -465,6 +469,10 @@ Find the `ActionDefinition` interface. Near the `idempotencyStrategy` property, 
   directExternalSideEffect?: boolean;
   sideEffectClass?: 'read' | 'write';
 ```
+
+> `'none'` was added as a third valid class alongside `'read'` and `'write'`.
+> Downstream logic (`managerGuardPure`) only gates on `'write'`, so `'none'` passes
+> through identically to `'read'`. The plan's original `'read' | 'write'` union was incomplete.
 
 - [ ] **Step 3: Verify skillIdempotencyKeysPure + managerGuardPure errors clear**
 

@@ -49,7 +49,7 @@ export async function handleIEEJob<T>(input: HandleJobInput<T>): Promise<void> {
     return;
   }
 
-  let executor: StepExecutor | null = null;
+  let executor: StepExecutor | null;
   try {
     executor = await input.buildExecutor(
       { id: run.id, organisationId: run.organisationId, subaccountId: run.subaccountId, agentId: run.agentId, agentRunId: run.agentRunId },

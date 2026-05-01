@@ -11,7 +11,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { and, eq, lt, sql, isNull, inArray } from 'drizzle-orm';
+import { and, eq, lt, isNull, inArray } from 'drizzle-orm';
 import type PgBoss from 'pg-boss';
 import { db } from '../db.js';
 import { env } from '../config/env.js';

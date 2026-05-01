@@ -22,7 +22,7 @@ import {
   type PendingInterventionOptions,
 } from './usePendingInterventionPure';
 
-export interface UsePendingInterventionOptions extends PendingInterventionOptions {}
+export type UsePendingInterventionOptions = PendingInterventionOptions;
 
 export interface UsePendingInterventionApi {
   approve: (reviewItemId: string) => Promise<void>;

@@ -73,7 +73,7 @@ test.skipIf(SKIP)('skill-analyzer wrapper RE-THROWS but does NOT emit on non-ter
   await new Promise(r => setTimeout(r, 100));
 
   const rows = await db.select().from(systemIncidents).where(eq(systemIncidents.fingerprint, fingerprint));
-  expect(rows.length).toBe(0, 'non-terminal attempts must NOT emit a system_incidents row');
+  expect(rows.length, 'non-terminal attempts must NOT emit a system_incidents row').toBe(0);
 });
 
 test.skipIf(SKIP)('skill-analyzer dedup: 5 terminal failures collapse to one row with occurrenceCount=5', async () => {

@@ -82,7 +82,7 @@ const anthropicAdapter: LLMProviderAdapter = {
     const providerRequestId = response.headers.get('request-id') ?? response.headers.get('x-request-id') ?? '';
 
     if (!response.ok) {
-      let errorDetail = '';
+      let errorDetail: string;
       try {
         const err = await response.json() as { error?: { message?: string } };
         errorDetail = err?.error?.message ?? response.statusText;
@@ -198,7 +198,7 @@ export async function countTokens(args: {
   }
 
   if (!response.ok) {
-    let errorDetail = '';
+    let errorDetail: string;
     try {
       const errBody = await response.json() as { error?: { message?: string } };
       errorDetail = errBody?.error?.message ?? response.statusText;

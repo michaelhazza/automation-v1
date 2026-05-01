@@ -22,7 +22,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { agentId, convId, messageId } = req.params;
     const orgId = req.orgId!;
-    const userId = req.userId!;
+    const userId = req.user!.id;
 
     const { actionKey } = req.body as { actionKey?: unknown };
 

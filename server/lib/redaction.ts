@@ -32,7 +32,7 @@ export interface RedactionPattern {
 export const DEFAULT_REDACTION_PATTERNS: readonly RedactionPattern[] = [
   {
     name: 'bearer_token',
-    regex: /Bearer\s+[A-Za-z0-9._\-]{20,}/g,
+    regex: /Bearer\s+[A-Za-z0-9._-]{20,}/g,
     replacement: '[REDACTED:bearer]',
   },
   {
@@ -47,7 +47,7 @@ export const DEFAULT_REDACTION_PATTERNS: readonly RedactionPattern[] = [
   },
   {
     name: 'anthropic_key',
-    regex: /sk-ant-[A-Za-z0-9\-]{20,}/g,
+    regex: /sk-ant-[A-Za-z0-9-]{20,}/g,
     replacement: '[REDACTED:anthropic_key]',
   },
   {
@@ -72,7 +72,7 @@ export const DEFAULT_REDACTION_PATTERNS: readonly RedactionPattern[] = [
   },
   {
     name: 'google_api_key',
-    regex: /\bAIza[0-9A-Za-z_\-]{35}\b/g,
+    regex: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     replacement: '[REDACTED:google_api_key]',
   },
 ];

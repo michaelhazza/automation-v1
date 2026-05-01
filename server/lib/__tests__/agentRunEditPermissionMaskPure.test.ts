@@ -81,8 +81,8 @@ test('prompt / llm_request / action — canEdit always false', () => {
       runOrganisationId: RUN_ORG,
       runSubaccountId: RUN_SUB,
     });
-    expect(mask.canEdit).toBe(false, `${type}: canEdit must be false`);
-    expect(mask.editHref).toBe(null, `${type}: editHref must be null`);
+    expect(mask.canEdit, `${type}: canEdit must be false`).toBe(false);
+    expect(mask.editHref, `${type}: editHref must be null`).toBe(null);
   }
 });
 
@@ -147,8 +147,8 @@ test('system_admin has full mask on every editable entity type', () => {
       runOrganisationId: RUN_ORG,
       runSubaccountId: RUN_SUB,
     });
-    expect(mask.canView).toBe(true, `${type}: system_admin canView`);
-    expect(mask.canEdit).toBe(true, `${type}: system_admin canEdit`);
+    expect(mask.canView, `${type}: system_admin canView`).toBe(true);
+    expect(mask.canEdit, `${type}: system_admin canEdit`).toBe(true);
   }
 });
 
