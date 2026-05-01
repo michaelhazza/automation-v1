@@ -142,7 +142,7 @@ export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorC
   if (input.fingerprintOverride) {
     return hashFingerprint(input.fingerprintOverride);
   }
-  if (input.idempotencyKey) return input.idempotencyKey; // caller-supplied dedup seed
+  if (input.idempotencyKey) return hashFingerprint(input.idempotencyKey); // caller-supplied dedup seed
   const parts = [
     input.source,
     input.errorCode ?? 'no_code',

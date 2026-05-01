@@ -309,5 +309,41 @@ test('shouldNotify — custom milestones from env', () => {
 });
 
 // ---------------------------------------------------------------------------
+// computeFingerprint — idempotencyKey priority path (S-2)
+// ---------------------------------------------------------------------------
+
+test('computeFingerprint — fingerprintOverride wins when both fingerprintOverride and idempotencyKey are set', () => {
+  const base = { source: 'agent' as const, summary: 'fail', stack: undefined, affectedResourceKind: undefined, errorCode: undefined };
+  const override = 'agent:orchestrator:CLASSIFICATION_PARSE_FAILURE';
+  const key = 'my-idempotency-key';
+  const result = computeFingerprint({ ...base, fingerprintOverride: override, idempotencyKey: key });
+  expect(result, 'fingerprintOverride should win').toEqual(hashFingerprint(override));
+});
+
+test('computeFingerprint — idempotencyKey is used and hashed when fingerprintOverride is undefined', () => {
+  const base = { source: 'job' as const, summary: 'sweep check', stack: undefined, affectedResourceKind: undefined, errorCode: undefined };
+  const key = 'sweep:check:abc123';
+  const result = computeFingerprint({ ...base, fingerprintOverride: undefined, idempotencyKey: key });
+  expect(result, 'idempotencyKey should be hashed').toEqual(hashFingerprint(key));
+});
+
+test('computeFingerprint — two inputs differing only by idempotencyKey produce different fingerprints', () => {
+  const base = { source: 'job' as const, summary: 'sweep check', stack: undefined, affectedResourceKind: undefined, errorCode: undefined, fingerprintOverride: undefined };
+  const a = computeFingerprint({ ...base, idempotencyKey: 'key-one' });
+  const b = computeFingerprint({ ...base, idempotencyKey: 'key-two' });
+  expect(a !== b, 'different idempotencyKey values should produce different fingerprints').toBeTruthy();
+});
+
+test('computeFingerprint — idempotencyKey path produces same result as equivalent fingerprintOverride', () => {
+  // Both idempotencyKey and fingerprintOverride now go through hashFingerprint,
+  // so passing the same string via either field must yield identical output.
+  const base = { source: 'job' as const, summary: 'check', stack: undefined, affectedResourceKind: undefined, errorCode: undefined };
+  const value = 'job:sweep:health-check-abc';
+  const viaIdempotencyKey = computeFingerprint({ ...base, idempotencyKey: value, fingerprintOverride: undefined });
+  const viaFingerprintOverride = computeFingerprint({ ...base, idempotencyKey: undefined, fingerprintOverride: value });
+  expect(viaIdempotencyKey, 'idempotencyKey and fingerprintOverride with same value should hash identically').toEqual(viaFingerprintOverride);
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
