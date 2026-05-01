@@ -4495,7 +4495,7 @@ async function executeMonitorWebpage(
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
-  let baselineContentHash = '';
+  let baselineContentHash: string;
   let baselineExtractedData: Record<string, unknown> | null = null;
 
   if (fields) {

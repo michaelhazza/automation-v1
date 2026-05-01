@@ -64,7 +64,7 @@ describe.skipIf(SKIP_INTEGRATION)('configAgentGuidelinesInjection (integration)'
   let memoryBlockAttachments: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let getBlocksForAgent: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let configAgent: { id: string; organisationId: string } | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let eq: any;

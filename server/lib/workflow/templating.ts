@@ -159,7 +159,7 @@ function parsePath(raw: string): ParsedPath {
   // 'steps' is a single token. 'run.input' / 'run.subaccount' / 'run.org' are two.
   let namespace: ParsedPath['namespace'];
   let stepId: string | undefined;
-  let cursor = 0;
+  let cursor: number;
 
   if (tokens[0]?.kind === 'key' && tokens[0].key === 'steps') {
     namespace = 'steps';

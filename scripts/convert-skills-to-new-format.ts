@@ -322,7 +322,7 @@ function convertSkillContent(raw: string): {
   try {
     toolDef = JSON.parse(jsonMatch[1]);
   } catch (e) {
-    throw new Error(`Invalid JSON in code block: ${e}`);
+    throw new Error(`Invalid JSON in code block: ${e}`, { cause: e });
   }
 
   const schema = toolDef.input_schema;

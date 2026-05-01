@@ -106,7 +106,7 @@ export function normaliseMessage(msg: string): string {
     // Strip UUIDs first (most specific pattern)
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
     // Strip ISO timestamps before number stripping so the 4-digit year isn't eaten first
-    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z+\-]+/g, '<timestamp>')
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z+-]+/g, '<timestamp>')
     // Strip remaining large standalone numbers (4+ digits)
     .replace(/\b\d{4,}\b/g, '<num>')
     .replace(/\s+/g, ' ')

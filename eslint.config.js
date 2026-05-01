@@ -5,10 +5,15 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'client/dist/**', 'coverage/**', 'server/db/migrations/**'],
+    ignores: ['dist/**', 'node_modules/**', 'client/dist/**', 'coverage/**', 'migrations/**', 'worker/.eslintrc.cjs'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    rules: {
+      'no-undef': 'off',
+    },
+  },
   {
     files: ['server/**/*.ts', 'shared/**/*.ts'],
     languageOptions: {

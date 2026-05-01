@@ -14,7 +14,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { modules } from '../server/db/schema/modules.js';
 
 const REPORTING_MODULE_SLUG = 'client_pulse';

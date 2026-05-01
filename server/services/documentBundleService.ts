@@ -346,7 +346,7 @@ export async function suggestBundle(input: {
       )
     );
 
-  let distinctSubjects = attachments.filter((a) => {
+  const distinctSubjects = attachments.filter((a) => {
     if (!input.excludeSubjectId) return true;
     return !(a.subjectType === input.excludeSubjectId.subjectType && a.subjectId === input.excludeSubjectId.subjectId);
   });

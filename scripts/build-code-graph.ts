@@ -645,18 +645,18 @@ async function runWatcher(): Promise<void> {
   try {
     const stats = await fs.stat(WATCHER_LOG_PATH);
     if (stats.size > 5 * 1024 * 1024) await fs.truncate(WATCHER_LOG_PATH, 0);
-  } catch {}
+  } catch { /* best-effort log rotation */ }
 
   // Write our PID so `--rebuild` can find and terminate us before dropping
   // the cache. Without this, a live watcher with stale in-memory state
   // would silently overwrite the freshly-rebuilt shards on its next event.
-  try { await fs.writeFile(WATCHER_PID_PATH, String(process.pid), 'utf8'); } catch {}
+  try { await fs.writeFile(WATCHER_PID_PATH, String(process.pid), 'utf8'); } catch { /* best-effort */ }
 
   // Cleanup on signal
   async function cleanup(): Promise<void> {
-    try { await fs.unlink(WATCHER_PID_PATH); } catch {}
+    try { await fs.unlink(WATCHER_PID_PATH); } catch { /* best-effort */ }
     if (releaseLock) {
-      try { await releaseLock(); } catch {}
+      try { await releaseLock(); } catch { /* best-effort */ }
       releaseLock = null;
     }
     process.exit(0);
@@ -745,7 +745,7 @@ async function runWatcher(): Promise<void> {
       const exports: string[] = [];
       try {
         for (const [name] of sf.getExportedDeclarations()) exports.push(name);
-      } catch {}
+      } catch { /* best-effort export extraction */ }
       // Successful extract — drop any stale .skipped.txt entry for this file.
       await pruneFromSkipped(relPath);
       return { imports, exports };
@@ -755,7 +755,7 @@ async function runWatcher(): Promise<void> {
       // Append to .skipped.txt
       try {
         await fs.appendFile(SKIPPED_PATH, `${relPath}\t${reason}\n`, 'utf8');
-      } catch {}
+      } catch { /* best-effort skip log */ }
       return null;
     }
   }
@@ -928,7 +928,7 @@ async function runWatcher(): Promise<void> {
           try {
             const content = await fs.readFile(path.join(ROOT, p), 'utf8');
             lineTotal += content.split('\n').length;
-          } catch {}
+          } catch { /* best-effort line count */ }
         }
         dirFileCounts.set(dir, Object.keys(memShards[dir]).length);
         dirLineCounts.set(dir, lineTotal);
@@ -1006,7 +1006,7 @@ async function runWatcher(): Promise<void> {
     });
   } catch (err) {
     console.warn(`[code-graph] watcher failed to start: ${err} — falling back to manual rebuild mode`);
-    if (releaseLock) { try { await releaseLock(); } catch {} }
+    if (releaseLock) { try { await releaseLock(); } catch { /* best-effort */ } }
     process.exit(0);
   }
 
@@ -1076,7 +1076,7 @@ async function main(): Promise<void> {
     console.log('[code-graph] --rebuild: terminating any existing watcher…');
     await terminateExistingWatcher();
     console.log('[code-graph] --rebuild: dropping cache…');
-    try { await fs.unlink(CACHE_PATH); } catch {}
+    try { await fs.unlink(CACHE_PATH); } catch { /* best-effort */ }
   }
 
   await coldBuild();
@@ -1134,9 +1134,9 @@ async function terminateExistingWatcher(): Promise<void> {
     }
   }
 
-  try { await fs.unlink(WATCHER_PID_PATH); } catch {}
-  try { await fs.unlink(LOCK_PATH); } catch {}
-  try { await fs.rm(LOCK_PATH + '.lock', { recursive: true, force: true }); } catch {}
+  try { await fs.unlink(WATCHER_PID_PATH); } catch { /* best-effort */ }
+  try { await fs.unlink(LOCK_PATH); } catch { /* best-effort */ }
+  try { await fs.rm(LOCK_PATH + '.lock', { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
 main().catch((err) => {

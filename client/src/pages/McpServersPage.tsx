@@ -314,7 +314,7 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
                       )}
                       {!isMcp && connector && (
                         <button
-                          onClick={async () => { try { const syncUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync` : `/api/org/connectors/${connector.id}/sync`; await api.post(syncUrl); load(); } catch {} }}
+                          onClick={async () => { try { const syncUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync` : `/api/org/connectors/${connector.id}/sync`; await api.post(syncUrl); load(); } catch { /* fire and forget */ } }}
                           className="btn btn-xs btn-secondary"
                         >
                           Sync Now

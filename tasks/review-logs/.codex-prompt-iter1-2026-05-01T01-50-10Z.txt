@@ -1,0 +1,50 @@
+You are reviewing a draft implementation specification for an internal codebase. The spec is reproduced verbatim at the bottom of this prompt between BEGIN_SPEC and END_SPEC markers. The repository the spec belongs to is the current working directory — you may inspect it freely (read files, run grep/find, etc.) to validate spec claims, but DO NOT modify any files.
+
+Project context you should treat as authoritative:
+- The repo is in PRE-PRODUCTION. No live users, no live agencies, no staged rollouts, no feature flags for new migrations.
+- Stage of the app: rapid evolution, breaking changes expected.
+- Testing posture: static gates primary; runtime tests are pure-function only; no frontend tests, no API contract tests, no E2E tests, no performance baselines, no composition tests.
+- Rollout model: commit-and-revert. Feature flags only for behaviour modes (shadow vs active, dev vs prod).
+- Prefer extending existing primitives over inventing new ones.
+- Test gates (npm run test:gates / test:qa / scripts/verify-*.sh / scripts/gates/*.sh / scripts/run-all-*.sh) are CI-only and must NEVER be invoked from a spec or local agent.
+
+Your task:
+
+Produce a rigorous implementation-readiness review of the spec. For every concrete finding, write a self-contained bullet that includes:
+
+1. A short title.
+2. The section / heading / line range in the spec it applies to.
+3. A one- to three-sentence description of the concern.
+4. A concrete suggested fix.
+5. A severity label: critical | important | minor | nit.
+
+Cover at minimum:
+
+- Internal contradictions (same fact stated two different ways).
+- Stale references (commands, file paths, line numbers, error counts that may be wrong).
+- Load-bearing claims without a named mechanism (e.g. "must be idempotent" with no enforcement).
+- File inventory drift (prose mentions a file/migration not listed in the file inventory or task list).
+- Sequencing bugs (later step depends on something a later task creates).
+- Missing per-task verdicts or ambiguous task scope.
+- Unnamed primitives ("a new helper" without a name).
+- Verification gaps (success conditions stated as prose without a checkable assertion).
+- Anything in the spec that contradicts the project context above.
+
+Do NOT propose "add more tests", "feature flag this", "stage the rollout", "add monitoring", "add E2E tests" — these conflict with the project context above and will be rejected as directional.
+
+Do NOT propose adding any local invocation of test gates / scripts/verify-*.sh / scripts/run-all-*.sh / npm run test:gates / npm run test:qa. CI runs these.
+
+Output format:
+
+Write your findings as a markdown document with two sections:
+
+## Findings
+
+- Finding 1 — title — severity — section — description — suggested fix.
+- Finding 2 — ...
+
+## Overall verdict
+
+One paragraph summarising whether the spec is ready for implementation as-is, ready with the listed fixes, or needs more substantial revision.
+
+BEGIN_SPEC

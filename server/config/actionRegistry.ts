@@ -3005,7 +3005,7 @@ export function resolveActionSlug(slug: string): string {
   if (canonical === undefined) return slug;
   if (!loggedAliasHits.has(slug)) {
     loggedAliasHits.add(slug);
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
     );

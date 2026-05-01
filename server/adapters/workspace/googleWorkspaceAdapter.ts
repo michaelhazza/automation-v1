@@ -179,7 +179,7 @@ export const googleWorkspaceAdapter: WorkspaceAdapter = {
     const auth = adminAuth();
     const admin = google.admin({ version: 'directory_v1', auth });
 
-    let googleUserId: string | null = null;
+    let googleUserId: string | null;
     try {
       const { data } = await admin.users.insert({
         requestBody: {

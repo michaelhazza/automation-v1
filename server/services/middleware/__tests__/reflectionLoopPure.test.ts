@@ -83,9 +83,9 @@ Second pass: Verdict APPROVE
 });
 
 test('ignores non-string input safely', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   expect(parseVerdict(undefined as unknown as string), 'undefined').toBe(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   expect(parseVerdict(null as unknown as string), 'null').toBe(null);
 });
 

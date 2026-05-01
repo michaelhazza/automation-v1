@@ -350,7 +350,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let effectiveModel: string;
   let routingTier: 'frontier' | 'economy' = 'frontier';
   let wasDowngraded = false;
-  let routingReason: string = 'ceiling';
+  let routingReason: string;
 
   const systemCallerPolicy = ctx.systemCallerPolicy ?? 'respect_routing';
   if (systemCallerPolicy === 'bypass_routing') {
@@ -700,6 +700,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const providerStart = Date.now();
   let providerResponse: ProviderResponse | null = null;
   let callStatus: string = 'success';
+  // eslint-disable-next-line no-useless-assignment
   let callError: string | null = null;
   let attemptNumber = 1;
   let actualProvider = effectiveProvider;

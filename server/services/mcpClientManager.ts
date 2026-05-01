@@ -89,7 +89,7 @@ function jsonDepth(obj: unknown, depth = 0): number {
 
 function validateMcpToolSchema(tool: McpToolDefinition): { valid: boolean; reason?: string } {
   if (!tool.name || tool.name.length > 100) return { valid: false, reason: 'name too long or empty' };
-  if (!/^[a-zA-Z0-9_.\-]+$/.test(tool.name)) return { valid: false, reason: 'invalid name characters' };
+  if (!/^[a-zA-Z0-9_.-]+$/.test(tool.name)) return { valid: false, reason: 'invalid name characters' };
   if (tool.description && tool.description.length > 1000) return { valid: false, reason: 'description exceeds 1000 chars' };
 
   if (tool.inputSchema) {
@@ -414,11 +414,11 @@ export const mcpClientManager = {
 
     // Variables declared before try so finally can access them in all paths.
     const callStart = Date.now();
-    let status: 'success' | 'error' | 'timeout' | 'budget_blocked' = 'error'; // safe default
+    let status: 'success' | 'error' | 'timeout' | 'budget_blocked';
     let failureReason: 'timeout' | 'process_crash' | 'invalid_response' | 'auth_error' | 'rate_limited' | 'unknown' | undefined;
     let responseSizeBytes: number | undefined;
     let wasTruncated = false;
-    let durationMs = 0;
+    let durationMs: number;
     // Set to true in the retry branch so finally skips the write (catch already wrote it)
     let wroteInCatch = false;
 

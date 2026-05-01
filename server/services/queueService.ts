@@ -172,7 +172,7 @@ async function processExecution(executionId: string): Promise<void> {
   // If subaccountId is set, use automationResolutionService for full
   // connection/engine/config resolution. Otherwise fall back to legacy.
   // ------------------------------------------------------------------
-  let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null = null;
+  let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null;
   let authPayload: Record<string, { access_token: string }> | undefined;
   let resolvedConfig: Record<string, unknown> | undefined;
   let resolvedConnections: Record<string, unknown> | undefined;

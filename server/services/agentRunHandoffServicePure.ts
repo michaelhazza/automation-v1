@@ -88,13 +88,13 @@ export interface BuildHandoffInput {
 
 const DECISION_PATTERNS: ReadonlyArray<RegExp> = [
   /^Decision[:\s]+(.+)$/im,
-  /^I (?:chose|decided to|opted to|went with) (.+?)(?: because (.+?))?[\.\n]/im,
-  /^Going with (.+?)(?: because (.+?))?[\.\n]/im,
+  /^I (?:chose|decided to|opted to|went with) (.+?)(?: because (.+?))?[.\n]/im,
+  /^Going with (.+?)(?: because (.+?))?[.\n]/im,
 ];
 
 /** Strip trailing sentence punctuation so the UI doesn't render dangling periods. */
 function trimTrailingPunctuation(s: string): string {
-  return s.replace(/[\.\!\?,;:]+$/g, '').trim();
+  return s.replace(/[.!?,;:]+$/g, '').trim();
 }
 
 /**
