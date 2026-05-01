@@ -32,7 +32,7 @@
 | 4 | Overuse of `eslint-disable-next-line` normalizing lint bypass | technical | REJECT framing / DEFER hygiene | Routed to backlog |
 | 5 | "best-effort cleanup" catch blocks across scripts — silent failures | technical | REJECT (spec-prescribed) | Auto-rejected |
 | 6 | `(r: Record<string, unknown>)` not type-safe — define minimal interfaces | technical | DEFER | Routed to backlog |
-| 7 | Silent error swallowing in UI sync action (`McpServersPage.tsx:317`) | **user-facing** | PRESENT TO USER | Awaiting decision |
+| 7 | Silent error swallowing in UI sync action (`McpServersPage.tsx:317`) | **user-facing** | PRESENT TO USER | **Implemented** (operator chose fix-in-PR) |
 
 ### Detailed adjudication
 
@@ -123,7 +123,10 @@ Verified ground truth:
 
 **Recommendation to user:** DEFER to backlog as a UX polish task ("surface sync errors via toast / inline alert"). Out of scope for the lint cleanup spec per CLAUDE.md §6.
 
-**Decision:** AWAITING USER INPUT.
+**Decision:** **Operator chose fix-in-PR.** Applied:
+- Added `import { toast } from 'sonner';` (line 2 — codebase convention; `Toaster` already mounted in `client/src/App.tsx`).
+- Replaced the inline single-line `try { ... } catch { /* fire and forget */ }` with a multi-line block that surfaces errors via `toast.error(msg)`. Error-message extraction follows the existing pattern in `client/src/components/AgentRunCancelButton.tsx:53-57`: tries `err.response.data.error` first (Axios error envelope), falls back to `err.message`, finally `'Sync failed'`.
+- Verified: `npm run lint` 0 errors / 697 warnings (unchanged); `npm run typecheck` clean.
 
 ---
 
@@ -133,7 +136,6 @@ Verified ground truth:
 |-------------|-------|
 | Auto-rejected | 3 (F1, F2, F5) |
 | Deferred to backlog | 3 (F3, F4, F6) |
-| Awaiting user | 1 (F7) |
-| Implemented | 0 |
+| Implemented | 1 (F7 — operator approved fix-in-PR) |
 
-No code changes applied this round. 4 backlog items added to `tasks/todo.md`.
+3 backlog items added to `tasks/todo.md` (F3, F4, F6). One file modified: `client/src/pages/McpServersPage.tsx`.

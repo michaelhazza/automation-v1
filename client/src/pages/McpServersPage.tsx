@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import api from '../lib/api';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -314,7 +315,20 @@ export default function McpServersPage({ user: _user, subaccountId, embedded = f
                       )}
                       {!isMcp && connector && (
                         <button
-                          onClick={async () => { try { const syncUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync` : `/api/org/connectors/${connector.id}/sync`; await api.post(syncUrl); load(); } catch { /* fire and forget */ } }}
+                          onClick={async () => {
+                            const syncUrl = subaccountId
+                              ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync`
+                              : `/api/org/connectors/${connector.id}/sync`;
+                            try {
+                              await api.post(syncUrl);
+                              load();
+                            } catch (err) {
+                              const msg =
+                                (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data?.error ??
+                                (err instanceof Error ? err.message : 'Sync failed');
+                              toast.error(msg);
+                            }
+                          }}
                           className="btn btn-xs btn-secondary"
                         >
                           Sync Now
