@@ -117,3 +117,50 @@ Final verdict: ✅ READY TO MERGE — no blockers left.
 *(none — all findings rejected)*
 
 ---
+
+## Round 4 — 2026-05-01T01:40:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: Nothing material left. Final 3 micro-checks.
+
+F27: Impossible state guard — add defensive assertion `if (!signalId) throw` for signal/diagnosis/runId.
+F28: Idempotency double-tap test — run same operation twice, verify no duplicate rows, no divergent state.
+F29: Failure path sanity — force one failure, confirm system doesn't leave unusable state, retries clean.
+
+Final verdict: ✅ Ship it. No blockers.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F27: Impossible state guard | technical | reject | auto (reject) | low | `writeDiagnosis.ts` already has explicit null guards: `if (!incidentId) return error` / `if (!agentRunId) return error`. Already implemented. |
+| F28: Idempotency double-tap test | technical | defer | auto (defer) | low | Valid future test. Out of scope for baseline. Added to plan post-merge section and tasks/todo.md. |
+| F29: Failure path sanity check | technical | reject | auto (reject) | low | Manual QA process, not a code change. |
+
+### Implemented
+*(none — F27/F29 rejected, F28 deferred)*
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED (4 rounds, 5 implement / 17 reject / 4 defer)
+
+- Rounds: 4
+- Auto-accepted (technical): 2 implemented | 14 rejected | 3 deferred
+- User-decided: 1 implemented (F1 schema columns removed) | 0 rejected | 1 deferred (F14 migration test)
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #246:
+  - [auto] F5: sideEffectClass 'none' spec alignment — doc update only
+  - [auto] F7: agentDiagnosis jsonb vs text — plan doc stale
+  - [user] F14: migration compatibility test for legacy null rows
+  - [auto] F28: idempotency double-tap test for writeDiagnosis
+- Architectural items surfaced to screen: none
+- KNOWLEDGE.md updated: yes (1 entry — stale local `main` ref; always use `origin/main` for PR diffs)
+- architecture.md updated: n/a
+- capabilities.md updated: n/a
+- integration-reference.md updated: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — verification commands already documented; agent files updated directly
+- frontend-design-principles.md updated: n/a
+- PR: #246 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/246

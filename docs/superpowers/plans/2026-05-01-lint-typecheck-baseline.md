@@ -1034,3 +1034,4 @@ pr-reviewer: review the lint/typecheck/CI baseline changes on branch lint-typech
 ## Post-merge work
 
 - [ ] **Migration compatibility test** — add `it('handles null agentDiagnosis for legacy rows')` covering the case where `agentDiagnosisRunId` / `agentDiagnosis` are null (pre-migration rows). Verifies that read paths and join logic don't silently exclude historical incidents. Surfaced by ChatGPT PR review round 2 (F14).
+- [ ] **Idempotency double-tap test for writeDiagnosis** — run the same `(incidentId, agentRunId)` pair twice and verify: no duplicate rows, second call returns `{ success: true }` via the no-op path, state is identical. Surfaced by ChatGPT PR review round 4 (F28).
