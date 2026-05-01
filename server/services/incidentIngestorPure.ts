@@ -138,6 +138,21 @@ export function topFrameSignature(stack: string | undefined): string {
     .slice(0, 200);
 }
 
+/**
+ * Compute the dedup fingerprint for an incident input.
+ *
+ * Precedence — first match wins:
+ *   1. `fingerprintOverride` — explicit override; wins outright (must match
+ *      `FINGERPRINT_OVERRIDE_RE`; intended for callers with domain-stable
+ *      identifiers, e.g. sweep + synthetic checks).
+ *   2. `idempotencyKey` — caller-supplied dedup seed; used when no override
+ *      is set but the caller still wants stable dedup (avoids stack-derived
+ *      fingerprinting churn across deploys).
+ *   3. Derived stack/message hash — default; combines source, errorCode,
+ *      normalised summary, top stack frame, and affected resource kind.
+ *
+ * See task 5.5 (N3) of the lint-typecheck-post-merge spec for the rationale.
+ */
 export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorCode' | 'summary' | 'stack' | 'affectedResourceKind' | 'fingerprintOverride' | 'idempotencyKey'>): string {
   if (input.fingerprintOverride) {
     return hashFingerprint(input.fingerprintOverride);
