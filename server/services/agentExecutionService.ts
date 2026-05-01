@@ -99,7 +99,7 @@ import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 import { checkRequiredIntegration } from './integrationBlockService.js';
 import { agentMessages } from '../db/schema/index.js';
 import { buildThreadContextReadModel } from './conversationThreadContextService.js';
-import { formatThreadContextBlock } from './conversationThreadContextServicePure.js';
+import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
 import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
 
 // ---------------------------------------------------------------------------
@@ -851,7 +851,7 @@ export const agentExecutionService = {
         if (threadCtx && typeof threadCtx.version === 'number') {
           const threadBlock = formatThreadContextBlock(threadCtx);
           if (threadBlock) {
-            effectiveBasePrompt = threadBlock + '\n\n' + basePrompt;
+            effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
             // Persist version for drift detection — fire-and-forget, best-effort
             void db
               .update(agentRuns)

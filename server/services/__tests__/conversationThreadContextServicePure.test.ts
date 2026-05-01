@@ -490,21 +490,25 @@ test('formatThreadContextBlock: openTasks capped at FORMAT_MAX_ITEMS=20', () => 
   expect(result).not.toContain('Task 20');
 });
 
-// ── Ordering invariant test ────────────────────────────────────────────────────
-test('formatThreadContextBlock: ordering invariant — thread context block appears before all other augmentation', () => {
+// ── prependThreadContextToBasePrompt tests ────────────────────────────────────
+import { prependThreadContextToBasePrompt } from '../conversationThreadContextServicePure.js';
+
+test('prependThreadContextToBasePrompt: empty threadBlock → basePrompt unchanged', () => {
+  const base = 'You are an assistant.';
+  expect(prependThreadContextToBasePrompt('', base)).toBe(base);
+});
+
+test('prependThreadContextToBasePrompt: non-empty threadBlock prepended before base prompt', () => {
   const ctx = makeModel({ openTasks: ['Deploy fix'], approach: 'Iterative' });
   const threadBlock = formatThreadContextBlock(ctx);
+  const base = 'You are an assistant.\n<external_document title="Doc1">content</external_document>';
 
-  // Simulate the full effectiveBasePrompt concatenation from agentExecutionService.ts:
-  // effectiveBasePrompt = threadBlock + '\n\n' + basePrompt
-  const basePrompt = 'You are an assistant.\n<external_document title="Doc1">content</external_document>';
-  const effectiveBasePrompt = threadBlock + '\n\n' + basePrompt;
+  const result = prependThreadContextToBasePrompt(threadBlock, base);
 
-  // Thread context must be first
-  expect(effectiveBasePrompt.indexOf(threadBlock)).toBe(0);
-
-  // External doc content must appear AFTER thread context
-  const threadBlockEnd = threadBlock.length;
-  const externalDocIdx = effectiveBasePrompt.indexOf('<external_document');
-  expect(externalDocIdx).toBeGreaterThan(threadBlockEnd);
+  // Thread context must appear first
+  expect(result.indexOf(threadBlock)).toBe(0);
+  // External doc content must appear strictly AFTER the thread block ends
+  expect(result.indexOf('<external_document')).toBeGreaterThan(threadBlock.length);
+  // Separator between thread block and base prompt
+  expect(result).toContain(threadBlock + '\n\n' + base);
 });

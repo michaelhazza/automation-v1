@@ -326,6 +326,22 @@ export function formatThreadContextBlock(ctx: ThreadContextReadModel | null): st
   return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
 }
 
+// ── prependThreadContextToBasePrompt ─────────────────────────────────────────
+
+/**
+ * Prepends a formatted thread-context block to the base system prompt.
+ * Returns basePrompt unchanged when threadBlock is empty — callers must not
+ * inject an empty block (creates an orphaned blank line at the start).
+ * This function is the single source of truth for the §2.2 ordering invariant.
+ */
+export function prependThreadContextToBasePrompt(
+  threadBlock: string,
+  basePrompt: string,
+): string {
+  if (!threadBlock) return basePrompt;
+  return `${threadBlock}\n\n${basePrompt}`;
+}
+
 // ── normalizePatch ────────────────────────────────────────────────────────────
 
 /**
