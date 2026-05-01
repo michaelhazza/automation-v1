@@ -241,3 +241,82 @@ No code changes, no backlog additions. All 5 rejects were either diff-misreading
 Per the chatgpt-pr-review agent's stop condition (diminishing returns / repeated rejections), this is a strong signal to close the session. Round 2 produced no new valid findings — every flagged "blocker" was either a diff misreading or a duplicate of round 1. A round 3 is unlikely to surface anything material.
 
 Awaiting operator decision: close the session, or continue with round 3?
+
+---
+
+## Round 3 — 2026-05-01T09:30 UTC (final)
+
+### Findings (4)
+
+| # | Finding (ChatGPT) | Triage | Recommendation | Decision |
+|---|-------------------|--------|----------------|----------|
+| 1 | HelpHint double toggle *still needs fixing* | technical | REJECT | Auto-rejected — duplicate of R1 F2 / R2 F1 (diff misreading) |
+| 2 | Duplicate `onClick` *still present* | technical | REJECT | Auto-rejected — duplicate of R2 F2 (diff misreading) |
+| 3 | `keyIdx` no longer increments → duplicate keys | technical | REJECT | Auto-rejected — duplicate of R2 F3 (post-increment on dead store) |
+| 4 | Standardise error handling — `catch {}` inconsistency | technical | REJECT | Auto-rejected — duplicate of R1 F5 / R2 F4 |
+
+Operator instruction: *"Choose what to implement and close this off."*
+
+Round 3 contains zero new findings. All four points are repackaged retreads of rounds 1–2:
+- R3-1 = R2-1 = R1-2 (HelpHint double toggle — diff misreading; only one toggle exists, the if-else)
+- R3-2 = R2-2 (duplicate onClick in McpServersPage — diff misreading; grep confirms one onClick)
+- R3-3 = R2-3 (keyIdx++ removal — semantically identical post-increment on dead store)
+- R3-4 = R2-4 = R1-5 (catch `{}` consistency — UI catches use toast per R1 F7 fix; non-UI use `// intentional` per spec §4.5)
+
+Detailed adjudication is unchanged from rounds 1–2 — see those sections above. No fresh ground-truth verification required (the file states are unchanged since the R1 F7 commit `55e8d831`).
+
+**Implemented:** nothing.
+
+### Round 3 summary
+
+| Disposition | Count |
+|-------------|-------|
+| Auto-rejected (duplicates of prior rounds) | 4 |
+| New findings | 0 |
+| Implemented | 0 |
+
+---
+
+## Session close — 2026-05-01T09:30 UTC
+
+### Final disposition (3 rounds, 17 total findings)
+
+| Disposition | Count | Findings |
+|-------------|-------|----------|
+| Implemented | 1 | R1 F7 (McpServersPage sync — toast on error) |
+| Deferred to backlog | 3 | R1 F3 (liveAgentCount dead state), R1 F4 (eslint-disable hygiene audit), R1 F6 (Record→named interfaces) |
+| Auto-rejected | 12 | R1 F1/F2/F5; R2 F1/F2/F3/F4/F6; R3 F1/F2/F3/F4 |
+| No-op | 1 | R2 F5 (sorting refactor readability) |
+
+### Files changed across the chatgpt-pr-review session
+
+- `client/src/pages/McpServersPage.tsx` — toast.error on sync failure (R1 F7)
+- `tasks/todo.md` — 3 backlog items added (R1 F3, F4, F6)
+- `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md` — this log
+
+### Durable patterns extracted to KNOWLEDGE.md
+
+1. **ChatGPT PR-review diff-misreading rejection pattern** — when ChatGPT claims a "duplicate" exists in the file (the same code appearing twice), verify with `grep -c` or by reading the file rather than trusting the claim. The failure mode is reading `-foo` and `+bar` in a diff and treating both as present in the current file. Recurred across all 3 rounds in this session — ~30% of all findings.
+2. **Post-increment on a dead store is semantically a no-op** — `var++` on the last use of a local variable inside a function emits the current value (correct) and increments (unobservable, since the variable goes out of scope). `no-useless-assignment` flags these correctly; removing the `++` does not change behavior. Reviewers may incorrectly claim "regression" or "duplicate keys" — verify by tracing the value-passed at the call site, not the value-assigned-after.
+3. **chatgpt-pr-review session close after 2 unproductive rounds** — when 2 consecutive rounds produce 0 new valid findings AND the failure mode is structural (diff misreading, scope confusion, hallucination), close the session. Round-3+ time investment is rarely positive — the model is not getting new context.
+
+### PR readiness
+
+Branch `lint-typecheck-post-merge-tasks` is review-pipeline complete:
+
+| Gate | Status | Verdict |
+|------|--------|---------|
+| `npm run lint` | exits 0 | 697 warnings (warnings-allowed per spec) |
+| `npm run typecheck` | exits 0 | clean |
+| `spec-conformance` | passed | CONFORMANT_AFTER_FIXES (1 mechanical) |
+| `pr-reviewer` | passed | APPROVED (1 strong + 4 non-blocking deferred) |
+| `dual-reviewer` (Codex) | passed | APPROVED (0 findings) |
+| `chatgpt-pr-review` | closed | 1 implement / 3 defer / 12 reject / 1 no-op |
+
+**One outstanding item gated on operator approval:** S-1 from pr-reviewer (port worker T8 `no-restricted-imports` rule into flat config; deletes legacy `worker/.eslintrc.cjs`). Routed to `tasks/todo.md` as `[user]` because `eslint.config.js` is HITL-protected. Pre-existing dormancy; not introduced by this PR. Can ship without it; recommended follow-up.
+
+PR #249 is **ready for the operator to drive the merge**. Standard next steps:
+1. (Optional) Approve and apply the S-1 fix in this branch.
+2. Apply `ready-to-merge` label — fires `unit_tests` and `integration_tests` jobs (gated `if:`).
+3. Wait for CI green.
+4. Merge.
