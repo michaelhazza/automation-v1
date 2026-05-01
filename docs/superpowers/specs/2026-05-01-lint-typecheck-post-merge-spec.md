@@ -32,7 +32,8 @@
 
 **Goal:** confirm the environment is clean and baseline error counts before touching code.
 
-- [ ] `git checkout lint-typecheck-post-merge-tasks && git pull` — confirm on correct branch
+- [ ] `git status --short` — must return empty output. A dirty tree is a stop condition; either commit/stash/discard before proceeding or the `git pull` below will fail or interleave unrelated state with this session.
+- [ ] `git checkout lint-typecheck-post-merge-tasks && git pull` — confirm on correct branch.
 - [ ] `npm install` — always first; vitest and other deps may not be in node_modules after a fresh clone. Do not skip even if node_modules exists.
 - [ ] Run `npm run typecheck 2>&1 | grep "error TS" | wc -l` and record count. Expected: ~138. If materially higher, read new errors before proceeding.
 - [ ] Run `npm run lint 2>&1 | grep " error " | wc -l` and record count. Expected: 283.
@@ -161,13 +162,29 @@ Files: `skillIdempotencyKeysPure.test.ts`, `logger.integration.test.ts`, `jobCon
 **Root cause:** `eslint.config.js` already disables `'no-undef': 'off'` inside the `server/**` + `shared/**` block (line 19) and the `client/**` block (line 34). Files outside both globs — `scripts/*.ts`, root-level TS files, `tools/*.ts`, anything not matched by either `files:` selector — fall through to `js.configs.recommended` defaults where `no-undef` is `error`. TypeScript already enforces undefined references; this rule is redundant across the whole codebase.
 
 - [ ] Open `eslint.config.js`.
-- [ ] Add a global rules object before the `files`-scoped overrides so unmatched files inherit the same suppression:
+- [ ] **Insertion point matters.** Place the global rules object AFTER `js.configs.recommended` and `...tseslint.configs.recommended` but BEFORE the `files:`-scoped overrides for `server/**`/`shared/**` and `client/**`. Inserting before `js.configs.recommended` would be silently overridden, since that recommended config sets `'no-undef': 'error'`. The intended end state of `tseslint.config(...)` is:
   ```javascript
-  {
-    rules: {
-      'no-undef': 'off',
+  export default tseslint.config(
+    {
+      ignores: ['dist/**', 'node_modules/**', 'client/dist/**', 'coverage/**', 'server/db/migrations/**'],
     },
-  },
+    js.configs.recommended,
+    ...tseslint.configs.recommended,
+    // NEW — global suppression for files outside server/**/client/** globs (scripts/**, tools/**, root-level TS).
+    {
+      rules: {
+        'no-undef': 'off',
+      },
+    },
+    {
+      files: ['server/**/*.ts', 'shared/**/*.ts'],
+      // ... existing block unchanged ...
+    },
+    {
+      files: ['client/**/*.{ts,tsx}'],
+      // ... existing block unchanged ...
+    },
+  );
   ```
 - [ ] Run `npm run lint 2>&1 | grep " error " | wc -l` — should drop by ~125.
 
@@ -234,6 +251,7 @@ The current stub at `actionRegistry.ts:55–57` only declares `ttlClass`. The ot
 - [ ] Read the v7.1 spec lines 588–665 to confirm field types and JSDoc are still as documented above.
 - [ ] Add the three missing fields to the `IdempotencyContract` interface, matching the v7.1 spec types verbatim. Include a brief JSDoc on each field that points at v7.1 spec §588 for the canonical semantics — do not duplicate the full prose.
 - [ ] No comment-only fallback — a Strong-priority finding must close the contract drift, not paper over it.
+- [ ] **Verification (postcondition):** `grep -nE "keyShape:|scope:|reclaimEligibility:" server/config/actionRegistry.ts` must return at least one match for each of the three field names, alongside the pre-existing `ttlClass:` row. Then run `npx tsc --noEmit -p server/tsconfig.json` and confirm no new errors are introduced.
 
 ### 5.2 — S2: `visibilityPredicatePure.ts` switch not exhaustive after `SystemPrincipal`
 
@@ -316,6 +334,7 @@ The comment implies `if (capturedProviderResponse !== null)` is reachable; it is
   ```
 - [ ] Option B: if the branch adds confusion with no protective value, remove it entirely.
 - [ ] Do not leave the misleading comment as-is.
+- [ ] **Verification (postcondition):** `grep -n "capturedProviderResponse" server/services/llmRouter.ts` should show either (a) the new "defensive dead branch" comment at the original line, or (b) no occurrences at all if Option B was chosen. The pre-edit "implies reachable" wording must be gone.
 
 ### 5.5 — N3: `idempotencyKey` on `IncidentInput` is never consumed
 
@@ -325,9 +344,10 @@ File: `server/services/incidentIngestorPure.ts` (~line 37)
 
 - [ ] Read `incidentIngestorPure.ts` and the `computeFingerprint` function.
 - [ ] Choose one option and implement it:
-  - **Option A — Wire it in:** use `idempotencyKey` as a fallback seed in `computeFingerprint` when callers want to force a specific fingerprint without using `fingerprintOverride`. Document the semantics.
-  - **Option B — Remove it:** delete `idempotencyKey` from `IncidentInput`. Grep for callers and migrate them to `fingerprintOverride` if they need override behaviour.
+  - **Option A — Wire it in.** Update `computeFingerprint` so it uses `idempotencyKey` as a fallback seed when no `fingerprintOverride` is set. Pin the precedence as documented in code: `fingerprintOverride` (explicit override; wins outright) → `idempotencyKey` (caller-supplied dedup seed) → derived stack/message hash (default). Add a JSDoc to `computeFingerprint` listing the three sources in priority order, and a one-line inline comment at the branch implementing the fallback.
+  - **Option B — Remove it.** Delete `idempotencyKey` from `IncidentInput`. Grep for callers (`grep -rn "idempotencyKey" server/`) and migrate any caller that relied on it to `fingerprintOverride`. Update the comment at line 35-37 to remove the field documentation.
 - [ ] Add a comment documenting the decision so future sessions don't re-discover the same confusion.
+- [ ] **Verification (postcondition):** `grep -rn "idempotencyKey" server/services/incidentIngestorPure.ts server/lib/ server/jobs/ server/routes/` must show the field is consistently used (Option A) OR completely absent (Option B). No mixed state — every caller must agree.
 
 
 ## Task 6 — CI gate and doc updates
@@ -351,9 +371,9 @@ File: `.github/workflows/ci.yml`
   ```yaml
   on:
     pull_request:
-      types: [opened, reopened, labeled, synchronize]
+      types: [opened, reopened, ready_for_review, labeled, synchronize]
   ```
-  Without this, the new job will not fire when a PR is opened — only after a label or push. The "mandatory on every PR" goal needs `opened` + `reopened` in the trigger list.
+  Without these additions, the new job would not fire on `opened` / `reopened` (so a freshly opened PR has no lint/typecheck signal until the next push or label) or on `ready_for_review` (so a draft PR transitioning to ready without a new push slips the gate). All four event types are needed for "mandatory on every PR" to actually hold.
 - [ ] Add the following job (node 20, ubuntu-latest, matches existing CI jobs):
   ```yaml
   lint_and_typecheck:
@@ -396,10 +416,18 @@ Read each agent file first; add checks to the relevant verification/post-impleme
 
 **Status:** the original draft of this task proposed two DB-backed integration tests (F14 — migration compatibility for null `agentDiagnosis` rows; F28 — idempotency double-tap on `executeWriteDiagnosis`). Both violate the project's testing posture in `docs/spec-context.md` (`runtime_tests: pure_function_only`, `e2e_tests_of_own_app: none_for_now`). They are deferred out of this spec rather than re-shaped into pure-function tests, because the value of both tests is exactly the DB round-trip behaviour they assert — a pure-function rewrite would not exercise what F14/F28 were raised to catch.
 
-- [ ] **Ensure** F14 and F28 rows exist in `tasks/todo.md` under the heading `## Deferred — testing posture (lint-typecheck-post-merge spec)`. The rows were added by the spec-reviewer agent during Iteration 1 and are already present (the heading and rows live near the bottom of `tasks/todo.md`). Verify with `grep -n "Deferred — testing posture (lint-typecheck-post-merge spec)" tasks/todo.md` — exactly one heading should exist with two rows beneath it.
-- [ ] **Collapse the older PR #246 routing.** The same F14/F28 items also appear in `tasks/todo.md` under `### PR #246 — lint-typecheck-baseline (2026-05-01)` (the earlier ChatGPT pr-review session routed them with sparser detail). Delete those two `[ ] F14: ...` and `[ ] F28: ...` lines from the PR #246 section so there is exactly one entry per item, anchored to the richer Iter 1 entry. Leave the F5 and F7 rows in the PR #246 section untouched.
-- [ ] If for any reason the heading or rows under `## Deferred — testing posture (lint-typecheck-post-merge spec)` are missing, add them — but do NOT add a second copy. Idempotency is the rule.
-- [ ] No code is written for F14 or F28 in this spec. Mark this task complete once the dedup is done and the heading + 2 rows are present exactly once.
+- [ ] **Verify** the heading and rows exist exactly once. Run:
+  ```bash
+  grep -nE "^## Deferred — testing posture \(lint-typecheck-post-merge spec\)$" tasks/todo.md
+  ```
+  Expect exactly one match. Then verify the two checkbox rows beneath it (one for F14, one for F28) are present.
+- [ ] **Verify** the older PR #246 section is already deduped — i.e. it shows a single pointer line `- F14 + F28: see ## Deferred — testing posture (lint-typecheck-post-merge spec) near the bottom of this file …` rather than separate `[ ] F14:` and `[ ] F28:` checkbox rows. (The spec-reviewer agent already collapsed those during Iteration 2.) Run:
+  ```bash
+  grep -nE "^- \[ \] F(14|28):" tasks/todo.md
+  ```
+  Expect zero matches.
+- [ ] If either check fails, restore the canonical state: heading + two checkbox rows under it (the richer Iter 1 entry); single pointer line in the PR #246 section. Idempotency is the rule — never two copies.
+- [ ] No code is written for F14 or F28 in this spec. Mark this task complete once both verify steps pass.
 
 **Why this is the right call:** the testing-posture deferral is the canonical pattern in this codebase (see `docs/spec-context.md` — `composition_tests: defer_until_stabilisation`, `migration_safety_tests: defer_until_live_data_exists`). When live data exists or the testing posture matures, F14 + F28 are picked up from `tasks/todo.md` together with whatever other deferred tests have accumulated.
 
@@ -449,7 +477,7 @@ Run all checks before marking this spec complete. Every item must pass.
 | CI YAML valid | `node -e "const fs=require('fs');const yaml=require('yaml');yaml.parse(fs.readFileSync('.github/workflows/ci.yml','utf8'));console.log('valid');"` | Prints `valid` |
 | S2 switch exhaustive | `npm run typecheck` | No `TS2322` on `never` in visibilityPredicatePure |
 | S3 test passes | Run visibilityPredicatePure test file | All tests pass |
-| F14 + F28 deferred | Inspect `tasks/todo.md` | Two new rows under `## Deferred — testing posture (lint-typecheck-post-merge spec)` |
+| F14 + F28 deferred | `grep -nE "^## Deferred — testing posture \(lint-typecheck-post-merge spec\)$" tasks/todo.md` and `grep -nE "^- \[ \] F(14\|28):" tasks/todo.md` | Heading line returns exactly one match; checkbox-row grep returns zero matches (only the deferred-testing-posture rows beneath the heading exist) |
 
 ---
 
@@ -470,7 +498,7 @@ Run all checks before marking this spec complete. Every item must pass.
 | Fix `no-useless-escape` (14) | Task 4.6 | ✓ |
 | Fix `prefer-const` remaining | Task 4.7 | ✓ |
 | Fix eslint ignore path (N4) | Task 4.8 | ✓ |
-| S1 IdempotencyContract fields or stub comment | Task 5.1 | ✓ |
+| S1 IdempotencyContract — add the three missing fields per v7.1 spec §588 (no comment-only fallback) | Task 5.1 | ✓ |
 | S2 SystemPrincipal switch + exhaustiveness | Task 5.2 | ✓ |
 | S3 SystemPrincipal test | Task 5.3 | ✓ |
 | N1 dead branch comment in llmRouter | Task 5.4 | ✓ |
