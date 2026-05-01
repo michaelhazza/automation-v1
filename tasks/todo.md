@@ -337,6 +337,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
   - [ ] [user] **Idempotency invariant for adversarial-reviewer** — Round 2 F1: add an explicit invariant guaranteeing that a second run of `adversarial-reviewer` against an unchanged diff produces identical findings (or a documented "no-op, already reviewed" log). Implementation cost too high for Phase 1 manual non-blocking — would require a finding-fingerprint scheme, parsing the prior log, comparing fingerprints, and skipping or no-op'ing on match. Defer until auto-invocation lands (re-running on every push amplifies the noise risk). **Home:** belongs in the cross-agent log-schema work above — idempotency is naturally expressed via the `findings[]` fingerprint field if the canonical schema is designed first.
   - [ ] [user] **Log header schema fields (`gitHeadSha`, `filesChanged`)** — Round 2 F4: ChatGPT proposed adding `gitHeadSha` and `filesChanged` to every review log's Session Info header so logs are self-contained snapshots of what was reviewed. Deferred for two reasons: (1) asymmetry — none of the existing review-log producers (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`) emit these fields today, so adding them only to `adversarial-reviewer` creates the schema drift the F5 standardisation is meant to prevent; (2) Mission Control's parser has no read-side consumer for either field — adding them to the producer with no reader is dead weight until the dashboard surfaces them. Bundle with the F5 standardisation work so the header schema is designed once across all seven agents.
 
+### lint-typecheck-post-merge-spec (2026-05-01)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-lint-typecheck-post-merge-spec-2026-05-01T02-26-36Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md`
+**Branch:** `lint-typecheck-post-merge-tasks`
+
+- [ ] [user] **Add concurrency guard to CI `lint_and_typecheck` job** — Round 1 ChatGPT finding: add `concurrency: group: lint-typecheck-${{ github.ref }}, cancel-in-progress: true` to prevent duplicate runs on rapid pushes. Out of scope for this spec's goal ("drive to exit 0, wire the gate"); valid CI optimization for a follow-up CI hygiene pass.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)

@@ -97,7 +97,15 @@ Error: `Type 'string | null | undefined' is not assignable to type 'string | nul
 
 ## Task 3 — Fix test file typecheck errors
 
+**Pre-condition (hard stop):** Before starting any step in this task, confirm production errors are fully cleared:
+```bash
+npm run typecheck 2>&1 | grep "error TS" | grep -v "__tests__\|\.test\.\|\.spec\." | wc -l
+```
+Must return **0**. If non-zero, return to Task 2 and resolve the remaining production errors first. Applying `!` fixes on top of unfixed production errors is wasted work.
+
 **Goal:** clear all ~127 TypeScript errors in test files. These are mechanical — use `!` assertions where test setup guarantees the value. Do not add runtime `if` guards in tests; they hide broken setup.
+
+**Fail-fast rule:** If any TypeScript error code outside `TS18047`, `TS18048`, or `TS2722` appears in a test file, **stop**. Do not apply `!` to that error — it indicates a real type mismatch in the fixture or source type. Fix the root cause instead.
 
 **Pattern A** (`TS18047`/`TS18048` — value is possibly null/undefined): add `!` after the variable at its access site.
 **Pattern B** (`TS2722` — cannot invoke a possibly-undefined object): add `!` before `()` on the call (e.g. `fn!()` or `obj.method!(arg)`).
@@ -150,7 +158,7 @@ Files: `skillIdempotencyKeysPure.test.ts`, `logger.integration.test.ts`, `jobCon
 
 ## Task 4 — Fix lint errors
 
-**Goal:** drive `npm run lint` to exit 0. Work in order — the `no-undef` root-cause fix alone clears ~44% of all errors.
+**Goal:** drive `npm run lint` to exit 0. **Execution order:** run §4.2 (no-undef root-cause fix) first, then §4.1 (auto-fix pass), then §4.3 onward. Fixing the root cause before the auto-fix pass reduces output noise — the `no-undef` rule alone accounts for ~44% of all errors.
 
 ### 4.1 — Auto-fix pass
 
@@ -159,7 +167,7 @@ Files: `skillIdempotencyKeysPure.test.ts`, `logger.integration.test.ts`, `jobCon
 
 ### 4.2 — Fix `no-undef` root cause (125 errors)
 
-**Root cause:** `eslint.config.js` already disables `'no-undef': 'off'` inside the `server/**` + `shared/**` block (line 19) and the `client/**` block (line 34). Files outside both globs — `scripts/*.ts`, root-level TS files, `tools/*.ts`, anything not matched by either `files:` selector — fall through to `js.configs.recommended` defaults where `no-undef` is `error`. TypeScript already enforces undefined references; this rule is redundant across the whole codebase.
+**Root cause:** `eslint.config.js` already disables `'no-undef': 'off'` inside the `server/**` + `shared/**` block (line 19) and the `client/**` block (line 34). Files outside both globs — `scripts/*.ts`, root-level TS files, `tools/*.ts`, anything not matched by either `files:` selector — fall through to `js.configs.recommended` defaults where `no-undef` is `error`. TypeScript already enforces undefined references; this rule is redundant across the whole codebase. This suppression is **intentional and permanent** — not temporary cleanup.
 
 - [ ] Open `eslint.config.js`.
 - [ ] **Insertion point matters.** Place the global rules object AFTER `js.configs.recommended` and `...tseslint.configs.recommended` but BEFORE the `files:`-scoped overrides for `server/**`/`shared/**` and `client/**`. Inserting before `js.configs.recommended` would be silently overridden, since that recommended config sets `'no-undef': 'error'`. The intended end state of `tseslint.config(...)` is:
@@ -187,6 +195,11 @@ Files: `skillIdempotencyKeysPure.test.ts`, `logger.integration.test.ts`, `jobCon
   );
   ```
 - [ ] Run `npm run lint 2>&1 | grep " error " | wc -l` — should drop by ~125.
+- [ ] Verify the config placement took effect — pick any file under `scripts/` and run:
+  ```bash
+  npx eslint --print-config scripts/chatgpt-review.ts | grep '"no-undef"'
+  ```
+  Must output `"no-undef": ["off"]`. If it still shows `"error"`, the global rules object is in the wrong position in `eslint.config.js`.
 
 ### 4.3 — Fix `no-useless-assignment` (53 errors)
 
@@ -200,6 +213,7 @@ Variables assigned a value that is immediately overwritten or never read.
 
 - [ ] Run `npm run lint 2>&1 | grep "no-unused-vars" | grep "error"` to identify.
 - [ ] Prefix each unused variable or parameter with `_`. Do not delete destructured fields needed for type inference.
+  For destructured bindings (e.g. `const { a, b } = obj`), prefer **removing** the unused binding entirely rather than `_`-prefixing — renaming inside a destructure can affect type narrowing in edge cases. Only retain `_b` if `b` is required for the type to be inferred correctly.
 
 ### 4.5 — Fix `no-empty` (21 errors)
 
@@ -343,7 +357,7 @@ File: `server/services/incidentIngestorPure.ts` (~line 37)
 `idempotencyKey` is set by callers but `computeFingerprint` ignores it — it is a no-op field.
 
 - [ ] Read `incidentIngestorPure.ts` and the `computeFingerprint` function.
-- [ ] Choose one option and implement it:
+- [ ] Choose one option and implement it. **Prefer Option A** — removing a field that callers may rely on for dedup behaviour creates a silent regression risk. Only choose Option B if you confirm via `grep -rn "idempotencyKey" server/` that no caller depends on it providing dedup semantics:
   - **Option A — Wire it in.** Update `computeFingerprint` so it uses `idempotencyKey` as a fallback seed when no `fingerprintOverride` is set. Pin the precedence as documented in code: `fingerprintOverride` (explicit override; wins outright) → `idempotencyKey` (caller-supplied dedup seed) → derived stack/message hash (default). Add a JSDoc to `computeFingerprint` listing the three sources in priority order, and a one-line inline comment at the branch implementing the fallback.
   - **Option B — Remove it.** Delete `idempotencyKey` from `IncidentInput`. Grep for callers (`grep -rn "idempotencyKey" server/`) and migrate any caller that relied on it to `fingerprintOverride`. Update the comment at line 35-37 to remove the field documentation.
 - [ ] Add a comment documenting the decision so future sessions don't re-discover the same confusion.
@@ -354,7 +368,7 @@ File: `server/services/incidentIngestorPure.ts` (~line 37)
 
 **Goal:** make `npm run lint` and `npm run typecheck` mandatory blocking checks on every PR, and update documentation to reflect that these scripts are now operational.
 
-**Scope boundary.** "Mandatory blocking" here means: an unconditional CI job that fails the workflow run when either script exits non-zero. Branch-protection rules / required-status-check configuration on the GitHub repo are a separate repo-admin concern and are **out of scope** for this spec — they are not a code change and require repo-owner permissions.
+**Scope boundary.** "Mandatory blocking" here means: an unconditional CI job that fails the workflow run when either script exits non-zero. Branch-protection rules / required-status-check configuration on the GitHub repo are a separate repo-admin concern and are **out of scope** for this spec — they are not a code change and require repo-owner permissions. The policy intent is: CI failure on this job = PR cannot be merged; branch protection is the enforcement mechanism, configured by a repo admin separately.
 
 ### 6.1 — Add `lint_and_typecheck` job to CI
 
