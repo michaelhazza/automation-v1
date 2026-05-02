@@ -5,6 +5,7 @@
 - PR: #250 — https://github.com/michaelhazza/automation-v1/pull/250
 - Mode: manual
 - Started: 2026-05-02T08:30:55Z
+- **Verdict:** APPROVED (2 rounds, 1 implement / 7 reject / 2 defer)
 
 ---
 
@@ -269,3 +270,95 @@ Top themes: idempotency, observability, error_handling, scope, test_coverage, na
 - F10 → tasks/todo.md (`PR Review deferred items / PR #250`) [user-approved as recommended]
 
 ---
+
+## Round 2 — 2026-05-02T08:55:00Z
+
+### ChatGPT Feedback (raw)
+
+All good — this is essentially ready to finalise.
+
+No new material risks beyond what was already covered. At this point, anything else would be over-optimisation rather than meaningful risk reduction.
+
+Final Recommendation: Proceed to merge.
+
+Optional (Only if you want to harden further, not required)
+
+If you want to push this from "solid" → "production-grade under stress", these are the only two worth doing immediately:
+
+1. Add a single idempotency constraint (highest ROI)
+   If not already done, this is the one thing that prevents real-world pain: duplicate jobs, retry storms, race conditions.
+
+2. Add one concurrency test
+   Not a full suite, just one: same job triggered twice simultaneously. Assert: only one write succeeds, second is ignored or safely deduped. This catches more real issues than 10 happy-path tests.
+
+What NOT to do (right now)
+
+Skip for this release: Refactoring derived state, Expanding failure taxonomy deeply, Perfecting observability structure, Over-generalising contracts. None of those move the needle for this PR.
+
+### Verdict and Findings Extraction
+
+- Verdict: **APPROVED** — proceed to merge.
+- Net new findings: **0**.
+- The two "optional, not required" items map exactly to Round 1 findings:
+  - "Add a single idempotency constraint" = Round 1 F1 (auto-rejected with rationale that the partial unique index `agent_recommendations_dedupe` + advisory lock + 23505 catch already provide DB-level idempotency).
+  - "Add one concurrency test" = Round 1 F9 (deferred to tasks/todo.md / PR #250).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| _(none — ChatGPT confirmed approve; the two optional items duplicate Round 1 F1 + F9)_ | — | — | — | — | — |
+
+Top themes: idempotency (already-handled), test_coverage (already-deferred).
+
+### Action
+
+No code changes this round. Awaiting user decision: finalise or run another round.
+
+---
+
+## Final Summary
+
+- **Rounds:** 2
+- **Auto-accepted (technical):** 1 implemented | 7 rejected | 0 deferred
+- **User-decided:** 0 implemented | 0 rejected | 2 deferred
+- **Index write failures:** 0
+- **Verdict:** APPROVED — proceed to merge.
+
+### Consistency Warnings
+
+None. Round 2's two "optional" items (idempotency constraint, concurrency test) were classified identically to Round 1's F1 (auto-reject — already-implemented at DB level) and F9 (defer — user-approved). No round contradicted another.
+
+### Implemented (across all rounds)
+
+- [auto] R1/F4: `recommendation_id: existing.id` added to `recommendations.no_change.hash_match` and `recommendations.skipped.sub_threshold` log lines (`server/services/agentRecommendationsService.ts:186, 208`).
+
+### Deferred to tasks/todo.md § PR Review deferred items / PR #250
+
+- [user] R1/F9: Add concurrency / duplicate-execution test for `upsertRecommendation` (23505-race + advisory-lock concurrency not unit-tested today).
+- [user] R1/F10: `subaccount_display_name` "sometimes-present" contract — defer until a real client-friction case justifies a spec amendment.
+
+### Architectural items surfaced to screen (user decisions)
+
+None — no findings escalated to user with `architectural` scope_signal.
+
+### Doc sync sweep
+
+Assessed against the full PR diff vs `origin/main` (chunk 1 of subaccount-optimiser).
+
+- KNOWLEDGE.md updated: yes (1 entry — Static-analysis single-writer test pattern)
+- architecture.md updated: yes (new § *Agent Recommendations Surface*; new row in *Skill System* table for Output category; new row in *Key files per domain* table)
+- capabilities.md updated: yes (new *Output (operator-facing)* subsection with `output.recommend`)
+- integration-reference.md updated: n/a — `output.recommend` is internal; no OAuth provider, MCP preset, or external capability slug introduced
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — chunk 1 conforms to existing build-discipline, RLS, idempotency, and single-writer rules without introducing new conventions; pattern-level lessons recorded in KNOWLEDGE.md instead
+- frontend-design-principles.md updated: no — recommendation list follows existing list-of-cards pattern already covered by hard rules and the ClientPulse intervention worked example; revisit when subaccount-optimiser ships beyond chunk 1
+
+Honesty flag: architecture.md was genuinely stale relative to chunk 1 — zero mention of the new service / route / schema / skill / table existed before this finalisation. Should have been updated when chunk 1 was committed (per CLAUDE.md §11). The agent definition (`.claude/agents/chatgpt-pr-review.md`) was hardened in this same finalisation commit to reduce the chance of recurrence: explicit TodoWrite contract listing all 14 finalisation steps; step 6 (doc-sync sweep) and step 10 (main-merge) now flagged MANDATORY with explicit wording that bundling is a known failure mode.
+
+### main merged into branch
+
+Pending — performed in step 10 of finalisation flow (this commit lands first; merge follows in a separate commit so CI sees the merged state when the ready-to-merge label fires).
+
+### PR
+
+#250 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/250

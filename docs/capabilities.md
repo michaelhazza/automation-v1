@@ -906,6 +906,12 @@ Complete list of all 112 skills.
 | `config_publish_workflow_output_to_portal` | Publish a workflow step's output to the sub-account portal card; upserts the portal brief and marks the run portal-visible (workflow `action_call` steps only) | Deterministic | — |
 | `config_send_workflow_email_digest` | Send a markdown email digest to configured recipients with per-run deduplication; irreversible (workflow `action_call` steps only) | Deterministic | HITL |
 
+### Output (operator-facing)
+
+| Skill | Description | Type | Gate |
+|-------|-------------|------|------|
+| `output.recommend` | Surface a prioritised recommendation to the operator with automatic de-duplication, cooldowns, and severity-aware display | Deterministic | — |
+
 ### Workflow Studio
 
 | Skill | Description | Type | Gate |
