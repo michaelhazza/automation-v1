@@ -164,17 +164,17 @@ All deltas are **additive**. No existing column is dropped. Existing system temp
 | Table | Column | Type | Default | Purpose |
 |---|---|---|---|---|
 | step-definition (the `params` JSON inside `workflow_template_steps` or equivalent — exact target table named at architect-time) | `is_critical` | `boolean` | `false` | Author-marked. When `true`, the step is auto-routed to Approval regardless of its declared side-effect class. Drives §5 routing + alert hooks. (brief §8.5) |
-| `workflow_step_reviews` | `seen_payload` | `jsonb` | `null` | Snapshot of the parameters and rendered preview the approver actually saw at decision time. Snapshot-at-decision-time semantics are the contract; engine MUST NOT regenerate this from current state. (brief §8.7) |
-| `workflow_step_reviews` | `seen_confidence` | `jsonb` | `null` | The confidence chip value (`high` / `medium` / `low`) and reason as rendered on the card at decision time. Contract pinned at §6.2.1. (brief §8.6) |
-| `workflow_step_reviews` | `decision_reason` | `text` | `null` | Optional free-text from the approver. (brief §8.7) |
-| `workflow_step_reviews` | `approver_pool_snapshot` | `jsonb` | `null` | Snapshot of the eligible-approvers pool (an array of `userId` strings) resolved at gate-creation time. The engine validates the deciding user is in this snapshot (§5.1); team-membership changes after gate-open do not invalidate an in-flight approval. Source-of-truth for the membership check; never re-resolved from `approverGroup` after gate-open. |
-| `workflow_step_reviews` | `is_critical_synthesised` | `boolean` | `false` | When `true`, this review was synthesised by the engine because the next step has `is_critical: true` (§5.2). Distinguishes author-placed Approvals from auto-inserted ones in the audit trail. |
+| `workflow_step_reviews` | `gate_id` | `uuid` | required | FK → `workflow_step_gates.id` (new table, §3.3). One review row per decider; the gate-level snapshot lives on the gate row (one row) so multi-approver quorum doesn't fragment the snapshot. |
+| `workflow_step_reviews` | `decision_reason` | `text` | `null` | Optional free-text from the deciding approver. Per-decider, not per-gate. (brief §8.7) |
 | `workflow_template_versions` | `publish_notes` | `text` | `null` | Optional one-line "what changed in this version?" captured by the Studio Publish modal. Surfaces in version history + Plan tab caption. (brief §7.4) |
 | `workflows` (the workflow-template table) | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
 | `workflows` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
 | `schedules` (existing) | `pinned_template_version_id` | `uuid` | `null` | When non-null, scheduled runs use this exact version regardless of newer published versions. When null, "next run uses newest" (brief §7.4). (spec-time decision #5) |
 | `agent_execution_events` (existing per `accepted_primitives`) | `task_id` | `uuid` | `null` | FK → `tasks.id`. Set on every event emitted within a task's lifecycle (workflow-fired or ad-hoc). Drives the §8 replay contract (per-task monotonic ordering). |
 | `agent_execution_events` | `task_sequence` | `bigint` | `null` | Per-task monotonic sequence allocated alongside the existing per-run sequence. Source of truth for `event_id` in §8.2; never gapped within a `task_id`. Atomic allocation extends the existing `agentExecutionEventService` per-run claim pattern to the per-task scope. |
+| `workflow_runs` (existing per-run table; architect verifies the exact name) | `effective_cost_ceiling_cents` | `integer` | (mirrors template `cost_ceiling_cents` at run start) | Per-run override. The Pause/Resume contract (§7.5) updates this on resume-with-extension; defaults to the template value when the run starts so the engine has one place to read the active cap. |
+| `workflow_runs` | `effective_wall_clock_cap_seconds` | `integer` | (mirrors template `wall_clock_cap_seconds` at run start) | Per-run override; same lifecycle as `effective_cost_ceiling_cents`. |
+| `workflow_runs` | `extension_count` | `integer` | `0` | Per-run counter incremented on each successful resume-with-extension (§7.5). Default cap is 2; once reached, the pause card disables the extension button and only Stop is offered. |
 
 ### 3.2 New `approval` step `params` shape
 
@@ -225,7 +225,7 @@ Field-level `error_message` is optional; absence falls back to a per-type generi
 
 ### 3.3 New tables
 
-One new table — `workflow_drafts` — for the Studio-handoff path (§10.6, §13.2). The `teams` and `team_members` tables already exist in schema (brief §8.4); the build adds the missing CRUD UI page in Org settings. No other new tables for `isCritical`, audit fields, confidence — all fit on existing tables.
+Two new tables: `workflow_drafts` (Studio-handoff path, §10.6, §13.2) and `workflow_step_gates` (gate-level snapshot for Approval / Ask gates — see below). The `teams` and `team_members` tables already exist in schema (brief §8.4); the build adds the missing CRUD UI page in Org settings. No other new tables for `isCritical`, audit fields, or confidence — those fit on `workflow_step_gates` (gate-level) and `workflow_step_reviews` (per-decider).
 
 | Table | Column | Type | Default | Purpose |
 |---|---|---|---|---|
@@ -240,9 +240,9 @@ One new table — `workflow_drafts` — for the Studio-handoff path (§10.6, §1
 Lifecycle:
 
 - Created when the orchestrator drafts a workflow from chat intent (§13.2).
-- Read once on `?fromDraft=:draftId` in the Studio (§10.6) to hydrate the canvas.
-- Deleted (or `consumed_at` set) when the operator publishes a new template or explicitly discards.
-- Reaped after 7 days if neither published nor discarded (cleanup job; §16.3).
+- **Read repeatedly** while `consumed_at IS NULL` — Studio reads on every `?fromDraft=:draftId` visit, so closing the tab and re-entering hydrates the same draft (§10.6).
+- `consumed_at` is set when the operator publishes a new template OR explicitly discards from the orchestrator's chat draft card. After `consumed_at` is set the draft is no longer surfaced from chat or hydrated by Studio.
+- Reaped from disk after 7 days if `consumed_at IS NULL` (cleanup job; §16.3 item 35a).
 
 Indexes:
 
@@ -251,15 +251,40 @@ Indexes:
 | `(subaccount_id, session_id)` UNIQUE | One in-flight draft per session per subaccount; re-drafting the same session updates in place. |
 | `(consumed_at, created_at)` partial WHERE `consumed_at IS NULL` | Cheap scan for the 7-day reaper. |
 
+#### `workflow_step_gates`
+
+One row per opened Approval or Ask gate. Holds the queue-time snapshot fields once, regardless of how many deciders / submitters the gate accepts. `workflow_step_reviews.gate_id` FKs here.
+
+| Column | Type | Default | Purpose |
+|---|---|---|---|
+| `id` | `uuid` (PK) | `gen_random_uuid()` | Surrogate key. |
+| `workflow_run_id` | `uuid` | required | The run the gate belongs to. |
+| `step_id` | `uuid` | required | The step within the run; together with `workflow_run_id` forms a UNIQUE pair (one open gate per step per run). |
+| `gate_kind` | `text` | required | `'approval'` or `'ask'`. |
+| `seen_payload` | `jsonb` | `null` | Snapshot of parameters + rendered preview at gate-open (§6.3). Approval-only; null for Ask. Engine MUST NOT regenerate from current state. |
+| `seen_confidence` | `jsonb` | `null` | Confidence chip value + reason at gate-open (§6.2.1). Approval-only. |
+| `approver_pool_snapshot` | `jsonb` | `null` | Snapshot of the eligible-approvers pool (array of `userId` strings) resolved at gate-open (§5.1). Approval / Ask both populate this. Source-of-truth for the membership check; never re-resolved from `approverGroup`/`submitterGroup` after gate-open except via the explicit `/refresh-pool` admin path (§4.6). |
+| `is_critical_synthesised` | `boolean` | `false` | `true` when the gate was synthesised because the next step has `is_critical: true` (§5.2). Approval-only. |
+| `created_at` | `timestamptz` | `now()` | Gate-open time. |
+| `resolved_at` | `timestamptz` | `null` | Set when the gate transitions to a terminal step status (`approved` / `rejected` / `submitted` / `skipped`). |
+
+Indexes:
+
+| Index | Reason |
+|---|---|
+| `(workflow_run_id, step_id)` UNIQUE | One open gate per step per run; idempotent re-emit returns the existing row. |
+| `(resolved_at) WHERE resolved_at IS NULL` partial | Cheap scan for the engine when notifying / aggregating open gates. |
+
 ### 3.4 Indexes and constraints
 
 | Table | Index / constraint | Reason |
 |---|---|---|
 | `workflow_step_reviews` | composite `(workflow_run_id, step_id, created_at)` if not already present | Frequent lookup pattern: "all reviews for this step in this run, in order." |
-| `workflow_step_reviews` | UNIQUE `(workflow_run_id, step_id, deciding_user_id)` | Per §5.1.1 Execution-Safety contract: enforces single-user idempotency on Approval double-click; 23505 → 200 idempotent-hit per the API mapping. |
+| `workflow_step_reviews` | UNIQUE `(gate_id, deciding_user_id)` | Per §5.1.1 Execution-Safety contract: enforces single-user idempotency on Approval double-click within a gate; 23505 → 200 idempotent-hit per the API mapping. (Replaces the `(workflow_run_id, step_id, deciding_user_id)` composite considered earlier — `gate_id` is now the canonical scope.) |
 | `agent_execution_events` | composite `(task_id, task_sequence)` UNIQUE | Per §8.1 replay contract: monotonic per-task ordering; never gapped. |
 | `schedules` | `pinned_template_version_id` | Cheap; admin queries for "all schedules pinned to v3 of template X". |
 | `workflow_drafts` | per-table indexes pinned in §3.3 | (UNIQUE `(subaccount_id, session_id)`; partial `(consumed_at, created_at)` for the reaper.) |
+| `workflow_step_gates` | per-table indexes pinned in §3.3 | (UNIQUE `(workflow_run_id, step_id)`; partial `(resolved_at) WHERE resolved_at IS NULL`.) |
 
 Verify all at architect-time; if any already exists, no-op.
 
@@ -319,7 +344,7 @@ The deprecated user-facing names `conditional`, `agent_decision`, `prompt` (as a
 ### 4.6 Approval-step quorum check (brief §8.2, §8.3)
 
 - Validator rejects publish if `approverGroup.kind === 'specific_users'` and `quorum > approverGroup.userIds.length`.
-- For `kind === 'team'`, validator validates at runtime (team membership can change after publish) — when the gate opens, the engine resolves the team membership and writes it to `approver_pool_snapshot` (§3.1, §5.1). If `quorum > snapshot.length` at gate-open, the engine surfaces an error in the Approval card and the run stalls. Recovery paths in V1: (a) an org admin / sub-account admin adds members to the team and re-resolves the snapshot via a small admin endpoint (`POST /api/tasks/:taskId/reviews/:reviewId/refresh-pool` — refreshes `approver_pool_snapshot` to the current team membership; gated on org admin / sub-account admin per §14); (b) the operator clicks Stop on the run (§7.3) and re-fires the workflow once the team is sized correctly. The running run cannot be patched to use a different workflow version (running tasks are pinned to their start version per the brief versioning contract).
+- For `kind === 'team'`, validator validates at runtime (team membership can change after publish) — when the gate opens, the engine resolves the team membership and writes it to `workflow_step_gates.approver_pool_snapshot` (§3.3). If `quorum > snapshot.length` at gate-open, the engine surfaces an error in the Approval card and the run stalls. Recovery paths in V1: (a) an org admin / sub-account admin adds members to the team and re-resolves the snapshot via the `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` endpoint (contract pinned in §5.1.2); (b) the operator clicks Stop on the run (§7.3) and re-fires the workflow once the team is sized correctly. The running run cannot be patched to use a different workflow version (running tasks are pinned to their start version per the brief versioning contract).
 - For `kind === 'task_requester'`, quorum is forced to `1` at validate time (a single user; quorum > 1 is meaningless). Validator warns if author tried to set quorum > 1.
 - For `kind === 'org_admin'`, no validation at publish (admin pool is large enough).
 
@@ -345,7 +370,7 @@ When an Approval step queues, the engine resolves the eligible-approvers pool fr
 | `kind` | Pool resolution |
 |---|---|
 | `specific_users` | The exact `userIds` array from the step. Validator confirms quorum ≤ length at publish (§4.6). |
-| `team` | All members of `teams.id = teamId` who are not soft-deleted (`deletedAt IS NULL`). Resolved at gate-creation time (snapshotted into the review record so later membership changes don't invalidate an in-flight approval). |
+| `team` | All members of `teams.id = teamId` who are not soft-deleted (`deletedAt IS NULL`). Resolved at gate-creation time and snapshotted into `workflow_step_gates.approver_pool_snapshot` (§3.3) so later team-membership changes don't invalidate an in-flight approval. The only V1 path to re-resolve is `/refresh-pool` (§5.1.2). |
 | `task_requester` | `tasks.created_by_user_id`. Single user. |
 | `org_admin` | All users in the org with `org_admin` role. Resolved at gate-creation time. |
 
@@ -359,7 +384,7 @@ When a user submits an approval decision, the engine:
 
 Per spec-authoring-checklist §10. Each Approval decision write declares:
 
-- **Idempotency posture: key-based + state-based.** A new UNIQUE constraint on `workflow_step_reviews (workflow_run_id, step_id, deciding_user_id)` makes a single user's double-click idempotent at (user, step) granularity — the second insert returns the first. The step-level transition (`review_required → approved` or `review_required → rejected`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'approved' WHERE id = $1 AND status = 'review_required'`). 0-rows-updated means another decider already transitioned the step; the API resolves the call as a successful idempotent hit and returns the winning decision to the losing caller (first-commit-wins).
+- **Idempotency posture: key-based + state-based.** A new UNIQUE constraint on `workflow_step_reviews (gate_id, deciding_user_id)` makes a single user's double-click idempotent at (user, gate) granularity — the second insert returns the first. The step-level transition (`review_required → approved` or `review_required → rejected`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'approved' WHERE id = $1 AND status = 'review_required'`). 0-rows-updated means another decider already transitioned the step; the API resolves the call as a successful idempotent hit and returns the winning decision to the losing caller (first-commit-wins).
 - **Retry classification: guarded.** Both the row insert and the step transition are retry-safe via the unique constraint and the predicate; the API contract documents that callers can retry on network failure without risk of double-counting.
 - **Concurrency guard for racing writes:**
   - Two approvals from different users on the same step before quorum is met: both `INSERT` rows; quorum-counting reads from row count.
@@ -367,6 +392,18 @@ Per spec-authoring-checklist §10. Each Approval decision write declares:
   - A concurrent approve + reject: the reject's predicate `WHERE status = 'review_required'` runs in the same transaction as the row insert; whichever commits first wins; the loser observes the post-commit state and returns the existing decision.
 - **Unique-constraint → HTTP mapping.** `23505 unique_violation` on `workflow_step_reviews` returns `200 { idempotent_hit: true, existing_review_id }`, never bubbles as 500.
 - **State machine closure.** Valid review-record transitions: `(none) → review_required → approved | rejected`. Forbidden: `approved/rejected → *` (terminal). Adding a new review status requires a spec amendment.
+
+#### 5.1.2 `/refresh-pool` admin endpoint
+
+The only V1 path for re-resolving an approver pool after a team-membership change has stalled an in-flight gate (§4.6). Pinned contract:
+
+- `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` body `{}`.
+- **Permission guard.** Caller must be an org admin / org manager / sub-account admin on the task's sub-account. 403 otherwise.
+- **Idempotency posture: state-based.** Refresh only runs when `workflow_step_gates.resolved_at IS NULL` (gate is still open). If the gate has resolved, returns `200 { refreshed: false, reason: 'gate_already_resolved' }`.
+- **Effect on success.** The engine re-resolves the team membership from `teams` / `team_members` and overwrites `workflow_step_gates.approver_pool_snapshot` with the new pool. Returns `200 { refreshed: true, pool_size: <new size> }`. Emits `approval.pool_refreshed` event (per §8.2 — added below) so all open clients update the Approval card.
+- **Below-quorum behaviour.** If the refreshed pool is still smaller than `quorum`, the gate remains stalled — the API still returns `refreshed: true` but the Approval card continues to show the under-quorum error. The operator's options remain (a) more team members, then re-call refresh; (b) Stop the run.
+- **Concurrency guard.** `UPDATE workflow_step_gates SET approver_pool_snapshot = $1 WHERE id = $2 AND resolved_at IS NULL` — first-commit-wins; 0 rows updated → race lost, returns `200 { refreshed: false, reason: 'gate_already_resolved' }`.
+- **No effect on existing reviews.** Decisions already recorded against the prior pool stay valid. The refreshed pool only governs subsequent decisions on the same gate.
 
 ### 5.2 `isCritical` routing (brief §8.5)
 
@@ -399,7 +436,7 @@ When an Approval or Ask step queues and a human gate is open:
 |---|---|
 | `agentExecutionService.ts` (gate resolution) | Add `isCritical` check; if true, synthesise an Approval gate before step execution. |
 | Approval-decision endpoint (existing) | Add pool-membership check (5.1.1). Return 403 with structured error if user not in pool. |
-| `workflow_step_reviews` insert path | Capture `seen_payload`, `seen_confidence`, `decision_reason`, `is_critical_synthesised` flag. |
+| Gate creation path (Approval / Ask) | Insert `workflow_step_gates` row at gate-open with `seen_payload`, `seen_confidence`, `approver_pool_snapshot`, `is_critical_synthesised`. Per-decider `workflow_step_reviews` rows reference `gate_id`. |
 | pg-boss schedule registration | Add stall-and-notify job scheduling (5.3) when a gate opens. Cancel jobs when gate resolves. |
 | Schedule-fired run dispatch | Honour `schedules.pinned_template_version_id` if non-null (load that exact version instead of the latest published). |
 
@@ -558,11 +595,12 @@ paused  ──► failed         (operator Stop on a paused run; reason `stopped
 
 **Resume API.**
 
-- `POST /api/tasks/:taskId/run/resume` body `{ extend_cost_cents?: integer, extend_seconds?: integer }`. Both extensions are optional; absent extensions resume the run with the existing caps unchanged.
+- `POST /api/tasks/:taskId/run/resume` body `{ extend_cost_cents?: integer, extend_seconds?: integer }`. The body is required to contain at least one extension when the previous pause was cap-triggered (`run.paused.cost_ceiling` or `run.paused.wall_clock`). A no-extension resume after a cap-triggered pause is rejected with `400 { error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: 'cost_ceiling' | 'wall_clock' }` so the engine can't immediately re-hit the same ceiling. After an operator-Pause (`run.paused.by_user`) the body may be empty.
+- Effect on success: the engine increments `workflow_runs.effective_cost_ceiling_cents` by `extend_cost_cents` (if provided), `workflow_runs.effective_wall_clock_cap_seconds` by `extend_seconds`, and increments `workflow_runs.extension_count` by 1. The run transitions to `running`. Emits `run.resumed` per §8.2.
 - Permission guard: caller must be in the visibility set for Pause / Stop buttons (§14.5 — task requester, org admin/manager, sub-account admin on the task's sub-account).
-- Idempotency: state-based. If the run's current status is `running`, the endpoint returns `200 { resumed: false, reason: 'not_paused' }` (no-op). If `paused`, transitions to `running` and resets cap counters per the body's extensions.
-- Cap on extensions: the engine tracks `extension_count_per_run`; default cap is 2 extensions per run (architect refines per §19.2 #G). After the cap, the next pause-card extension button is disabled and only Stop is available.
-- Concurrency: the transition uses an optimistic predicate (`UPDATE tasks SET status = 'running' ... WHERE status = 'paused' AND id = $1`). 0 rows updated → 409 `{ error: 'race_with_other_action', current_status: <observed> }`.
+- Idempotency: state-based. If the run's current status is `running`, the endpoint returns `200 { resumed: false, reason: 'not_paused' }` (no-op).
+- Cap on extensions: when `workflow_runs.extension_count >= 2` (architect refines per §19.2 #G), further resume calls return `400 { error: 'extension_cap_reached' }` and the pause card disables the extension button (Stop remains available).
+- Concurrency: the transition uses an optimistic predicate (`UPDATE workflow_runs SET status = 'running', effective_cost_ceiling_cents = ..., effective_wall_clock_cap_seconds = ..., extension_count = extension_count + 1 WHERE status = 'paused' AND id = $1`). 0 rows updated → 409 `{ error: 'race_with_other_action', current_status: <observed> }`.
 
 **Stop API.**
 
@@ -633,6 +671,7 @@ All events share a common envelope:
 | `step.branch_decided` | A producing step's output resolved a branch | step_id, field, resolved_value, target_step | Plan (resolved label appears), Activity |
 | `approval.queued` | Approval gate opened | step_id, approver_pool, seen_payload, seen_confidence | Chat (Approval card), Plan (current step indigo + confidence chip), Activity |
 | `approval.decided` | Approval resolved | decided_by, decision, decision_reason | Chat (card collapses to receipt), Plan (✓ or red), Activity |
+| `approval.pool_refreshed` | An admin called `/refresh-pool` on a stalled team-Approval gate (§5.1.2) | actor, new_pool_size, still_below_quorum (boolean) | Chat (Approval card refreshes the pool size + clears or retains the under-quorum error), Activity |
 | `ask.queued` | Ask form gate opened | step_id, submitter_pool, schema, prompt | Chat (form card), Plan (current step indigo), Activity |
 | `ask.submitted` | Ask form submitted | submitted_by, values | Chat (card collapses to receipt), Plan (✓), Activity |
 | `ask.skipped` | Ask form skipped (only when `params.allowSkip === true`; §3.2, §11.4.1) | submitted_by, step_id | Chat (card collapses to "Skipped" receipt), Plan (✓ skipped), Activity |
@@ -1317,7 +1356,7 @@ If a workflow author (org admin) configures an Ask step routed to a team in **an
 - The validator allows it at publish (org admins can route across the org).
 - At runtime, the team members in that other sub-account get the notification and can submit.
 - They land on the task view with full visibility (per §14.4) — even though the task is in a sub-account they don't normally have access to. This is intentional: the workflow author authorised them.
-- Audit captures their cross-sub-account access in `workflow_step_reviews.seen_payload` for compliance review.
+- Audit captures their cross-sub-account access via the `agent_execution_events` log: `ask.queued` (with `submitter_pool` snapshotted) and `ask.submitted` (with `submitted_by` and the cross-subaccount-actor's id) are the auditable trail. For Approval steps that route across sub-accounts, the equivalent trail is on `workflow_step_gates.approver_pool_snapshot` plus the per-decider `workflow_step_reviews` rows.
 
 Sub-account admins **cannot** route across sub-account boundaries (the picker doesn't surface other sub-accounts' users / teams to them).
 
@@ -1385,7 +1424,7 @@ Retire **Brief** as a UI noun. Every user-visible string that refers to a "brief
 
 | # | Item | Brief / spec ref | Effort |
 |---|---|---|---|
-| 1 | Schema migration: `is_critical` on step definition, `seen_payload` / `seen_confidence` / `decision_reason` on `workflow_step_reviews`, `publish_notes` on `workflow_template_versions`, `cost_ceiling_cents` / `wall_clock_cap_seconds` on workflows, `pinned_template_version_id` on schedules | §3 | 1 day (one Drizzle migration + Drizzle schema updates + tests) |
+| 1 | Schema migration (all §3 deltas): `is_critical` on step definition; `decision_reason` + `gate_id` FK on `workflow_step_reviews`; new `workflow_step_gates` table (with `seen_payload`, `seen_confidence`, `approver_pool_snapshot`, `is_critical_synthesised`); `publish_notes` on `workflow_template_versions`; `cost_ceiling_cents` / `wall_clock_cap_seconds` on workflows; `effective_cost_ceiling_cents` / `effective_wall_clock_cap_seconds` / `extension_count` on workflow_runs; `pinned_template_version_id` on schedules; `task_id` + `task_sequence` on `agent_execution_events`; new `workflow_drafts` table; updates to `RLS_PROTECTED_TABLES` for `workflow_drafts` and `workflow_step_gates` | §3 | 1.5 days (one Drizzle migration + Drizzle schema updates + tests + RLS manifest entries) |
 | 2 | Approver routing: `approverGroup` + `quorum` on Approval step, pool resolution + 403 enforcement | §5.1, brief §11.1 #1 | 1.5 days (engine enforcement + tests) |
 | 3 | Submitter routing on Ask: same `approverGroup` shape under `submitterGroup` | §3.2, §11 | 0.5 day (mostly reuses #2) |
 | 4 | Step-type validator: collapse user-visible vocabulary to four A's, accept legacy types from existing templates | §4.1, brief §11.1 #2 | 1 day |
@@ -1539,17 +1578,21 @@ Tests author-time (per CLAUDE.md, full test gates run in CI; locally only target
 **No runtime data migration is required.** All schema deltas (§3) are additive and default-safe:
 
 - `is_critical` defaults to `false` — existing steps behave as today.
-- `seen_payload`, `seen_confidence`, `decision_reason` default to `null` — existing approval records are unaffected.
+- `decision_reason` defaults to `null` — existing approval records are unaffected.
+- `gate_id` on existing `workflow_step_reviews` rows: backfilled with newly-created `workflow_step_gates` rows during migration (the migration creates one gate row per existing review row, copying the run/step keys; this preserves audit history without runtime impact). Or, simpler, `gate_id` is `NULL` on legacy rows and the validator accepts NULL only for rows whose `created_at` is before the migration timestamp; new rows always have `gate_id`. Architect picks the path with the lower migration risk.
 - `publish_notes` defaults to `null` — existing template versions have no notes (rendering treats `null` as "no notes").
 - `cost_ceiling_cents` defaults to `500`, `wall_clock_cap_seconds` defaults to `3600` — existing workflows get the safe defaults; admins can raise them per template if needed.
+- `effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count` on `workflow_runs`: the migration backfills `effective_*` columns from each run's template values (or NULL for completed runs); `extension_count` defaults to `0`.
 - `pinned_template_version_id` defaults to `null` — existing schedules behave as today (next run uses newest published).
+- `task_id`, `task_sequence` on `agent_execution_events`: NULL on legacy rows; the migration does not backfill (legacy rows pre-date the per-task replay contract). New rows always have both.
+- `workflow_drafts` and `workflow_step_gates` are new empty tables; both are added to `RLS_PROTECTED_TABLES` in the same migration.
 
 **Existing system templates** (`event-creation.workflow.ts`, `weekly-digest.workflow.ts`, `intelligence-briefing.workflow.ts`) continue to work without modification. The four A's validator accepts their legacy engine type names.
 
 **Migration steps (one PR):**
 
-1. Drizzle migration file with the additive column additions on existing tables and the `workflow_drafts` create-table (§3.1, §3.3).
-2. Schema files in `shared/schema/` updated to match; `workflow_drafts` added to `RLS_PROTECTED_TABLES` per `architecture.md` § Row-Level Security.
+1. Drizzle migration file with the additive column additions on existing tables and the `workflow_drafts` + `workflow_step_gates` create-tables (§3.1, §3.3).
+2. Schema files in `shared/schema/` updated to match; both `workflow_drafts` and `workflow_step_gates` added to `RLS_PROTECTED_TABLES` per `architecture.md` § Row-Level Security.
 3. New endpoints, services, components, validators per §3 – §15.
 4. CI runs the full test-gate battery as a pre-merge gate (per `CLAUDE.md`); we do not run gates locally.
 5. Merge → standard deploy pipeline applies the migration alongside the code that uses it. **No staged rollout, no feature flag, no per-tenant gating** — per `docs/spec-context.md` (`rollout_model: commit_and_revert`, `staged_rollout: never_for_this_codebase_yet`). The codebase is pre-production; no live operators are affected by the deploy.
