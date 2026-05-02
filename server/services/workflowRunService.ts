@@ -9,11 +9,14 @@
  * external callers, and delegates to the engine for any state advance.
  */
 
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import type { OrgScopedTx } from '../db/index.js';
 import {
   workflowRuns,
   workflowStepRuns,
+  workflowStepReviews,
+  workflowStepGates,
   workflowTemplateVersions,
   workflowTemplates,
   systemWorkflowTemplates,
@@ -28,12 +31,15 @@ import type {
   WorkflowStepRun,
   WorkflowRunStatus,
 } from '../db/schema/index.js';
-import type { WorkflowDefinition, WorkflowStep, RunContext } from '../lib/workflow/types.js';
+import type { WorkflowDefinition, RunContext } from '../lib/workflow/types.js';
+import { hashValue } from '../lib/workflow/hash.js';
 import { logger } from '../lib/logger.js';
 import { WorkflowEngineService } from './workflowEngineService.js';
 import { resolveApprovalDispatchAction, type ApprovalDecision } from './resolveApprovalDispatchActionPure.js';
 import { WorkflowTemplateService } from './workflowTemplateService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { WorkflowStepGateService } from './workflowStepGateService.js';
+import { userInPool } from './workflowApproverPoolServicePure.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -457,16 +463,37 @@ export const WorkflowRunService = {
     ) {
       return; // already terminal — idempotent
     }
-    await db
-      .update(workflowRuns)
-      .set({ status: 'cancelling', updatedAt: new Date() })
-      .where(eq(workflowRuns.id, runId));
+    await db.transaction(async (tx) => {
+      // Orphaned-gate cascade: resolve all open gates before transitioning run
+      const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(
+        runId,
+        'run_terminated',
+        organisationId,
+        tx
+      );
+      if (resolved > 0) {
+        logger.info('workflow_step_gates_cascade_resolved', {
+          event: 'gates.cascade_resolved',
+          runId,
+          resolved,
+          reason: 'run_terminated',
+        });
+      }
+      await tx
+        .update(workflowRuns)
+        .set({ status: 'cancelling', updatedAt: new Date() })
+        .where(eq(workflowRuns.id, runId));
+    });
     await WorkflowEngineService.enqueueTick(runId);
   },
 
   /**
    * Submit a user_input form payload for a step run. Engine merges into
    * context and re-ticks.
+   *
+   * Wrapped in a single transaction: gate lookup, pool check, optimistic
+   * status UPDATE with WHERE status='awaiting_input', and gate resolution
+   * all occur atomically.
    */
   async submitStepInput(
     organisationId: string,
@@ -487,12 +514,7 @@ export const WorkflowRunService = {
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
     if (!stepRun) throw { statusCode: 404, message: 'Step run not found' };
-    if (stepRun.status !== 'awaiting_input') {
-      throw {
-        statusCode: 409,
-        message: `Step is in status '${stepRun.status}', not 'awaiting_input'`,
-      };
-    }
+
     if (expectedVersion !== undefined && stepRun.version !== expectedVersion) {
       throw {
         statusCode: 409,
@@ -501,10 +523,75 @@ export const WorkflowRunService = {
       };
     }
 
-    await WorkflowEngineService.completeStepRun(stepRunId, {
-      output: formData,
-      via: 'user_input',
+    // Single transaction: gate lookup, pool check, optimistic step UPDATE,
+    // and gate resolution.
+    await db.transaction(async (tx) => {
+      // Gate lookup inside the transaction.
+      const [openGate] = await tx
+        .select()
+        .from(workflowStepGates)
+        .where(
+          and(
+            eq(workflowStepGates.workflowRunId, runId),
+            eq(workflowStepGates.stepId, stepRun.stepId),
+            eq(workflowStepGates.organisationId, organisationId),
+            isNull(workflowStepGates.resolvedAt)
+          )
+        );
+
+      if (openGate && !userInPool(openGate.approverPoolSnapshot as string[] | null, _userId)) {
+        throw {
+          statusCode: 403,
+          message: 'Not in approver pool',
+          errorCode: 'not_in_approver_pool',
+        };
+      }
+
+      // Optimistic UPDATE: only succeeds if status is still 'awaiting_input'.
+      const updated = await tx
+        .update(workflowStepRuns)
+        .set({
+          status: 'completed',
+          outputJson: formData as unknown as Record<string, unknown>,
+          completedAt: new Date(),
+          version: stepRun.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(workflowStepRuns.id, stepRunId),
+            eq(workflowStepRuns.status, 'awaiting_input')
+          )
+        )
+        .returning({ id: workflowStepRuns.id });
+
+      if (updated.length === 0) {
+        // Conflict: re-read the current status.
+        const [current] = await tx
+          .select({ status: workflowStepRuns.status, updatedAt: workflowStepRuns.updatedAt })
+          .from(workflowStepRuns)
+          .where(eq(workflowStepRuns.id, stepRunId));
+        throw {
+          statusCode: 409,
+          message: 'Already submitted',
+          errorCode: 'already_submitted',
+          current_status: current?.status ?? 'unknown',
+          // Use null rather than the current caller's id — the winning submitter
+          // is not tracked on this row (no submittedByUserId column). Spec requires
+          // the winning submitter's id here; null is preferable to wrong data.
+          submittedBy: null,
+          submittedAt: current?.updatedAt?.toISOString() ?? new Date().toISOString(),
+        };
+      }
+
+      // Resolve the gate if one was open.
+      if (openGate) {
+        await WorkflowStepGateService.resolveGate(openGate.id, 'submitted', organisationId, tx);
+      }
     });
+
+    // Engine re-tick outside the transaction (consistent with other paths).
+    await WorkflowEngineService.enqueueTick(runId);
   },
 
   /**
@@ -542,8 +629,12 @@ export const WorkflowRunService = {
     decision: ApprovalDecision,
     editedOutput: Record<string, unknown> | undefined,
     userId: string,
-    expectedVersion?: number
-  ): Promise<{ stepRunStatus: 'completed' | 'failed'; newVersion: number }> {
+    expectedVersion?: number,
+    decisionReason?: string
+  ): Promise<
+    | { stepRunStatus: 'completed' | 'failed'; newVersion: number; idempotent_hit?: never }
+    | { stepRunStatus: 'completed'; newVersion: number; idempotent_hit: true; existing_review_id: string | null }
+  > {
     const [run] = await db
       .select()
       .from(workflowRuns)
@@ -559,6 +650,8 @@ export const WorkflowRunService = {
       throw {
         statusCode: 409,
         message: `Step is in status '${stepRun.status}', not 'awaiting_approval'`,
+        errorCode: 'step_already_resolved',
+        current_status: stepRun.status,
       };
     }
     if (expectedVersion !== undefined && stepRun.version !== expectedVersion) {
@@ -569,30 +662,160 @@ export const WorkflowRunService = {
       };
     }
 
-    if (decision === 'rejected') {
-      await WorkflowEngineService.failStepRun(stepRunId, 'approval_rejected', userId);
-      return { stepRunStatus: 'failed', newVersion: stepRun.version + 1 };
+    // Pool-membership guard: if there is an open gate, check the user is in pool.
+    // Pre-flight read outside the transaction — idiomatic (getOpenGate uses getOrgScopedDb).
+    // 'awaiting_approval' is the codebase term; the spec uses 'review_required' interchangeably — always use 'awaiting_approval' here.
+    const gate = await WorkflowStepGateService.getOpenGate(
+      runId,
+      stepRun.stepId,
+      organisationId
+    );
+    if (gate && !userInPool(gate.approverPoolSnapshot as string[] | null, userId)) {
+      throw {
+        statusCode: 403,
+        message: 'Not in approver pool',
+        errorCode: 'not_in_approver_pool',
+      };
     }
 
     const action = resolveApprovalDispatchAction(stepRun, decision);
 
-    // invoke_automation steps must re-dispatch the webhook rather than completing
-    // with stored output — route to the dedicated resume path (C4a-REVIEWED-DISP).
-    if (action === 'redispatch') {
-      const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
-      return { stepRunStatus: stepOutcome, newVersion: stepRun.version + 1 };
+    // ── Single causality transaction ─────────────────────────────────────────
+    // review INSERT + gate resolve + step status UPDATE must be atomic.
+    // For the `approved` path we also merge step output into run contextJson
+    // inside the same transaction so downstream steps can template against it.
+    // `resumeInvokeAutomationStep` (redispatch) opens its own transaction
+    // internally, so it runs OUTSIDE this block.
+    // enqueueTick always runs OUTSIDE the transaction.
+    let idempotentHit = false;
+    let existingReviewId: string | null = null;
+    let finalStepStatus: 'completed' | 'failed' = 'completed';
+    let shouldRedispatch = false;
+
+    await db.transaction(async (tx: OrgScopedTx) => {
+      // 1. Idempotency: INSERT review row (gate FK) with ON CONFLICT DO NOTHING.
+      //    If gate is null (no gate exists for this step), skip the review INSERT.
+      if (gate) {
+        const insertResult = await tx.execute(
+          sql`
+            INSERT INTO workflow_step_reviews (step_run_id, gate_id, decided_by_user_id, decision, decision_reason, decided_at)
+            VALUES (${stepRunId}, ${gate.id}, ${userId}, ${decision}, ${decisionReason ?? null}, NOW())
+            ON CONFLICT (gate_id, decided_by_user_id) DO NOTHING
+          `
+        );
+        const rowCount = (insertResult as { rowCount?: number }).rowCount ?? 0;
+        if (rowCount === 0) {
+          // Conflict — idempotent hit. Look up the existing review row inside tx.
+          const [existingReview] = await tx
+            .select({ id: workflowStepReviews.id })
+            .from(workflowStepReviews)
+            .where(
+              and(
+                eq(workflowStepReviews.gateId, gate.id),
+                eq(workflowStepReviews.decidedByUserId, userId)
+              )
+            );
+          idempotentHit = true;
+          existingReviewId = existingReview?.id ?? null;
+          return; // exit tx callback — no writes
+        }
+      }
+
+      // 2. Resolve the gate (if one exists).
+      if (gate) {
+        const gateResolution = decision === 'rejected' ? 'rejected' : 'approved';
+        await WorkflowStepGateService.resolveGate(gate.id, gateResolution, organisationId, tx);
+      }
+
+      // 3. Update step status directly — minimal columns only.
+      //    This keeps the review INSERT + gate resolve + step transition atomic.
+      if (decision === 'rejected') {
+        finalStepStatus = 'failed';
+        await tx
+          .update(workflowStepRuns)
+          .set({
+            status: 'failed',
+            error: 'approval_rejected',
+            completedAt: new Date(),
+            version: stepRun.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(workflowStepRuns.id, stepRunId));
+      } else if (action === 'redispatch') {
+        // Gate is resolved above; the actual step transition is handled by
+        // resumeInvokeAutomationStep which opens its own transaction externally.
+        finalStepStatus = 'completed'; // placeholder — overwritten below
+        shouldRedispatch = true;
+      } else {
+        // approved / edited — complete the step and merge output into context.
+        finalStepStatus = 'completed';
+        const finalOutput =
+          decision === 'edited' && editedOutput
+            ? editedOutput
+            : (stepRun.outputJson as Record<string, unknown> | null) ?? {};
+        const outputHash = hashValue(finalOutput);
+
+        await tx
+          .update(workflowStepRuns)
+          .set({
+            status: 'completed',
+            outputJson: finalOutput as unknown as Record<string, unknown>,
+            outputHash,
+            completedAt: new Date(),
+            version: stepRun.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(workflowStepRuns.id, stepRunId));
+
+        // Merge step output into run contextJson so templating in downstream
+        // steps has access to the approved output on the next tick.
+        // Fresh read inside the transaction to avoid a stale-read lost-update:
+        // a parallel step completion between the outer SELECT and this write
+        // would otherwise overwrite the concurrent update.
+        const [freshRun] = await tx
+          .select({ contextJson: workflowRuns.contextJson })
+          .from(workflowRuns)
+          .where(eq(workflowRuns.id, runId));
+        const ctx = (freshRun?.contextJson ?? run.contextJson) as unknown as RunContext;
+        const nextCtx: RunContext = {
+          input: ctx.input,
+          subaccount: ctx.subaccount,
+          org: ctx.org,
+          steps: { ...ctx.steps, [stepRun.stepId]: { output: finalOutput } },
+          _meta: ctx._meta,
+        };
+        const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
+        await tx
+          .update(workflowRuns)
+          .set({
+            contextJson: nextCtx as unknown as Record<string, unknown>,
+            contextSizeBytes: nextBytes,
+            updatedAt: new Date(),
+          })
+          .where(eq(workflowRuns.id, runId));
+      }
+    });
+
+    // ── Idempotent-hit early return ───────────────────────────────────────────
+    if (idempotentHit) {
+      return {
+        stepRunStatus: 'completed',
+        newVersion: stepRun.version,
+        idempotent_hit: true,
+        existing_review_id: existingReviewId,
+      };
     }
 
-    const finalOutput =
-      decision === 'edited' && editedOutput
-        ? editedOutput
-        : (stepRun.outputJson as Record<string, unknown> | null) ?? {};
+    // ── Post-transaction side effects ────────────────────────────────────────
+    if (shouldRedispatch) {
+      const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
+      finalStepStatus = stepOutcome;
+    }
 
-    await WorkflowEngineService.completeStepRun(stepRunId, {
-      output: finalOutput,
-      via: 'approval',
-      decidedByUserId: userId,
-    });
-    return { stepRunStatus: 'completed', newVersion: stepRun.version + 1 };
+    // Enqueue a tick so the engine advances the run (context merge already done
+    // inside the transaction for approved paths; tick handles downstream dispatch).
+    await WorkflowEngineService.enqueueTick(runId);
+
+    return { stepRunStatus: finalStepStatus, newVersion: stepRun.version + 1 };
   },
 };

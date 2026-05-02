@@ -25,9 +25,9 @@ import { recordIncident } from '../services/incidentIngestor.js';
 
 /** Fields allowed to flow through from a thrown service error to the JSON
  *  response body. Added to support structured approval-gate responses
- *  (reasons[], resultId, field) on 409s. Kept minimal on purpose — extend
- *  only when a new contract genuinely needs it. */
-const FORWARDED_ERROR_FIELDS = ['reasons', 'resultId', 'field'] as const;
+ *  (reasons[], resultId, field, current_status, submittedBy, submittedAt) on 409s.
+ *  Kept minimal on purpose — extend only when a new contract genuinely needs it. */
+const FORWARDED_ERROR_FIELDS = ['reasons', 'resultId', 'field', 'current_status', 'submittedBy', 'submittedAt'] as const;
 
 export function asyncHandler(
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>

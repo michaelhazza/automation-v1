@@ -942,6 +942,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0267_agent_recommendations.sql',
     rationale: 'Operator-facing recommendation rows per org/subaccount — may contain business intelligence, budget overruns, and performance findings that must not leak cross-tenant.',
   },
+  // 0268 — Workflows V1: step gates and orchestrator drafts
+  {
+    tableName: 'workflow_step_gates',
+    schemaFile: 'workflowStepGates.ts',
+    policyMigration: '0268_workflows_v1_additive_schema.sql',
+    rationale: 'Per-step approval gate records — contains seen_payload and approver_pool_snapshot with PII and business-sensitive content.',
+  },
+  {
+    tableName: 'workflow_drafts',
+    schemaFile: 'workflowDrafts.ts',
+    policyMigration: '0268_workflows_v1_additive_schema.sql',
+    rationale: 'Orchestrator-authored workflow draft payloads — may contain business-sensitive automation intent.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

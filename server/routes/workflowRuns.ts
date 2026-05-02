@@ -13,6 +13,9 @@ import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { WorkflowRunService } from '../services/workflowRunService.js';
+import { WorkflowStepGateService } from '../services/workflowStepGateService.js';
+import { userInApproverPool } from '../services/workflowApprovalPoolPure.js';
+import { WorkflowRunPauseStopService } from '../services/workflowRunPauseStopService.js';
 
 const router = Router();
 
@@ -232,10 +235,11 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { runId, stepRunId } = req.params;
-    const { decision, editedOutput, expectedVersion } = req.body as {
+    const { decision, editedOutput, expectedVersion, decisionReason } = req.body as {
       decision?: 'approved' | 'rejected' | 'edited';
       editedOutput?: Record<string, unknown>;
       expectedVersion?: number;
+      decisionReason?: string;
     };
     if (!decision || !['approved', 'rejected', 'edited'].includes(decision)) {
       res.status(400).json({ error: 'decision must be approved | rejected | edited' });
@@ -245,6 +249,16 @@ router.post(
       res.status(400).json({ error: 'editedOutput is required when decision === "edited"' });
       return;
     }
+    // Pool-membership guard: reject if there is an open gate and the user is not in the pool
+    const gate = await WorkflowStepGateService.getOpenGateByRunAndStepRun(
+      runId,
+      stepRunId,
+      req.orgId!
+    );
+    if (gate && !userInApproverPool(gate.approverPoolSnapshot as string[] | null, req.user!.id)) {
+      res.status(403).json({ error: 'not_in_approver_pool' });
+      return;
+    }
     const result = await WorkflowRunService.decideApproval(
       req.orgId!,
       runId,
@@ -252,9 +266,56 @@ router.post(
       decision,
       editedOutput,
       req.user!.id,
-      expectedVersion
+      expectedVersion,
+      decisionReason
     );
     res.json({ ok: true, ...result });
+  })
+);
+
+// ─── Pause / resume / stop (Chunk 7 — runaway protection) ───────────────────
+
+/**
+ * POST /api/workflow-runs/:runId/resume
+ *
+ * Resume a paused run. For cap-triggered pauses, an extension is required:
+ *   { extendCostCents?: number; extendSeconds?: number }
+ */
+router.post(
+  '/api/workflow-runs/:runId/resume',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { extendCostCents, extendSeconds } = req.body as {
+      extendCostCents?: number;
+      extendSeconds?: number;
+    };
+    const result = await WorkflowRunPauseStopService.resumeRun(
+      req.params.runId,
+      req.orgId!,
+      req.user!.id,
+      { extendCostCents, extendSeconds }
+    );
+    res.json(result);
+  })
+);
+
+/**
+ * POST /api/workflow-runs/:runId/stop
+ *
+ * Hard-stop (fail) a run. Cascades open gates. Idempotent on terminal runs.
+ */
+router.post(
+  '/api/workflow-runs/:runId/stop',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const result = await WorkflowRunPauseStopService.stopRun(
+      req.params.runId,
+      req.orgId!,
+      req.user!.id
+    );
+    res.json(result);
   })
 );
 

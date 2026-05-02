@@ -33,6 +33,8 @@ import type {
 } from '../db/schema/index.js';
 import { validateDefinition } from '../lib/workflow/validator.js';
 import type { WorkflowDefinition, ValidationResult } from '../lib/workflow/types.js';
+import { validate as validateV1Rules } from './workflowValidatorPure.js';
+import type { ValidatorResult } from '../../shared/types/workflowValidator.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -162,23 +164,40 @@ export const WorkflowTemplateService = {
       };
     }
 
+    // V1 publish-time rules. System templates use engine type names, so
+    // acceptLegacyTypes is always true here.
+    const v1Validation: ValidatorResult = validateV1Rules(
+      { steps: def.steps.map((s) => ({ id: s.id, type: s.type, dependsOn: s.dependsOn, params: s.params })) },
+      { acceptLegacyTypes: true }
+    );
+    if (!v1Validation.ok) {
+      throw {
+        statusCode: 422,
+        message: `Workflow '${def.slug}' failed V1 validation`,
+        errorCode: 'validation_failed',
+        details: v1Validation.errors,
+      };
+    }
+
     const existing = await this.getSystemTemplate(def.slug);
 
     if (!existing) {
       // Create both the template row and the first version atomically.
-      const [created] = await db
-        .insert(systemWorkflowTemplates)
-        .values({
-          slug: def.slug,
-          name: def.name,
-          description: def.description,
-          latestVersion: def.version,
-        })
-        .returning();
-      await db.insert(systemWorkflowTemplateVersions).values({
-        systemTemplateId: created.id,
-        version: def.version,
-        definitionJson: serialiseDefinition(def),
+      await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(systemWorkflowTemplates)
+          .values({
+            slug: def.slug,
+            name: def.name,
+            description: def.description,
+            latestVersion: def.version,
+          })
+          .returning();
+        await tx.insert(systemWorkflowTemplateVersions).values({
+          systemTemplateId: created.id,
+          version: def.version,
+          definitionJson: serialiseDefinition(def),
+        });
       });
       return 'created';
     }
@@ -357,6 +376,23 @@ export const WorkflowTemplateService = {
         message: 'Workflow validation failed',
         errorCode: 'workflow_dag_invalid',
         details: validation.errors,
+      };
+    }
+
+    // V1 publish-time rules. Accept legacy engine type names only when the
+    // template was forked from a system template (may still carry engine names).
+    // Fresh Studio-authored templates must use V1 user-facing type names.
+    const acceptLegacyTypes = !!template.forkedFromSystemId;
+    const v1Validation: ValidatorResult = validateV1Rules(
+      { steps: def.steps.map((s) => ({ id: s.id, type: s.type, dependsOn: s.dependsOn, params: s.params })) },
+      { acceptLegacyTypes }
+    );
+    if (!v1Validation.ok) {
+      throw {
+        statusCode: 422,
+        message: 'Workflow template failed validation',
+        errorCode: 'validation_failed',
+        details: v1Validation.errors,
       };
     }
 

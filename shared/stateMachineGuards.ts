@@ -26,7 +26,7 @@
 
 import { TERMINAL_RUN_STATUSES, AGENT_RUN_STATUS } from './runStatus.js';
 
-export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run';
+export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run' | 'workflow_step_gate';
 
 const AGENT_RUN_TERMINAL: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 const AGENT_RUN_KNOWN: ReadonlySet<string> = new Set(Object.values(AGENT_RUN_STATUS));
@@ -41,6 +41,7 @@ const WORKFLOW_RUN_TERMINAL: ReadonlySet<string> = new Set([
 const WORKFLOW_RUN_KNOWN: ReadonlySet<string> = new Set([
   'pending',
   'running',
+  'paused',
   'awaiting_input',
   'awaiting_approval',
   'completed',
@@ -51,11 +52,23 @@ const WORKFLOW_RUN_KNOWN: ReadonlySet<string> = new Set([
   'partial',
 ]);
 
+// ---------------------------------------------------------------------------
+// Workflow Step Gate machine
+// ---------------------------------------------------------------------------
+// States: 'null' (before creation), 'open' (resolvedAt IS NULL), 'resolved'
+// Terminal: 'resolved'
+// Forbidden: 'resolved' → *, 'null' → 'resolved' (must go null→open→resolved)
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_STEP_GATE_TERMINAL: ReadonlySet<string> = new Set(['resolved']);
+const WORKFLOW_STEP_GATE_KNOWN: ReadonlySet<string> = new Set(['null', 'open', 'resolved']);
+
 const WORKFLOW_STEP_TERMINAL: ReadonlySet<string> = new Set([
   'completed',
   'failed',
   'skipped',
   'invalidated',
+  'cancelled',
 ]);
 const WORKFLOW_STEP_KNOWN: ReadonlySet<string> = new Set([
   'pending',
@@ -66,6 +79,7 @@ const WORKFLOW_STEP_KNOWN: ReadonlySet<string> = new Set([
   'failed',
   'skipped',
   'invalidated',
+  'cancelled',
 ]);
 
 interface KindSets {
@@ -81,6 +95,8 @@ function setsForKind(kind: StateMachineKind): KindSets {
       return { terminal: WORKFLOW_RUN_TERMINAL, known: WORKFLOW_RUN_KNOWN };
     case 'workflow_step_run':
       return { terminal: WORKFLOW_STEP_TERMINAL, known: WORKFLOW_STEP_KNOWN };
+    case 'workflow_step_gate':
+      return { terminal: WORKFLOW_STEP_GATE_TERMINAL, known: WORKFLOW_STEP_GATE_KNOWN };
   }
 }
 
@@ -183,4 +199,41 @@ export function describeTransition(event: TransitionEvent): Record<string, unkno
     site: event.site,
     guarded: event.guarded,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Gate-specific transition helpers
+// ---------------------------------------------------------------------------
+
+export type GateStatus = 'null' | 'open' | 'resolved';
+
+/**
+ * Assert that a workflow_step_gate transition is valid.
+ *
+ * Additional constraint beyond the base machine: 'null' → 'resolved' is
+ * forbidden (must go null → open → resolved).
+ */
+export function assertValidGateTransition(
+  gateId: string | null,
+  from: GateStatus,
+  to: GateStatus
+): void {
+  // The base machine already rejects resolved→* and unknown states.
+  assertValidTransition({
+    kind: 'workflow_step_gate',
+    recordId: gateId ?? 'new',
+    from,
+    to,
+  });
+
+  // Extra gate-specific rule: null → resolved is forbidden.
+  if (from === 'null' && to === 'resolved') {
+    throw new InvalidTransitionError(
+      `Invalid workflow_step_gate transition for ${gateId ?? 'new'}: 'null' → 'resolved' is forbidden — gate must pass through 'open' first`,
+      'workflow_step_gate',
+      gateId ?? 'new',
+      from,
+      to,
+    );
+  }
 }

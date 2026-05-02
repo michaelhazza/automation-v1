@@ -49,12 +49,23 @@ export function computeDurationSinceRunStartMs(
 // Envelope / eventId builder
 // ---------------------------------------------------------------------------
 
-/** `${runId}:${sequenceNumber}:${eventType}` — see spec §5.10. */
+/**
+ * Builds a stable event id for deduplication by the client LRU.
+ *
+ * Per-run format:  `${runId}:${sequenceNumber}:${eventType}`
+ * Per-task format: `task:${taskId}:${taskSequence}:${eventSubsequence}:${eventType}`
+ *
+ * Spec §5.10.
+ */
 export function buildEventId(
   runId: string,
   sequenceNumber: number,
   eventType: AgentExecutionEventType,
+  taskContext?: { taskId: string; taskSequence: number; eventSubsequence: number },
 ): string {
+  if (taskContext) {
+    return `task:${taskContext.taskId}:${taskContext.taskSequence}:${taskContext.eventSubsequence}:${eventType}`;
+  }
   return `${runId}:${sequenceNumber}:${eventType}`;
 }
 

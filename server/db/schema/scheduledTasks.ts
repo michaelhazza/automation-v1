@@ -72,6 +72,8 @@ export const scheduledTasks = pgTable(
       slack?: boolean;
     } | null>(),
 
+    // Workflows V1 — pin to a specific template version (migration 0268, no Drizzle FK)
+    pinnedTemplateVersionId: uuid('pinned_template_version_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -93,6 +95,9 @@ export const scheduledTasks = pgTable(
     workflowSlugIdx: index('scheduled_tasks_workflow_slug_idx')
       .on(table.createdByWorkflowSlug)
       .where(sql`${table.createdByWorkflowSlug} IS NOT NULL`),
+    pinnedTemplateVersionIdx: index('scheduled_tasks_pinned_template_version_idx')
+      .on(table.pinnedTemplateVersionId)
+      .where(sql`${table.pinnedTemplateVersionId} IS NOT NULL`),
   })
 );
 

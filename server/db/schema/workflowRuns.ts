@@ -26,6 +26,7 @@ export type WorkflowRunMode = 'auto' | 'supervised' | 'background' | 'bulk';
 export type WorkflowRunStatus =
   | 'pending'
   | 'running'
+  | 'paused'
   | 'awaiting_input'
   | 'awaiting_approval'
   | 'completed'
@@ -73,6 +74,12 @@ export const workflowRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
     failedDueToStepId: text('failed_due_to_step_id'),
+    // Workflows V1 — cost caps and degradation tracking (migration 0268)
+    effectiveCostCeilingCents: integer('effective_cost_ceiling_cents'),
+    effectiveWallClockCapSeconds: integer('effective_wall_clock_cap_seconds'),
+    extensionCount: integer('extension_count').notNull().default(0),
+    costAccumulatorCents: integer('cost_accumulator_cents').notNull().default(0),
+    degradationReason: text('degradation_reason'),
     // Phase E — onboarding-Workflows-spec §9.2 / §9.3 / §9.4.
     // Drives the portal card visibility toggle and the admin Onboarding tab.
     isPortalVisible: boolean('is_portal_visible').notNull().default(false),
@@ -91,6 +98,10 @@ export const workflowRuns = pgTable(
       table.status
     ),
     templateVersionIdx: index('workflow_runs_template_version_idx').on(table.templateVersionId),
+    statusPausedIdx: index('workflow_runs_status_paused_idx')
+      .on(table.id)
+      .where(sql`${table.status} = 'paused'`),
+    statusUpdatedIdx: index('workflow_runs_status_updated_idx').on(table.status, table.updatedAt),
   })
 );
 
@@ -115,6 +126,11 @@ export type WorkflowRunEventSequence = typeof workflowRunEventSequences.$inferSe
 // ---------------------------------------------------------------------------
 
 export type WorkflowStepType =
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask'
+  // Engine / legacy names — used in system templates and pre-V1 forks.
   | 'prompt'
   | 'agent_call'
   | 'user_input'
@@ -132,7 +148,8 @@ export type WorkflowStepRunStatus =
   | 'completed'
   | 'failed'
   | 'skipped'
-  | 'invalidated';
+  | 'invalidated'
+  | 'cancelled';
 
 export type WorkflowSideEffectType = 'none' | 'idempotent' | 'reversible' | 'irreversible';
 
@@ -195,6 +212,9 @@ export const workflowStepReviews = pgTable(
     decision: text('decision').notNull().default('pending').$type<WorkflowStepReviewDecision>(),
     decidedByUserId: uuid('decided_by_user_id').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
+    // Workflows V1 — gate linkage (no Drizzle FK to avoid circular schema imports)
+    gateId: uuid('gate_id'),
+    decisionReason: text('decision_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

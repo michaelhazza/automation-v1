@@ -249,3 +249,7 @@ export * from './conversationThreadContext';
 
 // Sub-Account Optimiser — generic agent-output primitive (migration 0267)
 export * from './agentRecommendations';
+
+// Workflows V1 — step gates and orchestrator drafts (migration 0268)
+export * from './workflowStepGates';
+export * from './workflowDrafts';

@@ -16,6 +16,11 @@
 import type { ZodSchema } from 'zod';
 
 export type StepType =
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask'
+  // Engine / legacy names — used in system templates and pre-V1 forks.
   | 'prompt'
   | 'agent_call'
   | 'user_input'
@@ -296,6 +301,13 @@ export interface WorkflowStep {
     /** The form field whose value we write. Must exist in formSchema. */
     field: string;
   };
+
+  /**
+   * V1 publish-time metadata bag. Read by workflowValidatorPure (Rules 6–8):
+   * approverGroup, is_critical, multiSubmit. Not consumed by the engine
+   * directly — engine uses the typed fields above.
+   */
+  params?: Record<string, unknown>;
 
   /**
    * REQUIRED for every step type. Validator-validated. Engine parses agent /

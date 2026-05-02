@@ -54,6 +54,9 @@ export const tasks = pgTable(
     // Populated by reassign_task when hierarchy is active.
     delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
 
+    // ── Workflows V1 — per-task event sequence counter (migration 0268) ──
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+
     // ── System incident escalation (migration 0223) ─────────────────────
     // When a system incident is escalated to an agent, the created task carries
     // these two fields so the escalation can be traced back to the source row.

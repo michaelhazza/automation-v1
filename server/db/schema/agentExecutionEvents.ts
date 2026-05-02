@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { agentRuns } from './agentRuns';
 import { organisations } from './organisations';
@@ -49,6 +49,13 @@ export const agentExecutionEvents = pgTable(
     linkedEntityType: text('linked_entity_type'),
     linkedEntityId: uuid('linked_entity_id'),
 
+    // Workflows V1 — task-scoped event pointers (migration 0268)
+    taskId: uuid('task_id'),
+    taskSequence: bigint('task_sequence', { mode: 'number' }),
+    eventOrigin: text('event_origin'),
+    eventSubsequence: integer('event_subsequence').default(0),
+    eventSchemaVersion: integer('event_schema_version').notNull().default(1),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
@@ -63,6 +70,13 @@ export const agentExecutionEvents = pgTable(
     linkedEntityIdx: index('agent_execution_events_linked_entity_idx')
       .on(table.linkedEntityType, table.linkedEntityId)
       .where(sql`${table.linkedEntityType} IS NOT NULL`),
+    // Workflows V1 — task-scoped unique index (partial, migration 0268)
+    taskSeqUniqueIdx: uniqueIndex('agent_execution_events_task_seq_idx')
+      .on(table.taskId, table.taskSequence, table.eventSubsequence)
+      .where(sql`${table.taskId} IS NOT NULL`),
+    runTaskSeqIdx: index('agent_execution_events_run_task_seq_idx')
+      .on(table.runId, table.taskSequence)
+      .where(sql`${table.taskId} IS NOT NULL`),
   }),
 );
 

@@ -70,6 +70,7 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
 import { WorkflowStepReviewService } from './workflowStepReviewService.js';
+import { WorkflowStepGateService } from './workflowStepGateService.js';
 import {
   executeActionCall,
   resolveConfigurationAssistantAgentId,
@@ -85,6 +86,9 @@ import {
   assertValidTransition,
   InvalidTransitionError,
 } from '../../shared/stateMachineGuards.js';
+import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
+import { decideRunNextState } from './workflowRunPauseStopServicePure.js';
+import { estimateStepCostCents } from '../lib/workflow/costEstimationDefaults.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -834,6 +838,23 @@ export const WorkflowEngineService = {
       const anyRunning = currentlyRunning > 0;
 
       if (allDone) {
+        // §7.5 run-completion invariant (Chunk 7): before writing a terminal
+        // status, verify no step run is still in a non-terminal state. This
+        // guards against a race where liveStepRuns snapshot is stale (a step
+        // completed between the SELECT and this check).
+        const pendingSteps = liveStepRuns.filter(
+          (s) =>
+            !['completed', 'failed', 'skipped', 'invalidated', 'cancelled'].includes(s.status)
+        );
+        if (pendingSteps.length > 0) {
+          logger.warn('run_completion_blocked_by_open_step', {
+            event: 'run.completion_blocked',
+            runId,
+            pendingSteps: pendingSteps.map((s) => ({ id: s.id, status: s.status })),
+          });
+          return; // run stays running — next tick will re-evaluate
+        }
+
         // Did any step fail with continue policy?
         const anyContinueFailures = stepRunRows.some(
           (s) =>
@@ -857,10 +878,16 @@ export const WorkflowEngineService = {
         }
 
         const completedAt = new Date();
-        await db
-          .update(workflowRuns)
-          .set({ status: finalStatus, completedAt, updatedAt: completedAt })
-          .where(eq(workflowRuns.id, runId));
+        // Defensive gate cascade + terminal status write — must be atomic.
+        // There SHOULD be no open gates at normal completion, but the spec
+        // requires resolveOpenGatesForRun unconditionally for all terminal writes.
+        await db.transaction(async (tx) => {
+          await WorkflowStepGateService.resolveOpenGatesForRun(run.id, 'run_terminated', run.organisationId, tx);
+          await tx
+            .update(workflowRuns)
+            .set({ status: finalStatus, completedAt, updatedAt: completedAt })
+            .where(eq(workflowRuns.id, runId));
+        });
         // §10.3 — onboarding-state bookkeeping (best-effort).
         await upsertSubaccountOnboardingState({
           runId,
@@ -933,7 +960,114 @@ export const WorkflowEngineService = {
       });
     }
 
+    // ── Cap check (Decision 12 / Chunk 7) ──────────────────────────────────
+    // Check cost_accumulator_cents and wall-clock elapsed BEFORE dispatching
+    // any steps. Read the accumulator from the DB (not from the stale `run`
+    // snapshot loaded at the start of the tick) so the check reflects any
+    // concurrent accumulator increments that committed while this tick was
+    // processing the ready-set.
+    if (toDispatch.length > 0) {
+      const [capRow] = await db
+        .select({
+          costAccumulatorCents: workflowRuns.costAccumulatorCents,
+          effectiveCostCeilingCents: workflowRuns.effectiveCostCeilingCents,
+          effectiveWallClockCapSeconds: workflowRuns.effectiveWallClockCapSeconds,
+        })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, runId));
+
+      // DB-side elapsed seconds — avoids TS Date.now() skew on the tick worker.
+      const elapsedResult = await db.execute(
+        sql`SELECT EXTRACT(EPOCH FROM (now() - started_at))::integer AS elapsed_seconds FROM workflow_runs WHERE id = ${runId}`
+      );
+      const elapsedRow = (elapsedResult as unknown as { rows?: Array<Record<string, unknown>> }).rows?.[0];
+      const elapsedSeconds = Number(elapsedRow?.['elapsed_seconds'] ?? 0);
+
+      if (capRow) {
+        const decision = decideRunNextState({
+          currentStatus: 'running',
+          currentCostCents: capRow.costAccumulatorCents ?? 0,
+          currentElapsedSeconds: elapsedSeconds,
+          effectiveCostCeilingCents: capRow.effectiveCostCeilingCents ?? Infinity,
+          effectiveWallClockCapSeconds: capRow.effectiveWallClockCapSeconds ?? Infinity,
+        });
+
+        if (decision.shouldPause) {
+          // Engine owns this context — no outer transaction wrapping the tick,
+          // so we open a transaction here for the pause write.
+          await db.transaction(async (tx) => {
+            await WorkflowRunPauseStopService.pauseRunBetweenSteps(
+              runId,
+              run.organisationId,
+              decision.capType!,
+              tx
+            );
+          });
+          logger.info('workflow_run_cap_pause', {
+            event: 'run.cap_pause',
+            runId,
+            capType: decision.capType,
+            costAccumulatorCents: capRow.costAccumulatorCents,
+            elapsedSeconds,
+          });
+          return;
+        }
+
+        // Pre-step cost-cap estimate: if the projected cost after the next step
+        // would exceed the cap, pause before dispatching.
+        const nextStep = toDispatch[0];
+        if (nextStep && capRow.effectiveCostCeilingCents !== null) {
+          const estimate = estimateStepCostCents(
+            nextStep.type,
+            nextStep.params as Record<string, unknown> | undefined
+          );
+          const projectedCost = (capRow.costAccumulatorCents ?? 0) + estimate;
+          if (projectedCost > (capRow.effectiveCostCeilingCents ?? Infinity)) {
+            await db.transaction(async (tx) => {
+              await WorkflowRunPauseStopService.pauseRunBetweenSteps(
+                runId,
+                run.organisationId,
+                'cost_ceiling',
+                tx
+              );
+            });
+            logger.info('workflow_run_pre_step_cost_cap_pause', {
+              event: 'run.pre_step_cost_cap_pause',
+              runId,
+              stepId: nextStep.id,
+              stepType: nextStep.type,
+              estimateCents: estimate,
+              projectedCost,
+              ceilingCents: capRow.effectiveCostCeilingCents,
+            });
+            return;
+          }
+        }
+      }
+    }
+
     for (const step of toDispatch) {
+      // Re-check run status before each step dispatch — a concurrent pause or
+      // cancellation may have fired while earlier steps in this batch were
+      // being dispatched.
+      const [runState] = await db
+        .select({ status: workflowRuns.status })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, runId));
+      if (
+        runState?.status === 'cancelled' ||
+        runState?.status === 'failed' ||
+        runState?.status === 'paused'
+      ) {
+        logger.info('workflow_engine_step_dispatch_skipped', {
+          event: 'engine.step_dispatch_skipped',
+          runId,
+          status: runState.status,
+          stepId: step.id,
+        });
+        return;
+      }
+
       try {
         await this.dispatchStep(run, def, step, liveStepRuns);
       } catch (err) {
@@ -1026,7 +1160,7 @@ export const WorkflowEngineService = {
     // normally.
     if (
       run.runMode === 'supervised' &&
-      (step.type === 'agent_call' || step.type === 'prompt' || step.type === 'action_call') &&
+      (step.type === 'agent_call' || step.type === 'prompt' || step.type === 'action_call' || step.type === 'invoke_automation') &&
       sr.status === 'pending'
     ) {
       await WorkflowStepReviewService.requireApproval(sr, {
@@ -1034,6 +1168,39 @@ export const WorkflowEngineService = {
       });
       // Step is now awaiting_approval; tick will re-check on next pass
       return;
+    }
+
+    // ── isCritical synthesis ─────────────────────────────────────────────
+    // When a non-approval step carries params.is_critical === true, the engine
+    // synthesises an approval gate (task_requester pool) before dispatching.
+    // Spec §5.2 #4: skip synthesis when the previous step is already an
+    // Approval step (no double-gate).
+    if (
+      step.params?.is_critical === true &&
+      (step.type === 'agent_call' || step.type === 'prompt' || step.type === 'action_call' || step.type === 'invoke_automation') &&
+      sr.status === 'pending'
+    ) {
+      // Check whether an open gate already exists — idempotent guard.
+      const existingGate = await WorkflowStepGateService.getOpenGate(
+        run.id,
+        step.id,
+        run.organisationId
+      );
+      if (!existingGate) {
+        // Check if ALL direct predecessors (by dependsOn) are approval steps — no double-gate.
+        const directPredecessors = def.steps.filter(s => step.dependsOn?.includes(s.id));
+        const prevIsApproval = directPredecessors.length > 0 && directPredecessors.every(s => s.type === 'approval');
+
+        if (!prevIsApproval) {
+          await WorkflowStepReviewService.requireApproval(sr, {
+            reviewKind: 'is_critical_synthesis',
+            approverGroup: { kind: 'task_requester' },
+            isCriticalSynthesised: true,
+          });
+          // Step is now awaiting_approval; tick will re-check on next pass
+          return;
+        }
+      }
     }
 
     switch (step.type) {
@@ -2710,16 +2877,20 @@ export const WorkflowEngineService = {
         from: run.status,
         to: 'failed',
       });
-      await db
-        .update(workflowRuns)
-        .set({
-          status: 'failed',
-          error: 'context_overflow',
-          failedDueToStepId: sr.stepId,
-          completedAt: failedAt,
-          updatedAt: failedAt,
-        })
-        .where(eq(workflowRuns.id, run.id));
+      await db.transaction(async (tx) => {
+        // Orphaned-gate cascade before terminal run status write.
+        await WorkflowStepGateService.resolveOpenGatesForRun(run.id, 'run_terminated', run.organisationId, tx);
+        await tx
+          .update(workflowRuns)
+          .set({
+            status: 'failed',
+            error: 'context_overflow',
+            failedDueToStepId: sr.stepId,
+            completedAt: failedAt,
+            updatedAt: failedAt,
+          })
+          .where(eq(workflowRuns.id, run.id));
+      });
       // §10.3 — onboarding-state bookkeeping for the terminal fail.
       await upsertSubaccountOnboardingState({
         runId: run.id,
@@ -3141,16 +3312,20 @@ export const WorkflowEngineService = {
           assertContextSize(nextBytes, run.id);
         } catch {
           const failedAt = new Date();
-          await db
-            .update(workflowRuns)
-            .set({
-              status: 'failed',
-              error: 'context_overflow',
-              failedDueToStepId: step.id,
-              completedAt: failedAt,
-              updatedAt: failedAt,
-            })
-            .where(eq(workflowRuns.id, run.id));
+          await db.transaction(async (tx) => {
+            // Orphaned-gate cascade before terminal run status write.
+            await WorkflowStepGateService.resolveOpenGatesForRun(run.id, 'run_terminated', run.organisationId, tx);
+            await tx
+              .update(workflowRuns)
+              .set({
+                status: 'failed',
+                error: 'context_overflow',
+                failedDueToStepId: step.id,
+                completedAt: failedAt,
+                updatedAt: failedAt,
+              })
+              .where(eq(workflowRuns.id, run.id));
+          });
           // §10.3 — onboarding-state bookkeeping for the terminal fail.
           await upsertSubaccountOnboardingState({
             runId: run.id,
@@ -3307,16 +3482,20 @@ export const WorkflowEngineService = {
       assertContextSize(nextBytes, run.id);
     } catch {
       const failedAt = new Date();
-      await db
-        .update(workflowRuns)
-        .set({
-          status: 'failed',
-          error: 'context_overflow',
-          failedDueToStepId: step.id,
-          completedAt: failedAt,
-          updatedAt: failedAt,
-        })
-        .where(eq(workflowRuns.id, run.id));
+      await db.transaction(async (tx) => {
+        // Orphaned-gate cascade before terminal run status write.
+        await WorkflowStepGateService.resolveOpenGatesForRun(run.id, 'run_terminated', run.organisationId, tx);
+        await tx
+          .update(workflowRuns)
+          .set({
+            status: 'failed',
+            error: 'context_overflow',
+            failedDueToStepId: step.id,
+            completedAt: failedAt,
+            updatedAt: failedAt,
+          })
+          .where(eq(workflowRuns.id, run.id));
+      });
       // §10.3 — onboarding-state bookkeeping for the terminal fail.
       await upsertSubaccountOnboardingState({
         runId: run.id,

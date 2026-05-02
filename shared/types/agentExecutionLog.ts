@@ -5,6 +5,12 @@
 // types. Adding a new event type has a checklist in spec §5.3a — follow it.
 
 // ---------------------------------------------------------------------------
+// Event origin — who produced the event (Workflows V1)
+// ---------------------------------------------------------------------------
+
+export type EventOrigin = 'engine' | 'gate' | 'user' | 'orchestrator';
+
+// ---------------------------------------------------------------------------
 // Source-service tag
 // ---------------------------------------------------------------------------
 
@@ -288,6 +294,13 @@ export function isCriticalEventType(eventType: AgentExecutionEventType): boolean
 // Main wire shape
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-run event id format: `${runId}:${sequenceNumber}:${eventType}`
+ * Per-task event id format: `task:${taskId}:${taskSequence}:${eventSubsequence}:${eventType}`
+ *
+ * Both formats are used in `AgentExecutionEventEnvelope.eventId` depending on
+ * whether the event is scoped to a task (Workflows V1) or just a run.
+ */
 export interface AgentExecutionEvent {
   id: string;
   runId: string;
@@ -302,6 +315,18 @@ export interface AgentExecutionEvent {
   linkedEntity: LinkedEntity | null;
   /** WIRE-ONLY — computed fresh on every read. See spec §4.1a. */
   permissionMask: PermissionMask;
+  // ── Workflows V1 — task-scoped event pointers ────────────────────────────
+  /** UUID of the task this event is scoped to. Null for run-only events. */
+  taskId: string | null;
+  /** Monotonically increasing sequence within the task. Null when taskId is null. */
+  taskSequence: number | null;
+  /** Who produced the event. Null for legacy run-only events. */
+  eventOrigin: EventOrigin | null;
+  /**
+   * Intra-sequence ordering for bundle events sharing the same taskSequence.
+   * 0-indexed. Null for legacy run-only events.
+   */
+  eventSubsequence: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +411,13 @@ export interface AgentExecutionEventPage {
   events: AgentExecutionEvent[];
   hasMore: boolean;
   highestSequenceNumber: number;
+  /**
+   * Task-scoped composite cursor component. Populated by `streamEventsByTask`
+   * only. Paired with `highestSequenceNumber` (= highest taskSequence) to
+   * resume at the exact mid-bundle position after a page cut. Always pass
+   * both fields as `(fromSeq, fromSubseq)` to `streamEventsByTask`.
+   */
+  highestSubsequence?: number;
 }
 
 // ---------------------------------------------------------------------------
