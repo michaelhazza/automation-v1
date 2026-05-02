@@ -115,3 +115,51 @@ None — round produced 0 implements (2 auto-rejects, 3 user-approved defers rou
 (none)
 
 ---
+
+## Round 3 — 2026-05-02T09:05:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> This final pass tightens the PR into something that's not just clean, but system-defining. The addition of CONTRIBUTING.md elevates this from a code cleanup to a standards-setting change. No blockers. One minor gap and a couple of high-leverage tweaks to make it airtight.
+>
+> Confirmed strengths: lint suppression policy properly codified (clear philosophy, enforced structure with `// reason:` directly above, explicit allowed vs forbidden reasoning, concrete examples mapped to real codebase rules); enforcement is practical (`grep -rn "eslint-disable"` is simple, enforceable, scalable, no tooling dependency); perfect alignment between code and policy (React hook suppressions, `any` constrained to test/dynamic imports, `namespace` documented, cross-block usage explained); previous strengths intact (type safety, test fixes, defensive defaults, UI change).
+>
+> Remaining gaps (very minor):
+>
+> P2.1 (R3) — Missing enforcement hook. Policy exists but enforcement is manual via grep. Easy to forget in fast-moving PRs; not enforced in CI. Recommendation (high ROI, low effort): add CI check `grep -rn "eslint-disable" . | grep -v "reason:" && exit 1`; or safer, ensure previous line contains `reason:`. Turns policy into hard guarantee.
+>
+> P2.2 (R3) — One small wording ambiguity in policy. Acceptable-patterns table phrase `"<symbol> is an inline async function that closes over state setters..."` is good but slightly narrow. Also used for non-async inline functions and functions not strictly tied to state setters. Suggestion: broaden to `"<symbol> is an inline function that closes over component state; only <dep> is the intended trigger."`
+>
+> P2.3 (R3) — "Dynamic import" guidance could be slightly stronger. Current: `"Dynamic import: <package> ships both ESM and CJS shapes; no clean type exists."` Add nudge: `"Prefer centralising this pattern in a helper if used in multiple locations."` Hints toward the deferred refactor without forcing it.
+>
+> Risk assessment — Runtime risk: None. Process risk: Reduced significantly. Codebase consistency: Strongly improved. Future maintainability: High.
+>
+> Final verdict — APPROVED, merge.
+>
+> Strategic note — PR moves from "we write clean code" to "we enforce how clean code is written and justified" — engineering effort to engineering system.
+>
+> Optional next move (high leverage): add CI lint suppression check; add "React effect dependency policy" section to CONTRIBUTING.md; add tiny util for dynamic imports.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| P2.1 (R3) — CI enforcement check for `eslint-disable` + `// reason:` preceding line | technical-escalated (defer) | defer | defer | low | ChatGPT's `grep -v` proposal is naive (matches same-line reason); correct check needs awk walking line pairs + block-comment handling. Belongs in its own focused PR with test coverage of the script. User-approved as recommended. |
+| P2.2 (R3) — Broaden "inline async function" wording in CONTRIBUTING.md acceptable-patterns table | technical | implement | auto (implement) | low | Direct wording fix to the file just created. Replaced narrow async-only phrasing with broader "inline function that closes over component state". |
+| P2.3 (R3) — Add "prefer centralising in helper" nudge to dynamic-import guidance | technical | implement | auto (implement) | low | Small additive sentence to existing acceptable-patterns row. Reinforces the deferred R1 P2.5 helper without forcing it. |
+| P2.4 (R3) — Add "React effect dependency policy" section to CONTRIBUTING.md | technical-escalated (defer) | defer | defer | low | Tied to deferred R1 P2.1 React refactor — policy should describe target pattern, not current pattern; write when refactor lands so doc and code agree. User-approved as recommended. |
+
+**Top themes:** other (governance/CI), naming (doc wording)
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+- [auto] Broadened CONTRIBUTING.md acceptable-patterns table: `react-hooks/exhaustive-deps` row reason template now reads "inline function that closes over component state" instead of the narrower "inline async function that closes over state setters"; `@typescript-eslint/no-explicit-any` row appends "Prefer centralising this pattern in a helper if used in multiple locations."
+
+### Deferred this round (routed to tasks/todo.md § PR Review deferred items / PR #251)
+
+- [user] P2.1 (R3) — CI enforcement check for eslint-disable + reason — needs its own design + tests.
+- [user] P2.4 (R3) — React effect dependency policy section — defer until React refactor PR lands.
+
+---

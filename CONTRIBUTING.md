@@ -36,8 +36,8 @@ The `// reason:` comment goes immediately above the `// eslint-disable-*` direct
 
 | Rule disabled | Acceptable site | Required `// reason:` form |
 |---------------|-----------------|----------------------------|
-| `react-hooks/exhaustive-deps` | `useEffect` whose body closes over inline async functions or callback props that intentionally do not retrigger | "`<symbol>` is an inline async function that closes over state setters; only `<dep>` is the intended trigger." |
-| `@typescript-eslint/no-explicit-any` | Test stub for a third-party module surface, or dynamic-import default-export workaround | "Test stub: stand-in for `<symbol>` to exercise the error path." or "Dynamic import: `<package>` ships both ESM and CJS shapes; no clean type exists." |
+| `react-hooks/exhaustive-deps` | `useEffect` whose body closes over inline functions or callback props that intentionally do not retrigger | "`<symbol>` is an inline function that closes over component state; only `<dep>` is the intended trigger." |
+| `@typescript-eslint/no-explicit-any` | Test stub for a third-party module surface, or dynamic-import default-export workaround | "Test stub: stand-in for `<symbol>` to exercise the error path." or "Dynamic import: `<package>` ships both ESM and CJS shapes; no clean type exists. Prefer centralising this pattern in a helper if used in multiple locations." |
 | `@typescript-eslint/no-namespace` | Express module augmentation in `server/types/*.d.ts` | "Express module augmentation requires the `namespace` keyword; no alternative syntax exists in TypeScript." |
 | `no-useless-assignment` | A variable consumed by a `finally` or `catch` block that the analyzer cannot see across blocks | "`<symbol>` is consumed by `clearTimeout` in the finally block; ESLint cannot see cross-block usage." |
 
