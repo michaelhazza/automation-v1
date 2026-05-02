@@ -2167,3 +2167,56 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+
+## Deferred spec decisions — workflows-dev-spec
+
+**Source:** spec-reviewer iteration 1 — 2026-05-02T00-48-25Z
+**Spec:** `docs/workflows-dev-spec.md` (v1)
+**Brief:** `docs/workflows-dev-brief.md` (v2)
+
+The spec-reviewer auto-decided the following directional findings during iteration 1. Each was accepted and applied to the spec mechanically using the most conservative resolution available; flagged here so a human can validate the resolution before implementation proceeds.
+
+### D-W1-C2: Ask multi-submitter / quorum semantics — resolved as single-submit / first-wins
+
+**Codex:** the spec inherits Approval-style `quorum` for Ask via the shared `submitterGroup` shape, but Ask runtime persists a single submitted-value JSON and never defines what multiple submitters mean.
+
+**Resolution applied:** Ask is single-submit / first-submit-wins. Validator caps `quorum` at 1 for Ask in §4.8; subsequent submissions return 409 with the existing submitter info. Matches the brief's implicit model (one row of submitted values per Ask step) and avoids inventing a multi-submit aggregation concept.
+
+**What to validate:** confirm with the brief author that "multiple people in the submitter group, only one fills the form" is the intended UX. If multi-submitter aggregation is wanted in V1, this needs a redo.
+
+### D-W1-C3: Idempotency / concurrency / unique-constraint→HTTP for Approval and Ask writes — resolved with state-based predicate + UNIQUE on review row
+
+**Codex:** new write paths had no idempotency posture, no concurrency guard, no duplicate-request HTTP mapping (spec-authoring-checklist §10 requires all three).
+
+**Resolution applied:** standard repo posture (per checklist §10 examples) — Approval writes get key-based + state-based posture (UNIQUE on `(workflow_run_id, step_id, deciding_user_id)` for double-click idempotency, optimistic predicate on step status for first-commit-wins quorum-counting, 23505 → 200 idempotent-hit). Ask writes get state-based posture (predicate on step status, 0-rows-updated → 409 already_submitted). State machine closure pinned in §5.1.1 + §11.4.1.
+
+**What to validate:** confirm the (workflow_run_id, step_id, deciding_user_id) UNIQUE constraint is the right granularity (vs (run_id, step_id) — but that disallows multi-approver quorum, which is wrong). Architect to verify the existing schema doesn't already have a conflicting constraint.
+
+### D-W1-I6: Ask form `params` Contracts entry — applied with the seven field types pinned
+
+**Codex:** Ask form contract underspecified — no canonical `params` schema, no `autoFillFrom` enum, skip-flag schema, `error_message` field.
+
+**Resolution applied:** added a Contracts subsection to §3.2 pinning the full Ask `params` shape (prompt, fields[] with seven types + per-field error_message, submitterGroup, quorum=1, autoFillFrom enum 'none'|'last_completed_run', allowSkip:boolean default false).
+
+**What to validate:** confirm the seven field types are the right V1 set. Confirm `autoFillFrom` is the right enum shape (vs a more flexible structure). Confirm reserved field-key list (currently unspecified — architect picks).
+
+### D-W1-I7: Pause / resume / extend state machine + API — resolved with full pin (path b)
+
+**Codex:** Pause system promised resume/extend but no endpoint, no persisted state, no permission contract, no state-machine closure.
+
+**Resolution applied:** path b chosen (pin the full state machine + resume API rather than cutting extend from V1). Added a §7.5 subsection with: new `paused` status, valid transitions (running ↔ paused, running/paused → failed via Stop), forbidden transitions, resume API contract (`POST /api/tasks/:taskId/run/resume` with optional extension params), Stop API contract, idempotency posture (state-based), permission guard (§14.5 visibility set), default 2-extension cap per run.
+
+**What to validate:** confirm the codebase wants to ship `Continue for another 30 minutes / $2.50` extension affordance in V1, OR whether path a (Stop only, no extend) is preferred for simplicity. The current spec assumes extend is in scope per §7.2 mock and spec-time decision #4.
+
+### D-W1-R2: Staging deploy step — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `staged_rollout: never_for_this_codebase_yet` and `rollout_model: commit_and_revert`. §18.1 step 5 was rewritten to commit-and-revert; staging smoke-test step removed.
+
+**What to validate:** if the codebase has actually moved to a staged rollout posture (e.g. an internal staging environment for the workflows feature specifically), the spec-context.md framing needs to be updated and this rejection re-litigated.
+
+### D-W1-R4: Frontend `*.test.tsx` tests — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `frontend_tests: none_for_now` and `convention_rejections` explicitly says "do not add frontend unit tests". §17.5 .test.tsx block was removed and replaced with a deviation note pointing back at spec-context.md; one .test.tsx in §17.6 was renamed to a server-side .test.ts.
+
+**What to validate:** if the codebase is ready to land a frontend testing posture for this feature specifically (justifiable because of the WebSocket-coordinated multi-pane UI), update spec-context.md first, then re-litigate.

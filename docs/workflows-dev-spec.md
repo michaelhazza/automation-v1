@@ -165,8 +165,10 @@ All deltas are **additive**. No existing column is dropped. Existing system temp
 |---|---|---|---|---|
 | step-definition (the `params` JSON inside `workflow_template_steps` or equivalent — exact target table named at architect-time) | `is_critical` | `boolean` | `false` | Author-marked. When `true`, the step is auto-routed to Approval regardless of its declared side-effect class. Drives §5 routing + alert hooks. (brief §8.5) |
 | `workflow_step_reviews` | `seen_payload` | `jsonb` | `null` | Snapshot of the parameters and rendered preview the approver actually saw at decision time. Snapshot-at-decision-time semantics are the contract; engine MUST NOT regenerate this from current state. (brief §8.7) |
-| `workflow_step_reviews` | `seen_confidence` | `jsonb` | `null` | The confidence chip value (`high` / `medium` / `low`) and reason as rendered on the card at decision time. (brief §8.6) |
+| `workflow_step_reviews` | `seen_confidence` | `jsonb` | `null` | The confidence chip value (`high` / `medium` / `low`) and reason as rendered on the card at decision time. Contract pinned at §6.2.1. (brief §8.6) |
 | `workflow_step_reviews` | `decision_reason` | `text` | `null` | Optional free-text from the approver. (brief §8.7) |
+| `workflow_step_reviews` | `approver_pool_snapshot` | `jsonb` | `null` | Snapshot of the eligible-approvers pool (an array of `userId` strings) resolved at gate-creation time. The engine validates the deciding user is in this snapshot (§5.1); team-membership changes after gate-open do not invalidate an in-flight approval. Source-of-truth for the membership check; never re-resolved from `approverGroup` after gate-open. |
+| `workflow_step_reviews` | `is_critical_synthesised` | `boolean` | `false` | When `true`, this review was synthesised by the engine because the next step has `is_critical: true` (§5.2). Distinguishes author-placed Approvals from auto-inserted ones in the audit trail. |
 | `workflow_template_versions` | `publish_notes` | `text` | `null` | Optional one-line "what changed in this version?" captured by the Studio Publish modal. Surfaces in version history + Plan tab caption. (brief §7.4) |
 | `workflows` (the workflow-template table) | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
 | `workflows` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
@@ -191,9 +193,61 @@ The existing `approval` step type carries `approvalPrompt` and `approvalSchema`.
 
 Same shape applies to **Ask** step `params` (the `user_input` engine type) — submitter routing reuses the same `approverGroup` structure under a `submitterGroup` key. One picker primitive, two step types using it. (brief §7.3, spec §14)
 
+**Ask `params` canonical shape** (Contracts entry; pin at this level so both server and client parse the same shape):
+
+```typescript
+{
+  prompt: string,                                                   // operator-facing prompt
+  fields: Array<{
+    key: string,                                                    // unique within schema; reserved keys rejected by validator
+    label: string,
+    type: 'text' | 'textarea' | 'select' | 'multi-select' | 'number' | 'date' | 'checkbox',
+    required: boolean,                                              // default false
+    help_text?: string,
+    error_message?: string,                                         // optional override; falls back to a generic per type
+    options?: Array<{ value: string, label: string }>,              // select / multi-select only
+    min?: number, max?: number                                      // number only
+  }>,
+  submitterGroup: {                                                 // same shape as approverGroup above
+    kind: 'specific_users' | 'team' | 'task_requester' | 'org_admin',
+    userIds?: string[],
+    teamId?: string
+  },
+  quorum: 1,                                                        // Ask is single-submit / first-wins (§4.8); validator caps at 1
+  autoFillFrom: 'none' | 'last_completed_run',                      // default 'none'; V2 expansion: 'specific_run' / 'saved_preset'
+  allowSkip: boolean                                                // default false; when true the runtime renders a "Skip-this-step" button
+}
+```
+
+Field-level `error_message` is optional; absence falls back to a per-type generic message (§11.3).
+
 ### 3.3 New tables
 
-**None for V1.** The `teams` and `team_members` tables already exist in schema (brief §8.4); the build adds the missing CRUD UI page in Org settings. No new tables for `isCritical`, audit fields, confidence — all fit on existing tables.
+One new table — `workflow_drafts` — for the Studio-handoff path (§10.6, §13.2). The `teams` and `team_members` tables already exist in schema (brief §8.4); the build adds the missing CRUD UI page in Org settings. No other new tables for `isCritical`, audit fields, confidence — all fit on existing tables.
+
+| Table | Column | Type | Default | Purpose |
+|---|---|---|---|---|
+| `workflow_drafts` (NEW) | `id` | `uuid` (PK) | `gen_random_uuid()` | Surrogate key. |
+| `workflow_drafts` | `session_id` | `text` | required | Chat session that produced the draft. Per-session, not per-user (§13.2). |
+| `workflow_drafts` | `subaccount_id` | `uuid` | required | Tenant scope. RLS-protected; new entry must be added to `RLS_PROTECTED_TABLES` (per `architecture.md` §1155). |
+| `workflow_drafts` | `payload` | `jsonb` | required | Draft step list + bindings + branches the orchestrator authored. |
+| `workflow_drafts` | `created_at` | `timestamptz` | `now()` | Set at draft creation. |
+| `workflow_drafts` | `updated_at` | `timestamptz` | `now()` | Updated when the orchestrator iterates on the same session. |
+| `workflow_drafts` | `consumed_at` | `timestamptz` | `null` | Set when the operator publishes (cleared/garbage-collected) or discards. Drafts older than the retention window with `consumed_at IS NULL` are reaped by the cleanup job (§16.3 item 35a). |
+
+Lifecycle:
+
+- Created when the orchestrator drafts a workflow from chat intent (§13.2).
+- Read once on `?fromDraft=:draftId` in the Studio (§10.6) to hydrate the canvas.
+- Deleted (or `consumed_at` set) when the operator publishes a new template or explicitly discards.
+- Reaped after 7 days if neither published nor discarded (cleanup job; §16.3).
+
+Indexes:
+
+| Index | Reason |
+|---|---|
+| `(subaccount_id, session_id)` UNIQUE | One in-flight draft per session per subaccount; re-drafting the same session updates in place. |
+| `(consumed_at, created_at)` partial WHERE `consumed_at IS NULL` | Cheap scan for the 7-day reaper. |
 
 ### 3.4 Indexes
 
@@ -206,7 +260,7 @@ Verify both at architect-time; if either already exists, no-op.
 
 ### 3.5 What does NOT change in schema
 
-- **No new tables** for tasks, workflows, runs, or any V1 surface.
+- **No new tables** for tasks, workflows, runs, approvals, or any other V1 surface (other than `workflow_drafts` per §3.3).
 - **No rename** of any existing column. The `tasks.brief` column stays (V1 nav cleanup is UI-only — see §15).
 - **No new step types.** The four A's collapse is validator + Studio vocabulary only (brief §11.1 #2). `prompt`, `agent_call`, `user_input`, `approval`, `conditional`, `agent_decision`, `action_call`, `invoke_automation` all remain in the engine; the validator rejects publishes that use the deprecated user-facing names but accepts the underlying engine types from existing templates.
 - **No migration** of existing system template rows. They continue to use their current `params` shapes; the new fields default to safe values (`is_critical: false`, `cost_ceiling_cents: 500`, etc.).
@@ -260,7 +314,7 @@ The deprecated user-facing names `conditional`, `agent_decision`, `prompt` (as a
 ### 4.6 Approval-step quorum check (brief §8.2, §8.3)
 
 - Validator rejects publish if `approverGroup.kind === 'specific_users'` and `quorum > approverGroup.userIds.length`.
-- For `kind === 'team'`, validator validates at runtime (team membership can change after publish) — if at run time `quorum > activeTeamMembers`, the engine surfaces an error in the Approval card and the run stalls until either quorum is achievable or the workflow is edited.
+- For `kind === 'team'`, validator validates at runtime (team membership can change after publish) — when the gate opens, the engine resolves the team membership and writes it to `approver_pool_snapshot` (§3.1, §5.1). If `quorum > snapshot.length` at gate-open, the engine surfaces an error in the Approval card and the run stalls. Recovery paths in V1: (a) an org admin / sub-account admin adds members to the team and re-resolves the snapshot via a small admin endpoint (`POST /api/tasks/:taskId/reviews/:reviewId/refresh-pool` — refreshes `approver_pool_snapshot` to the current team membership; gated on org admin / sub-account admin per §14); (b) the operator clicks Stop on the run (§7.3) and re-fires the workflow once the team is sized correctly. The running run cannot be patched to use a different workflow version (running tasks are pinned to their start version per the brief versioning contract).
 - For `kind === 'task_requester'`, quorum is forced to `1` at validate time (a single user; quorum > 1 is meaningless). Validator warns if author tried to set quorum > 1.
 - For `kind === 'org_admin'`, no validation at publish (admin pool is large enough).
 
@@ -271,7 +325,8 @@ The deprecated user-facing names `conditional`, `agent_decision`, `prompt` (as a
 
 ### 4.8 Ask-step submitter group (brief §7.3, spec §14)
 
-- Same shape as `approverGroup`. Same validator rules apply (quorum check, type-specific validation).
+- Same shape as `approverGroup`. Same validator rules apply for the picker (type-specific validation, pool resolution).
+- **Ask is single-submit / first-submit-wins.** `submitterGroup` defines who CAN submit; only one of them DOES. The validator caps `quorum` at `1` for Ask (rejects publish if `quorum > 1`); multi-submitter aggregation is intentionally not part of V1. The first submitter to POST a valid form transitions the step to `submitted` (idempotency posture pinned in §11.4); subsequent submissions return 409 `{ error: 'already_submitted', submitted_by, submitted_at }`.
 - Ask steps with `kind === 'task_requester'` are the most common; `kind === 'team'` and `kind === 'specific_users'` route via notification (§11).
 
 ---
@@ -295,6 +350,19 @@ When a user submits an approval decision, the engine:
 2. Increments the decision count. If `approve` count ≥ `quorum`, the step transitions to `approved` and the workflow continues per `onApprove` routing.
 3. If any single `reject` arrives, the step transitions to `rejected` immediately (a single rejection trumps multiple approvals — V1 simplification; V2 may add "rejection requires N rejecters").
 
+#### 5.1.1 Approval write contracts (Execution-Safety)
+
+Per spec-authoring-checklist §10. Each Approval decision write declares:
+
+- **Idempotency posture: key-based + state-based.** A new UNIQUE constraint on `workflow_step_reviews (workflow_run_id, step_id, deciding_user_id)` makes a single user's double-click idempotent at (user, step) granularity — the second insert returns the first. The step-level transition (`review_required → approved` or `review_required → rejected`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'approved' WHERE id = $1 AND status = 'review_required'`). 0-rows-updated means another decider already transitioned the step; the API resolves the call as a successful idempotent hit and returns the winning decision to the losing caller (first-commit-wins).
+- **Retry classification: guarded.** Both the row insert and the step transition are retry-safe via the unique constraint and the predicate; the API contract documents that callers can retry on network failure without risk of double-counting.
+- **Concurrency guard for racing writes:**
+  - Two approvals from different users on the same step before quorum is met: both `INSERT` rows; quorum-counting reads from row count.
+  - Two approvals from different users that both cross the quorum threshold: the predicate ensures exactly one `UPDATE` flips the step status; the second observes 0 rows updated and treats its own row as already-counted.
+  - A concurrent approve + reject: the reject's predicate `WHERE status = 'review_required'` runs in the same transaction as the row insert; whichever commits first wins; the loser observes the post-commit state and returns the existing decision.
+- **Unique-constraint → HTTP mapping.** `23505 unique_violation` on `workflow_step_reviews` returns `200 { idempotent_hit: true, existing_review_id }`, never bubbles as 500.
+- **State machine closure.** Valid review-record transitions: `(none) → review_required → approved | rejected`. Forbidden: `approved/rejected → *` (terminal). Adding a new review status requires a spec amendment.
+
 ### 5.2 `isCritical` routing (brief §8.5)
 
 When the engine encounters a step (Agent or Action) with `is_critical: true`:
@@ -304,7 +372,7 @@ When the engine encounters a step (Agent or Action) with `is_critical: true`:
    - `quorum = 1`.
    - The Approval card content shows the upcoming step's parameters and a confidence chip (§6).
 2. The synthesised gate is recorded in `workflow_step_reviews` with a flag indicating it was `isCritical`-induced (so audit can distinguish author-placed Approvals from synthesised ones).
-3. On approval, the original step executes. On rejection, the workflow stalls (no `onReject` route — author didn't define one for an implicit gate). The operator can edit the workflow or kill the run; spec-time decision #2 default applies.
+3. On approval, the original step executes. On rejection, the workflow stalls (no `onReject` route — author didn't define one for an implicit gate). The operator's only recovery path is clicking Stop in the task header (§7.3); the running run cannot be patched onto a new template version. Spec-time decision #2 default applies (stall-and-notify until either Stop or approval).
 4. If the author has explicitly placed an Approval before a critical step, the engine does NOT double-gate (one approval is sufficient). The validator warns the author at publish: "Step N is marked critical; the explicit Approval before it is redundant. Continue?"
 
 ### 5.3 State machine — stall-and-notify on Approval / Ask (spec-time decision #2)
@@ -369,6 +437,19 @@ The render mapping (V1):
 | Few past runs, mixed history | `Medium` · still learning what's normal here |
 
 The full mapping is also stored in a copy table (data file or hard-coded constant); architect to pick the storage shape. The reason string is computed at gate-creation, snapshotted into `seen_confidence.reason`, and not regenerated.
+
+#### 6.2.1 `seen_confidence` JSONB shape (Contracts)
+
+```typescript
+{
+  value: 'high' | 'medium' | 'low',                          // the chip rendered on the card
+  reason: string,                                            // operator-language one-liner per §6.2 mapping (no engineering jargon)
+  computed_at: string,                                       // ISO8601 — gate creation time; same as workflow_step_reviews.created_at
+  signals: Array<{ name: string, weight: number }>           // the heuristic signals that contributed to the value (audit / debugging only; never rendered)
+}
+```
+
+`signals` is captured for retrospective calibration when the V2 calibrated model lands. The render path uses only `value` and `reason`.
 
 ### 6.3 The `seen_payload` snapshot (brief §8.7)
 
@@ -450,7 +531,43 @@ Both buttons are visible to anyone with edit-access to the task (per §14 permis
 - Wall-clock is checked on every step completion plus a periodic (e.g., 30-second) heartbeat job.
 - Pause is **between-step**, not mid-step. A step in flight finishes (or errors out via its retry policy) before the cap takes effect. This avoids inconsistent partial state on irreversible side effects.
 
-### 7.5 Telemetry
+### 7.5 Pause / Stop state machine and API contract
+
+Pinned closure for the new transitions introduced by §7. Existing run statuses (`queued`, `running`, `failed`, `succeeded`) keep their current meaning. Two new statuses land:
+
+| New status | Meaning | Set by |
+|---|---|---|
+| `paused` | The run is suspended; no new step is dispatched until the run resumes. | Engine on cap breach (§7.1) or operator Pause (§7.3). |
+| (no new status for Stop — Stop transitions to existing `failed` with reason `stopped_by_user`.) |  |  |
+
+**Valid transitions:**
+
+```
+running ──► paused        (cost cap, wall-clock cap, operator Pause)
+paused  ──► running       (operator resume / extend; resets cap counters per §7.1)
+running ──► failed         (existing path: error; or Stop with reason `stopped_by_user`)
+paused  ──► failed         (operator Stop on a paused run; reason `stopped_by_user`)
+```
+
+**Forbidden transitions:** `failed → running`, `failed → paused`, `succeeded → *` (terminal). Adding a new status requires a spec amendment.
+
+**Resume API.**
+
+- `POST /api/tasks/:taskId/run/resume` body `{ extend_cost_cents?: integer, extend_seconds?: integer }`. Both extensions are optional; absent extensions resume the run with the existing caps unchanged.
+- Permission guard: caller must be in the visibility set for Pause / Stop buttons (§14.5 — task requester, org admin/manager, sub-account admin on the task's sub-account).
+- Idempotency: state-based. If the run's current status is `running`, the endpoint returns `200 { resumed: false, reason: 'not_paused' }` (no-op). If `paused`, transitions to `running` and resets cap counters per the body's extensions.
+- Cap on extensions: the engine tracks `extension_count_per_run`; default cap is 2 extensions per run (architect refines per §19.2 #G). After the cap, the next pause-card extension button is disabled and only Stop is available.
+- Concurrency: the transition uses an optimistic predicate (`UPDATE tasks SET status = 'running' ... WHERE status = 'paused' AND id = $1`). 0 rows updated → 409 `{ error: 'race_with_other_action', current_status: <observed> }`.
+
+**Stop API.**
+
+- `POST /api/tasks/:taskId/run/stop` body `{}`.
+- Permission guard: same as resume.
+- Idempotency: state-based. If the run is already terminal (`failed` or `succeeded`), returns `200 { stopped: false, reason: 'already_terminal', current_status: <observed> }`. If `running` or `paused`, transitions to `failed` with reason `stopped_by_user` and emits `run.stopped.by_user`.
+
+The pause card's `Continue for another 30 minutes / $2.50` button calls `/run/resume` with the corresponding extension. The pause card's `Stop run` button calls `/run/stop`.
+
+### 7.6 Telemetry
 
 - `run.paused.cost_ceiling`, `run.paused.wall_clock`, `run.paused.by_user`, `run.stopped.by_user` events emit through the existing tracing registry (per brief §2.5).
 - Cost-ceiling and wall-clock-cap incidents per workflow template are aggregated in the existing run telemetry; an admin can spot a template that pauses too often and tune its cap.
@@ -467,6 +584,8 @@ Both buttons are visible to anyone with edit-access to the task (per §14 permis
 - Connection authentication: existing session cookie / token. The server scopes events to tasks the user has visibility into (per §14 permissions).
 - Reconnect-with-replay: if the WebSocket drops, the client resumes from the last seen `event_id`. Server replays missed events. **Does not** replay from task start; does not lose events.
 - Backpressure: if the engine emits 50+ events in a burst (rare, but possible during a fan-out), the client batches the render to keep the frame rate smooth (architect picks specific batching window; rule of thumb: 60 fps cap on render).
+
+**Persisted event log.** Per-task events are persisted to the existing `agent_execution_events` table (the primitive named in `docs/spec-context.md` `accepted_primitives` — `agentExecutionEventService` + `agentExecutionEventServicePure`, with atomic monotonic sequence allocation per agent run). For workflow-fired tasks, events are emitted under the run's correlation id; for ad-hoc tasks, they correlate to the agent run. `event_id` in §8.2 is the per-task monotonic sequence assigned by `agentExecutionEventService` at insert time — the source of truth for ordering and replay. Replay query on reconnect: `SELECT * FROM agent_execution_events WHERE task_id = $1 AND sequence > $lastEventId ORDER BY sequence ASC` (architect verifies the exact column name during decomposition; the contract is "monotonic per task, sequence-ordered, durable"). New `task_id` correlation column added to `agent_execution_events` if not already present (architect picks; falls back to extending the existing correlation key set).
 
 ### 8.2 Event taxonomy
 
@@ -593,6 +712,8 @@ Chronological event log, **newest at the bottom** (per brief §6.1 + KNOWLEDGE.m
 ### 9.4 Right pane — tabs
 
 Three tabs: **Now / Plan / Files**. Default tab on task open: **Plan** (per spec-time decision #7).
+
+> **Resolution of brief-internal contradiction.** Brief §6.3 lists four right-panel tabs (Now / Plan / Activity / Files); brief §6.4 #2 lists three (Now / Plan / Files) and explicitly explains that Activity moved out of the right panel into its own collapsible left-of-right-panel column. The spec follows brief §6.4. There is no Activity tab in the right panel — Activity is a dedicated column (§9.3). Brief §6.3 should be reconciled to match.
 
 #### 9.4.1 Now tab
 
@@ -722,7 +843,7 @@ Field-key auto-derivation: lowercase, replace spaces with `_`, strip non-alphanu
 
 When the orchestrator drafts a workflow from chat intent and the operator clicks **"Open in Studio"** on the draft card:
 
-1. Orchestrator persists the draft as a draft row keyed by the chat session (architect picks the table; could be a new `workflow_drafts` table with `session_id`, `payload jsonb`, `created_at`).
+1. Orchestrator persists the draft as a `workflow_drafts` row keyed by the chat `session_id` (table contract pinned in §3.3).
 2. The "Open in Studio" link is `/admin/workflows/new?fromDraft=<draftId>`.
 3. Studio reads the draft, hydrates the canvas with the steps the orchestrator drafted, and clears the draft once the operator publishes (creating v1 of a new template) or discards (back to chat with the draft intact for further iteration).
 4. **No interstitial preview screen** — the canvas itself is the preview.
@@ -792,7 +913,19 @@ On valid Submit:
 
 1. Client POSTs to `/api/tasks/:taskId/ask/:stepId/submit` with the form values + the user's id.
 2. Server validates the user is in the `submitter_pool` (similar to Approval pool check — §5.1, §14). 403 if not.
-3. Server persists the values on the step run record's `outputs` JSON (so they're available as bindings: `${steps.confirm_campaign_target.outputs.audience}`).
+3. Server persists the values on the step run record's `outputs` JSON (so they're available as bindings: `${steps.confirm_campaign_target.outputs.audience}`). The persisted shape is fixed (Contracts entry):
+
+   ```typescript
+   // step run record .outputs JSON for an Ask step
+   {
+     submitted_by: string,                          // user id
+     submitted_at: string,                          // ISO8601
+     values: Record<string, unknown>,               // keyed by Ask params.fields[].key; type matches the field type
+     skipped: boolean                               // true when the user clicked Skip (only possible if params.allowSkip === true; values is then {})
+   }
+   ```
+
+   Bindings resolve `steps.<step_name>.outputs.<field_key>` against `outputs.values`. If `outputs.skipped === true`, every binding to that step's field returns `null` and downstream branches that depend on the field treat it as the default-branch case.
 4. Server emits `ask.submitted` event.
 5. Client receives the event, collapses the form card to a green-tinted **receipt** showing what was submitted, by whom, when:
 
@@ -805,6 +938,16 @@ Tone:            Professional warm
 ```
 
 6. Engine resumes the workflow (next step starts).
+
+#### 11.4.1 Ask submission contracts (Execution-Safety)
+
+Per spec-authoring-checklist §10. Each Ask submission write declares:
+
+- **Idempotency posture: state-based.** The step transition (`awaiting_input → submitted`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'submitted', outputs = $1 WHERE id = $2 AND status = 'awaiting_input'`). 0 rows updated means another submitter already won; the API returns `409 { error: 'already_submitted', submitted_by, submitted_at }` (the existing submitter info comes from the row that won).
+- **Retry classification: guarded.** A submitter who retries after a network failure observes one of two outcomes — `200 { ok: true }` if their original POST won, or `409 { already_submitted }` if a different submitter raced ahead. Either way, the form values land exactly once.
+- **Concurrency guard.** First-commit-wins per the predicate above; the losing caller's POST is rejected with 409 and the form card on their client reconciles via the WebSocket `ask.submitted` event.
+- **No DB unique constraint added.** State-based predicate is sufficient because Ask is single-submit; there is no `(run_id, step_id, user_id)` constraint (any one user in the pool can win, and the step status is the gate).
+- **State machine closure.** Valid step transitions for Ask: `queued → awaiting_input → submitted | skipped`. `skipped` is reachable only when `params.allowSkip === true` (§3.2). Forbidden: `submitted/skipped → *` (terminal). Adding a new step status for Ask requires a spec amendment.
 
 ### 11.5 Auto-fill on re-run (per spec-time decision #10)
 
@@ -897,6 +1040,14 @@ After any agent-driven file edit, the reader pane offers a small toggle:
 A one-line caption above the diff: *"Edits requested by Mike at 2:14 pm — 'cut the pricing section to one paragraph' — applied as v3 by Head of Sales."*
 
 **Per-hunk revert** affordance: each highlighted change has a small ↶ button that reverts that specific change (creates a new version, doesn't edit history). One click; no confirmation modal (the action creates a new version and is itself reversible).
+
+**Per-hunk revert contract** (Contracts entry):
+
+- **Hunk identity.** A hunk is identified by `(file_id, from_version, hunk_index)` where `from_version` is the version immediately prior to the version that introduced the hunk, and `hunk_index` is the position (0-based) of the hunk in the deterministic diff between `from_version` and `from_version + 1`. The diff algorithm is fixed (line-level for documents; row-level for spreadsheets) so the same `(from_version, hunk_index)` resolves to the same change set on every read.
+- **Endpoint.** `POST /api/tasks/:taskId/files/:fileId/revert-hunk` with body `{ from_version: integer, hunk_index: integer }`.
+- **Idempotency posture.** State-based (per spec-authoring-checklist §10.1). The server inspects the latest version's diff against `from_version`: if `hunk_index` is no longer present (already reverted, or superseded by a newer edit), the endpoint returns `200 { reverted: false, reason: 'already_absent' }` — the request is a no-op, not an error.
+- **Concurrency guard.** The server verifies the file's current version is exactly `from_version + 1` before applying the revert. If the file has been edited again since (current version > `from_version + 1`), the endpoint returns `409 { error: 'base_version_changed', current_version: N }` and the client surfaces "this draft has been edited again — refresh to see the latest". This protects against revert-against-stale-base.
+- **Result.** On success, the server creates `from_version + 2` (or `current_version + 1` if no concurrency conflict) with the targeted hunk reverted; emits `file.edited` event with `prior_version` and `new_version` ids; returns `200 { reverted: true, new_version: N }`.
 
 **Out of scope for V1:**
 
@@ -1001,7 +1152,37 @@ The chat panel renders this as a per-agent card with the link as an inline actio
 - Status updates ("still scanning…", "still drafting…").
 - Step.started / step.completed at the engine level (those are activity events, not chat events).
 
-### 13.4 Files referenced
+### 13.4 `workflow.run.start` skill (brief §11.3 #16, punch list §16.3 item 37)
+
+Lets any agent fire a saved workflow as a tool when the agent's intent matches a named template.
+
+**Skill contract:**
+
+```typescript
+{
+  name: 'workflow.run.start',
+  input: {
+    workflow_template_id: string,                    // template the agent wants to fire
+    template_version_id?: string,                    // optional pin; default = latest published
+    initial_inputs: Record<string, unknown>          // values mapped to the template's first-step bindings; type-checked at fire time
+  },
+  output:
+    | { ok: true, task_id: string }                  // a new Task row is created and the run begins under that task id
+    | { ok: false, error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid', message: string }
+}
+```
+
+**Permission guard.** The calling agent's principal-scoped context (per `architecture.md` § Principal-scoped RLS) must have run-permission on the template's sub-account. An org-level agent without sub-account scope cannot fire a sub-account-scoped workflow; sub-account agents can only fire workflows scoped to their sub-account. Permission is checked at the route layer and at the engine layer (defence in depth).
+
+**Version selection.** Default is the latest published version of the template. If `template_version_id` is provided and is a non-deleted version of the same template, that version fires. If the version doesn't exist or has been retracted, returns `template_not_published`.
+
+**Task creation semantics.** A new `tasks` row is created with `created_by_user_id = <the user whose session the agent is acting on>` (carried via the principal context) and `created_by_agent_id = <calling agent's id>`. The task is owned by the caller's sub-account.
+
+**Failure modes.** Permission denial, missing template, missing version, type-check failure on `initial_inputs` against the template's first-step bindings. All return structured errors per the output union.
+
+**Existing primitive vs new.** This is a new skill registered in the existing skill catalogue (`server/config/actionRegistry.ts` per `architecture.md`). No new service layer.
+
+### 13.5 Files referenced
 
 | File | Change |
 |---|---|
@@ -1010,6 +1191,8 @@ The chat panel renders this as a per-agent card with the link as an inline actio
 | New: `WorkflowDraftService.ts` (server) | Drafts CRUD + cleanup. |
 | New: `RecommendationCard.tsx` | Renders in the chat panel after task completion. |
 | Per-agent skill / scope code | Each sub-agent reports its own milestones via a new `emitMilestone(summary, link_ref)` helper. |
+| New: `workflow_drafts` cleanup job (extends existing pg-boss cleanup pattern) | Runs daily; reaps unclaimed drafts older than 7 days (§3.3, §13.2). |
+| New skill registration: `workflow.run.start` in `server/config/actionRegistry.ts` | Per §13.4 contract. |
 
 ---
 
@@ -1223,8 +1406,9 @@ Retire **Brief** as a UI noun. Every user-visible string that refers to a "brief
 |---|---|---|---|
 | 34 | Suggest-don't-decide pattern detection + recommendation card | §13.1 | 2 days |
 | 35 | Draft hydration into Studio (drafts table + endpoint + Studio integration) | §13.2 | 1.5 days |
+| 35a | `workflow_drafts` cleanup job — reaps drafts with `consumed_at IS NULL AND created_at < now() - interval '7 days'` (architect can extend the existing pg-boss cleanup-job pattern; no new pg-boss machinery) | §3.3, §13.2 | 0.25 day |
 | 36 | Per-agent milestone emission + chat-panel routing | §13.3 | 1 day |
-| 37 | Workflow-as-tool for agents (`workflow.run.start` skill) | brief §11.3 #16 | 1 day |
+| 37 | Workflow-as-tool for agents (`workflow.run.start` skill — see §13.4 for the contract) | §13.4, brief §11.3 #16 | 1 day |
 
 **Orchestrator subtotal: ~5.5 days.**
 
@@ -1300,19 +1484,7 @@ Tests author-time (per CLAUDE.md, full test gates run in CI; locally only target
 
 ### 17.5 UI surfaces (§9, §10, §11, §12)
 
-| Test | Asserts |
-|---|---|
-| `plan-tab-empty-state.test.tsx` | "Drafting…" placeholder renders for a brand-new task with no plan yet. |
-| `plan-tab-default-on-open.test.tsx` | Plan is the default selected tab when a task page mounts. |
-| `activity-newest-at-bottom.test.tsx` | Events render top-down chronologically; auto-scroll keeps newest at viewport bottom. |
-| `activity-scroll-up-pauses-autoscroll.test.tsx` | Scrolling up halts auto-scroll and shows the "↓ N new events" pill. |
-| `chat-milestone-vs-narration.test.tsx` | Per-agent milestone events render as cards in chat; in-progress narration events do not. |
-| `ask-form-validation.test.tsx` | Required-field errors surface inline; Submit stays enabled. |
-| `ask-form-submit.test.tsx` | Successful submission collapses card to receipt; emits `ask.submitted`. |
-| `studio-publish-notes-modal.test.tsx` | Publish button opens modal; empty notes are accepted. |
-| `studio-concurrent-edit-warning.test.tsx` | Stale-template warning surfaces if another user published while editing. |
-| `diff-renderer-revert-hunk.test.tsx` | Per-hunk revert creates a new version; doesn't edit history. |
-| `files-at-scale-search.test.tsx` | Search filters thumbnails by file name; cleared on tab switch. |
+**Frontend unit tests are deferred at the framing level** per `docs/spec-context.md` (`frontend_tests: none_for_now`). The behavioural contracts that frontend tests would cover (default tab on open, auto-scroll, milestone-vs-narration filtering, form validation, modal flows, hunk revert, files-at-scale search) are validated by a combination of: (a) the targeted server-side unit tests in §17.1–§17.4 for the logic that produces the events the UI consumes, (b) the static gates that catch typecheck/lint regressions, and (c) manual mockup-driven QA at integration time. When the codebase's frontend testing posture changes (per `spec-context.md` update procedure), this section will land the corresponding `*.test.tsx` files.
 
 ### 17.6 Permissions (§14)
 
@@ -1322,7 +1494,7 @@ Tests author-time (per CLAUDE.md, full test gates run in CI; locally only target
 | `assignable-users-subaccount-admin.test.ts` | Sub-account admin sees only sub-account members. |
 | `assignable-users-403-non-admin.test.ts` | Sub-account member gets 403 (cannot author). |
 | `cross-subaccount-routing.test.ts` | Org admin can route an Ask to another sub-account's team; sub-account admin cannot. |
-| `pause-stop-button-visibility.test.tsx` | Buttons render for requester / org admin / sub-account admin; hidden for other viewers. |
+| `pause-stop-visibility.test.ts` | Server-side: the Pause / Stop / resume endpoints return 403 to callers outside the visibility set; return 200 for requester / org admin / sub-account admin. (Button-render is the UI consequence; per §17.5 framing deviation, the UI assertion is manual until the frontend testing posture changes.) |
 
 ### 17.7 Test posture rules
 
@@ -1348,17 +1520,16 @@ Tests author-time (per CLAUDE.md, full test gates run in CI; locally only target
 
 **Migration steps (one PR):**
 
-1. Drizzle migration file with all column additions.
-2. Schema files in `shared/schema/` updated to match.
+1. Drizzle migration file with the additive column additions on existing tables and the `workflow_drafts` create-table (§3.1, §3.3).
+2. Schema files in `shared/schema/` updated to match; `workflow_drafts` added to `RLS_PROTECTED_TABLES` per `architecture.md` § Row-Level Security.
 3. New endpoints, services, components, validators per §3 – §15.
-4. Test gate (CI runs the full battery; we do not run gates locally).
-5. Deploy to staging; smoke-test the three system templates run successfully end-to-end.
-6. Deploy to production; no operator-visible disruption (UI gets the new surfaces but every existing path continues to work).
+4. CI runs the full test-gate battery as a pre-merge gate (per `CLAUDE.md`); we do not run gates locally.
+5. Merge → standard deploy pipeline applies the migration alongside the code that uses it. **No staged rollout, no feature flag, no per-tenant gating** — per `docs/spec-context.md` (`rollout_model: commit_and_revert`, `staged_rollout: never_for_this_codebase_yet`). The codebase is pre-production; no live operators are affected by the deploy.
 
 **Rollback plan:**
 
-- The migration is purely additive; no destructive changes.
-- If a critical bug surfaces, revert the deploy without rolling back the schema. The new columns sit unused.
+- All schema changes are additive (new columns default to safe values; new table is empty on first deploy).
+- If a regression surfaces post-merge, revert the code-side commits via the standard commit-and-revert pattern; the additive schema sits unused and does not need to be rolled back.
 - The schema migration itself stays applied (rolling back additive migrations is risky and unnecessary).
 
 ### 18.2 Telemetry and observability
@@ -1410,6 +1581,35 @@ After V1 ships, append KNOWLEDGE.md entries for:
 - Any orchestrator pattern-detection signals that turned out to be noise.
 
 ---
+
+## Deferred Items
+
+Per spec-authoring-checklist §7. Single canonical list of features / migrations / criteria mentioned in prose but intentionally deferred. Each entry: name, where the prose mention lives, the V1 scope, the V2 scope, reason. Cross-cuts §1.2 (out-of-scope summary) and §19.3 (out-of-scope re-statement).
+
+- **Mobile / phone-responsive layouts.** Phase V1 ships desktop-first. Phase V2 ships read-only single-pane fallback for tablet/phone. Reason: spec-time decision #1; the operator UX requires the three-pane real-estate.
+- **Visual node-graph drag-and-drop authoring.** Permanently out of scope per brief §3 product positioning. Reason: structural mismatch with the orchestrator-drafts-then-author flow.
+- **Inline human editing of files.** Phase V1 ships conversational-editing only. Phase V2 may add inline editing if production demand emerges. Reason: brief §9.3 audit-trail concerns.
+- **Workflow → workflow direct nesting.** Permanently disallowed; agent-layer indirection allowed. Reason: brief §4.3 bounded-blast-radius guardrail.
+- **Webhook triggers.** Phase V1 ships manual / scheduled / agent-fired triggers only. Phase V2 may ship webhooks. Reason: brief §12 (registration, secrets, replay, idempotency on inbound require their own surface).
+- **General `while` / `do-until` loops.** Permanently disallowed; Approval-on-reject covers the legitimate cases. Reason: brief §5.3 footgun-class avoidance.
+- **Cost dashboards across workflows / templates.** Phase V1 ships per-run cost on the open task view. Phase V2 ships cross-template aggregation. Reason: brief §12.
+- **Run-history search across sub-accounts.** Phase V1 ships per-subaccount runs library. Phase V2 ships cross-subaccount admin search. Reason: brief §12 (admin tooling, not operator surface).
+- **Timeout escalation policies beyond stall-and-notify.** Phase V1 ships 24h / 72h / 7d notification cadence to the requester. Phase V2 may ship per-step `escalateAfterHours` config. Reason: spec-time decision #2.
+- **Restricted view mode for non-requester submitters.** Phase V1 ships full task view to non-requester submitters. Phase V2 may ship "restricted" mode opt-in at publish time for sensitive workflows. Reason: spec-time decision #3.
+- **Audit drawer + audit export UIs.** Phase V1 ships the schema (`seen_payload`, `seen_confidence`, `decision_reason`, `approver_pool_snapshot`, `is_critical_synthesised`) and the Plan-tab one-line caption (§6.5). Phase V2 ships the full audit drawer and CSV/JSON export. Reason: bandwidth + waiting on real audit-review usage to inform shape.
+- **Calibrated confidence model.** Phase V1 ships the heuristic in §6.1 with `signals` captured for retrospective analysis. Phase V2 swaps in a calibrated model once `workflow_step_reviews` data accumulates. Reason: brief §8.6 (no labeled data yet).
+- **Conditional fields on Ask forms.** Phase V1 ships the seven static field types (§11.2). Phase V2 may add "show field B if field A = X" logic. Reason: brief §7.3 V2 deferrals.
+- **File-upload field type on Ask.** Phase V1 ships the seven non-file field types (§11.2). Phase V2 may add file-upload. Reason: brief §7.3 V2 deferrals.
+- **Server-side validation / custom regex / no-code forms-builder UI on Ask.** Phase V1 ships client-side required + type checks. Phase V2 may ship the rest. Reason: §11.3.
+- **Side-by-side full-page diff for conversational-edit files.** Phase V1 ships inline strikethrough + indigo-highlight section-anchored diff. Phase V2 may ship side-by-side. Reason: §12.4.
+- **Structured spreadsheet diffs.** Phase V1 ships row-level "added / removed / modified" counts as fallback for spreadsheets. Phase V2 may ship full structured diff. Reason: spec-time decision §19.1 #C.
+- **Diff between non-adjacent file versions.** Phase V1 always diffs against the immediately prior version (operator can load any earlier version as the new base via the version dropdown). Phase V2 may ship arbitrary-version diff. Reason: §12.4.
+- **`Activity` tab inside the right panel.** Permanently retired (brief §6.4 #2 + spec §9.4 resolution-note). Activity is a dedicated left-of-right-panel column, never a tab. Brief §6.3 should be reconciled to remove the legacy 4-tab table.
+- **"Promote agent run to workflow" feature.** Phase V1 ships orchestrator-driven creation only. Phase V2 may ship promotion if real usage signals demand. Reason: brief §12 (speculative until V1 telemetry lands).
+- **Visual diff between published workflow-template versions.** Phase V1 ships publish-notes captions only (§3.1, §10.5). Phase V2 may ship template-version diff. Reason: brief §12 (template-version churn not yet a pain point).
+- **Workflow-template parameter UI** (`paramsJson` on templates). Phase V1 ships Ask steps for runtime input gathering. Phase V2 may surface template-level params. Reason: brief §12.
+- **"Explain this workflow" / "What does this step do?" inline explanations in Studio.** Phase V1 not in scope. Phase V2 once authoring patterns surface. Reason: brief §12, brief reviewer-reconciliation entry.
+- **Frontend-surface unit tests** (`*.test.tsx`). Permanently deferred at the framing level — see `docs/spec-context.md` `frontend_tests: none_for_now`. Reason: codebase-wide testing posture; the §17 test plan covers this with static gates + targeted server-side tests instead.
 
 ## 19. Open spec-time decisions
 
