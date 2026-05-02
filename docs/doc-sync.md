@@ -24,15 +24,38 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 
 ---
 
+## Investigation procedure
+
+Every doc-sync sweep MUST execute this procedure per registered doc. Verdicts cannot be assigned without it. The procedure is the gate; the verdict is the receipt.
+
+1. **Read the doc.** Open the file. Do not rely on prior summaries, prior reviews, or memory.
+2. **Derive a candidate-stale-reference set from the branch diff.** Build a deterministic list of grep terms drawn from this session's changes:
+   - File paths the diff renames, deletes, or moves
+   - Symbols renamed, removed, or added: agent names, service names, primitive names, function names, table names, config keys, route paths, env vars, capability slugs, skill names
+   - Behaviour, invariants, or rules introduced, changed, or removed
+   - Any new name introduced in the branch that the doc may need to mention going forward
+3. **Grep the doc for each candidate.** Every hit becomes a stale-reference candidate.
+4. **For each hit, verify and fix in this same finalisation pass:**
+   - Stale → update the doc now. Do not defer. Do not log a TODO. Do not assume someone else will see it.
+   - Still correct (mention is intentional and accurate) → leave alone.
+5. **Record the verdict** per Verdict rule below — only after steps 1–4 ran.
+
+A "no" verdict cited from memory or skim is a missing verdict. The grep terms in step 2 are the audit trail; the verdict cites them.
+
+---
+
 ## Verdict rule
 
 For each doc, record one of:
 
-- `yes (sections X, Y)` — doc was updated; cite the section edited. Section references should match actual headings in the doc (e.g. `yes (Agent Workplace Identity, Playbook Engine)`), not vague descriptors like `yes (misc updates)`.
-- `no — <one-line rationale>` — scope was touched but the doc is already accurate. Format: `no — <rationale>`. A bare `no` with no rationale is treated as a missing verdict. Examples: `no — capability already reflects added skill set` / `no — no changes to integration surface in this PR`.
-- `n/a` — scope of this doc was not touched by this session
+- `yes (sections X, Y)` — doc was updated as part of step 4; cite headings actually edited (e.g. `yes (Agent Workplace Identity, Playbook Engine)`), not vague descriptors like `yes (misc updates)`.
+- `no — <rationale>` — investigation procedure ran clean. The rationale MUST include either:
+  - The grep terms checked against this doc and found absent (e.g. `no — checked feature-coordinator, builder, finalisation-coordinator, dual-reviewer; zero stale references`), OR
+  - The specific reason this doc's update trigger from the table above did not actually apply to the change-set (e.g. `no — no skill / capability / integration add/remove/rename in this PR`).
+  Without one of those, the verdict is treated as missing.
+- `n/a` — step 2 produced zero candidates relevant to this doc's update trigger; the doc's scope per the table above was not touched.
 
-**A missing verdict blocks finalisation.** Stale docs are a blocking issue per `CLAUDE.md § 11`.
+**A missing or unsubstantiated verdict blocks finalisation.** Stale docs are a blocking issue per `CLAUDE.md § 11`.
 
 ---
 

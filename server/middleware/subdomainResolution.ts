@@ -17,6 +17,7 @@ import { pageProjects, subaccounts } from '../db/schema/index.js';
 import type { PageProject } from '../db/schema/pageProjects.js';
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       resolvedPageProject?: PageProject;

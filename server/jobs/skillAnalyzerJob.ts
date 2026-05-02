@@ -880,6 +880,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             // Pass 'caller_timeout' as the reason so the adapter can
             // distinguish analyzer-side timeout from user-initiated cancel
             // (see spec §8.1).
+            // eslint-disable-next-line no-useless-assignment
             const timeoutId = setTimeout(
               () => abortController.abort('caller_timeout'),
               SKILL_CLASSIFY_TIMEOUT_MS,

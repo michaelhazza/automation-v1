@@ -106,7 +106,7 @@ export function normaliseMessage(msg: string): string {
     // Strip UUIDs first (most specific pattern)
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
     // Strip ISO timestamps before number stripping so the 4-digit year isn't eaten first
-    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z+\-]+/g, '<timestamp>')
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z+-]+/g, '<timestamp>')
     // Strip remaining large standalone numbers (4+ digits)
     .replace(/\b\d{4,}\b/g, '<num>')
     .replace(/\s+/g, ' ')
@@ -138,10 +138,26 @@ export function topFrameSignature(stack: string | undefined): string {
     .slice(0, 200);
 }
 
-export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorCode' | 'summary' | 'stack' | 'affectedResourceKind' | 'fingerprintOverride'>): string {
+/**
+ * Compute the dedup fingerprint for an incident input.
+ *
+ * Precedence — first match wins:
+ *   1. `fingerprintOverride` — explicit override; wins outright (must match
+ *      `FINGERPRINT_OVERRIDE_RE`; intended for callers with domain-stable
+ *      identifiers, e.g. sweep + synthetic checks).
+ *   2. `idempotencyKey` — caller-supplied dedup seed; used when no override
+ *      is set but the caller still wants stable dedup (avoids stack-derived
+ *      fingerprinting churn across deploys).
+ *   3. Derived stack/message hash — default; combines source, errorCode,
+ *      normalised summary, top stack frame, and affected resource kind.
+ *
+ * See task 5.5 (N3) of the lint-typecheck-post-merge spec for the rationale.
+ */
+export function computeFingerprint(input: Pick<IncidentInput, 'source' | 'errorCode' | 'summary' | 'stack' | 'affectedResourceKind' | 'fingerprintOverride' | 'idempotencyKey'>): string {
   if (input.fingerprintOverride) {
     return hashFingerprint(input.fingerprintOverride);
   }
+  if (input.idempotencyKey) return hashFingerprint(input.idempotencyKey); // caller-supplied dedup seed
   const parts = [
     input.source,
     input.errorCode ?? 'no_code',

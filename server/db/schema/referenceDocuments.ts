@@ -44,7 +44,7 @@ export const referenceDocuments = pgTable(
     externalFileMimeType: varchar('external_file_mime_type', { length: 256 }),
     attachedByUserId:     uuid('attached_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     attachmentOrder:      integer('attachment_order').notNull().default(0),
-    attachmentState:      varchar('attachment_state', { length: 32 }),
+    attachmentState:      varchar('attachment_state', { length: 32 }).$type<AttachmentState>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

@@ -50,10 +50,10 @@ function assertThrowsWithCode(fn: () => void, expectedCode: string, label: strin
       throw err;
     }
     if (!(err instanceof HierarchyContextBuildError)) {
-      throw new Error(`${label} — expected HierarchyContextBuildError, got: ${err instanceof Error ? err.constructor.name : String(err)}`);
+      throw new Error(`${label} — expected HierarchyContextBuildError, got: ${err instanceof Error ? err.constructor.name : String(err)}`, { cause: err });
     }
     if (err.code !== expectedCode) {
-      throw new Error(`${label} — expected code "${expectedCode}", got "${err.code}"`);
+      throw new Error(`${label} — expected code "${expectedCode}", got "${err.code}"`, { cause: err });
     }
   }
 }

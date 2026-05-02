@@ -3493,14 +3493,13 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       sa: subaccountAgents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, req.subaccountId),
         eq(subaccountAgents.agentId, req.agentId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 
@@ -3707,14 +3706,13 @@ async function executeReassignTask(
     const [saLinkRow] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, agentId),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -3957,14 +3955,13 @@ async function executeSpawnSubAgents(
     const [saLink] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, st.assigned_agent_id),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -4593,7 +4590,7 @@ async function executeMonitorWebpage(
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
-  let baselineContentHash = '';
+  let baselineContentHash: string;
   let baselineExtractedData: Record<string, unknown> | null = null;
 
   if (fields) {

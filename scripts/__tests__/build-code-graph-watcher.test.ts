@@ -80,9 +80,9 @@ async function isAnotherWatcherAlive(): Promise<boolean> {
 }
 
 async function clearLockArtifacts(): Promise<void> {
-  try { await fs.unlink(PID_PATH); } catch {}
-  try { await fs.unlink(LOCK_PATH); } catch {}
-  try { await fs.rm(LOCK_DIR, { recursive: true, force: true }); } catch {}
+  try { await fs.unlink(PID_PATH); } catch { /* intentional: best-effort cleanup */ }
+  try { await fs.unlink(LOCK_PATH); } catch { /* intentional: best-effort cleanup */ }
+  try { await fs.rm(LOCK_DIR, { recursive: true, force: true }); } catch { /* intentional: best-effort cleanup */ }
 }
 
 interface SpawnedWatcher {
@@ -118,13 +118,13 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
 
 async function killAndWait(child: ChildProcess, timeoutMs = 5_000): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  try { child.kill('SIGTERM'); } catch {}
+  try { child.kill('SIGTERM'); } catch { /* intentional: best-effort cleanup */ }
   const exited = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), timeoutMs);
     child.once('exit', () => { clearTimeout(timer); resolve(true); });
   });
   if (!exited) {
-    try { child.kill('SIGKILL'); } catch {}
+    try { child.kill('SIGKILL'); } catch { /* intentional: best-effort cleanup */ }
   }
 }
 
@@ -133,7 +133,7 @@ let skipAll = false;
 
 const cleanup = async (): Promise<void> => {
   if (watcherA && !watcherA.exited()) await killAndWait(watcherA.child);
-  try { await fs.unlink(FEEDBACK_PROBE); } catch {}
+  try { await fs.unlink(FEEDBACK_PROBE); } catch { /* intentional: best-effort cleanup */ }
   await clearLockArtifacts();
 };
 
@@ -147,7 +147,7 @@ beforeAll(async () => {
   await clearLockArtifacts();
 
   // Ensure SHARD_DIR exists so the feedback-loop probe write does not fail.
-  try { await fs.mkdir(SHARD_DIR, { recursive: true }); } catch {}
+  try { await fs.mkdir(SHARD_DIR, { recursive: true }); } catch { /* intentional: best-effort cleanup */ }
 
   watcherA = spawnWatcher();
 
@@ -239,5 +239,5 @@ test('no-feedback-loop: writing inside references/ does not retrigger processEve
     .filter((line) => line.includes('references/') || line.includes(probeRel));
   expect(offending.length === 0, `Watcher reacted to a write inside references/. Offending log lines:\n${offending.join('\n')}`).toBeTruthy();
 
-  try { await fs.unlink(FEEDBACK_PROBE); } catch {}
+  try { await fs.unlink(FEEDBACK_PROBE); } catch { /* intentional: best-effort cleanup */ }
 }, READY_TIMEOUT_MS);

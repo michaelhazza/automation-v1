@@ -312,7 +312,7 @@ export default function UnifiedActivityFeed({
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [limit]);
 
   // Re-fetch and merge when DashboardPage signals an activity update.

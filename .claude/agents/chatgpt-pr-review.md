@@ -230,6 +230,8 @@ For each round:
    - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
    - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
 
+1a. **Duplicate detection (rounds 2+).** Before triage, check whether each finding is a substantive duplicate of a decided finding from a prior round in this session. Substantive duplicate = same `finding_type` AND same file/code area (or same global concern), no new evidence — even when rephrased with stronger language ("must-fix", "not optional", "blocking"). For duplicates: auto-apply the prior round's decision regardless of triage; log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT proceed to step 2 (triage) and do NOT escalate to step 3b for this finding even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: KNOWLEDGE.md `[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`.
+
 2. Triage each finding into one of two buckets:
 
    - **`user-facing`** — the finding changes something an end-user, customer, or
@@ -599,11 +601,13 @@ Steps 6 and 10 in particular have historically been bundled into broader "finali
    Do NOT write to tasks/review-logs/_deferred.md.
 6. **Doc sync sweep — MANDATORY, per-doc verdicts required.** For EACH reference
    doc in `docs/doc-sync.md` (excluding `docs/spec-context.md` which is spec-
-   review-only), assess the FULL PR diff vs `origin/main` (not just per-round
-   edits) and update IN THE SAME finalisation commit if its scope is touched.
-   The PR is the unit of merge — finalisation must verify the entire merge unit,
-   not only what the PR review session itself wrote. Read `docs/doc-sync.md`
-   before starting this step; the scope triggers per doc live there.
+   review-only), follow the **Investigation procedure** in that file: read the
+   doc, derive a candidate-stale-reference set from the FULL PR diff vs
+   `origin/main` (file paths, symbols, behaviours, new names introduced — NOT
+   just per-round edits), grep the doc for each candidate, and fix any stale
+   references in this same finalisation commit. The PR is the unit of merge —
+   finalisation must verify the entire merge unit, not only what the PR review
+   session itself wrote.
 
    The 6 docs that MUST get a verdict (one each):
    - `architecture.md`
@@ -613,11 +617,12 @@ Steps 6 and 10 in particular have historically been bundled into broader "finali
    - `docs/frontend-design-principles.md`
    - `KNOWLEDGE.md`
 
-   For each doc, log one of:
+   For each doc, record verdict per the **Verdict rule** in `docs/doc-sync.md`:
    - `yes (sections X, Y)` — doc was updated; cite headings from the actual
      doc, not vague descriptors.
-   - `no — <one-line rationale>` — scope touched but already accurate. A bare
-     `no` is a MISSING verdict and BLOCKS finalisation.
+   - `no — <grep terms checked OR scope-not-touched rationale>` — scope
+     touched but already accurate. A bare `no` (no rationale) is a MISSING
+     verdict and BLOCKS finalisation.
    - `n/a` — scope of this doc was not touched by the PR.
 
    Failure to update a doc whose scope IS touched is a blocker — escalate to
@@ -694,19 +699,29 @@ Steps 6 and 10 in particular have historically been bundled into broader "finali
 
 12. CI Monitor and Auto-Merge Loop — starts immediately after the label is applied.
 
-    **Goal:** poll CI status once per minute, auto-fix failures iteratively (max 3
-    remedy attempts), then merge when all checks pass. If 3 remedies all fail, stop
-    and surface a structured failure report for the user to investigate manually.
+    **Goal:** poll CI status, auto-fix failures iteratively (max 3 remedy attempts),
+    then merge when all checks pass. If 3 remedies all fail, stop and surface a
+    structured failure report for the user to investigate manually.
+
+    **Cadence:** poll every ~90s. CI on this repo typically completes in 1-2 min,
+    so 60s is too tight (poll-during-queuing waste) and 4-5 min is too loose
+    (pushes past a full cycle, delays merge). 90s catches a fast CI pass in ~1
+    poll without burning the prompt cache more than necessary. Use
+    `ScheduleWakeup` (Claude Code) or `Monitor` for the wait — long synchronous
+    `sleep` is runtime-blocked. See `CLAUDE.md § Async polling cadence`.
 
     **State:** `REMEDY_ATTEMPTS = 0`  `POLL_COUNT = 0`  `REMEDY_LOG = []`
 
-    **Initial wait** — GitHub Actions needs ~30 seconds to pick up the label event
-    and queue new runs. Avoid a spurious "no checks yet" read:
-    ```bash
-    sleep 30
+    **Initial wait** — GitHub Actions needs ~60-90 seconds to pick up the label
+    event, queue new runs, and let early checks complete. Avoid a spurious "still
+    queuing" read:
+    ```
+    Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or `sleep 60`
+    if running outside a Claude Code session.
     ```
 
-    **Poll loop** — repeat until resolved. Hard cap: 30 polls (30 minutes total).
+    **Poll loop** — repeat until resolved. Hard cap: 30 polls (~45 minutes total
+    at 90s cadence).
 
     a. Increment `POLL_COUNT`. Query the PR's current check status:
        ```bash
@@ -727,9 +742,10 @@ Steps 6 and 10 in particular have historically been bundled into broader "finali
     b. **`passed`** → all CI checks succeeded. Proceed to **Auto-Merge** below.
 
     c. **`pending`** → CI is still running. Print:
-       > CI in progress — <POLL_COUNT>m elapsed. Next poll in 60s...
-       ```bash
-       sleep 60
+       > CI in progress — <POLL_COUNT> polls elapsed. Next poll in 90s...
+       ```
+       Schedule a wakeup ~90s out (ScheduleWakeup delaySeconds=90), or
+       `sleep 90` if running outside a Claude Code session.
        ```
        Return to (a). If `POLL_COUNT >= 30` without conclusion, print:
        > CI has not concluded after 30 minutes — stopping monitor.
@@ -776,9 +792,10 @@ Steps 6 and 10 in particular have historically been bundled into broader "finali
          `REMEDY_LOG`.
 
     vi.  Print:
-         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 45s for CI to queue...
-         ```bash
-         sleep 45
+         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 60s for CI to queue...
+         ```
+         Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or
+         `sleep 60` if running outside a Claude Code session.
          ```
          Reset `POLL_COUNT = 0`. Return to poll loop step (a).
 

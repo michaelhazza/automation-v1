@@ -401,7 +401,7 @@ export async function createBlock(input: {
 }): Promise<MemoryBlock> {
   const autoAttach = input.autoAttach === true && !!input.subaccountId;
 
-  // eslint-disable-next-line prefer-const
+   
   let created!: MemoryBlock;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
   await db.transaction(async (tx) => {

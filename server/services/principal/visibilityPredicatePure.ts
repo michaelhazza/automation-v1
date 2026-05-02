@@ -35,7 +35,14 @@ export function isVisibleTo(row: VisibilityRow, principal: PrincipalContext): bo
 
     case 'delegated':
       return row.visibilityScope === 'private' && row.ownerUserId === principal.id;
-  }
 
-  return false;
+    case 'system':
+      // SystemPrincipal bypasses visibility scoping by design; org gate at line 12 still applies.
+      return true;
+
+    default: {
+      const _exhaustive: never = principal;
+      return false;
+    }
+  }
 }

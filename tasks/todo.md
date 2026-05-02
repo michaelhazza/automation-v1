@@ -337,6 +337,14 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
   - [ ] [user] **Idempotency invariant for adversarial-reviewer** — Round 2 F1: add an explicit invariant guaranteeing that a second run of `adversarial-reviewer` against an unchanged diff produces identical findings (or a documented "no-op, already reviewed" log). Implementation cost too high for Phase 1 manual non-blocking — would require a finding-fingerprint scheme, parsing the prior log, comparing fingerprints, and skipping or no-op'ing on match. Defer until auto-invocation lands (re-running on every push amplifies the noise risk). **Home:** belongs in the cross-agent log-schema work above — idempotency is naturally expressed via the `findings[]` fingerprint field if the canonical schema is designed first.
   - [ ] [user] **Log header schema fields (`gitHeadSha`, `filesChanged`)** — Round 2 F4: ChatGPT proposed adding `gitHeadSha` and `filesChanged` to every review log's Session Info header so logs are self-contained snapshots of what was reviewed. Deferred for two reasons: (1) asymmetry — none of the existing review-log producers (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`) emit these fields today, so adding them only to `adversarial-reviewer` creates the schema drift the F5 standardisation is meant to prevent; (2) Mission Control's parser has no read-side consumer for either field — adding them to the producer with no reader is dead weight until the dashboard surfaces them. Bundle with the F5 standardisation work so the header schema is designed once across all seven agents.
 
+### lint-typecheck-post-merge-spec (2026-05-01)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-lint-typecheck-post-merge-spec-2026-05-01T02-26-36Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md`
+**Branch:** `lint-typecheck-post-merge-tasks`
+
+- [ ] [user] **Add concurrency guard to CI `lint_and_typecheck` job** — Round 1 ChatGPT finding: add `concurrency: group: lint-typecheck-${{ github.ref }}, cancel-in-progress: true` to prevent duplicate runs on rapid pushes. Out of scope for this spec's goal ("drive to exit 0, wire the gate"); valid CI optimization for a follow-up CI hygiene pass.
+
 ### subaccount-optimiser (2026-05-02)
 
 **Source log:** `tasks/review-logs/chatgpt-spec-review-subaccount-optimiser-2026-05-01T23-47-38Z.md`
@@ -365,12 +373,25 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 ---
 
+### deferred-items-pre-launch (2026-05-01)
+
+*(R1 deferred items F6 and F8 resolved in Round 2 — applied to spec)*
+
+---
+
 ## PR Review deferred items
 
 ### PR #250 — claude-evaluate-new-features-waqfY / subaccount-optimiser chunk 1 (2026-05-02 — ChatGPT review rounds 1–2)
 
 - [ ] [user] **F9: Add concurrency / duplicate-execution test for upsertRecommendation** — `skipReasonCoverage.test.ts` covers the deterministic skip paths exhaustively (cooldown / hash_match / sub_threshold / cap / eviction). Untested today: the 23505-race catch path (`agentRecommendationsService.ts:419–432`) and the per-`(scope, agent)` advisory-lock concurrency. Add (a) a unit test that mocks a 23505 throw on INSERT and asserts the re-lookup returns `was_new: false` with the existing id, and (b) an integration test exercising two parallel `upsertRecommendation` calls against the same dedupe key, asserting exactly one new row + one no-op return. Pair with TI-005 follow-up if the integration harness lands first. Source: ChatGPT PR review round 1 — user-approved as recommended (defer). PR #250 — https://github.com/michaelhazza/automation-v1/pull/250.
 - [ ] [user] **F10: `subaccount_display_name` "sometimes-present" contract — consider always-present-with-null** — `agentRecommendationsService.ts:602` conditionally spreads `subaccount_display_name` into the response; it's omitted entirely on non-subaccount rows. Spec §6.5 + the `AgentRecommendationRow` type both pin the field as `subaccount_display_name?: string`, and the existing client check (`AgentRecommendationsList.tsx:156`) handles undefined safely. Switching to always-present-with-null is a minor public-API contract change but a contract change — should be raised as a spec amendment, not an ad-hoc PR change. Defer until a real client-friction case justifies the contract widening. Source: ChatGPT PR review round 1 — user-approved as recommended (defer). PR #250 — https://github.com/michaelhazza/automation-v1/pull/250.
+
+### PR #247 — claude-deferred-items-pre-launch-5Kx9P (2026-05-01 — ChatGPT review round 1)
+
+- [ ] [user] **R1/F3a: Resume path lacks 500ms thread-context build timeout** — `agentResumeService.ts:96` calls `buildThreadContextReadModel(resumeConvId, organisationId)` without the 500ms `Promise.race` timeout that `agentExecutionService.ts:832` uses. A slow context build during resume could delay the run. Fix: extract the timeout pattern into a small helper (`buildThreadContextWithTimeout(convId, orgId, timeoutMs = 500)`) and call it from both sites. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F3b: Thread-context version persistence is fire-and-forget** — `agentExecutionService.ts:856` writes `threadContextVersionAtStart` via `void db.update(...).catch(() => {})`. If the write fails, the prompt still injected the context but the DB has no record. Spec §2.2 invariant 3 (fail-open) makes this intentional, but drift detection downstream may misfire. Consider: either accept the drift (close as wontfix) or move version persistence into the same transactional boundary as run-start. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F4: `findActiveConnection` ordering does not prefer subaccount-specific over org-level** — `integrationConnectionService.ts` orders by `updatedAt DESC, createdAt DESC, id DESC`. ChatGPT suggests `(subaccount_id IS NOT NULL) DESC` as primary sort to prefer subaccount connections. No spec or contract documents the expected precedence; current single caller (`integrationBlockService`) only tests `if (conn)` so ordering has no behavioural effect today. If the policy is "subaccount-specific overrides org-level for the same provider", spec it first then implement. Severity: medium. Source: ChatGPT PR review round 1 — user decision: defer.
+- [ ] [user] **R1/F6: `integrationBlockServicePure.test.ts` mutates `ACTION_REGISTRY` for setup** — Tests cast and mutate the global registry then restore. Vitest's default sequential file-level execution makes this safe today, but parallel test runs would flake. Refactor to dependency-injection (pass action lookup as a parameter) or `vi.spyOn` once the test architecture is revisited. Severity: low. Source: ChatGPT PR review round 1 — user decision: defer.
 
 ### PR #244 — claude-improve-ui-design-2F5Mg / tier-1-ui-uplift (2026-04-30 / 2026-05-01 — ChatGPT review rounds 1–3)
 
@@ -2173,12 +2194,17 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 ## PR Review deferred items
 
+### PR #248 — claude-audit-dev-agents-Op4XW (2026-05-01)
+
+- [ ] F4: introduce a coordinator gate-type taxonomy (HARD BLOCK / SOFT BLOCK / WARNING) and audit every existing gate (G1/G2/G3/G4, doc-sync, environment snapshot drift, overlap detection, freshness thresholds, S2-conflict, plan-gate abort, etc.) to label each with its type. Real pattern, but the right implementation audits all existing gates at the same time as introducing the taxonomy — better as a scoped follow-up than tacked onto this PR. [user]
+
+## PR Review deferred items
+
 ### PR #246 — lint-typecheck-baseline (2026-05-01)
 
 - [ ] F5: align plan doc to reflect `sideEffectClass: 'none'` as a valid class alongside `'read'` and `'write'` — downstream logic (managerGuardPure) only gates on `'write'`, so `'none'` is safely handled; doc just needs to match implementation. [auto]
 - [ ] F7: update plan doc to reflect that `agentDiagnosis` column is `jsonb` not `text` — JSONB is the correct type for structured diagnosis data and is already used by `writeDiagnosis.ts`; plan was written before the type decision was finalised. [auto]
-- [ ] F14: add migration compatibility test — `it('handles null agentDiagnosis for legacy rows')` covering null agentDiagnosisRunId / agentDiagnosis (pre-migration rows); see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [user]
-- [ ] F28: add idempotency double-tap test for writeDiagnosis — run same (incidentId, agentRunId) pair twice and verify no duplicate rows, no divergent state; see post-merge section in docs/superpowers/plans/2026-05-01-lint-typecheck-baseline.md. [auto]
+- F14 + F28: see `## Deferred — testing posture (lint-typecheck-post-merge spec)` near the bottom of this file — those rows supersede the earlier sparse routing.
 
 ## Deferred from ChatGPT PR review — external-doc-references Round 1 (F5)
 
@@ -2303,3 +2329,112 @@ These are spec-vs-implementation divergences identified during the all-of-spec c
   - Suggested approach: confirm the worktree's `progress.md` is what merges (most likely true given the branch HEAD), no further action needed. If main's version persists, copy the closeout block over.
 
 Flag if: you intended an operator-visible UI in v1 (in which case settings page + route + schema entry need to be specced) rather than a backend-only flag.
+
+## Deferred — testing posture (lint-typecheck-post-merge spec)
+
+**Source:** spec-reviewer agent — review of `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` Iteration 1, 2026-05-01. F14 and F28 were drafted as integration tests inside Task 7 of that spec, then auto-rejected on framing grounds (`docs/spec-context.md` `runtime_tests: pure_function_only`). Both are real tests worth writing — just not under the current testing posture. Picked up when posture changes (live data, integration-test budget approved, etc.).
+
+- [ ] **F14 — migration compatibility test for null `agentDiagnosis` rows.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosisLegacyRows.test.ts`. Asserts that `agentDiagnosisRunId` and `agentDiagnosis` read as `null` for legacy pre-migration rows and that `diagnosisStatus = 'none'` is the canonical presence indicator (never filter on `agentDiagnosisRunId IS NOT NULL`). DB-backed integration test — not pure-function. [auto - spec-reviewer]
+- [ ] **F28 — idempotency double-tap for `executeWriteDiagnosis`.** Originating file (when written): `server/services/systemMonitor/skills/__tests__/writeDiagnosis.test.ts`. Asserts that two calls with the same `(incidentId, agentRunId)` produce only one `diagnosis` event and a single row update. **Important contract correction:** the second call returns `{ success: true, suppressed: false }` per the actual implementation at `server/services/systemMonitor/skills/writeDiagnosis.ts:62-63, 124-127`; `suppressed: true` is reserved for the terminal-transition race path. Earlier draft of the test in the post-merge spec had this wrong — fix at write-time. [auto - spec-reviewer]
+
+## PR Review deferred items
+
+### PR — lint-typecheck-post-merge-tasks (2026-05-01)
+
+- [ ] N-1: remove redundant `'no-undef': 'off'` from per-pattern blocks in `eslint.config.js` (lines 24, 39); global block at line 14 already disables it. [auto]
+- [ ] N-2: combine the two `import type` lines for `PrincipalContext` and `SystemPrincipal` in `visibilityPredicatePure.test.ts:14-15`. [auto]
+- [ ] N-3: tighten `registerProviderAdapter` local type in `fakeProviderAdapter.test.ts:159` from `(key, a: unknown)` back to `(key, a: LLMProviderAdapter)`. [auto]
+- [ ] N-4: codemod sweep -- replace `npx tsx server/...` in Vitest test docstrings with `npx vitest run server/...` per DEVELOPMENT_GUIDELINES.md §7. [user]
+
+### PR #249 — lint-typecheck-post-merge-tasks — chatgpt-pr-review round 1 (2026-05-01T08:50 UTC)
+
+**Source:** ChatGPT-web review (manual mode); operator drove rounds inline in main session. Verdict: 3 auto-reject, 3 defer, 1 awaiting user. Log: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+
+- [ ] **F3-cgpt:** `liveAgentCount` in `client/src/components/Layout.tsx:266` is set in 5 places (initial fetch, refresh, polling, two socket handlers) but the JSX that rendered it as a Dashboard badge was removed in a prior commit. Pre-existing dead state — not introduced by PR #249. Lint rule is `'warn'` so CI passes. Either restore the Dashboard badge JSX (`<NavItem ... badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? \`${liveAgentCount} live\` : undefined} />`) or remove the state + setter + polling + socket handlers wholesale. [auto - chatgpt-pr-review]
+- [ ] **F4-cgpt:** Hygiene audit of all `// eslint-disable-next-line` comments in the codebase — ensure each remains justified and the rule it disables hasn't been resolved upstream. Periodic; not introduced by PR #249. [auto - chatgpt-pr-review]
+- [ ] **F6-cgpt:** Replace inline `Record<string, unknown>` casts with named row interfaces (~42 occurrences). Suggested per-file pass: introduce a small `type FooRow = { ... }` near each callsite where it's used, replace the cast. Mostly in `db.execute<T>()` callbacks. Out of scope for the lint cleanup spec (would expand the change set significantly). [auto - chatgpt-pr-review]
+- [x] **F7-cgpt:** UX polish for silent UI catches — `client/src/pages/McpServersPage.tsx:317` sync button. **Resolved in PR #249 (operator approved fix-in-PR):** added `toast.error(msg)` with the codebase's standard error-message extraction (matching `AgentRunCancelButton.tsx`). [user - chatgpt-pr-review]
+
+### PR #249 — lint-typecheck-post-merge-tasks — post-build pr-reviewer pass (2026-05-01T07:36 UTC)
+
+**Source:** post-build pr-reviewer agent. Verdict APPROVED (0 blocking, 1 strong, 4 non-blocking). Log: `tasks/review-logs/pr-reviewer-log-lint-typecheck-post-merge-tasks-2026-05-01T07-36-42Z.md`. S-1 was the only Strong finding; routed here because the only fix path requires editing `eslint.config.js`, which is a HITL-protected config file and the user is away from the keyboard at review time.
+
+- [x] **S-1 (Strong) — RESOLVED in PR #249 (operator approved at finalisation):** Worker T8 `no-restricted-imports` rule ported into `eslint.config.js` flat config (`files: ['worker/**/*.{ts,cjs,js}']` block at the bottom of the file); legacy `worker/.eslintrc.cjs` deleted; `'worker/.eslintrc.cjs'` ignore entry removed. Functionally verified — `ESLint.calculateConfigForFile('worker/src/loop/executionLoop.ts')` now returns the rule active; synthetic violation file produces the expected error `'../../server/db/schema/integrationConnections' import is restricted from being used by a pattern. Worker code must not import the integrationConnections table directly. ...` Stale doc references at `docs/reporting-agent-handoff.md:114` and `docs/reporting-agent-paywall-workflow-spec.md:942` updated in the same commit. [user]
+- [ ] **N-1 (post-build):** `IdempotencyContract` interface at `server/config/actionRegistry.ts:62-71` has all four S1 fields, but `ActionDefinition` doesn't yet carry `idempotencyContract?: IdempotencyContract`. Type-only contract — no caller validates it. Plumb through when the next idempotency-aware action is added. [auto]
+- [ ] **N-2 (post-build):** Pre-existing `await await expect(...).rejects.toThrow()` double-await typo in `server/services/__tests__/llmRouterTimeoutPure.test.ts:70` and `server/services/__tests__/canonicalDataService.principalContext.test.ts`. Drop the outer `await`. Harmless but confusing. [auto]
+- [ ] **N-3 (post-build):** Implementation chose `req.user!.id` (non-null assertion) over the spec's literal `req.user?.id` (optional chain) in `server/routes/workspace.ts` and `server/routes/suggestedActions.ts`. The `!` is correct because `authenticate` middleware always sets `req.user`; `?.` would propagate `undefined` into downstream services. Document the deviation in a future spec-self-review pass; no code change. [auto]
+- [ ] **N-4 (post-build):** `void _b;` dead-code noise at `server/services/dropZoneService.ts:280`. The `varsIgnorePattern: '^_'` already excludes `_b`; `void _b` is unnecessary. Drop in a future cleanup pass. [auto]
+- [x] **N-5 (post-build) — RESOLVED in PR #249:** `'worker/.eslintrc.cjs'` ignore entry removed from `eslint.config.js:8` together with S-1. The legacy file is deleted and the rule lives in the flat config. [auto]
+
+---
+
+## Deferred spec decisions — dev-pipeline-coordinators
+
+**Source:** spec-reviewer iteration 1, 2026-05-01
+
+### [AUTO-DECIDED - reject] §6.2 "frontmatter description MUST include Step 1 TodoWrite skeleton"
+
+The mandate in §6.2 says all agents "MUST include a Step 1 TodoWrite skeleton in its frontmatter `description`". However, YAML frontmatter `description` fields are by convention single-line strings — embedding a multi-step skeleton would break YAML parsing. All agents defined in this spec already have body-level "Step 1 — TodoWrite list" sections, which satisfy the spirit of the requirement.
+
+**Decision:** AUTO-DECIDED reject. The §6.2 wording is an overspecification — the body Step 1 sections in each agent definition are the correct place for the skeleton, not the YAML description field. The spec text at §6.2 should be updated to say "body Step 1 section" instead of "frontmatter description".
+
+**Rationale:** Prefer spec as-is (body Step 1 sections present in all agents); YAML description field cannot hold multi-step skeletons without breaking YAML parsing.
+
+**Action if human agrees:** Clarify §6.2 wording to say "each agent's body MUST include a Step 1 — TodoWrite list section" rather than referencing the frontmatter description field.
+
+### [AUTO-DECIDED - reject] Open Questions §1 — main-branch protection design question
+
+**Source:** spec-reviewer iteration 2, 2026-05-01
+**Finding:** Codex flagged that if the operator starts spec-coordinator on main/master/develop, all coordinator auto-commits and auto-pushes (§6.5) would land directly on main, bypassing the PR/CI flow. This is a real risk.
+
+**Decision:** AUTO-DECIDED reject (close the open question as deferred). The spec explicitly lists this as Open Question #1 for chatgpt-spec-review and the operator. The two options ("refuse on integration branch" vs "auto-create feature branch") each have trade-offs the operator must evaluate. Auto-resolving this in a mechanical spec review would be out of scope — it is a product design decision.
+
+**Rationale:** Prefer spec as-is; the open question is intentionally open and flagged for operator review. The risk is acknowledged in the spec.
+
+**Action for operator:** Resolve Open Question #1 before the pipeline ships. Recommended decision: add a guard at spec-coordinator entry that refuses to start if the current branch is main/master/develop and prompts the operator to switch to a feature branch first. This is the safer option (no destructive auto-branch) and matches the commit-and-revert rollout model.
+
+### [AUTO-DECIDED - accept] §2.16/§6.4.2 — Phase 2 hard-escalation current-focus.md state should be NONE
+
+**Source:** spec-reviewer iteration 5, 2026-05-01
+**Finding:** §6.4.2 says hard escalations "set tasks/current-focus.md status appropriately" but this is undefined for PHASE_2_PAUSED_PLAN and other Phase 2 paused states. Codex found that §2.3's entry check (BUILDING required) is inconsistent with the hard-escalation reset.
+
+**Decision:** AUTO-DECIDED accept (minor clarification needed). Hard-escalation paths in §2.16 should explicitly set current-focus.md to `NONE` (not BUILDING) so the next re-launch sees NONE and can re-enter Phase 2 cleanly by re-setting BUILDING at entry. The §2.3 entry check remains correct (BUILDING = valid, anything else = refuse; re-launch writes BUILDING before starting).
+
+**Rationale:** Phase 2 restart-not-resume posture means hard escalations should leave the repo in a clean state (NONE) rather than a stuck state (BUILDING). "Appropriately" in §6.4.2 should be interpreted as NONE for all Phase 2 PAUSED* escalations.
+
+**Action if human agrees:** Add a line to each hard-escalation path in §2.16 specifying `current-focus.md → NONE`. Minor spec clarification; non-blocking for implementation.
+
+---
+
+## Spec Review deferred items
+
+### dev-pipeline-coordinators (2026-05-01)
+
+Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec-review-dev-pipeline-coordinators-2026-05-01T02-20-30Z.md`). All items have explicit re-evaluation triggers.
+
+- [ ] **Per-phase cost and time budgeting.** Optional per-phase budget caps (tokens/time) surfaced in `progress.md`. Re-evaluation trigger: `live_users: yes` in `docs/spec-context.md`. [user]
+- [ ] **Overgrown progress.md compression.** Keep last N detailed entries; summarize older entries. Re-evaluation trigger: builds consistently exceed 20+ chunks. [user]
+- [ ] **Runtime smoke check for routes/schema/integration chunks.** Lightweight runtime verification (hit endpoint, verify response shape) after chunks touching API routes, DB schema, or integration points. Re-evaluation trigger: `api_contract_tests: not none` in `docs/spec-context.md` (i.e. when `live_users: yes`). [auto]
+- [ ] **Mid-run architecture checkpoint at 50% of chunks.** Re-invoke architect mid-build to catch slow architectural drift. Re-evaluation trigger: multi-month builds surface architectural drift as a recurring issue. [auto]
+- [ ] **Simplification pass at end of Phase 2.** "What can be removed, merged, or simplified?" pass after all chunks built. Re-evaluation trigger: when builder surgical-changes rule + review stack prove insufficient for complexity control. [auto]
+- [ ] **Confidence score per chunk (`confidence: HIGH/MEDIUM/LOW` in builder return).** Informational field only (no auto-trigger); operator uses it to decide manual review cadence. Re-evaluation trigger: when operator finds they regularly want to spot-review specific chunks based on complexity. [auto]
+
+## Deferred from pr-reviewer — dev-pipeline-coordinators (2026-05-01)
+
+**Captured:** 2026-05-01T17:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-dev-pipeline-coordinators-2026-05-01T17-30-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`
+
+- [ ] **Status-enum transition test coverage.** Author `tests/agents/dev-pipeline-coordinator-status-enum.test.ts` that reads all coordinator agent files, extracts every `status:` assignment, and asserts each is in the allowed-transition table from spec §6.1.1. Deferred: `docs/spec-context.md` sets `testing_posture: static_gates_primary`; revisit when posture changes. [auto-trigger: `testing_posture` changes]
+- [ ] **`tier-1-ui-uplift.html` migration scope.** Spec §10.1.1 only names `org-chart-redesign.html`; `tier-1-ui-uplift.html` was also migrated to satisfy the directory removal. Additive but unspecced — add a note to §9.3 to explicitly name both files if the spec is ever revised. [editorial]
+- [ ] **`chatgpt-plan-review.md` extra context loading.** Agent prepends CLAUDE.md + architecture.md + DEVELOPMENT_GUIDELINES.md before On Start (not specified in §4.3.4). Acceptable by convention; add to spec if formal review of §4.3.4 is done. [editorial]
+- [ ] **`feature-coordinator.md` per-chunk push as bare prose.** Step 6 says "push after each chunk commit" in prose with no fenced `git push` block. Add explicit `git push` command block for clarity. [minor]
+
+## Deferred spec decisions — pr-249-followups (2026-05-01)
+
+**Captured:** 2026-05-01T23-04-17Z by `spec-reviewer` iteration 2
+**Source log:** `tasks/review-logs/spec-review-log-pr-249-followups-2-2026-05-01T23-04-17Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md`
+
+- [ ] **F6 (`Record<string, unknown>` audit) volume re-scope.** Codex flagged the per-callsite audit scope (`server/ client/ shared/ scripts/ worker/ tools/`) as "hundreds to over a thousand" matches; verified at 510 occurrences across 200 files. Spec keeps the per-callsite framing because acceptance criteria (A/B/C tallies + out-of-scope carve-out for the discriminated-union refactor) still bound the work. **If execution proves intractable in one PR**, consider re-scoping to a bounded subset (e.g. only newly-added casts, only F6 backlog files, or only `as Record<string, unknown>` casts where `as` is the cast operator) and split the remainder into a follow-up spec. Decision intentionally deferred to execution time so the operator can use real progress data. [user]
+- [ ] **F6 — ClientPulse intervention-payload discriminated union (out-of-scope of pr-249-followups).** The intervention-payload type system would benefit from a `type InterventionPayload = CreateTaskPayload | FireAutomationPayload | NotifyOperatorPayload | SendEmailPayload | SendSmsPayload` discriminated union keyed on `actionType`. Substantive type-design refactor across many editor components in `client/src/components/clientpulse-settings/editors/payloadSubEditors/`. Worth its own spec when prioritised. Source: spec `2026-05-02-pr-249-followups-spec.md` §6.3. [user]

@@ -438,3 +438,77 @@ describe('normalizePatch', () => {
     expect(sha256(patchA)).not.toBe(sha256(patchB));
   });
 });
+
+// ── formatThreadContextBlock tests ───────────────────────────────────────────
+import { formatThreadContextBlock } from '../conversationThreadContextServicePure.js';
+import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext.js';
+
+function makeModel(overrides: Partial<ThreadContextReadModel> = {}): ThreadContextReadModel {
+  return {
+    openTasks: [],
+    completedTasks: [],
+    decisions: [],
+    approach: '',
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+test('formatThreadContextBlock: null → empty string', () => {
+  expect(formatThreadContextBlock(null)).toBe('');
+});
+
+test('formatThreadContextBlock: all-empty model → empty string', () => {
+  expect(formatThreadContextBlock(makeModel())).toBe('');
+});
+
+test('formatThreadContextBlock: model with openTasks → thread_context tag + Tasks section', () => {
+  const result = formatThreadContextBlock(makeModel({ openTasks: ['Build login', 'Write tests'] }));
+  expect(result).toContain('<thread_context>');
+  expect(result).toContain('</thread_context>');
+  expect(result).toContain('Tasks:');
+  expect(result).toContain('  - Build login');
+  expect(result).toContain('  - Write tests');
+});
+
+test('formatThreadContextBlock: model with approach → Approach line present', () => {
+  const result = formatThreadContextBlock(makeModel({ approach: 'Use iterative delivery' }));
+  expect(result).toContain('Approach: Use iterative delivery');
+});
+
+test('formatThreadContextBlock: model with decisions → Decisions section present', () => {
+  const result = formatThreadContextBlock(makeModel({ decisions: ['Use Postgres', 'No Redis'] }));
+  expect(result).toContain('Decisions:');
+  expect(result).toContain('  - Use Postgres');
+});
+
+test('formatThreadContextBlock: openTasks capped at FORMAT_MAX_ITEMS=20', () => {
+  const tasks = Array.from({ length: 25 }, (_, i) => `Task ${i}`);
+  const result = formatThreadContextBlock(makeModel({ openTasks: tasks }));
+  expect(result).toContain('Task 19');
+  expect(result).not.toContain('Task 20');
+});
+
+// ── prependThreadContextToBasePrompt tests ────────────────────────────────────
+import { prependThreadContextToBasePrompt } from '../conversationThreadContextServicePure.js';
+
+test('prependThreadContextToBasePrompt: empty threadBlock → basePrompt unchanged', () => {
+  const base = 'You are an assistant.';
+  expect(prependThreadContextToBasePrompt('', base)).toBe(base);
+});
+
+test('prependThreadContextToBasePrompt: non-empty threadBlock prepended before base prompt', () => {
+  const ctx = makeModel({ openTasks: ['Deploy fix'], approach: 'Iterative' });
+  const threadBlock = formatThreadContextBlock(ctx);
+  const base = 'You are an assistant.\n<external_document title="Doc1">content</external_document>';
+
+  const result = prependThreadContextToBasePrompt(threadBlock, base);
+
+  // Thread context must appear first
+  expect(result.indexOf(threadBlock)).toBe(0);
+  // External doc content must appear strictly AFTER the thread block ends
+  expect(result.indexOf('<external_document')).toBeGreaterThan(threadBlock.length);
+  // Separator between thread block and base prompt
+  expect(result).toContain(threadBlock + '\n\n' + base);
+});

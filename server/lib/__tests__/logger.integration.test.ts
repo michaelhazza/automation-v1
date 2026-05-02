@@ -12,8 +12,8 @@ test('logger.info with correlationId populates the log buffer', async () => {
   expect(lines.length >= 1).toBeTruthy();
   const line = lines.find(l => l.event === 'test_event_42');
   expect(line).toBeTruthy();
-  expect(line.correlationId).toBe('cid-42');
-  expect((line.meta as { foo?: string }).foo).toBe('bar');
+  expect(line!.correlationId).toBe('cid-42');
+  expect((line!.meta as { foo?: string }).foo).toBe('bar');
 });
 
 test('logger.info without correlationId does NOT populate the buffer', async () => {

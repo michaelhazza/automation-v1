@@ -52,14 +52,13 @@ export async function executeAssignTask(
   const [saLink] = await db
     .select({ sa: subaccountAgents, agent: agents })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, context.subaccountId),
         eq(agents.slug, worker_agent_slug),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt),
       ),
     );
 

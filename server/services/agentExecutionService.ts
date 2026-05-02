@@ -98,6 +98,9 @@ import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 // Integration block service — pauses runs waiting for OAuth connections
 import { checkRequiredIntegration } from './integrationBlockService.js';
 import { agentMessages } from '../db/schema/index.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
+import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -811,7 +814,60 @@ export const agentExecutionService = {
         runContextData.externalDocumentBlocks,
       );
 
-      const systemPromptParts = [basePrompt];
+      // ── Thread context injection (A-D1) ─────────────────────────────────────
+      // Prepended first — before external docs, memory blocks, and all other
+      // augmentation. Spec §2.2 ordering invariant. Fail-open: a build error
+      // skips injection rather than aborting the run.
+      let effectiveBasePrompt = basePrompt;
+      const THREAD_CTX_TIMEOUT = Symbol('timeout');
+      const runConvId =
+        request.conversationId ??
+        (request.triggerContext?.conversationId as string | undefined) ??
+        undefined;
+      if (runConvId) {
+        const _threadCtxStart = Date.now();
+        let threadCtx: ThreadContextReadModel | null = null;
+        try {
+          let _threadCtxTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+          const ctxResult = await Promise.race<ThreadContextReadModel | typeof THREAD_CTX_TIMEOUT>([
+            buildThreadContextReadModel(runConvId, request.organisationId),
+            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) => {
+              _threadCtxTimeoutHandle = setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500);
+            }),
+          ]);
+          if (_threadCtxTimeoutHandle !== undefined) clearTimeout(_threadCtxTimeoutHandle);
+          if (ctxResult === THREAD_CTX_TIMEOUT) {
+            logger.warn('thread_ctx.timeout', { runId: run.id });
+          } else {
+            threadCtx = ctxResult;
+          }
+        } catch (err) {
+          logger.warn('thread_ctx.build_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        logger.debug('thread_ctx.build_ms', { ms: Date.now() - _threadCtxStart, runId: run.id });
+        if (threadCtx && typeof threadCtx.version === 'number') {
+          const threadBlock = formatThreadContextBlock(threadCtx);
+          if (threadBlock) {
+            effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
+            // Persist version for drift detection — fire-and-forget, best-effort
+            void db
+              .update(agentRuns)
+              .set({
+                runMetadata: {
+                  ...(run.runMetadata ?? {}),
+                  threadContextVersionAtStart: threadCtx.version,
+                },
+              })
+              .where(eq(agentRuns.id, run.id))
+              .catch(() => {});
+          }
+        }
+      }
+
+      const systemPromptParts = [effectiveBasePrompt];
 
       // Layer 1b: System skill instructions
       if (systemSkillInstructions.length > 0) {
@@ -3221,13 +3277,12 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       agentDescription: agents.description,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 

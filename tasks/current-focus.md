@@ -3,7 +3,7 @@ active_spec: docs/sub-account-optimiser-spec.md
 active_plan: tasks/builds/subaccount-optimiser/plan.md
 build_slug: subaccount-optimiser
 branch: claude/evaluate-new-features-waqfY
-status: PLANNING
+status: REVIEWING
 last_updated: 2026-05-02
 -->
 
@@ -20,12 +20,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** docs/sub-account-optimiser-spec.md (F2 of the F1/F2/F3 sub-account feature wave; PR #250)
-**Active plan:** tasks/builds/subaccount-optimiser/plan.md (pending — `architect` to author next)
+**Active plan:** tasks/builds/subaccount-optimiser/plan.md
 **Active build slug:** subaccount-optimiser (currently on spec-authoring branch `claude/evaluate-new-features-waqfY`; F2 implementation moves to `claude/subaccount-optimiser` per spec metadata)
-**Status:** **PLANNING** — Significant (architect first; full review pipeline). Spec is **READY FOR BUILD** after a 9-iteration review chain: `spec-reviewer` 4 iterations (READY_FOR_BUILD verdict, commit `35c0b6b0`) followed by `chatgpt-spec-review` 5 manual rounds (APPROVED verdict 2026-05-02, finalisation commit follows). 30 substantive applies (19 auto + 11 user), 11 user-deferred items routed to `tasks/todo.md § Spec Review deferred items / subaccount-optimiser`. Spec covers the new generic `agent_recommendations` primitive (table + skill + component) plus the optimiser as its first consumer. Migrations `0267` (table) + `0267a` (peer-median materialised view) reserved. Sister branches still pending: F1 `subaccount-artefacts` (migration `0266`) and F3 `baseline-capture` (migrations `0268-0270`) — same spec-authoring branch holds all three; per-feature implementation branches will be cut at build time. **Next:** invoke `architect` (Opus) to decompose F2 into chunks at `tasks/builds/subaccount-optimiser/plan.md`. Stop at plan gate — operator switches Opus → Sonnet before execution per CLAUDE.md model-guidance rule.
+**Status:** **REVIEWING** — chunk 1 (generic agent-output primitive) committed; PR #250 in ChatGPT PR review finalisation (2026-05-02, verdict APPROVED). Spec ready post-9-iteration review chain (`spec-reviewer` 4 iter + `chatgpt-spec-review` 5 rounds). Migration `0267` shipped (table + RLS + `subaccounts.optimiser_enabled`). Sister branches still pending: F1 `subaccount-artefacts` (migration `0266`) and F3 `baseline-capture` (migrations `0268-0270`). **Next after PR #250 merge:** invoke `architect` (Opus) to decompose remaining chunks at `tasks/builds/subaccount-optimiser/plan.md`.
 
-**Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
-**Last updated:** 2026-04-29
+**Just merged:** PR [#249](https://github.com/michaelhazza/automation-v1/pull/249) — lint-typecheck-post-merge-tasks (squash merge `9e751566`, merged 2026-05-01T09:33:13Z). Drives `npm run lint` and `npm run typecheck` to exit 0; wires `lint_and_typecheck` as a blocking unconditional CI gate. Closes PR #246 review findings (S1 IdempotencyContract four fields, S2 visibilityPredicatePure 'system' case, S3 SystemPrincipal test coverage, N1/N3/N4). Worker T8 `no-restricted-imports` rule ported from legacy `worker/.eslintrc.cjs` (deleted) into `eslint.config.js` flat config. McpServersPage sync button now surfaces failures via `toast.error`. **Pipeline:** spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED (1 strong + 4 non-blocking; S-1/N-5 resolved at finalisation, others backlogged) → dual-reviewer (Codex) APPROVED 0 findings → chatgpt-pr-review CLOSED at 3 rounds (1 implement / 12 reject / 3 defer / 1 no-op) → doc-sync sweep PASS (2 stale refs fixed in `docs/reporting-agent-handoff.md` and `docs/reporting-agent-paywall-workflow-spec.md`) → MERGED. **KNOWLEDGE.md additions (4 patterns):** ChatGPT diff-misreading rule (grep-verify duplicate claims); post-increment-on-dead-store is a no-op; chatgpt-pr-review close after 2 unproductive rounds; **Correction** — `gh pr edit --add-label ready-to-merge` must be paired with `ScheduleWakeup(90-120s)` per CLAUDE.md §12.
+
+**Recently merged (on main):** PR #248 (three-coordinator dev pipeline spec — 2026-05-01T07:07Z), PR #247 (deferred-items-pre-launch implementation plan — 2026-05-01T06:23Z), PR #246 (lint-typecheck-baseline — 2026-05-01T01:22Z), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
+**Last updated:** 2026-05-01
 
 ---
 

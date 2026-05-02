@@ -297,7 +297,7 @@ export async function executeComputeHealthScore(
 
   // Compute each factor from canonical_metrics
   const factorResults: Array<{ factor: string; score: number; weight: number; metricSlug: string; rawValue: number | null; direction: 'positive' | 'negative' | 'neutral' }> = [];
-  let missingFactors: string[] = [];
+  const missingFactors: string[] = [];
   let factorsWithData = 0;
 
   for (const factor of factors) {

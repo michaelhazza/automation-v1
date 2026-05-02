@@ -56,7 +56,7 @@ Run these after every non-trivial change. No task is complete until all relevant
 | Trigger | Command | Max auto-fix attempts |
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
-| Any TypeScript change | `npm run typecheck` (or `npx tsc --noEmit`) | 3 |
+| Any TypeScript change | `npm run typecheck` | 3 |
 | Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
 | Client change | `npm run build:client` | 2 |
@@ -81,7 +81,7 @@ Full test-gate suites and whole-repo verification scripts DO NOT run in any loca
 - Any "regression sanity check", "quick re-verify everything", "confirm no regression" framing — these are dressed-up gate runs.
 
 **Allowed locally:**
-- `npm run lint`, `npm run typecheck` (or `npx tsc --noEmit`).
+- `npm run lint`, `npm run typecheck`.
 - `npm run build:server` / `npm run build:client` when the change touches the build surface.
 - **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Point: confirm the new test runs and passes. Not to re-run anything else.
 
@@ -169,6 +169,8 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 - `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
 - Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
 
+**Async polling cadence** — When polling external state (CI, builds, deployments, jobs) from a Claude Code session: default to 90-120s between polls, not 4-5 min. CI on this repo typically completes in 1-2 min, so a too-long cadence pushes past a full cycle and delays merge. Pick cadence to match expected event time, not to maximise prompt-cache hits — responsiveness wins for fast pollable signals. Use `ScheduleWakeup` or `Monitor`; long synchronous `sleep` commands are runtime-blocked.
+
 ---
 
 ## 13. Doc style: agent-facing is dense, human-facing is readable
@@ -220,12 +222,17 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 |-------|---------|----------------|
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
-| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug present for per-chunk invocations from `feature-coordinator`). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
+| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug included when invoked mid-build). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done. For spec-driven tasks, run `spec-conformance` first. |
-| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
-| `adversarial-reviewer` | Adversarial / threat-model review — read-only. Hunts tenant-isolation, auth, race-condition, injection, resource-abuse, and cross-tenant data-leakage holes. Emits a fenced `adversarial-review-log` block; the caller persists it. Phase 1 advisory; non-blocking. | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked. Auto-invocation from `feature-coordinator` is deferred. |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | Automatically when feature-coordinator runs its branch-level review pass and Codex is available. Manual standalone invocation also allowed. Skipped silently when Codex is unavailable (e.g. Claude Code on the web). |
+| `adversarial-reviewer` | Adversarial / threat-model review — read-only. Hunts tenant-isolation, auth, race-condition, injection, resource-abuse, and cross-tenant data-leakage holes. Emits a fenced `adversarial-review-log` block; the caller persists it. Phase 1 advisory; non-blocking. | Auto-invoked from feature-coordinator branch-level review pass when diff matches the security surface (§5.1.2 of dev-pipeline-coordinators-spec). Manual invocation also supported. Phase 1 advisory; non-blocking. |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
-| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
+| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Phase 2 of the three-coordinator pipeline — open a new session and type `launch feature coordinator` after spec-coordinator completes Phase 1 |
+| `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, spec-reviewer, chatgpt-spec-review, handoff | Starting any new Significant or Major feature from a brief |
+| `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, chatgpt-pr-review, doc-sync sweep, KNOWLEDGE.md, MERGE_READY | After feature-coordinator completes Phase 2 |
+| `builder` | Sonnet sub-agent — implements a single plan chunk and enforces G1 gate | Auto-invoked by feature-coordinator; never invoke directly |
+| `mockup-designer` | Sonnet sub-agent — hi-fi clickable HTML prototypes, iterates round-by-round | Auto-invoked by spec-coordinator; never invoke directly |
+| `chatgpt-plan-review` | Manual ChatGPT-web review coordinator for implementation plans | Auto-invoked by feature-coordinator; never invoke directly |
 | `audit-runner` | Runs codebase audits per `docs/codebase-audit-framework.md`. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings → high-confidence fixes → deferred), self-writes the audit log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`, routes deferred items to `tasks/todo.md`. Uses a TodoWrite task list to process areas one by one without spawning sub-agents. Prints post-audit commands (`spec-conformance`, `pr-reviewer`) for the caller to run after the audit completes. Auto-commits and auto-pushes within its own flow. Does not create PRs — the user does. | Periodic codebase hygiene (quarterly), pre-major-release gating, post-incident health check, or any time a subsystem (RLS, agent execution, queues, skills, webhooks, frontend) feels gnarly. Default to Hotspot mode. |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
 | `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
@@ -267,6 +274,9 @@ Classify every task before starting:
 "dual-reviewer: [brief description]"     # local-only, user must explicitly ask
 "adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
 "spec-reviewer: review docs/path-to-spec.md"
+"spec-coordinator: <brief or rough spec topic>"   # Phase 1: spec + mockup + review
+"launch feature coordinator"                       # Phase 2: build + review (new session)
+"launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
 ```
 
 `audit-runner` runs INLINE in the current session — do NOT use the Agent tool. Read `.claude/agents/audit-runner.md` and execute its instructions directly so the TodoWrite task list is visible.
@@ -277,8 +287,8 @@ For Standard/Significant/Major tasks, before marking done or opening a PR:
 
 1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
 2. `pr-reviewer` — always.
-3. `dual-reviewer` — optional, local-only, user must explicitly ask.
-4. `adversarial-reviewer` — optional, user must explicitly ask. Phase 1 advisory; findings are non-blocking unless the user escalates.
+3. `dual-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when Codex is available; manual standalone invocation also allowed. Skipped when Codex unavailable.
+4. `adversarial-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when diff matches security surface (§5.1.2). Manual invocation also supported. Phase 1 advisory; non-blocking.
 
 Steps 3 and 4 are independent optional steps; their order does not affect correctness.
 

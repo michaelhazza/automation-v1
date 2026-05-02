@@ -330,7 +330,7 @@ export async function projectRRuleOccurrences(
   // to each date candidate. Stop when we pass the window end or hit the cap.
   let cursor = new Date(windowStartMs - 1);
   while (out.length < MAX_PROJECTED_PER_SOURCE) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const next: Date | null = rule.after(cursor, false);
     if (!next) break;
     // next() returns a Date whose UTC components encode the nominal rule date.

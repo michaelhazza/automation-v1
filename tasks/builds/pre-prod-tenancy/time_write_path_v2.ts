@@ -19,7 +19,7 @@ const { interventionService } = await import('../../../server/services/intervent
 const { sql } = await import('drizzle-orm');
 
 const ORG1 = 'bde54a4f-7e21-418a-8741-4a5f2a143a00';
-const ORG2 = '421fa9b9-0055-44d0-adbd-51e439c4cb0a';
+// const ORG2 = '421fa9b9-0055-44d0-adbd-51e439c4cb0a'; // reserved for future use
 const ACCOUNT1 = '22200001-0000-0000-0000-000000000001';
 const ACCOUNT2 = '22200001-0000-0000-0000-000000000002';
 const NUM_ORGS = 2;
@@ -53,8 +53,6 @@ async function countWritten(): Promise<number> {
 
 console.log('\n=== NEW PATH: ON CONFLICT DO NOTHING ===');
 const newTimes: number[] = [];
-let newWritten = 0;
-
 for (let run = 1; run <= 3; run++) {
   await cleanup();
   const t0 = performance.now();
@@ -73,7 +71,6 @@ for (let run = 1; run <= 3; run++) {
   const elapsed = performance.now() - t0;
   newTimes.push(elapsed);
   const written = await countWritten();
-  if (run === 1) newWritten = written;
   const rowsPerSecTotal = written / (elapsed / 1000);
   const rowsPerSecPerOrg = (written / NUM_ORGS) / (elapsed / 1000);
   console.log(
@@ -85,8 +82,6 @@ for (let run = 1; run <= 3; run++) {
 
 console.log('\n=== LEGACY PATH: pg_advisory_xact_lock row-by-row ===');
 const legacyTimes: number[] = [];
-let legacyWritten = 0;
-
 for (let run = 1; run <= 3; run++) {
   await cleanup();
   const t0 = performance.now();
@@ -123,7 +118,6 @@ for (let run = 1; run <= 3; run++) {
   const elapsed = performance.now() - t0;
   legacyTimes.push(elapsed);
   const written = await countWritten();
-  if (run === 1) legacyWritten = written;
   const rowsPerSecTotal = written / (elapsed / 1000);
   const rowsPerSecPerOrg = (written / NUM_ORGS) / (elapsed / 1000);
   console.log(
@@ -159,7 +153,6 @@ console.log(`Absolute floor: ${newRowsPerSecPerOrg.toFixed(0)} rows/sec/org (pas
 console.log('\n=== CONCURRENCY CHECK ===');
 await cleanup();
 
-let concWritten = 0;
 await Promise.all([
   (async () => {
     for (const row of actionRows) {
@@ -187,7 +180,7 @@ await Promise.all([
   })(),
 ]);
 
-concWritten = await countWritten();
+const concWritten = await countWritten();
 const dupCheck = await db.execute(sql`
   SELECT COUNT(*) as cnt FROM (
     SELECT intervention_id FROM intervention_outcomes

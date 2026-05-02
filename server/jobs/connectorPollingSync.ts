@@ -93,7 +93,7 @@ export async function runConnectorPollingSync(
   const acquiredToken = leaseRow.sync_lock_token;
   const currentSyncPhase = leaseRow.sync_phase;
   const syncStartedAt = new Date();
-  let errorMessage: string | null = null;
+  let errorMessage: string | null;
 
   // Race-window control seam (test-only). Canonical guarded short-circuit so
   // production with the hook unset is identical to a job with no hook.

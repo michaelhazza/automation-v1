@@ -265,7 +265,7 @@ export const scrapingEngine = {
         : requestedMax;
 
     // ── 6. Tier 1 — plain HTTP ────────────────────────────────────────────────
-    let tier1Result = await httpFetch(url);
+    const tier1Result = await httpFetch(url);
 
     if (tier1Result.success && tier1Result.html) {
       const { content, contentHash } = await extractContent(

@@ -114,7 +114,7 @@ export type BriefResultEntityType =
  * provider API call. 'hybrid' = combined. Lets the UI flag freshness and the
  * caller decide whether to cache.
  */
-export type BriefResultSource = 'canonical' | 'live' | 'hybrid';
+export type BriefResultSource = 'canonical' | 'live' | 'hybrid' | 'stub';
 
 /**
  * Why the result set was truncated. Distinguishing these matters for

@@ -365,16 +365,18 @@ export default function SystemIncidentsPage() {
 
   const sorted = [...incidents].sort((a, b) => {
     if (!sortCol) return 0;
-    let av: string | number = '';
-    let bv: string | number = '';
-    if (sortCol === 'severity') { av = SEVERITY_ORDER[a.severity] ?? 0; bv = SEVERITY_ORDER[b.severity] ?? 0; }
-    else if (sortCol === 'status') { av = STATUS_ORDER[a.status] ?? 0; bv = STATUS_ORDER[b.status] ?? 0; }
-    else if (sortCol === 'occurrenceCount') { av = a.occurrenceCount; bv = b.occurrenceCount; }
-    else if (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') {
-      av = new Date(a[sortCol]).getTime();
-      bv = new Date(b[sortCol]).getTime();
-    }
-    else { av = (a[sortCol] as string) ?? ''; bv = (b[sortCol] as string) ?? ''; }
+    const av: string | number =
+      sortCol === 'severity' ? (SEVERITY_ORDER[a.severity] ?? 0) :
+      sortCol === 'status' ? (STATUS_ORDER[a.status] ?? 0) :
+      sortCol === 'occurrenceCount' ? a.occurrenceCount :
+      (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') ? new Date(a[sortCol]).getTime() :
+      ((a[sortCol] as string) ?? '');
+    const bv: string | number =
+      sortCol === 'severity' ? (SEVERITY_ORDER[b.severity] ?? 0) :
+      sortCol === 'status' ? (STATUS_ORDER[b.status] ?? 0) :
+      sortCol === 'occurrenceCount' ? b.occurrenceCount :
+      (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') ? new Date(b[sortCol]).getTime() :
+      ((b[sortCol] as string) ?? '');
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return sortDir === 'asc' ? cmp : -cmp;
   }).filter((i) => {

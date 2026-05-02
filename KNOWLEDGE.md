@@ -292,6 +292,22 @@ Closing out the cached-context spec after 5 rounds of external ChatGPT review + 
 
 **Rule for vocabulary drift:** when a user or reviewer observes that a spec is using two names for the same concept (backend name vs UI name), rename to the single preferred name immediately, at every layer (schema, services, routes, types, error codes, prose, mockups). Do not "defer to implementation" — vocabulary inconsistency compounds with every layer it survives into. This spec's pack → bundle rename fixed 390+ references across 6 files in one commit because it happened pre-implementation.
 
+### 2026-05-01 Convention — Coordinator handoff write ordering on abort (seen 1 time)
+
+On any coordinator abort or hard-escalation path: always write `handoff.md` FIRST, then update `tasks/current-focus.md`. Never reverse this order. A crash between the two writes leaves current-focus.md pointing at a valid handoff (recoverable) rather than an updated current-focus with no handoff (ambiguous state that every subsequent coordinator launch will reject as a bug). Applied in §6.4.2 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Generalises to any two-file state machine where the second write is the pointer.
+
+### 2026-05-01 Pattern — Commit file-scope invariant in coordinator-driven builds (seen 1 time)
+
+When a coordinator stages files after a builder sub-agent run: (1) capture the builder's declared "Files changed" list, (2) run `git diff --name-only HEAD`, (3) hard fail if unexpected files appear — do NOT offer to stage only declared files. The "stage only declared files" option allows a distracted operator to accidentally commit cross-chunk bleed. Hard fail forces investigation. Never use `git add .` or `git add -A` from a coordinator. Always `git add <explicit file list>`. Applied in §2.9.3 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Pattern — Pre-resume typecheck gate for coordinator resume runs (seen 1 time)
+
+When feature-coordinator resumes from an interrupted build (any chunk is `done` in progress.md): run one full `npm run typecheck` BEFORE processing any chunk-skip decisions. If it fails, do NOT skip any completed chunks — type drift from incomplete later chunks can make a previously-passing chunk look clean when it isn't. The typecheck gate is the cheapest way to catch integrated-state drift before acting on stale progress.md data. Applied in §2.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Convention — Doc-sync count enforcement (seen 1 time)
+
+When enforcing a doc-sync gate (coordinator or review agent): count the registered docs in `docs/doc-sync.md`, then verify the verdict table in progress.md / session log has exactly that many rows. A row count shortfall is a gate failure, not a review comment. "Missing verdict blocks finalisation" is only enforceable if you verify count, not just presence of some verdicts. Applied in §2.12 and §3.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
 **Rule for testing-posture framing in long specs:** if the spec inherits a framing default from a higher-level doc (e.g. `runtime_tests: pure_function_only` from `docs/spec-context.md`), and the spec defines tests that deviate from that default, declare the deviation explicitly in the spec's own framing-deviations section. Silence creates a cross-layer contradiction that reviewers will catch late. Caught in round 5 of this spec; worth doing proactively next time.
 
 Applies to any implementation-readiness spec review: API contracts, primitive rollouts, cross-cutting concerns.
@@ -1704,9 +1720,61 @@ In `agentResumeService.ts`, the first resume call cleared `integration_resume_to
 
 The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
 
+### [2026-05-01] Pattern — Subaccount scope guards must use null-safe checks to preserve org-level connection validity
+
+Route guards checking `conn.subaccountId !== subaccountId` wrongly reject connections where `subaccountId` is `null` (org-level connections) — `null !== 'some-uuid'` evaluates to `true`. The correct form is `if (conn.subaccountId && conn.subaccountId !== subaccountId)`. Apply this pattern to any route guard that scopes a shared resource (connection, credential, shared integration) to a subaccount while leaving org-level access open. Source: deferred-items-pre-launch spec review R2/F1.
+
+### [2026-05-01] Pattern — Spec step-shorthand ("same injection as above") silently drops side-effect writes
+
+When a spec uses shorthand like "apply the same injection (same two lines)" to describe a repeat call, implementers often copy the primary lines (build + format + prepend) but miss secondary side-effects (like writing `runMetadata.threadContextVersionAtStart`). Always enumerate every side-effect explicitly in each step — shorthand saves spec words but generates implementation bugs. Found in deferred-items-pre-launch spec review R1/F2 (§2.2 Step 3 resume path).
+
+### [2026-05-01] Correction — chatgpt-spec-review manual mode prints spec as a copy-paste payload
+
+In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy into ChatGPT ---` block per the agent design. If the user has already submitted the spec to ChatGPT independently, this block looks like instruction-dumping. Future sessions should briefly state "printing the ChatGPT payload" before the block so the user understands its purpose and can skip it if they submitted manually.
+
 ### [2026-05-01] Pattern — Pre-submit access verification prevents silent rebind failures
 
 When a UI action binds a new credential to a resource (e.g. rebinding a broken Drive reference to a new connection), calling a lightweight access-check endpoint on connection select — rather than waiting for the full submit — surfaces failures at decision time instead of after the user commits. `ExternalDocumentRebindModal` now calls `verifyAccess(connId, fileId)` on the connection `<select>` onChange, shows an inline error, and disables the confirm button until access is confirmed. **Rule:** for any "bind credential to resource" flow, add a verify-before-confirm step using any existing lightweight probe endpoint; post-submit failures confuse users because the error arrives after they have mentally moved on. Source: ChatGPT PR #242 review Round 2 F4.
+
+### [2026-05-01] Pattern — Implementation spec hard stop conditions must use explicit "stop" language, not implied success
+
+When a sequencing spec has a task boundary where proceeding on failure causes wasted work (e.g. applying `!` assertions to test files while production type errors remain), the verification step must use explicit "If non-zero, stop — do not proceed to Task N" language. An implied success condition ("must return 0 lines") is insufficient — implementers in execution mode continue past soft failures. The Task 2.4 → Task 3 boundary in `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` was the canonical example: 127 test-file `!` fixes applied on top of unfixed production errors = wasted session. The corrective pattern: hard stop at each major task boundary where downstream work is invalidated by upstream failure, plus a Task-N pre-condition that re-states the same check as an entry gate.
+
+### [2026-05-01] Gotcha — ESLint flat config global rule insertion is silent if placed in the wrong position
+
+In `eslint.config.js` (flat config format), a global `{ rules: { 'no-undef': 'off' } }` object is silently overridden if placed BEFORE `js.configs.recommended` (which re-enables it). The rule must appear AFTER both `js.configs.recommended` and `...tseslint.configs.recommended` but BEFORE any `files:`-scoped override blocks. There is no warning when the placement is wrong — the rule simply has no effect and the lint output is unchanged. Verification: `npx eslint --print-config <any-file-outside-scoped-globs> | grep '"no-undef"'` must return `["off"]`. If it returns `["error"]`, the global object is in the wrong position. Source: `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` Task 4.2.
+
+### [2026-05-01] Pattern — Sustained-reject discipline in spec review: re-raises with no new evidence should stay rejected
+
+When a spec reviewer raises the same finding 3 consecutive rounds with the same example and no new evidence, the correct response is to maintain the rejection rather than accepting under persistence pressure. The over-assertion guard (`>3 !` threshold) and exhaustiveness guard verification step were both raised across all 3 rounds of the lint-typecheck-post-merge spec review. Accepting them would have added: (a) an arbitrary threshold that generates false positives on legitimate deep-object assertions, and (b) a "deliberately break the code to verify the guard works" step for a standard TypeScript discriminated-union pattern. Rule: when a reviewer re-raises without new evidence, add a one-line note to the session log ("Round 1 FN re-raised; rationale unchanged") and reject. Accepting re-raises for their persistence is a common way specs accumulate bureaucratic noise. The Recommendation Criteria ("stylistic preference with no functional impact", "adds complexity without necessity") are stable across rounds — new evidence changes a recommendation, repetition alone does not.
+
+### [2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision
+
+When `chatgpt-pr-review` surfaces findings in Round N (N ≥ 2) that are substantive duplicates of decided findings from prior rounds (same finding_type + same file/code area, no new evidence — even when rephrased with stronger language like "must-fix" or "not optional"), auto-apply the prior round's decision and log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT re-surface to the user via the approval gate, even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: PR #247 round 2 — user feedback "these are all technical so shouldn't be surfaced to me, go with your recommendations" after I re-presented 6 round-1 duplicates with the same recommendations.
+
+### [2026-05-01] Pattern — External reviewers misread codebase canonical RLS without architecture.md context
+
+ChatGPT consistently flags the codebase canonical RLS pattern (`current_setting('app.organisation_id', true) IS NOT NULL AND ... <> '' AND organisation_id = current_setting(...)::uuid` with `, true`) as a "silent denial bug" and recommends removing `, true` for fail-fast behaviour. The pattern is intentional and documented at `architecture.md` §Canonical org-isolation policy template (lines 1451-1474). The `true` flag (`missing_ok = true`) returns NULL when the GUC is unset; the explicit NULL / empty guards then close the policy fail-closed. Admin paths bypass RLS entirely via `SET LOCAL ROLE admin_role` (BYPASSRLS), so the `true` flag avoids throwing on legitimate admin operations that don't set `app.organisation_id`. Surfaced 3× in PR #247 review (rounds 1, 2, 3). **Rule:** when this finding appears, reject and reference the architecture.md section; do NOT change the pattern unless undertaking a codebase-wide RLS convention audit.
+
+### [2026-05-01] Pattern — Verdict-based gates need evidence-bearing verdicts, not trust-based ones
+
+When a finalisation gate enforces "for each X, declare yes/no/n/a" (doc-sync sweeps, conformance checks, security reviews), the agent can declare `no — already accurate` after a quick skim and miss issues the diff actually invalidated. The verdict format itself must require evidence: either grep terms checked against the target and found absent, or a specific reason the update trigger genuinely doesn't apply. Without an audit trail in the verdict, the gate becomes trust-based and degrades silently — the failure mode is "declared clean, actually stale" with no way to retroactively notice. **Rule:** any verdict-based gate must require the verdict to cite the evidence that justified it; bare or unsubstantiated verdicts are treated as missing. Applied to `docs/doc-sync.md` § Investigation procedure + § Verdict rule (PR #248). Source: operator-observed failure mode in PR #247 finalisation where stale `architecture.md` references were missed because the doc-sync sweep declared `no` without opening the doc.
+
+### [2026-05-01] Pattern — ChatGPT PR-review diff misreading: treat "" claims as needing grep verification
+
+ChatGPT-web reviewing a PR diff frequently treats `-foo` (removed line) and `+bar` (added line) as both present in the current file, producing "duplicate code" findings that do not exist on disk. In PR #249 (lint-typecheck-post-merge-tasks), 3 of 17 findings across 3 rounds were diff-misreadings — HelpHint double toggle (R1 F2 / R2 F1 / R3 F1), duplicate `onClick` in McpServersPage (R2 F2 / R3 F2), duplicate try/catch — each resolved to one line in the file. **Rule:** when ChatGPT claims a "duplicate" pattern in code, verify with `grep -c <pattern> <file>` or read the file before acting. If grep returns 1, the claim is a diff misreading; auto-reject and document. If grep returns ≥ 2, the duplicate is real. Cost of grep is ~1 sec; cost of "fixing" a hallucinated duplicate is unwinding it later. Source: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+
+### [2026-05-01] Pattern — Post-increment on the last use of a local is a no-op; `no-useless-assignment` correctly removes it
+
+`var++` on the LAST use of a local variable inside a function passes the current value (correct semantics) and increments (unobservable, since the variable goes out of scope on the next line). The post-increment is dead — the new value is never read. `@typescript-eslint/no-useless-assignment` flags these correctly; removing the `++` does not change behavior. Reviewers may incorrectly claim "regression" or "duplicate React keys" — verify by tracing the value PASSED at the call site, not the value ASSIGNED after. PR #249 examples: `client/src/pages/AgentChatPage.tsx:80`, `client/src/pages/ConfigAssistantPage.tsx:62` — both `parts.push(...renderInlineMarkdown(remaining, keyIdx++))` → `parts.push(...renderInlineMarkdown(remaining, keyIdx))` immediately before `return parts;`. Keys still unique because `renderInlineMarkdown` namespaces by `baseKey * 10000`.
+
+### [2026-05-01] Pattern — chatgpt-pr-review session close after 2 unproductive rounds
+
+When 2 consecutive `chatgpt-pr-review` rounds produce 0 new valid findings AND the failure mode is structural (diff misreading, scope confusion, hallucination), close the session — do not push for round 3+. The model is not getting new context between rounds; persistence does not improve signal. PR #249 R2 produced 5 reject + 1 no-op + 0 implements; R3 was 4 reject (all duplicates of R1/R2) + 0 implements. Recommend operator close at end of R2 in similar cases. The chatgpt-pr-review agent definition encodes this as a stop signal — `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md` is the worked example.
+
+### [2026-05-01] Correction — Apply ready-to-merge label MUST be paired with ScheduleWakeup, not stop
+
+After `gh pr edit --add-label ready-to-merge` fires CI on this repo, the main session must immediately schedule a wake-up to poll CI status. Cadence per CLAUDE.md §12 line 172: 90-120s default (CI on this repo typically completes in 1-2 min). Stopping after applying the label and waiting for the operator to come back is wrong — it pushes the merge timeline by however long the operator is away, when the work was already CI-bound and pollable. **Rule:** `gh pr edit --add-label ready-to-merge` and `ScheduleWakeup` with `delaySeconds: 90-120` are a single atomic operation; one without the other is a process bug. After the wake-up fires, run `gh pr checks <N>` and either re-schedule (still running) or proceed (green/red). Source: PR #249 finalisation, 2026-05-01 — operator caught the miss after CI completed silently for ~3 min.
 
 ### [2026-05-02] Pattern — Material-change thresholds combine relative AND absolute floors
 
