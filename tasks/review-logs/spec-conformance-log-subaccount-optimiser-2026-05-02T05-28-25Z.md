@@ -10,6 +10,7 @@
 **Scope:** targeted re-verification of B1-B10 + B12 (the 11 directional gaps the main session reports as fixed). B11/B13/B14/B16 remain intentionally deferred and were NOT re-examined per caller direction.
 **Run at:** 2026-05-02T05:28:25Z
 **Prior log:** `tasks/review-logs/spec-conformance-log-subaccount-optimiser-2026-05-02T05-00-11Z.md`
+**Commit at finish:** `541fc2c4`
 
 ---
 
