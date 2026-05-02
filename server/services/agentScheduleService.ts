@@ -2,6 +2,7 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
+import { runOptimiser } from './optimiser/optimiserOrchestrator.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
 import { setContextEnrichmentJobSender } from './workspaceMemoryService.js';
@@ -70,6 +71,23 @@ export const agentScheduleService = {
       handler: async (job) => {
         const data = job.data;
         logger.info(`[AgentScheduler] Running scheduled agent: ${data.agentId} for subaccount ${data.subaccountId}`);
+
+        // If this is the subaccount-optimiser agent, bypass the LLM loop and
+        // call the internal orchestrator directly.
+        const [agentRow] = await db
+          .select({ slug: agents.slug })
+          .from(agents)
+          .where(eq(agents.id, data.agentId))
+          .limit(1);
+
+        if (agentRow?.slug === 'subaccount-optimiser') {
+          await runOptimiser({
+            subaccountId: data.subaccountId,
+            organisationId: data.organisationId,
+            agentId: data.agentId,
+          });
+          return;
+        }
 
         await agentExecutionService.executeRun({
           agentId: data.agentId,
