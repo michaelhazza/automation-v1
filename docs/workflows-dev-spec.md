@@ -328,6 +328,11 @@ The deprecated user-facing names `conditional`, `agent_decision`, `prompt` (as a
 - Fan-out: a step has multiple `next` arrows; engine dispatches in parallel.
 - Fan-in: multiple steps converge into one `next`; engine waits for all upstream to complete.
 - The validator rejects deeply-nested parallel sub-graphs. The shape stays flat enough to read on the canvas. Specifically: a fan-out target may not itself be a fan-out source on the same canvas level (architect to define "level" precisely; rule of thumb is "no more than one nesting depth").
+- **Failure aggregation — fail-fast (V1).** If any branch of a fan-out fails (the branch step emits `step.failed` per §8.2), the entire fan-out fails immediately:
+  - Sibling branches still in flight are best-effort cancelled (per §7.3 stop semantics — external calls that have already fired are not reversible).
+  - The fan-in step transitions to `failed` with reason `parallel_branch_failed`; the event payload includes `failed_branch_step_id` and `cancelled_sibling_step_ids[]`.
+  - The workflow follows the fan-in step's `onFailure` routing if defined; otherwise it stalls (consistent with the §5.2 isCritical-rejection stall pattern).
+  - V2 may add per-step configurability for best-effort completion or partial-success aggregation — explicitly out of scope for V1.
 
 ### 4.4 Loops: only Approval-on-reject (brief §5.3)
 
