@@ -404,6 +404,9 @@ The only V1 path for re-resolving an approver pool after a team-membership chang
 - **Below-quorum behaviour.** If the refreshed pool is still smaller than `quorum`, the gate remains stalled — the API still returns `refreshed: true` but the Approval card continues to show the under-quorum error. The operator's options remain (a) more team members, then re-call refresh; (b) Stop the run.
 - **Concurrency guard.** `UPDATE workflow_step_gates SET approver_pool_snapshot = $1 WHERE id = $2 AND resolved_at IS NULL` — first-commit-wins; 0 rows updated → race lost, returns `200 { refreshed: false, reason: 'gate_already_resolved' }`.
 - **No effect on existing reviews.** Decisions already recorded against the prior pool stay valid. The refreshed pool only governs subsequent decisions on the same gate.
+- **Ask gate vs Approval gate behaviour on pool refresh** (clarifies the asymmetry between the two gate kinds, both of which use this endpoint via `workflow_step_gates.approver_pool_snapshot`):
+  - **Approval gates:** decisions already recorded against the prior pool remain valid (per the line above). New decisions use the updated snapshot. A user who was in the prior pool but is removed by the refresh CAN'T submit a new decision; an approve / reject they already submitted stays counted.
+  - **Ask gates:** submission eligibility is evaluated against the snapshot current at the time the submitter POSTs. If `/refresh-pool` ran between gate-open and submit, a user who was in the prior snapshot but is NOT in the updated snapshot is ineligible — the submit returns `403 { error: 'not_in_submitter_pool' }` and the form card on their client shows an error toast. Ask is single-submit (§4.8); there is no "decisions already recorded" carry-over to preserve.
 
 ### 5.2 `isCritical` routing (brief §8.5)
 
@@ -414,7 +417,7 @@ When the engine encounters a step (Agent or Action) with `is_critical: true`:
    - `quorum = 1`.
    - The Approval card content shows the upcoming step's parameters and a confidence chip (§6).
 2. The synthesised gate is recorded in `workflow_step_reviews` with a flag indicating it was `isCritical`-induced (so audit can distinguish author-placed Approvals from synthesised ones).
-3. On approval, the original step executes. On rejection, the workflow stalls (no `onReject` route — author didn't define one for an implicit gate). The operator's only recovery path is clicking Stop in the task header (§7.3); the running run cannot be patched onto a new template version. Spec-time decision #2 default applies (stall-and-notify until either Stop or approval).
+3. On approval, the original step executes. On rejection, the workflow stalls (no `onReject` route — author didn't define one for an implicit gate). The operator's only recovery path is clicking Stop in the task header (§7.3); the running run cannot be patched onto a new template version. Spec-time decision #2 default applies (stall-and-notify until either Stop or approval). **V2 recovery path (out of scope for V1):** allow a privileged operator (org admin / sub-account admin) to manually resume a run stalled on an `isCritical`-induced rejection, with an override reason captured and written to the audit trail. This addresses the "user accidentally rejects → entire run dead" failure mode without compromising the V1 safety stance (rejection is still terminal by default).
 4. If the author has explicitly placed an Approval before a critical step, the engine does NOT double-gate (one approval is sufficient). The validator warns the author at publish: "Step N is marked critical; the explicit Approval before it is redundant. Continue?"
 
 ### 5.3 State machine — stall-and-notify on Approval / Ask (spec-time decision #2)
@@ -568,10 +571,11 @@ Both buttons are visible to anyone with edit-access to the task (per §14 permis
 
 ### 7.4 Engine-level mechanics
 
-- Cost is tracked per-run in an existing cost-reservation table (architect verifies; brief §1 mentions cost reservation as already-built infrastructure).
-- On every step completion, the engine sums the run's accumulated cost; if `>= cost_ceiling_cents`, queue the Pause card and stop dispatching the next step.
+- **Cost source of truth.** Cost is tracked per-run by summing persisted entries in the run's cost-reservation ledger (architect verifies the exact table name; brief §1 mentions cost reservation as already-built infrastructure). The accumulator is the **sum of persisted ledger rows**, not an in-memory aggregate. The sum is evaluated after each step completion. If a cost-write fails, the step that produced the cost MUST be considered failed — the engine MUST NOT proceed treating the cost as zero. This ensures `effective_cost_ceiling_cents` enforcement is transactionally consistent with step completion.
+- On every step completion, the engine sums the run's accumulated cost from the ledger; if `>= effective_cost_ceiling_cents`, queue the Pause card and stop dispatching the next step.
 - Wall-clock is checked on every step completion plus a periodic (e.g., 30-second) heartbeat job.
 - Pause is **between-step**, not mid-step. A step in flight finishes (or errors out via its retry policy) before the cap takes effect. This avoids inconsistent partial state on irreversible side effects.
+- **Cap enforcement is best-effort for long-running steps.** A step already in flight when the cap is reached will run to completion (or fail via its retry policy) before the cap takes effect. A run where a single step exceeds the cap will not be paused mid-step; the overage is visible in the Pause card when the step eventually completes. Authors should set caps with their longest expected step in mind. V2 may add heartbeat checkpoints for in-step interruption — explicitly out of scope for V1.
 
 ### 7.5 Pause / Stop state machine and API contract
 
@@ -630,6 +634,13 @@ The pause card's `Continue for another 30 minutes / $2.50` button calls `/run/re
 - Backpressure: if the engine emits 50+ events in a burst (rare, but possible during a fan-out), the client batches the render to keep the frame rate smooth (architect picks specific batching window; rule of thumb: 60 fps cap on render).
 
 **Persisted event log.** Per-task events are persisted to the existing `agent_execution_events` table (the primitive named in `docs/spec-context.md` `accepted_primitives` — `agentExecutionEventService` + `agentExecutionEventServicePure`). The existing primitive allocates a monotonic sequence per agent run; for workflow-fired tasks with multiple agent runs that ordering is too narrow. The spec extends the table with one new column — `task_id uuid NULL` (FK → `tasks.id`) — captured in the §3.1 schema deltas — and a new monotonic sequence allocated **per task** alongside the existing per-run sequence. The per-task sequence is the source of truth for `event_id` in §8.2 (replay and ordering); the existing per-run sequence is preserved for any consumer that already depends on it.
+
+**`task_sequence` allocation invariant.** Per-task allocation MUST be atomic and gap-free per `task_id`. Concretely:
+
+- Implementation MUST use a single-row counter with `FOR UPDATE` locking, or a database sequence scoped per `task_id`. The existing per-run claim pattern in `agentExecutionEventService` is the reference implementation; the per-task variant extends the same locking discipline to the per-task counter row.
+- Allocation and the event row INSERT MUST happen in the same transaction. If the INSERT fails after the sequence has been allocated, the transaction rolls back and the sequence number is reused on the retry (no gap).
+- If a non-retryable write failure leaves a gap that cannot be filled, the engine MUST surface this as a fatal error on the run (the run transitions to `failed` with reason `event_log_corrupted`) — replay correctness depends on the contract holding.
+- Parallel fan-out workers all contend on the same per-task counter; throughput is bounded by the lock acquisition rate. If this becomes a hotspot in production, the spec amendment lands a sharded counter (out of scope for V1).
 
 Replay contract on reconnect:
 
@@ -904,6 +915,7 @@ When the orchestrator drafts a workflow from chat intent and the operator clicks
 2. The "Open in Studio" link is `/admin/workflows/new?fromDraft=<draftId>`.
 3. Studio reads the draft, hydrates the canvas with the steps the orchestrator drafted. On **publish** (creating v1 of a new template) the draft's `consumed_at` is set and the draft is no longer surfaced from the chat card. On **explicit discard** (operator clicks "Discard" on the orchestrator's chat draft card per §13.2) the draft's `consumed_at` is also set, with the chat conversation returning to its prior state for further intent-shaping. Closing the Studio tab without publishing or explicitly discarding leaves `consumed_at` null — the draft persists for re-entry from the same chat session and is reaped after 7 days (§3.3, §16.3 item 35a).
 4. **No interstitial preview screen** — the canvas itself is the preview.
+5. **Discoverability — chat session only (V1).** Drafts are discoverable only via the originating chat session's "Open in Studio" card. There is no separate "Recent drafts" surface in Studio in V1. Rationale: matches the brief §3.0 strategic test ("describe intent, don't build systems") and the `frontend-design-principles.md` "default to hidden" rule. A user who closes the Studio tab and navigates away from the originating chat session must return to that conversation to re-enter the draft. If discoverability becomes a real pain point in production, a Studio-side "Continue from draft" surface lands in a follow-up spec.
 
 Without this, "describe intent → see plan → tweak in Studio" becomes "describe intent → see plan → recreate manually" — fails the §3.0 strategic test.
 
@@ -1023,8 +1035,8 @@ When an Ask step queues and the workflow has `autoFillFrom: 'last_completed_run'
 
 1. Server queries the most recent successful run of this template-version.
 2. If found, retrieves the values submitted for this Ask step.
-3. Pre-fills matching field keys; leaves new fields blank.
-4. **No warning** if the schema has changed (added/removed/renamed fields). Pre-fill matching keys silently; author's responsibility to know the schema changed.
+3. Pre-fills field keys where **both the key and the type match** the current schema; leaves new fields blank. A key that matches but whose type has changed (e.g., `text → number`, `select → multi-select`) is treated as a new field — no pre-fill, no type-coercion attempt. Prevents silent type corruption when a workflow author renames a field's type.
+4. **No warning** if the schema has changed (added/removed/renamed fields, or a key whose type changed). Pre-fill behaviour per step 3 is silent; author's responsibility to know the schema changed.
 5. Submitter can edit any pre-filled value before submitting.
 
 If no prior successful run exists (first run), no pre-fill — fields start blank.
