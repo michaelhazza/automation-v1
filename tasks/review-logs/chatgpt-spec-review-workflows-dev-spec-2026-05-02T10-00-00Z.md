@@ -6,6 +6,7 @@
 - PR: #252 — https://github.com/michaelhazza/automation-v1/pull/252
 - Mode: manual
 - Started: 2026-05-02T10:00:00Z
+- **Verdict:** APPROVED (4 rounds; 15 applied / 30 rejected / 10 deferred)
 
 ---
 
@@ -213,6 +214,63 @@ F25. Versioning for step schemas — schema_version per step type for long-runni
 ### Deferred to backlog (this round, no user surfacing per memory)
 
 - F42: visibility timeout / stuck execution recovery — engine/worker primitive (existing `createWorker()` / `withBackoff`) — architect-time
+
+---
+
+## Final Summary
+
+- **Verdict:** APPROVED — spec is implementation-ready. Top-level execution model declared (§4.0); all per-endpoint idempotency posture grounded; no unresolved forward references; all directional product calls landed.
+- **Rounds:** 4 (round 4 was diminishing returns per ChatGPT's own closing assessment: "no more meaningful design gaps").
+- **Auto-accepted (technical):** 6 applied | 30 rejected | 3 deferred
+- **User-decided:** 9 applied | 0 rejected | 7 deferred
+- **Total findings:** 55 (F1–F51 + M1–M4)
+- **Index write failures:** 0 (clean)
+
+### Cumulative Applied (15)
+
+- §3.1 + §8.1 — `task_sequence` per-task event sequence with atomic + gap-free allocation invariant; failed write surfaces `event_log_corrupted` (F1)
+- §5.1.2 — Ask vs Approval pool-refresh asymmetry (F2)
+- §7.4 — cost source of truth = ledger sum; failed cost-write fails the step (F3)
+- §7.4 — cap enforcement best-effort for long-running steps (F4, Option A)
+- §5.2 — V2 isCritical recovery path note (F6)
+- §10.6 — V1 chat-session-only draft discoverability (F7, Option A)
+- §8.1 — event retention invariant + client gap-detection fallback (F8)
+- §11.5 — type-match guard on auto-fill (F9)
+- §5.1.1 — race resolution: 409 step_already_resolved when CAS fails AND step is no longer review_required (F12)
+- §4.3 — fan-out failure aggregation = fail-fast (V1) with parallel_branch_failed (F15, Option A)
+- §8.1 — explicit client ordering invariant (events applied in task_sequence order; buffer gaps; replay if gap doesn't fill) (F18)
+- §10.5 — publish API contract returns version_id; new runs reference it at dispatch time and pin for lifetime (F20)
+- §4.0 (NEW) — Execution model: at-least-once dispatch with idempotent handlers; state-based CAS predicates as primary mechanism (F27)
+- §7.5 — run completion invariant: running → succeeded requires all steps in terminal status AND no pending/queued (F29)
+- §7.5 — retry/resume separation: resume continues from next pending step; does NOT re-execute completed; step retries independent of resume (F34)
+
+### Deferred to tasks/todo.md § Spec Review deferred items / workflows-dev-spec
+
+- [user] M1: define max approver pool size — UI guard + perf cap, architect-time
+- [user] M2: define max Ask fields per step — schema validator rule + UX cap, architect-time
+- [user] M3: define max files per task before grouping mandatory — UI threshold, architect-time
+- [user] M4: timeout for /run/resume race window — confirm against §19 open items, architect-time
+- [user] F21: max step count per run runtime quota (e.g. 10k) — runtime safety guard, architect-time
+- [user] F23: fan-in result ordering by `task_sequence` of producing event — depends on engine fan-in semantics, architect-time
+- [user] F24: permission drift policy — explicit one-line statement of "snapshot for gates, live for controls" pattern in §14, architect-time
+- [auto] F38: max concurrent steps per run / per org — same family as F21, architect-time
+- [auto] F40: max tasks per run / max steps per task / max runtime duration upper bounds — same family as F21+M1-M3, architect-time
+- [auto] F42: visibility timeout / stuck execution recovery — engine/worker concern using existing `createWorker()` primitive, architect-time
+
+### Doc sync sweep (per `docs/doc-sync.md`)
+
+- KNOWLEDGE.md updated: yes (3 entries — engine execution model, gate-snapshot pattern, race-vs-external-transition gotcha)
+- architecture.md updated: n/a — spec is upstream of the architecture changes; new tables (`workflow_drafts`, `workflow_step_gates`) and the per-task event-sequence extension will surface in `architecture.md` when the implementation lands
+- capabilities.md updated: n/a — workflow capability already exists; no add/remove/rename in this session
+- integration-reference.md updated: n/a — no integration changes
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no convention changes; no `[missing-doc]` reasons surfaced
+- spec-context.md updated: n/a — spec uses existing primitives (`agent_execution_events`, `agentExecutionEventService`, `withBackoff`, `createWorker()`); no framing assumption changed
+- frontend-design-principles.md updated: n/a — F7 referenced this doc to justify Option A but did not propose a new principle
+
+### PR
+
+PR: #252 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/252
+
 
 
 

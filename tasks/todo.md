@@ -337,6 +337,26 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
   - [ ] [user] **Idempotency invariant for adversarial-reviewer** — Round 2 F1: add an explicit invariant guaranteeing that a second run of `adversarial-reviewer` against an unchanged diff produces identical findings (or a documented "no-op, already reviewed" log). Implementation cost too high for Phase 1 manual non-blocking — would require a finding-fingerprint scheme, parsing the prior log, comparing fingerprints, and skipping or no-op'ing on match. Defer until auto-invocation lands (re-running on every push amplifies the noise risk). **Home:** belongs in the cross-agent log-schema work above — idempotency is naturally expressed via the `findings[]` fingerprint field if the canonical schema is designed first.
   - [ ] [user] **Log header schema fields (`gitHeadSha`, `filesChanged`)** — Round 2 F4: ChatGPT proposed adding `gitHeadSha` and `filesChanged` to every review log's Session Info header so logs are self-contained snapshots of what was reviewed. Deferred for two reasons: (1) asymmetry — none of the existing review-log producers (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `spec-reviewer`, `audit-runner`, `chatgpt-pr-review`, `chatgpt-spec-review`) emit these fields today, so adding them only to `adversarial-reviewer` creates the schema drift the F5 standardisation is meant to prevent; (2) Mission Control's parser has no read-side consumer for either field — adding them to the producer with no reader is dead weight until the dashboard surfaces them. Bundle with the F5 standardisation work so the header schema is designed once across all seven agents.
 
+### workflows-dev-spec (2026-05-02)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-workflows-dev-spec-2026-05-02T10-00-00Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**PR:** #252 — https://github.com/michaelhazza/automation-v1/pull/252
+**Branch:** `claude/workflows-brainstorm-LSdMm`
+
+All ten items below are **architect-time runtime quotas / picks** — none are spec-blocking. They surface during the `architect` decomposition pass as concrete numbers / endpoints to pin in the implementation chunks.
+
+- [ ] [user] **M1 — Define max approver pool size.** UI guard (picker shows up to N users) + query-time performance cap. Architect to pick at decomposition.
+- [ ] [user] **M2 — Define max Ask fields per step.** Validator rule + UX field-count limit. Architect to pick at decomposition.
+- [ ] [user] **M3 — Define max files per task before grouping becomes mandatory.** UI threshold based on strip overflow profiling. Architect to pick after first real task with many files.
+- [ ] [user] **M4 — Timeout for /run/resume race window.** Confirm against §19 open extension-cap parameters. Architect-time confirmation.
+- [ ] [user] **F21 — Max step count per run runtime quota (e.g. 10k).** §4.4 prevents structural infinite loops at validation; this guards against Approval-on-reject runtime cycles. Simple `max_steps_per_run` quota; architect to pick value.
+- [ ] [user] **F23 — Fan-in result ordering by `task_sequence` of producing event.** §4.3 fan-in doesn't address result aggregation order; the right answer is "by `task_sequence` of the producing event" so downstream LLM inputs are deterministic. Architect to confirm during decomposition; depends on existing engine fan-in semantics.
+- [ ] [user] **F24 — Permission drift policy (snapshot for gates, live for controls).** Spec already has the consistent split (snapshot for `workflow_step_gates.approver_pool_snapshot` per §5.1; live for Pause/Stop buttons per §7.5). Worth a one-line statement in §14 making this split explicit. Not a blocking gap — architect-time clarification.
+- [ ] [auto] **F38 — Max concurrent steps per run / per org runtime quota.** Same family as F21 — runtime safety rail; bundle the picks.
+- [ ] [auto] **F40 — Hard upper bounds (max tasks per run, max steps per task, max runtime duration).** Same family as F21 + M1–M3 — architect-time quotas.
+- [ ] [auto] **F42 — Visibility timeout / stuck execution recovery.** Engine/worker-level concern; existing `createWorker()` + `withBackoff` primitives handle worker death. Architect to confirm the recovery semantics are wired correctly during decomposition.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
