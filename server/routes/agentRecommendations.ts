@@ -77,15 +77,19 @@ router.post(
       return;
     }
 
+    // Destructure service fields needed for socket emission but not the HTTP response
+    const { scope_type, scope_id, ...httpResult } = result;
+
     // Emit socket event with full payload per spec §6.5
     emitOrgUpdate(orgId, 'dashboard.recommendations.changed', {
       recommendation_id: recId,
-      scope_type: result.scope_type,
-      scope_id: result.scope_id,
+      scope_type,
+      scope_id,
       change: 'acknowledged',
     });
 
-    res.json(result);
+    // HTTP response: only spec-defined fields { success, alreadyAcknowledged }
+    res.json(httpResult);
   }),
 );
 

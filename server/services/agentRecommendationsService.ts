@@ -548,6 +548,7 @@ export async function listRecommendations(
 
   if (clampedLimit === 0) {
     // Short-circuit to COUNT(*) only
+    // orgId is server-derived from the authenticated session — safe for sql.raw interpolation
     const countRows = await db.execute<{ cnt: string }>(sql.raw(`
       SELECT count(*)::text AS cnt
       FROM agent_recommendations ar

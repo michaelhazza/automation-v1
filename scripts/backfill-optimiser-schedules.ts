@@ -37,12 +37,13 @@ async function main(): Promise<void> {
 
   console.log(`[backfill-optimiser-schedules] Starting${DRY_RUN ? ' (DRY RUN)' : ''}...`);
 
-  // Fetch all opted-in sub-accounts
+  // Fetch all opted-in sub-accounts (include settings for timezone)
   const eligibleSubaccounts = await db
     .select({
       id: subaccounts.id,
       organisationId: subaccounts.organisationId,
       name: subaccounts.name,
+      settings: subaccounts.settings,
     })
     .from(subaccounts)
     .where(
@@ -89,6 +90,10 @@ async function main(): Promise<void> {
     }
 
     const scheduleCron = computeOptimiserCron(sa.id);
+    const saSettings = sa.settings as Record<string, unknown> | null | undefined;
+    const scheduleTimezone = (typeof saSettings?.['timezone'] === 'string' && saSettings['timezone'])
+      ? saSettings['timezone']
+      : 'UTC';
 
     try {
       let linkId: string;
@@ -104,7 +109,7 @@ async function main(): Promise<void> {
             isActive: true,
             scheduleEnabled: true,
             scheduleCron,
-            scheduleTimezone: 'UTC',
+            scheduleTimezone,
           })
           .onConflictDoNothing()
           .returning();
@@ -144,7 +149,7 @@ async function main(): Promise<void> {
             subaccountId: sa.id,
             organisationId: sa.organisationId,
           },
-          'UTC',
+          scheduleTimezone,
           singletonKey,
         );
 

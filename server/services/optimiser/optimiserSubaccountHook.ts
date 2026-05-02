@@ -11,7 +11,7 @@
  */
 
 import { db } from '../../db/index.js';
-import { agents, subaccountAgents } from '../../db/schema/index.js';
+import { agents, subaccountAgents, subaccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { agentScheduleService } from '../agentScheduleService.js';
@@ -74,6 +74,16 @@ export async function registerOptimiserForSubaccount(input: {
     const agentId = optimiserAgent.id;
     const scheduleCron = computeOptimiserCron(subaccountId);
 
+    // Read the subaccount's timezone from its settings jsonb; fall back to UTC if absent
+    const [subaccountRow] = await db
+      .select({ settings: subaccounts.settings })
+      .from(subaccounts)
+      .where(eq(subaccounts.id, subaccountId));
+    const subaccountSettings = subaccountRow?.settings as Record<string, unknown> | null | undefined;
+    const scheduleTimezone = (typeof subaccountSettings?.['timezone'] === 'string' && subaccountSettings['timezone'])
+      ? subaccountSettings['timezone']
+      : 'UTC';
+
     // Idempotent insert: ON CONFLICT DO NOTHING
     const [linkRow] = await db
       .insert(subaccountAgents)
@@ -84,7 +94,7 @@ export async function registerOptimiserForSubaccount(input: {
         isActive: true,
         scheduleEnabled: true,
         scheduleCron,
-        scheduleTimezone: 'UTC',
+        scheduleTimezone,
       })
       .onConflictDoNothing()
       .returning();
@@ -127,7 +137,7 @@ export async function registerOptimiserForSubaccount(input: {
         subaccountId,
         organisationId,
       },
-      'UTC',
+      scheduleTimezone,
       singletonKey,
     );
 
@@ -137,6 +147,7 @@ export async function registerOptimiserForSubaccount(input: {
       agentId,
       linkId,
       scheduleCron,
+      scheduleTimezone,
       singletonKey,
     });
   } catch (err) {
