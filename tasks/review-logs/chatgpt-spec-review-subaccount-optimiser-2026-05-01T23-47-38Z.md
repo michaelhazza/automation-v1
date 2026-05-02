@@ -444,5 +444,95 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0). The `updated_
 
 Round 3 complete. Spec grew from 783 → 796 lines (+13 net). One user-facing apply, three user-facing defers, six technical auto-applies (5 ChatGPT + 1 integrity).
 
-Updated spec on the PR — paste it into ChatGPT for Round 4 if you want to confirm closure, or say 'done' to finalise. Note: ChatGPT's Round 3 verdict was "Ship it. Monitor. Iterate." with the closing observation that the only remaining step is "convert these into a pre-build checklist" — i.e. an implementation prep task, not another review round. A finalisation pass is the natural next step.
+---
+
+## Round 4 — 2026-05-02T00-48-00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary: You're genuinely at the end. What's left is ultra-edge correctness + long-term survivability, not build blockers.
+
+Final "last 1%" gaps
+
+1. Cross-agent dedupe collision (real but rare)
+Multiple agents writing to (scope, category, dedupe_key); unique index on (scope_type, scope_id, category, dedupe_key). Two different agents can unintentionally overwrite each other's findings, especially if future agents reuse categories like agent.over_budget.
+Minimal fix: enforce hard rule category = "<agent_namespace>.<area>.<finding>" (e.g. optimiser.agent.over_budget vs portfolio.agent.over_budget). Already hinted at namespacing but needs to be hard rule, not suggestion.
+
+2. Evidence canonicalisation incomplete — array ordering
+You handled integers and floats (4dp). Missing: array ordering. sample_escalation_ids: ["a","b","c"] vs ["b","a","c"] → same meaning → different hash → triggers updated_in_place. Fix: sort arrays where order is non-semantic before hashing. Especially sample_escalation_ids and any future list-type evidence.
+
+3. Eviction fairness still has one corner case
+Alphabetical category bias still dominates before freshness. Priority: severity → category → dedupe_key → updated_at. Example: agent.* will always beat memory.* even if memory rec is more important operationally.
+Better ordering: severity → updated_at → category → dedupe_key. Removes structural bias, keeps determinism.
+
+4. Missing "run-level atomicity" for outputs
+Each output.recommend runs independently; cap + eviction applied per call. Edge case: run generates 12 recs, order of calls influences final surface. Fix (lightweight): add explicit invariant "A single agent run must produce a deterministic final set of recommendations regardless of execution interleaving." Currently implied, not enforced.
+
+5. Cooldown + severity escalation loophole
+Bypass if severity increases. Edge case: warn → dismiss → critical → bypass → drops to warn → cooldown blocks → critical again → bypass again. Flip-flop spam.
+Fix: track last_escalation_bypass_at, allow bypass only once per cooldown window. Not required for v1, but this will show up in real data.
+
+6. "See all N" truncation honesty
+Correctly notes limit=100 cap. But /suggestions doesn't exist yet → user hits dead end: "I know there are more but I can't access them".
+Fix: change copy to "Showing top 100 of N", remove "see full list" language until /suggestions ships.
+
+Final verdict: "Production-safe, scale-aware, future-extensible." 2 correctness edge cases, 2 fairness refinements, 2 UX/operational polish items. None block build.
+```
+
+Inferred verdict: APPROVED ("Production-safe, scale-aware, future-extensible. None block build.").
+
+### Recommendations and Decisions
+
+| ID | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|----|---------|--------|----------------|----------------|----------|-----------|
+| R4-F1 | Category namespace: promote from convention to hard rule (`<agent_namespace>.<area>.<finding>`) | technical | apply | auto (apply) | medium | Prevents unintentional cross-agent dedupe collisions when future agents reuse short category names. Also defuses R4-F3's alphabetical-bias concern within a single agent's namespace. |
+| R4-F2 | Evidence canonicalisation: sort non-semantic arrays before hashing | technical | apply | auto (apply) | medium | `sample_escalation_ids` order is non-semantic; permutation of the same IDs produces a different hash and triggers phantom `updated_in_place`. RFC 8785 doesn't sort arrays. |
+| R4-F3 | Eviction priority tuple reorder: severity → updated_at → category → dedupe_key | user-facing | defer | _pending user_ | low | With R4-F1 applying the namespace hard rule, category-alphabetical bias is scoped within one agent's namespace. Reordering would sacrifice tuple stability (same rec evicted across runs) for fairness that's no longer a real concern with proper namespacing. |
+| R4-F4 | Add explicit run-level atomicity invariant in the spec | technical | apply | auto (apply) | low | Currently implied by the pre-sort recommendation. A one-paragraph spec invariant is cheap and closes the "implied not enforced" gap. |
+| R4-F5 | Cooldown bypass loophole: allow bypass only once per cooldown window | user-facing | defer | _pending user_ | low | ChatGPT says "Not required for v1". Requires `last_escalation_bypass_at` column. Scenario (multi-oscillation within one window) won't appear in pre-production telemetry. Revisit with production data. |
+| R4-F6 | Change "Showing 100 of N — see /suggestions" copy to "Showing top 100 of N" until /suggestions ships | user-facing | apply | _pending user_ | low | /suggestions is a v1.1 deferred item. Current copy implies a destination that doesn't exist. Simple wording change. |
+
+**Summary counts (Round 4):**
+- Auto-applied (technical): 3 ChatGPT (R4-F1, R4-F2, R4-F4) + 1 integrity (singletonKey assertion softened to requirement) = 4 applied, 0 rejected, 0 deferred
+- User-decided: 1 applied (R4-F6), 0 rejected, 2 deferred (R4-F3, R4-F5) — user replied "as recommended"
+
+### Decisions and Resolutions (post user reply)
+
+| ID | Final Decision |
+|----|----------------|
+| R4-F1 | auto (apply) — category namespace promoted to hard rule (`<agent_namespace>.<area>.<finding>`); §2 namespace note + §6.2 naming rule + §6.5 example row updated |
+| R4-F2 | auto (apply) — array sorting added to canonicalisation: non-semantic arrays sorted ascending before hash input; `sample_escalation_ids` called out explicitly |
+| R4-F3 | defer (user: as recommended) — R4-F1 namespace rule scopes bias within one agent's namespace; within-namespace alphabetical ordering is stable/arbitrary; routed to tasks/todo.md |
+| R4-F4 | auto (apply) — "Run-level atomicity invariant" paragraph added to §6.2 with three-property guarantee (pre-sort + sequential calls + singletonKey scheduling) |
+| R4-F5 | defer (user: as recommended) — bypass-once-per-window guard; scenario requires multi-oscillation within one cooldown window (implausible pre-production); routed to tasks/todo.md |
+| R4-F6 | apply (user: as recommended) — "Showing top 100 of N" copy replacing dead-end "/suggestions" reference |
+
+### Applied edits
+
+- [auto] §2 — "Namespace note" paragraph clarifying that taxonomy table uses short `area.finding` form; full stored values use `optimiser.<area>.<finding>`.
+- [auto] §6.2 — Category naming rewritten from "convention only" to "hard rule: three segments `<agent_namespace>.<area>.<finding>`"; extended with examples across multiple agents.
+- [auto] §6.5 — Example row `"category"` updated from `"agent.over_budget"` to `"optimiser.agent.over_budget"`.
+- [auto] §6.2 — Array sorting added to the Numeric canonicalisation paragraph: RFC 8785 does NOT sort arrays; non-semantic arrays must be sorted ascending before hashing; `sample_escalation_ids` called out explicitly; future list-type evidence fields must document order semantics.
+- [auto] §6.2 — NEW "Run-level atomicity invariant" paragraph (three-property guarantee: pre-sort, sequential calls, singletonKey scheduling). `singletonKey` phrased as a Phase 2 implementation requirement, not a current assertion.
+- [user] §7 — Expanded-mode truncation copy changed from "Showing 100 of N — see /suggestions for the full list" to "Showing top 100 of N" (no dead-end link to deferred /suggestions page).
+- [user/auto] Deferred Items — appended R4-F3 (eviction reorder) and R4-F5 (bypass-once guard) with reconsider-per-trigger reasons.
+- [auto] §6.2 (integrity I1) — `singletonKey` claim in atomicity invariant softened from present-tense assertion to future-tense implementation requirement on `agentScheduleService`.
+- [user] `tasks/todo.md` — R4-F3 and R4-F5 appended to subaccount-optimiser subheading (both `[user]`-tagged).
+
+### Integrity check
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0). The "Run-level atomicity invariant" asserted `singletonKey` as a current property of `agentScheduleService` — this is a new requirement that Phase 2 must implement, not an existing codebase fact. Rewritten as a "MUST" requirement with "(Phase 2 implementation requirement)" callout. Post-integrity sanity: `optimiser.agent.over_budget` in §6.5 example row is the only full-slug occurrence; all other category references use short form with §2 namespace note as the bridge — consistent.
+
+### Top themes
+
+- **R4-F1 is a spec-architectural fix, not just a naming cleanup.** Promoting category namespace to a hard rule closes the unintentional cross-agent dedupe collision risk that would become real as more agents adopt the generic primitive. It also renders R4-F3's alphabetical-bias concern moot within a single agent's namespace. One fix preempts two problems.
+- **R4-F2 completes the evidence-hash canonicalisation trilogy.** R3 added integer/float normalisation; R4 adds array sorting. RFC 8785 handles string canonicalisation. Together they cover all JSON types. The spec's canonicalisation rules are now fully specified: integers bare, floats to 4dp, strings via RFC 8785, arrays sorted ascending where order is non-semantic.
+- **R4-F4 (atomicity invariant) converts an implied assumption into a verifiable spec property.** The pre-sort was already recommended; singletonKey scheduling wasn't stated anywhere. Surfacing both as an explicit three-property invariant gives the build session something testable: "does the schedule registration prevent concurrent runs for the same subaccount?" is now a Phase 2 implementation requirement, not a gap to rediscover.
+
+### Round 4 status
+
+Round 4 complete. Spec grew from 796 → 813 lines (+17). One user-facing apply (copy fix), two user-facing defers, four technical auto-applies (3 ChatGPT + 1 integrity). ChatGPT's verdict: "Production-safe, scale-aware, future-extensible." This is the spec's 4th review cycle; the 5th iteration cap has one remaining cycle. Finalisation is the natural next step unless a substantive concern remains.
+
+Updated spec on the PR. Say 'done' to finalise, or paste a Round 5 response if you want one final pass.
 
