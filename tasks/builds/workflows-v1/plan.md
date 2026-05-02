@@ -15,10 +15,11 @@ _Spec effort estimate: ~12–16 weeks calendar (~59 engineer-days, parallelisabl
 2. [Model-collapse check](#model-collapse-check)
 3. [Primitives-reuse search results](#primitives-reuse-search-results)
 4. [Pre-existing violations to fix in Chunk 1](#pre-existing-violations-to-fix-in-chunk-1)
-5. [Open questions blocking finalisation](#open-questions-blocking-finalisation)
+5. [Open questions resolved at plan-gate review](#open-questions-resolved-at-plan-gate-review)
 6. [Architecture notes](#architecture-notes)
 7. [Chunk overview](#chunk-overview)
 8. [Per-chunk detail](#per-chunk-detail)
+   - [Chunk 0 — Vertical-slice spike (optional pre-build validation)](#chunk-0--vertical-slice-spike-optional-pre-build-validation)
    - [Chunk 1 — Schema migration + RLS + pre-existing violation fix](#chunk-1--schema-migration--rls--pre-existing-violation-fix)
    - [Chunk 2 — Engine validator (four A's, branching, loops, nesting, isCritical)](#chunk-2--engine-validator)
    - [Chunk 3 — Per-task event log (sequence allocation + replay contract)](#chunk-3--per-task-event-log)
@@ -32,7 +33,8 @@ _Spec effort estimate: ~12–16 weeks calendar (~59 engineer-days, parallelisabl
    - [Chunk 11 — Open task view UI (three-pane layout, Now/Plan/Files tabs, header)](#chunk-11--open-task-view-ui)
    - [Chunk 12 — Ask form runtime (form card primitive, submit/skip, autofill)](#chunk-12--ask-form-runtime)
    - [Chunk 13 — Files tab + diff renderer + per-hunk revert](#chunk-13--files-tab--diff-renderer)
-   - [Chunk 14 — Studio canvas, four A's inspectors, publish flow, draft hydration](#chunk-14--studio-canvas--inspectors)
+   - [Chunk 14a — Studio canvas + bottom bar + publish flow](#chunk-14a--studio-canvas--publish)
+   - [Chunk 14b — Four A's inspectors + Studio chat panel + draft hydration](#chunk-14b--inspectors--draft-hydration)
    - [Chunk 15 — Orchestrator changes (suggest-don't-decide, draft creation, milestone events, workflow.run.start skill)](#chunk-15--orchestrator-changes)
    - [Chunk 16 — Naming cleanup (Brief → Task) + workflow_drafts cleanup job](#chunk-16--naming-cleanup--cleanup-job)
 9. [Risks and mitigations](#risks-and-mitigations)
@@ -78,6 +80,42 @@ These invariants are non-negotiable. Every chunk in this plan respects them; CI 
 - **Gate eligibility is snapshotted at gate-open.** `workflow_step_gates.approver_pool_snapshot` is the source of truth for membership checks; never re-resolved from `approverGroup`/`submitterGroup` on the fly. The only V1 path to re-resolve is `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` (admin-only). (Spec §5.1, §5.1.2.)
 - **Single-decider idempotency on Approval.** UNIQUE `(gate_id, deciding_user_id)` on `workflow_step_reviews` makes double-clicks idempotent at user×gate granularity; 23505 → 200 idempotent-hit. The step transition uses `WHERE status = 'review_required'`; 0 rows → losing caller observes the winning decision. (Spec §5.1.1.)
 - **Ask is single-submit / first-wins.** No `(run_id, step_id, user_id)` constraint; the step's status (`awaiting_input → submitted | skipped`) is the gate. 0 rows updated → 409 `already_submitted` returning the winning submitter. (Spec §11.4.1.)
+
+**Hardening invariants added at plan-gate review (round 1 feedback):**
+
+- **Causality boundary rule (single-transaction step+gate+event triple).** All events that originate from the same logical step transition MUST be written in a single DB transaction in deterministic order. Concretely: step status update, gate creation/resolution, and the corresponding `agent_execution_events` rows for that transition are persisted together. Multi-source emitters (engine, gates, files, orchestrator) tag every event with `event_origin: 'engine' | 'gate' | 'user' | 'orchestrator'` and an optional `event_subsequence: integer` per logical bundle for deterministic intra-transaction ordering. Forbidden: appending a `step.completed` event in transaction T1 and the gate-resolution event in transaction T2 — they must commit together or roll back together. Rationale: prevents "logically earlier event with higher sequence number" race; makes replay deterministic; keeps debugging tractable. (Chunks 3, 4, 9.)
+- **`task_sequence` is the only ordering used for UI and replay at task scope.** `agent_execution_events.sequence_number` (per-run) is preserved for legacy consumers but MUST NOT be used by any new task-scoped UI surface, replay path, or event consumer. New consumers sort and resume strictly by `task_sequence`. (Chunks 3, 9, 11.)
+- **Run termination cascades to open gates.** Any `workflow_runs` transition into a terminal status (`succeeded`, `failed`, `cancelled`) MUST resolve every open `workflow_step_gates` row for that run in the same transaction with `resolution_reason = 'run_terminated'`. Without this, dangling gates produce stale notifications, ambiguous audit, and inconsistent UI. (Chunks 4, 7.)
+- **One gate per `(run_id, step_id)` regardless of synthesis path.** The engine MUST check for an existing open gate before attempting to create one, even when `is_critical` synthesis fires after an explicit author-placed Approval. The UNIQUE index is the safety net; the pre-check prevents the 23505 round-trip and clarifies the engine's intent. (Chunk 5.)
+- **Stall-job stale-fire guard.** Stall-notification jobs MUST verify both `gate.resolved_at IS NULL` AND `gate.created_at = expected_created_at` (encoded in the job payload at scheduling time) before sending. Prevents stale notifications after refresh-pool, gate re-open (future), or any case where a job survives cancellation. (Chunk 8.)
+- **Cost accumulator is the control-flow source of truth.** The cost ledger remains the audit source. A new `workflow_runs.cost_accumulator_cents integer NOT NULL DEFAULT 0` column, incremented transactionally with every cost-ledger row write, is the source of truth for cap checks. Engine reads accumulator (point-in-time consistent within the transaction), not `SUM(ledger)`. Removes async-write skew from the pause-trigger path. (Chunks 1, 7.)
+- **Naming pin (codebase wins): `awaiting_approval` is the step status, not `review_required`.** The spec uses both interchangeably in different sections. The codebase term is `awaiting_approval` (in `workflowStepRuns.status` and `assertValidTransition` calls). All new code uses `awaiting_approval`. Pure mappers / serializers MAY translate to `review_required` in API responses if the existing public contract demands it; the database, transition guards, and engine code never use `review_required`. Documented at the call-site in Chunk 5.
+
+**Round-2 hardening invariants (final pre-build review):**
+
+- **Transaction-boundary ownership lives in the engine layer, NEVER in downstream services.** The single transaction that wraps a step transition (step state UPDATE + gate INSERT/UPDATE + event INSERT) MUST be opened by `workflowEngineService` (or the route handler for user-driven transitions: `decideApproval`, `submitStepInput`, `pauseRun`, `resumeRun`, `stopRun`). Downstream services (`workflowStepGateService`, `agentExecutionEventService`, `workflowStepReviewService`) accept a `tx` parameter but MUST NOT open transactions of their own when called from the engine path. The bundle-append helper (`appendEventBundle`) accepts a `tx` and writes within it. Forbidden: a downstream service that wraps `db.transaction(...)` while called from another transactional path — that creates a nested SAVEPOINT and breaks the causality boundary's commit semantics. Code review enforces; future lint rule plausible.
+- **Every event row carries `event_schema_version: integer NOT NULL`.** V1 ships `event_schema_version = 1`. Every new event kind or payload-shape change increments the version (per-kind, not global). Replay logic reads the version and branches when the shape evolved. Without this, future schema evolutions either break replay silently or force a one-shot mass-rewrite. Cheap now, expensive later.
+- **Gate-resolution precedence is deterministic.** When two resolvers race (e.g., user clicks Approve at the same moment Stop fires), the precedence is: **user action > system timeout (stall-not-fail / cap pause / wall-clock) > run termination (`run_terminated` cascade)**. Implementation: every resolver UPDATEs with `WHERE id = $ AND resolved_at IS NULL` and inspects affected-row count. 0 rows → look up the existing `resolution_reason` and return idempotent-hit. The bulk cascade (`resolveOpenGatesForRun`) MUST NOT overwrite a resolution already set by a user action — its WHERE clause `resolved_at IS NULL` makes this automatic. No application-side priority logic; the optimistic CAS is the precedence.
+- **Resume correctness — re-check before dispatch, never blind-replay.** On `paused → running` transition, the engine MUST re-load the step graph and dispatch ONLY steps with `status NOT IN ('completed', 'failed', 'skipped', 'cancelled')`. No completed step is re-executed. Step writes MUST be idempotent: every step's terminal-status UPDATE uses an optimistic predicate (`WHERE status = 'running'`) so a duplicate dispatch from a retried scheduler tick is a no-op. Tested at chunk-time with a kill-during-resume scenario.
+- **Gap detection is non-fatal at consumer-side.** The server-side allocation gap (Chunk 3) — a non-retryable failure leaves a missing `task_sequence` — fails the run with `event_log_corrupted` (per spec §8.1). The consumer-side gap (Chunk 9) — a replay or live-stream consumer detects a missing sequence — does NOT fail the run. The engine emits a structured `task.degraded` event with the gap range, sets `workflow_runs.degradation_reason text`, and execution continues. UI surfaces a warning chip. Distinguishes "log is corrupt at the source" (fatal) from "consumer missed events under retention" (recoverable).
+- **Pre-step cost-cap check.** The engine MUST evaluate `cost_accumulator_cents + estimatedNextStepCostCents` against `effective_cost_ceiling_cents` BEFORE dispatching the next step. If the projected total would exceed the cap, pause `running → paused` BEFORE execution (not after). Estimation is heuristic, not exact: `params.estimatedCostCents` if author-provided on the step, else a per-step-type default (`agent_call: 50`, `action_call: 5`, `prompt: 10`, `invoke_automation: 25`, others: 0). One expensive step can no longer overshoot the cap by an unbounded amount. (Chunk 7.)
+- **UI reconciles against the authoritative event log, not WebSocket alone.** WebSocket is the low-latency push path; the REST replay endpoint is the authoritative source. UI MUST: (a) reload the snapshot on every reconnect via `GET /api/tasks/:taskId/event-stream/replay?fromSeq=N`, (b) periodically re-fetch the snapshot every 60 seconds while the page is visible (cheap — replay returns delta only), (c) treat a `task.degraded` event as a trigger to immediately replay rather than waiting for the periodic tick. Prevents ghost states from dropped frames or partial pushes. (Chunks 9, 11.)
+- **Structured-log shape pinned.** Every workflow-engine, gate, and event-service log line emits the standard envelope:
+  ```json
+  { "runId": "...", "taskId": "...", "stepId": "...", "gateId": "...",
+    "eventType": "...", "state": "...", "taskSequence": 123,
+    "eventSubsequence": 0, "eventOrigin": "engine", "organisationId": "..." }
+  ```
+  Plus `level`, `msg`, `timestamp` from the existing logger. Optional fields are omitted when not applicable; no `null` placeholders. Consistency over completeness — the existing logger wrapper enforces shape via a typed helper. (Cross-chunk; codified as a wrapper in Chunk 1's foundation.)
+
+**Round-3 hardening invariants (final pre-build review — micro-gaps):**
+
+- **Exactly-once step completion at the DB level.** A step transitions to `completed` exactly once per run. Every terminal-status UPDATE on `workflow_step_runs` uses an optimistic predicate `WHERE id = $1 AND status NOT IN ('completed', 'failed', 'skipped', 'cancelled')` and inspects affected-row count: 0 → no-op (idempotent retry), 1 → success. The `assertValidTransition` guard rejects any attempt to write FROM a terminal status (per existing rule). No new column needed; the discipline is enforced by the predicate + guard pair. Forbidden: any code path that writes `status = 'completed'` without the predicate. (Chunks 4, 7, plus every step-completion site.)
+- **External side-effect calls carry an idempotency key derived from `(run_id, step_id, task_sequence)`.** Every outbound HTTP / webhook / integration call (skill executors, action_call dispatch, email send, CRM write, payment) MUST set an idempotency header using the canonical key `${runId}:${stepId}:${taskSequence}`. The engine is idempotent; the external world is not. A retried step that re-fires the same external call MUST hit the same key so the receiver dedups. Implementations: Stripe `Idempotency-Key`, generic `X-Idempotency-Key` header, or provider-specific equivalents. Skill executors that don't support an idempotency header SHOULD record the key in a local `external_call_log` row keyed on the canonical key and short-circuit on the second attempt. (Chunk 7 wires for the action_call path; existing skill executors audited at Chunk 5 entry.)
+- **DB time is authoritative; never compare app-server time to DB time.** All TTLs, timestamps, ordering, and `created_at` / `resolved_at` / `started_at` writes use `NOW()` in the SQL statement (or `DEFAULT now()` on the column). Application servers MAY format DB-supplied timestamps for display, but MUST NOT compute `now()` in JS and compare against a DB column — clock drift between app and DB silently breaks comparisons. Cap-check elapsed-seconds computation reads `EXTRACT(EPOCH FROM (now() - workflow_runs.started_at))` in SQL, not `Date.now() - run.startedAt` in TypeScript. Same rule for stall-job stale-fire guard, gate `expectedCreatedAt` comparison, and any retry-window check. (Chunks 3, 4, 7, 8.)
+- **Run cancellation semantics pinned.** When a run cancels (via Stop, fail, or terminal cascade): (a) no new steps may dispatch — the engine MUST re-check run status before each dispatch; (b) the in-flight step continues to its natural conclusion (do NOT abort mid-step in V1 — best-effort cancellation of skill/action calls is logged but not awaited); (c) any open gates resolved with `resolution_reason = 'run_terminated'` (per round-1 cascade); (d) stall-notify jobs cancelled (best-effort) AND in-handler stale-fire guard catches strays (per round-1 expectedCreatedAt); (e) emit `run.stopped.by_user` (Stop) or `run.failed` (fail) exactly once. **Mid-step abort is V2** — V1 lets the in-flight call run; the run still transitions to `cancelled` / `failed` immediately, and post-completion writes from the in-flight step land on a terminal run (the engine ignores them via the dispatch-status re-check).
+- **UI state is derived from a deterministic read-model projection, not from raw events.** The projection is rebuildable from `agent_execution_events + workflow_runs + workflow_step_runs + workflow_step_gates`. WebSocket events are deltas that mutate the in-memory projection; REST replay rebuilds the projection from scratch on reconnect. UI components read the projection (`useTaskProjection(taskId) → TaskProjection`); they MUST NOT read raw events directly. The projection's reducer is pure (no side effects, no fetches) and idempotent (applying the same event twice produces the same state — the dedup LRU is the safety). Defines a clear "step completed in DB but event not yet processed" boundary: the projection lags the DB by at most one reconcile interval; UI shows the projection state, not a contradictory mix. (Chunk 9 emits the events; Chunk 11 owns the projection + reducer.)
+- **Hard failure containment per step.** Every step has a `params.maxAttempts: integer` (default 3). The engine increments `workflow_step_runs.attempt` on each retry attempt (column exists); when `attempt >= maxAttempts`, the step transitions to `failed` (no further retries) and the run propagates per the step's `onFail` policy (`fail` → run fails; `continue` → next step dispatches; `gate` → Approval card surfaces with the failure reason). Retry backoff is exponential with cap (1s, 2s, 4s, 8s, max 60s). Without the cap, one bad step floods retries, logs, and cost. (Chunk 7 wires the retry counter check + cap; the `attempt` column is reused, no schema change.)
 
 ---
 
@@ -165,24 +203,26 @@ These are violations of architecture rules in code that this build directly exte
 
 ---
 
-## Open questions blocking finalisation
+## Open questions resolved at plan-gate review
 
-These are questions the planner could not resolve from spec + brief + codebase. They block plan finalisation; the caller should take them to the user.
+All six open questions resolved by the user at plan-gate review (2026-05-02). Captured here for traceability.
 
-1. **`workflow_drafts` vs extending `workflow_studio_sessions`.** The codebase already has `workflow_studio_sessions` (`server/db/schema/workflowRuns.ts` lines 214–238) shaped for the Phase 1 GitHub-PR-authoring Studio with `candidateFileContents` + `candidateValidationState` + `prUrl`. The spec §3.3 introduces a new `workflow_drafts` table for the chat-orchestrator-drafts-then-author flow with `payload jsonb` + `consumed_at` + `(subaccount_id, session_id) UNIQUE`. The two are similar in intent but different in shape. Options:
-   - **(a)** Add `workflow_drafts` as a new table per the spec. Minor duplication of session-scoped Studio state; clear separation of concerns (orchestrator drafts vs Studio review sessions).
-   - **(b)** Extend `workflow_studio_sessions` with `payload`, `consumed_at`, `subaccountId`, `sessionId` (UNIQUE on `(subaccountId, sessionId)`), and reuse for both flows.
-   - Recommendation if user does not weigh in: **(a)**, per spec literal. The shapes differ enough (the orchestrator's `payload` is a draft step list; the Studio session's `candidateFileContents` is a serialized template file destined for GitHub) that conflating them risks data-shape ambiguity at read time. Plan currently assumes (a).
+1. **`workflow_drafts` vs extending `workflow_studio_sessions`.** **Resolved: (a) — new `workflow_drafts` table per spec literal.** The shapes differ enough (orchestrator `payload` is a draft step list; Studio session `candidateFileContents` is a serialized template file destined for GitHub) that conflating them risks data-shape ambiguity at read time. Cleanup job (Chunk 16) is trivial regardless. **Hardening:** add `draft_source: 'orchestrator' | 'studio_handoff'` column to disambiguate provenance when future flows merge (Decision 14 below).
 
-2. **Confidence chip threshold cut-points (spec §19.1 #A).** Spec defers to architect-time. The plan in Chunk 6 ships the heuristic + `signals[]` capture but does NOT lock final thresholds — V1 ships with a placeholder mapping (`high` if ≥ 5 similar approved-without-mod runs, `low` if ≤ 0 or any clamp condition fires, `medium` otherwise). Final tuning lands as a one-line config change after 100+ internal Approval cards are reviewed. Caller may want a different default.
+2. **Confidence chip threshold cut-points (spec §19.1 #A).** **Resolved: ship the placeholder.** V1 mapping: `high` if ≥ 5 similar approved-without-mod runs, `low` if ≤ 0 or any clamp condition fires, `medium` otherwise. Final tuning lands as a one-line config change after 100+ internal Approval cards are reviewed. The pure heuristic captures `signals[]` so retro-tuning has the data.
 
-3. **Cost-cap extension granularity (spec §19.2 #G).** Spec defers to architect. Plan in Chunk 7 ships a single canned extension button: "Continue for another 30 minutes / $2.50". Cap of 2 extensions per run. Operator clicks once → +30min and +$2.50; second click → another +30min and +$2.50; third click disabled with Stop only. Caller may want different granularity.
+3. **Cost-cap extension granularity (spec §19.2 #G).** **Resolved: +30 min / +$2.50 per extension, cap at 2 extensions per run.** Conservative first-pass; cap-at-2 prevents runaway. Tunable post-launch via `server/services/workflowRunPauseStopService.ts` constants.
 
-4. **Per-task event log retention TTL (spec §8.1 "minimum 24 hours recommended").** Plan in Chunk 3 picks 7 days as the retention window — long enough that a session reconnect after a long lunch break does not gap, short enough that the events table doesn't grow unbounded for tasks that ran weeks ago. Caller may want a different default.
+4. **Per-task event log retention TTL (spec §8.1 "minimum 24 hours recommended").** **Resolved: 7 days hot-retention.** Survives long-weekend reconnects; client `hasGap: true` recovery path (Chunk 9) handles older. **Scalability checkpoint:** flagged in Chunk 9 deferred items — cold archival pipeline (S3 / archive table) ships as V2 once retention pressure surfaces. See Risks row 17.
 
-5. **Multi-select renderer threshold (spec §19.2 #I).** Plan in Chunk 12 ships the checkbox list for ≤ 7 options, Combobox for ≥ 8 — matches spec default.
+5. **Multi-select renderer threshold (spec §19.2 #I).** **Resolved: ≤ 7 checkbox list / ≥ 8 combobox** — matches spec default.
 
-6. **`is_critical` target table (spec §19.2 #F).** Plan in Chunk 1 lands `is_critical: boolean` inside the `params` JSON of step definitions in `workflow_template_versions.definitionJson`. No schema column. Validator + engine read from `params.is_critical`. Justification: step definitions are already schema-less JSON per the existing engine pattern; adding a top-level column on `workflow_template_steps` (a table that may not exist by that name) creates a new query surface for one boolean. JSON path is consistent with how `approverGroup` / `submitterGroup` / `quorum` land in §3.2. Caller may want a different shape.
+6. **`is_critical` target table (spec §19.2 #F).** **Resolved: JSON path inside `params`.** `is_critical: boolean` lives in `workflow_template_versions.definitionJson.steps[i].params`. Consistent with how `approverGroup`/`submitterGroup`/`quorum` land in §3.2. No schema column for one boolean.
+
+Architect-time refinements (non-blocking — chunk-level decisions):
+
+- Confidence threshold retuning, cost-cap retuning, retention retuning all routed to `tasks/todo.md` for post-launch evaluation.
+- Plan-tab "trivial task" detection (spec §19.2 #K), empty-state copy (spec §19.2 #L) — designer pass at component-build time.
 
 ---
 
@@ -209,6 +249,14 @@ These are questions the planner could not resolve from spec + brief + codebase. 
 **Decision 9 — Permission-aware picker via a new endpoint, not via a generic /users endpoint.** Spec §14.2 defines `GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users`. The shape (org-grouped vs flat list, per role) is specific to picker UX. Rejected: extending `/api/users` with query params. Reason: a single-purpose endpoint makes the permission scoping logic obvious at the boundary; the response shape (with `is_org_user` / `is_subaccount_member` flags) is picker-specific.
 
 **Decision 10 — Naming cleanup is UI-only, schema unchanged.** Spec §15. `tasks` table stays, `tasks.brief` column stays. The rename is sidebar / nav / page title / breadcrumb / modal copy + a `/briefs/:id → /tasks/:id` redirect. Rejected: schema rename. Reason: any schema-rename would touch every consumer of `tasks.brief`; cost-benefit does not justify it for a pure UI vocabulary change.
+
+**Decision 11 — `event_origin` + `event_subsequence` for multi-source event causality.** Events flow into `agent_execution_events` from four sources (engine, gate transitions, user-driven approvals/asks/submits, orchestrator). With `task_sequence` allocated at INSERT time under `FOR UPDATE`, two events from the same logical step transition can interleave with events from a concurrent transition and produce a sequence ordering that obscures causality. Adding `event_origin: 'engine' | 'gate' | 'user' | 'orchestrator'` and an optional `event_subsequence: integer` per logical bundle (default 0) gives consumers a deterministic intra-bundle ordering AND a way to filter / debug by source. The causality-boundary invariant (single transaction for step+gate+event triples) is the primary safety; `event_subsequence` is the explicit deterministic order WITHIN that triple. Rejected: relying on `task_sequence` alone. Reason: cross-source races at the transaction-commit boundary do not have meaningful sequence ordering without an intra-bundle tiebreaker. (Spec §8 implicitly assumes single-source events; this decision generalises.)
+
+**Decision 12 — Cost accumulator column instead of SUM-on-read.** `workflow_runs.cost_accumulator_cents` is incremented transactionally with every cost-ledger row write. Engine cap-check reads `cost_accumulator_cents`, not `SUM(workflow_run_cost_ledger.cost_cents)`. Rejected: `SUM` on every between-step check. Reason: ledger writes are async (skill executors emit cost events that land via a separate writer); a `SUM`-driven check can fire late (cost row pending) or early (cost row replayed). The accumulator is point-in-time consistent within the transaction that increments it; the ledger remains the audit source.
+
+**Decision 13 — `resolveAssignableUsers(context, intent)` abstraction over role-branching.** The picker endpoint's pool resolution today branches on `callerRole`. As partner / external-reviewer / restricted-view roles arrive, role-branching becomes a fan-out maintenance burden. The new `assignableUsersService.ts` exposes `resolvePool({ caller, organisationId, subaccountId, intent: 'pick_approver' | 'pick_submitter' | 'pick_reviewer' })` with the role-resolution logic encapsulated. V1 ships only `pick_approver` and `pick_submitter` intents; future intents (e.g., `pick_external_reviewer`) extend the resolver, not the call sites. Rejected: hardcoded role branches in the route handler. Reason: every consumer of the picker (Studio inspectors, future Ad-hoc Ask routing) would re-implement the role logic.
+
+**Decision 14 — `draft_source` column on `workflow_drafts`.** `workflow_drafts.draft_source: 'orchestrator' | 'studio_handoff'` captures provenance. V1 only writes `'orchestrator'` (the chat-orchestrator-drafts-then-author flow), but the column is the seam for future flows where Studio itself produces a draft (e.g., "save and continue later" while authoring). Without this column, future merging of `workflow_studio_sessions` and `workflow_drafts` (Open Question 1's path (b)) would lose provenance. Cheap insurance.
 
 ### Patterns applied
 
@@ -247,11 +295,12 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 | 11 | Open task view UI (three-pane layout, Now/Plan/Files tabs, header) | §9 (full), §15 (Brief → Task UI) | 9, 10 | ~5 days |
 | 12 | Ask form runtime (form card primitive, submit/skip, autofill) | §3.2 (Ask params shape), §11 (full) | 4, 9, 11 | ~3 days |
 | 13 | Files tab + diff renderer + per-hunk revert | §12 (full) | 9, 11 | ~3 days |
-| 14 | Studio canvas, four A's inspectors, publish flow, draft hydration | §3.3 (`workflow_drafts` if Open Q1 stays at (a)), §10 (full) | 2, 10 | ~7 days |
+| 14a | Studio canvas + bottom bar + publish flow | §10.1, §10.2, §10.4, §10.5 (publish + concurrent-edit) | 2, 10 | ~3.5 days |
+| 14b | Four A's inspectors + Studio chat panel + draft hydration | §3.3 (`workflow_drafts`), §10.3 (inspectors), §10.6 (Studio chat), §10.7 (draft hydration) | 14a | ~3.5 days |
 | 15 | Orchestrator changes (suggest-don't-decide, draft creation, milestone events, workflow.run.start skill) | §13 (full), §16.3 (full) | 9, 14 | ~3 days |
 | 16 | Naming cleanup (Brief → Task) + workflow_drafts cleanup job | §15 (full), §16.3 #35a, §18 (final migration polish + telemetry registry entries) | 1, 11, 14 | ~1 day |
 
-**Total: ~40 engineer-days of focused work.** Lower than the spec's ~59-day estimate because primitives reuse (existing engine, WebSocket layer, schedule service, queue infrastructure) shaves time off engine + real-time chunks. UI chunks remain the dominant cost.
+**Total: ~40 engineer-days of focused work** across 17 chunks (Chunk 14 split into 14a + 14b at plan-gate review for reviewer-fatigue management; net effort unchanged). Lower than the spec's ~59-day estimate because primitives reuse (existing engine, WebSocket layer, schedule service, queue infrastructure) shaves time off engine + real-time chunks. UI chunks remain the dominant cost.
 
 **Chunk dependency graph (forward-only, no cycles):**
 
@@ -265,7 +314,7 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 │       │   ├── 13 (Files + diff)
 │       │   └── 16 (naming cleanup)
 │       └── 15 (orchestrator)
-│           └── (depends on 14 too)
+│           └── (depends on 14b too)
 ├── 4 (gates)
 │   ├── 5 (approvals)
 │   ├── 6 (confidence + audit)
@@ -273,14 +322,50 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 │   └── 8 (stall-and-notify + pinning)
 └── 10 (permissions + teams CRUD)
     ├── 11 (open task UI)
-    └── 14 (Studio)
+    └── 14a (Studio canvas + publish)
+        └── 14b (inspectors + draft hydration)
 ```
 
-**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 7, 8 can ship in parallel after 4 lands. Chunks 11, 14 require 9 and 10. Chunks 12, 13, 15, 16 are post-11/14.
+**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 7, 8 can ship in parallel after 4 lands. Chunks 11, 14a require 9 and 10. Chunk 14b requires 14a. Chunks 12, 13 require 11. Chunk 15 requires 9 and 14b. Chunk 16 is post-everything.
 
 ---
 
 ## Per-chunk detail
+
+### Chunk 0 — Vertical-slice spike (optional pre-build validation)
+
+**Purpose.** Validate ~80% of the system assumptions before committing to all 17 chunks. Build the smallest end-to-end path that exercises every load-bearing primitive once: 1 workflow (2 steps), 1 Approval gate, 1 pause/resume loop, full event log with `task_sequence` allocation, single WebSocket reconcile.
+
+**When to run.** Optional but high-leverage. Runs in parallel with the user's plan-gate review of this document; ~2 days of focused work. If signal from the spike contradicts an assumption, fold the learning back into Chunks 1–17 before committing the rest. If the spike validates, throw the spike code away — it is a learning artifact, not a foundation. Resist the temptation to extend it.
+
+**Scope (minimal vertical slice):**
+
+- 1 hard-coded workflow template definition: `agent_call → approval → action_call`. Three steps, one Approval gate, no branching, no parallelism.
+- Schema deltas applied (Chunk 1 migration + the round-2 columns).
+- Per-task event log allocation working under `FOR UPDATE` (Chunk 3 path; one origin only).
+- Causality-boundary engine transaction wrapping step transition + gate write + event bundle (round-2 invariant).
+- WebSocket emit + REST replay reconcile (Chunk 9 thin-shell).
+- Single React page with three sections: chat (1 Approval card), activity (event stream), header (Pause / Stop buttons).
+- Stub'd cost ledger — increment a fake $0.05 per `agent_call`, validate `cost_accumulator_cents` math.
+- Stub'd permission resolver — hard-code one user.
+
+**Out of scope for the spike.** Studio, Files tab, Now/Plan tabs (placeholder), all four A's inspectors, naming cleanup, multi-tenant role variations, RLS testing (use the existing harness), the orchestrator, scheduling, stall-and-notify, confidence chip.
+
+**Failure-injection drills (the actual point of the spike).** Manually simulate, observe, document:
+
+1. Kill the engine mid-step. Resume. Verify no duplicate execution.
+2. Click Approve in two browser tabs simultaneously. Verify single-decider idempotency at the gate level.
+3. Click Stop while a step is in flight. Verify orphaned-gate cascade. Verify no events leak after `run.stopped.by_user`.
+4. Disconnect the WebSocket for 30 seconds. Reconnect. Verify the REST reconcile path catches up with no duplicates.
+5. Force a sequence allocation conflict (two appendEvent calls on the same task in parallel). Verify `FOR UPDATE` serialises.
+6. Force a cost-ledger / accumulator skew (write ledger row in a separate transaction). Verify the daily probe metric ticks.
+7. Cap the run at $0.05 and dispatch an `agent_call` (estimated $0.10). Verify pre-step cost-cap pause fires before the call.
+
+**Spike artifact.** A short markdown file `tasks/builds/workflows-v1/spike-findings.md` listing each drill outcome (pass / fail / fold-back). Findings that contradict an assumption become amendments to the plan; findings that validate become test cases for the relevant chunk.
+
+**Decision criterion.** Run the spike if any of: (a) the team includes engineers unfamiliar with the existing engine / WebSocket / pg-boss patterns, (b) ChatGPT review still has material concerns about an invariant, (c) the user wants concrete signal before committing ~40 engineer-days. Skip if all three are false — the plan's invariants are already pinned tightly enough that the spike's marginal value is low.
+
+---
 
 ### Chunk 1 — Schema migration + RLS + pre-existing violation fix
 
@@ -294,15 +379,16 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 
 - `migrations/<NNNN>_workflows_v1_additive_schema.sql` — single migration. Placeholder NNNN renamed at merge time per `DEVELOPMENT_GUIDELINES.md` §6.2. Header comment cites spec §3.1 + §3.3.
 - `server/db/schema/workflowStepGates.ts` — new schema file. Follows `workflowRuns.ts` shape (imports schema only).
-- `server/db/schema/workflowDrafts.ts` — new schema file (assuming Open Question 1 resolves to (a); revisit if (b)).
+- `server/db/schema/workflowDrafts.ts` — new schema file.
 - `shared/types/workflowStepGate.ts` — `seen_payload`, `seen_confidence`, `approver_pool_snapshot` types extracted to `shared/types/` per `DEVELOPMENT_GUIDELINES.md` §3 (types crossing schema/service boundary live in `shared/types/`).
+- `server/lib/workflowLogger.ts` — typed wrapper around the existing logger. Exposes `workflowLog.info(payload: WorkflowLogPayload, msg: string)` etc., where `WorkflowLogPayload` enforces the round-2 structured-log shape (`runId?`, `taskId?`, `stepId?`, `gateId?`, `eventType?`, `state?`, `taskSequence?`, `eventSubsequence?`, `eventOrigin?`, `organisationId`). Optional fields omitted when not applicable; never `null`. Every workflow-engine, gate-service, event-service, orchestrator log line goes through this helper. Backwards-compatible — callers that don't use it still work, but new code MUST.
 
 **Files to modify:**
 
-- `server/db/schema/workflowRuns.ts` — add `effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count`. Extend `WorkflowRunStatus` union with `paused` (insert between `running` and `failed`). Extend `workflowStepReviews` with `gateId` (FK), `decisionReason`. Extend `workflowStepReviews` UNIQUE to `(gate_id, deciding_user_id)` (replaces the prior plan of `(workflow_run_id, step_id, deciding_user_id)`).
+- `server/db/schema/workflowRuns.ts` — add `effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count`, `cost_accumulator_cents integer NOT NULL DEFAULT 0` (Decision 12 — control-flow source of truth for cost cap; ledger remains audit). Extend `WorkflowRunStatus` union with `paused` (insert between `running` and `failed`). Extend `workflowStepReviews` with `gateId` (FK), `decisionReason`. Extend `workflowStepReviews` UNIQUE to `(gate_id, deciding_user_id)` (replaces the prior plan of `(workflow_run_id, step_id, deciding_user_id)`). Extend `workflowStepGates` with `resolution_reason text NULL` (one of `'approved' | 'rejected' | 'submitted' | 'skipped' | 'run_terminated'`; populated when `resolved_at` is set, per the run-termination cascade invariant).
 - `server/db/schema/workflowTemplates.ts` — add `cost_ceiling_cents` and `wall_clock_cap_seconds` on the *org* `workflow_templates` table (not on the version). Add `publish_notes` on `workflow_template_versions`.
-- `server/db/schema/scheduledTasks.ts` — add `pinned_template_version_id uuid NULL` (FK to `workflow_template_versions.id`). Note: `scheduledTasks` is the existing schedule table; spec §3.1 names "schedules" as the abstract concept — architect verifies the exact table at chunk-time. If a separate `schedules` table exists, add the column there instead.
-- `server/db/schema/agentExecutionEvents.ts` — add `taskId uuid NULL` (FK to `tasks.id`), `taskSequence bigint NULL`. Add UNIQUE INDEX `(task_id, task_sequence)` partial WHERE `task_id IS NOT NULL` (legacy rows have NULL; the unique constraint applies only to new rows).
+- `server/db/schema/scheduledTasks.ts` — add `pinned_template_version_id uuid NULL` (FK to `workflow_template_versions.id`). Pinned: the existing schedule table is `scheduled_tasks` (verified at plan-gate review — `migrations/0013_phase_two_scheduled_workforce.sql:8`, `server/db/schema/scheduledTasks.ts`). Spec §3.1's "schedules" is the abstract concept; the column lands on `scheduled_tasks`.
+- `server/db/schema/agentExecutionEvents.ts` — add `taskId uuid NULL` (FK to `tasks.id`), `taskSequence bigint NULL`, `eventOrigin text NULL` (`'engine' | 'gate' | 'user' | 'orchestrator'`), `eventSubsequence integer NULL DEFAULT 0`. Add UNIQUE INDEX `(task_id, task_sequence, event_subsequence)` partial WHERE `task_id IS NOT NULL` (legacy rows have NULL; the unique constraint applies only to new rows; `event_subsequence` is the deterministic intra-bundle tiebreaker per Decision 11).
 - `server/db/schema/tasks.ts` — add `nextEventSeq integer NOT NULL DEFAULT 0` mirroring `agent_runs.next_event_seq`.
 - `server/db/schema/index.ts` — re-export `workflowStepGates`, `workflowDrafts`.
 - `server/config/rlsProtectedTables.ts` — add entries for `workflow_step_gates` and `workflow_drafts` with canonical org-isolation policy reference. Update `policyMigration` to point at the new migration filename.
@@ -344,9 +430,18 @@ ALTER TYPE workflow_run_status_enum ADD VALUE IF NOT EXISTS 'paused';   -- if en
 ALTER TABLE workflow_runs
   ADD COLUMN effective_cost_ceiling_cents integer,
   ADD COLUMN effective_wall_clock_cap_seconds integer,
-  ADD COLUMN extension_count integer NOT NULL DEFAULT 0;
+  ADD COLUMN extension_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN cost_accumulator_cents integer NOT NULL DEFAULT 0,          -- Decision 12: control-flow source of truth
+  ADD COLUMN degradation_reason text;                                    -- Round-2: consumer-side gap = degraded, not failed
+-- Partial index for the resume / paused-listing path (round-1 minor tweak)
+CREATE INDEX workflow_runs_status_paused_idx
+  ON workflow_runs (id)
+  WHERE status = 'paused';
+-- Round-2 index coverage: dashboard ordering by recency-within-status
+CREATE INDEX workflow_runs_status_updated_idx
+  ON workflow_runs (status, updated_at DESC);
 
--- ── scheduled_tasks (or `schedules` if separate) ──
+-- ── scheduled_tasks ──
 ALTER TABLE scheduled_tasks
   ADD COLUMN pinned_template_version_id uuid REFERENCES workflow_template_versions(id);
 CREATE INDEX scheduled_tasks_pinned_template_version_idx
@@ -356,9 +451,16 @@ CREATE INDEX scheduled_tasks_pinned_template_version_idx
 -- ── agent_execution_events ──
 ALTER TABLE agent_execution_events
   ADD COLUMN task_id uuid REFERENCES tasks(id),
-  ADD COLUMN task_sequence bigint;
+  ADD COLUMN task_sequence bigint,
+  ADD COLUMN event_origin text,                                          -- Decision 11: 'engine' | 'gate' | 'user' | 'orchestrator'
+  ADD COLUMN event_subsequence integer DEFAULT 0,                        -- Decision 11: deterministic intra-bundle order
+  ADD COLUMN event_schema_version integer NOT NULL DEFAULT 1;            -- Round-2: per-kind shape evolution
 CREATE UNIQUE INDEX agent_execution_events_task_seq_idx
-  ON agent_execution_events (task_id, task_sequence)
+  ON agent_execution_events (task_id, task_sequence, event_subsequence)
+  WHERE task_id IS NOT NULL;
+-- Round-2 index coverage: dashboard queries by run + task ordering
+CREATE INDEX agent_execution_events_run_task_seq_idx
+  ON agent_execution_events (run_id, task_sequence)
   WHERE task_id IS NOT NULL;
 
 -- ── tasks ──
@@ -377,13 +479,17 @@ CREATE TABLE workflow_step_gates (
   is_critical_synthesised boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz,
+  resolution_reason text,                                                 -- 'approved'|'rejected'|'submitted'|'skipped'|'run_terminated'
+  superseded_by_gate_id uuid REFERENCES workflow_step_gates(id),          -- Round-2: future re-open seam, V1 always NULL
   organisation_id uuid NOT NULL REFERENCES organisations(id)              -- for RLS
 );
 CREATE UNIQUE INDEX workflow_step_gates_run_step_uniq_idx
   ON workflow_step_gates (workflow_run_id, step_id);
-CREATE INDEX workflow_step_gates_unresolved_idx
-  ON workflow_step_gates (resolved_at)
-  WHERE resolved_at IS NULL;
+-- Round-2 index: unresolved-first ordering for dashboards & dispatchers
+-- NULLS FIRST puts open gates at the head of the index, matching the
+-- typical access pattern (find-open-gates).
+CREATE INDEX workflow_step_gates_run_resolved_idx
+  ON workflow_step_gates (workflow_run_id, resolved_at NULLS FIRST);
 -- Canonical RLS policy
 ALTER TABLE workflow_step_gates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY workflow_step_gates_isolation ON workflow_step_gates
@@ -397,6 +503,7 @@ CREATE TABLE workflow_drafts (
   organisation_id uuid NOT NULL REFERENCES organisations(id),
   subaccount_id uuid NOT NULL REFERENCES subaccounts(id),
   payload jsonb NOT NULL,
+  draft_source text NOT NULL DEFAULT 'orchestrator',                      -- Decision 14: 'orchestrator'|'studio_handoff'
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   consumed_at timestamptz
@@ -414,10 +521,12 @@ CREATE POLICY workflow_drafts_isolation ON workflow_drafts
 
 **Contracts pinned in this chunk:**
 
-- `WorkflowRunStatus` (TS) — extended with `'paused'`. Sites consuming the union (e.g., `runStatus.ts`, route handlers, UI badges) compile-error if they don't handle the new value — caught by `npm run typecheck`.
-- `WorkflowStepGate` (TS) — derived from `workflow_step_gates` schema. `gateKind: 'approval' | 'ask'`. Source of truth for `gate.kind` everywhere downstream.
-- `WorkflowDraft` (TS) — `payload jsonb` typed loosely; the orchestrator-side draft shape lives in `shared/types/workflowDraftPayload.ts` (Chunk 15 owns the precise shape).
+- `WorkflowRunStatus` (TS) — extended with `'paused'`. Sites consuming the union (e.g., `runStatus.ts`, route handlers, UI badges) compile-error if they don't handle the new value — caught by `npm run typecheck`. `WorkflowRun` type extended with `degradationReason: string | null` (Round-2: consumer-side gap signal).
+- `WorkflowStepGate` (TS) — derived from `workflow_step_gates` schema. `gateKind: 'approval' | 'ask'`. `resolutionReason: 'approved' | 'rejected' | 'submitted' | 'skipped' | 'run_terminated' | null`. `supersededByGateId: string | null`. Source of truth for gate state everywhere downstream.
+- `WorkflowDraft` (TS) — `payload jsonb` typed loosely; the orchestrator-side draft shape lives in `shared/types/workflowDraftPayload.ts` (Chunk 15 owns the precise shape). `draftSource: 'orchestrator' | 'studio_handoff'`.
 - `seenPayload`, `seenConfidence`, `approverPoolSnapshot` — typed in `shared/types/workflowStepGate.ts` per the spec §6.2.1, §6.3 shapes.
+- `EventOrigin` (TS) — `'engine' | 'gate' | 'user' | 'orchestrator'`. New in `shared/types/agentExecutionLog.ts`.
+- `EventSchemaVersion` (TS) — `number` per-kind. Replay logic branches on `(kind, schemaVersion)` when a kind's payload shape evolves. V1 ships every kind at `version = 1`.
 
 **Error handling:**
 
@@ -515,9 +624,9 @@ The validator returns ONE object with all errors collected (not first-error-fail
 
 ### Chunk 3 — Per-task event log
 
-**Spec sections owned:** §3.1 (`task_id` + `task_sequence` columns), §8.1 (replay contract, sequence allocation invariant, gap-detection invariant on the client side will land in Chunk 9 — this chunk owns the SERVER side allocation only).
+**Spec sections owned:** §3.1 (`task_id` + `task_sequence` columns), §8.1 (replay contract, sequence allocation invariant, gap-detection invariant on the client side will land in Chunk 9 — this chunk owns the SERVER side allocation only). Plus Decision 11 (event_origin / event_subsequence) and the **task_sequence-authoritative** ordering invariant for new task-scoped consumers.
 
-**Scope.** Extend `agentExecutionEventService` to allocate a per-task sequence in addition to the per-run sequence whenever a task_id is in scope. The per-task counter mirrors `agent_runs.next_event_seq` exactly. Allocation + INSERT in the same transaction with `FOR UPDATE` per spec §8.1 invariant. Replay query honours the per-task ordering.
+**Scope.** Extend `agentExecutionEventService` to allocate a per-task sequence in addition to the per-run sequence whenever a task_id is in scope. The per-task counter mirrors `agent_runs.next_event_seq` exactly. Allocation + INSERT in the same transaction with `FOR UPDATE` per spec §8.1 invariant. Replay query honours the per-task ordering, and the secondary sort uses `event_subsequence ASC` to keep multi-event bundles deterministic. **Pinned ordering rule:** every new task-scoped UI surface, replay path, and event consumer sorts strictly by `(task_sequence, event_subsequence)`. The legacy per-run `sequence_number` is preserved for existing consumers but MUST NOT be referenced by any new task-scoped code.
 
 **Out of scope.** WebSocket emission of events (Chunk 9). The client gap-detection protocol (Chunk 9). Specific event kinds for tasks (Chunk 9 owns the taxonomy in §8.2).
 
@@ -527,22 +636,25 @@ The validator returns ONE object with all errors collected (not first-error-fail
 
 **Files to modify:**
 
-- `server/services/agentExecutionEventService.ts` — `appendEvent` accepts an optional `taskId: string | null`. When provided, the persist path also allocates `task_sequence` from `tasks.next_event_seq` under `FOR UPDATE` in the same transaction. Both sequences land on the row. The retry-with-backoff path (critical events) re-allocates a fresh task sequence on retry — the row's transaction rolls back on the first attempt's failure so the sequence is reused, not gapped (per spec §8.1 invariant).
-- `server/services/agentExecutionEventService.ts` — new `streamEventsByTask(taskId, fromSeq, limit, forUser)` mirroring the existing `streamEvents(runId, ...)` shape.
-- `shared/types/agentExecutionLog.ts` — extend the envelope type with `taskId: string | null`, `taskSequence: number | null`. The existing `eventId` derivation (`${runId}:${sequenceNumber}:${eventType}`) extends to a per-task variant `task:${taskId}:${taskSequence}:${eventType}` for events scoped to a task without a specific run (e.g., the orchestrator's `task.created` event).
-- `server/services/agentExecutionEventServicePure.ts` — `buildEventId` extended to handle the per-task case.
+- `server/services/agentExecutionEventService.ts` — `appendEvent` accepts an optional `taskId: string | null`, `eventOrigin: EventOrigin`, `eventSubsequence: number = 0`. When `taskId` is provided, the persist path also allocates `task_sequence` from `tasks.next_event_seq` under `FOR UPDATE` in the same transaction. Both sequences land on the row. The retry-with-backoff path (critical events) re-allocates a fresh task sequence on retry — the row's transaction rolls back on the first attempt's failure so the sequence is reused, not gapped (per spec §8.1 invariant). For multi-event bundles emitted within the same logical step transition (causality-boundary invariant), the caller passes monotonically increasing `event_subsequence` values (0, 1, 2, …) so the post-load ordering is deterministic.
+- `server/services/agentExecutionEventService.ts` — new `streamEventsByTask(taskId, fromSeq, limit, forUser)` mirroring the existing `streamEvents(runId, ...)` shape. Sort: `ORDER BY task_sequence ASC, event_subsequence ASC`.
+- `server/services/agentExecutionEventService.ts` — new `appendEventBundle(taskId, events: Array<{ origin, kind, payload }>, tx)` helper. Allocates ONE `task_sequence` for the bundle and writes each event with `event_subsequence = i`. Used by Chunk 4's gate-creation path and Chunk 7's pause path to honour the causality-boundary rule.
+- `shared/types/agentExecutionLog.ts` — extend the envelope type with `taskId: string | null`, `taskSequence: number | null`, `eventOrigin: EventOrigin | null`, `eventSubsequence: number | null`. The existing `eventId` derivation (`${runId}:${sequenceNumber}:${eventType}`) extends to a per-task variant `task:${taskId}:${taskSequence}:${eventSubsequence}:${eventType}` for events scoped to a task without a specific run (e.g., the orchestrator's `task.created` event).
+- `server/services/agentExecutionEventServicePure.ts` — `buildEventId` extended to handle the per-task case including the subsequence component.
 
 **Contracts pinned in this chunk:**
 
 - Replay query (illustrative — exact column names verified at chunk-time):
   ```sql
   SELECT * FROM agent_execution_events
-   WHERE task_id = $1 AND task_sequence > $lastSeq
-   ORDER BY task_sequence ASC
+   WHERE task_id = $1
+     AND (task_sequence, event_subsequence) > ($lastSeq, $lastSubseq)
+   ORDER BY task_sequence ASC, event_subsequence ASC
    LIMIT $limit
   ```
-- Allocation invariant (verbatim from spec §8.1): allocation MUST be atomic and gap-free per `task_id`; INSERT must happen in the same transaction. If a non-retryable failure leaves a gap, the run transitions to `failed` with reason `event_log_corrupted`.
+- Allocation invariant (verbatim from spec §8.1, plus subsequence): allocation MUST be atomic and gap-free per `task_id`; INSERT must happen in the same transaction. If a non-retryable failure leaves a gap, the run transitions to `failed` with reason `event_log_corrupted`. Within a single bundle, `event_subsequence` is the deterministic intra-bundle order.
 - Per-run sequence is preserved on every event (not replaced). Some consumers depend on it (e.g., the existing Live Agent Execution Log spec).
+- **Ordering rule for new task-scoped consumers (pinned):** sort strictly by `(task_sequence, event_subsequence)`. Never use `sequence_number` (per-run) for task-scoped UI, replay, or event consumption. The legacy column stays for backwards compatibility with the existing per-run consumers only.
 
 **Error handling:**
 
@@ -575,36 +687,40 @@ The validator returns ONE object with all errors collected (not first-error-fail
 
 ### Chunk 4 — Gate primitive + state machine
 
-**Spec sections owned:** §3.3 (`workflow_step_gates` table — created in Chunk 1, this chunk owns the write path and lifecycle), §5.1.1 (Approval write contracts — execution-safety), §11.4.1 (Ask write contracts), §10.7 invariants on terminal-state writes, plus the gate-aware extensions to the existing `workflowStepReviewService.requireApproval`.
+**Spec sections owned:** §3.3 (`workflow_step_gates` table — created in Chunk 1, this chunk owns the write path and lifecycle), §5.1.1 (Approval write contracts — execution-safety), §11.4.1 (Ask write contracts), §10.7 invariants on terminal-state writes, plus the gate-aware extensions to the existing `workflowStepReviewService.requireApproval`. Plus the **causality-boundary** invariant (single transaction for step+gate+event triple), the **orphaned-gate cascade** invariant (run termination resolves all open gates with `resolution_reason = 'run_terminated'`), the **gate-resolution precedence** invariant, and the **transaction-ownership-at-engine-layer** invariant.
 
-**Scope.** Wire every gate-creation site to insert a `workflow_step_gates` row. Wire gate-resolution to set `resolved_at`. Extend the per-decider `workflow_step_reviews` write to FK back to `gate_id`. State machine: gate transitions tracked via `resolved_at` (NULL → set). Write contracts for Approval and Ask fully pinned. Concurrency guards specified per spec §5.1.1, §11.4.1.
+**Transaction ownership rule for this chunk (round-2 hardening):** every method on `WorkflowStepGateService` accepts an explicit `tx` parameter. The service NEVER opens its own transaction — the engine layer (or the user-driven route handler) opens the transaction and passes `tx` down. Two-tier shape: `openGate(input, tx)`, `resolveGate(gateId, reason, organisationId, tx)`, `resolveOpenGatesForRun(runId, reason, organisationId, tx)`, `refreshPool(gateId, organisationId, newSnapshot, tx)`. The route's `asyncHandler` holds the transaction; the service is a transactional participant only.
+
+**Scope.** Wire every gate-creation site to insert a `workflow_step_gates` row. Wire gate-resolution to set `resolved_at` AND `resolution_reason`. Extend the per-decider `workflow_step_reviews` write to FK back to `gate_id`. State machine: gate transitions tracked via `resolved_at` (NULL → set). Write contracts for Approval and Ask fully pinned. Concurrency guards specified per spec §5.1.1, §11.4.1. Causality-boundary enforcement via the bundle-append helper (Chunk 3). Orphaned-gate cascade implemented in `workflowRunService.failRun` / `cancelRun` / `succeedRun`.
 
 **Out of scope.** Approver pool resolution (Chunk 5). isCritical synthesis (Chunk 5). Confidence chip computation (Chunk 6). The actual gate-open trigger from the engine (chunks 5, 7). UI rendering of gate state (Chunks 11, 12).
 
 **Files to create:**
 
 - `server/services/workflowStepGateService.ts` — service with:
-  - `openGate(input: { workflowRunId, stepId, gateKind, seenPayload?, seenConfidence?, approverPoolSnapshot?, isCriticalSynthesised, organisationId }) → Promise<WorkflowStepGate>` — idempotent on `(workflow_run_id, step_id) UNIQUE`; 23505 → returns the existing row.
-  - `resolveGate(gateId, organisationId) → Promise<void>` — sets `resolved_at = now()` if NULL; 0-rows → 200 idempotent-hit.
+  - `openGate(input: { workflowRunId, stepId, gateKind, seenPayload?, seenConfidence?, approverPoolSnapshot?, isCriticalSynthesised, organisationId }, tx) → Promise<WorkflowStepGate>` — **transaction-required** (causality boundary). Pre-checks for an existing open gate via `getOpenGate(...)`; if found, returns it (one gate per `(run_id, step_id)` regardless of synthesis path). If not found, INSERTs; the UNIQUE index is the safety net for racing peers; 23505 → re-reads and returns. The bundle-append helper writes the corresponding `gate.opened` event in the same transaction.
+  - `resolveGate(gateId, resolutionReason: 'approved'|'rejected'|'submitted'|'skipped'|'run_terminated', organisationId, tx) → Promise<void>` — sets `resolved_at = now()`, `resolution_reason = $reason` if `resolved_at IS NULL`. UPDATE predicate: `WHERE id = $ AND resolved_at IS NULL`. 0 rows → look up the existing reason and return idempotent-hit (no error if the same reason; warn if different). Caller passes `tx` so the resolution and its event commit together.
+  - `resolveOpenGatesForRun(workflowRunId, resolutionReason: 'run_terminated', organisationId, tx) → Promise<{ resolved: number }>` — implements the orphaned-gate cascade. Single bulk UPDATE: `UPDATE workflow_step_gates SET resolved_at = now(), resolution_reason = 'run_terminated' WHERE workflow_run_id = $1 AND resolved_at IS NULL`. Called from `workflowRunService.failRun` / `cancelRun` / `succeedRun` (succeed shouldn't have open gates per the run-completion guard, but defensive cleanup if any). Cancels stall-notify jobs for each resolved gate (Chunk 8 wiring).
   - `getOpenGate(workflowRunId, stepId, organisationId) → Promise<WorkflowStepGate | null>`.
   - `refreshPool(gateId, organisationId, newSnapshot) → Promise<{ refreshed: boolean, poolSize?: number, reason?: string }>` — implements spec §5.1.2 contract. UPDATE with `WHERE id = $ AND resolved_at IS NULL`; 0 rows → `{ refreshed: false, reason: 'gate_already_resolved' }`.
 - `server/services/workflowStepGateServicePure.ts` — pure helper for snapshot construction (`buildGateSnapshot(stepDefinition, runContext, prior?) → { seenPayload, seenConfidence }` — orchestrates Chunks 5 and 6 building blocks).
 
 **Files to modify:**
 
-- `server/services/workflowStepReviewService.ts` — `requireApproval` extended to call `WorkflowStepGateService.openGate` first, then create the per-decider review row with the new `gate_id` FK. The existing pending-review-already-exists idempotency check now keys off `gate_id` (one open gate per step per run, by UNIQUE).
-- `server/services/workflowRunService.ts` — `decideApproval` extended:
+- `server/services/workflowStepReviewService.ts` — `requireApproval` extended. Wraps in a single transaction: (a) `openGate` (with pre-check for existing open gate per the single-gate invariant), (b) per-decider review row with the new `gate_id` FK, (c) `appendEventBundle` for `gate.opened` + `step.transition` events. The existing pending-review-already-exists idempotency check now keys off `gate_id` (one open gate per step per run, by UNIQUE).
+- `server/services/workflowRunService.ts` — `decideApproval` extended (single transaction wraps every step):
   1. Look up the open gate via `getOpenGate(runId, stepId)`.
   2. Verify caller is in `gate.approver_pool_snapshot` (delegated to Chunk 5's pool-resolution helper; for now use a thin pass-through).
   3. INSERT `workflow_step_reviews` row with `gate_id` FK; ON CONFLICT (`gate_id`, `decided_by_user_id`) DO NOTHING; if 23505 → return 200 idempotent-hit per spec §5.1.1.
   4. Step transition `awaiting_approval → completed | failed` uses `WHERE status = 'awaiting_approval'`; 0 rows → look up the existing decision and return it (first-commit-wins).
   5. If the step has been transitioned externally (e.g., run was Stopped), return 409 `step_already_resolved` per spec §5.1.1.
-  6. On terminal step transition, `WorkflowStepGateService.resolveGate(gateId)`.
-- `server/services/workflowRunService.ts` — `submitStepInput` (Ask submission) extended:
+  6. On terminal step transition: `resolveGate(gateId, decision === 'approved' ? 'approved' : 'rejected')` + `appendEventBundle(['approval.decided', 'step.transition'])`.
+- `server/services/workflowRunService.ts` — `submitStepInput` (Ask submission) extended (single transaction):
   1. Look up the open gate.
   2. Verify caller is in `gate.approver_pool_snapshot` (Ask uses the same column).
   3. Step transition `awaiting_input → submitted` uses `WHERE status = 'awaiting_input'`; 0 rows → 409 `already_submitted` with the winning submitter info per spec §11.4.1.
-  4. On success: `resolveGate(gateId)`.
+  4. On success: `resolveGate(gateId, skipped ? 'skipped' : 'submitted')` + `appendEventBundle(['ask.submitted'|'ask.skipped', 'step.transition'])`.
+- `server/services/workflowRunService.ts` — `failRun` / `cancelRun` extended (and `succeedRun` defensively): inside the run-status-transition transaction, call `WorkflowStepGateService.resolveOpenGatesForRun(runId, 'run_terminated')` BEFORE the run-status UPDATE, to honour the orphaned-gate cascade invariant. Cascade also cancels stall-notify jobs (Chunk 8 emits the cancellation; here, the cascade triggers it).
 - `server/routes/workflowRuns.ts` — extend the existing input-submit and approve routes with the gate-aware error mapping (200 idempotent-hit, 409 race, 409 already-submitted, 403 not-in-pool).
 - `shared/stateMachineGuards.ts` — add `workflow_step_gate` machine: `null → open` (via INSERT) and `open → resolved` (via `resolved_at` set). Forbidden: `resolved → *`, `null → resolved`.
 
@@ -646,6 +762,13 @@ export type ApproverPoolSnapshot = string[];                              // use
 - `workflowStepGateRaceConditions.integration.test.ts` — concurrent decision when the step has been externally cancelled: 409 step_already_resolved.
 - `workflowStepGateRefreshPool.test.ts` — pool refresh on a still-open gate succeeds; on a resolved gate returns `gate_already_resolved`.
 - `workflowAskSingleSubmitConcurrent.integration.test.ts` — two concurrent Ask submits: first wins with 200, second gets 409 `already_submitted` with the winning submitter info.
+- `workflowStepGateOrphanedCascade.integration.test.ts` — open 3 gates on a run; call `failRun`; assert all 3 gates have `resolved_at` set and `resolution_reason = 'run_terminated'`. Stall-notify jobs cancelled.
+- `workflowStepGateResolutionPrecedence.integration.test.ts` — race scenarios:
+  1. User Approve fires concurrently with Stop. User wins (resolution_reason = `'approved'`); Stop's cascade UPDATE affects 0 rows for that gate, the rest of the cascade still resolves any other open gates.
+  2. Stall-notify timeout fires concurrently with user Approve. User wins.
+  3. Stop fires concurrently with stall timeout. Whichever's UPDATE commits first wins; both use the same `WHERE resolved_at IS NULL` predicate. No application-side priority logic needed; the optimistic CAS is the precedence.
+- `workflowStepGateCausalityBoundary.integration.test.ts` — kill the DB connection between the gate INSERT and the event INSERT; assert the gate row does NOT persist (transactional integrity). Counter-test: successful path produces gate row + `gate.opened` event row with matching `(task_id, task_sequence)` pair.
+- `workflowStepGateSingleGateInvariant.integration.test.ts` — engine attempts to create a gate when one already exists open for the same `(run_id, step_id)`; returns the existing gate, no duplicate row created. Pre-check observed (not just UNIQUE-index fallback).
 
 **Verification commands:**
 
@@ -659,7 +782,10 @@ export type ApproverPoolSnapshot = string[];                              // use
 - Concurrent double-click on the same Approval is idempotent at the user level.
 - Concurrent submitters on the same Ask: exactly one wins.
 - Pool refresh on resolved gates is a no-op with `gate_already_resolved` reason.
-- Gate resolution sets `resolved_at`; the `unresolved_idx` partial index becomes empty for that row.
+- Gate resolution sets `resolved_at` AND `resolution_reason`; lookups by `(workflow_run_id, resolved_at)` find unresolved rows quickly via the new index.
+- **Causality boundary holds:** step transitions, gate writes, and events for the same logical transition commit or roll back together.
+- **Orphaned-gate cascade holds:** terminal run transitions resolve every open gate on that run with `resolution_reason = 'run_terminated'` and cancel its stall-notify jobs.
+- **Single-gate invariant holds:** engine pre-checks for existing open gate before INSERT; never relies solely on UNIQUE for correctness.
 
 **Dependencies:** Chunk 1 (`workflow_step_gates` table, `gate_id` FK on reviews, UNIQUE constraint, status enum extension).
 
@@ -685,9 +811,10 @@ export type ApproverPoolSnapshot = string[];                              // use
 **Files to modify:**
 
 - `server/services/workflowEngineService.ts` — `prepareNextStep` (or whatever the per-step-prelude is named) extended:
-  1. Read step's `params.is_critical`. If true and step type is `agent_call` / `prompt` / `action_call` / `invoke_automation`, AND the previous step is not already an Approval (the spec's "no double-gate" rule §5.2 #4): synthesise an Approval gate.
-  2. Synthesised approverGroup defaults: `{ kind: 'task_requester' }`, `quorum: 1`. The pool resolver runs, snapshot lands on `workflow_step_gates`.
-  3. Set `is_critical_synthesised: true` on the gate row.
+  1. **Pre-check the single-gate invariant.** Before any synthesis decision, call `WorkflowStepGateService.getOpenGate(runId, stepId)`. If a gate already exists open for this `(run_id, step_id)`, skip synthesis entirely and proceed using the existing gate. This handles the re-entrant case (engine reaches the same step a second time after restart, branching reconvergence, or scheduler retry) without relying on the UNIQUE-index 23505 fallback as a correctness mechanism.
+  2. Read step's `params.is_critical`. If true and step type is `agent_call` / `prompt` / `action_call` / `invoke_automation`, AND the previous step is not already an Approval (the spec's "no double-gate" rule §5.2 #4): synthesise an Approval gate.
+  3. Synthesised approverGroup defaults: `{ kind: 'task_requester' }`, `quorum: 1`. The pool resolver runs, snapshot lands on `workflow_step_gates`.
+  4. Set `is_critical_synthesised: true` on the gate row.
 - `server/services/workflowStepReviewService.ts` — `requireApproval` extended to accept an `approverGroup` param and resolve the pool via `WorkflowApproverPoolService.resolvePool` before opening the gate.
 - `server/services/workflowRunService.ts` — `decideApproval`:
   1. Pool-membership check delegated to `WorkflowApproverPoolService.userInPool(gate.approver_pool_snapshot, userId)`. Returns 403 if false.
@@ -815,9 +942,9 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 
 ### Chunk 7 — Cost / wall-clock runaway protection
 
-**Spec sections owned:** §3.1 (`effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count`, `cost_ceiling_cents`, `wall_clock_cap_seconds`), §7 (full): pause card, operator-initiated Pause/Stop, between-step semantics, resume API with extension, stop API, telemetry events.
+**Spec sections owned:** §3.1 (`effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count`, `cost_ceiling_cents`, `wall_clock_cap_seconds`, `cost_accumulator_cents`), §7 (full): pause card, operator-initiated Pause/Stop, between-step semantics, resume API with extension, stop API, telemetry events. Plus Decision 12 (`cost_accumulator_cents` is the control-flow source of truth) and the orphaned-gate cascade on `failRun` / `cancelRun` (Chunk 4 owns the cascade method; this chunk wires it into Stop).
 
-**Scope.** Per-run cost cap + wall-clock cap. Engine pauses between steps when either is reached. Operator-driven Pause/Stop in the task header. Resume API with mandatory extension after cap-triggered pause. Stop API. Run-completion invariant (every step terminal before `running → succeeded`).
+**Scope.** Per-run cost cap + wall-clock cap. Engine pauses between steps when either is reached, reading from `cost_accumulator_cents` (NOT `SUM(ledger)`). Cost-ledger writers also increment the accumulator transactionally. Operator-driven Pause/Stop in the task header. Resume API with mandatory extension after cap-triggered pause. Stop API. Run-completion invariant (every step terminal before `running → succeeded`). Stop / fail paths cascade into open gates with `resolution_reason = 'run_terminated'` per the orphaned-gate invariant.
 
 **Out of scope.** Pause card UI rendering (Chunk 11). Operator's Pause / Stop button placement in the task header (Chunk 11). Cost dashboards (V2).
 
@@ -829,11 +956,26 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 **Files to modify:**
 
 - `server/services/workflowEngineService.ts` — between-step loop:
-  1. After each step completion, evaluate `currentCostCents = sum of cost-ledger rows for runId`. (Sum, not in-memory aggregate, per spec §7.4.)
-  2. Evaluate `currentElapsedSeconds = now() - startedAt`.
+  1. After each step completion, read `currentCostCents` from `workflow_runs.cost_accumulator_cents` (Decision 12: control-flow source of truth; ledger remains audit). The cost-ledger writer increments `cost_accumulator_cents` transactionally with each ledger row write.
+  2. Evaluate `currentElapsedSeconds` via SQL: `SELECT EXTRACT(EPOCH FROM (now() - started_at))::integer FROM workflow_runs WHERE id = $1` (round-3 clock-source invariant — DB time only; never compute `Date.now() - run.startedAt` in TS).
   3. If `currentCostCents >= effective_cost_ceiling_cents` OR `currentElapsedSeconds >= effective_wall_clock_cap_seconds`: emit `run.paused.cost_ceiling` or `run.paused.wall_clock` (whichever fired first), transition `running → paused`, do not dispatch the next step.
   4. Wall-clock check additionally fires from a 30-second pg-boss heartbeat job that pauses long-running steps' parent runs without waiting for between-step.
   5. Run completion: when transitioning `running → succeeded`, verify (a) every step is in a terminal status and (b) no `queued` / `awaiting_input` / `awaiting_approval` step remains. Spec §7.5 invariant. If condition fails, the run stays `running` and the engine logs `run_completion_blocked_by_open_step` + the specific step status.
+- `server/services/workflowRunCostLedgerService.ts` (existing or new wrapper) — every ledger row write atomically increments `workflow_runs.cost_accumulator_cents` in the same transaction: `UPDATE workflow_runs SET cost_accumulator_cents = cost_accumulator_cents + $delta WHERE id = $runId`. Writers that emit cost rows asynchronously (skill executors that reconcile cost via a separate writer) MUST land both rows in the same transaction.
+- `server/services/workflowRunPauseStopService.ts` — `resumeRun` (round-2 hardening — resume correctness invariant):
+  1. Open the run-status transaction (`paused → running` with optimistic predicate `WHERE status = 'paused'`); 0 rows → 409 `not_paused` or `race_with_other_action`.
+  2. Re-load the step graph for the run.
+  3. Identify the next-dispatchable steps: every step with `status NOT IN ('completed', 'failed', 'skipped', 'cancelled')`. Dispatch via the engine's existing tick path. **Forbidden:** dispatching a step whose status is already `completed` — engine MUST re-check, never trust prior in-memory state.
+  4. Step-completion writes use optimistic CAS predicates `WHERE id = $1 AND status NOT IN ('completed', 'failed', 'skipped', 'cancelled')` (round-3: exactly-once at DB level). 0 rows → no-op idempotent retry; 1 row → success.
+  5. Pre-step cost-cap check (round-2): before dispatch, evaluate `cost_accumulator_cents + estimatedNextStepCostCents` against `effective_cost_ceiling_cents`. If the projected total would exceed the cap, immediately re-pause the run with `run.paused.cost_ceiling` (no step dispatch). Estimation source (priority order): `step.params.estimatedCostCents` if author-provided, else per-step-type default constants in `server/lib/workflow/costEstimationDefaults.ts` (`agent_call: 50`, `action_call: 5`, `prompt: 10`, `invoke_automation: 25`, others: 0).
+- `server/services/workflowEngineService.ts` — retry containment + cancellation re-check (round-3):
+  - Before each step dispatch, re-read the run's `status` from DB. If `status IN ('cancelled', 'failed', 'paused')`, abandon dispatch — emit log line, do not write. Cancellation re-check is the dispatch-time guard that backs the run-cancellation invariant.
+  - Increment `workflow_step_runs.attempt` on each retry attempt. Read `params.maxAttempts` from the step definition (default 3). If `attempt >= maxAttempts`, transition `running → failed` with `errorMessage: 'max_attempts_exceeded'` and propagate per `params.onFail` (`'fail' | 'continue' | 'gate'`).
+  - Retry backoff: pure helper `computeRetryBackoffMs(attemptNumber)` returns `min(1000 * 2 ** (attempt - 1), 60000)` — exponential cap at 60s.
+- `server/services/skillExecutor.ts` and `server/services/actionCallDispatchService.ts` — round-3 external idempotency keys:
+  - Every outbound HTTP / webhook / integration call sets the canonical idempotency key `${runId}:${stepId}:${taskSequence}`.
+  - Implementation paths by provider: Stripe `Idempotency-Key` header; HTTP webhooks include `X-Idempotency-Key`; CRM / email providers use provider-specific equivalents.
+  - Skill executors that don't support an idempotency header SHOULD record the key in a local `external_call_log` row keyed on the canonical key and short-circuit on the second attempt. (Audit at Chunk 5 entry — list every existing skill executor, mark which already support keys, route the gaps to `tasks/todo.md`.)
 - `server/routes/workflowRuns.ts` — three new routes (mounted on the existing router):
   - `POST /api/tasks/:taskId/run/resume` body `{ extendCostCents?, extendSeconds? }`. Permission guard: caller in §14.5 visibility set.
   - `POST /api/tasks/:taskId/run/stop` body `{}`.
@@ -881,6 +1023,9 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - `workflowRunResumeWithExtension.integration.test.ts` — resume after cap-triggered pause without extension → 400; with extension → 200; `effective_*` fields incremented.
 - `workflowRunCompletionGuard.integration.test.ts` — fan-out with one branch still in flight: run does NOT transition to `succeeded` even when the parent step's `next` resolves.
 - `workflowRunStopMidFlight.integration.test.ts` — Stop while a skill call is in flight: emit `run.stopped.by_user`, attempt cancellation, log result, transition to `failed`.
+- `workflowRunResumeIdempotency.integration.test.ts` — round-2 invariant. Pause a run after step N completes; trigger TWO concurrent `resumeRun` calls. Assert: first wins; second 409s with `not_paused`. No completed step is re-executed. Step-status CAS predicates ensure a retried scheduler tick on the same step is a no-op.
+- `workflowRunResumeAfterCrash.integration.test.ts` — round-2 invariant. Pause a run, then simulate engine restart (kill + relaunch). Resume: engine re-loads step graph, dispatches only `status NOT IN terminal` steps. Completed step N is not re-executed.
+- `workflowRunPreStepCostCap.integration.test.ts` — round-2 invariant. Set `effective_cost_ceiling_cents = 100`, `cost_accumulator_cents = 80`, next step is an `agent_call` (default estimate = 50). Engine pauses BEFORE dispatch; emits `run.paused.cost_ceiling`. Without round-2, the agent_call would have run and overshot to 130.
 
 **Verification commands:**
 
@@ -896,6 +1041,10 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - Run-completion invariant holds: succeeded only when every step is terminal.
 - `effective_*` fields update transactionally on resume-with-extension.
 - Stop transitions to `failed` with `stopped_by_user` reason; emits `run.stopped.by_user`.
+- **Cost accumulator stays in sync:** ledger writes and accumulator increments commit together. Concurrent ledger writes do not double-count or lose-count.
+- **Orphaned-gate cascade fires on Stop:** any open gates resolved with `resolution_reason = 'run_terminated'`; stall-notify jobs cancelled.
+- **Resume correctness:** completed steps are never re-executed after resume; step CAS predicates make duplicate dispatches no-ops.
+- **Pre-step cost-cap check:** projected `accumulator + estimate` is evaluated BEFORE dispatch; one expensive step can no longer overshoot the cap by an unbounded amount.
 
 **Dependencies:** Chunks 1 (schema columns + status enum), 4 (gate primitive — Stop must resolve any open gates), 9 (event emission for `run.paused.*` / `run.resumed` / `run.stopped.by_user` — but the events themselves can land in this chunk; Chunk 9 owns the WebSocket transport).
 
@@ -911,10 +1060,10 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 
 **Files to create:**
 
-- `server/jobs/workflowGateStallNotifyJob.ts` — pg-boss job handler. Payload: `{ gateId, organisationId, taskId, requesterUserId, cadence: '24h' | '72h' | '7d' }`. Verifies gate is still open (`resolved_at IS NULL`) before notifying — late-firing job after gate resolved is a no-op.
+- `server/jobs/workflowGateStallNotifyJob.ts` — pg-boss job handler. Payload: `{ gateId, organisationId, taskId, requesterUserId, cadence: '24h' | '72h' | '7d', expectedCreatedAt: ISO8601 }`. Stale-fire guard: notification is sent ONLY if BOTH `gate.resolved_at IS NULL` AND `gate.created_at = expectedCreatedAt` (string-equal on the ISO timestamp — round-3 clock-source: comparison is DB-row vs DB-supplied-string, no app `Date.now()`). If either check fails (gate resolved, or gate row recreated after a future re-open flow), the job is a no-op. Prevents stale notifications after refresh-pool or future gate-reopen scenarios.
 - `server/services/workflowGateStallNotifyService.ts` — schedules and cancels stall jobs.
-  - `scheduleStallNotifications(gateId, taskId, requesterUserId, organisationId)` — enqueues three jobs with `startAfter: 24h / 72h / 7d`. Records the pg-boss job IDs on a new `workflow_step_gates.stall_notify_job_ids jsonb` column (added in Chunk 1 supplement — see note below). Or, simpler, the cleanup-on-resolve query queries pg-boss for jobs by name pattern matching `gateId`. Architect picks at chunk-time; the latter is simpler.
-  - `cancelStallNotifications(gateId)` — cancels the three jobs.
+  - `scheduleStallNotifications(gateId, gateCreatedAt, taskId, requesterUserId, organisationId)` — enqueues three jobs with `startAfter: 24h / 72h / 7d`. Each payload carries `expectedCreatedAt: gateCreatedAt.toISOString()` for the stale-fire guard. Job names follow the pattern `stall-notify-${gateId}-${cadence}` for pg-boss-native dedup.
+  - `cancelStallNotifications(gateId)` — cancels the three jobs by name pattern (`stall-notify-${gateId}-*`). Cancellation is best-effort; the in-handler stale-fire guard (`expectedCreatedAt` check) is the durable safety.
 - `server/services/workflowScheduleDispatchService.ts` — wraps the existing schedule-dispatch path with `pinned_template_version_id` honour. If non-null, dispatches that exact version; else uses the latest published.
 
 **Files to modify:**
@@ -924,7 +1073,7 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - `server/index.ts` — register the new pg-boss worker via `createWorker(WORKFLOW_GATE_STALL_NOTIFY_QUEUE, handler)`.
 - `server/services/notificationService.ts` (or whichever service sends in-app notifications + emails) — extend with `sendGateStallNotification(taskId, requesterUserId, cadence)`.
 
-**Note on Chunk 1 schema:** if the stall-job-id-tracking lands as a JSONB column on `workflow_step_gates`, that column needs to land in the Chunk 1 migration. Architect at Chunk 1 time can decide whether to track via a column or a pg-boss query pattern. **Plan-author preference:** pg-boss query pattern (no schema column) — pg-boss has `getJobsByName` / cancel-by-name; one less column.
+**Resolved at plan-gate review:** stall-job-id tracking uses the pg-boss query pattern (no schema column). pg-boss `getJobsByName` / cancel-by-name handles cancellation; the durable safety is the in-handler stale-fire guard (`expectedCreatedAt` check) — independent of cancellation success.
 
 **Contracts pinned in this chunk:**
 
@@ -977,10 +1126,13 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - `server/websocket/emitters.ts` (modify) — add `emitTaskEvent(taskId, envelope)` mirroring `emitAgentExecutionEvent`. Envelope shape:
   ```typescript
   {
-    eventId: `task:${taskId}:${taskSequence}:${kind}`,
+    eventId: `task:${taskId}:${taskSequence}:${eventSubsequence}:${kind}`,
     type: 'task:execution-event',
     entityId: taskId,
     timestamp: ISO8601,
+    eventOrigin: 'engine' | 'gate' | 'user' | 'orchestrator',                // Decision 11
+    taskSequence: number,
+    eventSubsequence: number,                                                // Decision 11
     payload: TaskEvent
   }
   ```
@@ -1026,19 +1178,53 @@ export type TaskEvent =
   | { kind: 'run.paused.wall_clock'; payload: { capValue: number; currentElapsed: number } }
   | { kind: 'run.paused.by_user'; payload: { actorId: string } }
   | { kind: 'run.resumed'; payload: { actorId: string; extensionCostCents?: number; extensionSeconds?: number } }
-  | { kind: 'run.stopped.by_user'; payload: { actorId: string } };
+  | { kind: 'run.stopped.by_user'; payload: { actorId: string } }
+  | { kind: 'task.degraded'; payload: { reason: 'consumer_gap_detected' | 'replay_cursor_expired'; gapRange?: [number, number]; degradationReason: string } };
 ```
 
-Adding a new kind requires updating the union AND the validator allow-list in the same commit (DEVELOPMENT_GUIDELINES §8.13).
+`task.degraded` is the round-2 non-fatal signal. The server emits it when a consumer-side gap is detected (live stream or replay) AND simultaneously sets `workflow_runs.degradation_reason` (one-shot — first-write wins). The run does NOT fail; execution continues. UI surfaces a warning chip and triggers an immediate REST-replay reconcile.
+
+Adding a new kind requires updating the union AND the validator allow-list in the same commit (DEVELOPMENT_GUIDELINES §8.13). When a kind's payload shape changes (field added, type widened, semantics evolve), the kind's `eventSchemaVersion` increments and the replay logic branches on `(kind, version)` to re-shape old payloads to the current type. V1 ships every kind at `eventSchemaVersion = 1`.
 
 **Replay protocol pinned:**
 
-- Cursor: `taskSequence` (number).
-- Server: `GET /api/tasks/:taskId/event-stream/replay?fromSeq=N` returns `{ events, hasGap, oldestRetainedSeq }`.
-- Client: applies events with `taskSequence > N`. If `hasGap === true` (cursor pre-dates oldest retained event), client re-fetches the full task state from the REST snapshot endpoint and rebuilds.
+- Cursor: `(taskSequence, eventSubsequence)` (composite — round-1 invariant).
+- Server: `GET /api/tasks/:taskId/event-stream/replay?fromSeq=N&fromSubseq=M` returns `{ events, hasGap, oldestRetainedSeq }`. Each event row includes `eventSchemaVersion` so the client can branch when shapes evolved.
+- Client: applies events with `(taskSequence, eventSubsequence) > (N, M)`. If `hasGap === true` (cursor pre-dates oldest retained event), client re-fetches the full task state from the REST snapshot endpoint and rebuilds.
 - Retention: 7 days for `agent_execution_events` rows (Open Question 4 default).
+- **Schema-version branching:** the client's pure decoder maps `(kind, eventSchemaVersion) → CurrentTaskEvent`. V2 evolutions add a new branch; older events in the retention window decode through the back-compat branch. Without `eventSchemaVersion`, V2 either breaks replay or forces a one-shot mass-rewrite of all retained events. (Round-2 hardening invariant.)
+- **UI reconciliation contract.** WebSocket is the low-latency push; REST replay is authoritative. Clients reconcile in three cases: (a) on every reconnect, (b) every 60 seconds while the page is visible (delta-only — replay is cheap), (c) immediately on `task.degraded` event arrival. (Round-2 hardening invariant; consumed by Chunk 11.)
 
-**Latency budget:** sub-200ms event-emit-to-render. Architect verifies with synthetic load tests at chunk-time. The existing `agent_execution_events` write-then-emit shape already meets this; the per-task variant inherits.
+**Latency budget verification (pinned at plan-gate review):**
+
+- **Synthetic test:** 1000 events / second sustained for 60 seconds, single-node dev DB, single Node process. Measure `event_emit → client_render` end-to-end latency for a representative subset (10% sample) of emitted events.
+- **Acceptance:** p95 < 200 ms, p99 < 500 ms.
+- **Test harness lives at:** `server/services/__tests__/taskEventStreamLoad.integration.test.ts`. Generates events from a fake engine, captures emit timestamp at the server, captures render timestamp at a single test client, computes percentiles.
+- **Failure mode:** if budget is missed at chunk-time, the chunk does not merge. Fixes (in order of preference): batch the WebSocket emit (combine multiple events per envelope), drop non-critical events from the emit path (downgrade to log-only), shard the per-task counter (defer to V2).
+
+**Observability metrics counters (round-1 feedback):**
+
+Counter metrics emitted from existing `metrics.ts` infrastructure (or equivalent prom-client wrapper). Surfaces telemetry for ops dashboards from day one — without them, anomalies are blind until a customer reports.
+
+```
+workflow_run_paused_total{reason="cost_ceiling"|"wall_clock"|"by_user", template_id, organisation_id}
+workflow_gate_open_total{gate_kind="approval"|"ask", is_critical_synthesised, organisation_id}
+workflow_gate_resolved_total{resolution_reason, gate_kind, organisation_id}
+workflow_gate_stalled_total{cadence="24h"|"72h"|"7d", organisation_id}
+workflow_gate_orphaned_cascade_total{organisation_id}
+task_event_gap_detected_total{organisation_id}
+task_event_subsequence_collision_total{organisation_id}
+workflow_cost_accumulator_skew_total{organisation_id}                       // accumulator vs ledger SUM mismatch (probe)
+```
+
+Counters incremented from the relevant emitter / handler. Cardinality bounded: `organisation_id` and `template_id` are the only high-cardinality labels and the dashboard aggregates in queries. Probe `workflow_cost_accumulator_skew_total` runs daily against a sample of recently completed runs and increments the counter on any mismatch — non-zero is the signal to investigate.
+
+**Retention scalability checkpoint (round-1 feedback):**
+
+The 7-day hot retention (Open Q4) is the V1 baseline. Long-running workflows and audit investigations will quickly exceed this. Routed to `tasks/todo.md`:
+
+- **Cold archival pipeline** — archive `agent_execution_events` rows older than the hot window to a dedicated archive table OR S3 object storage. Replay from archive is best-effort (slow, separate code path). Triggers at chunk-time visibility into retention pressure.
+- **Per-org retention overrides** — once one customer needs longer hot retention, expose as an org-level setting; default stays at 7d.
 
 **Error handling:**
 
@@ -1046,6 +1232,7 @@ Adding a new kind requires updating the union AND the validator allow-list in th
 - Replay of a `fromSeq` older than retention: 200 with `hasGap: true`; client recovers by full reload.
 - WebSocket emission failure (no listeners, broken pipe): log; the event row is still in the DB and replays on reconnect.
 - Client gap detection (out-of-order arrival): buffer up to 1 second; if gap not filled, trigger replay from last contiguous `taskSequence`.
+- **Consumer-side gap that survives the buffer and replay** (round-2): emit `task.degraded` with `reason: 'consumer_gap_detected'` + the missing range; set `workflow_runs.degradation_reason = 'consumer_gap_detected: <range>'` if currently null (one-shot — never overwrite a prior degradation reason; the metric counter still ticks for repeat detections). Run continues. Distinct from the spec §8.1 server-side allocation gap which fails the run with `event_log_corrupted` — that is a corrupted log; this is a missed-by-consumer signal.
 
 **Test considerations:**
 
@@ -1083,7 +1270,7 @@ Adding a new kind requires updating the union AND the validator allow-list in th
 
 **Files to create:**
 
-- `server/services/assignableUsersService.ts` — `resolvePool(callerRole, callerId, organisationId, subaccountId) → Promise<{ users: AssignableUser[], teams: AssignableTeam[] }>` per spec §14.2 shape. Org admin/manager: org users + subaccount members. Subaccount admin: subaccount members only. Subaccount member: 403.
+- `server/services/assignableUsersService.ts` — `resolvePool({ caller: { id, role }, organisationId, subaccountId, intent: 'pick_approver' | 'pick_submitter' }) → Promise<{ users: AssignableUser[], teams: AssignableTeam[] }>` per spec §14.2 shape and Decision 13. Org admin/manager: org users + subaccount members. Subaccount admin: subaccount members only. Subaccount member: 403. **The `intent` parameter is carried through but does not branch in V1** — both `pick_approver` and `pick_submitter` resolve identically. The seam exists so future intents (`pick_external_reviewer`, `pick_partner_user`, restricted-view) extend the resolver, not call sites. Call sites pass `intent` literally — never construct it from caller role.
 - `server/routes/assignableUsers.ts` — `GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users`. Mounted in `server/index.ts`.
 - `server/services/teamsService.ts` — Teams CRUD (create, list, update, soft-delete). `team_members` add/remove. Already-implicitly-existing schema; this is the missing service layer.
 - `server/routes/teams.ts` — Teams CRUD endpoints. Mounted under `/api/orgs/:orgId/teams` (org-level) and `/api/subaccounts/:subaccountId/teams` (subaccount-scoped, optional in V1).
@@ -1100,7 +1287,7 @@ Adding a new kind requires updating the union AND the validator allow-list in th
 **Contracts pinned in this chunk:**
 
 ```typescript
-// GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users
+// GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users?intent=pick_approver|pick_submitter
 // 200:
 {
   users: Array<{
@@ -1114,6 +1301,12 @@ Adding a new kind requires updating the union AND the validator allow-list in th
   teams: Array<{ id: string; name: string; member_count: number }>;
 }
 // 403: { error: 'forbidden' }                                            // subaccount member or wrong subaccount admin
+// 400: { error: 'invalid_intent' }                                       // intent missing or not in V1 set
+
+// Intent values pinned in shared/types/assignableUsers.ts:
+//   type AssignableUsersIntent = 'pick_approver' | 'pick_submitter';
+// Future intents extend this union AND the resolver in assignableUsersService.ts
+// in the same commit (DEVELOPMENT_GUIDELINES §8.13 discriminated-union rule).
 ```
 
 ```typescript
@@ -1178,6 +1371,8 @@ Adding a new kind requires updating the union AND the validator allow-list in th
 - `client/src/components/openTask/PauseCard.tsx` — pause card primitive (Stop / Continue with extension buttons).
 - `client/src/components/openTask/TaskHeader.tsx` — task name, status badge, Pause/Stop buttons (visibility per role).
 - `client/src/components/openTask/openTaskViewPure.ts` — pure helpers: classify task type from event stream (trivial / multi-step / workflow-fired); pick the latest thinking text from `thinking.changed` events; compute milestone-vs-narration filter set; activity-pane auto-scroll decision logic per KNOWLEDGE.md 2026-05-02 correction.
+- `client/src/hooks/useTaskProjection.ts` — round-3 read-model projection. Pure deterministic reducer `(prevState: TaskProjection, event: TaskEvent) → TaskProjection`. Idempotent (applying the same event twice produces the same state — the dedup LRU is the safety). Inputs: a snapshot from REST replay (initial) plus the WebSocket event stream (incremental). UI components (`ChatPane`, `ActivityPane`, `NowTab`, `PlanTab`, `TaskHeader`) read the projection via `useTaskProjection(taskId) → TaskProjection`. **Forbidden:** UI components reading raw `useTaskEventStream` events directly. The projection is rebuildable from `agent_execution_events + workflow_runs + workflow_step_runs + workflow_step_gates`; reconcile-on-reconnect rebuilds it from scratch.
+- `client/src/hooks/useTaskProjectionPure.ts` — the reducer extracted as a pure function. Tested via `npx tsx` per the project's pure-function-only test posture.
 
 **Files to modify:**
 
@@ -1191,6 +1386,8 @@ Adding a new kind requires updating the union AND the validator allow-list in th
 - Activity flows top-down newest-at-bottom (KNOWLEDGE.md 2026-05-02 correction).
 - Plain-language thinking text (no engineering jargon).
 - Empty states per spec §9.6.
+- **UI reconciliation rule (round-2):** `useTaskEventStream` reconciles against the REST replay endpoint in three cases: on reconnect, every 60s while the page is visible (delta-only), immediately on `task.degraded` arrival. The hook exposes a `reconcileNow()` callback the page can also invoke (Files-tab open, manual refresh button). Reconciliation is delta-only — the existing dedup LRU absorbs duplicates. A degraded run renders a small warning chip in the task header.
+- **Read-model projection rule (round-3):** UI components consume `useTaskProjection(taskId)`, NOT raw events. The projection's reducer is pure + idempotent; applying the same event twice produces the same state. This defines the "step completed in DB but event not yet processed" boundary: projection lags DB by at most one reconcile interval; UI shows the projection state, never a contradictory mix.
 
 **Error handling:**
 
@@ -1376,35 +1573,27 @@ Hunk identity invariant: `(file_id, from_version, hunk_index)` deterministically
 
 ---
 
-### Chunk 14 — Studio canvas + inspectors
+### Chunk 14a — Studio canvas + publish
 
-**Spec sections owned:** §3.3 (`workflow_drafts` lifecycle — open question 1 may revisit), §10 (full): canvas, four A's inspectors, Ask inspector deep-dive, publish flow with publish-notes modal, concurrent-editing handling, Studio handoff with draft hydration.
+**Spec sections owned:** §10.1 (canvas layout, vertical step cards), §10.2 (validation status + cost estimate strip), §10.4 (publish flow), §10.5 (last-write-wins concurrent-edit handling). Plus the publish-notes column write path (column added in Chunk 1).
 
-**Scope.** Studio is admin / power-user only — not in operator nav. Canvas-first authoring with slide-out inspectors per step type. Studio chat panel (docked bottom-left, expand to side panel) for big restructures via diff card. Bottom action bar with validation status + estimated cost + Publish button. Publish modal with optional notes. Last-write-wins concurrent edit handling. Draft hydration via `?fromDraft=:draftId`.
+**Scope.** Studio is admin / power-user only — not in operator nav. The canvas itself: vertical step-card list, branching forks, parallel side-by-side, Approval-on-reject dashed back-arrow. Bottom action bar with validation status + estimated cost + Publish button. Publish modal with optional notes. Last-write-wins concurrent-edit handling.
 
-**Out of scope.** Visual node-graph editor (permanently out per brief §3). Inline file editing (out per brief §9.3). "Explain this workflow" inline explanations (V2). Visual diff between published versions (V2).
+**Out of scope.** Inspectors (Chunk 14b — slide-out + four step types). Studio chat panel (Chunk 14b). Draft hydration UI (Chunk 14b). Visual node-graph editor (permanently out per brief §3). Inline file editing (out per brief §9.3). "Explain this workflow" inline explanations (V2). Visual diff between published versions (V2).
 
 **Files to create:**
 
-- `client/src/pages/StudioPage.tsx` — admin route at `/admin/workflows/:id/edit` and `/admin/workflows/new?fromDraft=:draftId`.
-- `client/src/components/studio/StudioCanvas.tsx` — vertical step-card list, branching forks, parallel side-by-side, Approval-on-reject dashed back-arrow.
-- `client/src/components/studio/StudioInspector.tsx` — slide-out container.
-- `client/src/components/studio/inspectors/AgentInspector.tsx` — Agent step inspector (per mock 04).
-- `client/src/components/studio/inspectors/ActionInspector.tsx` — Action step inspector.
-- `client/src/components/studio/inspectors/AskInspector.tsx` — Ask inspector with five sub-states (per mock 09): default, Who-can-submit dropdown, Auto-fill dropdown, Add-a-field picker, edit-field-detail.
-- `client/src/components/studio/inspectors/ApprovalInspector.tsx` — Approval inspector with confidence preview + audit-on-decision footnote (read-only).
-- `client/src/components/studio/StudioChatPanel.tsx` — docked pill bottom-left; expands to left side-panel; agent diff cards with Apply / Discard.
+- `client/src/pages/StudioPage.tsx` — admin route at `/admin/workflows/:id/edit` and `/admin/workflows/new`. (The `?fromDraft=:draftId` query param is read but its hydration logic lands in Chunk 14b.)
+- `client/src/components/studio/StudioCanvas.tsx` — vertical step-card list, branching forks, parallel side-by-side, Approval-on-reject dashed back-arrow. Empty inspector mount-point — Chunk 14b fills.
 - `client/src/components/studio/StudioBottomBar.tsx` — validation status + cost estimate + Publish button.
 - `client/src/components/studio/PublishModal.tsx` — single optional textarea + Skip / Publish buttons. Concurrent-edit warning banner if upstream `updated_at` changed.
 - `client/src/components/studio/studioCanvasPure.ts` — pure layout logic: branch fork rendering, parallel layout, validate-then-publish gating.
-- `server/services/workflowDraftService.ts` — `workflow_drafts` CRUD: create, read by id, mark consumed, list-unconsumed for cleanup.
-- `server/routes/workflowDrafts.ts` — `GET /api/workflow-drafts/:draftId` (Studio reads on `?fromDraft` open), `POST /api/workflow-drafts/:draftId/discard` (operator discard from chat).
 - `server/services/workflowPublishService.ts` — wraps the existing `WorkflowTemplateService.publish` with publish-notes capture and concurrent-edit detection (compares `workflow_template_versions.updated_at` of the latest version against the user's snapshot).
 
 **Files to modify:**
 
 - `server/services/workflowTemplateService.ts` — `publish` accepts `publishNotes?: string` and persists to `workflow_template_versions.publish_notes` in the same transaction.
-- `server/routes/workflowStudio.ts` (existing) — extend with the publish-notes-capable endpoint.
+- `server/routes/workflowStudio.ts` (existing) — extend with the publish-notes-capable endpoint and concurrent-edit response shape.
 - `client/src/App.tsx` — register `/admin/workflows/:id/edit` and `/admin/workflows/new`.
 
 **Contracts pinned in this chunk:**
@@ -1416,11 +1605,6 @@ Hunk identity invariant: `(file_id, from_version, hunk_index)` deterministically
 // 422: { error: 'validation_failed', errors: ValidatorError[] }
 // 409: { error: 'concurrent_publish', upstream_updated_at: string, upstream_user_id: string }
 //   (When expectedUpstreamUpdatedAt is provided and the latest version was published since.)
-
-// GET /api/workflow-drafts/:draftId
-// 200: { id, payload, sessionId, subaccountId, createdAt, updatedAt, consumedAt }
-// 404: { error: 'draft_not_found' }
-// 410: { error: 'draft_consumed', consumed_at }                          // already published / discarded
 ```
 
 Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `updated_at` on canvas open. On publish, the request includes `expectedUpstreamUpdatedAt`. If mismatch → 409 with the new upstream info; modal banner shown; user can Publish-anyway (omits the expected field on retry) or Cancel.
@@ -1429,12 +1613,10 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 
 - 422 validation errors from Chunk 2 validator: render inline error pills next to the offending steps.
 - 409 concurrent publish: render banner; user choice.
-- 410 draft consumed: render "This draft was already used or discarded — start fresh?".
 
 **Test considerations:**
 
 - `studioCanvasPure.test.ts` — layout calculation logic.
-- `workflowDraftServicePure.test.ts` — pure draft hydration logic.
 - `workflowPublishConcurrentEdit.integration.test.ts` — two users editing the same template; second-to-publish gets 409.
 
 **Verification commands:**
@@ -1446,14 +1628,78 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 
 **Acceptance criteria:**
 
-- Studio canvas matches mock 05.
-- Four A's inspectors match mock 04 + mock 09 (Ask sub-states).
+- Studio canvas matches mock 05 (without inspectors — placeholder mount-point).
 - Publish modal matches mock 05 publish-notes inset.
 - Concurrent-edit warning banner appears when upstream changed.
-- Draft hydration on `?fromDraft=:draftId` populates the canvas.
-- Discarding a draft sets `consumed_at`.
+- Validation pills render inline on offending steps.
 
-**Dependencies:** Chunks 2 (validator), 10 (User / Team pickers).
+**Dependencies:** Chunks 2 (validator), 10 (User / Team pickers — already exist; consumed by 14b).
+
+---
+
+### Chunk 14b — Inspectors + draft hydration
+
+**Spec sections owned:** §3.3 (`workflow_drafts` lifecycle), §10.3 (four A's inspectors, Ask inspector deep-dive), §10.6 (Studio chat panel), §10.7 (Studio handoff with draft hydration via `?fromDraft=:draftId`).
+
+**Scope.** Slide-out inspectors per step type (Agent, Action, Approval, Ask). Studio chat panel docked bottom-left, expand to side panel for big restructures via diff card. Draft hydration on canvas open via `?fromDraft=:draftId`. Discard endpoint for the operator-side dismiss flow.
+
+**Out of scope.** Canvas + bottom bar + publish flow (Chunk 14a). Visual node-graph editor (out). "Explain this workflow" inline explanations (V2).
+
+**Files to create:**
+
+- `client/src/components/studio/StudioInspector.tsx` — slide-out container, mount inside the canvas placeholder from 14a.
+- `client/src/components/studio/inspectors/AgentInspector.tsx` — Agent step inspector (per mock 04).
+- `client/src/components/studio/inspectors/ActionInspector.tsx` — Action step inspector.
+- `client/src/components/studio/inspectors/AskInspector.tsx` — Ask inspector with five sub-states (per mock 09): default, Who-can-submit dropdown, Auto-fill dropdown, Add-a-field picker, edit-field-detail.
+- `client/src/components/studio/inspectors/ApprovalInspector.tsx` — Approval inspector with confidence preview + audit-on-decision footnote (read-only).
+- `client/src/components/studio/StudioChatPanel.tsx` — docked pill bottom-left; expands to left side-panel; agent diff cards with Apply / Discard.
+- `server/services/workflowDraftService.ts` — `workflow_drafts` CRUD: `create({ payload, sessionId, subaccountId, organisationId, draftSource })`, `findById`, `markConsumed`, `listUnconsumedOlderThan` (for the cleanup job in Chunk 16). Decision 14: `draftSource` is required; V1 callers always pass `'orchestrator'`.
+- `server/routes/workflowDrafts.ts` — `GET /api/workflow-drafts/:draftId` (Studio reads on `?fromDraft` open), `POST /api/workflow-drafts/:draftId/discard` (operator discard from chat).
+
+**Files to modify:**
+
+- `client/src/pages/StudioPage.tsx` (from 14a) — add the `?fromDraft=:draftId` hydration on mount; calls `GET /api/workflow-drafts/:draftId` and seeds canvas state.
+- `client/src/components/studio/StudioCanvas.tsx` (from 14a) — wire the inspector slide-out mount-point to the new components.
+
+**Contracts pinned in this chunk:**
+
+```typescript
+// GET /api/workflow-drafts/:draftId
+// 200: { id, payload, sessionId, subaccountId, draftSource, createdAt, updatedAt, consumedAt }
+// 404: { error: 'draft_not_found' }
+// 410: { error: 'draft_consumed', consumed_at }                          // already published / discarded
+
+// POST /api/workflow-drafts/:draftId/discard
+// 200: { discarded: true }
+// 410: { error: 'draft_consumed', consumed_at }
+// 404: { error: 'draft_not_found' }
+```
+
+**Error handling:**
+
+- 410 draft consumed: render "This draft was already used or discarded — start fresh?".
+- Inspector validation errors: per-field inline (mirrors the Chunk 2 validator output shape).
+
+**Test considerations:**
+
+- `workflowDraftServicePure.test.ts` — pure draft hydration + provenance handling (`draftSource` round-trips correctly).
+- Inspector behaviour: visual / interaction states validated against mockups manually (per CLAUDE.md / spec §17.5 frontend-tests-deferred posture).
+
+**Verification commands:**
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build:client`
+- `npx tsx server/services/__tests__/workflowDraftServicePure.test.ts`
+
+**Acceptance criteria:**
+
+- Four A's inspectors match mock 04 + mock 09 (Ask sub-states).
+- Studio chat panel docks bottom-left; expand-to-side works; diff card Apply / Discard wired.
+- Draft hydration on `?fromDraft=:draftId` populates the canvas; `draft_source = 'orchestrator'` round-trips.
+- Discarding a draft sets `consumed_at`; subsequent reads return 410.
+
+**Dependencies:** Chunk 14a (canvas + publish). Chunk 10 (User / Team pickers consumed by AskInspector / ApprovalInspector).
 
 ---
 
@@ -1546,7 +1792,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 - Milestone events emit per-agent; narration stays in activity (does not leak to chat).
 - `workflow.run.start` skill is reachable from any agent with run-permission on the target subaccount; both ACTION_REGISTRY and SKILL_HANDLERS registered.
 
-**Dependencies:** Chunks 9 (`agent.milestone` + `chat.message` event kinds), 14 (`workflow_drafts` table + service).
+**Dependencies:** Chunks 9 (`agent.milestone` + `chat.message` event kinds), 14b (`workflow_drafts` table + service).
 
 ---
 
@@ -1602,7 +1848,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 - Cleanup job reaps unconsumed drafts after 7 days.
 - `architecture.md` and `docs/capabilities.md` updated.
 
-**Dependencies:** Chunks 1 (`workflow_drafts` table), 11 (Tasks page lives in OpenTaskView), 14 (drafts service exists).
+**Dependencies:** Chunks 1 (`workflow_drafts` table), 11 (Tasks page lives in OpenTaskView), 14b (drafts service exists).
 
 ---
 
@@ -1625,6 +1871,31 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 | **Pre-existing violation #1 (pool-membership check) is missed** if Chunk 1 ships partial | High if not closed | Critical — data integrity | Pre-existing violation explicitly listed in Chunk 1 acceptance criteria. CI's `verify-rls-coverage.sh` does not catch this — it's an authz check, not RLS. Manual reviewer (`pr-reviewer`) verifies the route guard at Chunk 1 PR. |
 | **Latency budget of sub-200ms event-emit-to-render is missed** | Medium — depends on infra | High — kills the demo experience | Synthetic load test ships in Chunk 9 verification. Optimistic rendering hides any latency to the operator (their actions render immediately). Server-side instrumentation (existing logger.info pattern) captures emit→ack timing per event for post-launch tuning. |
 | **Telemetry cascade** — every event emit cascades through tracing, web-socket, log. If one cascade blocks the request path, hot-path latency degrades | Low — existing pattern is fire-and-forget | Medium | Existing `agentExecutionEventService` is already fire-and-forget per spec §4.1. New `taskEventService` mirrors. Soft-breaker pattern (KNOWLEDGE.md 2026-04-21 entry) available if a cascade misbehaves. |
+| **Cross-source event causality drift** — engine, gate, user, and orchestrator emitters all write to `agent_execution_events`. Without the causality boundary, two transitions can interleave and produce a sequence ordering that obscures cause / effect | Medium without invariants | High — replay correctness, debugging, audit | Causality-boundary invariant (single-transaction step+gate+event triple) plus `event_origin` + `event_subsequence` columns enforce deterministic intra-bundle ordering. `appendEventBundle` helper (Chunk 3) is the canonical write path. Validator rejects events missing origin. |
+| **`run_sequence` accidentally consumed by new task-scoped surface** | Medium — easy to copy-paste from old code | Medium — produces stable-looking but wrong order | Task_sequence-authoritative invariant pinned in Chunk 3. Code review catches; future lint rule plausible. |
+| **Orphaned gates after run termination** — open gates left dangling on Stop / fail produce stale notifications, audit ambiguity, dead UI cards | Medium without cascade | High — operator-visible incorrectness | Orphaned-gate cascade invariant: every terminal run transition resolves all open gates with `resolution_reason = 'run_terminated'` AND cancels stall-notify jobs. Wired through `failRun` / `cancelRun` / `succeedRun`. Integration test asserts cascade across 3+ open gates. |
+| **Stall notification fires for stale gate state** (e.g., refresh-pool changed pool, future re-open scenarios) | Low V1, growing V2 | Low — wrong audience reads stale message | `expectedCreatedAt` payload field + in-handler stale-fire guard. Cancellation is best-effort; the durable safety is the handler check. |
+| **isCritical synthesis double-fires** when the engine reaches the same step twice (branching reconvergence, restart, retry) | Medium without pre-check | Medium — duplicate gate UI + race | Pre-check via `getOpenGate` before synthesis decision. UNIQUE index is the safety net; pre-check is the correctness mechanism. Test asserts no duplicate row when re-entry happens. |
+| **Cost-cap pause fires at the wrong moment** because `SUM(ledger)` reads see in-flight async writes | Medium | Medium — operator confusion (paused too early / too late) | Decision 12: `cost_accumulator_cents` is the control-flow source. Ledger writes increment the accumulator transactionally. Daily probe (`workflow_cost_accumulator_skew_total`) flags drift. |
+| **Permission model rigidity** when partner / external-reviewer / restricted-view roles arrive | Medium V2 | Medium — call-site fan-out | Decision 13: `resolveAssignableUsers({ caller, intent })` abstraction. V1 uses one resolver; future intents extend the resolver, not call sites. |
+| **Workflow drafts provenance ambiguity** when future flows produce drafts (Studio "save and continue later") | Low V1 | Medium V2 | Decision 14: `draft_source` column. V1 always writes `'orchestrator'`; future Studio-side writers tag `'studio_handoff'`. |
+| **Event-log retention pressure** at scale — 7d hot may not survive long-running workflow audits | Medium when usage scales | High — audit blocked | Cold archival pipeline routed to `tasks/todo.md`. Hot-window observability via metrics counters. Per-org retention overrides as a follow-up. |
+| **Studio chunk 14b inspector workload underestimated** | Medium — Ask sub-states are five distinct UI flows | Medium — schedule slip on the longest sub-chunk | Track inspector-by-inspector progress in 14b's TodoWrite; if Ask inspector alone exceeds 1.5 days, escalate before continuing to ApprovalInspector. |
+| **Transaction boundary fragmentation** — different engineers wrap transactions in different layers (e.g., service opens its own `db.transaction(...)` while called from an engine transaction → nested SAVEPOINT) | Medium without enforcement | High — silently breaks the causality boundary's commit semantics | Round-2 invariant: transaction boundary owned by engine / route handler only; downstream services accept `tx`. Code review catches; future lint rule plausible. Tested by a "service-opens-tx-in-engine-path" assertion in the integration suite. |
+| **Event schema evolution breaks replay** — V2 adds a field to an event payload; older retained events lack it; replay decoder crashes | Low V1, Medium V2+ | Medium — replays fail silently after schema bump | Round-2 invariant: every event row carries `event_schema_version`; client decoder branches on `(kind, version)`. V1 ships at 1; future bumps add a back-compat branch. |
+| **Gate-resolution race produces wrong `resolution_reason`** (e.g., user clicks Approve, Stop fires concurrently, gate resolves with `run_terminated` instead of `approved`) | Medium without precedence | Medium — operator confusion, audit incorrectness | Round-2 invariant: deterministic precedence via optimistic CAS (`WHERE resolved_at IS NULL`). User action's UPDATE wins by ordering, not by application priority. Tested across 3 race scenarios. |
+| **Resume re-executes a completed step** after crash / scheduler retry / duplicate dispatch | Medium without invariant | High — duplicate side effects (irreversible action_call, charge, notification) | Round-2 invariant: engine re-loads step graph and dispatches only `status NOT IN terminal`. Step CAS predicates make duplicate dispatches no-ops at the DB level. Tested with kill-during-resume and concurrent-resume scenarios. |
+| **Consumer-side gap is conflated with corrupt log** and fails the run unnecessarily | Medium without distinction | Medium — false-positive run failures | Round-2 invariant: server-side allocation gap fails the run (existing); consumer-side gap emits `task.degraded` and continues. Distinct code paths; metric counters distinguish. |
+| **Cost cap overshoots by an unbounded amount** when one expensive step lands after a low accumulator | Medium — every long task hits this once | Medium — operator surprise, billing tickets | Round-2 invariant: pre-step cost-cap check uses `accumulator + estimate`. Estimation heuristic by step type; opt-in `params.estimatedCostCents` for author override. Drift from actual cost is tolerated (accumulator catches up post-step). |
+| **WebSocket-only UI gets stuck in ghost state** when a frame drops or a network blip mutes the push | Medium under flaky networks | Medium — operator sees stale state, mistrusts the system | Round-2 invariant: UI reconciles against REST replay every 60s + on reconnect + on `task.degraded`. Existing dedup LRU absorbs duplicates from reconcile. |
+| **Future gate re-open flow forces a schema migration** because the seam wasn't reserved | Low V1, growing V2 | Medium — painful refactor across many call sites | Round-2 hardening: `superseded_by_gate_id` column added now, unused in V1. Reserves the seam at zero cost. |
+| **Inconsistent log shape across engine / gate / event services** makes ops debugging slow | Medium without enforcement | Low — operator productivity tax | Round-2 hardening: typed `workflowLog` wrapper enforces standard shape. New code MUST use it. Existing code stays as-is. |
+| **Step transitions to `completed` twice** under retry / scheduler double-fire / engine restart, producing duplicate side effects | Medium without DB-level CAS | High — duplicate cost ledger row, duplicate downstream event, audit drift | Round-3 invariant: every terminal-status UPDATE uses `WHERE status NOT IN terminal` predicate; affected-row count gates the success path. `assertValidTransition` rejects writes from terminal status as the second line of defence. Tested by `workflowStepCompletionExactlyOnce.integration.test.ts`. |
+| **External side-effect duplication** — engine retries an `action_call` and the receiver receives the request twice (duplicate email, duplicate payment, duplicate CRM write) | Medium under retry | Critical when the receiver is irreversible | Round-3 invariant: idempotency key `${runId}:${stepId}:${taskSequence}` on every outbound call. Provider-specific header (Stripe `Idempotency-Key`, generic `X-Idempotency-Key`). Skill executors without native key support back via `external_call_log` row. Audit at Chunk 5 entry to enumerate skills lacking native support. |
+| **Clock drift between app server and DB silently breaks timing comparisons** (cap checks, stall windows, retry windows) | Low — usually < 1s | Medium when it happens — comparisons go wrong by exactly the drift | Round-3 invariant: DB `NOW()` is authoritative; never compute time in TS and compare to a DB column. Cap-check elapsed-seconds reads `EXTRACT(EPOCH FROM (now() - started_at))` in SQL. Stall-job stale-fire guard compares DB-row vs DB-supplied-string. |
+| **Cancellation semantics inconsistent** between Stop, fail, and terminal cascade — some paths abort mid-step, others let in-flight finish, others do something different | Medium without explicit rule | Medium — operator confusion, audit ambiguity, half-completed side effects | Round-3 invariant pinned: V1 lets in-flight step complete naturally; engine re-checks run status before each dispatch; orphaned-gate cascade resolves open gates; mid-step abort is V2. Documented at the cancellation site in Chunk 7. |
+| **UI shows contradictory state** between WebSocket-pushed event and DB row (event lag, reconcile gap) | Medium without projection rule | Low — operator sees momentary glitch | Round-3 invariant: UI reads from `useTaskProjection`, NOT raw events. Projection lags DB by at most one reconcile interval; reconcile-on-reconnect rebuilds. Pure idempotent reducer; tested via `npx tsx`. |
+| **One bad step floods retries, logs, and cost** — no max-attempts cap | Medium — first time a step has a real bug | Medium — runaway log volume, cost ledger inflation | Round-3 invariant: `params.maxAttempts` (default 3); `attempt` column on `workflow_step_runs` already exists; engine increments + checks; exponential backoff with 60s cap. `onFail` policy controls run propagation. |
 
 ---
 
@@ -1658,6 +1929,11 @@ These are spec-named V2 items NOT in this build's scope. The plan author SHOULD 
 | Mid-step cap interruption (heartbeat checkpoints inside long-running steps) | Spec §7.4 | V2 — V1 is between-step only |
 | Sharded per-task sequence counter for high-fan-out workloads | Spec §8.1 | V2 — pre-production load doesn't warrant |
 | Frontend-surface unit tests (`*.test.tsx`) | Spec §17.5, `docs/spec-context.md` `frontend_tests: none_for_now` | Codebase-wide testing posture; revisit when posture flips |
+| Cold archival pipeline for `agent_execution_events` (archive table or S3 after hot-window) | Plan-gate review round-1 feedback #7 | V1 hot-only at 7d; cold ships when retention pressure surfaces |
+| Per-org event-retention overrides | Plan-gate review round-1 feedback #7 | V1 fixed at 7d; configurable once a customer needs it |
+| Custom roles / partner / external-reviewer support via `resolveAssignableUsers` intent extension | Decision 13, plan-gate round-1 feedback #8 | Abstraction seam exists; new intents added as customer demand surfaces |
+| Studio-side draft writes (`draft_source = 'studio_handoff'`) for "save and continue later" flow | Decision 14, plan-gate round-1 feedback #9 | V1 only writes `'orchestrator'`; column reserves the seam |
+| Future gate re-open flow | Implied by `expectedCreatedAt` stale-fire guard | V1 has no re-open path; the guard future-proofs the stall handler |
 
 **Open spec-time decisions also routed (architect refines at chunk-time, not blockers):**
 
@@ -1699,7 +1975,7 @@ Every spec section is owned by a chunk OR routed to deferred. No section silentl
 | §8.4 Optimistic rendering | Chunk 11 | |
 | §8.5 Latency budget | Chunk 9 (synthetic load test in verification) | |
 | §9 Open task view UI | Chunk 11 | Mobile fallback V2 → deferred |
-| §10 Studio UI | Chunk 14 | |
+| §10 Studio UI | Chunks 14a (canvas + publish), 14b (inspectors + chat panel + draft hydration) | |
 | §11 Ask form runtime | Chunk 12 | File-upload + conditional fields V2 → deferred |
 | §12 Files and conversational editing | Chunk 13 | Side-by-side diff + non-adjacent-version diff V2 → deferred |
 | §13 Orchestrator changes | Chunk 15 | |
@@ -1746,9 +2022,16 @@ Reviewed the plan against the questions in `spec-authoring-checklist.md` § Self
   - #9 picker permission scoping → Chunk 10. ✓
   - #10 auto-fill no warning → Chunk 12. ✓
   - #11 effort re-estimate → Chunk overview revised down to ~40 days. ✓
-- **System invariants block present** at top of plan. ✓
+- **System invariants block present** at top of plan. ✓ Hardening invariants added at plan-gate review round 1 (causality boundary, task_sequence-authoritative, orphaned-gate cascade, single-gate pre-check, stall-job stale-fire guard, cost accumulator, awaiting_approval naming pin). ✓ Round-2 invariants added (transaction-boundary ownership, event_schema_version, gate-resolution precedence, resume correctness, consumer-side-gap as degraded, pre-step cost-cap check, UI reconciliation, structured-log shape). ✓
 - **Pre-existing violations flagged** for Chunk 1. ✓
-- **Open questions surfaced** for caller. ✓
+- **Open questions resolved** at plan-gate review (Q1–Q6 all accepted with stated defaults). ✓
+- **Decisions 11–14 recorded** for the round-1 feedback items (event_origin/subsequence, cost_accumulator, picker abstraction, draft_source). ✓
+- **Chunk 14 split into 14a + 14b** to keep PR review scopes manageable; net effort unchanged. ✓
+- **Round-1 risk rows added.** ✓
+- **Round-2 risk rows added** for transaction fragmentation, schema evolution, gate-resolution race, resume re-execution, consumer-gap conflation, cost overshoot, WebSocket ghost state, gate re-open seam, log shape consistency. ✓
+- **Chunk 0 (vertical-slice spike)** documented as optional pre-build validation. ✓
+- **Round-3 invariants added** (exactly-once step completion, external side-effect idempotency keys, DB-clock-source authority, run cancellation semantics, read-model projection, hard failure containment per step). ✓
+- **Round-3 risk rows added** + crash-safety meta-check folded into Executor notes for every chunk's `pr-reviewer` pass. ✓
 
 ---
 
@@ -1775,9 +2058,25 @@ Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run t
 
 **Doc-sync at the end.** Chunk 16 includes the `architecture.md` Key files per domain update + `docs/capabilities.md` Workflows V1 section. Per CLAUDE.md §11 "Docs Stay In Sync With Code" — same commit as the relevant chunk, not a follow-up.
 
+**Crash-safety meta-check (round-3 — apply at every chunk's `pr-reviewer` pass).** Before marking a chunk done, walk every newly-introduced mutation site and ask: *"If the process crashes at any line, can the workflow replay safely without duplicating effects or corrupting state?"* The check passes when:
+
+- Every terminal-status write uses an optimistic CAS predicate (round-3 exactly-once invariant).
+- Every external side-effect call carries the canonical idempotency key (round-3 invariant).
+- Every transactional bundle (step + gate + event) commits or rolls back as one unit (round-1 causality boundary).
+- Every retry path increments `attempt` and respects `maxAttempts` (round-3 failure containment).
+- Every cancellation path re-checks run status before dispatch (round-3 cancellation invariant).
+
+If the check fails for any mutation site, the chunk does NOT merge — fix the site or escalate.
+
 ---
 
-_End of plan. Ready for plan-gate review._
+_End of plan. Plan-gate review complete (2026-05-02):_
+
+- _Round 1: open questions Q1–Q6 resolved, hardening invariants added (causality boundary, task_sequence-authoritative, orphaned-gate cascade, isCritical single-gate, stall-job stale-fire guard, cost accumulator, awaiting_approval naming pin), Decisions 11–14 recorded, Chunk 14 split into 14a + 14b._
+- _Round 2: invariants added for transaction-boundary ownership at the engine layer, `event_schema_version` for replay determinism, gate-resolution precedence, resume correctness with idempotent step writes, consumer-side gap as degraded (not failed), pre-step cost-cap check, UI reconciliation against the event log, `superseded_by_gate_id` future-proofing, three additional indexes, and a typed structured-log wrapper. Optional Chunk 0 vertical-slice spike documented for teams wanting concrete signal before committing the full ~40 engineer-days._
+- _Round 3: invariants added for exactly-once step completion at DB level, external side-effect idempotency keys, DB-clock-source authority, run cancellation semantics, deterministic read-model projection at the UI layer, hard failure containment per step. Crash-safety meta-check folded into Executor notes — every chunk's `pr-reviewer` pass walks the new mutation sites and verifies replay-safety._
+
+_**Verdict: Go.** The plan is now deterministic, replay-safe, concurrency-safe, and production-grade. Hand to `feature-coordinator` after switching to Sonnet per CLAUDE.md model-guidance rule. Run Chunk 0 first if any of: unfamiliar engineers, unresolved review concerns, or the user wants empirical validation of invariants before committing the full plan._
 
 
 
