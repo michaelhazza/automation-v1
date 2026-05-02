@@ -532,7 +532,72 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0). The "Run-leve
 
 ### Round 4 status
 
-Round 4 complete. Spec grew from 796 → 813 lines (+17). One user-facing apply (copy fix), two user-facing defers, four technical auto-applies (3 ChatGPT + 1 integrity). ChatGPT's verdict: "Production-safe, scale-aware, future-extensible." This is the spec's 4th review cycle; the 5th iteration cap has one remaining cycle. Finalisation is the natural next step unless a substantive concern remains.
+Round 4 complete. Spec grew from 796 → 813 lines (+17). One user-facing apply (copy fix), two user-facing defers, four technical auto-applies (3 ChatGPT + 1 integrity). ChatGPT's verdict: "Production-safe, scale-aware, future-extensible."
 
-Updated spec on the PR. Say 'done' to finalise, or paste a Round 5 response if you want one final pass.
+---
+
+## Round 5 — 2026-05-02T01-00-00Z (final round before lockdown)
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary: You're now at the true end-state. Only 4 additional micro-gaps worth fixing. Everything else is either already solved, or not worth touching until real usage data exists.
+
+1. Render cache key is missing render_version
+You defined cache by (category, dedupe_key, evidence_hash, render_version) but later implementation paths only reference (category, dedupe_key, evidence_hash) in multiple places. Risk: tweak prompt → old copy persists → no re-render. Fix (must-do): make explicit everywhere; render_cache_key = hash(category, dedupe_key, evidence_hash, render_version); any render prompt change → bump RENDER_VERSION.
+
+2. Cross-agent dedupe still technically unsafe
+Namespace rule is good, but enforcement is "code review convention". One future agent forgets prefix → silent overwrite. Low-cost hardening: at skill executor level, validate category.startsWith(`${agentNamespace}.`). Avoids schema change, eliminates 90% of risk.
+
+3. Array canonicalisation is correct but not future-safe
+sample_escalation_ids sorted before hashing. But rule is "document whether arrays are semantic." Future dev forgets → phantom updates return. Fix: ALL arrays sorted before hashing by default; explicit preserveOrder: true to opt out. Default-safe is better than opt-in-safe.
+
+4. Cap fairness across categories (minor but real)
+Even with namespacing, optimiser.agent.* dominates optimiser.memory.* alphabetically within same agent. One noisy category crowds out others. Minimal improvement: severity → updated_at → category → dedupe_key. Preserves determinism, improves rotation fairness, reduces structural bias.
+
+Final verdict: "Deploy-ready, scale-stable, architecture-complete". 2 defensive guards + 2 fairness tweaks. None are blockers. For absolute zero-regret before build: enforce category namespace in executor, include render_version everywhere, default-sort arrays, reorder eviction priority.
+```
+
+Inferred verdict: APPROVED ("Deploy-ready, scale-stable, architecture-complete").
+
+### Recommendations and Decisions
+
+| ID | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|----|---------|--------|----------------|----------------|----------|-----------|
+| R5-F1 | render_version missing from 3 cache-key references in §2 / §5 / §13 | technical | apply | auto (apply) | high | Spec has correct definition in §2 line 96 but stale `(evidence_hash)`-only references in 3 other places. Mechanical consistency fix. Severity high but confident in fix → auto-apply. |
+| R5-F2 | Promote category namespace from code-review convention to runtime executor guard | technical | apply | auto (apply) | medium | Single `if (!category.startsWith(agentNamespace + '.')) throw` makes forgetting the namespace fail-loud at test time, not silent-collide in production. |
+| R5-F3 | Default-sort all arrays before hashing; opt-out with `@preserveOrder` annotation | technical | apply | auto (apply) | medium | Default-safe vs opt-in-safe — forgetting to document an array's order semantics no longer produces hash drift. |
+| R5-F4 | Eviction priority reorder: severity → updated_at → category → dedupe_key (was severity → category → dedupe_key → updated_at) | user-facing | apply | apply (user: as recommended) | medium | **Reverses R4-F3 deferral.** ChatGPT R5 shows concrete production impact: `optimiser.agent.*` (alphabetically earliest) is ALWAYS last evicted; `optimiser.skill.*` ALWAYS first. Systematic per-category bias, not arbitrary tiebreaker. Moving updated_at to position 2 rotates eviction by freshness; full determinism preserved. |
+
+**Summary counts (Round 5):**
+- Auto-applied (technical): 3 — R5-F1, R5-F2, R5-F3
+- User-decided: 1 applied (R5-F4) — user replied "as recommended, go"
+
+### Applied edits
+
+- [auto] §2 — Render-cache description (material thresholds paragraph) updated to reference full key tuple instead of just evidence_hash.
+- [auto] §5 — Skill-table footer updated: render keyed on `(category, dedupe_key, evidence_hash, render_version)`; RENDER_VERSION bump invalidates cache after prompt-template change.
+- [auto] §6.2 — Category naming: hard rule extended with runtime executor guard (`category.split('.').length >= 3` + `startsWith(agentNamespace + '.')`); validation throws `failure(FailureReason.InvalidInput, 'Category must follow <agent_namespace>.<area>.<finding> format')`.
+- [auto] §6.2 — Numeric canonicalisation: array rule flipped from "document order semantics" to "default-sort all arrays; opt-out with `@preserveOrder` JSDoc annotation".
+- [auto] §13 risks — LLM render cost mitigation updated to reference full cache key tuple.
+- [user] §6.2 — Eviction priority ranking reordered to `severity → updated_at → category → dedupe_key`. `evicted_lower_priority` bullet rewritten with concrete rationale (alphabetical bias example: `optimiser.agent.*` vs `optimiser.skill.*`); decision flow step 4 ORDER BY updated; pre-write candidate ordering paragraph aligned (producer can't participate in updated_at ordering — explicitly noted).
+
+### Integrity check
+
+Integrity check: 0 issues found this round. All four findings landed cleanly with no contradictions introduced. `render_version` consistently referenced across §2 (definition), §2 (material thresholds), §5 (skill footer), §13 (risks), §9 Phase 0 (renderVersion.ts file authoring) — 7 occurrences total, all aligned. Eviction priority ranking cross-references between §6.2 (bullet, decision flow step 4, pre-write candidate ordering) all use the new tuple. No broken references.
+
+### Top themes
+
+- **R5 is the "default-safe" round.** All four findings flip a property from "documented but enforced by humans" to "default behaviour or runtime-validated":
+  - R5-F1: render_version was already in the canonical cache key but other references hadn't propagated. Now consistent everywhere — no place left where a developer could miss it.
+  - R5-F2: namespace rule was code-review-only. Now executor-guarded — wrong values fail loud at test time.
+  - R5-F3: array sort was opt-in (with documentation requirement). Now default — wrong arrays fail safe by default.
+  - R5-F4: alphabetical-category eviction was "arbitrary tiebreaker". Now freshness-rotated — no per-category structural bias.
+  Together they convert the spec from "follow these rules carefully" to "the rules are enforced for you."
+- **R5-F4 reverses R4-F3 cleanly because the argument got more specific.** R4-F3 was deferred on the abstract grounds of "namespacing makes it within-namespace bias; arbitrary." R5 made it concrete: "`optimiser.agent.*` ALWAYS beats `optimiser.skill.*`, every run, forever, no matter how stale agent.* gets." That's no longer arbitrary — it's a systematic operator-perception bias. The deferral was correct given R4's argument; the apply is correct given R5's argument. Both calls are defensible for their information state.
+- **Five rounds of ChatGPT review have produced the canonical convergence pattern.** R0 → R1: +95 lines (lifecycle scaffolding). R1 → R2: +7 (in-place tightening). R2 → R3: +13 (observability). R3 → R4: +17 (atomicity + namespace). R4 → R5: ~+20 (default-safe). Each round adds less; each round's findings move closer to the surface ("polish" not "structure"). After R5, ChatGPT's verdict shifted from "production-safe" to "deploy-ready, architecture-complete" — the language tracks the convergence.
+
+### Round 5 status
+
+Round 5 complete. Spec at 813 lines. Three technical auto-applies, one user-facing apply (reversing R4-F3 deferral). User signal: "as recommended, go" — proceeding immediately to finalisation.
 
