@@ -106,10 +106,107 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0).
 
 ---
 
-## Round summary
+## Round summary (Round 1)
 
 Round 1 done.
 Auto-accepted (technical): 4 applied (F2, F3, F4 — three sections amended), 3 rejected (F5a/b/c), 0 deferred.
 User-decided (user-facing + technical-escalated): 0 applied, 1 rejected (F1), 0 deferred.
 
 Committed and pushed as part of the round 1 spec edits commit (see git log on `pr-249-followups`).
+
+---
+
+## Round 2 — 2026-05-02T00-01-59Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+> This updated spec is now tight, internally consistent, and implementation-ready.
+> The earlier risks (F6 overreach, audit drift, concurrency bugs) are now properly handled.
+> Only one remaining issue: you're still locking in the wrong product decision (Task 4).
+>
+> 1. What you fixed well (this is now strong)
+> ✅ F6 is now correctly constrained — added Default-to-C invariant + 2-minute stop condition. Removes risk of accidental over-narrowing or refactor sprawl. "If the value crosses a network boundary… classify as Category C" is exactly the right mental model.
+> ✅ F4 audit is now bounded — explicit stop condition + clear classification flow prevents audit sprawl and "clean everything" syndrome.
+> ✅ Concurrency bug is properly addressed — "Late events from previous subaccounts are dropped". Without this you would absolutely get ghost badge counts, flickering UI, hard-to-debug race conditions. Good catch and correctly specified.
+> ✅ Overall spec quality: deterministic, verifiable, bounded, no hidden dependencies. Execution risk is now low.
+>
+> 2. The one remaining problem (and it matters): Task 4 is still the wrong call.
+> You've doubled down on "Operator chose restore… they like the ambient awareness signal". This is a local preference overriding a system-level design principle.
+>
+> Why this is a mistake (directly):
+> 1. Violates your own UX model — sidebar = action surface, not monitoring dashboard. Restoring this introduces a third semantic type: awareness; inconsistent mental model.
+> 2. Doesn't scale in multi-tenant reality — "3 live" feels useful now, but with multiple agents/workflows/subaccounts becomes meaningless, noisy, ignored.
+> 3. You already solved this elsewhere — the Live Agent Execution Log is the correct surface for awareness/monitoring/debugging.
+> 4. It adds complexity for zero leverage — you're maintaining polling, socket listeners, state syncing, concurrency guards (just added) all for non-actionable UI. Negative ROI.
+>
+> 3. The real issue: this isn't a UI tweak. It's a product philosophy decision.
+> Option A (current spec): system surfaces everything; operator filters mentally.
+> Option B (mockup): system surfaces only actionable signals; operator acts immediately.
+> You're building an automation OS for time-poor operators. Option B is the correct long-term move.
+>
+> 4. What I would change (clean, minimal edit)
+> Replace Task 4 entirely with:
+> ```
+> ## Task 4 — F3: remove dead `liveAgentCount` state
+> Goal: remove unused awareness-only state and associated polling/socket machinery. Sidebar remains action-focused.
+> Actions:
+> - Remove liveAgentCount state from Layout.tsx
+> - Remove polling fetch /live-status
+> - Remove socket listeners: live:agent_started, live:agent_completed
+> - Remove resyncBadges dependency on live state
+> - Remove any unused imports/types related to live agents
+> Invariant: Sidebar surfaces only actionable signals (review queue, incidents). Awareness data belongs in dedicated pages (e.g. Live Agent Execution Log).
+> Verification: No references to liveAgentCount remain; no socket listeners for live agent events; lint + typecheck clean.
+> ```
+> Also update Verification table: "F3 restored → badge appears" → "F3 removed → no references remain".
+> Self-review table: "F3-cgpt liveAgentCount badge → restore" → "F3-cgpt liveAgentCount badge → removed (operator decision revised)".
+>
+> 5. Final verdict
+> Spec quality: 9.5/10. Execution-ready. Safe to hand to agent.
+> Product decision: Needs correction before build.
+> Bottom line: you've engineered this spec well. But right now you're about to reintroduce dead UI, maintain unnecessary state, dilute your UX model — all for something your own mockup already rejected.
+
+### Verdict (inferred)
+
+`CHANGES_REQUESTED` — ChatGPT explicit: "Needs correction before build" (Task 4 only). All R1 fixes (F2/F3/F4) confirmed addressed.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1-R2: Replace Task 4 entirely (remove `liveAgentCount` badge + state + polling + sockets); update Verification + Self-review tables accordingly | user-facing | reject (consistent with R1 directive) | reject (user — "as recommended") | high | Same finding as R1 F1, now with concrete apply-path. User reaffirmed "keep the badge" via "as recommended" reply. ChatGPT's expanded argument (Live Agent Execution Log already solves awareness; sidebar = action surface; multi-tenant scale dilutes signal) acknowledged but does not override the operator's stated preference for ambient sidebar awareness without page-switching. |
+| F2-R2 / F3-R2 / F4-R2: Confirmation that R1 fixes (concurrency invariant, default-to-C, stop conditions) are correctly addressed | technical | n/a — confirmation of prior round | auto (no-op) | n/a | ChatGPT explicitly endorsed all three. No new action. Logged for completeness so the audit trail shows R1 fixes survived R2 review. |
+
+### Triage policy notes
+
+- F1-R2 was correctly classified `user-facing` (same surface as R1 F1). Presented to user despite R1 directive because round-2 contained materially expanded apply-path detail (full Task 4 replacement text). User chose to reaffirm.
+- No technical findings this round (only confirmations of R1 fixes). No auto-applies, no auto-rejects, no escalations.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- _(none — single user-facing finding rejected; no spec edits this round)_
+
+### Rejected / not applied
+
+- **[user] F1-R2 — replace Task 4 with badge removal.** Operator reaffirmed "keep the badge" via "as recommended" reply (recommendation was reject). Spec Task 4 unchanged.
+
+### Consistency note (cross-round)
+
+F1-R2 (Round 2) is the same finding as F1 (Round 1) — both surface the badge restore-vs-remove product direction. Both rounds resolved as **user-rejected** (badge stays). No cross-round contradiction; the operator's directive has been consistent across rounds. Round-2 added concrete apply-path detail (full Task 4 replacement, table updates) but did not introduce new evidence; the doubled-down framing did not change the operator's call. Finalisation consistency check should confirm: no contradictions, F1 direction stable across both rounds.
+
+### Integrity check
+
+No spec edits this round → integrity check trivially passes (0 forward references to check, 0 contradictions introduced, 0 missing IO from new content). Confirmed `Layout.tsx:407-410 / 416 / 431-432` references in §4.4 (added in R1) still resolve correctly against the current spec — no R2 edits would have invalidated them.
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+---
+
+## Round summary (Round 2)
+
+Round 2 done.
+Auto-accepted (technical): 0 applied, 0 rejected, 0 deferred. (3 R1 fixes confirmed addressed by ChatGPT — logged as no-op confirmations.)
+User-decided (user-facing + technical-escalated): 0 applied, 1 rejected (F1-R2 — "as recommended"), 0 deferred.
+
+No spec file changes this round. Session log updated with Round 2 entry; committed and pushed.
