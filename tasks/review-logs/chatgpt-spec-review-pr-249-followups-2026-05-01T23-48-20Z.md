@@ -6,6 +6,7 @@
 - PR: #251 — https://github.com/michaelhazza/automation-v1/pull/251 (created after Round 1 commit because no diff existed at session start; the spec had been committed directly to `main` across 5 prior `spec-reviewer` iterations)
 - Mode: manual
 - Started: 2026-05-01T23:48:20Z
+- **Verdict:** APPROVED (3 rounds; spec rated 9.5/10 by ChatGPT round 3 with explicit "ship it")
 
 ---
 
@@ -284,3 +285,91 @@ Auto-accepted (technical): 1 applied (F1-R3 — §4.5 listener lifecycle invaria
 User-decided (user-facing + technical-escalated): 0 applied, 0 rejected, 0 deferred.
 
 ChatGPT verdict: `APPROVED`, "ship it". Spec rated execution-ready. Review value has converged.
+
+---
+
+## Consistency check (cross-round)
+
+Scanning all final decisions across the 3 rounds for contradictions:
+
+| Finding family | R1 | R2 | R3 | Consistent? |
+|----------------|----|----|----|-------------|
+| F1 / F1-R2 — restore vs remove badge | reject (user) | reject (user, "as recommended") | n/a (not re-raised) | ✓ same direction across rounds |
+| F2 — concurrency invariant (§4.4) | apply (auto) | confirmation (no-op) | n/a | ✓ apply not re-litigated |
+| F3 — default-to-C invariant (§6.2) | apply (auto) | confirmation (no-op) | n/a | ✓ apply not re-litigated |
+| F4 — stop conditions (§5.2 + §6.2) | apply (auto) | confirmation (no-op) | n/a | ✓ apply not re-litigated |
+| F5a/b/c — mockup commentary | reject (auto, scope) | n/a (not re-raised) | n/a | ✓ reject not re-litigated |
+| F1-R3 — listener lifecycle invariant (§4.5) | n/a (new in R3) | n/a | apply (auto) | ✓ no contradiction (orthogonal to F2's §4.4) |
+
+**No cross-round contradictions found.** The operator's directive on F1 ("keep the badge") was consistent across R1 and R2; auto-applies in R1 (§4.4, §6.2 invariants) were ratified by ChatGPT in R2; the R3 addition (§4.5) is structurally parallel to §4.4, not contradictory.
+
+---
+
+## Implementation readiness checklist
+
+| Check | Result | Evidence |
+|-------|--------|----------|
+| All inputs defined | ✓ | Each task names files, line numbers (e.g. `Layout.tsx:407-410 / 416 / 431-432`), grep commands (e.g. `grep -rn "await await" server/services/__tests__/`), and exact action lists. |
+| All outputs defined | ✓ | Verification table at §Verification states expected results for every check (zero matches, lint exit 0, badge appears at count > 0, etc.). |
+| Failure modes covered | ✓ | Each task has an explicit Risk line. F4 / F6 audits have stop conditions and fallback classifications. Task 4 has three named invariants (badge restoration, §4.4 event filtering, §4.5 listener lifecycle) covering the three failure modes. |
+| Ordering guarantees explicit | ✓ | Tasks 1-7 are numbered with Pre-flight (Task 1) and Doc-sync (Task 7) as fixed brackets. Verification table at the end ties tasks to required results. |
+| No unresolved forward references | ✓ | Per-round integrity checks confirmed each round's edits resolved cleanly. Final scan: §4.5 references to `useSocketRoom` / `Layout.tsx:416` / `live:agent_started` all exist; §6.2 default-to-C invariant references named in the Risk line below; §5.2 / §6.2 stop conditions reference their parent classification rules in the same section. |
+
+**Result: 5/5 pass.** Spec is implementation-ready.
+
+---
+
+## Doc sync sweep
+
+Scope per `docs/doc-sync.md` § Reference docs and update triggers. Investigation procedure run for each.
+
+Candidate-stale-reference set derived from this branch's diff (terms newly introduced or modified):
+- `liveAgentCount`, `useSocketRoom`, `activeClientId`, `Record<string, unknown>` (existing identifiers; no rename in this spec)
+- `live:agent_started`, `live:agent_completed` (existing socket events; no change)
+- "default-to-C invariant", "boundary values", "stop condition", "listener lifecycle invariant" (new spec-internal labels)
+- Spec subsections `§4.4`, `§4.5` (new sections within Task 4)
+- `Layout.tsx:407-410 / 416 / 431-432` (existing line citations)
+
+Verdicts:
+
+- **architecture.md updated:** no — checked `liveAgentCount`, `useSocketRoom`, `activeClientId`, `Record<string, unknown>`, `live:agent_started`. `useSocketRoom` mentioned at lines 1567 / 1579 / 1679 with descriptions consistent with the §4.5 listener lifecycle invariant the spec adds (line 1579 explicitly: *"Joins the room on mount, leaves on unmount"*). No stale references; existing description correctly characterises the pattern. `liveAgentCount` and per-component invariants are not architecture-level concerns.
+- **capabilities.md updated:** n/a — no capability / skill / integration add / remove / rename in this spec.
+- **integration-reference.md updated:** n/a — no integration behaviour change in this spec.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — spec introduces three local invariants (event filtering, listener lifecycle, default-to-C boundary). These are spec-local verification rules; KNOWLEDGE.md is the appropriate first home. They may graduate to DEVELOPMENT_GUIDELINES.md §8 if the patterns repeat across multiple specs.
+- **frontend-design-principles.md updated:** n/a — no new UI hard rule. Task 4 restoration follows the existing `NavItem` badge pattern (`Layout.tsx:135-179` already supports `badge` / `badgeLabel` props per the spec text).
+- **spec-context.md updated:** n/a — no framing-assumption change. Spec uses existing primitives (`useSocketRoom`, NavItem badge), aligns with `pre_production: yes`, `testing_posture: static_gates_primary`, `feature_flags: only_for_behaviour_modes`. No new primitive worth adding to `accepted_primitives`; no new convention to add to `convention_rejections`.
+- **KNOWLEDGE.md updated:** yes (3 entries) — three Pattern entries appended:
+  1. *Subaccount-scoped UI signals need both event filtering AND listener lifecycle cleanup* (combines §4.4 + §4.5 invariants).
+  2. *Per-callsite audit tasks need explicit stop conditions to prevent drift into refactor* (codifies §5.2 + §6.2 stop conditions).
+  3. *`Record<string, unknown>` at network or actionType boundaries should default to keeping the cast* (codifies §6.2 default-to-C invariant + runtime-vs-typecheck rationale).
+
+---
+
+## Deferred backlog
+
+No findings deferred this session. All 8 unique findings (R1: F1, F2, F3, F4, F5a, F5b, F5c; R3: F1-R3) resolved as either applied (auto) or rejected (user/auto). F1-R2 was a re-raise of F1 from R1; per the cross-round consistency check it does not constitute a separate deferred item.
+
+`tasks/todo.md` § *Spec Review deferred items* / *pr-249-followups* — **not created** (zero items to write).
+
+The spec itself notes one deferred consideration: the *ClientPulse intervention-payload discriminated-union refactor* (Task 6.3) is recorded in `tasks/todo.md` § *Deferred spec decisions — pr-249-followups*. This is a spec-level deferred (predates this review session) and is not a session-level deferred item from chatgpt-spec-review.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 4 applied | 3 rejected | 0 deferred
+  - Applied: F2 (§4.4 concurrency invariant), F3 (§6.2 default-to-C invariant), F4 (§5.2 + §6.2 stop conditions), F1-R3 (§4.5 listener lifecycle invariant)
+  - Rejected: F5a (Home KPI scope), F5b (Incidents subaccount visibility scope), F5c (escalation surface — moot once F1 rejected)
+- User-decided: 0 applied | 2 rejected | 0 deferred
+  - Rejected: F1 R1 (badge restore vs remove — user directive "keep the badge"), F1-R2 R2 (same finding re-raised — "as recommended" reaffirmation)
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § Spec Review deferred items / pr-249-followups: _(none)_
+- KNOWLEDGE.md updated: yes (3 entries — subaccount scoping, audit stop conditions, boundary-cast defaults)
+- architecture.md updated: no — checked liveAgentCount, useSocketRoom, activeClientId, Record<string,unknown>, live:agent_started; existing description at line 1579 already characterises the §4.5 lifecycle pattern correctly
+- capabilities.md updated: n/a — no capability / skill / integration change
+- integration-reference.md updated: n/a — no integration behaviour change
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — spec-local invariants belong in KNOWLEDGE.md first; may graduate later if patterns repeat
+- spec-context.md updated: n/a — no framing-assumption change
+- frontend-design-principles.md updated: n/a — restoration follows existing NavItem badge pattern; no new UI rule
+- PR: #251 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/251
