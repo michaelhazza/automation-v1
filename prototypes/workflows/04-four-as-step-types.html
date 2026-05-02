@@ -301,6 +301,17 @@
         </select>
       </div>
 
+      <!-- v2 · Mark critical toggle (isCritical) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="checkbox" style="margin-top: 2px; accent-color: #dc2626;">
+          <div>
+            <div style="font-size: 12.5px; font-weight: 600; color: #0f172a;">Mark as critical</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.45;">Auto-routes this Agent step to Approval before execution. Useful for high-stakes decisions you want a human to glance at, even when the agent is confident. <strong>v2 addition.</strong></div>
+          </div>
+        </label>
+      </div>
+
       <details class="border-t border-slate-100 pt-3">
         <summary class="text-[12px] font-medium text-slate-600 cursor-pointer">Advanced — raw definition</summary>
         <pre class="mt-2 text-[10.5px] leading-snug bg-slate-900 text-slate-100 rounded p-2.5 overflow-x-auto"><code>{ "id":"classify_by_fit", "type":"agent",
@@ -382,6 +393,17 @@
           <option>Reversible</option>
           <option>Irreversible</option>
         </select>
+      </div>
+
+      <!-- v2 · Mark critical toggle (isCritical) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="checkbox" style="margin-top: 2px; accent-color: #dc2626;">
+          <div>
+            <div style="font-size: 12.5px; font-weight: 600; color: #0f172a;">Mark as critical</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.45;">Auto-routes this step to Approval regardless of side-effect class. Use for irreversible side effects, high-cost operations, or regulated actions. <strong>v2 addition.</strong></div>
+          </div>
+        </label>
       </div>
 
     </div>
@@ -524,6 +546,29 @@
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
           Approval is the only step that can route backward.
         </div>
+      </div>
+
+      <!-- v2 · Confidence preview (read-only · author sees what runtime will surface) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Confidence preview <span style="text-transform: none; letter-spacing: 0; color: #94a3b8; font-weight: 500;">(read-only · v2)</span></label>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: #fef3c7; color: #92400e; font-size: 10.5px; font-weight: 700;">Medium</span>
+          <span style="font-size: 11.5px; color: #475569;">the next step can't be undone, worth a careful look</span>
+        </div>
+        <div style="font-size: 10.5px; color: #64748b; margin-top: 6px; line-height: 1.5;">
+          Runtime computes and snapshots the chip and reason on each Approval card. V1 uses heuristics; V2 swaps in a calibrated model once <code style="font-size: 10px; background: #f1f5f9; padding: 1px 3px; border-radius: 3px;">workflow_step_reviews</code> data accumulates. Reason copy is plain operator language, not the algorithm description.
+        </div>
+      </div>
+
+      <!-- v2 · Audit fields footnote -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Audit on decision <span style="text-transform: none; letter-spacing: 0; color: #94a3b8; font-weight: 500;">(automatic · v2)</span></label>
+        <ul style="font-size: 11.5px; color: #475569; padding-left: 16px; margin: 0; list-style: disc;">
+          <li>who approved (<code style="font-size: 10px;">approved_by</code>) and when (<code style="font-size: 10px;">approved_at</code>)</li>
+          <li>snapshot of what they saw (<code style="font-size: 10px;">seen_payload</code>), not what later ran</li>
+          <li>confidence chip and reason at decision time (<code style="font-size: 10px;">seen_confidence</code>)</li>
+          <li>optional decision reason free-text (<code style="font-size: 10px;">decision_reason</code>)</li>
+        </ul>
       </div>
 
     </div>

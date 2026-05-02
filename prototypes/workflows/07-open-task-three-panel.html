@@ -7,7 +7,7 @@
   the operator can see chat + activity + (live/flow/files) all at once.
 
   Layout (when Activity is expanded):
-    Chat 25% · Activity 25% · Tabs 50% (Live/Flow/Files)
+    Chat 25% · Activity 25% · Tabs 50% (Now/Plan/Files — renamed in v2 from Live/Flow/Files)
 
   Layout (when Activity is minimised):
     Chat 25% · Activity 36px strip · Tabs ~71%
@@ -46,7 +46,7 @@
   .scroll::-webkit-scrollbar { width: 6px; }
   .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 
-  /* Org-chart node styles (Live tab) */
+  /* Org-chart node styles (Now tab — v2 rename from Live) */
   .org-node { background: white; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; min-width: 170px; box-shadow: 0 1px 3px rgba(15,23,42,0.06); }
   .org-node.done    { border-color: #a7f3d0; }
   .org-node.active  { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 0 0 3px rgba(59,130,246,0.10); }
@@ -277,49 +277,29 @@
         <div class="text-[10.5px] text-slate-400 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5">Handed off to 3 teams</div>
       </div>
 
+      <!-- v2: milestone-shaped per-agent card. Sales has finished a deliverable
+           (the body draft), so it surfaces in chat with attribution + a View
+           link. Research and Operations are still working — their in-progress
+           narration is in activity and as Now-tab status dots, not in chat. -->
       <div class="flex gap-2">
         <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-1 flex-wrap">
             <span class="text-[12px] font-semibold text-slate-900">Head of Sales</span>
             <span class="a-pill a-agent">Agent</span>
-            <span class="text-[10px] text-slate-400">28s</span>
+            <span class="text-[10px] text-slate-400">28s ago</span>
           </div>
-          <div class="text-slate-700 text-[12px] mt-0.5">Proposal body drafted. Pulled SDR-1 for last quarter MRR + terms.</div>
+          <div class="text-slate-700 text-[12px] mt-0.5">Body drafted ✓ Pulled SDR-1 for last quarter MRR + terms.</div>
           <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium">Open draft →</a>
         </div>
       </div>
 
-      <div class="flex gap-2">
-        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
-          HR
-          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1 flex-wrap">
-            <span class="text-[12px] font-semibold text-slate-900">Head of Research</span>
-            <span class="a-pill a-agent">Agent</span>
-            <span class="text-[10px] text-blue-600 font-medium">working</span>
-          </div>
-          <div class="text-slate-700 text-[12px] mt-0.5">Scanning 4 competitor rate cards.</div>
-        </div>
-      </div>
+    </div>
 
-      <div class="flex gap-2">
-        <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative" style="background:#eef2ff; color:#3730a3;">
-          HO
-          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border-2 border-white" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1 flex-wrap">
-            <span class="text-[12px] font-semibold text-slate-900">Head of Operations</span>
-            <span class="a-pill a-agent">Agent</span>
-            <span class="text-[10px] text-blue-600 font-medium">working</span>
-          </div>
-          <div class="text-slate-700 text-[12px] mt-0.5">Drafting pricing annex — line items, terms, credits.</div>
-        </div>
-      </div>
-
+    <!-- v2: thinking box reflects the current moment, not a log of in-progress agents. -->
+    <div class="border-t border-slate-200 px-4 py-2 flex items-center gap-2 bg-slate-50" style="border-left: 3px solid #4f46e5;">
+      <span class="w-1.5 h-1.5 rounded-full bg-indigo-600" style="animation: pulse-dot 1.6s ease-in-out infinite;"></span>
+      <span class="text-[12px] text-slate-700 italic">Working with Research and Operations · 2 agents still going</span>
     </div>
 
     <div class="border-t border-slate-200 px-4 py-2.5">
@@ -360,31 +340,39 @@
         </label>
       </div>
 
+      <!-- v2: events flow top-down in chronological order (oldest at top).
+           When the list overflows, auto-scroll keeps the newest event in
+           view at the bottom of the viewport; "↓ N new events" pill (not
+           shown in static mock) appears if the operator scrolls up. -->
       <div class="flex-1 overflow-y-auto scroll px-3 py-3 space-y-2.5">
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot active mt-1"></span>
+          <span class="activity-dot done mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">just now</span><span class="font-medium text-slate-900">Head of Operations</span></div>
-            <div class="text-slate-700 mt-0.5">Drafting pricing annex.</div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">38s ago</span><span class="font-medium text-slate-900">Mike H.</span><span class="text-slate-700">created task</span></div>
           </div>
         </div>
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot active mt-1"></span>
+          <span class="activity-dot done mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">4s</span><span class="font-medium text-slate-900">Research Analyst</span></div>
-            <div class="text-slate-700 mt-0.5">Scanning competitors.</div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">36s ago</span><span class="text-slate-700">Routed to <span class="font-medium">COO</span></span></div>
           </div>
         </div>
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot note mt-1"></span>
+          <span class="activity-dot done mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">8s</span><span class="text-slate-700">Fetched 2 rate cards</span></div>
-            <div class="mt-1 inline-flex items-center gap-1 flex-wrap">
-              <span class="ref-chip doc">Stripe</span>
-              <span class="ref-chip doc">PayPal</span>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">34s ago</span><span class="font-medium text-slate-900">COO</span><span class="text-slate-700">delegated to 3 teams</span></div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 text-[11.5px]">
+          <span class="activity-dot done mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">30s ago</span><span class="text-slate-700">Memory consulted</span></div>
+            <div class="mt-1 inline-flex items-center gap-1">
+              <span class="ref-chip memory">3 blocks</span>
               <a class="ref-link">View</a>
             </div>
           </div>
@@ -393,9 +381,9 @@
         <div class="flex items-start gap-2 text-[11.5px]">
           <span class="activity-dot done mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">14s</span><span class="font-medium text-slate-900">SDR 1</span><span class="text-slate-700">CRM context ✓</span></div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">28s ago</span><span class="font-medium text-slate-900">Head of Sales</span><span class="text-slate-700">drafted body ✓</span></div>
             <div class="mt-1 inline-flex items-center gap-1">
-              <span class="ref-chip crm">Acme · CRM</span>
+              <span class="ref-chip doc">Acme proposal</span>
               <a class="ref-link">View</a>
             </div>
           </div>
@@ -404,7 +392,7 @@
         <div class="flex items-start gap-2 text-[11.5px]">
           <span class="activity-dot note mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">22s</span><span class="text-slate-700">Applied rule</span></div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">22s ago</span><span class="text-slate-700">Applied rule</span></div>
             <div class="text-[11px] text-slate-500 mt-0.5">15% min margin on renewals</div>
             <div class="mt-1 inline-flex items-center gap-1">
               <span class="ref-chip rule">Pricing rule</span>
@@ -416,43 +404,39 @@
         <div class="flex items-start gap-2 text-[11.5px]">
           <span class="activity-dot done mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">28s</span><span class="font-medium text-slate-900">Head of Sales</span><span class="text-slate-700">drafted body ✓</span></div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">14s ago</span><span class="font-medium text-slate-900">SDR 1</span><span class="text-slate-700">CRM context ✓</span></div>
             <div class="mt-1 inline-flex items-center gap-1">
-              <span class="ref-chip doc">Acme proposal</span>
+              <span class="ref-chip crm">Acme · CRM</span>
               <a class="ref-link">View</a>
             </div>
           </div>
         </div>
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot done mt-1"></span>
+          <span class="activity-dot note mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">30s</span><span class="text-slate-700">Memory consulted</span></div>
-            <div class="mt-1 inline-flex items-center gap-1">
-              <span class="ref-chip memory">3 blocks</span>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">8s ago</span><span class="text-slate-700">Fetched 2 rate cards</span></div>
+            <div class="mt-1 inline-flex items-center gap-1 flex-wrap">
+              <span class="ref-chip doc">Stripe</span>
+              <span class="ref-chip doc">PayPal</span>
               <a class="ref-link">View</a>
             </div>
           </div>
         </div>
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot done mt-1"></span>
+          <span class="activity-dot active mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">34s</span><span class="font-medium text-slate-900">COO</span><span class="text-slate-700">delegated to 3 teams</span></div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">4s ago</span><span class="font-medium text-slate-900">Research Analyst</span></div>
+            <div class="text-slate-700 mt-0.5">Scanning competitors.</div>
           </div>
         </div>
 
         <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot done mt-1"></span>
+          <span class="activity-dot active mt-1"></span>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">36s</span><span class="text-slate-700">Routed to <span class="font-medium">COO</span></span></div>
-          </div>
-        </div>
-
-        <div class="flex items-start gap-2 text-[11.5px]">
-          <span class="activity-dot done mt-1"></span>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">38s</span><span class="font-medium text-slate-900">Mike H.</span><span class="text-slate-700">created task</span></div>
+            <div class="flex items-center gap-1 flex-wrap"><span class="num text-[10px] text-slate-400">just now</span><span class="font-medium text-slate-900">Head of Operations</span></div>
+            <div class="text-slate-700 mt-0.5">Drafting pricing annex.</div>
           </div>
         </div>
 
@@ -460,20 +444,20 @@
     </div>
   </div>
 
-  <!-- ========================== TABS PANEL (Live / Flow / Files) ========================== -->
+  <!-- ========================== TABS PANEL (Now / Plan / Files — renamed in v2 from Live / Flow / Files) ========================== -->
   <div class="flex-1 min-w-0 flex flex-col bg-white">
 
     <div class="px-6 border-b border-slate-200 flex items-center gap-1">
-      <label for="tab-live"  class="tab-btn">Live</label>
-      <label for="tab-flow"  class="tab-btn">Flow</label>
+      <label for="tab-live"  class="tab-btn">Now</label>
+      <label for="tab-flow"  class="tab-btn">Plan</label>
       <label for="tab-files" class="tab-btn">Files <span class="num text-[10.5px] text-slate-400 ml-1">5</span></label>
       <span class="ml-auto text-[11.5px] text-slate-400 self-center">Updates automatically</span>
     </div>
 
-    <!-- Live -->
+    <!-- Now (was Live in v1) -->
     <div class="tab-content tc-live overflow-y-auto scroll px-6 py-6">
       <div class="text-[14px] font-semibold text-slate-800 mb-1">Who is doing what right now</div>
-      <div class="text-[11.5px] text-slate-500 mb-5">Live snapshot of agents working on this task.</div>
+      <div class="text-[11.5px] text-slate-500 mb-5">Snapshot of agents working on this task.</div>
 
       <div style="position:relative; width:100%; max-width: 720px; margin: 0 auto; height:340px;">
         <svg width="100%" height="100%" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
@@ -512,7 +496,7 @@
       </div>
     </div>
 
-    <!-- Flow -->
+    <!-- Plan (was Flow in v1) -->
     <div class="tab-content tc-flow overflow-y-auto scroll px-6 py-6">
       <div class="text-[14px] font-semibold text-slate-800 mb-1">The shape of this work</div>
       <div class="text-[11.5px] text-slate-500 mb-5">What the COO planned · current step in indigo.</div>
@@ -531,7 +515,17 @@
         <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 3 — review &amp; deliver</div>
         <div class="flex justify-center"><div class="step-card a-approval" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">Mike approves</div><div class="text-[10px] text-slate-400">queued</div></div></div></div>
         <div class="connector" style="height:20px;"></div>
-        <div class="flex justify-center"><div class="step-card a-action" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">Send to Acme</div><div class="text-[10px] text-slate-400">queued</div></div></div></div>
+        <div class="flex justify-center"><div class="step-card a-action" style="opacity:0.55; width:240px;"><div class="icn-wrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><div class="flex-1 min-w-0"><div class="text-[12.5px] font-medium text-slate-900 truncate">Send to Acme</div><div class="text-[10px] text-slate-400">queued</div></div><span title="Critical step (v2) — pauses for Approval even if not explicitly an Approval step" style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fee2e2; color:#991b1b; font-size:9.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; margin-left:6px;">Critical</span></div></div>
+
+        <!-- v2 audit caption preview, anchored to the queued Approval -->
+        <div class="text-[10.5px] text-slate-500 mt-3 text-center leading-relaxed">
+          When Mike decides, the audit will record who, when, and a snapshot of what he saw at decision time (v2 audit fields, §8.7).
+          <br>
+          <span style="display:inline-flex; align-items:center; gap:4px; margin-top:4px;">
+            <span style="display:inline-block; padding:1px 6px; border-radius:8px; background:#fef3c7; color:#92400e; font-size:9.5px; font-weight:700;">Medium</span>
+            <span class="text-slate-500" style="font-size:10.5px;">the next step can't be undone, worth a careful look</span>
+          </span>
+        </div>
       </div>
     </div>
 

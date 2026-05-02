@@ -36,9 +36,49 @@
         <div class="text-[14px] font-semibold text-slate-900">07 · Open task view — 3-panel master</div>
         <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Operator surface (master)</div>
       </div>
-      <div class="text-[12.5px] text-slate-600">The user-facing task surface. Chat (26%) + Activity panel (22%, collapsible — can minimise to 36px strip) + Tabbed right panel (52%) with Live / Flow / Files. Activity is its own column rather than a tab so chat + activity + visual context are all visible at once. Files tab supports portrait + landscape orientations with proper proportions in the reader pane. Document toolbar above each file with download + open-in-new-window actions. Same surface for ad-hoc and workflow-fired tasks — "Brief" retired as a noun.</div>
+      <div class="text-[12.5px] text-slate-600">The user-facing task surface. Chat (26%) + Activity panel (22%, collapsible — can minimise to 36px strip) + Tabbed right panel (52%) with <strong>Now / Plan / Files</strong> (renamed v2 from Live / Flow / Files). Activity is its own column rather than a tab so chat + activity + visual context are all visible at once. Files tab supports portrait + landscape orientations with proper proportions in the reader pane. Document toolbar above each file with download + open-in-new-window actions. Same surface for ad-hoc and workflow-fired tasks — "Brief" retired as a noun.</div>
     </a>
 
+    <a href="08-task-progression-states.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">08 · Task progression states (5 moments)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Real-time coordination · v2</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Five states of one task, click between them to see how chat / activity / right pane stay coordinated: <strong>1)</strong> just kicked off (Plan tab, plan forming), <strong>2)</strong> multi-agent dispatch (Now tab, org chart pulsing), <strong>3)</strong> fetching references (Files tab, Stripe rate card), <strong>4)</strong> file created (Files tab, Acme proposal), <strong>5)</strong> awaiting approval (Plan tab, Critical pill + confidence chip). Chat panel is the conversation plus a single thinking box at the bottom (not a per-agent log). Activity is the chronological event stream, newest at the bottom (matches chat). Right pane focuses on whichever tab the moment calls for. Demonstrates v2 design refinements (chat-as-thinking-box pattern + WebSocket-driven multi-pane coordination, brief §6.1 / §6.2).</div>
+    </a>
+
+    <a href="09-ask-step-authoring.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">09 · Ask step authoring (5 inspector states)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Authoring deep-dive · v2</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">Five inspector states zoomed into the Ask step type: <strong>A)</strong> default, <strong>B)</strong> Who-can-submit dropdown open (4 routing options), <strong>C)</strong> Auto-fill dropdown open (V1 + V2 deferrals), <strong>D)</strong> Add-a-field picker (7 V1 field types: text, textarea, select, multi-select, number, date, checkbox), <strong>E)</strong> Editing a select field with options list. Companion to mock 04 which shows all four A's together. Brief §7.3.</div>
+    </a>
+
+    <a href="10-ask-step-runtime.html" class="block bg-white border border-emerald-300 hover:border-emerald-400 hover:shadow-sm rounded-lg p-5 transition ring-2 ring-emerald-100">
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[14px] font-semibold text-slate-900">10 · Ask step runtime (form card + routing)</div>
+        <div class="text-[11px] text-emerald-700 uppercase tracking-wider font-semibold">Runtime experience · v2</div>
+      </div>
+      <div class="text-[12.5px] text-slate-600">What happens when an Ask step queues at runtime. Four states: <strong>A)</strong> form card awaiting input in the chat panel, <strong>B)</strong> mid-fill with required-field validation, <strong>C)</strong> submitted (collapses to a receipt; next step starts), <strong>D)</strong> routed elsewhere (sidebar count, "Waiting on you" page, email — all paths land on the same form card in the same task view). Demonstrates the form-card primitive shares the same surface and lifecycle as Approval cards.</div>
+    </a>
+
+  </div>
+
+  <!-- v2 changelog (2026-05-02) -->
+  <div class="p-4 bg-indigo-50/50 border border-indigo-200 rounded-lg text-[12.5px] text-slate-700 mb-8">
+    <div class="text-[11px] uppercase tracking-wider font-semibold text-indigo-700 mb-2">v2 mockup additions · 2026-05-02</div>
+    <ul class="list-disc pl-5 space-y-1.5">
+      <li><strong>Mock 04 (four A's inspectors):</strong> "Mark as critical" toggle on the Agent and Action inspectors (auto-routes the step to Approval regardless of side-effect class). Confidence preview chip + audit-fields footnote on the Approval inspector — author sees what runtime will surface on the Approval card. Confidence-reason copy is plain operator language, not the heuristic algorithm.</li>
+      <li><strong>Mock 05 (Studio route editor):</strong> Red "Critical" pill on step 6 (Send via Mailchimp) showing how the new <code class="text-[12px] bg-white border border-slate-200 px-1 rounded">isCritical</code> author flag renders in the canvas. On-Publish modal floating bottom-right — single optional text field, "What changed in this version?", stored on <code class="text-[12px] bg-white border border-slate-200 px-1 rounded">workflow_template_versions.publish_notes</code>.</li>
+      <li><strong>Mock 07 (open task view):</strong> Tabs renamed Live → Now and Flow → Plan. Plan tab now has a Critical pill on the queued "Send to Acme" step plus a confidence-chip preview ("Medium · the next step can't be undone, worth a careful look") and an audit-caption preview describing what will be recorded when Mike approves.</li>
+      <li><strong>Mock 08 (task progression states, new):</strong> Five-state walkthrough demonstrating the v2 chat-thinking-box pattern and real-time multi-pane coordination. Click any state to see chat / activity / right pane in lockstep. Activity flipped to newest-at-bottom across all 5 states (matches chat). Validates the design before commissioning the build.</li>
+      <li><strong>Mock 09 (Ask step authoring, new):</strong> Inspector deep-dive covering all dropdown options (Who-can-submit, Auto-fill), the field-type picker (7 V1 types), and editing a select field with its options list. Brief §7.3.</li>
+      <li><strong>Mock 10 (Ask step runtime, new):</strong> The form-card primitive in the chat panel — awaiting / validating / submitted / routed-elsewhere. Same surface and lifecycle as Approval cards.</li>
+      <li><strong>Mock 07 (open task view):</strong> Activity panel flipped to newest-at-bottom (events flow top-down, latest lands at the bottom of the visible list with auto-scroll). Timestamps now read "Xs ago" / "Xm ago" so they're clearly relative-time, not duration. Chat panel adopted the v2 milestone-vs-narration rule: dropped in-progress narration cards (Head of Research scanning, Head of Operations drafting); kept the Sales milestone card (deliverable + view link); added a thinking box at the bottom showing the current moment.</li>
+      <li><strong>Mock 08 (states 4 + 5):</strong> Chat panel now demonstrates the milestone-shaped pattern. State 4: Head of Sales speaks directly when the body draft is ready (instead of the COO summarising). State 5: full milestone arc — Sales, Research, and Operations each speak once with their deliverable + link, then COO consolidates and asks for approval.</li>
+    </ul>
+    <div class="text-[12px] text-slate-600 mt-3">No new mockups added. All adjustments are in-place on existing surfaces. See <code class="text-[12px] bg-white border border-slate-200 px-1 rounded">docs/workflows-dev-brief.md</code> v2 for the integrated reviewer-reconciliation changes (strategic-test framing, isCritical, confidence + guardrails, audit fields, files-at-scale, diff view, orchestrator suggest-not-decide).</div>
   </div>
 
   <div class="p-4 border border-dashed border-slate-300 rounded-lg text-[12.5px] text-slate-600 mb-8">
