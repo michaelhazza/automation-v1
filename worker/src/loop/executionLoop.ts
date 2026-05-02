@@ -100,6 +100,7 @@ export async function runExecutionLoop(input: ExecutionLoopInput): Promise<Execu
   const previousSteps: CompressedStep[] = [];
   const artifacts: string[] = [];
 
+  // reason: safe defaults so the finally/catch block always has defined values, even if an unexpected throw bypasses assignment in the try body.
   // eslint-disable-next-line no-useless-assignment
   let terminalStatus: 'completed' | 'failed' = 'failed';
   // eslint-disable-next-line no-useless-assignment

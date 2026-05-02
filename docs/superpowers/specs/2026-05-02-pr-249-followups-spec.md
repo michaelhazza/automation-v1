@@ -138,7 +138,31 @@ If any of those have been removed since this spec was authored, treat the task a
 - [ ] Wait for the agent to finish (or terminate it). Confirm the badge disappears at 0.
 - [ ] Hard-refresh the page while a run is in flight. Confirm the badge re-appears with the correct count after the initial fetch (proves the on-mount sync works).
 
-**Risk:** very low. The component already manages the state; only the JSX is being added back. No backend changes.
+### 4.4 — Concurrency invariant: scope events by `activeClientId`
+
+**Invariant:** `liveAgentCount` reflects only events whose subaccount matches `activeClientId` at the moment the event is handled. Late events from previous subaccounts are dropped, not buffered.
+
+The polling-and-socket pipeline is shared across subaccounts. Without this scoping, fast subaccount switches produce ghost counts (badge shows N for subaccount B from subaccount A's still-in-flight events) and flickering as cross-subaccount events arrive and are then corrected by the next initial fetch.
+
+- [ ] **Initial fetch (`Layout.tsx:407-410`).** Already keys on `activeClientId`. Confirm the fetch URL embeds the current value and is not closing over a stale one.
+- [ ] **Socket handlers (`Layout.tsx:431-432`).** Read `activeClientId` from a ref or the latest closure at event-handling time. Ignore events whose payload subaccount differs from the current `activeClientId`.
+- [ ] **Reconnect resync (`Layout.tsx:416`).** Must use current `activeClientId` at resync time, not the value captured when the socket first opened.
+
+If any handler closes over a stale `activeClientId`, refactor to use a ref (or pass `activeClientId` through the handler's argument list) before claiming done.
+
+### 4.5 — Listener lifecycle invariant: no handler accumulation
+
+**Invariant:** Socket listeners must not accumulate across subaccount switches or component re-mounts. Each event type has exactly one active handler per mounted `Layout` instance.
+
+Without listener cleanup, every subaccount switch adds another handler for the same event — one inbound socket message then produces N badge increments. The §4.4 event-filtering invariant masks the symptom on cross-subaccount events but does NOT mask within-subaccount duplicates.
+
+- [ ] **`useSocketRoom` effect cleanup.** The hook's `useEffect` must return a cleanup function that calls `socket.off(eventName, handler)` for each registered listener. Read the hook source to confirm.
+- [ ] **Subaccount-switch sanity check.** Add a temporary console log in the `live:agent_started` handler. Switch subaccounts twice, fire one event. The handler should run exactly once per event — not 2× or 3×.
+- [ ] **Reconnect sanity check.** Force a socket disconnect/reconnect (devtools throttle network or kill server). After reconnect, fire one event — handler should still run exactly once.
+
+If duplicates are observed: fix is in `useSocketRoom` (effect cleanup) or in how the handler is registered (never `socket.on` outside an effect that returns a cleanup).
+
+**Risk:** very low for the JSX restoration; medium for §4.4 if any handler closes over a stale `activeClientId`; low for §4.5 listener lifecycle (testable in dev with one console log). The component already manages the count state; only the JSX is being added back. No backend changes.
 
 ---
 
@@ -166,6 +190,8 @@ For each match in the inventory:
 - [ ] **Read the disabled line and the rule.** If the rule still genuinely fires on legitimate code (e.g. namespace declaration for module augmentation, narrowing patterns the rule false-positives on), add a one-line `// reason: <why>` comment on the line ABOVE the disable, OR confirm an existing inline comment is sufficient.
 - [ ] **If the underlying issue is fixable**, fix it and remove the disable. Example: a `no-unused-vars` disable on a destructured field that should just be deleted.
 - [ ] **If the rule has changed semantics** since the disable was added (e.g. updated `varsIgnorePattern` makes the disable redundant), remove the disable.
+
+**Stop condition.** If a single disable's verdict takes more than 2 minutes of investigation, classify it as "kept with one-line justification" and move on. The audit is hygiene — surfacing obvious wins and adding context comments — not a refactor pass; a bounded time per disable prevents drift into unscoped cleanup.
 
 ### 5.3 — Verify
 
@@ -202,6 +228,10 @@ For each match, classify:
 
 **Action:** keep the cast. Add a one-line `// polymorphic by <discriminator>` comment if absent and the polymorphism isn't obvious from naming.
 
+**Default-to-C invariant — boundary values.** If the value crosses a network boundary (route handler input/output, webhook payload, external API response, persisted JSONB column read) or a dynamic-`actionType` boundary (intervention payload variants, polymorphic discriminated structures keyed at runtime), classify as Category C unless the type is closed and exhaustively known *and* you can demonstrate that. Mis-narrowing a boundary value produces *runtime* bugs (`undefined` access, wrong-shape calls), not type errors — typecheck will pass, behaviour will not. Default-to-C is the safe call when in doubt.
+
+**Stop condition.** If classifying a single callsite takes more than 2 minutes of investigation, classify as Category C and move on. The audit identifies obvious wins (A) and small narrow-able cases (B); a callsite that needs deep type analysis to decide is Category C by definition. Audits become refactors when callsite-by-callsite analysis is unbounded — this audit is hygiene, not deep cleanup.
+
 ### 6.3 — Out-of-scope reframe (do NOT pull this into the cleanup PR)
 
 The ClientPulse intervention-payload type system would benefit from a **discriminated union** (`type InterventionPayload = CreateTaskPayload | FireAutomationPayload | ...` with `actionType` as the discriminator). This is a substantive type-design refactor touching many editor components — it is **out of scope** for this cleanup spec and should be a separate spec when the operator chooses to tackle it. The deferred consideration is recorded in `tasks/todo.md` § *Deferred spec decisions — pr-249-followups* (alongside the F6 volume re-scope option) — that file is the canonical record; no new self-review note is required in this spec.
@@ -212,7 +242,7 @@ The ClientPulse intervention-payload type system would benefit from a **discrimi
 - [ ] `npm run lint` exits 0 with no new errors.
 - [ ] Record the final tallies in the F6 audit tallies row of the Self-review section (see *Self-review against backlog source* below). Format: `<initial inventory> → A: <removed N>, B: <narrowed N>, C: <kept N> (plus any new comments)`.
 
-**Risk:** medium. Per-callsite judgment can introduce real type errors if a "narrow" decision misses a polymorphic case. Run typecheck after each file's changes, not just at the end.
+**Risk:** medium under disciplined classification; medium-high if narrowing decisions are made lazily without applying the §6.2 default-to-C invariant. Per-callsite judgment can introduce real *runtime* bugs (not just type errors — typecheck does not catch wrong narrowing at boundaries) if a "narrow" decision misses a polymorphic case. Run typecheck after each file's changes, not just at the end.
 
 ---
 

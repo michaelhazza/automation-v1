@@ -700,6 +700,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const providerStart = Date.now();
   let providerResponse: ProviderResponse | null = null;
   let callStatus: string = 'success';
+  // reason: safe default so finally-block logging is always defined regardless of which branch executes.
   // eslint-disable-next-line no-useless-assignment
   let callError: string | null = null;
   let attemptNumber = 1;

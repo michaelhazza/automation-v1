@@ -67,7 +67,7 @@ test('callWithTimeout — caller signal abort propagates to inner signal', async
   await new Promise((r) => setTimeout(r, 5));
   callerController.abort(new Error('caller cancelled'));
 
-  await await expect(pending).rejects.toThrow();
+  await expect(pending).rejects.toThrow();
   expect(holder.signal).toBeTruthy();
   expect(holder.signal!.aborted).toBe(true);
 });

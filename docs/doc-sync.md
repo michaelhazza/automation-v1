@@ -18,6 +18,7 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `docs/capabilities.md` | Any add / remove / rename of a product capability, agency capability, skill, or integration. **Editorial Rules apply** — see § *Editorial Rules* in that file. External-ready prose only; no engineer-facing primitives. |
 | `docs/integration-reference.md` | Any change to integration behaviour: new scope, new skill, changed status, new write capability, new OAuth provider, new MCP preset, new capability slug, new alias. Update `last_verified`. |
 | `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | Any change touching build discipline, conventions, agent fleet, review pipeline, locked rules (RLS, service-tier, gates, migrations, §8 development discipline). Also triggered by `[missing-doc] > 2`. |
+| `CONTRIBUTING.md` | Any change to lint-suppression policy, `// reason:` comment format, acceptable / forbidden disable patterns, or addition of new contributor-facing conventions. |
 | `docs/frontend-design-principles.md` | Any new UI pattern, hard rule, or worked example introduced this session. |
 | `KNOWLEDGE.md` | Patterns and corrections — always check. |
 | `docs/spec-context.md` | **Spec-review sessions only.** Any framing-assumption change implied by the spec under review. |

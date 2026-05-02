@@ -1288,6 +1288,7 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
 
   useEffect(() => {
     void load();
+    // reason: `load` is an inline async function that closes over state setters; only the trigger key (subaccountId) should re-run this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 

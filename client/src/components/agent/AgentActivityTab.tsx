@@ -107,6 +107,7 @@ export default function AgentActivityTab({ agentId: _agentId, actorId, subaccoun
     setNextCursor(null);
     setItems([]);
     fetchItems(true, null);
+    // reason: `fetchItems` is an inline function that closes over state setters; only the filter params are the intended triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actorId, subaccountId, dateRange, eventTypeGroup]);
 

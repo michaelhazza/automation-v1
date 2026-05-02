@@ -81,6 +81,7 @@ export default function MemoryBlockDetailPage() {
   useEffect(() => {
     loadVersions();
     if (tab === 'diff-canonical') loadCanonical();
+    // reason: `loadVersions` and `loadCanonical` are inline async functions; only the trigger keys (blockId, tab) should re-run this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blockId, tab]);
 

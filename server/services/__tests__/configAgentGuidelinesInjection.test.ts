@@ -54,6 +54,7 @@ describe.skipIf(SKIP_INTEGRATION)('configAgentGuidelinesInjection (integration)'
   const CONFIG_ASSISTANT_SLUG = 'configuration-assistant';
   const BLOCK_NAME = 'config-agent-guidelines';
 
+  // reason: populated via dynamic imports in beforeAll; declared as `any` because module types are not statically available at declaration site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sql: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,7 +65,7 @@ describe.skipIf(SKIP_INTEGRATION)('configAgentGuidelinesInjection (integration)'
   let memoryBlockAttachments: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let getBlocksForAgent: any;
-   
+
   let configAgent: { id: string; organisationId: string } | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let eq: any;
