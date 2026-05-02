@@ -93,7 +93,7 @@ System-monitoring is reactive fault detection (something broke). The optimiser i
 
 ## §2 Recommendation taxonomy
 
-8 categories. Each scan skill returns raw evidence; the agent renders user-facing copy via a small LLM prompt. The render output is cached by `(category, dedupe_key, evidence_hash)` — re-runs with byte-equal evidence reuse the cached copy; an evidence change invalidates the cache and triggers re-render.
+8 categories. Each scan skill returns raw evidence; the agent renders user-facing copy via a small LLM prompt. The render output is cached by `(category, dedupe_key, evidence_hash, render_version)` — re-runs with byte-equal evidence and the same render_version reuse the cached copy. An evidence change OR a render_version bump invalidates the cache and triggers re-render. `render_version` is a monotonically-increasing integer constant exported from `server/services/optimiser/renderVersion.ts`; bump it whenever the render-prompt template, the per-category evidence-shape contract, or the output-format contract changes. This keeps stale operator copy from persisting after a prompt tweak.
 
 **Category slugs are internal vocabulary.** They appear in `agent_recommendations.category`, in skill manifests, and in deferred-items routing. They MUST NOT appear in operator-facing UI — the agent renders plain English titles and details.
 
@@ -115,7 +115,7 @@ Each recommendation row has: `category`, `severity` (`info` / `warn` / `critical
 |------|----------|---------|--------------------------|
 | `memory.low_citation_waste` | warn | > 50% of injected memory entries scored < 0.3 in `memory_citation_scores` over 7 days | "Memory cleanup could speed things up" / "Most of the notes saved for your agents this week went unused. Cleaning them up could trim costs and speed up runs." |
 | `agent.routing_uncertainty` | warn | Fast-path confidence < 0.5 on > 30% of decisions, OR `secondLookTriggered` rate > 30%, sustained 7 days | "Outreach Agent is hesitating a lot" / "It's second-guessing itself on about a third of decisions. Worth a quick look." |
-| `llm.cache_poor_reuse` | info | `cacheCreationTokens` > sum of `cachedPromptTokens` over 7 days for any agent (cache costs more than it saves) | "Caching isn't paying off this week" / "Building the cache is costing more than it's saving on the Reporting Agent." |
+| `llm.cache_poor_reuse` | info | `cacheCreationTokens` > sum of `cachedPromptTokens` over 7 days for any agent (cache costs more than it saves) AND `cacheCreationTokens + cachedPromptTokens >= 5000` over the same window (volume-floor noise guard — agents below this floor produce a too-noisy ratio) | "Caching isn't paying off this week" / "Building the cache is costing more than it's saving on the Reporting Agent." |
 
 ### Per-category evaluator modules
 
@@ -135,6 +135,23 @@ Each category has a template module under `server/services/optimiser/recommendat
 | `llm.cache_poor_reuse` | `<agent_id>` |
 
 Open recommendation in same `(subaccount_id, category, dedupe_key)` → write skill returns `was_new=false`, no insert.
+
+### Material-change thresholds
+
+A bare evidence hash mismatch is too sensitive to drive re-surfacing — daily fluctuation in costs, latency, and rates would re-clear `acknowledged_at` on every run and train operators to ignore the section. Each category defines a `materialDelta(prev, next): boolean` predicate. Below-threshold deltas are full no-ops: no DB write, no re-render, no re-surface. Above-threshold deltas land the `updated_in_place` path (per §6.2). The predicates live alongside the per-category evidence types in `shared/types/agentRecommendations.ts` (per §6.5).
+
+| Category | Material-change predicate |
+|----------|---------------------------|
+| `agent.over_budget` | `abs(next.this_month - prev.this_month) / max(prev.this_month, 1) >= 0.10` (10% relative change in this-month spend) |
+| `playbook.escalation_rate` | `abs(next.escalation_pct - prev.escalation_pct) >= 0.10` (10pp absolute change in escalation rate) |
+| `skill.slow` | `abs(next.ratio - prev.ratio) >= 0.20` (20% absolute change in p95-vs-peer-median ratio) |
+| `inactive.workflow` | `next.last_run_at !== prev.last_run_at` (any change is material — a new run resolves the finding entirely) |
+| `escalation.repeat_phrase` | `next.count !== prev.count` (any new occurrence is material; cap-and-cooldown handle volume) |
+| `memory.low_citation_waste` | `abs(next.low_citation_pct - prev.low_citation_pct) >= 0.10` (10pp absolute change in low-citation %) |
+| `agent.routing_uncertainty` | `abs(next.low_confidence_pct - prev.low_confidence_pct) >= 0.10 OR abs(next.second_look_pct - prev.second_look_pct) >= 0.10` |
+| `llm.cache_poor_reuse` | `abs(next.creation_tokens - prev.creation_tokens) / max(prev.creation_tokens, 1) >= 0.20` (20% relative change in creation-token spend) |
+
+Predicates are PURE — no I/O, no clock reads. They take only the prior and current `evidence` shapes. The render-cache key already changes whenever `evidence_hash` differs, so a below-threshold delta with cached copy still costs zero LLM tokens AND zero DB writes.
 
 ---
 
@@ -167,6 +184,8 @@ The original §3 noted "review_items joined to tasks → skill_instructions" wit
 **Access posture.** The view contains only cross-tenant aggregates and carries no `organisation_id` / `subaccount_id` columns. Read via `withAdminConnection()` from inside `server/services/optimiser/queries/skillLatency.ts`. Not added to `rlsProtectedTables.ts` because there are no per-tenant rows to protect — opt-out rationale documented in `architecture.md` per the §3 sysadmin-bypassed-read pattern.
 
 **Minimum-tenant threshold:** the view returns no value for a `skill_slug` used by < 5 sub-accounts. Below threshold, `skill.slow` evaluator skips the recommendation entirely. Prevents single-tenant data leakage when a skill is used by 1-2 clients. Threshold is enforced inside the view definition (HAVING clause), not just application logic.
+
+**Refresh staleness is acceptable.** The materialised view refreshes nightly via the `refresh_optimiser_peer_medians` pg-boss job (see §9 Phase 1). Optimiser runs fire at sub-account local 06:00, which means earliest fires (e.g. UTC+13) can land before later UTC-zone refreshes complete. The staleness window is intentional: `skill.slow` uses 7-day-aggregate medians, and a one-day-old peer baseline is still well-correlated with current operator-perceived latency. The job is scheduled at `00:00 UTC` to maximise the cushion before the earliest-timezone optimiser window. No tighter coupling is required for v1.
 
 ## §4 Agent definition
 
@@ -230,7 +249,8 @@ CREATE TABLE agent_recommendations (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- set on insert; bumped on every update_in_place, acknowledge, dismiss
   acknowledged_at TIMESTAMPTZ,
   dismissed_at TIMESTAMPTZ,
-  dismissed_reason TEXT
+  dismissed_reason TEXT,
+  dismissed_until TIMESTAMPTZ -- cooldown end; NULL when not dismissed; output.recommend skips matches where now() < dismissed_until
 );
 
 CREATE UNIQUE INDEX agent_recommendations_dedupe
@@ -241,9 +261,15 @@ CREATE INDEX agent_recommendations_open_by_scope
   ON agent_recommendations(scope_type, scope_id, updated_at DESC)
   WHERE dismissed_at IS NULL AND acknowledged_at IS NULL;
 
+CREATE INDEX agent_recommendations_dismissed_active_cooldown
+  ON agent_recommendations(scope_type, scope_id, category, dedupe_key, dismissed_until)
+  WHERE dismissed_at IS NOT NULL;
+
 CREATE INDEX agent_recommendations_org
   ON agent_recommendations(organisation_id, created_at DESC);
 ```
+
+The `dismissed_until` cooldown lookup uses the `agent_recommendations_dismissed_active_cooldown` index — `output.recommend` runs an inner-loop check `SELECT 1 FROM agent_recommendations WHERE scope_type=$1 AND scope_id=$2 AND category=$3 AND dedupe_key=$4 AND dismissed_at IS NOT NULL AND dismissed_until > now() LIMIT 1` before any insert decision. The partial unique index `agent_recommendations_dedupe` cannot widen its `WHERE` clause to reference `now()` (Postgres rejects non-IMMUTABLE expressions in partial-index predicates), so cooldown enforcement is application-side, not constraint-side.
 
 Plus RLS policies (per `0245_all_tenant_tables_rls.sql` pattern), `rlsProtectedTables.ts` entry, `canonicalDictionary.ts` entry.
 
@@ -272,17 +298,35 @@ New skill defined in `server/skills/output/recommend.md`, executor in `server/se
 }
 ```
 
-**Output:** `{ recommendation_id: string, was_new: boolean, reason?: 'cap_reached' | 'updated_in_place' }`.
-- `was_new=true` — new row inserted.
-- `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` AND the new `evidence_hash` differs from the stored `evidence_hash`. Executor updates `title`, `body`, `evidence`, `evidence_hash`, `severity`, `action_hint`, and `updated_at` (= `now()`) on the existing row in place; `created_at` is preserved; `acknowledged_at` is set to `NULL` (re-surface the row to the operator since something material changed); `recommendation_id` returned is the existing row's id.
-- `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations. Insert refused; `recommendation_id` returned is `''`. Cap is enforced inside the executor via `pg_advisory_xact_lock(hashtext('output.recommend.cap:' || scope_type || ':' || scope_id || ':' || producing_agent_id))` taken before the `SELECT count(*)` that gates the insert. The advisory lock serialises insert decisions per `(scope, producing_agent_id)` triple within a transaction, eliminating the count-then-insert TOCTOU race. Pattern lifted from `feature_requests` (per architecture.md → "Feature request pipeline" → `pg_advisory_xact_lock(orgId + dedupeHash)` inside the insert transaction).
-- `was_new=false` (no `reason`) — open match existed and `evidence_hash` matches; no write performed. The operator-facing copy and the row's `acknowledged_at` state are preserved.
+**Output:** `{ recommendation_id: string, was_new: boolean, reason?: 'cap_reached' | 'cooldown' | 'updated_in_place' | 'sub_threshold' | 'evicted_lower_priority' }`.
 
-**Evidence hash.** `evidence_hash = sha256(canonical_json(evidence))` where `canonical_json` is RFC 8785 (or equivalent) — recursive sort of object keys, no insignificant whitespace, lowercase hex digest. Computed inside the skill executor before any DB call. Hash compares the full `evidence` value (including numeric values), not just its shape. A delta of `{ "this_month": 7300 }` → `{ "this_month": 7400 }` is a hash change and triggers update-in-place + acknowledged_at clear; rerunning the same scan with byte-equal evidence is a no-op.
+- `was_new=true` (no `reason`) — new row inserted; cap was below 10 for `(scope, producing_agent_id)`.
+- `was_new=true, reason='evicted_lower_priority'` — cap was full but the new candidate's priority tuple was higher than the lowest-priority open rec for `(scope, producing_agent_id)`. Executor atomically dismissed the lowest (`dismissed_at=now()`, `dismissed_reason='evicted_by_higher_priority'`, `dismissed_until=NULL` — eviction does NOT trigger an operator-driven cooldown) and inserted the new row in the same transaction. Priority tuple: severity rank desc (`critical=3`, `warn=2`, `info=1`), then `category` asc, then `dedupe_key` asc.
+- `was_new=false, reason='updated_in_place'` — open recommendation existed for `(scope_type, scope_id, category, dedupe_key)` AND the new `evidence_hash` differs from the stored `evidence_hash` AND the per-category `materialDelta(prev, next)` predicate (per §2 Material-change thresholds) returned TRUE. Executor updates `title`, `body`, `evidence`, `evidence_hash`, `severity`, `action_hint`, and `updated_at` (= `now()`) on the existing row in place; `created_at` is preserved; `acknowledged_at` is set to `NULL` (re-surface the row to the operator since something material changed); `recommendation_id` returned is the existing row's id.
+- `was_new=false, reason='sub_threshold'` — open recommendation existed AND the new `evidence_hash` differs from the stored hash, but the per-category `materialDelta(prev, next)` returned FALSE. Full no-op: no DB write, no LLM render, no operator re-surface. `recommendation_id` returned is the existing row's id (callers can correlate). This is the noise-suppression path that prevents day-to-day fluctuation in costs / latency / rates from re-clearing `acknowledged_at`.
+- `was_new=false, reason='cap_reached'` — `(scope_type, scope_id, producing_agent_id)` already has 10 open (non-dismissed) recommendations AND the new candidate's priority tuple was NOT higher than the lowest-priority open rec. Insert refused; `recommendation_id` returned is `''`. Executor emits a structured log line `recommendations.dropped_due_to_cap` (per the "tagged-log-as-metric" convention in KNOWLEDGE.md) with fields `{scope_type, scope_id, producing_agent_id, category, severity, dedupe_key}` so cap drops are auditable without a separate observability table.
+- `was_new=false, reason='cooldown'` — a dismissed row exists for `(scope_type, scope_id, category, dedupe_key)` with `dismissed_until > now()`. Insert refused; `recommendation_id` returned is the existing dismissed row's id. Cooldown is set at dismiss time per severity (see §6.5 dismiss endpoint): `critical → now() + 1 day`, `warn → now() + 7 days`, `info → now() + 14 days`. Defaults are encoded in `server/services/agentRecommendationsService.ts`; the dismiss endpoint's optional admin-only `cooldown_hours` body param overrides per-call.
+- `was_new=false` (no `reason`) — open match existed AND `evidence_hash` matches exactly. No write performed. The operator-facing copy and the row's `acknowledged_at` state are preserved.
 
-**Pre-write candidate ordering.** When an agent run produces more candidate recommendations than the per-`(scope, producing_agent_id)` cap of 10, the executor's caller (the optimiser agent loop OR any future producer) MUST sort candidates before invoking `output.recommend` to make cap-eviction deterministic: severity descending (`critical` > `warn` > `info`), then `category` ascending, then `dedupe_key` ascending. This is a producer-side contract, not enforced inside `output.recommend` itself; the optimiser's evaluator-orchestration layer applies it before the per-recommendation calls.
+**Decision flow + advisory lock.** All five paths above are decided inside a single transaction guarded by `pg_advisory_xact_lock(hashtext('output.recommend.cap:' || scope_type || ':' || scope_id || ':' || producing_agent_id))`. The lock pattern is lifted from `feature_requests` (per `architecture.md` → "Feature request pipeline"). Within the lock, the executor runs in this order:
 
-**Idempotency posture (per spec-authoring-checklist §10).** Key-based on `(scope_type, scope_id, category, dedupe_key) WHERE dismissed_at IS NULL`. Two agents racing on the same key resolve via the unique index — first commit wins; the loser catches Postgres `23505` and returns `{ was_new: false, recommendation_id: <existing row id> }` (looked up after the catch). Never bubbles `23505` as a 500. The skill executor maps the exception inside the transaction. Update-in-place path uses an optimistic `UPDATE … WHERE id = $existing AND dismissed_at IS NULL` predicate — 0 rows affected = a concurrent dismiss won; falls through to the no-op `was_new=false` path.
+1. **Cooldown check.** `SELECT 1 FROM agent_recommendations WHERE scope_type=$1 AND scope_id=$2 AND category=$3 AND dedupe_key=$4 AND dismissed_at IS NOT NULL AND dismissed_until > now() LIMIT 1`. If hit → return `{was_new: false, reason: 'cooldown', recommendation_id: <dismissed_row_id>}`.
+2. **Open-match lookup.** `SELECT id, evidence, evidence_hash FROM agent_recommendations WHERE scope_type=$1 AND scope_id=$2 AND category=$3 AND dedupe_key=$4 AND dismissed_at IS NULL FOR UPDATE`. If hit:
+   - Hashes equal → return `{was_new: false, recommendation_id: <existing_id>}` (no `reason`).
+   - Hashes differ + `materialDelta(prev, next)` is FALSE → return `{was_new: false, reason: 'sub_threshold', recommendation_id: <existing_id>}`.
+   - Hashes differ + `materialDelta` is TRUE → UPDATE row (per `updated_in_place` bullet) + return `{was_new: false, reason: 'updated_in_place', recommendation_id: <existing_id>}`.
+3. **Cap check.** `SELECT count(*) FROM agent_recommendations WHERE scope_type=$1 AND scope_id=$2 AND producing_agent_id=$5 AND dismissed_at IS NULL`. If `< 10` → INSERT new row, return `{was_new: true, recommendation_id: <new_id>}`.
+4. **Eviction check** (cap reached). `SELECT id, severity, category, dedupe_key FROM agent_recommendations WHERE scope_type=$1 AND scope_id=$2 AND producing_agent_id=$5 AND dismissed_at IS NULL ORDER BY <priority asc> LIMIT 1`. Compare new candidate's priority to that lowest row:
+   - New > lowest → UPDATE lowest (`dismissed_at=now()`, `dismissed_reason='evicted_by_higher_priority'`, `dismissed_until=NULL`), then INSERT new row, then return `{was_new: true, reason: 'evicted_lower_priority', recommendation_id: <new_id>}`.
+   - New ≤ lowest → emit `recommendations.dropped_due_to_cap` log line, return `{was_new: false, reason: 'cap_reached', recommendation_id: ''}`.
+
+The advisory lock + `FOR UPDATE` row lock together eliminate every race: two agents can't insert the 11th row, an evict-and-insert can't be split by an interleaving insert, and a concurrent dismiss can't land between the open-match `FOR UPDATE` and the in-place update (the `FOR UPDATE` blocks the dismiss until this transaction commits or rolls back).
+
+**Evidence hash.** `evidence_hash = sha256(canonical_json(evidence))` where `canonical_json` is RFC 8785 (or equivalent) — recursive sort of object keys, no insignificant whitespace, lowercase hex digest. Computed inside the skill executor before any DB call. Hash compares the full `evidence` value (including numeric values), not just its shape. The hash drives cache-key invalidation and is the trigger for the per-category `materialDelta(prev, next)` check (per §2 Material-change thresholds): byte-equal evidence is a full no-op (no `reason`); a hash delta where `materialDelta` returns FALSE is a `sub_threshold` no-op (no DB write, no re-render, no operator re-surface); a hash delta where `materialDelta` returns TRUE lands the `updated_in_place` path (DB row updated, copy re-rendered, `acknowledged_at` cleared). The hash itself is not the gate for re-surfacing — `materialDelta` is.
+
+**Pre-write candidate ordering.** When an agent run produces more candidate recommendations than the per-`(scope, producing_agent_id)` cap of 10, the executor's caller (the optimiser agent loop OR any future producer) SHOULD sort candidates before invoking `output.recommend` so cap-eviction churn is minimised. Sort order: severity descending (`critical` > `warn` > `info`), then `category` ascending, then `dedupe_key` ascending — same priority tuple the executor uses internally for eviction decisions. This is a producer-side optimisation, not a correctness requirement: cap eviction is now executor-side and priority-aware (per §6.2 — higher-priority candidates displace lower-priority open recs regardless of arrival order), so an unsorted producer is correct but causes more `evicted_lower_priority` outcomes than an ordered one.
+
+**Idempotency posture (per spec-authoring-checklist §10).** Key-based on `(scope_type, scope_id, category, dedupe_key) WHERE dismissed_at IS NULL`. Same-`producing_agent_id` races are serialised by the per-`(scope, producing_agent_id)` advisory lock + `FOR UPDATE` row lock from §6.2 Decision flow — they never reach the unique-index race in practice. Cross-`producing_agent_id` races (two different agents picking the same `(scope, category, dedupe_key)`, which is unusual since agents own their category namespaces per §6.2 Category naming, but legal) hold different advisory locks and can both reach the INSERT step concurrently; the unique index resolves them — first commit wins; the loser catches Postgres `23505` and returns `{ was_new: false, recommendation_id: <existing row id> }` (looked up after the catch). Never bubbles `23505` as a 500. The skill executor maps the exception inside the transaction. Update-in-place path uses the `FOR UPDATE` row lock from step 2 of the decision flow — a concurrent dismiss is blocked until the in-place update commits; no optimistic-CAS predicate needed.
 
 **Retry classification.** `output.recommend` is `safe` (key-based idempotency); callers may retry on transport failure without further coordination. The acknowledge / dismiss HTTP routes are `guarded` — both use `UPDATE agent_recommendations SET … WHERE id = $1 AND dismissed_at IS NULL` (or `acknowledged_at IS NULL` for acknowledge); a second call lands as a 200-idempotent-no-op rather than a 409.
 
@@ -309,6 +353,14 @@ New React component at `client/src/components/recommendations/AgentRecommendatio
                                    // visible rows. Parent controls toggle via state.
   limit?: number,            // default 3 — used only when mode='collapsed'.
   emptyState?: 'hide' | 'show', // default 'hide' — section disappears when empty
+  collapsedDistinctScopeId?: boolean, // default true when scope.type='org' AND
+                                      // includeDescendantSubaccounts=true AND mode='collapsed'.
+                                      // When effective, the component dedupes rows by scope_id
+                                      // BEFORE applying limit, keeping only the highest-priority
+                                      // row per scope_id. Prevents one noisy subaccount from
+                                      // dominating the top-3 in cross-client rollup. The dedupe
+                                      // is purely a render-layer rule; the underlying fetch and
+                                      // total-count are unchanged.
   onTotalChange?: (total: number) => void, // fires after each fetch with the full
                                            // (post-RLS) row count. Lets the parent render
                                            // "See all N →" with the real N instead of guessing.
@@ -326,6 +378,8 @@ Renders a vertical list of open recommendations for the given scope, sorted by s
 **Row-data contract from the hook.** `useAgentRecommendations` returns rows shaped as `{ id, scope_type, scope_id, subaccount_display_name?: string, category, severity, title, body, action_hint, evidence, created_at, updated_at, acknowledged_at, dismissed_at }`. `subaccount_display_name` is populated ONLY for `scope_type='subaccount'` rows fetched in org-rollup mode (`includeDescendantSubaccounts=true`); the hook joins to `subaccounts.name` server-side and returns the resolved string. Sub-account scope and org-only-row queries omit the field.
 
 **Org-rollup row label.** When `scope_type='subaccount'` rows are rendered in org-rollup mode, the row prepends a small slate-500 label `<subaccount_display_name> · ` before the operator-facing title (e.g. "Smith Dental · Reporting Agent is spending more than expected"). In single-scope mode (sub-account context, or `includeDescendantSubaccounts=false`), the label is omitted.
+
+**Org-rollup collapsed-mode dedupe.** When `collapsedDistinctScopeId` is effective (per the prop default rule above), the component groups fetched rows by `scope_id`, keeps only the highest-priority row per scope_id (using the same priority tuple as the cap-eviction in §6.2 — severity desc → category asc → dedupe_key asc), then slices to `limit`. Expanded mode skips this dedupe and renders all visible rows. Sub-account context never triggers the dedupe (only one scope_id present). The `total` reported via `onTotalChange` always reflects the full post-RLS row count, NOT the post-dedupe count, so "See all N →" matches what the operator finds in the expanded view.
 
 **No category labels in the UI.** No severity word labels. No timestamps on individual rows. Dot colour and ordering carry severity; the section header carries the timestamp ("Updated this morning").
 
@@ -373,6 +427,36 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
   }
   ```
 
+**Per-category evidence shapes.** The `evidence` column is JSONB, but each optimiser category emits a stable shape so evaluators, the render prompt, the `materialDelta` predicate, and downstream consumers can rely on the field set. Shapes live in `shared/types/agentRecommendations.ts` as a discriminated union keyed on `category`. Future agents adding new categories MUST add their shape to the same file. No DB-level constraint enforces these — they are a TypeScript contract the producer side honours.
+
+```ts
+// shared/types/agentRecommendations.ts (excerpt)
+export type AgentOverBudgetEvidence = { agent_id: string; this_month: number; last_month: number; budget: number; top_cost_driver: string };
+export type PlaybookEscalationRateEvidence = { workflow_id: string; run_count: number; escalation_count: number; escalation_pct: number; common_step_id: string };
+export type SkillSlowEvidence = { skill_slug: string; latency_p95_ms: number; peer_p95_ms: number; ratio: number };
+export type InactiveWorkflowEvidence = { subaccount_agent_id: string; agent_id: string; agent_name: string; expected_cadence: string; last_run_at: string | null };
+export type EscalationRepeatPhraseEvidence = { phrase: string; count: number; sample_escalation_ids: string[] };
+export type MemoryLowCitationWasteEvidence = { agent_id: string; low_citation_pct: number; total_injected: number; projected_token_savings: number };
+export type AgentRoutingUncertaintyEvidence = { agent_id: string; low_confidence_pct: number; second_look_pct: number };
+export type LlmCachePoorReuseEvidence = { agent_id: string; creation_tokens: number; reused_tokens: number; dominant_skill: string };
+
+export type RecommendationEvidence =
+  | { category: 'agent.over_budget' } & AgentOverBudgetEvidence
+  | { category: 'playbook.escalation_rate' } & PlaybookEscalationRateEvidence
+  | { category: 'skill.slow' } & SkillSlowEvidence
+  | { category: 'inactive.workflow' } & InactiveWorkflowEvidence
+  | { category: 'escalation.repeat_phrase' } & EscalationRepeatPhraseEvidence
+  | { category: 'memory.low_citation_waste' } & MemoryLowCitationWasteEvidence
+  | { category: 'agent.routing_uncertainty' } & AgentRoutingUncertaintyEvidence
+  | { category: 'llm.cache_poor_reuse' } & LlmCachePoorReuseEvidence;
+
+export const materialDelta: Record<RecommendationEvidence['category'], (prev: any, next: any) => boolean> = {
+  // per-category predicates — see §2 Material-change thresholds for the exact rules
+};
+```
+
+The `evidence` row column persists the shape MINUS the `category` discriminator (since the row already has its own `category` column). Producer code constructs the discriminated-union value, and the `output.recommend` executor strips `category` before insert.
+
 **`output.recommend` input/output** — already pinned in §6.2 (input contract + output discriminated by `was_new` and `reason`). Producer: any agent with the skill in its manifest. Consumer: `skillExecutor.ts`.
 
 **Read endpoint** (the GET that `useAgentRecommendations` calls).
@@ -383,7 +467,7 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
 
 **Acknowledge / dismiss HTTP endpoints.**
 - `POST /api/recommendations/:recId/acknowledge` — request body `{}`; response `{ success: true, alreadyAcknowledged: boolean }`. Idempotent: a second call returns `alreadyAcknowledged: true` rather than 409. 404 when `:recId` doesn't exist or isn't visible to the caller (RLS-filtered).
-- `POST /api/recommendations/:recId/dismiss` — request body `{ reason: string }` (`reason` max 500 chars). Response `{ success: true, alreadyDismissed: boolean }`. Idempotent on the dismiss path; the second call's `reason` is ignored. 404 same as above.
+- `POST /api/recommendations/:recId/dismiss` — request body `{ reason: string, cooldown_hours?: number }` (`reason` max 500 chars; `cooldown_hours` admin-only — silently ignored if the caller is not a system admin per the standard `requireSystemAdmin` guard pattern). Response `{ success: true, alreadyDismissed: boolean, dismissed_until: string }` (ISO 8601 timestamp). Idempotent on the dismiss path; the second call's `reason` and `cooldown_hours` are ignored. 404 same as above. Cooldown defaults are computed from the row's `severity` at dismiss time: `critical → +1d`, `warn → +7d`, `info → +14d`. Admin override via `cooldown_hours` clamps to `[1, 24*90]` (1 hour to 90 days). The cooldown end date is what blocks future `output.recommend` calls from recreating the row (per §6.2 cooldown path) — once `dismissed_until` is in the past, a new evaluation will produce a fresh row with a new `id`.
 - Both routes are auth-gated (`authenticate`); no additional permission guard since RLS scopes the row to the caller's org. Idempotency is state-based, not key-based, and the route distinguishes "row missing / RLS-hidden" from "already in target state" via a two-step CTE pattern:
 
   ```sql
@@ -409,9 +493,11 @@ Pinned shapes for the four boundaries this primitive crosses. Source-of-truth: `
   - `existed = 1, updated_rows = 0` → 200 `{ alreadyAcknowledged: true }` (target state already reached; no-op).
   - `existed = 1, updated_rows = 1` → 200 `{ alreadyAcknowledged: false }` (this call performed the transition).
 
-  Same shape for dismiss with `acknowledged_at` swapped for `dismissed_at` and `reason` recorded in `dismissed_reason`. `updated_at` is bumped on both transitions. No `23505` edge applies — there is no unique-constraint involvement on the UPDATE path.
+  Same shape for dismiss with `acknowledged_at` swapped for `dismissed_at`, `reason` recorded in `dismissed_reason`, AND `dismissed_until` set to `now() + interval '<H> hours'` where `H` is `cooldown_hours` (admin-only override) or the per-severity default (`critical=24`, `warn=168`, `info=336`). The `dismissed_until` column is computed inside the same `UPDATE` so the cooldown landing is atomic with the dismiss transition. `updated_at` is bumped on both transitions. No `23505` edge applies — there is no unique-constraint involvement on the UPDATE path.
 
 **Implicit acknowledge on deep-link click.** The "Help me fix this →" UI affordance triggers the acknowledge endpoint client-side as a fire-and-forget `POST` immediately after the deep-link navigation begins (the user has acted on the recommendation, so it should leave the operator's list). The dismiss × button is the only explicitly-visible alternate row action in v1 — there is no separate visible "Acknowledge" button. This keeps the row contract clean (one primary action + one dismiss) per the frontend design principles. If the user does NOT click the deep-link and instead returns to the dashboard later, the recommendation remains visible.
+
+**Click feedback before navigation.** The click-to-deep-link transition needs a beat of visible feedback so the row's later disappearance feels caused, not arbitrary. The component fades the row to 50% opacity and replaces the "Help me fix this →" text with "Marked as resolved" inline for a 250ms beat before initiating navigation. The fire-and-forget `POST /acknowledge` runs in parallel with the visual beat, not after it — total user-perceived latency stays at 250ms regardless of network state. If the user navigates away during the beat (back button, sidebar nav), the acknowledge POST has already been dispatched and lands when the network resolves; the row will be hidden by the socket-driven refetch on next dashboard mount.
 
 **`action_hint` deep-link schema.** `action_hint` is a string in the form `<surface>://<entity>/<id>?<params>` parsed by the Configuration Assistant front-door router. The primitive does not validate the format — agents own their hints — but optimiser categories MUST follow the table below so the operator deep-link experience is consistent. Unknown / malformed hints fall through to a generic `configuration-assistant://` landing page.
 
@@ -454,7 +540,7 @@ Section header: **"A few things to look at"** (h2, matches the `text-[17px] font
 
 Sub-header line (12.5px, slate-500): the freshness label, plus a sec-link "See all N →" on the right when there are more than 3 open recommendations. The freshness label is rendered from the maximum `updated_at` across the rows in the current scope (e.g. "Updated this morning" if the most-recent `updated_at` was within the last 4 hours; "Updated yesterday" otherwise — exact thresholds in `client/src/lib/relativeTime.ts`). The N comes from the `onTotalChange` callback fired by `<AgentRecommendationsList>` after each fetch (per §6.3). DashboardPage holds `[mode, setMode] = useState<'collapsed'|'expanded'>('collapsed')` and `[total, setTotal] = useState(0)`; clicking the "See all N →" link calls `setMode('expanded')` to flip the same component into expanded mode in place — no navigation in v1. Expanded mode fetches `limit=100` (the GET endpoint's hard cap); if `total > 100`, the truncation is acknowledged in the UI ("Showing 100 of N — see /suggestions for the full list" — the standalone page is a v1.1 deferred item).
 
-Body: top 3 open recommendations rendered by `<AgentRecommendationsList limit={3} mode={mode} onTotalChange={setTotal} … />` with the props above. Each row: severity dot, plain-English title (operator copy), one-sentence detail (operator copy with concrete numbers), "Help me fix this →" deep-link to Configuration Assistant.
+Body: top 3 open recommendations rendered by `<AgentRecommendationsList limit={3} mode={mode} onTotalChange={setTotal} … />` with the props above. Each row: severity dot, plain-English title (operator copy), one-sentence detail (operator copy with concrete numbers), "Help me fix this →" deep-link to Configuration Assistant. In org context with cross-client rollup (`includeDescendantSubaccounts={true}`), the collapsed top-3 dedupes by `scope_id` (per §6.3 "Org-rollup collapsed-mode dedupe") so one noisy subaccount cannot dominate the surface — the operator sees up to one row per subaccount in the top-3, with the rest available via "See all N →".
 
 **Hidden when empty.** Zero open recommendations for the current scope = entire section is not rendered. No "Nothing to optimise" empty state — the section simply isn't there.
 
@@ -496,15 +582,17 @@ Total ~25h. Phase 0 builds the reusable primitive; Phases 1-4 are the optimiser 
 
 Builds reusable infrastructure that survives beyond the optimiser.
 
-- [ ] Author migration `migrations/0267_agent_recommendations.sql` (+ `.down.sql`). Same migration adds the boolean column `subaccounts.optimiser_enabled NOT NULL DEFAULT true` (the opt-out toggle referenced in §1, §4, §8, §9, §11). Not added as a separate migration because it's a single-column boolean conceptually owned by the optimiser feature; a dedicated migration would be heavier overhead than the primitive itself.
-- [ ] Add table to `server/db/schema/agentRecommendations.ts`.
+- [ ] Author migration `migrations/0267_agent_recommendations.sql` (+ `.down.sql`). Same migration adds the boolean column `subaccounts.optimiser_enabled NOT NULL DEFAULT true` (the opt-out toggle referenced in §1, §4, §8, §9, §11) AND the four `agent_recommendations` indexes (dedupe partial-unique, open-by-scope, dismissed-active-cooldown, organisation-id rollup) per §6.1. Not added as a separate migration because all are conceptually owned by the optimiser feature; a dedicated migration would be heavier overhead than the primitive itself.
+- [ ] Add table to `server/db/schema/agentRecommendations.ts` (including `dismissed_until TIMESTAMPTZ` column and discriminated-union `RecommendationEvidence` type).
 - [ ] Register in `rlsProtectedTables.ts` and `canonicalDictionary.ts`.
 - [ ] RLS policies migration entry per `0245_all_tenant_tables_rls.sql` pattern (folded into 0267).
-- [ ] Author skill `server/skills/output/recommend.md` + executor case in `server/services/skillExecutor.ts`.
-- [ ] Author component `client/src/components/recommendations/AgentRecommendationsList.tsx`.
+- [ ] Author `shared/types/agentRecommendations.ts` — discriminated-union evidence types per §6.5 + `materialDelta` registry per §2 Material-change thresholds.
+- [ ] Author `server/services/optimiser/renderVersion.ts` exporting `RENDER_VERSION` (integer constant, currently `1`). Bump policy: prompt-template change, evidence-shape change, output-format change.
+- [ ] Author skill `server/skills/output/recommend.md` + executor case in `server/services/skillExecutor.ts` implementing the §6.2 decision flow (cooldown check → open-match lookup with `materialDelta` → cap check → eviction-or-drop). Drop log uses the existing tagged-log-as-metric convention.
+- [ ] Author component `client/src/components/recommendations/AgentRecommendationsList.tsx` (including `collapsedDistinctScopeId` prop per §6.3 and click-feedback beat per §6.5).
 - [ ] Author hook `client/src/hooks/useAgentRecommendations.ts` (fetches by scope, subscribes to socket updates per home-dashboard-reactivity pattern).
-- [ ] Read + acknowledge / dismiss endpoints in `server/routes/agentRecommendations.ts`: `GET /api/recommendations?scopeType=&scopeId=&includeDescendantSubaccounts=&limit=` (list), `POST /api/recommendations/:recId/acknowledge`, `POST /api/recommendations/:recId/dismiss` (body: `{reason}`). All three exact contracts pinned in §6.5.
-- [ ] Pure unit tests: dedupe-key uniqueness, scope enforcement, severity enum, opening row only when no open match exists.
+- [ ] Read + acknowledge / dismiss endpoints in `server/routes/agentRecommendations.ts`: `GET /api/recommendations?scopeType=&scopeId=&includeDescendantSubaccounts=&limit=` (list), `POST /api/recommendations/:recId/acknowledge`, `POST /api/recommendations/:recId/dismiss` (body: `{reason, cooldown_hours?}`; admin-only `cooldown_hours` override). All three exact contracts pinned in §6.5.
+- [ ] Pure unit tests: dedupe-key uniqueness, scope enforcement, severity enum, opening row only when no open match exists, per-category `materialDelta` predicates against fixture deltas, cap-eviction priority comparison, dismiss-cooldown behaviour (cooldown-active → no-op; cooldown-expired → fresh row).
 
 ### Phase 1 — Telemetry rollup queries + cross-tenant median view (~8h)
 
@@ -560,23 +648,28 @@ Builds reusable infrastructure that survives beyond the optimiser.
 ### Phase 0 — primitive (reusable)
 
 **Server:**
-- `migrations/0267_agent_recommendations.sql` (+ `.down.sql`) — `agent_recommendations` table + RLS policies + `subaccounts.optimiser_enabled` boolean column (default true)
+- `migrations/0267_agent_recommendations.sql` (+ `.down.sql`) — `agent_recommendations` table (including `dismissed_until` cooldown column) + four indexes per §6.1 + RLS policies + `subaccounts.optimiser_enabled` boolean column (default true)
 - `server/db/schema/subaccounts.ts` — add `optimiser_enabled` column to existing schema export
-- `server/db/schema/agentRecommendations.ts` (new)
+- `server/db/schema/agentRecommendations.ts` (new — includes `dismissed_until` column)
 - `server/db/rlsProtectedTables.ts` (entry)
 - `server/db/canonicalDictionary.ts` (entry)
+- `server/services/optimiser/renderVersion.ts` (new — `RENDER_VERSION` integer constant; bumped on prompt / evidence / output-format change)
+- `server/services/agentRecommendationsService.ts` (new — per-severity cooldown defaults, eviction priority comparator, drop-log helper)
 - `server/skills/output/recommend.md` (new generic skill spec)
-- `server/services/skillExecutor.ts` (new case for `output.recommend`)
-- `server/routes/agentRecommendations.ts` (new — list / acknowledge / dismiss endpoints per §6.5)
+- `server/services/skillExecutor.ts` (new case for `output.recommend` implementing the §6.2 decision flow)
+- `server/routes/agentRecommendations.ts` (new — list / acknowledge / dismiss endpoints per §6.5; dismiss accepts optional admin `cooldown_hours`)
 - `server/websocket/emitters.ts` (extend — add `dashboard.recommendations.changed` emitter alongside the existing `dashboard.*` emitters from PR #218)
 - `server/index.ts` (extend — mount the new `agentRecommendations.ts` router on `/api`)
 
+**Shared:**
+- `shared/types/agentRecommendations.ts` (new — discriminated-union evidence types per §6.5 + `materialDelta` registry per §2)
+
 **Client:**
-- `client/src/components/recommendations/AgentRecommendationsList.tsx` (new)
+- `client/src/components/recommendations/AgentRecommendationsList.tsx` (new — includes `collapsedDistinctScopeId` rendering rule and click-feedback beat per §6.5)
 - `client/src/hooks/useAgentRecommendations.ts` (new)
 
 **Tests:**
-- Pure unit tests for primitive: dedupe, scope enforcement, severity enum.
+- Pure unit tests for primitive: dedupe, scope enforcement, severity enum, per-category `materialDelta` predicates, cap-eviction priority comparison, dismiss-cooldown behaviour.
 
 ### Phase 1-2 — optimiser as first consumer
 
@@ -634,7 +727,7 @@ Builds reusable infrastructure that survives beyond the optimiser.
 
 ## §13 Risks
 
-- **Recommendation noise.** Too many low-value recommendations train operators to ignore the surface. Mitigations: severity tuning, dedupe by `(scope, category, dedupe_key)`, hard cap of 10 open per `(scope, producing_agent_id)`, top-3 + "see all" pattern hides the rest by default.
+- **Recommendation noise.** Too many low-value recommendations train operators to ignore the surface. Mitigations: severity tuning, dedupe by `(scope, category, dedupe_key)`, hard cap of 10 open per `(scope, producing_agent_id)` with priority-aware eviction (per §6.2 — higher-priority candidates displace lower-priority open recs rather than getting silently dropped), per-category material-change thresholds (per §2 — sub-threshold deltas are full no-ops, never re-surface), per-severity dismiss cooldown (`dismissed_until` blocks recreation for 1d / 7d / 14d after dismiss per §6.5), top-3 + "see all" pattern hides the rest by default. Cap drops emit `recommendations.dropped_due_to_cap` log lines (per the tagged-log-as-metric convention) so silent suppression stays auditable.
 - **Cross-tenant median view leakage.** The view exposes aggregate p50/p95/p99 per skill across tenants. If a single skill is used by 1-2 tenants, "peer median" reveals their data. Mitigation: minimum 5-tenant threshold per skill before peer comparison fires; below threshold, `skill.slow` evaluator skips the recommendation entirely. Enforced in view definition, not just application logic.
 - **Cost overrun on LLM render.** If render copy is regenerated too often. Mitigation: re-render only when `evidence_hash` (sha256 over canonical-JSON of `evidence`) changes between runs (per §6.2). Byte-equal re-runs do not re-render and do not even write to the DB.
 - **Schedule storm.** Registering 100+ daily crons at boot may overwhelm pg-boss. Mitigation: stagger by sub-account `created_at` hash → distribute across 6-hour window.
@@ -678,3 +771,6 @@ Aggregated from prose markers throughout the spec ("deferred", "later", "v1.1", 
 - **`agent_recommendations` primitive extensions.** Per §6.4: widget registry, layout engine, charts/KPI tiles, per-agent renderer customisation, multi-step actions, threaded discussion. Deferred indefinitely — separate scope each.
 - **Notification surfaces for recommendations** (Slack, email, in-app push). Recommendations are pull-only in v1; future spec can add notification routing on `dashboard.recommendations.changed` events.
 - **Sub-account-settings UI toggle for `subaccounts.optimiser_enabled`.** v1 ships the column only; flipping it is admin-SQL or via a Configuration Assistant prompt. A proper settings page (whether a sub-account preferences panel or an integration into existing admin tooling) is deferred until the broader sub-account-settings surface is designed (out of scope here).
+- **Routing-uncertainty trigger refinement using `downstreamOutcome`** (per ChatGPT review F8 — 2026-05-02). Current trigger: confidence < 0.5 OR secondLook > 30%. Refined trigger would couple the signal to outcome quality (e.g. low confidence + bad outcome rate, OR high secondLook + low improvement) so healthy "cautious" agents aren't flagged. Deferred until v1 ships and baseline outcome-quality data exists to tune thresholds against.
+- **Periodic schedule-rebalancing job** (per ChatGPT review F10 — 2026-05-02). The Phase 2 backfill staggers daily-cron registration by sub-account `created_at` hash across a 6-hour window, which prevents pg-boss storms at deploy time but does not rebalance when many new sub-accounts are added at once post-deploy. A periodic redistribution job (compute target slot per sub-account, re-issue `agentScheduleService.updateSchedule` if drift > N) is deferred until sub-account creation rate becomes a measurable concern.
+- **Stateful empty-state UX for the suggestions section** (per ChatGPT review F14 — 2026-05-02). Current spec is "hide section when empty" (aligns with `frontend-design-principles.md` "Default to hidden"). A more sophisticated rule — show the section after first-ever appearance for a scope, then hide only when transitioning from non-empty back to empty — would prevent the "expected section disappeared" surprise but introduces stateful UX that needs design. Defer to v1.1 or until operator feedback indicates the simpler rule causes confusion.
