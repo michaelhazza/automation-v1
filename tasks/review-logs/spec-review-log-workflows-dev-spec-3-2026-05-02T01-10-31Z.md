@@ -54,7 +54,7 @@ No directional. No ambiguous. No rejections.
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   (set after Step 8b commit)
+- Spec commit after iteration:   `99f176f51b8a1e16a66013f9071c9cac6d617a66`
 
 **Stopping heuristic.** Iteration 2 was mechanical-only (0 directional, 0 ambiguous, 0 reclassified). Iteration 3 was also mechanical-only. **Two consecutive mechanical-only rounds** = preferred exit condition met. The loop will not start iteration 4.
 
