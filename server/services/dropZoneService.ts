@@ -277,7 +277,6 @@ export function getProposal(uploadId: string): UploadProposal | null {
   const cached = proposalCache.get(uploadId);
   if (!cached) return null;
   const { buffer: _b, ...rest } = cached;
-  void _b;
   return rest;
 }
 
