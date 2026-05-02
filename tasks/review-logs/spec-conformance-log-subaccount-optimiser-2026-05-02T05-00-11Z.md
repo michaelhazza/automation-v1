@@ -9,6 +9,7 @@
 **Scope:** all-of-spec (caller confirmed all 5 chunks complete; whole branch)
 **Changed-code set:** ~50 files (primitive + queries + evaluators + orchestrator + skills + UI)
 **Run at:** 2026-05-02T05:00:11Z
+**Commit at finish:** `d47ca0c6`
 
 ---
 
