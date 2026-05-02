@@ -210,3 +210,77 @@ Auto-accepted (technical): 0 applied, 0 rejected, 0 deferred. (3 R1 fixes confir
 User-decided (user-facing + technical-escalated): 0 applied, 1 rejected (F1-R2 — "as recommended"), 0 deferred.
 
 No spec file changes this round. Session log updated with Round 2 entry; committed and pushed.
+
+---
+
+## Round 3 — 2026-05-02T00-20-52Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+> You've handled the review process exactly right. Spec is now clean, bounded, and execution-ready. The system-level risks are resolved. No technical blockers remain. The only open debate (badge) has been explicitly decided and consistently rejected twice, which is what matters.
+> 👉 At this point, you should finalise and build.
+>
+> 1. Status check — Round 1 surfaced real issues → fixed. Round 2 confirmed fixes → re-argued badge → rejected. No new findings introduced. Spec rated 9.5/10 and execution-ready. Review value has been exhausted; further rounds won't improve the spec.
+>
+> 2. The badge decision is now settled — Round 1 challenged → rejected. Round 2 challenged again → rejected with consistency note. Logged explicitly in review history. Decision traceability, no ambiguity for future reviewers, no re-litigation during PR review. This is exactly how product-level disagreements should be handled.
+>
+> 3. Spec quality assessment (final)
+> Strengths: Deterministic execution; proper scoping; risk containment (F6 + F4 safeguards); concurrency handled correctly.
+> Remaining risk — only one minor operational risk:
+> ⚠️ Socket lifecycle edge case (small but worth noting). You correctly added subaccount scoping and event filtering, but did not explicitly enforce listener cleanup. If `useSocketRoom` does not unsubscribe on subaccount change (or reset listeners cleanly), you can still get duplicate handlers and double increments. Not a blocker, but worth a quick sanity check.
+>
+> 4. What I would (optionally) tighten before build — Not required, but high leverage:
+> Add one micro-invariant to Task 4:
+> Invariant: Socket listeners must not accumulate across subaccount switches. Each event type has exactly one active handler per mounted Layout instance.
+> That closes the last real edge case.
+>
+> 5. Final recommendation
+> Do this now: say "done" and finalise. Run consistency check, implementation readiness checklist, auto-commit + push, move to build.
+>
+> 6. What NOT to do
+> Don't run a round 3 on the same spec. Don't revisit the badge decision mid-build. Don't expand F6 beyond current scope. That's where most teams lose momentum.
+>
+> Bottom line: you've reached the point where additional thinking = diminishing returns and additional changes = unnecessary risk. The spec is clear enough to execute, safe enough to ship, documented enough to defend decisions later. 👉 Ship it.
+
+### Verdict (inferred)
+
+`APPROVED` — ChatGPT explicitly: "you should finalise and build"; "ship it". One optional micro-invariant offered ("not required, but high leverage").
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1-R3: Add listener-lifecycle invariant to Task 4 — "Socket listeners must not accumulate across subaccount switches; each event type has exactly one active handler per mounted Layout instance" | technical | apply | auto (apply) | low | Real edge case orthogonal to §4.4. Cross-subaccount event filtering masks the symptom on switches but does not mask within-subaccount handler duplicates (one event → N badge increments after N-1 switches). Cheap to add as parallel §4.5 with same structure as §4.4 (invariant statement + 3 verification checkboxes + risk line). No escalation carveout hit (severity low; not `defer`; no convention contradiction). Auto-applied per step 3a. |
+
+### Triage policy notes
+
+- F1-R3 was correctly classified `technical` (internal `useSocketRoom` lifecycle correctness, not user-visible product surface). Auto-applied per step 3a — severity low, recommendation `apply`, no escalation carveout hit.
+- Sections 1, 2, 3 (status), 5 (finalise directive), 6 (do-NOT-do guidance) carry no extractable findings — they are review-meta commentary and an "approved" verdict, not edits the spec needs to absorb.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- **[auto] §4.5 added** — Listener lifecycle invariant: no handler accumulation. Three verification checkboxes (`useSocketRoom` effect cleanup, subaccount-switch sanity check, reconnect sanity check). Anchored to existing socket primitives in `useSocketRoom` and `Layout.tsx:416`. Task 4 task-level Risk line updated to acknowledge §4.5 as low-risk-but-verifiable.
+
+### Rejected / not applied
+
+- _(none — single technical finding auto-applied; no rejections this round)_
+
+### Integrity check
+
+Post-edit pass over §4.5 and the updated task-level Risk line:
+- **Forward references:** §4.5 references `useSocketRoom` (existing hook), `Layout.tsx:416` (existing reconnect path, also cited in §4.2 and §4.4), `live:agent_started` (existing event, cited in §4.2). All resolve correctly.
+- **Contradictions:** §4.5 invariant ("exactly one active handler per mounted Layout") complements §4.4 invariant ("scope events by activeClientId at handling time") — two orthogonal correctness rules, no overlap. Task-level Risk line now lists three risk components (JSX, §4.4, §4.5) consistent with the three Task-4 invariants.
+- **Missing inputs/outputs:** §4.5 invariant stated explicitly; three verification checkboxes cover the three lifecycle moments (mount, subaccount switch, reconnect); fix-location guidance points at `useSocketRoom`. No missing IO.
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+---
+
+## Round summary (Round 3)
+
+Round 3 done.
+Auto-accepted (technical): 1 applied (F1-R3 — §4.5 listener lifecycle invariant), 0 rejected, 0 deferred.
+User-decided (user-facing + technical-escalated): 0 applied, 0 rejected, 0 deferred.
+
+ChatGPT verdict: `APPROVED`, "ship it". Spec rated execution-ready. Review value has converged.

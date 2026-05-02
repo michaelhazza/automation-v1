@@ -150,7 +150,19 @@ The polling-and-socket pipeline is shared across subaccounts. Without this scopi
 
 If any handler closes over a stale `activeClientId`, refactor to use a ref (or pass `activeClientId` through the handler's argument list) before claiming done.
 
-**Risk:** very low for the JSX restoration; medium for §4.4 if any handler closes over a stale `activeClientId`. The component already manages the count state; only the JSX is being added back. No backend changes.
+### 4.5 — Listener lifecycle invariant: no handler accumulation
+
+**Invariant:** Socket listeners must not accumulate across subaccount switches or component re-mounts. Each event type has exactly one active handler per mounted `Layout` instance.
+
+Without listener cleanup, every subaccount switch adds another handler for the same event — one inbound socket message then produces N badge increments. The §4.4 event-filtering invariant masks the symptom on cross-subaccount events but does NOT mask within-subaccount duplicates.
+
+- [ ] **`useSocketRoom` effect cleanup.** The hook's `useEffect` must return a cleanup function that calls `socket.off(eventName, handler)` for each registered listener. Read the hook source to confirm.
+- [ ] **Subaccount-switch sanity check.** Add a temporary console log in the `live:agent_started` handler. Switch subaccounts twice, fire one event. The handler should run exactly once per event — not 2× or 3×.
+- [ ] **Reconnect sanity check.** Force a socket disconnect/reconnect (devtools throttle network or kill server). After reconnect, fire one event — handler should still run exactly once.
+
+If duplicates are observed: fix is in `useSocketRoom` (effect cleanup) or in how the handler is registered (never `socket.on` outside an effect that returns a cleanup).
+
+**Risk:** very low for the JSX restoration; medium for §4.4 if any handler closes over a stale `activeClientId`; low for §4.5 listener lifecycle (testable in dev with one console log). The component already manages the count state; only the JSX is being added back. No backend changes.
 
 ---
 
