@@ -1234,6 +1234,18 @@ export const queueService = {
         },
       });
 
+      // F2 Sub-Account Optimiser — nightly peer-median view refresh (00:00 UTC)
+      await boss.schedule('maintenance:refresh-optimiser-peer-medians', '0 0 * * *', {});
+      await (boss as any).work('maintenance:refresh-optimiser-peer-medians', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { refreshOptimiserPeerMedians } = await import('../jobs/refreshOptimiserPeerMedians.js');
+          await refreshOptimiserPeerMedians();
+        } catch (err) {
+          logger.error('job_error', { queue: 'maintenance:refresh-optimiser-peer-medians', error: String(err) });
+          throw err;
+        }
+      });
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

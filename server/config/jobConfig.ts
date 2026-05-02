@@ -474,6 +474,19 @@ export const JOB_CONFIG = {
     deadLetter: 'system-monitor-ingest__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
+
+  // ── F2 Sub-Account Optimiser — peer-median view refresh ──────────
+  // Daily at 00:00 UTC. REFRESH MATERIALIZED VIEW CONCURRENTLY is
+  // idempotent; duplicate delivery re-refreshes the view (no-op if
+  // data hasn't changed). idempotencyStrategy: 'one-shot' (daily cron).
+  'maintenance:refresh-optimiser-peer-medians': {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:refresh-optimiser-peer-medians__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

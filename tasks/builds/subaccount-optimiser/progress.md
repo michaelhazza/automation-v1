@@ -19,13 +19,25 @@ Phase numbers below match `plan.md` 1:1. Per spec §9, the previous standalone "
 | Phase | Plan chunk | Status | Estimate | Notes |
 |-------|------------|--------|----------|-------|
 | Phase 1 — Generic agent-output primitive | Chunk 1 | **COMPLETE** | ~6h | Migration 0267 + `agent_recommendations` schema + RLS + `subaccounts.optimiser_enabled` column + `output.recommend` skill + `<AgentRecommendationsList>` + read/ack/dismiss routes + hook. All 6 test files created; 112 tests pass. Lint 283 (unchanged), TS 138 (unchanged). |
-| Phase 2 — Telemetry rollup queries + cross-tenant median view | Chunk 2 | pending | ~8h | 8 query modules under `server/services/optimiser/queries/`, including `escalationPhrases.ts` with the regex tokeniser + n-gram counter. Migration 0267a peer-median materialised view + nightly refresh job. |
+| Phase 2 — Telemetry rollup queries + cross-tenant median view | Chunk 2 | **COMPLETE** | ~8h | 8 query modules under `server/services/optimiser/queries/`, including `escalationPhrases.ts` with the regex tokeniser + n-gram counter. Migration 0267a peer-median materialised view + nightly refresh job. 86 tests pass (9 test files). Lint 283 (unchanged), TS 138 (unchanged). |
 | Phase 3 — Optimiser agent definition + scan skills | Chunk 3 | pending | ~6h | Optimiser AGENTS.md, 8 scan skill markdowns, 8 evaluator modules, schedule registration, backfill script, `subaccountService.create` hook. First consumer of the Phase 1 primitive. |
 | Phase 4 — Home dashboard wiring | Chunk 4 | pending | ~3h | New section on `DashboardPage.tsx` between "Pending your approval" and "Your workspaces". Scope-aware via `Layout.tsx` `activeClientId`. Sidebar count badge. |
 | Phase 5 — folded into Phase 2 | — | n/a | — | Phrase tokeniser is part of `escalationPhrases.ts` per spec §9 line 631. Number kept here so historical references resolve. |
 | Phase 6 — Verification + doc sync | Chunk 5 | pending | ~2h | Lint, typecheck, targeted unit + integration tests, manual end-to-end run, cost sanity, capabilities.md + architecture.md updates, progress.md closeout. |
 
 ## Decisions log
+
+**2026-05-02 — Phase 2 complete (commit `feat(subaccount-optimiser): chunk 2 — telemetry queries + peer-median view`)**
+
+1. Materialised view uses `event_type = 'skill.completed'` (not `tool_call.completed` as written in the plan). The TypeScript union in `shared/types/agentExecutionLog.ts` has no `tool_call.completed` event; the JSONB payload fields are `skillSlug` and `durationMs` (camelCase), matching what `skillExecutor.ts` writes. Used camelCase keys in both the view SQL and the `skillLatency.ts` query.
+
+2. `agentBudget.ts` uses `withAdminConnection` (admin bypass) so it can see cost data across all tenants. The query filters by `organisation_id` explicitly, so cross-org leakage is impossible.
+
+3. `routingUncertainty.ts` joins `fast_path_decisions` via `subaccount_agents` to get agent_id, because `fast_path_decisions` does not have an `agent_id` column directly.
+
+4. Staleness guard in `skillLatency.ts` uses `> 24h` (strict greater-than), so a view refreshed exactly 24h ago is considered fresh. The test mirrors this contract.
+
+5. All 8 query tests are written as structural/pure tests (no real DB) because the existing test infrastructure does not support transaction-rollback DB tests in local vitest sessions. DB-backed integration tests for the peer-median view are also structural, verifying migration SQL structure.
 
 **2026-05-02 — Phase 1 complete (commit `feat(subaccount-optimiser): chunk 1 — generic agent-output primitive`)**
 
