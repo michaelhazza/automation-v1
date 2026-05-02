@@ -183,6 +183,7 @@ export async function upsertRecommendation(
         if (existingHash === newEvidenceHash) {
           // Hash match: no-op
           logger.info('recommendations.no_change.hash_match', {
+            recommendation_id: existing.id,
             category,
             dedupe_key,
             evidence_hash: newEvidenceHash,
@@ -205,6 +206,7 @@ export async function upsertRecommendation(
 
         if (!isMaterial) {
           logger.info('recommendations.skipped.sub_threshold', {
+            recommendation_id: existing.id,
             category,
             dedupe_key,
             prev_evidence_hash: existingHash,
