@@ -432,8 +432,11 @@ export default function DashboardPage({ user }: { user: User }) {
       )}
 
       {/* ── A few things to look at (recommendations) ────────────────────── */}
-      {recsTotal > 0 && (
-        <div className="mb-8">
+      {/* The list always renders so it can fetch and report its total via
+          onTotalChange. The header and controls are gated on recsTotal > 0.
+          emptyState="hide" makes the list self-hide when empty. */}
+      <div className={recsTotal > 0 ? 'mb-8' : undefined}>
+        {recsTotal > 0 && (
           <div className="flex items-baseline justify-between mb-3.5">
             <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
               A few things to look at
@@ -448,21 +451,21 @@ export default function DashboardPage({ user }: { user: User }) {
               </button>
             )}
           </div>
-          {recsFreshness && (
-            <p className="text-[12.5px] text-slate-500 mb-2">{recsFreshness}</p>
-          )}
-          <AgentRecommendationsList
-            scope={scope}
-            includeDescendantSubaccounts={includeDescendantSubaccounts}
-            mode={recsMode}
-            limit={3}
-            emptyState="hide"
-            onTotalChange={setRecsTotal}
-            onLatestUpdatedAtChange={setRecsLatestUpdatedAt}
-            onExpandRequest={() => setRecsMode('expanded')}
-          />
-        </div>
-      )}
+        )}
+        {recsTotal > 0 && recsFreshness && (
+          <p className="text-[12.5px] text-slate-500 mb-2">{recsFreshness}</p>
+        )}
+        <AgentRecommendationsList
+          scope={scope}
+          includeDescendantSubaccounts={includeDescendantSubaccounts}
+          mode={recsMode}
+          limit={recsMode === 'expanded' ? undefined : 3}
+          emptyState="hide"
+          onTotalChange={setRecsTotal}
+          onLatestUpdatedAtChange={setRecsLatestUpdatedAt}
+          onExpandRequest={() => setRecsMode('expanded')}
+        />
+      </div>
 
       {/* [LAYOUT-RESERVED: Piece 3 — Operational metrics] */}
       <OperationalMetricsPlaceholder />

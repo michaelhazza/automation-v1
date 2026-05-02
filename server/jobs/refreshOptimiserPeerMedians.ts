@@ -56,32 +56,42 @@ export async function refreshOptimiserPeerMedians(): Promise<RefreshOptimiserPee
     // block. We execute it via the raw postgres.js client so no transaction is
     // open. SET ROLE / RESET ROLE bracket the refresh to ensure admin_role
     // (BYPASSRLS) is active for the duration.
+    //
+    // We reserve a single connection from the pool so that SET ROLE, the
+    // REFRESH, and RESET ROLE are guaranteed to run on the same session.
+    // Without this, pool connection rotation between tagged-template calls
+    // would leave the REFRESH on a session where SET ROLE was never issued.
     // -------------------------------------------------------------------------
-    await client`SET ROLE admin_role`;
+    const reserved = await client.reserve();
     try {
-      // --- Step 1: Attempt concurrent refresh (non-blocking for readers) ---
+      await reserved`SET ROLE admin_role`;
       try {
-        await client`REFRESH MATERIALIZED VIEW CONCURRENTLY optimiser_skill_peer_medians`;
-        method = 'concurrent';
-        logger.info(`${SOURCE}.concurrent_refresh_succeeded`);
-      } catch (concurrentErr) {
-        // Concurrent refresh requires a unique index. If it fails for any
-        // reason (unique index missing, pg version issue, etc.), fall back.
-        logger.warn(`${SOURCE}.concurrent_refresh_failed_falling_back`, {
-          error:
-            concurrentErr instanceof Error
-              ? concurrentErr.message
-              : String(concurrentErr),
-        });
+        // --- Step 1: Attempt concurrent refresh (non-blocking for readers) ---
+        try {
+          await reserved`REFRESH MATERIALIZED VIEW CONCURRENTLY optimiser_skill_peer_medians`;
+          method = 'concurrent';
+          logger.info(`${SOURCE}.concurrent_refresh_succeeded`);
+        } catch (concurrentErr) {
+          // Concurrent refresh requires a unique index. If it fails for any
+          // reason (unique index missing, pg version issue, etc.), fall back.
+          logger.warn(`${SOURCE}.concurrent_refresh_failed_falling_back`, {
+            error:
+              concurrentErr instanceof Error
+                ? concurrentErr.message
+                : String(concurrentErr),
+          });
 
-        // --- Step 2: Blocking refresh fallback ---
-        await client`REFRESH MATERIALIZED VIEW optimiser_skill_peer_medians`;
-        method = 'blocking';
-        logger.info(`${SOURCE}.blocking_refresh_succeeded`);
+          // --- Step 2: Blocking refresh fallback ---
+          await reserved`REFRESH MATERIALIZED VIEW optimiser_skill_peer_medians`;
+          method = 'blocking';
+          logger.info(`${SOURCE}.blocking_refresh_succeeded`);
+        }
+      } finally {
+        // Always restore the session role, even if the refresh threw.
+        await reserved`RESET ROLE`;
       }
     } finally {
-      // Always restore the session role, even if the refresh threw.
-      await client`RESET ROLE`;
+      reserved.release();
     }
 
     // -------------------------------------------------------------------------

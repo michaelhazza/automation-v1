@@ -20,9 +20,10 @@
  */
 
 import 'dotenv/config';
-import { db } from '../server/db/index.js';
+import { sql } from 'drizzle-orm';
 import { subaccounts, agents, subaccountAgents } from '../server/db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
+import { withAdminConnection } from '../server/lib/adminDbConnection.js';
 import { computeOptimiserCron } from '../server/services/optimiser/optimiserCronPure.js';
 import { agentScheduleService } from '../server/services/agentScheduleService.js';
 
@@ -37,45 +38,54 @@ async function main(): Promise<void> {
 
   console.log(`[backfill-optimiser-schedules] Starting${DRY_RUN ? ' (DRY RUN)' : ''}...`);
 
-  // Fetch all opted-in sub-accounts (include settings for timezone)
-  const eligibleSubaccounts = await db
-    .select({
-      id: subaccounts.id,
-      organisationId: subaccounts.organisationId,
-      name: subaccounts.name,
-      settings: subaccounts.settings,
-    })
-    .from(subaccounts)
-    .where(
-      and(
-        eq(subaccounts.optimiserEnabled, true),
-        isNull(subaccounts.deletedAt),
-      ),
-    );
+  // Cross-org reads use withAdminConnection + SET LOCAL ROLE admin_role to bypass RLS.
+  // Per-org inserts run inside the same admin tx (they are idempotent via ON CONFLICT DO NOTHING).
+  const { eligibleSubaccounts, orgAgentMap } = await withAdminConnection(
+    { source: 'backfill-optimiser-schedules', reason: 'admin sweep: register optimiser schedules', skipAudit: true },
+    async (adminTx) => {
+      await adminTx.execute(sql`SET LOCAL ROLE admin_role`);
+
+      // Fetch all opted-in sub-accounts (include settings for timezone)
+      const rows = await adminTx
+        .select({
+          id: subaccounts.id,
+          organisationId: subaccounts.organisationId,
+          name: subaccounts.name,
+          settings: subaccounts.settings,
+        })
+        .from(subaccounts)
+        .where(
+          and(
+            eq(subaccounts.optimiserEnabled, true),
+            isNull(subaccounts.deletedAt),
+          ),
+        );
+
+      // Group by org to minimise agent lookups
+      const orgIds = [...new Set(rows.map((sa) => sa.organisationId))];
+      const agentMap = new Map<string, string>();
+      for (const orgId of orgIds) {
+        const [optimiserAgent] = await adminTx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(and(eq(agents.organisationId, orgId), eq(agents.slug, OPTIMISER_AGENT_SLUG)));
+
+        if (optimiserAgent) {
+          agentMap.set(orgId, optimiserAgent.id);
+        } else {
+          console.warn(`[backfill-optimiser-schedules] WARNING: No optimiser agent found for org ${orgId} — skipping sub-accounts in this org.`);
+        }
+      }
+
+      return { eligibleSubaccounts: rows, orgAgentMap: agentMap };
+    },
+  );
 
   console.log(`[backfill-optimiser-schedules] Found ${eligibleSubaccounts.length} eligible sub-accounts.`);
 
   if (eligibleSubaccounts.length === 0) {
     console.log('[backfill-optimiser-schedules] Nothing to do.');
     return;
-  }
-
-  // Group by org to minimise agent lookups
-  const orgIds = [...new Set(eligibleSubaccounts.map((sa) => sa.organisationId))];
-
-  // Build org → optimiser agent id map
-  const orgAgentMap = new Map<string, string>();
-  for (const orgId of orgIds) {
-    const [optimiserAgent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.organisationId, orgId), eq(agents.slug, OPTIMISER_AGENT_SLUG)));
-
-    if (optimiserAgent) {
-      orgAgentMap.set(orgId, optimiserAgent.id);
-    } else {
-      console.warn(`[backfill-optimiser-schedules] WARNING: No optimiser agent found for org ${orgId} — skipping sub-accounts in this org.`);
-    }
   }
 
   let created = 0;
@@ -100,46 +110,60 @@ async function main(): Promise<void> {
       let action: 'created' | 'already_existed';
 
       if (!DRY_RUN) {
-        const [linkRow] = await db
-          .insert(subaccountAgents)
-          .values({
-            organisationId: sa.organisationId,
-            subaccountId: sa.id,
-            agentId,
-            isActive: true,
-            scheduleEnabled: true,
-            scheduleCron,
-            scheduleTimezone,
-          })
-          .onConflictDoNothing()
-          .returning();
+        // Per-org insert — use its own admin connection so each org's write is isolated
+        const linkResult = await withAdminConnection(
+          { source: 'backfill-optimiser-schedules', reason: `insert link for subaccount ${sa.id}`, skipAudit: true },
+          async (adminTx) => {
+            await adminTx.execute(sql`SET LOCAL ROLE admin_role`);
 
-        if (linkRow) {
-          linkId = linkRow.id;
-          action = 'created';
-        } else {
-          // Row already existed — fetch it
-          const [existing] = await db
-            .select({ id: subaccountAgents.id })
-            .from(subaccountAgents)
-            .where(
-              and(
-                eq(subaccountAgents.subaccountId, sa.id),
-                eq(subaccountAgents.agentId, agentId),
-              ),
-            );
+            const [linkRow] = await adminTx
+              .insert(subaccountAgents)
+              .values({
+                organisationId: sa.organisationId,
+                subaccountId: sa.id,
+                agentId,
+                isActive: true,
+                scheduleEnabled: true,
+                scheduleCron,
+                scheduleTimezone,
+              })
+              .onConflictDoNothing()
+              .returning();
 
-          if (!existing) {
-            console.error(`[backfill-optimiser-schedules] ERROR: Could not find existing link for subaccount ${sa.id}`);
-            errors++;
-            continue;
-          }
+            if (linkRow) {
+              return { id: linkRow.id, action: 'created' as const };
+            }
 
-          linkId = existing.id;
-          action = 'already_existed';
+            // Row already existed — fetch it
+            const [existing] = await adminTx
+              .select({ id: subaccountAgents.id })
+              .from(subaccountAgents)
+              .where(
+                and(
+                  eq(subaccountAgents.subaccountId, sa.id),
+                  eq(subaccountAgents.agentId, agentId),
+                ),
+              );
+
+            if (!existing) {
+              return null;
+            }
+
+            return { id: existing.id, action: 'already_existed' as const };
+          },
+        );
+
+        if (!linkResult) {
+          console.error(`[backfill-optimiser-schedules] ERROR: Could not find existing link for subaccount ${sa.id}`);
+          errors++;
+          continue;
         }
 
+        linkId = linkResult.id;
+        action = linkResult.action;
+
         const singletonKey = `subaccount-optimiser:${sa.id}:${agentId}`;
+        // agentScheduleService.registerSchedule talks to pg-boss only — outside any DB tx
         await agentScheduleService.registerSchedule(
           linkId,
           scheduleCron,

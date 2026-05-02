@@ -74,7 +74,7 @@ export const agentScheduleService = {
 
         // If this is the subaccount-optimiser agent, bypass the LLM loop and
         // call the internal orchestrator directly.
-        const [agentRow] = await db
+        const [agentRow] = await getOrgScopedDb('agentScheduleService.optimiserSlugCheck')
           .select({ slug: agents.slug })
           .from(agents)
           .where(eq(agents.id, data.agentId))

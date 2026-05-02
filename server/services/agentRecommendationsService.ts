@@ -15,7 +15,8 @@
 
 import { sql } from 'drizzle-orm';
 import { comparePriority as _comparePriority, type PriorityTuple } from './agentRecommendationsServicePure.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { emitOrgUpdate } from '../websocket/emitters.js';
 import {
@@ -95,7 +96,11 @@ export async function upsertRecommendation(
   const newEvidenceHash = computeEvidenceHash(evidence as Record<string, unknown>);
 
   try {
-    const result = await db.transaction(async (tx) => {
+    // Use the org-scoped transaction from the current ALS context (set by
+    // createWorker / orgScoping middleware). The advisory lock and all queries
+    // run inside this already-open transaction, which is RLS-aware for the org.
+    const tx = getOrgScopedDb('agentRecommendationsService.upsertRecommendation');
+    const result = await (async () => {
       // Acquire advisory lock: (scope_type, scope_id, producing_agent_id)
       // Lock is released automatically when the transaction commits/rolls back.
       const lockKey = advisoryLockId(scope_type, scope_id, agentId);
@@ -407,7 +412,7 @@ export async function upsertRecommendation(
         was_new: true,
         reason: 'evicted_lower_priority' as const,
       };
-    });
+    })();
 
     return result;
   } catch (err: unknown) {
@@ -415,7 +420,8 @@ export async function upsertRecommendation(
     // with different advisory lock keys — possible for cross-agent category collisions).
     // Re-run open-match lookup and return was_new=false.
     if (isUniqueViolation(err)) {
-      const existing = await db.execute<{ id: string }>(sql`
+      const tx = getOrgScopedDb('agentRecommendationsService.upsertRecommendation.uniqueViolation');
+      const existing = await tx.execute<{ id: string }>(sql`
         SELECT id FROM agent_recommendations
         WHERE scope_type = ${scope_type}
           AND scope_id = ${scope_id}::uuid
@@ -451,7 +457,7 @@ interface InsertRecommendationInput {
 }
 
 async function insertNewRecommendation(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: OrgScopedTx,
   input: InsertRecommendationInput,
 ): Promise<{ id: string }> {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -515,6 +521,11 @@ export async function listRecommendations(
 ): Promise<ListRecommendationsResult> {
   const { orgId, scopeType, scopeId, includeDescendantSubaccounts = false, limit = 20 } = params;
 
+  // orgId is interpolated into sql.raw() — validate UUID format as a SQL-injection guard
+  if (!UUID_REGEX.test(orgId)) {
+    throw { statusCode: 422, message: 'orgId must be a valid UUID' };
+  }
+
   // Guard against SQL injection: scopeId is interpolated into sql.raw(), validate format
   if (scopeId !== undefined && !UUID_REGEX.test(scopeId)) {
     throw { statusCode: 422, message: 'scopeId must be a valid UUID' };
@@ -524,6 +535,7 @@ export async function listRecommendations(
     throw { statusCode: 422, message: 'scopeType must be org or subaccount' };
   }
 
+  const tx = getOrgScopedDb('agentRecommendationsService.listRecommendations');
   const clampedLimit = Math.min(limit, 100);
 
   // Build WHERE conditions
@@ -549,7 +561,7 @@ export async function listRecommendations(
   if (clampedLimit === 0) {
     // Short-circuit to COUNT(*) only
     // orgId is server-derived from the authenticated session — safe for sql.raw interpolation
-    const countRows = await db.execute<{ cnt: string }>(sql.raw(`
+    const countRows = await tx.execute<{ cnt: string }>(sql.raw(`
       SELECT count(*)::text AS cnt
       FROM agent_recommendations ar
       WHERE ${whereClause}
@@ -558,7 +570,7 @@ export async function listRecommendations(
   }
 
   // Full query with LEFT JOIN to subaccounts for subaccount_display_name
-  const rows = await db.execute<{
+  const rows = await tx.execute<{
     id: string;
     scope_type: string;
     scope_id: string;
@@ -590,7 +602,7 @@ export async function listRecommendations(
       ar.acknowledged_at::text,
       ar.dismissed_at::text
     FROM agent_recommendations ar
-    LEFT JOIN subaccounts s ON s.id = ar.scope_id AND ar.scope_type = 'subaccount'
+    LEFT JOIN subaccounts s ON s.id = ar.scope_id AND ar.scope_type = 'subaccount' AND s.deleted_at IS NULL
     WHERE ${whereClause}
     ORDER BY
       CASE ar.severity WHEN 'critical' THEN 3 WHEN 'warn' THEN 2 ELSE 1 END DESC,
@@ -598,7 +610,7 @@ export async function listRecommendations(
     LIMIT ${clampedLimit}
   `));
 
-  const countRows = await db.execute<{ cnt: string }>(sql.raw(`
+  const countRows = await tx.execute<{ cnt: string }>(sql.raw(`
     SELECT count(*)::text AS cnt
     FROM agent_recommendations ar
     WHERE ${whereClause}
@@ -639,18 +651,23 @@ export async function acknowledgeRecommendation(
   recId: string,
   orgId: string,
 ): Promise<AcknowledgeResult | null> {
+  const tx = getOrgScopedDb('agentRecommendationsService.acknowledgeRecommendation');
   // CTE pattern: distinguish "row absent/RLS-hidden" from "already acknowledged"
-  const result = await db.execute<{ existed: string; updated_rows: string; scope_type: string; scope_id: string }>(sql`
+  // The organisation_id filter is belt-and-braces in addition to RLS enforcement.
+  const result = await tx.execute<{ existed: string; updated_rows: string; scope_type: string; scope_id: string }>(sql`
     WITH existing AS (
       SELECT id, acknowledged_at, scope_type, scope_id
       FROM agent_recommendations
       WHERE id = ${recId}::uuid
+        AND organisation_id = ${orgId}::uuid
       FOR UPDATE
     ),
     updated AS (
       UPDATE agent_recommendations
       SET acknowledged_at = now(), updated_at = now()
-      WHERE id = ${recId}::uuid AND acknowledged_at IS NULL
+      WHERE id = ${recId}::uuid
+        AND organisation_id = ${orgId}::uuid
+        AND acknowledged_at IS NULL
       RETURNING id
     )
     SELECT
@@ -701,7 +718,9 @@ export async function dismissRecommendation(
   // Step 1: lock and read the row to derive cooldown from severity (CTE pattern per spec §6.5).
   // We need severity to compute the cooldown interval before the update CTE, so we
   // first SELECT FOR UPDATE to lock the row, then conditionally UPDATE.
-  const result = await db.transaction(async (tx) => {
+  // The organisation_id filter is belt-and-braces in addition to RLS enforcement.
+  const tx = getOrgScopedDb('agentRecommendationsService.dismissRecommendation');
+  const result = await (async () => {
     // CTE step 1: lock the target row
     const targetRows = await tx.execute<{
       id: string;
@@ -714,6 +733,7 @@ export async function dismissRecommendation(
       SELECT id, severity, dismissed_at, dismissed_until::text, scope_type, scope_id::text
       FROM agent_recommendations
       WHERE id = ${recId}::uuid
+        AND organisation_id = ${orgId}::uuid
       FOR UPDATE
     `);
 
@@ -752,7 +772,9 @@ export async function dismissRecommendation(
         dismissed_reason = ${reason.slice(0, 500)},
         dismissed_until = now() + (${effectiveCooldownH} || ' hours')::interval,
         updated_at = now()
-      WHERE id = ${recId}::uuid AND dismissed_at IS NULL
+      WHERE id = ${recId}::uuid
+        AND organisation_id = ${orgId}::uuid
+        AND dismissed_at IS NULL
       RETURNING dismissed_until::text
     `);
 
@@ -765,7 +787,7 @@ export async function dismissRecommendation(
       scope_type: scopeType,
       scope_id: scopeId,
     };
-  });
+  })();
 
   return result;
 }

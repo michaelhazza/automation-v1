@@ -10,10 +10,10 @@
  * Spec: docs/sub-account-optimiser-spec.md §4, §9 Phase 2
  */
 
-import { db } from '../../db/index.js';
 import { agents, subaccountAgents, subaccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agentScheduleService } from '../agentScheduleService.js';
 import { computeOptimiserCron } from './optimiserCronPure.js';
 
@@ -51,8 +51,10 @@ export async function registerOptimiserForSubaccount(input: {
   }
 
   try {
+    const tx = getOrgScopedDb('optimiserSubaccountHook.registerOptimiserForSubaccount');
+
     // Find the optimiser agent for this org
-    const [optimiserAgent] = await db
+    const [optimiserAgent] = await tx
       .select({ id: agents.id })
       .from(agents)
       .where(
@@ -75,7 +77,7 @@ export async function registerOptimiserForSubaccount(input: {
     const scheduleCron = computeOptimiserCron(subaccountId);
 
     // Read the subaccount's timezone from its settings jsonb; fall back to UTC if absent
-    const [subaccountRow] = await db
+    const [subaccountRow] = await tx
       .select({ settings: subaccounts.settings })
       .from(subaccounts)
       .where(eq(subaccounts.id, subaccountId));
@@ -85,7 +87,7 @@ export async function registerOptimiserForSubaccount(input: {
       : 'UTC';
 
     // Idempotent insert: ON CONFLICT DO NOTHING
-    const [linkRow] = await db
+    const [linkRow] = await tx
       .insert(subaccountAgents)
       .values({
         organisationId,
@@ -104,7 +106,7 @@ export async function registerOptimiserForSubaccount(input: {
     if (linkRow) {
       linkId = linkRow.id;
     } else {
-      const [existing] = await db
+      const [existing] = await tx
         .select({ id: subaccountAgents.id })
         .from(subaccountAgents)
         .where(
