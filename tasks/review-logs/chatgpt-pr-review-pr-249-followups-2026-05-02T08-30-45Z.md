@@ -5,6 +5,7 @@
 - PR: #251 — https://github.com/michaelhazza/automation-v1/pull/251
 - Mode: manual
 - Started: 2026-05-02T08:30:45Z
+- **Verdict:** APPROVED (4 rounds, 3 implement / 4 reject / 9 defer — 1 user-implement, 2 auto-implement, 4 auto-reject, 5 user-defer + 4 auto-defer-as-duplicate)
 
 ---
 
@@ -163,3 +164,69 @@ None — round produced 0 implements (2 auto-rejects, 3 user-approved defers rou
 - [user] P2.4 (R3) — React effect dependency policy section — defer until React refactor PR lands.
 
 ---
+
+## Round 4 — 2026-05-02T09:25:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary — this is now tight, consistent, and system-complete. Final tweaks to CONTRIBUTING.md close the only real gaps from the previous round. No blockers, no meaningful risks. Ready to merge.
+>
+> Improvements this round confirmed: React hook guidance correctly generalised ("inline async function that closes over state setters" → "inline function that closes over component state" — covers sync + async, non-setter closures, broader patterns); dynamic import guidance now nudges toward centralisation without over-prescribing; policy ↔ implementation alignment is complete (every suppression pattern in code has a defined rule in CONTRIBUTING.md with example and acceptable reasoning).
+>
+> Final PR check — strengths locked in: lint suppression explicit/justified/auditable; type safety improved without overengineering; tests cleaner and more intentional; async/telemetry patterns defensive and consistent; UI change isolated and safe; documentation enforces behaviour, not just describes it.
+>
+> Only remaining gap (non-blocking, high value): CI enforcement still missing. Rule is defined (`grep -rn "eslint-disable"`) but manual and reviewer-dependent. Recommendation (same as prior, still worth doing): add CI check `grep -rn "eslint-disable" . | grep -v "reason:" && exit 1` for guaranteed compliance, zero reviewer overhead, no drift.
+>
+> Risk assessment — Runtime: None. Process: Significantly reduced. Consistency: Eliminated (given current scope). Future maintainability: Strong.
+>
+> Final verdict — APPROVED, merge.
+>
+> Strategic takeaway — this PR establishes a reusable pattern: identify a recurring code smell → fix it → codify it → enforce it.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| CI enforcement check for `eslint-disable` + `// reason:` | technical | (n/a — duplicate) | auto (defer) | low | Substantive duplicate of Round 3 / P2.1 (R3) — same finding_type, same global concern, no new evidence. Auto-applied prior decision per duplicate-detection rule. |
+
+**Top themes:** other (governance/CI duplicate)
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — round produced 0 implements (1 duplicate auto-defer).
+
+### Deferred this round (no new defers — duplicate routed in Round 3)
+
+(none)
+
+---
+
+## Consistency Warnings
+
+None. Across 4 rounds, every duplicate finding received the same decision as its prior occurrence (auto-applied per duplicate-detection rule). No finding was implemented in one round and rejected in another.
+
+---
+
+## Final Summary
+
+- Rounds: 4
+- Auto-accepted (technical): 2 implemented | 4 rejected | 4 deferred
+- User-decided:               1 implemented | 0 rejected | 5 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #251:
+  - [user] P2.1 (R1) — useRef/useCallback refactor across ~10 components
+  - [user] P2.3 (R1) — budgetGuardrail zero-cost observability hook
+  - [user] P2.5 (R1) — resolveDefault<T> dynamic-import helper
+  - [user] P2.1 (R3) — CI enforcement check for eslint-disable + reason preceding line
+  - [user] P2.4 (R3) — React effect dependency policy section in CONTRIBUTING.md
+- Architectural items surfaced to screen (user decisions):
+  - P2.1 (R1) — useRef/useCallback refactor (deferred: out of scope for cleanup PR)
+- KNOWLEDGE.md updated: yes (1 entry — "Policy expansions for a deferred refactor must defer with the refactor")
+- architecture.md updated: no — checked grep terms `eslint-disable`, `safe default`, `liveAgentCount`, `costUsd`, `CONTRIBUTING`, `lint suppress`, `// reason:`; zero stale references. PR did not touch service boundaries, three-tier agent model, RLS, key-files-per-domain, or audit framework.
+- capabilities.md updated: n/a — no product / agency capability, skill, or integration add/remove/rename in this PR.
+- integration-reference.md updated: n/a — no integration scope, status, write capability, OAuth provider, MCP preset, or capability slug change in this PR.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked grep terms `eslint-disable`, `safe default`, `liveAgentCount`, `CONTRIBUTING`, `lint suppress`, `// reason:`; zero stale references. PR did not touch build discipline, agent fleet, review pipeline, or §8 development discipline.
+- spec-context.md updated: n/a — spec-review sessions only.
+- frontend-design-principles.md updated: no — `liveAgentCount > 0 ? badge : undefined` is a conditional render of an existing badge prop, not a new UI pattern, hard rule, or worked example.
+- docs/doc-sync.md updated: yes (Reference docs and update triggers — added CONTRIBUTING.md row per "Adding a new reference doc" rule)
+- PR: #251 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/251
