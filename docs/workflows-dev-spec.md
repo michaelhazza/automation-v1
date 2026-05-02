@@ -301,6 +301,15 @@ Verify all at architect-time; if any already exists, no-op.
 
 The validator runs at template publish time. All rules below reject the publish (with a clear error) if violated. Rules apply in addition to whatever the engine validates today.
 
+### 4.0 Execution model (V1)
+
+Foundational engine contract — anchors the per-endpoint idempotency posture declarations in §5.1.1, §5.1.2, §7.5, §10.5, §11.4.1, §11.4.2, §12.4. New step types or handlers MUST conform.
+
+- **Execution model: at-least-once dispatch with idempotent handlers.** The engine guarantees every step will be dispatched at least once. Handlers MUST be idempotent: re-execution of a successfully-completed handler MUST NOT change observable state. Operator-driven `/run/resume` after a paused window, engine-level retries on transient failures, and dispatcher restart after a crash all rely on this property.
+- **Idempotency mechanism: state-based via CAS predicates (primary), unique constraints (secondary).** Each handler endpoint declares its idempotency posture inline per spec-authoring-checklist §10. The dominant pattern across this spec is state-based concurrency control (`UPDATE ... WHERE status = X` predicate; 0 rows updated → idempotent-hit response). The unique-constraint pattern (e.g., `UNIQUE (gate_id, deciding_user_id)` per §5.1.1) is used where multi-writer per-step deduplication is required.
+- **Why not exactly-once via global idempotency keys.** Exactly-once dispatch across distributed workers is a well-known impossibility outside a single transactional context. The spec instead requires handlers to be idempotent so retries are safe. A global `(run_id, task_id, step_id, attempt)` key would be redundant with the per-endpoint state-based posture and would not solve the underlying determinism problem.
+- **Implication for handler authors.** A new step type or handler MUST: (a) declare its idempotency posture inline (per spec-authoring-checklist §10), (b) verify a re-execution does not double-count or double-write, and (c) document the failure mode if the handler is not naturally idempotent — for example, an external API call without a deduplicating key must surface that constraint upstream rather than silently retry.
+
 ### 4.1 Four A's vocabulary (brief §4.2, §11.1 #2)
 
 The validator accepts the user-facing names `Agent`, `Action`, `Ask`, `Approval` from the Studio. Internally, each maps to one or more engine step types:
@@ -603,6 +612,8 @@ paused  ──► failed         (operator Stop on a paused run; reason `stopped
 
 **Forbidden transitions:** `failed → running`, `failed → paused`, `succeeded → *` (terminal). Adding a new status requires a spec amendment.
 
+**Run completion invariant.** `running → succeeded` is the existing terminal-success transition (carried over from the existing engine path; not shown in the table above because it predates this spec). The engine MUST verify both conditions before transitioning a run to `succeeded`: (1) every step in the run is in a terminal status (`completed`, `failed`, `skipped`, `cancelled`); (2) no `queued` or `awaiting_input` or `review_required` step remains. This prevents phantom-completion races where a fan-out branch is still in flight when the run is incorrectly marked succeeded.
+
 **Resume API.**
 
 - `POST /api/tasks/:taskId/run/resume` body `{ extend_cost_cents?: integer, extend_seconds?: integer }`. The body is required to contain at least one extension when the previous pause was cap-triggered (`run.paused.cost_ceiling` or `run.paused.wall_clock`). A no-extension resume after a cap-triggered pause is rejected with `400 { error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: 'cost_ceiling' | 'wall_clock' }` so the engine can't immediately re-hit the same ceiling. After an operator-Pause (`run.paused.by_user`) the body may be empty.
@@ -611,6 +622,7 @@ paused  ──► failed         (operator Stop on a paused run; reason `stopped
 - Idempotency: state-based. If the run's current status is `running`, the endpoint returns `200 { resumed: false, reason: 'not_paused' }` (no-op).
 - Cap on extensions: when `workflow_runs.extension_count >= 2` (architect refines per §19.2 #G), further resume calls return `400 { error: 'extension_cap_reached' }` and the pause card disables the extension button (Stop remains available).
 - Concurrency: the transition uses an optimistic predicate (`UPDATE workflow_runs SET status = 'running', effective_cost_ceiling_cents = ..., effective_wall_clock_cap_seconds = ..., extension_count = extension_count + 1 WHERE status = 'paused' AND id = $1`). 0 rows updated → 409 `{ error: 'race_with_other_action', current_status: <observed> }`.
+- **Resume vs retry separation.** Resume continues the run from the next pending step (the step that was about to dispatch when the engine paused); it does NOT re-execute already-completed steps. Step-level retries (per §4.4 `retryPolicy` / engine-level `withBackoff` primitive) are independent of resume — a step that failed during the paused window will retry per its own retry policy when the engine resumes dispatching, without operator intervention. A successful resume transitioning the run from `paused` to `running` does NOT itself trigger any retry; retry decisions remain local to each failed step's policy.
 
 **Stop API.**
 

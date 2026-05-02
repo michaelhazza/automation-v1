@@ -133,5 +133,51 @@ F25. Versioning for step schemas — schema_version per step type for long-runni
 - F23: fan-in result ordering by `task_sequence` of producing event — architect-time
 - F24: permission drift policy (snapshot for gates, live for controls — explicit one-liner) — architect-time
 
+---
+
+## Round 3 — 2026-05-02T11:00:00Z
+
+### ChatGPT Feedback (raw)
+
+15 final clarifications: 5 critical (F26–F30), 5 medium (F31–F35), 5 polish (F36–F40). ChatGPT explicitly flagged diminishing returns: "Another review pass will give diminishing returns. The remaining value comes from enforcing these as code-level invariants."
+
+🔴 Critical: F26 atomic state transitions (single tx for completion + dispatch); F27 exactly-once vs at-least-once execution model declaration; F28 idempotency key scope (per-step deterministic key); F29 run completion invariant (all steps terminal AND no active/pending); F30 cancellation propagation (run → tasks → steps).
+
+🟡 Medium: F31 ordering for task creation (monotonic); F32 Ask response schema validation (server-side); F33 gate resolution immutable; F34 retry vs resume separation (resume not auto-retry); F35 time source consistency (single source).
+
+🟢 Polish: F36 correlation ID per execution attempt; F37 dead-letter handling for failed steps; F38 backpressure / max concurrent steps per run/org; F39 schema evolution safety (immutable workflow + step schema versions); F40 hard upper bounds (max tasks per run, max steps per task, max runtime).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F26: Atomic state transitions | technical | reject | auto (reject) | high | Spec already uses CAS-predicate-within-transaction discipline throughout (§5.1.1, §11.4.1, §7.5, §3.3, §10.5). The proposed invariant — "step completion + next step activation in a single transaction" — is over-prescriptive and conflicts with the standard outbox / at-least-once-dispatch pattern. The right discipline is the one the spec already uses (CAS predicates). Severity escalation override: user memory says repeats / over-prescriptive findings auto-apply per recommendation. |
+| F27: Execution model declaration (at-least-once vs exactly-once) | technical | apply | apply (user, "continue as recommended") | high | Genuine missing top-level contract. The spec consistently uses state-based idempotency per endpoint, which implies at-least-once with idempotent handlers, but never declares the V1 execution model at the top level. Added §4.0 Execution model framing subsection to anchor all the per-endpoint idempotency declarations. |
+| F28: Idempotency key scope | technical | reject | auto (reject) | medium | The spec uses per-endpoint state-based idempotency posture (per spec-authoring-checklist §10), which is more flexible and covers more cases than a single global `(run_id, task_id, step_id, attempt)` key. Per-endpoint posture is already declared at §5.1.1, §5.1.2, §11.4.1, §11.4.2, §7.5 (resume + stop), §10.5, §12.4. |
+| F29: Run completion invariant | technical | apply | auto (apply) | medium | Genuine small gap. §7.5 state machine names `succeeded` as a status but doesn't define the entry condition. Add a one-line invariant: `running → succeeded` requires all steps in terminal status AND no pending steps. Prevents phantom "completed" runs. |
+| F30: Cancellation propagation rule | technical | reject | auto (reject) | medium | The proposed run → tasks → steps hierarchy doesn't match the spec's structure — a workflow Task has one Run; cancellation is run-level (§7.3 Stop). The spec already says "best-effort cancel; some external calls may have already fired and are not reversible." That's the honest answer; restating it as "cancellation propagates" hierarchy mismatches the data model. |
+| F31: Task creation ordering (monotonic task_sequence) | technical | reject | auto (reject) | medium | Conflates `task_sequence` (per-task event ordering, §3.1 + §8.1) with task creation order across tasks. Tasks are independent units; cross-task ordering isn't a contract this spec needs. The per-task event sequence is the right granularity. |
+| F32: Ask response schema validation (server-side) | technical | reject | auto (reject) | medium | §11.3 explicitly states V1 is client-side validation, V2 is server-side. Spec is intentional. Per user memory: spec already addressed → auto-reject. |
+| F33: Gate resolution immutable | technical | reject | auto (reject) | medium | §5.1.1 state machine already declares: "Forbidden: `approved/rejected → *` (terminal). Adding a new review status requires a spec amendment." Immutability is already in the contract. Per user memory: repeat → auto-reject. |
+| F34: Retry vs resume separation | technical | apply | auto (apply) | medium | Genuine small clarification. §7.5 Resume API says the run transitions to `running` but doesn't explicitly say "resume continues from the next pending step; it does NOT re-execute completed steps; step retries are independent of resume." Worth one-line addition. |
+| F35: Time source consistency | technical | reject | auto (reject) | medium | Spec already uses `now()` defaults in column definitions (§3.1, §3.3); time discipline is implicit in the database-time pattern. Architect-level convention; not a spec contract. |
+| F36: Correlation ID per execution attempt | technical | reject | auto (reject) | low | §8.2 event envelope already includes `event_id` (monotonic per task) + `task_id`; existing `agent_execution_events` infrastructure provides correlation. `run_id` / `step_id` flow through `entity_refs[]` and payload as relevant. Adding a separate `correlation_id` would duplicate `event_id`'s role. |
+| F37: Dead-letter handling for failed steps | technical | reject | auto (reject) | low | Engine-level concern (existing infrastructure per spec-context.md `accepted_primitives` — `withBackoff`, `TripWire`, `failure()` + `FailureReason` enum). Not a V1 spec contract. |
+| F38: Backpressure / max concurrent steps quota | technical | defer | auto (defer, no surface) | low | Same family as F21 (max step count per run) — runtime quota / safety rail. Per user memory: repeat-family auto-defer without re-surfacing. Routes to backlog. |
+| F39: Schema evolution safety (immutable workflow + step schema versions) | technical | reject | auto (reject) | medium | Direct repeat of F25 (rejected round 2) — already covered by template-level versioning + start-version pinning per §4.6. Per user memory: repeat → auto-reject without re-surfacing. |
+| F40: Hard upper bounds (max tasks per run, max steps per task, max runtime) | technical | defer | auto (defer, no surface) | low | Same family as F21 + M1–M3 (architect-time quotas already deferred). Per user memory: repeat-family auto-defer without re-surfacing. Routes to backlog. |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] §7.5 — run completion invariant: `running → succeeded` requires all steps in terminal status AND no pending/queued steps remain (F29)
+- [auto] §7.5 — explicit retry/resume separation: resume continues from next pending step; does NOT re-execute completed steps; step retries are independent of resume (F34)
+- [user] §4.0 (NEW subsection) — Execution model: at-least-once dispatch with idempotent handlers; state-based CAS predicates as primary idempotency mechanism; foundational framing for all per-endpoint posture declarations across the spec (F27)
+
+### Deferred to backlog (routed at finalisation, no user surfacing per memory)
+
+- F38: max concurrent steps per run / per org — runtime quota; same family as F21 — architect-time
+- F40: max tasks per run / max steps per task / max runtime duration — same family as F21 + M1–M3 — architect-time
+
+
 
 ---
