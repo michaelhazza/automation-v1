@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -19,6 +20,10 @@ Returns an array of `AgentBudgetRow`:
 - `top_cost_driver` — skill slug or feature tag that drove the most cost this month, or `"unknown"`.
 
 Returns `[]` when no budget rows exist for the sub-account.
+
+## Evaluator
+
+Output is processed by the `agentBudget` evaluator (`server/services/optimiser/recommendations/agentBudget.ts`).
 
 ## Rules
 

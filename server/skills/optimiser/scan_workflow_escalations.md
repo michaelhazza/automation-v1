@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -18,6 +19,10 @@ Returns an array of `EscalationRateRow`:
 - `common_step_id` — modal step_id of escalating runs (the step that most often escalated).
 
 Returns `[]` when no workflow runs exist in the window.
+
+## Evaluator
+
+Output is processed by the `playbookEscalation` evaluator (`server/services/optimiser/recommendations/playbookEscalation.ts`).
 
 ## Rules
 

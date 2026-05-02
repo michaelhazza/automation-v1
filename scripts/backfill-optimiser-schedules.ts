@@ -30,6 +30,11 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const OPTIMISER_AGENT_SLUG = 'subaccount-optimiser';
 
 async function main(): Promise<void> {
+  if (process.env['OPTIMISER_DISABLED'] === 'true') {
+    console.log('OPTIMISER_DISABLED=true: backfill skipped');
+    return;
+  }
+
   console.log(`[backfill-optimiser-schedules] Starting${DRY_RUN ? ' (DRY RUN)' : ''}...`);
 
   // Fetch all opted-in sub-accounts

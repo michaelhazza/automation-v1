@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -18,6 +19,10 @@ Returns an array of `MemoryCitationRow`:
 - `projected_token_savings` — integer estimated tokens that could be saved by removing low-citation blocks.
 
 Returns `[]` when no citation data exists for the sub-account in the window.
+
+## Evaluator
+
+Output is processed by the `memoryCitation` evaluator (`server/services/optimiser/recommendations/memoryCitation.ts`).
 
 ## Rules
 

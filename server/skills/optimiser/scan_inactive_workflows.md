@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -20,8 +21,13 @@ Returns an array of `InactiveWorkflowRow`:
 
 Returns `[]` when all scheduled agents are running on time.
 
+## Evaluator
+
+Output is processed by the `inactiveWorkflow` evaluator (`server/services/optimiser/recommendations/inactiveWorkflow.ts`).
+
 ## Rules
 
 - Only includes subaccount_agents rows with scheduleEnabled=true and a non-null scheduleCron.
 - Expected cadence uses computeNextHeartbeatAt to derive expected run times.
+- 7-day agent_runs lookup window bounds the query cost.
 - Returns raw data only. Missed-heartbeat threshold evaluation is done by the evaluator.

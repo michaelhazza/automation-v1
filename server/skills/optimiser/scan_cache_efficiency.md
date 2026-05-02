@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -18,6 +19,10 @@ Returns an array of `CacheEfficiencyRow`:
 - `dominant_skill` — feature_tag with the highest total token cost in the window.
 
 Returns `[]` when no LLM request data exists for the sub-account in the window.
+
+## Evaluator
+
+Output is processed by the `cacheEfficiency` evaluator (`server/services/optimiser/recommendations/cacheEfficiency.ts`).
 
 ## Rules
 

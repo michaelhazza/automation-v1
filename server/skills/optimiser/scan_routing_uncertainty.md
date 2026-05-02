@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -18,6 +19,10 @@ Returns an array of `RoutingUncertaintyRow`:
 - `total_decisions` — integer raw row count (required for materialDelta volume floor).
 
 Returns `[]` when no routing decision data exists for the sub-account in the window.
+
+## Evaluator
+
+Output is processed by the `routingUncertainty` evaluator (`server/services/optimiser/recommendations/routingUncertainty.ts`).
 
 ## Rules
 

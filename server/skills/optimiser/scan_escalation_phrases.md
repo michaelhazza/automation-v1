@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -17,6 +18,10 @@ Returns an array of `EscalationPhrasesRow`:
 - `sample_escalation_ids` — ascending-sorted array of escalation IDs that contained this phrase.
 
 Returns `[]` when no phrases meet the minimum occurrence threshold.
+
+## Evaluator
+
+Output is processed by the `repeatPhrase` evaluator (`server/services/optimiser/recommendations/repeatPhrase.ts`).
 
 ## Rules
 

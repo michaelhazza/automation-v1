@@ -7,7 +7,8 @@ visibility: none
 
 ## Parameters
 
-- subaccount_id: string (required) — UUID of the sub-account to scan.
+- subaccountId: string (required) — UUID of the sub-account to scan.
+- organisationId: string (required) — UUID of the organisation owning the sub-account.
 
 ## Output
 
@@ -22,8 +23,13 @@ Returns `[]` when:
 - The peer-median view has no entry for a skill (skill used by fewer than 5 sub-accounts).
 - The peer-median view is stale (last refresh more than 24 hours ago).
 
+## Evaluator
+
+Output is processed by the `skillSlow` evaluator (`server/services/optimiser/recommendations/skillSlow.ts`).
+
 ## Rules
 
 - Query window: agent_execution_events.event_timestamp >= now() - interval '7 days'.
-- Staleness guard: emits recommendations.scan_skipped.peer_view_stale and returns [] when view is stale.
+- Peer-median source: `optimiser_skill_peer_medians` materialised view (cross-tenant p95 per skill slug).
+- Staleness guard: emits recommendations.scan_skipped.peer_view_stale and returns [] when view is stale (last refresh > 24 hours ago).
 - Returns raw data only. Ratio threshold evaluation is done by the evaluator.
