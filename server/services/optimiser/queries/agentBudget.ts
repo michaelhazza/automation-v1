@@ -63,7 +63,6 @@ export async function queryAgentBudget(input: {
             WHERE ca.entity_type = 'agent'
               AND ca.period_type = 'monthly'
               AND ca.period_key >= mk.last_month_key
-              AND ca.organisation_id IS NOT DISTINCT FROM ${organisationId}
             GROUP BY ca.entity_id
           ),
           -- top cost-driver per agent per current month: skill feature_tag with max cost

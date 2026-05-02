@@ -1236,12 +1236,14 @@ export const queueService = {
 
       // F2 Sub-Account Optimiser — nightly peer-median view refresh (00:00 UTC)
       await boss.schedule('maintenance:refresh-optimiser-peer-medians', '0 0 * * *', {});
-      await (boss as any).work('maintenance:refresh-optimiser-peer-medians', { teamSize: 1, teamConcurrency: 1 }, async () => {
+      await (boss as any).work('maintenance:refresh-optimiser-peer-medians', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
           const { refreshOptimiserPeerMedians } = await import('../jobs/refreshOptimiserPeerMedians.js');
-          await refreshOptimiserPeerMedians();
+          await withTimeout(refreshOptimiserPeerMedians(), 570_000);
         } catch (err) {
-          logger.error('job_error', { queue: 'maintenance:refresh-optimiser-peer-medians', error: String(err) });
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:refresh-optimiser-peer-medians', jobId: job.id });
+          }
           throw err;
         }
       });
@@ -1296,6 +1298,14 @@ export const queueService = {
         const { runMemoryDedup } = await import('../jobs/memoryDedupJob.js');
         runMemoryDedup().catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:memory_dedup_error', ...serializeError(err) }));
+        });
+      }, 24 * 60 * 60 * 1000); // daily
+
+      // F2 Sub-Account Optimiser — nightly peer-median view refresh (in-memory fallback)
+      setInterval(async () => {
+        const { refreshOptimiserPeerMedians } = await import('../jobs/refreshOptimiserPeerMedians.js');
+        refreshOptimiserPeerMedians().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:refresh_optimiser_peer_medians_error', ...serializeError(err) }));
         });
       }, 24 * 60 * 60 * 1000); // daily
 

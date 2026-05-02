@@ -117,6 +117,6 @@ export async function refreshOptimiserPeerMedians(): Promise<RefreshOptimiserPee
     const durationMs = Date.now() - startedAt;
     const error = err instanceof Error ? err.message : String(err);
     logger.error(`${SOURCE}.failed`, { error, durationMs });
-    return { status: 'failed', method: 'none', durationMs, error };
+    return { status: 'failed', method, durationMs, error };
   }
 }
