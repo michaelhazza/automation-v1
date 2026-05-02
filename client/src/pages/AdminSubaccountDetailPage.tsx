@@ -8,6 +8,7 @@ import AgentRunCancelButton from '../components/AgentRunCancelButton';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 import { toast } from 'sonner';
 import { WorkspaceTabContent } from '../components/workspace/WorkspaceTabContent';
+import { AgentRecommendationsList } from '../components/recommendations/AgentRecommendationsList';
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
@@ -209,8 +210,18 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       <h1 className="text-[26px] font-bold text-slate-800 mb-1">
         {mode === 'client' ? `${sa.name} Settings` : sa.name}
       </h1>
-      {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-6">{sa.slug}</div>}
+      {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-4">{sa.slug}</div>}
       {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage connections, board config, and categories</div>}
+
+      {/* Recommendations card — admin mode only */}
+      {mode === 'admin' && subaccountId && (
+        <div className="mb-6">
+          <AgentRecommendationsList
+            scope={{ type: 'subaccount', subaccountId }}
+            emptyState="hide"
+          />
+        </div>
+      )}
 
       {/* Tabs */}
       {visibleTabs.length > 1 && (

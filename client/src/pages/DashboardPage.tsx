@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket, useSocketRoom, useSocketConnected } from '../hooks/useSocket';
 import api from '../lib/api';
-import { User } from '../lib/auth';
+import { User, getActiveClientId } from '../lib/auth';
 import MetricCard from '../components/MetricCard';
 import { PendingApprovalCard } from '../components/dashboard/PendingApprovalCard';
 import WorkspaceFeatureCard from '../components/dashboard/WorkspaceFeatureCard';
@@ -18,6 +18,9 @@ import {
   trackPendingCardRejected,
 } from '../lib/telemetry';
 import type { PulseItem, PulseAttentionResponse } from '../hooks/usePulseAttention';
+import { AgentRecommendationsList } from '../components/recommendations/AgentRecommendationsList';
+import { deriveDashboardScope } from './dashboardPageScopePure';
+import { formatRelativeTime } from '../lib/relativeTime';
 
 type DashboardErrorMap = {
   agents: boolean;
@@ -80,6 +83,17 @@ export default function DashboardPage({ user }: { user: User }) {
   // ── Reconnect state ───────────────────────────────────────────────────────
   const prevConnected      = useRef<boolean | null>(null);
   const reconnectDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Recommendations section ───────────────────────────────────────────────
+  const [recsMode, setRecsMode] = useState<'collapsed' | 'expanded'>('collapsed');
+  const [recsTotal, setRecsTotal] = useState(0);
+  const [recsLatestUpdatedAt, setRecsLatestUpdatedAt] = useState<Date | null>(null);
+  const activeClientId = getActiveClientId();
+  const recsFreshness = recsLatestUpdatedAt ? formatRelativeTime(recsLatestUpdatedAt) : null;
+  const { scope, includeDescendantSubaccounts } = deriveDashboardScope({
+    activeClientId,
+    userOrganisationId: user.organisationId,
+  });
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -414,6 +428,39 @@ export default function DashboardPage({ user }: { user: User }) {
               />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── A few things to look at (recommendations) ────────────────────── */}
+      {recsTotal > 0 && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3.5">
+            <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
+              A few things to look at
+            </h2>
+            {recsTotal > 3 && recsMode === 'collapsed' && (
+              <button
+                type="button"
+                className="text-[12.5px] text-slate-500 hover:text-slate-700"
+                onClick={() => setRecsMode('expanded')}
+              >
+                See all {recsTotal} {'→'}
+              </button>
+            )}
+          </div>
+          {recsFreshness && (
+            <p className="text-[12.5px] text-slate-500 mb-2">{recsFreshness}</p>
+          )}
+          <AgentRecommendationsList
+            scope={scope}
+            includeDescendantSubaccounts={includeDescendantSubaccounts}
+            mode={recsMode}
+            limit={3}
+            emptyState="hide"
+            onTotalChange={setRecsTotal}
+            onLatestUpdatedAtChange={setRecsLatestUpdatedAt}
+            onExpandRequest={() => setRecsMode('expanded')}
+          />
         </div>
       )}
 

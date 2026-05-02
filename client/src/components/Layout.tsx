@@ -13,6 +13,8 @@ import {
 import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
+import { useAgentRecommendations } from '../hooks/useAgentRecommendations';
+import { deriveDashboardScope } from '../pages/dashboardPageScopePure';
 
 interface LayoutProps {
   user: User;
@@ -133,8 +135,8 @@ function NavButton({ icon, label, onClick }: { icon: React.ReactNode; label: str
 }
 
 function NavItem({
-  to, icon, label, badge, badgeLabel, exact = false, manageTo,
-}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string }) {
+  to, icon, label, badge, badgeLabel, recsBadge, exact = false, manageTo,
+}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; recsBadge?: number; exact?: boolean; manageTo?: string }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const baseTo = to.split('?')[0]; // ignore query params for matching
@@ -158,6 +160,11 @@ function NavItem({
       ) : !!badge && badge > 0 ? (
         <span className="min-w-[18px] h-[18px] rounded-[9px] px-[5px] bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
+        </span>
+      ) : null}
+      {!!recsBadge && recsBadge > 0 ? (
+        <span className="text-[10px] bg-slate-200 text-slate-700 rounded-full px-1.5">
+          {recsBadge > 99 ? '99+' : recsBadge}
         </span>
       ) : null}
       {manageTo ? (
@@ -273,6 +280,18 @@ export default function Layout({ user, children }: LayoutProps) {
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
+
+  // Recommendations badge (scope-aware, limit: 0 = count-only fetch)
+  const { scope: recsBadgeScope, includeDescendantSubaccounts: recsBadgeIncludeDescendants } = deriveDashboardScope({
+    activeClientId,
+    userOrganisationId: user.organisationId,
+  });
+  const { total: recsBadgeTotal } = useAgentRecommendations({
+    scopeType: recsBadgeScope.type,
+    scopeId: recsBadgeScope.type === 'org' ? recsBadgeScope.orgId : recsBadgeScope.subaccountId,
+    includeDescendantSubaccounts: recsBadgeIncludeDescendants,
+    limit: 0,
+  });
 
   // Inline create modals
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -748,14 +767,14 @@ export default function Layout({ user, children }: LayoutProps) {
                 <span className="flex-1">New Brief</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} />
+                <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} recsBadge={recsBadgeTotal} />
               )}
             </>
           )}
 
           {/* ── Fallback when no client selected */}
           {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/" icon={<Icons.inbox />} label="Home" />
+            <NavItem to="/" icon={<Icons.inbox />} label="Home" recsBadge={recsBadgeTotal} />
           )}
 
           {/* ── Work section */}
