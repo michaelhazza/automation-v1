@@ -178,6 +178,43 @@ F25. Versioning for step schemas — schema_version per step type for long-runni
 - F38: max concurrent steps per run / per org — runtime quota; same family as F21 — architect-time
 - F40: max tasks per run / max steps per task / max runtime duration — same family as F21 + M1–M3 — architect-time
 
+---
+
+## Round 4 — 2026-05-02T11:30:00Z
+
+### ChatGPT Feedback (raw)
+
+11 final tightenings: F41–F50 + F51 meta. ChatGPT closes with: "There are no more meaningful design gaps. Anything further would be: implementation detail, or premature optimisation."
+
+🔴 Final edge-of-production: F41 explicit concurrency control (SELECT … FOR UPDATE SKIP LOCKED / advisory lock); F42 visibility timeout / stuck execution recovery; F43 partial side-effect failure model (write-ahead intent); F44 deterministic retry backoff (exp + jitter); F45 schema validation boundary for LLM outputs; F46 event ordering totally ordered per run; F47 replay/rehydration contract (state derivable from event log); F48 version skew (workers vs schema); F49 no hidden writes rule; F50 terminal state final.
+
+🟢 Meta: F51 invariant enforcement location (DB constraint / tx boundary / central guard).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F41: Concurrency control strategy (worker contention) | technical | reject | auto (reject) | medium | Already covered by §4.0 Execution model — state-based CAS predicates ensure exactly one worker wins the `UPDATE ... WHERE status = 'queued'` transition. The proposed `SELECT FOR UPDATE SKIP LOCKED` / advisory lock is one valid implementation; the spec's CAS approach is equivalent and is consistent across §5.1.1, §11.4.1, §7.5, §10.5. |
+| F42: Visibility timeout / stuck execution recovery | technical | defer | auto (defer, no surface) | medium | Engine / worker-level concern. Existing engine primitives (`createWorker()`, `withBackoff` per spec-context.md `accepted_primitives`) handle worker death. Architect to confirm during decomposition. Routes to backlog. |
+| F43: Partial side-effect failure model | technical | reject | auto (reject) | medium | §4.0 already addresses: "an external API call without a deduplicating key must surface that constraint upstream rather than silently retry." The architectural pattern (write-ahead intent vs reconciliation) is engine-level and out of scope for this spec. |
+| F44: Deterministic retry backoff | technical | reject | auto (reject) | medium | Direct repeat of F22 (rejected round 2) — retry policy is engine-level via existing `withBackoff` primitive. Per user memory: repeat → auto-reject. |
+| F45: Schema validation boundary for LLM outputs | technical | reject | auto (reject) | medium | LLM output validation is agent-layer concern, broader than this workflow spec's scope. The agent layer's existing validation handles this. Out of scope for V1 workflow spec. |
+| F46: Event ordering totally ordered per run | technical | reject | auto (reject) | medium | Direct repeat of F1 (round 1, applied) + F18 (round 2, applied) — §8.1 already has the `task_sequence` allocation invariant + client ordering invariant. Per user memory: repeat → auto-reject. |
+| F47: Replay/rehydration contract (state derivable from event log) | technical | reject | auto (reject) | medium | The spec uses a hybrid event-log + relational-state model intentionally (events for replay/UI, tables for state). Full event sourcing as a top-level invariant would be a major architectural change and is out of scope for V1. |
+| F48: Version skew handling (workers vs schema) | technical | reject | auto (reject) | low | Workflow versioning is already pinned per run (§4.6 start-version pinning). Worker code skew during deploys is engine-level deployment concern, not workflow spec contract. |
+| F49: Strict "no hidden writes" rule | technical | reject | auto (reject) | low | Implementation discipline rule, not a spec contract. The spec lists every write surface (§3, §5, §7, §10, §11, §12); enforcement is via code review. |
+| F50: Terminal state is final | technical | reject | auto (reject) | medium | Direct repeat of F33 (rejected round 3) — §5.1.1 state machine already says "Forbidden: approved/rejected → * (terminal)". §7.5 forbids "succeeded → *" / "failed → running/paused". Per user memory: repeat → auto-reject. |
+| F51: Invariant enforcement location (DB / tx / central guard) | technical | reject | auto (reject) | low | Meta-statement; the spec already uses all three enforcement mechanisms (DB constraints — UNIQUE on `(gate_id, deciding_user_id)`, FK on `gate_id`; transactional CAS predicates throughout; central validator at publish per §4). Architect-time guidance, not new spec contract. |
+
+### Applied (this round)
+
+- (none — all findings auto-resolved as reject or defer-no-surface per user memory)
+
+### Deferred to backlog (this round, no user surfacing per memory)
+
+- F42: visibility timeout / stuck execution recovery — engine/worker primitive (existing `createWorker()` / `withBackoff`) — architect-time
+
+
 
 
 ---
