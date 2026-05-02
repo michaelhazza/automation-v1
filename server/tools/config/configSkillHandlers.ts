@@ -20,6 +20,7 @@ import { subaccounts, agents, subaccountAgents } from '../../db/schema/index.js'
 import { eq, and, isNull } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, resolveEffectiveScope, type RosterEntry } from './configSkillHandlersPure.js';
+import { registerOptimiserForSubaccount } from '../../services/optimiser/optimiserSubaccountHook.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -289,6 +290,15 @@ export async function executeConfigCreateSubaccount(
     // Auto-init board config (matches subaccount creation route behaviour)
     boardService.initSubaccountBoard(context.organisationId, sa.id).catch(() => {
       // Non-critical: if org has no board config, skip silently
+    });
+
+    // Optimiser hook — register the daily optimiser schedule for this sub-account.
+    registerOptimiserForSubaccount({
+      subaccountId: sa.id,
+      organisationId: context.organisationId,
+      optimiserEnabled: true,
+    }).catch(() => {
+      // Already logged inside registerOptimiserForSubaccount
     });
 
     await configHistoryService.recordHistory({

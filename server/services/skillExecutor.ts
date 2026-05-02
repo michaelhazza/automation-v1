@@ -1887,6 +1887,68 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWriteEvent(input, context);
   },
 
+  // ── Sub-Account Optimiser: scan skills (Chunk 3) ────────────────────────────
+  // Each scan skill queries a specific telemetry source and returns raw rows.
+  // The orchestrator (optimiserOrchestrator.ts) calls these sequentially and
+  // passes the results to the matching evaluator module.
+  // Spec: docs/sub-account-optimiser-spec.md §3, §5, §9 Phase 2
+
+  'optimiser.scan_agent_budget': async (input, context) => {
+    const { queryAgentBudget } = await import('./optimiser/queries/agentBudget.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryAgentBudget({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_workflow_escalations': async (input, context) => {
+    const { queryEscalationRate } = await import('./optimiser/queries/escalationRate.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryEscalationRate({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_skill_latency': async (input, context) => {
+    const { querySkillLatency } = await import('./optimiser/queries/skillLatency.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return querySkillLatency({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_inactive_workflows': async (input, context) => {
+    const { queryInactiveWorkflows } = await import('./optimiser/queries/inactiveWorkflows.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryInactiveWorkflows({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_escalation_phrases': async (input, context) => {
+    const { queryEscalationPhrases } = await import('./optimiser/queries/escalationPhrases.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryEscalationPhrases({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_memory_citation': async (input, context) => {
+    const { queryMemoryCitation } = await import('./optimiser/queries/memoryCitation.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryMemoryCitation({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_routing_uncertainty': async (input, context) => {
+    const { queryRoutingUncertainty } = await import('./optimiser/queries/routingUncertainty.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryRoutingUncertainty({ subaccountId, organisationId });
+  },
+
+  'optimiser.scan_cache_efficiency': async (input, context) => {
+    const { queryCacheEfficiency } = await import('./optimiser/queries/cacheEfficiency.js');
+    const subaccountId = String((input as Record<string, unknown>).subaccount_id ?? context.subaccountId ?? '');
+    const organisationId = context.organisationId;
+    return queryCacheEfficiency({ subaccountId, organisationId });
+  },
+
   // ── Sub-Account Optimiser: generic agent-output primitive (Chunk 1) ────────
   // output.recommend — any agent with this skill can surface operator-facing
   // recommendations via the generic agent_recommendations primitive.

@@ -250,19 +250,31 @@ export const agentScheduleService = {
 
   /**
    * Register or update a single schedule.
+   *
+   * @param singletonKey Optional pg-boss singleton key. When set, pg-boss drops
+   *   the queued fire if the prior run has not yet completed — preventing
+   *   concurrent execution of the same logical job. Used by the optimiser
+   *   to enforce the run-level atomicity invariant (spec §6.2).
+   *   Existing callers that omit `singletonKey` are unaffected.
    */
   async registerSchedule(
     subaccountAgentId: string,
     cron: string,
     data: { subaccountAgentId: string; agentId: string; subaccountId: string; organisationId: string },
-    tz: string = 'UTC'
+    tz: string = 'UTC',
+    singletonKey?: string,
   ) {
     const pgboss = await getPgBoss() as any;
     const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
 
-    await pgboss.schedule(scheduleName, cron, data, {
+    const scheduleOptions: Record<string, unknown> = {
       tz: tz || 'UTC',
-    });
+    };
+    if (singletonKey) {
+      scheduleOptions['singletonKey'] = singletonKey;
+    }
+
+    await pgboss.schedule(scheduleName, cron, data, scheduleOptions);
   },
 
   /**

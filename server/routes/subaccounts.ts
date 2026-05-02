@@ -17,6 +17,7 @@ import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
 import { logger } from '../lib/logger.js';
+import { registerOptimiserForSubaccount } from '../services/optimiser/optimiserSubaccountHook.js';
 
 const router = Router();
 
@@ -113,6 +114,17 @@ router.post(
     // Auto-init board config from org config (if available)
     boardService.initSubaccountBoard(organisationId, sa.id).catch(() => {
       // Non-critical: if org has no board config, skip silently
+    });
+
+    // Optimiser hook — register the daily optimiser schedule for this sub-account.
+    // Non-critical: wrapped in try/catch inside the hook; sub-account creation succeeds
+    // even if the hook fails. The next backfill run closes any gap.
+    registerOptimiserForSubaccount({
+      subaccountId: sa.id,
+      organisationId,
+      optimiserEnabled: true, // default — subaccounts.optimiser_enabled defaults to true
+    }).catch(() => {
+      // Already logged inside registerOptimiserForSubaccount
     });
 
     // Phase F — spec §10.5: auto-start onboarding playbooks whose templates
