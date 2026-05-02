@@ -410,6 +410,17 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
 
+### Sub-Account Efficiency Review
+
+The platform runs a daily efficiency review for each client workspace, surfacing concrete recommendations on the Home dashboard. Recommendations cover agent cost patterns, escalation frequency, response latency, workflow activity, and language quality — scored and prioritised so operators see what matters most.
+
+- **Daily review cycle** — Each workspace is evaluated overnight; findings land on the Home dashboard the next morning with a severity badge and one-line summary
+- **Eight signal dimensions** — Agent budget overrun, skill response time vs portfolio median, escalation rate, inactive workflows, repeat-phrase degradation, routing uncertainty, memory citation gaps, and prompt-cache efficiency
+- **Priority-based surface** — Up to 20 recommendations per workspace, ordered by severity; lower-priority items are evicted when the cap is reached, so the dashboard never becomes a wall of warnings
+- **Operator workflow** — Each recommendation can be acknowledged (noted but kept visible) or dismissed (cleared from the surface); dismissed items re-surface if the underlying signal worsens
+
+Any built-in agent can surface operator-facing recommendations through a shared recommendations layer, with automatic deduplication, priority-based eviction, and per-recommendation acknowledgement and dismissal.
+
 ### Activity & Analytics
 
 Unified operational view across all activity types with advanced filtering and real-time updates.
@@ -1003,6 +1014,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-02 | Sub-Account Efficiency Review: daily per-workspace efficiency review surfacing prioritised recommendations on the Home dashboard across eight signal dimensions (agent cost, skill latency, escalation rate, workflow activity, repeat-phrase degradation, routing uncertainty, memory citation gaps, prompt-cache efficiency). Shared recommendations layer lets any built-in agent surface operator-facing items with deduplication, priority-based eviction, and per-recommendation acknowledge/dismiss. Sidebar Home badge shows unacknowledged recommendation count. | — |
 | 2026-05-01 | Skills Reference: add invoke_automation as the eighth Workflow step type (PR #186); add 14 new system-agent v7.1 skills across Admin Operations & Finance, CRM & Contact Management, and Analytics & Reporting categories; remove retired update_financial_record skill (PR #212/#216). | — |
 | 2026-04-24 | System Monitor (Phase 0 + 0.5): fingerprint-deduplicating incident pipeline that surfaces production failures — route errors, job DLQ landings, agent run failures, connector sync failures, skill terminal failures, LLM provider exhaustion — as actionable incidents on a sysadmin dashboard. Incidents deduplicate by SHA-256 fingerprint, auto-escalate severity on repeated occurrence, and support ack / resolve / suppress / escalate-to-agent lifecycle. Resolution links back to the agent task so operators see the full remediation chain. AlertFatigueGuard refactored to a shared base class so push-notification rate-limiting (Phase 0.75) uses the same per-run + per-day cap logic. Live nav badge + WebSocket push via a dedicated sysadmin room. Self-check job surfaces ingest pipeline degradation as a self-referential incident. | — |
 | 2026-04-23 | Paperclip Hierarchy: per-sub-account lead-agent guarantee (exactly one active lead at all times, atomic rotation, degraded-fallback + health signal if ever missing), scoped delegation enforcement (children / subtree / sub-account) at execution time, visible delegation graph per run (DAG view with direction + scope inline, up to 5 levels), starter team templates for one-step sub-account setup, and observable delegation ledger with idempotent writes. Three new workspace-health detectors (multiple leads, no lead, orphaned delegation skills) bring the detector total to 10. | — |

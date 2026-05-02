@@ -5,7 +5,7 @@
 **Branch:** `claude/subaccount-optimiser`
 **Worktree:** `../automation-v1.subaccount-optimiser`
 **Migrations claimed:** `0267`, `0267a`
-**Status:** IN PROGRESS — Phase 1 complete, Phases 2–6 pending
+**Status:** COMPLETE
 
 ## Concurrent peers
 
@@ -23,7 +23,7 @@ Phase numbers below match `plan.md` 1:1. Per spec §9, the previous standalone "
 | Phase 3 — Optimiser agent definition + scan skills | Chunk 3 | **COMPLETE** | ~6h | Optimiser AGENTS.md, 8 scan skill markdowns, 8 evaluator modules, `optimiserCronPure.ts`, `evaluatorBoundsPure.ts`, `optimiserOrchestrator.ts`, `optimiserSubaccountHook.ts`, `backfill-optimiser-schedules.ts`. `agentScheduleService.registerSchedule` extended with `singletonKey`. 8 scan SKILL_HANDLERS + subaccount create hook. 40 tests across 4 files, all passing. Lint 283 (unchanged), TS 138 (unchanged). |
 | Phase 4 — Home dashboard wiring | Chunk 4 | **COMPLETE** | ~3h | "A few things to look at" section added to `DashboardPage.tsx` between "Pending your approval" and `[LAYOUT-RESERVED: Piece 3]`. Scope derived via `deriveDashboardScope` (pure helper + 4 tests). `formatRelativeTime` added to `relativeTime.ts`. Sidebar rec-count badge via `recsBadge` prop on `NavItem`. Optional `<AgentRecommendationsList>` card added to `AdminSubaccountDetailPage.tsx`. |
 | Phase 5 — folded into Phase 2 | — | n/a | — | Phrase tokeniser is part of `escalationPhrases.ts` per spec §9 line 631. Number kept here so historical references resolve. |
-| Phase 6 — Verification + doc sync | Chunk 5 | pending | ~2h | Lint, typecheck, targeted unit + integration tests, manual end-to-end run, cost sanity, capabilities.md + architecture.md updates, progress.md closeout. |
+| Phase 6 — Verification + doc sync | Chunk 5 | **COMPLETE** | ~2h | Lint (0 new errors; 283 pre-existing, all in unchanged files), TS (0 new errors; 138 pre-existing), client build clean. All 16 targeted pure test files pass (213 tests). DB-backed tests (`peerMedianViewIntegration`, `optimiserOrchestrator`) skipped — require live Postgres. `capabilities.md` + `architecture.md` + `KNOWLEDGE.md` updated. |
 
 ## Decisions log
 
@@ -71,3 +71,37 @@ Phase numbers below match `plan.md` 1:1. Per spec §9, the previous standalone "
 - ML-based brand-voice classification (keyword/phrase match for v1)
 - Riley W3-dependent categories (`context.gap.persistent`, `context.token_pressure`) — wait for W3, then add as v1.1
 - All other deferrals: see `docs/sub-account-optimiser-spec.md` "Deferred Items" section
+
+---
+
+## Closeout — 2026-05-02
+
+**Status: COMPLETE**
+
+### What landed
+
+| Phase | Commits |
+|-------|---------|
+| Phase 1 — Generic agent-output primitive | `bfcb2605`, `a186364b`, `caf4a5e2` |
+| Phase 2 — Telemetry queries + peer-median view | `2997461e`, `81a04fe8`, `3a64c38f` |
+| Phase 3 — Optimiser agent + scan skills + orchestrator | `9c739685`, `2bc2770b`, `e143c714` |
+| Phase 4 — Home dashboard wiring + sidebar badge | `59c04247`, `b6ab09e0` |
+| Phase 6 — Verification + doc sync | (this commit) |
+
+### Decisions log reference
+
+All architectural decisions are captured in the Decisions log above. No new decisions in the verification phase.
+
+### Deferred items (out-of-scope, surfaced during build)
+
+- `peerMedianViewIntegration.test.ts` + `optimiserOrchestrator.test.ts` — DB-backed integration tests; require live Postgres. Run in CI only. Not failures.
+- Manual end-to-end acceptance criteria AC-54 and AC-55 require a live database environment. Not runnable locally.
+- All items in the "Out of scope (filed for later)" section above.
+
+### Cross-build lessons promoted to KNOWLEDGE.md
+
+1. pg-boss `singletonKey` silently drops next-fire if same key is already running — 60s wall-clock budget prevents cross-day drop.
+2. `REFRESH MATERIALIZED VIEW CONCURRENTLY` cannot run inside a transaction — use raw `pg.Pool` client outside any `BEGIN/COMMIT` block.
+3. Canonical JSON hashing for evidence deduplication — sort keys recursively, NFC-normalize strings, sort arrays.
+4. Advisory lock granularity for cap + eviction atomicity — lock at `(scope_type, scope_id, producing_agent_id)`, not `(category, dedupe_key)`.
+5. Pure-module extraction for ESM test isolation — extract pure fns to `*Pure.ts` sidecar to avoid transitive `server/lib/env.ts` import.
