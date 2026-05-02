@@ -845,7 +845,14 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasSidebarItem('clientpulse') && (
             <>
               <NavSection label="ClientPulse" />
-              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+              <NavItem
+                to="/clientpulse"
+                exact
+                icon={<Icons.dashboard />}
+                label="Dashboard"
+                badge={liveAgentCount > 0 ? liveAgentCount : undefined}
+                badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined}
+              />
               {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
               <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
             </>
