@@ -119,6 +119,7 @@ export const googleDriveResolver: ExternalDocumentResolver = {
       if (pdfBuf.byteLength > EXTERNAL_DOC_PDF_MAX_BYTES) throw new ResolverError('quota_exceeded');
       // pdf-parse is an optional dependency; if not installed, PDF extraction is unavailable.
       try {
+        // reason: pdf-parse is an optional dep with no @types; cast to `any` lets dynamic import succeed when the package is present.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { default: pdfParse } = await import('pdf-parse' as any);
         const parsed = await pdfParse(pdfBuf);

@@ -338,6 +338,7 @@ export default function UnifiedActivityFeed({
 
     void fetchAndMerge();
     return () => { cancelled = true; };
+  // reason: `fetchAndMerge` is defined inside the effect; only `refreshToken` is the intended trigger.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 

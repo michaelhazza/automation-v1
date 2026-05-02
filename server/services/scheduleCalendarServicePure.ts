@@ -251,6 +251,7 @@ export async function projectCronOccurrences(
 // Intl-based offset-detection trick to stay correct across DST boundaries.
 // ---------------------------------------------------------------------------
 
+// reason: rrule has inconsistent ESM/CJS exports across versions; `any` is required to probe the export shape at runtime.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getRRule(): Promise<any> {
   const mod = await import('rrule');
@@ -312,6 +313,7 @@ export async function projectRRuleOccurrences(
 ): Promise<Array<{ scheduledAt: Date; base: OccurrenceBase; sourceId: string; sourceName: string }>> {
   const out: Array<{ scheduledAt: Date; base: OccurrenceBase; sourceId: string; sourceName: string }> = [];
   if (windowStartMs >= windowEndMs) return out;
+  // reason: rrule's dynamic import returns `any`; typing getRRule's return as RRule would require duplicating the class signature.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rule: any;
   try {

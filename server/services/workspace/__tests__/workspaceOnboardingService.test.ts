@@ -26,6 +26,7 @@ process.env.JWT_SECRET ??= 'test-jwt-secret-that-is-at-least-32-chars-long!';
 process.env.EMAIL_FROM ??= 'test@example.com';
 
 // Service handles — populated in beforeAll after env stubs are in place.
+// reason: populated via dynamic imports in beforeAll; declared as `any` because module types are not statically available at declaration site.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let withOrgTx: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -161,6 +162,7 @@ function buildMockTx(opts: {
 
 function patchTransition(impl: (id: string, action: string, userId: string) => Promise<{ status: string; noOpDueToRace: boolean }>): () => void {
   const original = workspaceIdentityService.transition;
+  // reason: workspaceIdentityService is dynamically imported as `any`; cast required to assign monkey-patched test stub.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (workspaceIdentityService as any).transition = impl;
   return () => { (workspaceIdentityService as any).transition = original; };
@@ -168,6 +170,7 @@ function patchTransition(impl: (id: string, action: string, userId: string) => P
 
 function patchUpdateDisplayName(): () => void {
   const original = workspaceActorService.updateDisplayName;
+  // reason: workspaceActorService is dynamically imported as `any`; cast required to assign monkey-patched test stub.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (workspaceActorService as any).updateDisplayName = async () => ({});
   return () => { (workspaceActorService as any).updateDisplayName = original; };

@@ -44,9 +44,11 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 function makeCtx(overrides: Partial<MiddlewareContext> = {}): MiddlewareContext {
   const base: MiddlewareContext = {
     runId: 'run-1',
+    // reason: test stub — full Express Request shape is not needed for checkpoint unit tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     request: {} as any,
     agent: { modelId: 'gpt-4o', temperature: 0.2, maxTokens: 4096 },
+    // reason: test stub — SubaccountLink shape is not exercised by checkpoint unit tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     saLink: {} as any,
     tokensUsed: 0,
@@ -257,9 +259,11 @@ test('builds a resume context at iteration + 1', () => {
   const out = buildResumeContext({
     checkpoint,
     runId: 'run-1',
+    // reason: test stub — full Express Request shape is not needed for checkpoint unit tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     request: {} as any,
     agent: { modelId: 'gpt-4o', temperature: 0, maxTokens: 4096 },
+    // reason: test stub — SubaccountLink shape is not exercised by checkpoint unit tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     saLink: {} as any,
     startTime: 1_700_000_999_999,
@@ -281,6 +285,7 @@ test('builds a resume context at iteration + 1', () => {
 });
 
 test('rejects a checkpoint with an unsupported version', () => {
+  // reason: deliberately passing an unsupported version number to verify the runtime guard rejects it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const checkpoint = makeCheckpoint({ version: 99 as any });
   assertThrows(
@@ -288,9 +293,11 @@ test('rejects a checkpoint with an unsupported version', () => {
       buildResumeContext({
         checkpoint,
         runId: 'run-1',
+        // reason: test stub — full Express Request shape is not needed for this guard test.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         request: {} as any,
         agent: { modelId: 'gpt-4o', temperature: 0, maxTokens: 4096 },
+        // reason: test stub — SubaccountLink shape is not exercised by this guard test.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         saLink: {} as any,
         startTime: 0,
@@ -359,9 +366,11 @@ test('round-trip: serialise → JSON → deserialise → build preserves state',
   const out = buildResumeContext({
     checkpoint,
     runId: 'run-1',
+    // reason: test stub — full Express Request shape is not needed for checkpoint round-trip tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     request: {} as any,
     agent: { modelId: 'gpt-4o', temperature: 0, maxTokens: 4096 },
+    // reason: test stub — SubaccountLink shape is not exercised by checkpoint round-trip tests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     saLink: {} as any,
     startTime: 1_700_001_000_000,

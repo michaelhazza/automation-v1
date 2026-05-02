@@ -57,6 +57,7 @@ test('rejects an invalid role', () => {
   assertThrows(
     () =>
       validateMessageShape({
+        // reason: deliberately passing an invalid role value to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         role: 'function' as any,
         content: 'x',
@@ -116,6 +117,7 @@ test('rejects non-string toolCallId', () => {
       validateMessageShape({
         role: 'assistant',
         content: [{ type: 'text', text: 'hi' }],
+        // reason: deliberately passing a non-string toolCallId to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         toolCallId: 42 as any,
       }),
