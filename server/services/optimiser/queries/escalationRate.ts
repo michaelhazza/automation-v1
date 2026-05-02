@@ -2,10 +2,10 @@
  * escalationRate.ts — Optimiser telemetry query (Chunk 2)
  *
  * Joins flow_runs + flow_step_outputs + review_items to compute per-workflow
- * escalation rates over 7 days. Returns the modal (most-common) step_id that
+ * escalation rates over 14 days. Returns the modal (most-common) step_id that
  * escalated across runs.
  *
- * Query cost guardrail: WHERE flow_runs.started_at >= now() - interval '7 days'.
+ * Query cost guardrail: WHERE flow_runs.started_at >= now() - interval '14 days'.
  * Called by the evaluator in Chunk 3; this module returns raw data only.
  */
 
@@ -43,7 +43,7 @@ export async function queryEscalationRate(input: {
             FROM flow_runs fr
             WHERE fr.subaccount_id = ${subaccountId}
               AND fr.organisation_id = ${organisationId}
-              AND fr.started_at >= now() - INTERVAL '7 days'
+              AND fr.started_at >= now() - INTERVAL '14 days'
           ),
           escalation_flags AS (
             -- a run is "escalated" if any of its step outputs have a
@@ -55,7 +55,7 @@ export async function queryEscalationRate(input: {
             JOIN review_items ri ON ri.agent_run_id = fso.agent_run_id
             JOIN recent_runs rr ON rr.run_id = fso.flow_run_id
             WHERE ri.review_status = 'pending'
-              AND ri.created_at >= now() - INTERVAL '7 days'
+              AND ri.created_at >= now() - INTERVAL '14 days'
           ),
           run_escalation AS (
             SELECT

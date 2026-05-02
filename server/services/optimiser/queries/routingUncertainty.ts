@@ -23,7 +23,7 @@ export interface RoutingUncertaintyRow {
 const SOURCE = 'optimiser.routingUncertainty';
 
 /** Confidence threshold below which a decision is considered "low confidence". */
-const LOW_CONFIDENCE_THRESHOLD = 0.7;
+const LOW_CONFIDENCE_THRESHOLD = 0.5;
 
 export async function queryRoutingUncertainty(input: {
   subaccountId: string;

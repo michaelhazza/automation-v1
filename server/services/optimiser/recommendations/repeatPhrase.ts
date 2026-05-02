@@ -7,7 +7,7 @@
  *   Each returned phrase row is a candidate.
  *
  * Category: optimiser.escalation.repeat_phrase
- * Severity: warn
+ * Severity: info
  * Dedupe key: phrase
  *
  * F1 degradation: The action_hint links to the brand-voice configuration page
@@ -113,7 +113,7 @@ export async function evaluateRepeatPhrase(
 
     candidates.push({
       category: CATEGORY,
-      severity: 'warn',
+      severity: 'info',
       evidence: {
         phrase: row.phrase,
         count: row.count,

@@ -45,6 +45,7 @@ export async function queryMemoryCitation(input: {
           SELECT
             ar.agent_id::text                      AS agent_id,
             COUNT(*)::int                          AS total_injected,
+            -- cited=false is the schema encoding for final_score < threshold in memory_citation_scores
             SUM(CASE WHEN mcs.cited = false THEN 1 ELSE 0 END)::int AS low_count,
             ROUND(
               SUM(CASE WHEN mcs.cited = false THEN 1 ELSE 0 END)::numeric

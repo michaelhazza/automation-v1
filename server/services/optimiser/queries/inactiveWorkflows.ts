@@ -1,10 +1,10 @@
 /**
  * inactiveWorkflows.ts — Optimiser telemetry query (Chunk 2)
  *
- * Finds sub-account agent links that have scheduled runs enabled but have not
- * run within the expected heartbeat cadence. Uses computeNextHeartbeatAt from
- * scheduleCalendarServicePure to derive the expected next-run time, then
- * compares to agent_runs.started_at.
+ * Finds sub-account agent links that have schedule_enabled=true AND schedule_cron IS NOT NULL
+ * (cron-scheduled only) but whose most recent agent_run.started_at is older than 1.5× the
+ * expected cadence. Uses computeNextHeartbeatAt from scheduleCalendarServicePure to derive
+ * the expected next-run time, then compares to agent_runs.started_at.
  *
  * Query cost guardrail: agent_runs lookup is bounded to last 7 days.
  * Called by the evaluator in Chunk 3; this module returns raw data only.
@@ -66,8 +66,8 @@ function isInactive(params: {
     heartbeatOffsetMinutes,
   );
 
-  // Add a 25% grace buffer to avoid false positives on borderline schedules
-  const gracePeriodMs = heartbeatIntervalHours * 60 * 60 * 1000 * 0.25;
+  // Add a 50% grace buffer to avoid false positives on borderline schedules (spec: 1.5× cadence)
+  const gracePeriodMs = heartbeatIntervalHours * 60 * 60 * 1000 * 0.5;
   return nowMs > expectedNextMs + gracePeriodMs;
 }
 
@@ -92,7 +92,6 @@ export async function queryInactiveWorkflows(input: {
             sa.heartbeat_interval_hours,
             sa.heartbeat_offset_hours,
             sa.heartbeat_offset_minutes,
-            sa.heartbeat_enabled,
             MAX(ar.started_at)        AS last_run_at
           FROM subaccount_agents sa
           JOIN agents a ON a.id = sa.agent_id
@@ -102,13 +101,11 @@ export async function queryInactiveWorkflows(input: {
           WHERE sa.subaccount_id = ${subaccountId}
             AND sa.organisation_id = ${organisationId}
             AND sa.is_active = true
-            AND (
-              (sa.schedule_enabled = true AND sa.schedule_cron IS NOT NULL)
-              OR sa.heartbeat_enabled = true
-            )
+            AND sa.schedule_enabled = true
+            AND sa.schedule_cron IS NOT NULL
           GROUP BY sa.id, sa.agent_id, a.name, sa.schedule_cron,
                    sa.heartbeat_interval_hours, sa.heartbeat_offset_hours,
-                   sa.heartbeat_offset_minutes, sa.heartbeat_enabled
+                   sa.heartbeat_offset_minutes
         `);
 
         const nowMs = Date.now();
@@ -120,7 +117,6 @@ export async function queryInactiveWorkflows(input: {
           heartbeat_interval_hours: number | null;
           heartbeat_offset_hours: number | null;
           heartbeat_offset_minutes: number | null;
-          heartbeat_enabled: boolean;
           last_run_at: string | null;
         }>;
 

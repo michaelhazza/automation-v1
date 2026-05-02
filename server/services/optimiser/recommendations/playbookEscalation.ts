@@ -3,11 +3,10 @@
  *
  * Evaluator: playbook escalation rate detection.
  *
- * Trigger: escalation_count / run_count > 60% over 14 days (query already
- *   uses a 7-day window; the evaluator enforces the rate threshold).
+ * Trigger: escalation_count / run_count > 60% over 14 days.
  *
  * Category: optimiser.playbook.escalation_rate
- * Severity: warn
+ * Severity: critical
  * Dedupe key: workflow_id
  */
 
@@ -36,7 +35,7 @@ export function evaluatePlaybookEscalation(
     if (escalation_pct > ESCALATION_RATE_THRESHOLD) {
       candidates.push({
         category: CATEGORY,
-        severity: 'warn',
+        severity: 'critical',
         evidence: {
           workflow_id: row.workflow_id,
           run_count: row.run_count,

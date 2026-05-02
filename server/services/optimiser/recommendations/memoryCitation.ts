@@ -3,10 +3,10 @@
  *
  * Evaluator: memory low-citation waste detection.
  *
- * Trigger: low_citation_pct > 40%.
+ * Trigger: low_citation_pct > 50%.
  *
  * Category: optimiser.memory.low_citation_waste
- * Severity: info
+ * Severity: warn
  * Dedupe key: agent_id
  */
 
@@ -15,7 +15,7 @@ import { assertPercentInBounds } from '../evaluatorBoundsPure.js';
 import type { RecommendationCandidate } from './agentBudget.js';
 
 const CATEGORY = 'optimiser.memory.low_citation_waste';
-const LOW_CITATION_THRESHOLD = 0.40;
+const LOW_CITATION_THRESHOLD = 0.50;
 const SOURCE_QUERY = 'optimiser.memoryCitation';
 
 export function evaluateMemoryCitation(
@@ -31,7 +31,7 @@ export function evaluateMemoryCitation(
     if (row.low_citation_pct > LOW_CITATION_THRESHOLD) {
       candidates.push({
         category: CATEGORY,
-        severity: 'info',
+        severity: 'warn',
         evidence: {
           agent_id: row.agent_id,
           low_citation_pct: row.low_citation_pct,

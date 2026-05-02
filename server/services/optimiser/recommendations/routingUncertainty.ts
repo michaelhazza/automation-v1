@@ -3,7 +3,7 @@
  *
  * Evaluator: routing uncertainty detection.
  *
- * Trigger: low_confidence_pct > 30% AND total_decisions >= 50.
+ * Trigger: low_confidence_pct > 30% OR second_look_pct > 30%, sustained 7 days.
  *
  * Category: optimiser.agent.routing_uncertainty
  * Severity: warn
@@ -18,7 +18,6 @@ import type { RecommendationCandidate } from './agentBudget.js';
 
 const CATEGORY = 'optimiser.agent.routing_uncertainty';
 const LOW_CONFIDENCE_THRESHOLD = 0.30;
-const MIN_TOTAL_DECISIONS = 50;
 const SOURCE_QUERY = 'optimiser.routingUncertainty';
 
 export function evaluateRoutingUncertainty(
@@ -34,7 +33,7 @@ export function evaluateRoutingUncertainty(
       continue;
     }
 
-    if (row.low_confidence_pct > LOW_CONFIDENCE_THRESHOLD && row.total_decisions >= MIN_TOTAL_DECISIONS) {
+    if (row.low_confidence_pct > LOW_CONFIDENCE_THRESHOLD || row.second_look_pct > LOW_CONFIDENCE_THRESHOLD) {
       candidates.push({
         category: CATEGORY,
         severity: 'warn',

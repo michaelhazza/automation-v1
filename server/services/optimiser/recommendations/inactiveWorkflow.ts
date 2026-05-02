@@ -7,7 +7,7 @@
  *   expected heartbeats. Each returned row is a candidate.
  *
  * Category: optimiser.inactive.workflow
- * Severity: info
+ * Severity: warn
  * Dedupe key: subaccount_agent_id
  */
 
@@ -21,7 +21,7 @@ export function evaluateInactiveWorkflow(
 ): RecommendationCandidate[] {
   return rows.map((row) => ({
     category: CATEGORY,
-    severity: 'info' as const,
+    severity: 'warn' as const,
     evidence: {
       subaccount_agent_id: row.subaccount_agent_id,
       agent_id: row.agent_id,
