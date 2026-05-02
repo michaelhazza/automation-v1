@@ -316,5 +316,133 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0). The §9 Phase
 
 Round 2 complete. Spec grew from 776 → 783 lines (+7 net — most edits were in-place tightening, not section additions). Three user-facing applies, two user-facing defers, two technical auto-applies (1 ChatGPT + 1 integrity).
 
-Updated spec on the PR — paste it into ChatGPT for Round 3 if you want a second-derivative pass, or say 'done' to finalise.
+---
+
+## Round 3 — 2026-05-02T00-30-00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary
+You're effectively done. This is implementation-ready at production standard.
+The remaining gaps are now micro-level edge conditions, future-proofing, and observability polish. No blockers, no structural risks.
+Below is the final sweep. If you address these, you're at "nothing left to bite you later".
+
+Final micro-gaps (last 5%)
+
+1. Ordering stability under identical priority
+Eviction + sort tuple is severity → category → dedupe_key. Deterministic, but not time-aware. Edge case: two equal-priority recs, older might persist forever while newer ones churn.
+Fix: append → updated_at ASC for eviction (prefer stalest) and updated_at DESC for display (still shows freshest). Prevents long-lived stale recs clogging the cap.
+
+2. Evidence hash canonicalisation risk
+sha256(canonical_json(evidence)) is good, but hidden risk: numeric normalization. {"cost": 1000} vs {"cost": 1000.0} can hash differently depending on serializer.
+Fix: enforce integers for currency (already true), fixed precision for floats (e.g. 4dp), OR stringify via strict encoder before hashing. Otherwise phantom updated_in_place.
+
+3. Acknowledge reset logic edge case
+updated_in_place clears acknowledged_at — correct. But small-but-material oscillations (just over threshold) could let user keep seeing same issue reappear.
+Optional refinement: only clear acknowledged_at if severity increased OR delta > 2× threshold. Prevents borderline churn from resurfacing too aggressively. Not required now.
+
+4. Cap fairness across agents (future)
+Per-agent cap is correct. Longer-term, more agents writing to same surface → fragmented UI across producers.
+Future consideration (not now): soft global cap per scope (20-30) on top of per-agent cap. Just flagging for later scaling.
+
+5. Query cost guardrails (important at scale)
+Heavy scans (memory_citation_scores, fast_path_decisions, agent_execution_events). All 7-day windows. Missing: explicit scan bounding or indexing callouts.
+Add: composite indexes on (subaccount_id, created_at) and (agent_id, created_at). Hard cap scan window WHERE created_at >= now() - interval '7 days'. Avoids silent cost creep.
+
+6. Socket storm control
+dashboard.recommendations.changed emits on create/update/acknowledge/dismiss. Edge case: bulk run 8 recs → 8 socket events → 8 refetches.
+Fix: debounce client refetch (250-500ms) OR emit once per run. Not critical for v1 but worth a 5-min debounce.
+
+7. Missing "first seen" vs "last changed" distinction
+Track created_at and updated_at; UI sorts by updated_at — correct. But you lose ability to show persistence of problems.
+Optional (future UX): surface "ongoing for X days". No schema change needed.
+
+8. Phrase tokeniser risk (real-world noise)
+Regex + n-grams works, but edge cases: punctuation variants, casing, synonyms ("guarantee" vs "guaranteed").
+Minimal improvement: lowercase + stem basic suffixes (ing, ed, s). Avoids fragmented counts.
+
+9. Missing hard failure visibility
+You log dropped_due_to_cap, evicted_lower_priority. Don't log scan failures or partial category failures.
+Add: recommendations.scan_failed with category, error type. Otherwise silent failures = invisible blind spots.
+
+10. One subtle UX gap
+Hide section when empty is clean, but: user gets used to section, it disappears → feels broken. Already flagged as deferred — confirming this will come up in real usage.
+
+Final verdict
+"Ship it. Monitor. Iterate."
+If you want one last step: convert these into a pre-build checklist so nothing slips during implementation. Otherwise, you're good to go.
+```
+
+Inferred verdict: APPROVED ("Ship it. Monitor. Iterate.").
+
+### Recommendations and Decisions
+
+| ID | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|----|---------|--------|----------------|----------------|----------|-----------|
+| R3-F1 | Append `updated_at ASC` to eviction priority tuple, `updated_at DESC` to display sort | user-facing | apply | _pending user_ | medium | Equal-priority items currently have indeterminate eviction order; older ones can persist forever. Cheap addition. |
+| R3-F2 | Pin numeric canonicalisation for evidence_hash (integers for currency/counts/ms; 4dp for percentages) | technical | apply | auto (apply) | medium | Phantom updated_in_place risk if values pass through multiple serializers. Fix is purely technical. |
+| R3-F3 | Only clear `acknowledged_at` if severity increased OR delta > 2× threshold | user-facing | defer | _pending user_ | low | ChatGPT itself says "Not required now". `materialDelta` floors already absorb most micro-noise. Polish layer that needs production usage to tune. |
+| R3-F4 | Soft global per-scope cap (20-30) on top of per-agent cap | technical-escalated (defer) | defer | _pending user_ | low | ChatGPT explicitly frames as "future consideration (not now)". Single optimiser agent in v1; no fragmentation risk yet. Routed to tasks/todo.md. |
+| R3-F5 | Composite indexes (`(subaccount_id, created_at)`, `(agent_id, created_at)`) + 7-day window cap on heavy scans | technical | apply | auto (apply) | medium | Indexes likely already exist on most source tables; spec adds an implementation-time verification step. Window cap is cheap to document. |
+| R3-F6 | Client-side debounce (250-500ms) on `dashboard.recommendations.changed` refetch | technical | apply | auto (apply) | low | Cheap client-side guard against bulk-run socket storms. |
+| R3-F7 | "Ongoing for X days" UI surface using existing `created_at` | user-facing | defer | _pending user_ | low | ChatGPT itself says "Optional (future UX)". v1 UI doesn't need persistence-aware copy yet. Routed to tasks/todo.md. |
+| R3-F8 | Phrase tokeniser: lowercase + stem basic suffixes (ing, ed, s) | technical | apply | auto (apply) | low | Tokeniser-quality improvement that prevents fragmented counts. Direction unambiguous. |
+| R3-F9 | Add `recommendations.scan_failed` structured log for scan errors | technical | apply | auto (apply) | medium | Sister convention to `dropped_due_to_cap` and `evicted_lower_priority`. Closes silent-failure blind spot. |
+| R3-F10 | Hide-when-empty UX (re-affirmation of R1-F14 deferral) | — | — | n/a | — | Same finding as R1-F14, already deferred. ChatGPT explicitly notes "Already flagged as deferred, which is correct". |
+
+**Summary counts (Round 3):**
+- Auto-applied (technical): 5 ChatGPT (R3-F2, R3-F5, R3-F6, R3-F8, R3-F9) + 1 integrity (priority tuple direction wording) = 6 applied, 0 rejected, 0 deferred
+- User-decided: 1 applied (R3-F1), 0 rejected, 3 deferred (R3-F3, R3-F4, R3-F7) — user replied "as recommended"
+- No new decision (carry-over): R3-F10 = R1-F14
+
+### Decisions and Resolutions (post user reply)
+
+| ID | Final Decision |
+|----|----------------|
+| R3-F1 | apply (user: as recommended) — `updated_at` tiebreaker (eviction stalest-first; display already freshest-first) |
+| R3-F2 | auto (apply) — numeric canonicalisation rules pinned (integers + 4dp percentages) |
+| R3-F3 | defer (user: as recommended) — acknowledge-clear ramp; routed to tasks/todo.md |
+| R3-F4 | defer (user: as recommended) — soft global per-scope cap; routed to tasks/todo.md |
+| R3-F5 | auto (apply) — composite-index assumption + 7-day window cap as Phase 1 verification step |
+| R3-F6 | auto (apply) — 250ms trailing-edge debounce on socket refetch |
+| R3-F7 | defer (user: as recommended) — "Ongoing for X days" UI; routed to tasks/todo.md |
+| R3-F8 | auto (apply) — phrase tokeniser polish (lowercase + minimal suffix-stem) |
+| R3-F9 | auto (apply) — `recommendations.scan_failed` structured log (closes silent-failure gap) |
+| R3-F10 | n/a — re-affirms R1-F14 deferral; no new decision |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+**Spec edits (`docs/sub-account-optimiser-spec.md`):**
+- [user] §6.2 — eviction `evicted_lower_priority` bullet now describes priority ranking with explicit `updated_at` tiebreaker (newer wins for ranking; stalest-first for eviction).
+- [user] §6.2 — Decision flow step 4 ORDER BY now reads `severity asc, category desc, dedupe_key desc, updated_at asc` (returns lowest-priority + stalest first for eviction).
+- [auto] §6.2 — Pre-write candidate ordering paragraph updated to reflect the new tiebreaker (and notes that producer can't participate in `updated_at` ordering since candidates aren't stored yet).
+- [auto] §6.2 — NEW "Numeric canonicalisation" subsection in §6.2 Evidence hash documents the integer / 4dp-percentage normalisation rules. Closes phantom-`updated_in_place` risk from RFC 8785 / serializer round-trips.
+- [auto] §6.5 — Socket payload subsection now documents 250ms trailing-edge debounce on `dashboard.recommendations.changed` refetch (collapses bulk-run 8-event storms into one refetch).
+- [auto] §9 Phase 1 — `escalationPhrases.ts` bullet expanded with tokeniser pre-processing (lowercase + strip punctuation + suffix-stem `-ing` / `-ed` / `-s`); explicitly notes minimal — no full Porter / Snowball.
+- [auto] §9 Phase 1 — NEW "Query cost guardrails" bullet documenting 7-day window cap + composite-index assumption per source table; verification runs as part of each query module's unit test.
+- [auto] §9 Phase 2 — NEW bullet wrapping each scan-skill invocation in try/catch + `recommendations.scan_failed` structured log (sister to dropped/evicted log lines).
+- [auto] §13 risks — NEW "Silent scan failures" bullet referencing the Phase 2 wrap.
+- [user] Deferred Items section — appended R3-F3 (acknowledge-clear ramp), R3-F4 (soft global per-scope cap), R3-F7 ("ongoing for X days" UI) with reconsider-per-trigger reasons.
+- [auto] §6.2 (integrity I1) — `evicted_lower_priority` bullet rewritten to remove asc/desc ambiguity in the priority-tuple description (replaced asc/desc directional terminology with explicit ranking semantics: "newer `updated_at` wins ranking; stalest evicted first").
+- [auto] §6.2 (integrity I1, second paragraph) — `Pre-write candidate ordering` updated to align with the new ranking framing.
+
+**`tasks/todo.md`:**
+- [user] Three new entries appended to `### subaccount-optimiser (2026-05-02)`: R3-F3, R3-F4, R3-F7 (all `[user]`-tagged).
+
+### Integrity check
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0). The `updated_at asc` direction in the priority-tuple description was ambiguous (asc as sort direction vs asc as priority direction conflict — the eviction query orders asc to find stalest first, but the priority ranking itself treats newer as higher). Rewritten in plain ranking terms to eliminate the ambiguity. Post-integrity sanity: `recommendations.scan_failed` referenced consistently in §9 Phase 2 and §13 risks; numeric canonicalisation rules referenced in §6.2 Evidence hash + §6.5 evidence types (canonicalisation step lives next to evidence types per the spec); 250ms debounce documented in §6.5 socket subsection only (single source of truth).
+
+### Top themes
+
+- **Round 3 is the observability + edge-case round.** Rounds 1 and 2 hardened the lifecycle; Round 3 closes silent-failure blind spots (`recommendations.scan_failed`), ordering edge cases (stalest-first eviction), numeric serialisation hazards (canonicalisation rules), socket storm absorption (debounce), tokeniser fragmentation (lowercase + stem), and query cost ceilings (7-day window + index assumption). None are structural; all are "nothing left to bite you later" polish.
+- **Three carry-over deferrals (R3-F3, R3-F4, R3-F7) all share a common shape: needs production data.** Acknowledge-clear ramp needs operator usage to tune; soft global cap needs multi-producer fragmentation to actually emerge; "ongoing for X days" needs an operator workflow that benefits. Pre-launch, all three are speculative; post-launch with real data, each becomes designable.
+- **The auto-apply rate climbed from 5/14 (R1) to 1/7 (R2) to 5/10 (R3).** R1 had a high user-facing rate because the lifecycle changes were operator-perceptible. R2's surface was lifecycle-tightening (most user-facing). R3's surface is observability and edge cases — most are technical and auto-apply. This is the typical convergence pattern: directional decisions concentrate in early rounds, mechanical tightening dominates later rounds.
+
+### Round 3 status
+
+Round 3 complete. Spec grew from 783 → 796 lines (+13 net). One user-facing apply, three user-facing defers, six technical auto-applies (5 ChatGPT + 1 integrity).
+
+Updated spec on the PR — paste it into ChatGPT for Round 4 if you want to confirm closure, or say 'done' to finalise. Note: ChatGPT's Round 3 verdict was "Ship it. Monitor. Iterate." with the closing observation that the only remaining step is "convert these into a pre-build checklist" — i.e. an implementation prep task, not another review round. A finalisation pass is the natural next step.
 
