@@ -173,6 +173,8 @@ All deltas are **additive**. No existing column is dropped. Existing system temp
 | `workflows` (the workflow-template table) | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
 | `workflows` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
 | `schedules` (existing) | `pinned_template_version_id` | `uuid` | `null` | When non-null, scheduled runs use this exact version regardless of newer published versions. When null, "next run uses newest" (brief §7.4). (spec-time decision #5) |
+| `agent_execution_events` (existing per `accepted_primitives`) | `task_id` | `uuid` | `null` | FK → `tasks.id`. Set on every event emitted within a task's lifecycle (workflow-fired or ad-hoc). Drives the §8 replay contract (per-task monotonic ordering). |
+| `agent_execution_events` | `task_sequence` | `bigint` | `null` | Per-task monotonic sequence allocated alongside the existing per-run sequence. Source of truth for `event_id` in §8.2; never gapped within a `task_id`. Atomic allocation extends the existing `agentExecutionEventService` per-run claim pattern to the per-task scope. |
 
 ### 3.2 New `approval` step `params` shape
 
@@ -249,14 +251,17 @@ Indexes:
 | `(subaccount_id, session_id)` UNIQUE | One in-flight draft per session per subaccount; re-drafting the same session updates in place. |
 | `(consumed_at, created_at)` partial WHERE `consumed_at IS NULL` | Cheap scan for the 7-day reaper. |
 
-### 3.4 Indexes
+### 3.4 Indexes and constraints
 
-| Table | Index | Reason |
+| Table | Index / constraint | Reason |
 |---|---|---|
 | `workflow_step_reviews` | composite `(workflow_run_id, step_id, created_at)` if not already present | Frequent lookup pattern: "all reviews for this step in this run, in order." |
+| `workflow_step_reviews` | UNIQUE `(workflow_run_id, step_id, deciding_user_id)` | Per §5.1.1 Execution-Safety contract: enforces single-user idempotency on Approval double-click; 23505 → 200 idempotent-hit per the API mapping. |
+| `agent_execution_events` | composite `(task_id, task_sequence)` UNIQUE | Per §8.1 replay contract: monotonic per-task ordering; never gapped. |
 | `schedules` | `pinned_template_version_id` | Cheap; admin queries for "all schedules pinned to v3 of template X". |
+| `workflow_drafts` | per-table indexes pinned in §3.3 | (UNIQUE `(subaccount_id, session_id)`; partial `(consumed_at, created_at)` for the reaper.) |
 
-Verify both at architect-time; if either already exists, no-op.
+Verify all at architect-time; if any already exists, no-op.
 
 ### 3.5 What does NOT change in schema
 
@@ -519,7 +524,7 @@ Two affordances live in the open task view header (mock 07 reference; not curren
 
 | Button | Behaviour |
 |---|---|
-| **Pause** | Same effect as a cap-triggered pause. Card lands in chat; operator (or another approver if routing is configured for resume) can resume / stop. |
+| **Pause** | Same effect as a cap-triggered pause. Card lands in chat; anyone in the §14.5 visibility set (task requester, org admin/manager, sub-account admin on the task's sub-account) can resume / stop via the §7.5 endpoints. |
 | **Stop** | Immediate termination. Engine writes a `run.stopped.by_user` event with the actor's user id. Cleanup runs for any outstanding skill / Action calls (best-effort cancel; some external calls may have already fired and are not reversible). The task transitions to `failed` with reason `stopped_by_user`. |
 
 Both buttons are visible to anyone with edit-access to the task (per §14 permissions). Read-only viewers don't see them.
@@ -585,7 +590,17 @@ The pause card's `Continue for another 30 minutes / $2.50` button calls `/run/re
 - Reconnect-with-replay: if the WebSocket drops, the client resumes from the last seen `event_id`. Server replays missed events. **Does not** replay from task start; does not lose events.
 - Backpressure: if the engine emits 50+ events in a burst (rare, but possible during a fan-out), the client batches the render to keep the frame rate smooth (architect picks specific batching window; rule of thumb: 60 fps cap on render).
 
-**Persisted event log.** Per-task events are persisted to the existing `agent_execution_events` table (the primitive named in `docs/spec-context.md` `accepted_primitives` — `agentExecutionEventService` + `agentExecutionEventServicePure`, with atomic monotonic sequence allocation per agent run). For workflow-fired tasks, events are emitted under the run's correlation id; for ad-hoc tasks, they correlate to the agent run. `event_id` in §8.2 is the per-task monotonic sequence assigned by `agentExecutionEventService` at insert time — the source of truth for ordering and replay. Replay query on reconnect: `SELECT * FROM agent_execution_events WHERE task_id = $1 AND sequence > $lastEventId ORDER BY sequence ASC` (architect verifies the exact column name during decomposition; the contract is "monotonic per task, sequence-ordered, durable"). New `task_id` correlation column added to `agent_execution_events` if not already present (architect picks; falls back to extending the existing correlation key set).
+**Persisted event log.** Per-task events are persisted to the existing `agent_execution_events` table (the primitive named in `docs/spec-context.md` `accepted_primitives` — `agentExecutionEventService` + `agentExecutionEventServicePure`). The existing primitive allocates a monotonic sequence per agent run; for workflow-fired tasks with multiple agent runs that ordering is too narrow. The spec extends the table with one new column — `task_id uuid NULL` (FK → `tasks.id`) — captured in the §3.1 schema deltas — and a new monotonic sequence allocated **per task** alongside the existing per-run sequence. The per-task sequence is the source of truth for `event_id` in §8.2 (replay and ordering); the existing per-run sequence is preserved for any consumer that already depends on it.
+
+Replay contract on reconnect:
+
+```sql
+SELECT * FROM agent_execution_events
+ WHERE task_id = $1 AND task_sequence > $lastEventId
+ ORDER BY task_sequence ASC
+```
+
+(Column names are illustrative; architect picks the exact column name for the per-task sequence at decomposition. The contract is "monotonic per task, sequence-ordered, durable, never gapped".)
 
 ### 8.2 Event taxonomy
 
@@ -620,12 +635,14 @@ All events share a common envelope:
 | `approval.decided` | Approval resolved | decided_by, decision, decision_reason | Chat (card collapses to receipt), Plan (✓ or red), Activity |
 | `ask.queued` | Ask form gate opened | step_id, submitter_pool, schema, prompt | Chat (form card), Plan (current step indigo), Activity |
 | `ask.submitted` | Ask form submitted | submitted_by, values | Chat (card collapses to receipt), Plan (✓), Activity |
+| `ask.skipped` | Ask form skipped (only when `params.allowSkip === true`; §3.2, §11.4.1) | submitted_by, step_id | Chat (card collapses to "Skipped" receipt), Plan (✓ skipped), Activity |
 | `file.created` | A new file or version landed | file_id, version, producer_agent | Files (thumbnail appears, optionally auto-selects), Activity (with chip), Chat (if milestone-shaped) |
 | `file.edited` | Conversational edit produced a new version | file_id, prior_version, new_version, edit_request | Files (reader updates, version dropdown updates), Activity, Chat (if requested via chat) |
 | `chat.message` | Operator or orchestrator posted a chat message | author, body, attachments | Chat |
 | `agent.milestone` | Sub-agent reports a milestone in chat (per brief §6.1 milestone-vs-narration rule) | agent, summary, link_ref | Chat |
 | `thinking.changed` | Current micro-task changed | new_text | Thinking box (overwrites previous) |
 | `run.paused.cost_ceiling` / `run.paused.wall_clock` / `run.paused.by_user` | Run paused (§7) | reason, cap_value, current_cost / current_elapsed | Chat (Pause card), Plan, Activity |
+| `run.resumed` | Run resumed via §7.5 `/run/resume` (with or without an extension) | actor, extension_cost_cents, extension_seconds | Chat (Pause card collapses to a "Resumed" receipt), Plan (paused pill clears), Activity |
 | `run.stopped.by_user` | Run stopped (§7) | actor | Activity, task transitions to `failed` |
 
 Architect to lock the precise field names during decomposition. The above is the V1-canonical list.
@@ -636,7 +653,7 @@ Each pane subscribes to the same event stream and filters to what it cares about
 
 | Pane | Filters to |
 |---|---|
-| Chat | `chat.message`, `agent.milestone`, `approval.queued` / `approval.decided`, `ask.queued` / `ask.submitted`, `run.paused.*` |
+| Chat | `chat.message`, `agent.milestone`, `approval.queued` / `approval.decided`, `ask.queued` / `ask.submitted` / `ask.skipped`, `run.paused.*`, `run.resumed` |
 | Activity | All events (the full chronological log) |
 | Now (when the active right-tab) | `agent.delegation.*`, `step.started` / `step.completed`, `step.failed` |
 | Plan (when the active right-tab) | `step.queued` / `step.started` / `step.completed` / `step.failed`, `step.branch_decided`, `approval.queued` / `approval.decided`, `ask.queued` / `ask.submitted` |
@@ -781,8 +798,8 @@ Admin / power-user nav. Not in the operator's primary nav. Routes:
 | Route | Purpose |
 |---|---|
 | `/admin/workflows` | Workflow library (admin browsing) |
-| `/admin/workflows/:id/edit` | Studio canvas for editing a template |
-| `/admin/workflows/:id/edit?fromDraft=:draftId` | Studio with the canvas hydrated from an orchestrator draft (per §10.5 + §13) |
+| `/admin/workflows/:id/edit` | Studio canvas for editing an existing template |
+| `/admin/workflows/new?fromDraft=:draftId` | Studio canvas for a brand-new template, hydrated from an orchestrator draft (per §10.6 + §13.2). On publish, the Studio creates v1 of a new template and sets the draft's `consumed_at`. |
 
 Operators reach the Studio via:
 
@@ -845,7 +862,7 @@ When the orchestrator drafts a workflow from chat intent and the operator clicks
 
 1. Orchestrator persists the draft as a `workflow_drafts` row keyed by the chat `session_id` (table contract pinned in §3.3).
 2. The "Open in Studio" link is `/admin/workflows/new?fromDraft=<draftId>`.
-3. Studio reads the draft, hydrates the canvas with the steps the orchestrator drafted, and clears the draft once the operator publishes (creating v1 of a new template) or discards (back to chat with the draft intact for further iteration).
+3. Studio reads the draft, hydrates the canvas with the steps the orchestrator drafted. On **publish** (creating v1 of a new template) the draft's `consumed_at` is set and the draft is no longer surfaced from the chat card. On **explicit discard** (operator clicks "Discard" on the orchestrator's chat draft card per §13.2) the draft's `consumed_at` is also set, with the chat conversation returning to its prior state for further intent-shaping. Closing the Studio tab without publishing or explicitly discarding leaves `consumed_at` null — the draft persists for re-entry from the same chat session and is reaped after 7 days (§3.3, §16.3 item 35a).
 4. **No interstitial preview screen** — the canvas itself is the preview.
 
 Without this, "describe intent → see plan → tweak in Studio" becomes "describe intent → see plan → recreate manually" — fails the §3.0 strategic test.
@@ -948,6 +965,17 @@ Per spec-authoring-checklist §10. Each Ask submission write declares:
 - **Concurrency guard.** First-commit-wins per the predicate above; the losing caller's POST is rejected with 409 and the form card on their client reconciles via the WebSocket `ask.submitted` event.
 - **No DB unique constraint added.** State-based predicate is sufficient because Ask is single-submit; there is no `(run_id, step_id, user_id)` constraint (any one user in the pool can win, and the step status is the gate).
 - **State machine closure.** Valid step transitions for Ask: `queued → awaiting_input → submitted | skipped`. `skipped` is reachable only when `params.allowSkip === true` (§3.2). Forbidden: `submitted/skipped → *` (terminal). Adding a new step status for Ask requires a spec amendment.
+
+#### 11.4.2 Skip endpoint
+
+When `params.allowSkip === true` and the runtime renders the Skip-this-step button (§11.1):
+
+- `POST /api/tasks/:taskId/ask/:stepId/skip` body `{}`.
+- Server validates the caller is in the `submitter_pool` (same gate as submit; 403 otherwise).
+- Idempotency posture: state-based (`UPDATE workflow_steps SET status = 'skipped', outputs = $1 WHERE id = $2 AND status = 'awaiting_input'`); 0 rows updated → 409 `{ error: 'already_resolved', current_status, submitted_by, submitted_at }`.
+- The persisted `outputs` for a skip is `{ submitted_by, submitted_at, values: {}, skipped: true }` (per §11.4 step 3 Contracts entry).
+- Server emits `ask.skipped`. Client receives the event and collapses the form card to a green-tinted receipt: `✓ Skipped · <step name> — Skipped by <name> · <time>`.
+- Engine resumes the workflow; downstream bindings to this step's fields resolve to `null` (per §11.4 step 3).
 
 ### 11.5 Auto-fill on re-run (per spec-time decision #10)
 
@@ -1119,8 +1147,8 @@ When the orchestrator drafts a workflow from chat intent (either through the sug
    > 
    > [Open in Studio · Discard]
 
-3. "Open in Studio" navigates to `/admin/workflows/new?fromDraft=<draftId>`. Studio reads the draft, hydrates the canvas, clears the draft on publish or discard.
-4. The draft is per-session, not per-user. If the operator closes the tab, the draft persists (architect picks retention; recommend 7 days).
+3. "Open in Studio" navigates to `/admin/workflows/new?fromDraft=<draftId>`. Studio reads the draft, hydrates the canvas, sets `consumed_at` on publish or explicit discard (§10.6 lifecycle).
+4. The draft is per-session, not per-user. If the operator closes the tab, the draft persists; the cleanup job reaps it after 7 days (§3.3, §16.3 item 35a).
 
 ### 13.3 Milestone reporting in chat (brief §6.1, mock 8 state 4 + 5)
 

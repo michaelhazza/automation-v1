@@ -83,5 +83,5 @@ R4 (frontend .test.tsx) — `frontend_tests: none_for_now`. Remove .test.tsx blo
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             4 (C2, C3, I6, I7 — see tasks/todo.md for details)
-- Spec commit after iteration:   (will be set after Step 8b commit)
+- Spec commit after iteration:   `a0f7f4856bba34f9258d95383db4e1803aa7e7ee`
 
