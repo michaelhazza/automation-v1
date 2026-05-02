@@ -2325,3 +2325,13 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
   - Spec section: §7 (Doc-sync) Verdict destination paragraph
   - Gap: PR description does not contain the `## Doc-sync verdicts` section the spec mandates.
   - Suggested approach: operator runs `gh pr edit 251 --body "..."` to append the seven `<doc>: yes (sections X, Y) | no — <rationale> | n/a` lines, citing KNOWLEDGE.md (the one doc updated this branch) and `n/a` or `no — <rationale per investigation procedure>` for the remaining six per `docs/doc-sync.md § Verdict rule`.
+
+## PR Review deferred items
+
+### PR #251 — pr-249-followups (2026-05-02)
+
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pr-249-followups-2026-05-02T08-30-45Z.md`
+
+- [ ] **P2.1 — Refactor inline async functions in `useEffect` to `useRef`/`useCallback` pattern** across ~10 client components and hooks to eliminate `react-hooks/exhaustive-deps` disables. Touches `client/src/components/Layout.tsx`, `client/src/components/PortalConfigEditor.tsx`, `client/src/components/UnifiedActivityFeed.tsx`, `client/src/components/agent/AgentActivityTab.tsx`, `client/src/components/skill-analyzer/SkillAnalyzerProcessingStep.tsx`, `client/src/hooks/useSocket.ts`, `client/src/pages/AdminSubaccountDetailPage.tsx`, `client/src/pages/ClientPulseClientsListPage.tsx`, `client/src/pages/MemoryBlockDetailPage.tsx`, `client/src/pages/MemoryReviewQueuePage.tsx`, `client/src/pages/SubaccountKnowledgePage.tsx`, `client/src/pages/SubaccountOnboardingPage.tsx`. ChatGPT explicitly flagged "not a blocker, worth standardising later". [user] — out of scope for PR #251 cleanup; the disables now carry explicit reason comments which is the spec-mandated immediate fix.
+- [ ] **P2.3 — Add observability hook on `budgetGuardrail` zero-cost short-circuit.** `server/processors/budgetGuardrail.ts:218` silently skips `costUsd === 0` results, but zero-cost may be meaningful (free-tier calls, cached responses). Add a debug log or metric so the skip is observable. [user] — pre-existing behaviour; this PR only removed a redundant cast on the line above. Out of scope for a lint/typing cleanup.
+- [ ] **P2.5 — Extract `resolveDefault<T>(mod): T` helper for dynamic-import default-export pattern.** Centralises the `(mod as any).default ?? (mod as any).x` workaround currently duplicated across `cron-parser` (`server/services/__tests__/scheduleCalendarParity.test.ts`), `rrule` (used in scheduling helpers), and `pdf-parse` (used in document ingestion). Only 3 callsites today. [user] — premature abstraction at current callsite count; revisit if a 4th case appears.
