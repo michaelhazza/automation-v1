@@ -54,7 +54,8 @@ export function formatRelativeTime(date: Date): string {
   if (diffMs < 0) return 'Updated just now';
 
   if (diffMs < fourHoursMs) {
-    return 'Updated this morning';
+    const currentHour = new Date(nowMs).getHours();
+    return currentHour < 12 ? 'Updated this morning' : 'Updated today';
   }
 
   const now = new Date(nowMs);
