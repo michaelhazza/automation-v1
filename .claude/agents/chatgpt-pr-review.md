@@ -519,6 +519,27 @@ how the user reviews what happened without needing to be prompted at each step.
 
 Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
 
+### TodoWrite contract — MANDATORY
+
+Before performing any finalisation work, write the following 14 items to `TodoWrite` as **separate** todos. Bundling steps (e.g. "doc-sync + KNOWLEDGE.md + commit") is a known failure mode — the bundled item gets partially completed and the missed sub-step is never caught. Each step MUST be its own todo, marked `in_progress` before work and `completed` immediately after — never batch completions.
+
+1. Consistency check across all rounds (step 1)
+2. Final Summary block + Verdict header (step 2)
+3. KNOWLEDGE.md pattern extraction — grep + update or skip with rationale (step 3)
+4. Append findings to `tasks/review-logs/_index.jsonl` (step 4)
+5. Append deferred items to `tasks/todo.md` (step 5)
+6. **Doc-sync sweep — assess ALL 6 reference docs in `docs/doc-sync.md` against the FULL PR diff vs main (NOT just this session's per-round edits). Each doc gets a logged verdict: `yes (sections X, Y)` / `no — <rationale>` / `n/a`. A bare `no` is a missing verdict and BLOCKS finalisation.** (step 6) — `docs/spec-context.md` is spec-review-only; the 6 are: `architecture.md`, `docs/capabilities.md`, `docs/integration-reference.md`, `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` (treated as one verdict), `docs/frontend-design-principles.md`, `KNOWLEDGE.md`.
+7. Print full session summary to screen (step 7)
+8. Print "Ready to merge — PR #N: <url>" (step 8)
+9. Auto-commit-and-push finalisation artifacts (step 9)
+10. **`git fetch origin main` + `git merge origin/main` into the feature branch — resolve any conflicts and push BEFORE adding the ready-to-merge label, so CI validates the merged state, not the branch in isolation.** (step 10)
+11. Add `ready-to-merge` label via `gh pr edit` (step 11)
+12. CI Monitor and Auto-Merge Loop (step 12)
+13. Print session-complete (step 13)
+14. Remove per-round diff files from `.chatgpt-diffs/` (step 14)
+
+Steps 6 and 10 in particular have historically been bundled into broader "finalise" todos and silently skipped — write them as their own todos or do not start finalisation. The explicit-todo discipline is the enforcement; the spec language below describes WHAT each step does.
+
 1. Consistency check: scan all final decisions (both auto-applied and user-
    decided) for contradictions — same finding type implemented in one round
    and rejected in another, regardless of decision source. For each found:
@@ -578,19 +599,38 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    Before each item scan for a similar existing entry (same finding_type OR
    same leading ~5 words) — skip if already present.
    Do NOT write to tasks/review-logs/_deferred.md.
-6. Doc sync sweep — for each reference doc in `docs/doc-sync.md`, follow the
-   **Investigation procedure** in that file: read the doc, derive a
-   candidate-stale-reference set from the branch diff (file paths, symbols,
-   behaviours, new names introduced), grep the doc for each candidate, and fix
-   any stale references in this same finalisation commit. Skip `docs/spec-context.md` — spec-review sessions only.
+6. **Doc sync sweep — MANDATORY, per-doc verdicts required.** For EACH reference
+   doc in `docs/doc-sync.md` (excluding `docs/spec-context.md` which is spec-
+   review-only), follow the **Investigation procedure** in that file: read the
+   doc, derive a candidate-stale-reference set from the FULL PR diff vs
+   `origin/main` (file paths, symbols, behaviours, new names introduced — NOT
+   just per-round edits), grep the doc for each candidate, and fix any stale
+   references in this same finalisation commit. The PR is the unit of merge —
+   finalisation must verify the entire merge unit, not only what the PR review
+   session itself wrote.
 
-   Failure to update a relevant doc is a blocker — escalate to the user, do not
-   auto-defer.
+   The 6 docs that MUST get a verdict (one each):
+   - `architecture.md`
+   - `docs/capabilities.md`
+   - `docs/integration-reference.md`
+   - `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` (single combined verdict)
+   - `docs/frontend-design-principles.md`
+   - `KNOWLEDGE.md`
 
-   Record verdict per the **Verdict rule** in `docs/doc-sync.md`:
-   `yes (sections X, Y)` | `no — <grep terms checked OR scope-not-touched rationale>` | `n/a`.
-   A `no` verdict that does not cite grep terms or scope rationale is treated as
-   missing.
+   For each doc, record verdict per the **Verdict rule** in `docs/doc-sync.md`:
+   - `yes (sections X, Y)` — doc was updated; cite headings from the actual
+     doc, not vague descriptors.
+   - `no — <grep terms checked OR scope-not-touched rationale>` — scope
+     touched but already accurate. A bare `no` (no rationale) is a MISSING
+     verdict and BLOCKS finalisation.
+   - `n/a` — scope of this doc was not touched by the PR.
+
+   Failure to update a doc whose scope IS touched is a blocker — escalate to
+   the user, do not auto-defer. Stale docs are a blocking issue per `CLAUDE.md
+   § 11`.
+
+   The Final Summary block (step 2) MUST contain all 6 verdicts in the exact
+   format above — no abbreviation, no consolidation into a single line.
 
 7. Print the full session summary to screen. Break the totals down by decision
    source so the user sees what was auto-applied versus what they were asked
@@ -625,9 +665,10 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    + deferred count + KNOWLEDGE.md entry count. Push after commit. If nothing
    changed (rare — only if finalize produced zero edits), skip.
 
-10. Merge `main` into the feature branch and resolve any conflicts before marking
-    ready-to-merge. This ensures CI validates the merged state, not the branch in
-    isolation.
+10. **Merge `main` into the feature branch — MANDATORY, must run BEFORE step 11
+    (ready-to-merge label).** This ensures CI validates the merged state, not the
+    branch in isolation. Skipping this step is a known failure mode: a green CI
+    on the unmerged branch can hide conflicts that surface only after merge.
 
     ```bash
     git fetch origin main
@@ -871,13 +912,17 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
     - [auto|user] <item> — <reason>
   - Architectural items surfaced to screen (user decisions):
     - <item> — <recommendation>
-  - KNOWLEDGE.md updated: yes (<N> entries) | no
-  - architecture.md updated: yes (sections X, Y) | no | n/a
-  - capabilities.md updated: yes (sections X) | no | n/a
-  - integration-reference.md updated: yes (slug X) | no | n/a
-  - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no | n/a
-  - frontend-design-principles.md updated: yes | no | n/a
+  - KNOWLEDGE.md updated: yes (<N> entries) | no — <rationale>
+  - architecture.md updated: yes (sections X, Y) | no — <rationale> | n/a
+  - capabilities.md updated: yes (sections X) | no — <rationale> | n/a
+  - integration-reference.md updated: yes (slug X) | no — <rationale> | n/a
+  - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (sections X) | no — <rationale> | n/a
+  - frontend-design-principles.md updated: yes | no — <rationale> | n/a
+  - main merged into branch: yes (<sha>) | yes (clean fast-forward) | no — <reason>
   - PR: #<N> — ready to merge at <url>
+
+ALL 6 doc verdicts above are MANDATORY — a missing or malformed verdict blocks
+finalisation. A bare `no` (no rationale) is treated as missing.
 
 ---
 

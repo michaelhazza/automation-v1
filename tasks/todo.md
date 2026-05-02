@@ -345,6 +345,24 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 
 - [ ] [user] **Add concurrency guard to CI `lint_and_typecheck` job** — Round 1 ChatGPT finding: add `concurrency: group: lint-typecheck-${{ github.ref }}, cancel-in-progress: true` to prevent duplicate runs on rapid pushes. Out of scope for this spec's goal ("drive to exit 0, wire the gate"); valid CI optimization for a follow-up CI hygiene pass.
 
+### subaccount-optimiser (2026-05-02)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-subaccount-optimiser-2026-05-01T23-47-38Z.md`
+**Spec:** `docs/sub-account-optimiser-spec.md`
+**PR:** #250 — https://github.com/michaelhazza/automation-v1/pull/250
+**Branch:** `claude/evaluate-new-features-waqfY` (spec-authoring branch for F1/F2/F3 wave; F2 implementation will move to `claude/subaccount-optimiser` per the spec's branch metadata)
+
+- [ ] [user] **F8 — Routing-uncertainty trigger refinement using `downstreamOutcome`.** ChatGPT R1 proposed coupling the trigger to outcome quality (low confidence + bad outcome rate, OR high secondLook + low improvement) instead of confidence/secondLook thresholds in isolation. Deferred because the refined heuristic requires baseline outcome-quality data the v1 deployment will produce — no point tuning thresholds against a guessed distribution. **Reconsider per trigger:** when 30+ days of `fast_path_decisions.downstreamOutcome` data accumulate post-launch, OR when an operator complains that a "cautious" agent is being flagged. Until then the simpler `confidence < 0.5 OR secondLook > 30%` trigger ships in v1.
+- [ ] [user] **F10 — Periodic schedule-rebalancing job for daily optimiser cron.** Phase 2 backfill staggers cron registration by `created_at` hash across 6 hours, which prevents pg-boss storms at deploy time but does not rebalance when many sub-accounts are added at once post-deploy. Deferred because v1's expected creation cadence (1-2 sub-accounts per agency per week) does not produce noticeable drift. **Reconsider per trigger:** when sub-account creation rate exceeds ~10/day OR when pg-boss queue depth metrics show optimiser cron contention.
+- [ ] [user] **F14 — Stateful empty-state UX for the suggestions section.** ChatGPT R1 proposed showing the section after first-ever appearance for a scope, then hiding only when transitioning from non-empty back to empty (vs current "hide whenever empty" rule). Deferred because the simpler rule aligns with `frontend-design-principles.md § Default to hidden`, and the stateful version introduces UX state that needs a design pass (when does "first-ever" fire — first scope view ever? first run produces a row? first time the operator dismisses everything?). **Reconsider per trigger:** v1.1 redesign of the dashboard, OR when operator feedback indicates the disappearing-section is causing confusion.
+- [ ] [user] **R2-F3 — Cap-eviction category-diversity bias.** ChatGPT R2 proposed preferring to evict same-category-as-incoming first when the cap is full, falling back to global lowest priority. Deferred because the simple form has correctness risks — without a priority floor, it could evict a `critical` rec of the same category to make room for a `warn` rec of the same category. **Reconsider per trigger:** when production cap-eviction logs show one category persistently dominating the cap. At that point, design a correctness-safe variant (likely "prefer same-category at-or-below incoming severity" rather than unconditional category preference).
+- [ ] [user] **R2-F7 — `evidence_version` for evidence-shape evolution.** ChatGPT R2 proposed adding an optional `evidence_version: number` to evidence shapes, included in the `evidence_hash` input, so evolving a shape doesn't trigger unintended re-surfacing across already-stored rows. Deferred because (a) `render_version` already covers the prompt-template change axis, and (b) pre-production posture means an evidence-shape change can ship with a one-shot DB rewrite — no deployed users to disrupt. **Reconsider per trigger:** when the first evidence-shape evolution is required AND the one-shot rewrite pattern is impractical (e.g. real customers in production by then).
+- [ ] [user] **R3-F3 — Acknowledge-clear ramp threshold.** ChatGPT R3 proposed only clearing `acknowledged_at` if severity increased OR delta > 2× the per-category material threshold, so borderline oscillations don't aggressively re-surface acknowledged findings. Deferred because the existing `materialDelta` floors already absorb most micro-noise, and the 2× multiplier needs production data to tune. **Reconsider per trigger:** when operators report that just-over-threshold deltas are training them to ignore the surface.
+- [ ] [user] **R3-F4 — Soft global per-scope cap across producing agents.** Current cap is `(scope, producing_agent_id)` = 10 open. ChatGPT R3 flagged future fragmentation risk: when multiple agents write recommendations to the same scope, an operator could see 10 from each producer with no upper bound. Deferred because v1 ships only one optimiser agent. **Reconsider per trigger:** when a second agent (Portfolio Health, system-monitoring, custom user agents) starts writing recommendations to the same scope.
+- [x] ~~[user] **R4-F3 — Eviction priority reorder (severity → updated_at → category → dedupe_key).** ChatGPT R4 proposed moving `updated_at` to position 2 to remove alphabetical-category bias. Deferred because the R4-F1 namespace hard rule (`optimiser.agent.*` vs `optimiser.memory.*`) scopes all bias within one agent — within-namespace alphabetical ordering is a stable, arbitrary tiebreaker. **Reconsider per trigger:** production eviction logs show a specific category systematically dominating the cap within the same namespace in a way operators notice.~~ **SUPERSEDED 2026-05-02 by R5-F4 apply** — ChatGPT R5 surfaced concrete impact (`optimiser.agent.*` consistently dominates `optimiser.skill.*` every run, not arbitrary). Reorder applied to spec in commit `dd27581e`. No further action.
+- [ ] [user] **R4-F5 — Bypass-once-per-cooldown-window guard.** ChatGPT R4 proposed tracking `last_escalation_bypass_at` and allowing severity-escalation cooldown bypass only once per cooldown window, to prevent warn→critical oscillation causing flip-flop re-surfacing. Deferred because the scenario requires multiple severity oscillations within one cooldown window — implausible in pre-production. **Reconsider per trigger:** post-launch production logs show cooldown-bypass or eviction patterns for specific categories that indicate oscillation.
+- [ ] [user] **R3-F7 — "Ongoing for X days" UI persistence indicator.** `created_at` and `updated_at` are both stored; the UI today sorts by `updated_at` desc but doesn't surface persistence ("open for 5 days"). Deferred because v1's surface is "what to look at right now" — persistence indicators need an established operator workflow that benefits from them, which doesn't exist pre-launch. **Reconsider per trigger:** when v1.1 surface design picks up dashboard refinements, OR when operator feedback indicates persistence context would help triage.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -362,6 +380,11 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 ---
 
 ## PR Review deferred items
+
+### PR #250 — claude-evaluate-new-features-waqfY / subaccount-optimiser chunk 1 (2026-05-02 — ChatGPT review rounds 1–2)
+
+- [ ] [user] **F9: Add concurrency / duplicate-execution test for upsertRecommendation** — `skipReasonCoverage.test.ts` covers the deterministic skip paths exhaustively (cooldown / hash_match / sub_threshold / cap / eviction). Untested today: the 23505-race catch path (`agentRecommendationsService.ts:419–432`) and the per-`(scope, agent)` advisory-lock concurrency. Add (a) a unit test that mocks a 23505 throw on INSERT and asserts the re-lookup returns `was_new: false` with the existing id, and (b) an integration test exercising two parallel `upsertRecommendation` calls against the same dedupe key, asserting exactly one new row + one no-op return. Pair with TI-005 follow-up if the integration harness lands first. Source: ChatGPT PR review round 1 — user-approved as recommended (defer). PR #250 — https://github.com/michaelhazza/automation-v1/pull/250.
+- [ ] [user] **F10: `subaccount_display_name` "sometimes-present" contract — consider always-present-with-null** — `agentRecommendationsService.ts:602` conditionally spreads `subaccount_display_name` into the response; it's omitted entirely on non-subaccount rows. Spec §6.5 + the `AgentRecommendationRow` type both pin the field as `subaccount_display_name?: string`, and the existing client check (`AgentRecommendationsList.tsx:156`) handles undefined safely. Switching to always-present-with-null is a minor public-API contract change but a contract change — should be raised as a spec amendment, not an ad-hoc PR change. Defer until a real client-friction case justifies the contract widening. Source: ChatGPT PR review round 1 — user-approved as recommended (defer). PR #250 — https://github.com/michaelhazza/automation-v1/pull/250.
 
 ### PR #247 — claude-deferred-items-pre-launch-5Kx9P (2026-05-01 — ChatGPT review round 1)
 
@@ -2193,6 +2216,119 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 `RebindReferenceModal` (TaskModal.tsx) submits the rebind without calling `verifyAccess(...)` first, even though the API exposes that endpoint. Server-side validation still catches broken connections on POST, so this is not a security hole — it's a UX improvement: surface the error before the user commits rather than after.
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
+
+
+---
+
+## Deferred spec decisions — subaccount-optimiser
+
+**Spec:** `docs/sub-account-optimiser-spec.md`
+**Source:** spec-reviewer iteration 1 — 2026-05-01
+
+Two AUTO-DECIDED items routed for human awareness. Both have already been applied to the spec; flag only if the decision feels wrong.
+
+### F2-AD-1: `inactive.workflow` category trigger redefined to use `subaccount_agents` schedule columns
+
+Original trigger referenced `autoStartOnSchedule: true` and a "(cadence × 1.5) days" rule, but neither exists on `workflowTemplates` or `flowRuns`. Rewrote the trigger to detect sub-account agents with `scheduleEnabled = true AND scheduleCron IS NOT NULL` whose most recent `agent_runs` row is older than 1.5× the expected cadence (computed via `scheduleCalendarServicePure`). This anchors the category against a real currently-shipped schedule mechanism.
+
+Flag if: you wanted this category to track *workflow templates* specifically (in which case it has to wait until workflow templates carry schedule metadata), not scheduled agents.
+
+### F2-AD-2: "Why not extend an existing primitive" paragraph added to §6
+
+spec-authoring-checklist Section 1 expects a one-paragraph rationale comparing the new primitive against the closest existing primitives. Added a paragraph after §6.1 listing `system_incidents`, `feature_requests`, and `org_memories` / `workspace_memory` and explaining why none fit the recommendations lifecycle (operator-facing rows that dedupe by stable finding keys, render plain-English copy, acknowledge/dismiss in the UI without notifying anyone).
+
+Flag if: you intended a tighter mapping to one of those existing tables and the paragraph misframes the design-review decision.
+
+### F2-AD-3: Sub-account-settings UI for `optimiser_enabled` deferred (iter 2)
+
+Iter-2 Codex finding #6: spec called the opt-out a "toggle on sub-account settings" but only added the DB column. Downgraded the prose to "backend boolean column flipped via admin SQL or Configuration Assistant" and added a Deferred Items entry calling out the missing settings UI. v1 has no operator-visible toggle.
+
+---
+
+## Deferred from spec-conformance review — subaccount-optimiser (2026-05-02)
+
+**Captured:** 2026-05-02T05:06:28Z
+**Source log:** `tasks/review-logs/spec-conformance-log-subaccount-optimiser-2026-05-02T05-00-11Z.md`
+**Spec:** `docs/sub-account-optimiser-spec.md`
+
+These are spec-vs-implementation divergences identified during the all-of-spec conformance audit on branch `claude/subaccount-optimiser` at HEAD `1ba02c3b`. None were auto-fixed (all required design judgment). Resolve before merge OR pin the spec to match the implementation choices.
+
+- [ ] **REQ #B1 — `playbook.escalation_rate` severity drift**
+  - Spec section: §2 line 109
+  - Gap: spec says severity=`critical` at >60% over 14 days; implementation is severity=`warn` at >60% over 7 days (`recommendations/playbookEscalation.ts:39`, `queries/escalationRate.ts:46`).
+  - Suggested approach: either flip to `critical` and widen window to 14 days OR pin spec to "warn at 7 days". Two divergences in one finding.
+
+- [ ] **REQ #B2 — `inactive.workflow` severity drift**
+  - Spec section: §2 line 111
+  - Gap: spec=`warn`; implementation=`info` (`recommendations/inactiveWorkflow.ts:24`).
+  - Suggested approach: bump severity to `warn` to match the spec, OR pin spec to `info`.
+
+- [ ] **REQ #B3 — `escalation.repeat_phrase` severity drift**
+  - Spec section: §2 line 112
+  - Gap: spec=`info`; implementation=`warn` (`recommendations/repeatPhrase.ts:116`).
+  - Suggested approach: lower to `info`, OR pin spec to `warn`. Note `info` was the spec author's deliberate choice — phrase repetition is informational, not actionable until the brand-voice profile (F1) ships.
+
+- [ ] **REQ #B4 — `memory.low_citation_waste` severity + threshold drift**
+  - Spec section: §2 line 118
+  - Gap: spec=`warn` at `>50% scored <0.3`; implementation=`info` at `>40%` using `mcs.cited = false` flag (`recommendations/memoryCitation.ts:13–46`, `queries/memoryCitation.ts:48`).
+  - Suggested approach: confirm whether `mcs.cited = false` is the schema's encoding of "scored below threshold" — if so, lift threshold to 50% and bump severity to `warn`. If not, the query is reading the wrong signal entirely.
+
+- [ ] **REQ #B5 — `agent.routing_uncertainty` trigger semantics rewritten**
+  - Spec section: §2 line 119
+  - Gap: spec="confidence < 0.5 on > 30% of decisions, OR `secondLookTriggered` rate > 30%, sustained 7 days"; implementation uses 0.7 confidence threshold (not 0.5), drops the OR with `second_look_pct`, AND adds an undocumented `total_decisions >= 50` evaluator-level gate (`queries/routingUncertainty.ts:26`, `recommendations/routingUncertainty.ts:20–37`).
+  - Suggested approach: align all three to spec — set `LOW_CONFIDENCE_THRESHOLD=0.5`, OR-combine with second_look_pct, remove the >=50 evaluator gate (the spec's volume floor of 10 already lives in `materialDelta`).
+
+- [ ] **REQ #B6 — `llm.cache_poor_reuse` trigger semantics rewritten + missing volume floor**
+  - Spec section: §2 line 120
+  - Gap: spec="`cacheCreationTokens > cachedPromptTokens` AND total >= 5000"; implementation uses `reuse_ratio < 0.20` with NO volume floor (`recommendations/cacheEfficiency.ts:29–32`).
+  - Suggested approach: switch to `creation_tokens > reused_tokens` AND `(creation_tokens + reused_tokens) >= 5000`. Without the volume floor, low-volume agents will produce noisy info recommendations.
+
+- [ ] **REQ #B7 — `runOptimiser` orchestrator not wired to production schedule path**
+  - Spec section: §6.2 Run-level atomicity
+  - Gap: `optimiserOrchestrator.ts:runOptimiser` implements pre-sort + sequential calls + singleton key per spec, but no production callsite references it. The pg-boss schedule routes through `agentExecutionService.runAgent` (LLM-driven loop reading `AGENTS.md`), which provides no pre-sort guarantee.
+  - Suggested approach: either (a) wire `runOptimiser` as the queue handler for `subaccount-optimiser` runs (specialised dispatch path), OR (b) accept LLM-mediated ordering and weaken the atomicity invariant in §6.2 to "best-effort sort via system prompt directive". This is the largest single conformance gap and the most architecturally consequential.
+
+- [ ] **REQ #B8 — Cron timezone semantics divergence**
+  - Spec section: §4
+  - Gap: spec says "daily at sub-account local 06:00 (cron derived from sub-account's `timezone`)"; implementation runs at UTC 06:00–11:59 with deterministic stagger via `optimiserCronPure.ts`, ignoring `subaccounts.timezone` (`optimiserSubaccountHook.ts:131` registers with `'UTC'`).
+  - Suggested approach: read `subaccounts.timezone` and pass it to `agentScheduleService.registerSchedule` as the `tz` argument, while keeping the deterministic minute-stagger inside the 06:00 hour. Spec §13 schedule-storm risk is preserved by the minute spread; sub-account-local timing is preserved by reading `timezone`.
+
+- [ ] **REQ #B9 — `inactive.workflow` heartbeat-vs-cron path drift + grace buffer**
+  - Spec section: §2 line 111 / §3 line 174 / §5 line 222
+  - Gap: spec restricts to `subaccountAgents.scheduleEnabled = true AND scheduleCron IS NOT NULL` and "older than 1.5× expected cadence"; implementation ORs in `sa.heartbeat_enabled = true` (broadens scope) AND uses 1.25× grace buffer (tightens trigger) — both diverge from spec (`queries/inactiveWorkflows.ts:104–108, 70–71`).
+  - Suggested approach: drop the heartbeat path branch (or update the spec to acknowledge it), and change the grace buffer from `*0.25` (1.25×) to `*0.5` (1.5×) to match the spec.
+
+- [ ] **REQ #B10 — Acknowledge route response shape includes extra fields**
+  - Spec section: §6.5
+  - Gap: spec response is `{ success, alreadyAcknowledged }`; implementation returns `{ success, alreadyAcknowledged, scope_type, scope_id }` (the extras are read by the route layer to drive socket emission).
+  - Suggested approach: either pin spec to allow the extra fields, OR move the `scope_type`/`scope_id` lookup out of the response shape into a separate `getById` call inside the route handler.
+
+- [ ] **REQ #B11 — Cooldown / open-match queries lack explicit `organisation_id` predicate (RLS-only isolation)**
+  - Spec section: §6.2 Step 1, §6.5
+  - Gap: AMBIGUOUS — `agentRecommendationsService.ts:111–123, 167–175, 248–255, 300–312` all rely on connection-level `app.organisation_id` RLS to enforce isolation, but the service uses `db.transaction()` directly (not `withOrgTx`). If the calling context does not set `app.organisation_id`, RLS will see no session var and lookup will silently return zero rows.
+  - Suggested approach: confirm that `output.recommend` and the HTTP routes both run inside `withOrgTx` (or equivalent) before this service is invoked, OR add an explicit `AND organisation_id = ${ctx.organisationId}::uuid` predicate to all four queries as defense in depth.
+
+- [ ] **REQ #B12 — `listRecommendations` uses `sql.raw` with string interpolation**
+  - Spec section: §6.5
+  - Gap: `agentRecommendationsService.ts:530–544, 575–598` interpolates `orgId` and `scopeId` directly into `sql.raw(...)` strings. UUID format is validated for `scopeId` only; `orgId` comes from `req.orgId` (server-side), so practical injection is impossible — but the convention prefers parameterised drizzle-tagged-template `sql\`…\`` interpolation.
+  - Suggested approach: refactor to drizzle composable conditions (the descendant-subaccount IN clause is the reason raw was used; `inArray` + a subquery would express the same shape parameterised). OR add an inline comment naming the safety invariant ("orgId is server-side only").
+
+- [ ] **REQ #B13 — Defensive fallback can mask data corruption on dismiss path**
+  - Spec section: §6.5
+  - Gap: AMBIGUOUS — `agentRecommendationsService.ts:730` returns `target.dismissed_until ?? new Date().toISOString()` when the row's `dismissed_until` is NULL on an already-dismissed row. That state is impossible if the service is the only writer (single-writer invariant), so the fallback hides corruption rather than surfacing it.
+  - Suggested approach: log a warning if `dismissed_at IS NOT NULL AND dismissed_until IS NULL` is observed (impossible state under invariant), then return the timestamp.
+
+- [ ] **REQ #B14 — RLS policy variant on migration 0267 vs reference pattern in 0245**
+  - Spec section: §6.1 / §10
+  - Gap: AMBIGUOUS — migration 0267 uses one combined policy (`USING + WITH CHECK` on the same predicate). Spec references "per `0245_all_tenant_tables_rls.sql` pattern" without specifying single-policy vs split-policy convention. Verify against 0245.
+  - Suggested approach: if 0245 splits SELECT/INSERT/UPDATE/DELETE into separate policies, refactor 0267 to match. Otherwise PASS.
+
+- [ ] **REQ #B16 — Stale `progress.md` in main worktree**
+  - Spec section: §9 Phase 4 / §11
+  - Gap: AMBIGUOUS — main worktree `tasks/builds/subaccount-optimiser/progress.md` shows "IN PROGRESS — Phase 1 complete"; the feature-branch worktree shows "Status: COMPLETE" with full closeout. Resolution depends on which version lands on `main` after the merge.
+  - Suggested approach: confirm the worktree's `progress.md` is what merges (most likely true given the branch HEAD), no further action needed. If main's version persists, copy the closeout block over.
+
+Flag if: you intended an operator-visible UI in v1 (in which case settings page + route + schema entry need to be specced) rather than a backend-only flag.
 
 ## Deferred — testing posture (lint-typecheck-post-merge spec)
 

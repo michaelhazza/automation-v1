@@ -71,6 +71,11 @@ export const subaccounts = pgTable(
     // ── Pulse — per-subaccount retention override (migration 0160) ──
     runRetentionDays: integer('run_retention_days'),
 
+    // ── Sub-Account Optimiser — opt-out toggle (migration 0267, spec §4) ──
+    // Default true: every sub-account participates in daily optimiser scans
+    // unless the operator explicitly opts out via admin SQL or Configuration Assistant.
+    optimiserEnabled: boolean('optimiser_enabled').notNull().default(true),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
