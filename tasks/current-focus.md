@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
-active_plan: tasks/builds/pre-prod-tenancy/plan.md
-build_slug: pre-prod-tenancy
-branch: pre-prod-tenancy
+active_spec: docs/sub-account-optimiser-spec.md
+active_plan: tasks/builds/subaccount-optimiser/plan.md
+build_slug: subaccount-optimiser
+branch: claude/evaluate-new-features-waqfY
 status: PLANNING
-last_updated: 2026-04-29
+last_updated: 2026-05-02
 -->
 
 # Current Focus
@@ -19,10 +19,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
-**Active plan:** tasks/builds/pre-prod-tenancy/plan.md (pending — architect agent to author after `spec-reviewer`)
-**Active build slug:** pre-prod-tenancy (branch `pre-prod-tenancy`)
-**Status:** **PLANNING** — Major (architect first; full review pipeline). Branch created from origin/main. Verification pass against the source brief found that 14 of the 17 listed items are already shipped on `main` (Phase 1 RLS DB hardening closed by migrations 0227 / 0228 / 0229; route+service refactors P3-C6/C7/C8/C9/C10/C11/H2/H3 closed in-tree). Spec narrowed to three phases: (1) `SC-2026-04-26-1` RLS protected-tables registry triage — bring `verify-rls-protected-tables.sh` to exit 0 (currently 67 violations: 63 unregistered tenant tables + 4 stale entries); (2) `CHATGPT-PR203-R2` `intervention_outcomes` UNIQUE index + `ON CONFLICT DO NOTHING` migration + job refactor; (3) `B10` per-org `withOrgTx` defense-in-depth on three maintenance jobs (optional, conditional on §5.5 budget rule — jobs are no longer silent no-ops, so this is defense-in-depth not correctness). Migration range `0244–0255` reserved (brief reserved 0241–0252 but `main` already shipped 0241/0242/0243). 14 brief items marked `[x]` in `tasks/todo.md` with closure citations. Sister branches `pre-prod-boundary-and-brief-api` and `pre-prod-workflow-and-delegation` own scoped-out paths (see §0.4 in the spec). **Next:** run `spec-reviewer` on the draft spec, then `architect` to decompose into chunks at `tasks/builds/pre-prod-tenancy/plan.md`. Stop at plan gate — operator switches model from Opus to Sonnet before execution per CLAUDE.md model-guidance rule.
+**Active spec:** docs/sub-account-optimiser-spec.md (F2 of the F1/F2/F3 sub-account feature wave; PR #250)
+**Active plan:** tasks/builds/subaccount-optimiser/plan.md (pending — `architect` to author next)
+**Active build slug:** subaccount-optimiser (currently on spec-authoring branch `claude/evaluate-new-features-waqfY`; F2 implementation moves to `claude/subaccount-optimiser` per spec metadata)
+**Status:** **PLANNING** — Significant (architect first; full review pipeline). Spec is **READY FOR BUILD** after a 9-iteration review chain: `spec-reviewer` 4 iterations (READY_FOR_BUILD verdict, commit `35c0b6b0`) followed by `chatgpt-spec-review` 5 manual rounds (APPROVED verdict 2026-05-02, finalisation commit follows). 30 substantive applies (19 auto + 11 user), 11 user-deferred items routed to `tasks/todo.md § Spec Review deferred items / subaccount-optimiser`. Spec covers the new generic `agent_recommendations` primitive (table + skill + component) plus the optimiser as its first consumer. Migrations `0267` (table) + `0267a` (peer-median materialised view) reserved. Sister branches still pending: F1 `subaccount-artefacts` (migration `0266`) and F3 `baseline-capture` (migrations `0268-0270`) — same spec-authoring branch holds all three; per-feature implementation branches will be cut at build time. **Next:** invoke `architect` (Opus) to decompose F2 into chunks at `tasks/builds/subaccount-optimiser/plan.md`. Stop at plan gate — operator switches Opus → Sonnet before execution per CLAUDE.md model-guidance rule.
 
 **Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
 **Last updated:** 2026-04-29

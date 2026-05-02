@@ -6,6 +6,8 @@
 - PR: #250 — https://github.com/michaelhazza/automation-v1/pull/250
 - Mode: manual
 - Started: 2026-05-01T23:47:38Z
+- Finalised: 2026-05-02T01:10:00Z
+- **Verdict:** APPROVED (5 rounds; no blockers; spec is implementation-ready)
 
 ---
 
@@ -601,3 +603,87 @@ Integrity check: 0 issues found this round. All four findings landed cleanly wit
 
 Round 5 complete. Spec at 813 lines. Three technical auto-applies, one user-facing apply (reversing R4-F3 deferral). User signal: "as recommended, go" — proceeding immediately to finalisation.
 
+---
+
+## Final Summary
+
+### Consistency Warnings
+
+One cross-round consistency item:
+
+- **R4-F3 (defer) → R5-F4 (apply): eviction priority reorder.** R4 deferred the priority-tuple reorder on the abstract grounds that "namespacing makes within-namespace alphabetical ordering an arbitrary tiebreaker." R5 surfaced concrete production impact — `optimiser.agent.*` is alphabetically earliest within the namespace and would systematically dominate same-severity tiebreaks every run, with `optimiser.skill.*` consistently last. **Resolution:** later-round decision (R5 apply) supersedes the earlier deferral. Both calls were defensible for their information state — R4 was correct on R4's argument; R5's stronger evidence justified the reversal. The deferred entry was removed from the Deferred Items section in R5; tasks/todo.md's R4-F3 entry should be marked complete rather than carried forward (handled in deferred backlog summary below).
+
+No other cross-round contradictions detected.
+
+### Implementation-readiness checklist
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| All inputs defined | ✅ | `output.recommend` input contract pinned in §6.2; all 8 scan-skill inputs pinned in §5; HTTP endpoint inputs pinned in §6.5 |
+| All outputs defined | ✅ | `output.recommend` 6-case discriminated-union output pinned in §6.2; HTTP endpoint responses pinned in §6.5; socket payload pinned in §6.5 |
+| Failure modes covered | ✅ | Cap-reached, cooldown, sub-threshold, eviction (with implicit cooldown), severity-escalation bypass, scan-skill failure logging — all pinned. 23505 cross-agent race documented; `FOR UPDATE` blocks concurrent dismiss; advisory lock serialises same-agent races |
+| Ordering guarantees explicit | ✅ | Decision flow numbered 1-4 in §6.2; eviction priority tuple explicitly ranked in §6.2; pre-write candidate ordering paragraph; run-level atomicity invariant added in R4 |
+| No unresolved forward references | ✅ | All cross-section identifiers (`materialDelta`, `evicted_lower_priority`, `dismissed_until`, `collapsedDistinctScopeId`, `render_version`, `RENDER_VERSION`, `recommendations.scan_failed`, `recommendations.evicted_lower_priority`, `recommendations.dropped_due_to_cap`) consistent across §2 / §3 / §5 / §6.1 / §6.2 / §6.3 / §6.5 / §7 / §9 / §10 / §13 / Deferred Items |
+
+**Result:** all 5 checks pass. Spec is implementation-ready.
+
+### Doc Sync Sweep
+
+Per `docs/doc-sync.md`, the following reference docs were checked against the change-set:
+
+- **architecture.md updated:** n/a — spec authoring only; the `agent_recommendations` primitive, `output.recommend` skill, and cross-tenant median view do not exist yet. Architecture.md updates are a Phase 4 closeout task per §9 (already enumerated in the spec's Done definition).
+- **capabilities.md updated:** n/a — spec authoring only; "sub-account observability" + "reusable agent recommendations primitive" capabilities will be added at Phase 4 closeout per §9.
+- **integration-reference.md updated:** n/a — optimiser reads only internal telemetry; no integration surface change.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** n/a — no changes to build discipline, conventions, agent fleet, RLS rules, or §8 development discipline.
+- **frontend-design-principles.md updated:** n/a — the spec's UI surface (DashboardPage section, click-feedback beat, default-to-hidden empty state) follows existing principles in `frontend-design-principles.md`; no new UI patterns or hard rules introduced.
+- **spec-context.md updated:** n/a — spec adheres to existing framing assumptions (pre-production, no live users, rapid evolution, static-gates-primary, no feature flags). No framing-assumption change implied.
+- **KNOWLEDGE.md updated:** yes (3 entries) — appended three durable patterns extracted from the 5-round review:
+  1. `[2026-05-02] Pattern — Material-change thresholds combine relative AND absolute floors` — generalises beyond optimiser to any threshold-based detection.
+  2. `[2026-05-02] Pattern — Cap-aware priority eviction with implicit cooldown rotates the surface fairly` — pattern for any bounded surface that needs priority-aware admission control.
+  3. `[2026-05-02] Pattern — Render-cache key for LLM-rendered copy MUST include render_version` — specific to LLM-rendered persisted copy; prevents prompt-tweak-driven silent stale-copy bug.
+
+### Index records
+
+- 38 per-finding records appended to `tasks/review-logs/_index.jsonl` (one per substantive finding across 5 rounds; integrity-check fixes elided per existing PR-agent convention).
+- `index_write_failures: 0` (clean).
+
+### Deferred backlog (in `tasks/todo.md` under `## Spec Review deferred items / ### subaccount-optimiser (2026-05-02)`)
+
+| ID | Item | Tag | Reconsider trigger |
+|----|------|-----|--------------------|
+| F2-AD-1 | (from spec-reviewer round 1) `inactive.workflow` trigger source verification | auto | Already handled by spec-reviewer; kept as audit reminder |
+| F2-AD-2 | (from spec-reviewer round 1) "Why not extend an existing primitive?" framing check | auto | Already handled by spec-reviewer |
+| F2-AD-3 | (from spec-reviewer round 1) Settings-UI deferral confirmation | auto | UI deferred per §4 / Deferred Items |
+| R1-F8 | Routing-uncertainty trigger refinement using `downstreamOutcome` | user | 30+ days of `fast_path_decisions.downstreamOutcome` data accumulated post-launch |
+| R1-F10 | Periodic schedule-rebalancing job | user | Sub-account creation rate exceeds ~10/day OR pg-boss queue contention |
+| R1-F14 | Stateful empty-state UX | user | v1.1 dashboard redesign OR operator feedback indicates disappearing-section confusion |
+| R2-F3 | Cap-eviction category-diversity bias | user | Production cap-eviction logs show category persistently dominating within same namespace |
+| R2-F7 | `evidence_version` field for evidence-shape evolution | user | First evidence-shape change required AND one-shot rewrite pattern impractical |
+| R3-F3 | Acknowledge-clear ramp threshold | user | Operators report just-over-threshold deltas training them to ignore the surface |
+| R3-F4 | Soft global per-scope cap across producing agents | user | Second agent (Portfolio Health, system-monitoring, custom user agents) starts writing recommendations to same scope |
+| R3-F7 | "Ongoing for X days" UI persistence indicator | user | v1.1 surface design picks up dashboard refinements |
+| R4-F3 | ~~Eviction priority reorder~~ | ~~user~~ | **SUPERSEDED by R5-F4 apply** — entry should be marked complete in tasks/todo.md |
+| R4-F5 | Bypass-once-per-cooldown-window guard | user | Production logs show oscillation patterns for specific categories |
+
+### Final counts
+
+- **Rounds:** 5
+- **Auto-accepted (technical):** 19 applied | 0 rejected | 0 deferred (across all 5 rounds, including 6 integrity-check fixes)
+- **User-decided:** 11 applied | 0 rejected | 11 deferred (across all 5 rounds)
+- **Spec growth:** 681 → 813 lines (+132 net across 5 rounds)
+- **PR:** #250 — https://github.com/michaelhazza/automation-v1/pull/250
+- **Final HEAD:** dd27581e (Round 5) → finalisation commit follows
+
+### Final Summary fields
+
+- KNOWLEDGE.md updated: yes (3 entries)
+- architecture.md updated: n/a — spec authoring only; primitive does not yet exist; updates scheduled for Phase 4 closeout per §9
+- capabilities.md updated: n/a — spec authoring only; capabilities additions scheduled for Phase 4 closeout per §9
+- integration-reference.md updated: n/a — no integration surface change (optimiser reads internal telemetry only)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no changes to build discipline, conventions, RLS rules, or §8 development discipline
+- spec-context.md updated: n/a — spec adheres to existing framing assumptions
+- frontend-design-principles.md updated: n/a — spec's UI surface follows existing principles; no new patterns or hard rules introduced
+
+### Verdict: APPROVED
+
+5 rounds of ChatGPT review converged cleanly. Final ChatGPT verdict: "Deploy-ready, scale-stable, architecture-complete." All 5 implementation-readiness checks pass. Spec is locked and ready for `architect` (or `feature-coordinator`) to decompose into chunks at `tasks/builds/subaccount-optimiser/plan.md`.
