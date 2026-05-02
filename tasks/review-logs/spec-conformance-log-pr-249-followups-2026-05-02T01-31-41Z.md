@@ -5,6 +5,7 @@
 **Branch:** `pr-249-followups`
 **Base:** `290b1caa` (merge-base with `main`)
 **HEAD at start:** `fcc734a6`
+**Commit at finish:** `6ce781bc`
 **Scope:** whole-spec (single-phase Standard task; complete branch implementation per caller invocation)
 **Changed-code set:** 37 files (1 spec doc, 1 KNOWLEDGE.md, 1 review log + index, 12 client, 20 server/worker, 2 review-log housekeeping)
 **Run at:** 2026-05-02T01:31:41Z
