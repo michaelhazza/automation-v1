@@ -187,5 +187,134 @@ Integrity check: 3 issues found this round (auto: 3, escalated: 0). Post-integri
 
 Round 1 complete. Spec grew from 681 → 776 lines (+95). Five user-facing applies, three user-facing defers, eight technical auto-applies (5 ChatGPT + 3 integrity).
 
-Updated spec printed below — paste it into ChatGPT and paste the response here for Round 2, or say 'done' to finalise.
+---
+
+## Round 2 — 2026-05-02T00-12-00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Executive summary
+This is now a tight, production-ready spec. You've closed the major failure modes from the first round:
+- Flapping → solved with material thresholds
+- Reappearance spam → solved with cooldown
+- Cap starvation → solved with eviction
+- Org noise → solved with collapsed dedupe
+- Render staleness → solved with render_version
+At this point, there are no structural gaps. What remains are a few edge-case correctness and long-term scaling tweaks. None are blockers.
+
+What you fixed well (important)
+- Material-change predicates are exactly what was missing.
+- Cooldown with severity weighting is correct and pragmatic.
+- Priority-based eviction inside the executor is the right call. This avoids producer-order dependency.
+- Render versioning closes a subtle but real production issue.
+- Collapsed dedupe by subaccount fixes the rollup UX properly.
+
+Remaining gaps (small but worth tightening)
+
+1. Eviction + cooldown interaction edge case
+Right now eviction sets dismissed_at=now(), dismissed_until=NULL.
+That's intentional, but introduces oscillation: low-priority rec evicted → next run produces it again → reappears immediately. This creates oscillation under pressure when the system is near cap.
+Fix (minimal): introduce a short implicit cooldown for eviction (6-12 hours).
+
+2. Material thresholds missing absolute floor
+Current relative threshold like abs(delta)/max(prev,1) fails when values are small (noise becomes proportionally large). 100→110=10% fires but absolute change trivial.
+Fix: add dual condition — relative AND minimum absolute delta. cost ≥ 10% AND ≥ $10 equivalent; latency ≥ 20% AND ≥ 200ms; rates ≥ 10pp AND ≥ 3 events change.
+
+3. Cap eviction fairness across categories
+Current priority tuple severity → category → dedupe_key makes category ordering arbitrary bias; some categories may dominate long-term.
+Fix (lightweight): when selecting eviction candidate, prefer evicting same category as incoming first; fallback to global lowest priority. Keeps category mix healthier.
+
+4. Cooldown bypass via evidence change
+Cooldown blocks insertion regardless of evidence. But what if situation becomes much worse during cooldown? Dismissed "slightly over budget" → now 3× over budget → still suppressed.
+Fix: if new severity > previous severity OR delta exceeds critical override threshold, ignore cooldown and insert.
+
+5. Routing uncertainty still not outcome-aware
+You've deferred it. Right now it will still flag cautious but effective agents. When you revisit, incorporate downstreamOutcome.
+
+6. Log-only drop visibility is good, but incomplete
+recommendations.dropped_due_to_cap is good. But for debugging you'll want eviction info too.
+Add for eviction path: recommendations.evicted_lower_priority with evicted category, incoming category, priority comparison.
+
+7. Evidence schema versioning (minor future-proofing)
+Strong typing is good. Missing: versioning of evidence shape. If you ever change shape, hashes change, unintended re-surfacing.
+Fix (lightweight): add optional evidence_version: number; include in hash input. Not urgent.
+
+Things you should NOT change
+Resist the urge to add more categories now / auto-fix flows / notifications / further generalise the UI. You've hit the right level of scope.
+
+Final verdict: Architecturally sound, operationally stable, UX-aware, scalable without rework. No blockers. You can build this confidently.
+```
+
+Inferred verdict: APPROVED (explicit "No blockers. You can build this confidently.").
+
+### Recommendations and Decisions
+
+| ID | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|----|---------|--------|----------------|----------------|----------|-----------|
+| R2-F1 | Eviction sets `dismissed_until=NULL` → low-priority can oscillate under pressure. Add 6-12h implicit cooldown on eviction. | user-facing | apply | _pending user_ | high | Real edge case in steady-state-near-cap. Cheap fix — set `dismissed_until=now()+6h` on eviction path. |
+| R2-F2 | Material thresholds need absolute floors (not just relative). | user-facing | apply | _pending user_ | high | Without floors, 100→110 (10%) fires the same as 1000→1100 (10%). Define: cost ≥ $10, latency ≥ 200ms, rates ≥ 3-event count change. |
+| R2-F3 | Cap eviction has implicit category bias. Add diversity preference (evict same-category-as-incoming first). | user-facing | defer | _pending user_ | medium | Diversity rule has correctness risks (could evict critical-of-same-category over info-of-different-category). Defer until production data shows actual dominance. |
+| R2-F4 | Cooldown can suppress severity-escalating findings. Allow bypass when new severity > previous severity. | user-facing | apply | _pending user_ | high | Failure mode: dismissed "slightly over" stays suppressed when situation becomes 3× worse. Stored "previous severity" available on dismissed row. |
+| R2-F5 | Routing uncertainty signal still not outcome-aware (reaffirmation of R1-F8). | — | — | n/a | — | Same finding as R1-F8, already deferred. No new decision. |
+| R2-F6 | Eviction event log incomplete — add `recommendations.evicted_lower_priority` structured log with evicted/incoming details. | technical | apply | auto (apply) | low | Internal observability — sister convention to `recommendations.dropped_due_to_cap` shipped in Round 1. |
+| R2-F7 | Add `evidence_version` to hash input for future shape-evolution safety. | technical-escalated (defer) | defer | _pending user_ | low | "Not urgent, but clean" per ChatGPT. `render_version` already covers prompt changes. Escalated because recommendation is `defer`. |
+
+**Summary counts (Round 2):**
+- Auto-applied (technical): 1 ChatGPT (R2-F6) + 1 integrity (test-list update for new lifecycle paths) = 2 applied, 0 rejected, 0 deferred
+- User-decided: 3 applied (R2-F1, R2-F2, R2-F4), 0 rejected, 2 deferred (R2-F3, R2-F7) — user replied "as recommended"
+- No new decision (Round 1 carry-over): R2-F5
+
+### Decisions and Resolutions (post user reply)
+
+| ID | Final Decision |
+|----|----------------|
+| R2-F1 | apply (user: as recommended) — eviction implicit 6h cooldown |
+| R2-F2 | apply (user: as recommended) — relative+absolute threshold floors across all 6 numeric predicates |
+| R2-F3 | defer (user: as recommended) — diversity bias has hidden correctness risks; routed to tasks/todo.md |
+| R2-F4 | apply (user: as recommended) — severity-escalation bypass on cooldown |
+| R2-F5 | n/a — Round 1 deferral re-affirmed; consistency check confirms no contradiction |
+| R2-F6 | auto (apply) — `recommendations.evicted_lower_priority` structured log on eviction |
+| R2-F7 | defer (user: as recommended) — `evidence_version` is forward-compat insurance against a shape change that hasn't happened; routed to tasks/todo.md |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+**Spec edits (`docs/sub-account-optimiser-spec.md`):**
+- [user] §2 Material-change thresholds — six numeric predicates rewritten with dual-condition (relative AND absolute) floors. New predicates:
+  - `agent.over_budget`: 10% AND ≥ 1000 cents ($10) absolute change
+  - `playbook.escalation_rate`: 10pp rate change AND ≥ 3 escalation-count change
+  - `skill.slow`: 20% ratio change AND ≥ 200ms absolute p95 change
+  - `memory.low_citation_waste`: 10pp rate change AND volume floor (`total_injected >= 10`) AND ≥ 3 volume change
+  - `agent.routing_uncertainty`: 10pp rate change AND volume floor (`total_decisions >= 10`) AND ≥ 3 volume change
+  - `llm.cache_poor_reuse`: 20% relative AND ≥ 1000 token absolute change
+  Categories with naturally absolute predicates (`inactive.workflow`, `escalation.repeat_phrase`) unchanged.
+- [user] §5 — `optimiser.scan_routing_uncertainty` return-shape now includes `total_decisions` for the volume floor.
+- [user] §6.5 — `AgentRoutingUncertaintyEvidence` evidence type extended with `total_decisions: number`.
+- [user] §6.2 Decision flow step 1 (cooldown) — severity-escalation bypass added: if `severity_rank(new) > severity_rank(matched_row)`, cooldown is ignored and the candidate falls through to insert as a fresh finding.
+- [user] §6.2 Decision flow step 4 (eviction) — evicted row now carries `dismissed_until=now() + interval '6 hours'` (was `NULL`); eviction emits `recommendations.evicted_lower_priority` structured log with full displacement context.
+- [user] §6.2 Output union bullets — `evicted_lower_priority` and `cooldown` bullets reconciled with new behaviours (6h implicit cooldown on evict; severity bypass on dismiss-cooldown).
+- [auto] §6.2 Eviction step now emits `recommendations.evicted_lower_priority` log with `{evicted_recommendation_id, evicted_category, evicted_severity, evicted_dedupe_key, incoming_category, incoming_severity, incoming_dedupe_key}` (R2-F6).
+- [user] §13 risks — Recommendation noise mitigation block expanded with 6h eviction cooldown, dual-condition thresholds (relative + absolute floors), severity-escalation bypass, and `recommendations.evicted_lower_priority` log line.
+- [user] Deferred Items section — appended R2-F3 (cap-eviction diversity bias) and R2-F7 (evidence_version) with reconsider-per-trigger reasons.
+- [auto] §9 Phase 0 test list — updated to cover new lifecycle paths (relative/absolute/volume floor variants, eviction implicit cooldown, severity-escalation bypass).
+
+**`tasks/todo.md`:**
+- [user] Two new entries appended to `### subaccount-optimiser (2026-05-02)`: R2-F3 and R2-F7 (both `[user]`-tagged).
+
+### Integrity check
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0). The §9 Phase 0 test list mentioned dismiss cooldown but didn't cover the new severity-escalation bypass or eviction implicit cooldown paths — auto-extended. Post-integrity sanity confirmed: `total_decisions` consistent across §2 / §5 / §6.5; `severity_rank(...)` referenced consistently in §6.2 step 1 + cooldown bullet; eviction 6h cooldown referenced consistently in step 4 + `evicted_lower_priority` bullet + cooldown bullet + §13 risks.
+
+### Top themes
+
+- **Round 2 closes the lifecycle loopholes Round 1 introduced.** Round 1 added eviction with `dismissed_until=NULL` (oscillation risk) and severity-blind cooldown (priority-suppression risk). Round 2 closes both: 6h implicit cooldown on eviction prevents oscillation; severity-escalation bypass prevents critical findings from being suppressed by a stale dismiss.
+- **Absolute floors complete the noise-suppression story.** Round 1 added relative-only `materialDelta` predicates. Round 2 surfaces the small-value failure mode (`$5 → $5.50` = 10% but trivial) and pairs every relative threshold with an absolute floor. Two of the rate-based predicates additionally need a supporting-count floor — for routing_uncertainty this required adding `total_decisions` to the evidence shape, which propagated through §5, §6.5, and §2.
+- **R2-F3 defer is the cleanest call of the round.** "Diversity bias on eviction" sounds appealing but the simple form has hidden correctness costs (could evict critical-of-same-category over info-of-different-category). The deferred entry captures the correctness shape that future work needs to satisfy ("prefer same-category at-or-below incoming severity") so reviving the idea later doesn't have to rediscover the trap.
+- **R2-F5 was correctly handled as a re-affirmation, not a re-decision.** ChatGPT's "still not outcome-aware" comment about routing uncertainty was already a Round 1 deferral. Treating it as a new decision would have created false noise in the consistency check at finalisation.
+
+### Round 2 status
+
+Round 2 complete. Spec grew from 776 → 783 lines (+7 net — most edits were in-place tightening, not section additions). Three user-facing applies, two user-facing defers, two technical auto-applies (1 ChatGPT + 1 integrity).
+
+Updated spec on the PR — paste it into ChatGPT for Round 3 if you want a second-derivative pass, or say 'done' to finalise.
 
