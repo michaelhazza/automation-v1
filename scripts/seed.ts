@@ -1,4 +1,4 @@
-/**
+﻿/**
  * scripts/seed.ts — MASTER SEED SCRIPT
  *
  * Single source of truth for bootstrapping an Automation OS database (local dev
@@ -153,7 +153,7 @@ async function preflightVerifySkillVisibility(): Promise<void> {
     const slug = file.slice(0, -3);
     // Strip BOM so the leading `^---` anchor matches files saved with UTF-8 BOM.
     const raw = (await readFile(join(skillsDir, file), 'utf-8'))
-      .replace(/^﻿/, '')
+      .replace(/^\uFEFF/, '')
       .replace(/\r\n/g, '\n');
 
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
@@ -405,7 +405,7 @@ async function phase3_systemAgents(): Promise<void> {
   try {
     parsed = await parseCompanyFolder(companyDir);
   } catch (err) {
-    throw new Error(`Failed to parse company folder at ${companyDir}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse company folder at ${companyDir}: ${(err as Error).message}`, { cause: err });
   }
 
   log(`  Company: ${parsed.manifest.name} (v${parsed.manifest.version})`);

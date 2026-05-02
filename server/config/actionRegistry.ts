@@ -52,8 +52,22 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
+// Closed list of valid OAuth provider slugs for `requiredIntegration` on actions.
+// Single source of truth — both the type below and `VALID_INTEGRATION_PROVIDERS`
+// in integrationBlockService derive from this constant.
+export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'slack', 'notion', 'ghl'] as const;
+
+export type RequiredIntegrationSlug = typeof REQUIRED_INTEGRATION_SLUGS[number];
+
 export interface IdempotencyContract {
+  /** Ordered ActionContext field names that together form the idempotency key. See v7.1 spec §588. */
+  keyShape: string[];
+  /** Dedup boundary. See v7.1 spec §588. */
+  scope: 'subaccount' | 'org';
+  /** Retention class before expiry. See v7.1 spec §588. */
   ttlClass: 'permanent' | 'long' | 'short';
+  /** Whether the lock record may be reclaimed after TTL. See v7.1 spec §588. */
+  reclaimEligibility: 'eligible' | 'disabled';
 }
 
 export interface ActionDefinition {
@@ -147,6 +161,15 @@ export interface ActionDefinition {
    * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
    */
   isUniversal?: boolean;
+
+  /**
+   * OAuth provider this action requires. When set, agentExecutionService calls
+   * integrationBlockService.checkRequiredIntegration before dispatching the tool,
+   * blocking the run if no active connection exists.
+   * Slugs: 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl'
+   * Leave unset for first-party / internal-only actions.
+   */
+  requiredIntegration?: RequiredIntegrationSlug;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -306,6 +329,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
+    requiredIntegration: 'gmail',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -330,6 +354,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
+    requiredIntegration: 'gmail',
   },
   create_task: {
     actionType: 'create_task',
@@ -1640,6 +1665,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
 
   // ── Finance Agent — auto-gated stubs + review-gated ─────────────────────
@@ -2665,6 +2691,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
   'crm.send_sms': {
     actionType: 'crm.send_sms',
@@ -3005,7 +3032,7 @@ export function resolveActionSlug(slug: string): string {
   if (canonical === undefined) return slug;
   if (!loggedAliasHits.has(slug)) {
     loggedAliasHits.add(slug);
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
     );

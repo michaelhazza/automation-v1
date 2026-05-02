@@ -172,13 +172,10 @@ export function parseParameterLine(line: string): SkillParameter | null {
   }
 
   // Parse description after em-dash or hyphen separator
-  let description = '';
   const dashMatch = after.match(/^[—–-]\s*/);
-  if (dashMatch) {
-    description = after.slice(dashMatch[0].length).trim();
-  } else {
-    description = after.trim();
-  }
+  const description = dashMatch
+    ? after.slice(dashMatch[0].length).trim()
+    : after.trim();
 
   return { name, type, required, description, ...(enumValues ? { enumValues } : {}) };
 }

@@ -129,7 +129,7 @@ export default function GuidedTour({ forceShow = false }: GuidedTourProps) {
       window.removeEventListener('scroll', recalc);
       window.removeEventListener('resize', recalc);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [active, step]);
 
   const next = () => {

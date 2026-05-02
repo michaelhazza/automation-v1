@@ -51,8 +51,8 @@ export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
 
   // ── Pass 1: Load candidates + evaluate heuristics ──────────────────────────
 
-  let candidates: Awaited<ReturnType<typeof loadCandidates>>['candidates'] = [];
-  let limitReached = false;
+  let candidates: Awaited<ReturnType<typeof loadCandidates>>['candidates'];
+  let limitReached: boolean;
 
   try {
     const result = await loadCandidates(now);

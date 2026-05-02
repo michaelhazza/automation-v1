@@ -218,13 +218,12 @@ export const agentScheduleService = {
         agentStatus: agents.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.scheduleEnabled, true),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 

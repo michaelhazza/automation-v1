@@ -57,6 +57,7 @@ test('projectCronOccurrences: matches cron-parser output exactly (UTC)', async (
   // Golden reference: call cron-parser directly with the same args the
   // pure layer uses. If this drifts, the pure layer is out of parity.
   const cronParser = await import('cron-parser');
+  // reason: cron-parser has inconsistent ESM/CJS exports; `any` is required to probe the export shape at runtime (mirrors scheduleCalendarServicePure.ts).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parse = (cronParser as any).default?.parseExpression ?? (cronParser as any).parseExpression;
   const iter = parse(expression, {
@@ -89,6 +90,7 @@ test('projectCronOccurrences: matches cron-parser across DST boundary (America/N
   );
 
   const cronParser = await import('cron-parser');
+  // reason: cron-parser has inconsistent ESM/CJS exports; `any` is required to probe the export shape at runtime (mirrors scheduleCalendarServicePure.ts).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parse = (cronParser as any).default?.parseExpression ?? (cronParser as any).parseExpression;
   const iter = parse(expression, {

@@ -20,6 +20,8 @@ import { eq, and, gt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock } from './conversationThreadContextServicePure.js';
 
 export interface ResumeResult {
   status: 'resumed' | 'already_resumed';
@@ -83,6 +85,24 @@ export async function resumeFromIntegrationConnect(params: {
     return { status: 'already_resumed', runId: candidateRun.id };
   }
 
+  // Keep threadContextVersionAtStart in sync with latest context so the DB
+  // record is consistent with the next executeRun() re-injection. Fetched
+  // before the transaction to avoid extending the lock hold time with a
+  // DB round-trip that is not part of the transaction's semantic boundary.
+  let freshThreadContextVersion: number | undefined;
+  const resumeConvId = params.conversationId ?? (candidateMeta.conversationId as string | undefined);
+  if (resumeConvId) {
+    try {
+      const threadCtx = await buildThreadContextReadModel(resumeConvId, organisationId);
+      const block = formatThreadContextBlock(threadCtx);
+      if (block) {
+        freshThreadContextVersion = threadCtx.version;
+      }
+    } catch {
+      // Fail-open — version sync is best-effort; skip if unavailable
+    }
+  }
+
   // Step 2: optimistic UPDATE + metadata write inside one transaction so a
   // parallel scheduler write cannot clobber `runMetadata` between the two
   // statements (the first UPDATE clears blocked_reason; the second writes
@@ -133,6 +153,9 @@ export async function resumeFromIntegrationConnect(params: {
           lastResumeBlockSequence: currentSeq,
           completedBlockSequences: completedSeqs,
           blockedReason: null,
+          ...(freshThreadContextVersion !== undefined
+            ? { threadContextVersionAtStart: freshThreadContextVersion }
+            : {}),
         },
         updatedAt: new Date(),
       })

@@ -71,7 +71,6 @@ test('rejected outcome with reason — passes', () => {
 test('rejected outcome without reason — throws', () => {
   assertThrows(
     () => assertDelegationOutcomeShape(makeValidAccepted({ outcome: 'rejected', reason: null })),
-    'delegation_outcome_reason_required',
     'rejected-without-reason',
   );
 });
@@ -79,7 +78,6 @@ test('rejected outcome without reason — throws', () => {
 test('rejected outcome with empty reason string — throws', () => {
   assertThrows(
     () => assertDelegationOutcomeShape(makeValidAccepted({ outcome: 'rejected', reason: '' })),
-    'delegation_outcome_reason_required',
     'rejected-empty-reason',
   );
 });
@@ -90,7 +88,6 @@ test('accepted outcome with a non-null reason — throws', () => {
       assertDelegationOutcomeShape(
         makeValidAccepted({ outcome: 'accepted', reason: 'should not be here' }),
       ),
-    'delegation_outcome_reason_not_allowed',
     'accepted-with-reason',
   );
 });
@@ -98,7 +95,6 @@ test('accepted outcome with a non-null reason — throws', () => {
 test('invalid delegation_scope — throws', () => {
   assertThrows(
     () => assertDelegationOutcomeShape(makeValidAccepted({ delegationScope: 'global' })),
-    'delegation_outcome_invalid_scope',
     'invalid-scope',
   );
 });
@@ -106,7 +102,6 @@ test('invalid delegation_scope — throws', () => {
 test('invalid delegation_direction — throws', () => {
   assertThrows(
     () => assertDelegationOutcomeShape(makeValidAccepted({ delegationDirection: 'sideways' })),
-    'delegation_outcome_invalid_direction',
     'invalid-direction',
   );
 });

@@ -45,7 +45,7 @@ const VALID_ENTITY_TYPES = new Set<BriefResultEntityType>([
   'contacts', 'opportunities', 'appointments', 'conversations',
   'revenue', 'tasks', 'runs', 'other',
 ]);
-const VALID_SOURCES = new Set<BriefResultSource>(['canonical', 'live', 'hybrid']);
+const VALID_SOURCES = new Set<BriefResultSource>(['canonical', 'live', 'hybrid', 'stub']);
 const VALID_TRUNCATION_REASONS = new Set<BriefTruncationReason>([
   'result_limit', 'cost_limit', 'time_limit',
 ]);

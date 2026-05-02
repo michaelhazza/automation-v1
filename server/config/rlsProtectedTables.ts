@@ -935,6 +935,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0264_conversation_thread_context.sql',
     rationale: 'Per-conversation agent tasks, approach, and decisions — may contain sensitive strategy and business context.',
   },
+  // 0267 — Sub-Account Optimiser: generic agent-output primitive (spec §6.1)
+  {
+    tableName: 'agent_recommendations',
+    schemaFile: 'agentRecommendations.ts',
+    policyMigration: '0267_agent_recommendations.sql',
+    rationale: 'Operator-facing recommendation rows per org/subaccount — may contain business intelligence, budget overruns, and performance findings that must not leak cross-tenant.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

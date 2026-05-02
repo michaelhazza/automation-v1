@@ -148,12 +148,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
   useEffect(() => {
     if (!subaccountId) return;
     load();
+    // reason: `load` is an inline async function that closes over state setters; only subaccountId is the intended trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
   useEffect(() => {
     if (!subaccountId || tab !== 'insights') return;
     loadInsights();
+    // reason: `loadInsights` is an inline async function that closes over state setters; only the filter keys are the intended triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId, tab, insightFilters]);
 

@@ -64,6 +64,7 @@ export default function SubaccountOnboardingPage() {
 
   useEffect(() => {
     load();
+    // reason: `load` is an inline async function that closes over state setters; only subaccountId is the intended trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 

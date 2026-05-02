@@ -246,3 +246,6 @@ export * from './documentFetchEvents';
 
 // Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
 export * from './conversationThreadContext';
+
+// Sub-Account Optimiser — generic agent-output primitive (migration 0267)
+export * from './agentRecommendations';

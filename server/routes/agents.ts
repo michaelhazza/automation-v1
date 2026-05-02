@@ -104,6 +104,13 @@ router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(O
       res.status(422).json({ error: 'invalid_connection_id' });
       return;
     }
+    // Subaccount scope guard — this is an org-level route (no subaccount in URL).
+    // Only org-level connections (subaccountId = null) may be attached here;
+    // subaccount-scoped connections cannot be validated without a subaccount context.
+    if (conn.subaccountId) {
+      res.status(422).json({ error: 'invalid_connection_id' });
+      return;
+    }
   } else if (!sourcePath) {
     res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
     return;

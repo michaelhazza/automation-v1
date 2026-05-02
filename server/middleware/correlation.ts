@@ -8,6 +8,8 @@ import { generateCorrelationId } from '../lib/logger.js';
 // ---------------------------------------------------------------------------
 
 declare global {
+  // reason: Express module augmentation requires the `namespace` keyword; no alternative syntax exists in TypeScript.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       correlationId?: string;

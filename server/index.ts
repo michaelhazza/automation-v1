@@ -173,6 +173,8 @@ import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
 import suggestedActionsRouter from './routes/suggestedActions.js';
 // Thread Context — per-conversation living doc (Chunk A)
 import conversationThreadContextRouter from './routes/conversationThreadContext.js';
+// Sub-Account Optimiser — generic agent-output primitive (Chunk 1, migration 0267)
+import agentRecommendationsRouter from './routes/agentRecommendations.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -383,6 +385,8 @@ app.use(workspaceMailRouter);
 app.use(workspaceCalendarRouter);
 app.use(suggestedActionsRouter);
 app.use(conversationThreadContextRouter);
+// Sub-Account Optimiser — generic agent-output primitive (Chunk 1)
+app.use(agentRecommendationsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

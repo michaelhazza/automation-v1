@@ -218,6 +218,7 @@ async function main(): Promise<void> {
     process.stderr.write(`--- raw response (full) ---\n${rawContent}\n--- end raw response ---\n`);
     throw new Error(
       `failed to parse model output as JSON: ${err instanceof Error ? err.message : String(err)} (full response written to stderr)`,
+      { cause: err },
     );
   }
 

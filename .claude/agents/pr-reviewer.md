@@ -120,6 +120,8 @@ Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUE
 
 ## Rules
 
+- The author must run `npm run lint && npm run typecheck` before marking done.
+  Flag any new lint errors or typecheck failures in changed files as blocking issues.
 - Zero blocking issues means say so explicitly — "No blocking issues found."
 - Don't nitpick style unless it violates a documented convention
 - When flagging missing tests, write the test description in Given/When/Then so it's immediately actionable

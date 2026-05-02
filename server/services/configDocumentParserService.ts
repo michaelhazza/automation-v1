@@ -97,7 +97,7 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
     normalised.endsWith('docx')
   ) {
     // Dynamic import to avoid hard dependency at test time
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     // @ts-expect-error — optional peer dep, not declared in this project's deps
     const mammoth = await (import('mammoth') as Promise<any>).catch(() => null) as {
       extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }>;

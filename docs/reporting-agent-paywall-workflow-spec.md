@@ -939,7 +939,7 @@ export async function getWebLoginConnectionForRun(
 
 There is no escape hatch in `worker/src/persistence/`. If a future feature needs a different connection type, it adds a sibling single-purpose function (`getSlackConnectionForRun`, `getOpenAiConnectionForRun`) — never a generic `getConnectionById`.
 
-A unit test asserts the file's exported surface area is exactly `getWebLoginConnectionForRun` (and any future siblings) and nothing else. Lint rule (added to `worker/.eslintrc`) bans `import { db }` outside `worker/src/persistence/`.
+A unit test asserts the file's exported surface area is exactly `getWebLoginConnectionForRun` (and any future siblings) and nothing else. Lint rule lives in `eslint.config.js` flat config (`files: ['worker/**/*.{ts,cjs,js}']` block, `no-restricted-imports` rule) and bans `import { integrationConnections }` outside `worker/src/persistence/`.
 
 ### 6.6.3 Cross-subaccount credential isolation (T14)
 

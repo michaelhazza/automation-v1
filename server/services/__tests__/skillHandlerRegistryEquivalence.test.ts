@@ -34,7 +34,7 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 const { SKILL_HANDLERS } = await import('../skillExecutor.js');
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (178 entries)
+// Canonical handler key set (179 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -226,6 +226,8 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'write_event',
   // Tier-1 UI uplift — thread context handler (wired in with conversation thread context feature)
   'update_thread_context',
+  // Subaccount Optimiser chunk 1 — agent-recommendations output primitive (PR #250)
+  'output.recommend',
 ];
 
 // ---------------------------------------------------------------------------
@@ -261,11 +263,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 178 keys', () => {
+test('SKILL_HANDLERS has exactly 179 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 178) {
+  if (count !== 179) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 178. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 179. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

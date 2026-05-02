@@ -1,3 +1,4 @@
+ 
 /**
  * Phase 3 converter: handwritten harness → Vitest
  *
@@ -133,8 +134,6 @@ function rewriteAssertion(src, fnName, mapper) {
   });
 }
 
-function emsg(msg) { return msg ? `, ${msg}` : ""; }
-function expectMsg(a, msg) { return msg ? `expect(${a}, ${msg})` : `expect(${a})`; }
 
 for (const file of files) {
   // Skip the 2 outliers — they need special R-M8 wrapping, handled separately
@@ -257,19 +256,19 @@ for (const file of files) {
     src = rewriteAssert2(src, "strictEqual",     (a, b, msg) => b === null ? null : (msg ? `expect(${a}, ${msg}).toBe(${b})` : `expect(${a}).toBe(${b})`));
     src = rewriteAssert2(src, "equal",           (a, b, msg) => b === null ? null : (msg ? `expect(${a}, ${msg}).toBe(${b})` : `expect(${a}).toBe(${b})`));
     src = rewriteAssert2(src, "ok",              (a, _, msg) => msg ? `expect(${a}, ${msg}).toBeTruthy()` : `expect(${a}).toBeTruthy()`);
-    src = rewriteAssert2(src, "throws",          (a, b, msg) => {
+    src = rewriteAssert2(src, "throws",          (a, b) => {
       if (b === null) return `expect(${a}).toThrow()`;
       if (/^\s*\(/.test(b) || /^\s*(async\s+)?function/.test(b)) return null;
       return `expect(${a}).toThrow(${b})`;
     });
     src = rewriteAssert2(src, "doesNotThrow",    (a) => `expect(${a}).not.toThrow()`);
-    src = rewriteAssert2(src, "match",           (a, b, _) => b === null ? null : `expect(${a}).toMatch(${b})`);
-    src = rewriteAssert2(src, "notMatch",        (a, b, _) => b === null ? null : `expect(${a}).not.toMatch(${b})`);
+    src = rewriteAssert2(src, "match",           (a, b) => b === null ? null : `expect(${a}).toMatch(${b})`);
+    src = rewriteAssert2(src, "notMatch",        (a, b) => b === null ? null : `expect(${a}).not.toMatch(${b})`);
   }
 
   // assert(cond, msg) → expect(cond, msg).toBeTruthy()
   if (hasAssert && !hasNodeAssertImport) {
-    src = rewriteAssertion(src, "assert", (a, b, _) => {
+    src = rewriteAssertion(src, "assert", (a, b) => {
       if (b === null) return `expect(${a}).toBeTruthy()`;
       return `expect(${a}, ${b}).toBeTruthy()`;
     });
@@ -277,7 +276,7 @@ for (const file of files) {
 
   // assertTrue(cond, msg) → expect(cond, msg).toBe(true)
   if (hasAssertTrue) {
-    src = rewriteAssertion(src, "assertTrue", (a, b, _) => {
+    src = rewriteAssertion(src, "assertTrue", (a, b) => {
       if (b === null) return `expect(${a}).toBe(true)`;
       return `expect(${a}, ${b}).toBe(true)`;
     });
@@ -285,7 +284,7 @@ for (const file of files) {
 
   // assertFalse(cond, msg) → expect(cond, msg).toBe(false)
   if (hasAssertFalse) {
-    src = rewriteAssertion(src, "assertFalse", (a, b, _) => {
+    src = rewriteAssertion(src, "assertFalse", (a, b) => {
       if (b === null) return `expect(${a}).toBe(false)`;
       return `expect(${a}, ${b}).toBe(false)`;
     });
@@ -314,12 +313,12 @@ for (const file of files) {
 
   // assertStrictEqual(actual, expected) → expect(actual).toBe(expected)
   if (hasAssertStrictEqual) {
-    src = rewriteAssertion(src, "assertStrictEqual", (a, b, _) => b === null ? null : `expect(${a}).toBe(${b})`);
+    src = rewriteAssertion(src, "assertStrictEqual", (a, b) => b === null ? null : `expect(${a}).toBe(${b})`);
   }
 
   // assertClose(actual, expected, label, tolerance?) — use toBeCloseTo
   if (hasAssertClose) {
-    src = rewriteAssertion(src, "assertClose", (a, b, label) => {
+    src = rewriteAssertion(src, "assertClose", (a, b) => {
       if (b === null) return null;
       return `expect(${a}).toBeCloseTo(${b}, 4)`;
     });
@@ -327,12 +326,12 @@ for (const file of files) {
 
   // assertMatch(str, rx) → expect(str).toMatch(rx)
   if (hasAssertMatch) {
-    src = rewriteAssertion(src, "assertMatch", (a, b, _) => b === null ? null : `expect(${a}).toMatch(${b})`);
+    src = rewriteAssertion(src, "assertMatch", (a, b) => b === null ? null : `expect(${a}).toMatch(${b})`);
   }
 
   // assertContains(arr, item) → expect(arr).toContain(item)
   if (hasAssertContains) {
-    src = rewriteAssertion(src, "assertContains", (a, b, _) => b === null ? null : `expect(${a}).toContain(${b})`);
+    src = rewriteAssertion(src, "assertContains", (a, b) => b === null ? null : `expect(${a}).toContain(${b})`);
   }
 
   // ── 7. Wrap top-level scripts in a test() block if no test() calls exist ─

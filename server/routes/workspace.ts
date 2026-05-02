@@ -177,7 +177,7 @@ router.post(
         emailSendingEnabled,
         signatureOverride,
         onboardingRequestId,
-        initiatedByUserId: req.userId!,
+        initiatedByUserId: req.user!.id,
       },
       {
         adapter: nativeWorkspaceAdapter,
@@ -252,7 +252,7 @@ router.post(
       targetBackend,
       targetConnectorConfigId: targetConfig.id,
       migrationRequestId,
-      initiatedByUserId: req.userId!,
+      initiatedByUserId: req.user!.id,
     });
 
     if ('failureReason' in result) {
@@ -497,7 +497,7 @@ router.post(
     }
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
-    const result = await workspaceIdentityService.transition(identity.id, 'suspend', req.userId!);
+    const result = await workspaceIdentityService.transition(identity.id, 'suspend', req.user!.id);
     if (!result.noOpDueToRace) {
       await resolveAdapter(identity.backend).suspendIdentity(identity.id);
       await getOrgScopedDb('workspace.suspend').insert(auditEvents).values({
@@ -528,7 +528,7 @@ router.post(
     }
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
-    const result = await workspaceIdentityService.transition(identity.id, 'resume', req.userId!);
+    const result = await workspaceIdentityService.transition(identity.id, 'resume', req.user!.id);
     if (!result.noOpDueToRace) {
       await resolveAdapter(identity.backend).resumeIdentity(identity.id);
       await getOrgScopedDb('workspace.resume').insert(auditEvents).values({
@@ -573,7 +573,7 @@ router.post(
       return;
     }
 
-    const result = await workspaceIdentityService.transition(identity.id, 'revoke', req.userId!);
+    const result = await workspaceIdentityService.transition(identity.id, 'revoke', req.user!.id);
     if (!result.noOpDueToRace) {
       await resolveAdapter(identity.backend).revokeIdentity(identity.id);
       await getOrgScopedDb('workspace.revoke').insert(auditEvents).values({
@@ -604,7 +604,7 @@ router.post(
     }
 
     const { identity } = await resolveAgentIdentity(agentId, req.orgId!);
-    const result = await workspaceIdentityService.transition(identity.id, 'archive', req.userId!);
+    const result = await workspaceIdentityService.transition(identity.id, 'archive', req.user!.id);
     if (!result.noOpDueToRace) {
       await resolveAdapter(identity.backend).archiveIdentity(identity.id);
       await getOrgScopedDb('workspace.archive').insert(auditEvents).values({
@@ -651,7 +651,7 @@ router.patch(
       return;
     }
 
-    await workspaceIdentityService.setEmailSending(identity.id, enabled, req.userId!);
+    await workspaceIdentityService.setEmailSending(identity.id, enabled, req.user!.id);
     await getOrgScopedDb('workspace.emailSending').insert(auditEvents).values({
       organisationId: req.orgId!,
       actorType: 'agent',

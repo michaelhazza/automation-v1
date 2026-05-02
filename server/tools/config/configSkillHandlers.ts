@@ -31,7 +31,7 @@ async function getConfigAgentId(orgId: string): Promise<string | null> {
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
     .where(and(eq(agents.organisationId, orgId), eq(systemAgents.slug, 'configuration-assistant')));
   return rows[0]?.agentId ?? null;
 }

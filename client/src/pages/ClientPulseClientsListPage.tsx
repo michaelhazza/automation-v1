@@ -108,6 +108,7 @@ export default function ClientPulseClientsListPage({ user: _user }: { user: User
     });
 
     return () => { cancelled = true; };
+  // reason: the effect body is defined inline; only the filter/search keys (band, debouncedQ) are the intended triggers.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [band, debouncedQ]);
 

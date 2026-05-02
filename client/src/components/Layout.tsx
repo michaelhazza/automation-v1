@@ -217,24 +217,16 @@ function TrialCountdown() {
   if (msLeft <= 0) return null;
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
 
-  let label = '';
-  let cls = 'text-slate-500';
-  if (daysLeft > 7) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-slate-500';
-  } else if (daysLeft > 2) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-amber-400';
-  } else if (daysLeft === 2) {
-    label = 'Trial ends in 2 days';
-    cls = 'text-red-400';
-  } else if (daysLeft === 1) {
-    label = 'Trial ends tomorrow';
-    cls = 'text-red-400';
-  } else {
-    label = 'Trial ends today';
-    cls = 'text-red-400';
-  }
+  const label =
+    daysLeft > 7 ? `${daysLeft} days left in trial` :
+    daysLeft > 2 ? `${daysLeft} days left in trial` :
+    daysLeft === 2 ? 'Trial ends in 2 days' :
+    daysLeft === 1 ? 'Trial ends tomorrow' :
+    'Trial ends today';
+  const cls =
+    daysLeft > 7 ? 'text-slate-500' :
+    daysLeft > 2 ? 'text-amber-400' :
+    'text-red-400';
 
   return (
     <div className={`flex items-center gap-2 px-3 py-[6px] mx-1.5 my-px text-[11.5px] font-medium ${cls}`}>
@@ -853,7 +845,14 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasSidebarItem('clientpulse') && (
             <>
               <NavSection label="ClientPulse" />
-              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+              <NavItem
+                to="/clientpulse"
+                exact
+                icon={<Icons.dashboard />}
+                label="Dashboard"
+                badge={liveAgentCount > 0 ? liveAgentCount : undefined}
+                badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined}
+              />
               {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
               <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
             </>
