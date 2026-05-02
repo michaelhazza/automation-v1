@@ -392,6 +392,90 @@ describe('output.recommend skill handler — input validation', () => {
     expect((result as { error: string }).error).toMatch(/action_hint/);
   });
 
+  test('category does not start with agent namespace → returns success=false with namespace error', async () => {
+    const { SKILL_HANDLERS } = await import('../skillExecutor.js');
+    const handler = SKILL_HANDLERS['output.recommend'];
+
+    // Context carries agentNamespace 'optimiser'; category starts with 'portfolio' → mismatch
+    const ctx = { organisationId: ORG_ID, agentId: AGENT_ID, agentNamespace: 'optimiser' } as unknown as Parameters<typeof handler>[1];
+    const result = await handler(
+      {
+        scope_type: 'org',
+        scope_id: SCOPE_ID,
+        category: 'portfolio.agent.over_budget', // wrong namespace prefix
+        severity: 'warn',
+        title: 'T',
+        body: 'B',
+        evidence: {},
+        dedupe_key: 'k',
+      },
+      ctx,
+    );
+    expect((result as { success: boolean }).success).toBe(false);
+    expect((result as { error: string }).error).toMatch(/namespace/);
+  });
+
+  test('category starts with agent namespace → passes namespace check', async () => {
+    // When the category namespace matches, validation passes and the service is called.
+    setExecuteQueue(
+      [], // advisory lock
+      [], // cooldown
+      [], // open-match
+      [{ cnt: '0' }], // cap
+      [{ id: REC_ID_2 }], // INSERT
+    );
+
+    const { SKILL_HANDLERS } = await import('../skillExecutor.js');
+    const handler = SKILL_HANDLERS['output.recommend'];
+
+    const ctx = { organisationId: ORG_ID, agentId: AGENT_ID, agentNamespace: 'optimiser' } as unknown as Parameters<typeof handler>[1];
+    const result = await handler(
+      {
+        scope_type: 'org',
+        scope_id: SCOPE_ID,
+        category: 'optimiser.agent.over_budget', // correct namespace prefix
+        severity: 'warn',
+        title: 'T',
+        body: 'B',
+        evidence: {},
+        dedupe_key: 'k',
+      },
+      ctx,
+    );
+    expect((result as { success: boolean }).success).toBe(true);
+  });
+
+  test('no agent namespace declared → namespace check skipped, three-segment format accepted', async () => {
+    // When context.agentNamespace is undefined, any valid three-segment category passes.
+    setExecuteQueue(
+      [], // advisory lock
+      [], // cooldown
+      [], // open-match
+      [{ cnt: '0' }], // cap
+      [{ id: REC_ID_2 }], // INSERT
+    );
+
+    const { SKILL_HANDLERS } = await import('../skillExecutor.js');
+    const handler = SKILL_HANDLERS['output.recommend'];
+
+    // No agentNamespace on context
+    const ctx = { organisationId: ORG_ID, agentId: AGENT_ID } as unknown as Parameters<typeof handler>[1];
+    const result = await handler(
+      {
+        scope_type: 'org',
+        scope_id: SCOPE_ID,
+        category: 'any_namespace.area.finding', // would fail if namespace check ran
+        severity: 'info',
+        title: 'T',
+        body: 'B',
+        evidence: {},
+        dedupe_key: 'k',
+      },
+      ctx,
+    );
+    expect((result as { success: boolean }).success).toBe(true);
+  });
+
   test('null action_hint is accepted', async () => {
     // When action_hint=null the validator should skip URI check.
     // The transaction will be called (DB mock returns fresh insert).

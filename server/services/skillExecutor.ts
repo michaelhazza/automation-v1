@@ -154,6 +154,14 @@ export interface SkillExecutionContext {
    * Review finding #3.
    */
   userId?: string;
+  /**
+   * The calling agent's namespace, declared in AGENTS.md frontmatter.
+   * Populated by agentExecutionService when the agent definition carries a
+   * `namespace` field. When undefined, `output.recommend` skips the namespace
+   * prefix check and validates three-segment format only.
+   * Spec: docs/sub-account-optimiser-spec.md §6.2 "Category naming: hard rule".
+   */
+  agentNamespace?: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   handoffDepth?: number;
   isSubAgent?: boolean;
@@ -1928,6 +1936,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       return {
         success: false,
         error: 'category must follow <agent_namespace>.<area>.<finding> format (three segments)',
+      };
+    }
+    // Validate namespace prefix: if the calling agent has a namespace declared,
+    // the first category segment must match it. Spec §6.2 "Category naming: hard rule".
+    if (context.agentNamespace && categoryParts[0] !== context.agentNamespace) {
+      return {
+        success: false,
+        error: `category must start with agent namespace "${context.agentNamespace}" (got "${categoryParts[0]}")`,
       };
     }
     if (!title || typeof title !== 'string') {

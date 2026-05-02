@@ -51,13 +51,23 @@ describe('acknowledge route — 404 / 200 matrix', () => {
   });
 
   test('service returns alreadyAcknowledged=false → 200', () => {
-    const outcome = acknowledgeRouteOutcome({ success: true, alreadyAcknowledged: false });
+    const outcome = acknowledgeRouteOutcome({
+      success: true,
+      alreadyAcknowledged: false,
+      scope_type: 'subaccount',
+      scope_id: '00000000-0000-0000-0000-000000000002',
+    });
     expect(outcome.status).toBe(200);
     expect(outcome.body).toMatchObject({ success: true, alreadyAcknowledged: false });
   });
 
   test('service returns alreadyAcknowledged=true → 200 (idempotent)', () => {
-    const outcome = acknowledgeRouteOutcome({ success: true, alreadyAcknowledged: true });
+    const outcome = acknowledgeRouteOutcome({
+      success: true,
+      alreadyAcknowledged: true,
+      scope_type: 'org',
+      scope_id: '00000000-0000-0000-0000-000000000001',
+    });
     expect(outcome.status).toBe(200);
     expect(outcome.body).toMatchObject({ success: true, alreadyAcknowledged: true });
   });
@@ -103,6 +113,8 @@ describe('dismiss route — validation + 404 / 200 matrix', () => {
       success: true,
       alreadyDismissed: false,
       dismissed_until: new Date(Date.now() + 3600_000).toISOString(),
+      scope_type: 'subaccount',
+      scope_id: '00000000-0000-0000-0000-000000000002',
     };
     const outcome = dismissRouteOutcome({ reason: 'handled' }, serviceResult);
     expect(outcome.status).toBe(200);
@@ -110,11 +122,15 @@ describe('dismiss route — validation + 404 / 200 matrix', () => {
     expect(typeof (outcome.body as unknown as DismissResult).dismissed_until).toBe('string');
   });
 
-  test('service returns alreadyDismissed=true → 200 (idempotent)', () => {
+  test('service returns alreadyDismissed=true → 200 (idempotent, second dismiss call via CTE)', () => {
+    // The dismiss CTE uses SELECT FOR UPDATE + conditional UPDATE WHERE dismissed_at IS NULL.
+    // A second dismiss call finds dismissed_at already set → returns alreadyDismissed: true.
     const serviceResult: DismissResult = {
       success: true,
       alreadyDismissed: true,
       dismissed_until: new Date(Date.now() + 3600_000).toISOString(),
+      scope_type: 'subaccount',
+      scope_id: '00000000-0000-0000-0000-000000000002',
     };
     const outcome = dismissRouteOutcome({ reason: 'handled again' }, serviceResult);
     expect(outcome.status).toBe(200);

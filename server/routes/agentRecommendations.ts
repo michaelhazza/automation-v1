@@ -77,9 +77,11 @@ router.post(
       return;
     }
 
-    // Emit socket event
+    // Emit socket event with full payload per spec §6.5
     emitOrgUpdate(orgId, 'dashboard.recommendations.changed', {
       recommendation_id: recId,
+      scope_type: result.scope_type,
+      scope_id: result.scope_id,
       change: 'acknowledged',
     });
 
@@ -118,9 +120,11 @@ router.post(
       return;
     }
 
-    // Emit socket event
+    // Emit socket event with full payload per spec §6.5
     emitOrgUpdate(orgId, 'dashboard.recommendations.changed', {
       recommendation_id: recId,
+      scope_type: result.scope_type,
+      scope_id: result.scope_id,
       change: 'dismissed',
     });
 

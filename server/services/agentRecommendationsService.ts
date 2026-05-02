@@ -510,10 +510,18 @@ function isUniqueViolation(err: unknown): boolean {
 
 // ── listRecommendations ───────────────────────────────────────────────────────
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function listRecommendations(
   params: ListRecommendationsParams,
 ): Promise<ListRecommendationsResult> {
   const { orgId, scopeType, scopeId, includeDescendantSubaccounts = false, limit = 20 } = params;
+
+  // Guard against SQL injection: scopeId is interpolated into sql.raw(), validate format
+  if (scopeId !== undefined && !UUID_REGEX.test(scopeId)) {
+    throw { statusCode: 422, message: 'scopeId must be a valid UUID' };
+  }
+
   const clampedLimit = Math.min(limit, 100);
 
   // Build WHERE conditions
@@ -620,6 +628,8 @@ export async function listRecommendations(
 export interface AcknowledgeResult {
   success: true;
   alreadyAcknowledged: boolean;
+  scope_type: string;
+  scope_id: string;
 }
 
 export async function acknowledgeRecommendation(
@@ -627,9 +637,9 @@ export async function acknowledgeRecommendation(
   orgId: string,
 ): Promise<AcknowledgeResult | null> {
   // CTE pattern: distinguish "row absent/RLS-hidden" from "already acknowledged"
-  const result = await db.execute<{ existed: string; updated_rows: string }>(sql`
+  const result = await db.execute<{ existed: string; updated_rows: string; scope_type: string; scope_id: string }>(sql`
     WITH existing AS (
-      SELECT id, acknowledged_at
+      SELECT id, acknowledged_at, scope_type, scope_id
       FROM agent_recommendations
       WHERE id = ${recId}::uuid
       FOR UPDATE
@@ -642,7 +652,9 @@ export async function acknowledgeRecommendation(
     )
     SELECT
       (SELECT count(*)::text FROM existing) AS existed,
-      (SELECT count(*)::text FROM updated) AS updated_rows
+      (SELECT count(*)::text FROM updated) AS updated_rows,
+      (SELECT scope_type FROM existing LIMIT 1) AS scope_type,
+      (SELECT scope_id::text FROM existing LIMIT 1) AS scope_id
   `);
 
   const row = result[0];
@@ -655,6 +667,8 @@ export async function acknowledgeRecommendation(
   return {
     success: true,
     alreadyAcknowledged: updatedRows === 0,
+    scope_type: row.scope_type,
+    scope_id: row.scope_id,
   };
 }
 
@@ -664,6 +678,8 @@ export interface DismissResult {
   success: true;
   alreadyDismissed: boolean;
   dismissed_until: string;
+  scope_type: string;
+  scope_id: string;
 }
 
 export interface DismissOptions {
@@ -679,57 +695,74 @@ export async function dismissRecommendation(
 ): Promise<DismissResult | null> {
   const { reason, cooldownHours: rawCooldownHours, isAdmin = false } = options;
 
-  // First, get the current row to derive cooldown from severity
-  const rowRows = await db.execute<{ id: string; severity: string; dismissed_at: string | null }>(sql`
-    SELECT id, severity, dismissed_at
-    FROM agent_recommendations
-    WHERE id = ${recId}::uuid
-    FOR UPDATE
-  `);
-
-  if (rowRows.length === 0) return null; // 404
-
-  const row = rowRows[0];
-  if (row.dismissed_at !== null) {
-    // Already dismissed — return idempotent response
-    const dismissedUntilRows = await db.execute<{ dismissed_until: string | null }>(sql`
-      SELECT dismissed_until::text FROM agent_recommendations WHERE id = ${recId}::uuid
+  // Step 1: lock and read the row to derive cooldown from severity (CTE pattern per spec §6.5).
+  // We need severity to compute the cooldown interval before the update CTE, so we
+  // first SELECT FOR UPDATE to lock the row, then conditionally UPDATE.
+  const result = await db.transaction(async (tx) => {
+    // CTE step 1: lock the target row
+    const targetRows = await tx.execute<{
+      id: string;
+      severity: string;
+      dismissed_at: string | null;
+      dismissed_until: string | null;
+      scope_type: string;
+      scope_id: string;
+    }>(sql`
+      SELECT id, severity, dismissed_at, dismissed_until::text, scope_type, scope_id::text
+      FROM agent_recommendations
+      WHERE id = ${recId}::uuid
+      FOR UPDATE
     `);
-    const dismissedUntil = dismissedUntilRows[0]?.dismissed_until ?? new Date().toISOString();
+
+    if (targetRows.length === 0) return null; // 404 — row absent or RLS-hidden
+
+    const target = targetRows[0];
+    const scopeType = target.scope_type;
+    const scopeId = target.scope_id;
+
+    if (target.dismissed_at !== null) {
+      // Already dismissed — idempotent no-op
+      return {
+        success: true as const,
+        alreadyDismissed: true,
+        dismissed_until: target.dismissed_until ?? new Date().toISOString(),
+        scope_type: scopeType,
+        scope_id: scopeId,
+      };
+    }
+
+    // Compute cooldown from severity
+    const severity = target.severity as 'info' | 'warn' | 'critical';
+    const defaultCooldownH = COOLDOWN_HOURS_BY_SEVERITY[severity];
+    let effectiveCooldownH = defaultCooldownH;
+
+    if (isAdmin && rawCooldownHours !== undefined) {
+      // Clamp to [1, 24*90]
+      effectiveCooldownH = Math.min(Math.max(rawCooldownHours, 1), 24 * 90);
+    }
+
+    // CTE step 2: UPDATE only if still not dismissed (guard against concurrent dismiss)
+    const updateRows = await tx.execute<{ dismissed_until: string }>(sql`
+      UPDATE agent_recommendations
+      SET
+        dismissed_at = now(),
+        dismissed_reason = ${reason.slice(0, 500)},
+        dismissed_until = now() + (${effectiveCooldownH} || ' hours')::interval,
+        updated_at = now()
+      WHERE id = ${recId}::uuid AND dismissed_at IS NULL
+      RETURNING dismissed_until::text
+    `);
+
+    const dismissedUntil = updateRows[0]?.dismissed_until ?? new Date().toISOString();
+
     return {
-      success: true,
-      alreadyDismissed: true,
+      success: true as const,
+      alreadyDismissed: false,
       dismissed_until: dismissedUntil,
+      scope_type: scopeType,
+      scope_id: scopeId,
     };
-  }
+  });
 
-  // Compute cooldown
-  const severity = row.severity as 'info' | 'warn' | 'critical';
-  const defaultCooldownH = COOLDOWN_HOURS_BY_SEVERITY[severity];
-  let effectiveCooldownH = defaultCooldownH;
-
-  if (isAdmin && rawCooldownHours !== undefined) {
-    // Clamp to [1, 24*90]
-    effectiveCooldownH = Math.min(Math.max(rawCooldownHours, 1), 24 * 90);
-  }
-
-  // Perform the dismiss
-  const result = await db.execute<{ dismissed_until: string }>(sql`
-    UPDATE agent_recommendations
-    SET
-      dismissed_at = now(),
-      dismissed_reason = ${reason.slice(0, 500)},
-      dismissed_until = now() + (${effectiveCooldownH} || ' hours')::interval,
-      updated_at = now()
-    WHERE id = ${recId}::uuid
-    RETURNING dismissed_until::text
-  `);
-
-  const dismissedUntil = result[0]?.dismissed_until ?? new Date().toISOString();
-
-  return {
-    success: true,
-    alreadyDismissed: false,
-    dismissed_until: dismissedUntil,
-  };
+  return result;
 }
