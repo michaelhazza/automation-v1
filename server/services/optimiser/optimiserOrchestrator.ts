@@ -17,7 +17,6 @@
  * Spec: docs/sub-account-optimiser-spec.md §4, §6.2, §8, §9 Phase 2
  */
 
-import { createHash } from 'crypto';
 import { logger } from '../../lib/logger.js';
 import { routeCall } from '../llmRouter.js';
 import type { UpsertRecommendationContext } from '../agentRecommendationsService.js';
@@ -377,73 +376,76 @@ export async function runOptimiser(input: OptimiserRunInput): Promise<void> {
     totalCandidates = cappedCandidates.length;
 
     // ── Phase 3: Render + recommend ──────────────────────────────────────────
-    const { upsertRecommendation } = await import('../agentRecommendationsService.js');
+    // Skip entirely if Phase 1 already timed out — avoids a duplicate run_timeout log
+    if (status !== 'timed_out') {
+      const { upsertRecommendation } = await import('../agentRecommendationsService.js');
 
-    for (const candidate of cappedCandidates) {
-      // Pre-render timeout check
-      if (Date.now() - runStartedAt > OPTIMISER_RUN_BUDGET_MS) {
-        logger.warn('recommendations.run_timeout', {
-          subaccount_id: subaccountId,
-          agent_id: agentId,
-          completed_categories: completedCategories,
-          remaining_categories: [],
-          elapsed_ms: Date.now() - runStartedAt,
-        });
-        status = 'timed_out';
-        break;
-      }
-
-      const rendered = await renderRecommendation(candidate, { organisationId, subaccountId });
-      if (!rendered) {
-        renderFailures++;
-        continue;
-      }
-
-      const upsertCtx: UpsertRecommendationContext = {
-        organisationId,
-        agentId,
-        agentNamespace: 'optimiser',
-      };
-
-      const upsertInput: OutputRecommendInput = {
-        scope_type: 'subaccount',
-        scope_id: subaccountId,
-        category: candidate.category,
-        severity: candidate.severity,
-        title: rendered.title,
-        body: rendered.body,
-        evidence: candidate.evidence,
-        action_hint: candidate.action_hint ?? null,
-        dedupe_key: candidate.dedupe_key,
-      };
-
-      try {
-        const result = await upsertRecommendation(upsertCtx, upsertInput);
-
-        if (result.was_new && result.reason !== 'evicted_lower_priority') {
-          written++;
-        } else if (!result.was_new && result.reason === 'updated_in_place') {
-          updatedInPlace++;
-        } else if (!result.was_new && result.reason === 'cooldown') {
-          skippedCooldown++;
-        } else if (!result.was_new && result.reason === 'sub_threshold') {
-          skippedSubThreshold++;
-        } else if (!result.was_new && !result.reason) {
-          skippedNoChange++;
-        } else if (result.reason === 'evicted_lower_priority') {
-          evictedLowerPriority++;
-          written++;
-        } else if (result.reason === 'cap_reached') {
-          droppedDueToCap++;
+      for (const candidate of cappedCandidates) {
+        // Pre-render timeout check
+        if (Date.now() - runStartedAt > OPTIMISER_RUN_BUDGET_MS) {
+          logger.warn('recommendations.run_timeout', {
+            subaccount_id: subaccountId,
+            agent_id: agentId,
+            completed_categories: completedCategories,
+            remaining_categories: [],
+            elapsed_ms: Date.now() - runStartedAt,
+          });
+          status = 'timed_out';
+          break;
         }
-      } catch (err) {
-        renderFailures++;
-        logger.warn('recommendations.upsert_failed', {
+
+        const rendered = await renderRecommendation(candidate, { organisationId, subaccountId });
+        if (!rendered) {
+          renderFailures++;
+          continue;
+        }
+
+        const upsertCtx: UpsertRecommendationContext = {
+          organisationId,
+          agentId,
+          agentNamespace: 'optimiser',
+        };
+
+        const upsertInput: OutputRecommendInput = {
+          scope_type: 'subaccount',
+          scope_id: subaccountId,
           category: candidate.category,
+          severity: candidate.severity,
+          title: rendered.title,
+          body: rendered.body,
+          evidence: candidate.evidence,
+          action_hint: candidate.action_hint ?? null,
           dedupe_key: candidate.dedupe_key,
-          subaccount_id: subaccountId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        };
+
+        try {
+          const result = await upsertRecommendation(upsertCtx, upsertInput);
+
+          if (result.was_new && result.reason !== 'evicted_lower_priority') {
+            written++;
+          } else if (!result.was_new && result.reason === 'updated_in_place') {
+            updatedInPlace++;
+          } else if (!result.was_new && result.reason === 'cooldown') {
+            skippedCooldown++;
+          } else if (!result.was_new && result.reason === 'sub_threshold') {
+            skippedSubThreshold++;
+          } else if (!result.was_new && !result.reason) {
+            skippedNoChange++;
+          } else if (result.reason === 'evicted_lower_priority') {
+            evictedLowerPriority++;
+            written++;
+          } else if (result.reason === 'cap_reached') {
+            droppedDueToCap++;
+          }
+        } catch (err) {
+          renderFailures++;
+          logger.warn('recommendations.upsert_failed', {
+            category: candidate.category,
+            dedupe_key: candidate.dedupe_key,
+            subaccount_id: subaccountId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
 

@@ -12,7 +12,7 @@
 
 import { db } from '../../db/index.js';
 import { agents, subaccountAgents } from '../../db/schema/index.js';
-import { sql, eq, and } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { agentScheduleService } from '../agentScheduleService.js';
 import { computeOptimiserCron } from './optimiserCronPure.js';
