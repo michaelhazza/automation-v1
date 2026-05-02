@@ -72,3 +72,65 @@ M4. Define timeout for /run/resume race window (optional)
 - M4: timeout for /run/resume race window — already in §19 open items
 
 ---
+
+## Round 2 — 2026-05-02T10:30:00Z
+
+### ChatGPT Feedback (raw)
+
+15 new findings: 5 high-impact (F11–F15), 5 medium refinements (F16–F20), 5 small (F21–F25).
+
+🔴 High-impact:
+F11. Resume endpoint not fully idempotent under partial success — CAS per task, scan for paused tasks, ignore already-running.
+F12. Race: approval arrives exactly as step completes — must be accepted only if gate pending + step not transitioned; otherwise STEP_ALREADY_RESOLVED.
+F13. Gate timeout / expiry not defined — either define expires_at semantics OR explicitly state "No expiry in V1 (intentional)".
+F14. No invariant for "single active step per task" — at most one active step; transitions atomic.
+F15. Parallel fan-out lacks failure aggregation rule — must pick A (fail-fast) / B (partial success) / C (configurable).
+
+🟡 Medium:
+F16. Cost extension approval race — cap update must persist before resume; otherwise re-pause loops.
+F17. "Stop workflow" consistency — must explicitly state: cancel all immediately OR allow in-flight to finish.
+F18. WebSocket ordering guarantee not explicit — client must apply events strictly in sequence; buffer out-of-order.
+F19. Snapshot isolation for gate evaluation — all decisions must use the same snapshot version, not live org state.
+F20. Studio publish → execution race — publish must persist + return version_id; execution must reference version_id explicitly.
+
+🟢 Small:
+F21. Max recursion / loop guard — define max step count per run (e.g. 10k).
+F22. Explicit retry policy for steps — max_retries + retry_backoff per step.
+F23. Deterministic ordering for parallel results — fan-in aggregation order based on task_sequence or creation order.
+F24. Permission drift during execution — snapshot at run start OR live checks (must choose).
+F25. Versioning for step schemas — schema_version per step type for long-running workflows.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F11: Resume endpoint not idempotent under partial success | technical | reject | auto (reject) | high | Misreads `/run/resume` as a bulk operation. §7.5 contract is per-run (`POST /api/tasks/:taskId/run/resume`) with an atomic CAS predicate (`UPDATE workflow_runs SET status = 'running' WHERE status = 'paused' AND id = $1`). Single-run idempotency is already correct. There is no "scan all paused tasks" semantics in V1. |
+| F12: Race: approval arrives as step completes | technical | apply | auto (apply) | medium | §5.1.1 covers approve/reject racing on a `review_required` gate via the step-level CAS predicate, but DOES NOT handle the case where the step has been transitioned to a non-decision state (e.g., the run was Stopped, mid-flight). Today the API would return "successful idempotent hit" with no real winning decision — that's a ghost log. Add: if the predicate fails AND the step is no longer `review_required`, return `409 { error: 'step_already_resolved', current_status }`. |
+| F13: Gate timeout / expiry not defined | technical | reject | auto (reject) | medium | §5.3 already explicitly states this: "**No timeout.** The task does not auto-fail." The spec also names notification cadence (24h / 72h / 7d) and explicitly defers `escalateAfterHours` to V2. Finding is redundant — spec is intentional. |
+| F14: No invariant for "single active step per task" | technical | reject | auto (reject) | high | Directly contradicts §4.3 ("Fan-out: a step has multiple `next` arrows; engine dispatches in parallel") and §4.4 (Approval-on-reject loops). Multiple steps can be active simultaneously by design. Adding the proposed invariant would break the engine's parallel semantics. |
+| F15: Parallel fan-out lacks failure aggregation rule | user-facing | apply (Option A) | pending user | high | Genuine gap. §4.3 defines fan-out/fan-in but not what happens when one branch fails. Need to pick a default. Recommend Option A (fail-fast: any branch fails → fan-out fails immediately, in-flight branches best-effort cancelled). Matches the spec's safety + visibility stance; V2 may add per-step configurability. |
+| F16: Cost extension approval race | technical | reject | auto (reject) | medium | §7.5 already uses a single atomic UPDATE that updates the cap AND the status in one transaction (`UPDATE workflow_runs SET status = 'running', effective_cost_ceiling_cents = ..., extension_count = extension_count + 1 WHERE status = 'paused' AND id = $1`). Cap is persisted before any resume can observe `running`. No re-pause loop is possible. |
+| F17: "Stop workflow" consistency across tasks | technical | reject | auto (reject) | medium | §7.3 already says: "Cleanup runs for any outstanding skill / Action calls (best-effort cancel; some external calls may have already fired and are not reversible)." The state machine in §7.5 forbids `failed → *` so no new steps dispatch. ChatGPT wants a binary "complete OR cancel" — the spec's actual answer is "best-effort cancel, may have fired" which is more honest. |
+| F18: WebSocket ordering guarantee not explicit | technical | apply | auto (apply) | medium | §8.1 + §8.2 use a monotonic `task_sequence` but don't state the client invariant: events MUST be applied in `task_sequence` order; out-of-order arrivals MUST be buffered and applied when the gap fills (or trigger replay if the gap doesn't fill within a small window). Adding the explicit client invariant prevents UI flicker / state corruption. |
+| F19: Snapshot isolation for gate evaluation | technical | reject | auto (reject) | medium | The spec ALREADY uses snapshot-based evaluation throughout: §3.3 `workflow_step_gates.approver_pool_snapshot`, §5.1 step 1 ("Verifies the deciding user is in the snapshotted pool"), §5.1.2 `/refresh-pool` is the only way to mutate the snapshot. Live org state is never read for gate decisions. Finding is a re-statement of existing design. |
+| F20: Studio publish → execution race | technical | apply | auto (apply) | medium | The spec implies this through `workflow_template_versions` + `pinned_template_version_id` (§3.1) + start-version pinning (§4.6) but never explicitly pins the publish API contract or the dispatch-time version selection. Worth a small clarification: publish persists + returns `version_id`; new runs reference the latest published `version_id` at dispatch time AND pin to it for the run's lifetime. Removes ambiguity for architect. |
+| F21: Max recursion / loop guard — max step count per run | technical | defer | escalated (defer) | low | Runtime quota; architect-time. §4.4 prevents structural infinite loops at validation, but Approval-on-reject at runtime could in theory cycle. A simple `max_steps_per_run` quota (e.g., 10k) is the right fix; pick at decomposition. Routes to backlog. |
+| F22: Explicit retry policy for steps | technical | reject | auto (reject) | medium | §4.4 already says "Action retries (`retryPolicy`) are engine-level and not validated as a 'loop.'" The retry primitive is engine-level (existing infrastructure per spec-context.md `accepted_primitives` — `withBackoff`). The spec doesn't need to redefine. |
+| F23: Deterministic ordering for parallel results | technical | defer | escalated (defer) | low | Real architect-time question (depends on engine fan-in semantics; the spec at §4.3 doesn't address result aggregation order). Routes to backlog with a note: the right answer is "by `task_sequence` of the producing event" so downstream LLM inputs are deterministic. Architect to confirm during decomposition. |
+| F24: Permission drift during execution | technical | defer | escalated (defer) | medium | The spec already has a consistent split (snapshot for gates per §5.1; live for real-time controls per §7.5). The general "permission drift" question deserves a one-line statement of this split, but it's not a blocking gap — architect-time clarification. Routes to backlog. |
+| F25: Versioning for step schemas | technical | reject | auto (reject) | medium | Already addressed by template-level versioning (§3.5 `workflow_template_versions`) + start-version pinning (§4.6 "running tasks are pinned to their start version"). A long-running task uses the schema bundle from its start version; mid-run schema drift is impossible. Per-step schema_version would be redundant. |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] §5.1.1 — race resolution clarification: API returns `409 { error: 'step_already_resolved', current_status }` when CAS fails AND step is no longer `review_required` (F12)
+- [auto] §8.1 — explicit client ordering invariant: events MUST be applied in `task_sequence` order; out-of-order arrivals buffered (F18)
+- [auto] §10.5 — publish API contract: persists + returns `version_id`; new runs reference the version_id at dispatch time and pin to it for the run's lifetime (F20)
+
+### Deferred to backlog (routed at finalisation)
+
+- F21: max step count per run runtime quota — architect-time
+- F23: fan-in result ordering by `task_sequence` of producing event — architect-time
+- F24: permission drift policy (snapshot for gates, live for controls — explicit one-liner) — architect-time
+
+
+---
