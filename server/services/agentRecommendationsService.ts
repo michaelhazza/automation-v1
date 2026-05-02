@@ -13,11 +13,9 @@
  * Spec: docs/sub-account-optimiser-spec.md §6.2 + §6.5
  */
 
-import { eq, and, isNull, isNotNull, gt, count, asc, desc, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { comparePriority as _comparePriority, type PriorityTuple } from './agentRecommendationsServicePure.js';
 import { db } from '../db/index.js';
-import { agentRecommendations } from '../db/schema/agentRecommendations.js';
-import { subaccounts } from '../db/schema/subaccounts.js';
 import { logger } from '../lib/logger.js';
 import { emitOrgUpdate } from '../websocket/emitters.js';
 import {
@@ -520,6 +518,10 @@ export async function listRecommendations(
   // Guard against SQL injection: scopeId is interpolated into sql.raw(), validate format
   if (scopeId !== undefined && !UUID_REGEX.test(scopeId)) {
     throw { statusCode: 422, message: 'scopeId must be a valid UUID' };
+  }
+
+  if (scopeType !== undefined && scopeType !== 'org' && scopeType !== 'subaccount') {
+    throw { statusCode: 422, message: 'scopeType must be org or subaccount' };
   }
 
   const clampedLimit = Math.min(limit, 100);
