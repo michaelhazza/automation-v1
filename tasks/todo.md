@@ -2212,4 +2212,89 @@ Flag if: you intended a tighter mapping to one of those existing tables and the 
 
 Iter-2 Codex finding #6: spec called the opt-out a "toggle on sub-account settings" but only added the DB column. Downgraded the prose to "backend boolean column flipped via admin SQL or Configuration Assistant" and added a Deferred Items entry calling out the missing settings UI. v1 has no operator-visible toggle.
 
+---
+
+## Deferred from spec-conformance review — subaccount-optimiser (2026-05-02)
+
+**Captured:** 2026-05-02T05:06:28Z
+**Source log:** `tasks/review-logs/spec-conformance-log-subaccount-optimiser-2026-05-02T05-00-11Z.md`
+**Spec:** `docs/sub-account-optimiser-spec.md`
+
+These are spec-vs-implementation divergences identified during the all-of-spec conformance audit on branch `claude/subaccount-optimiser` at HEAD `1ba02c3b`. None were auto-fixed (all required design judgment). Resolve before merge OR pin the spec to match the implementation choices.
+
+- [ ] **REQ #B1 — `playbook.escalation_rate` severity drift**
+  - Spec section: §2 line 109
+  - Gap: spec says severity=`critical` at >60% over 14 days; implementation is severity=`warn` at >60% over 7 days (`recommendations/playbookEscalation.ts:39`, `queries/escalationRate.ts:46`).
+  - Suggested approach: either flip to `critical` and widen window to 14 days OR pin spec to "warn at 7 days". Two divergences in one finding.
+
+- [ ] **REQ #B2 — `inactive.workflow` severity drift**
+  - Spec section: §2 line 111
+  - Gap: spec=`warn`; implementation=`info` (`recommendations/inactiveWorkflow.ts:24`).
+  - Suggested approach: bump severity to `warn` to match the spec, OR pin spec to `info`.
+
+- [ ] **REQ #B3 — `escalation.repeat_phrase` severity drift**
+  - Spec section: §2 line 112
+  - Gap: spec=`info`; implementation=`warn` (`recommendations/repeatPhrase.ts:116`).
+  - Suggested approach: lower to `info`, OR pin spec to `warn`. Note `info` was the spec author's deliberate choice — phrase repetition is informational, not actionable until the brand-voice profile (F1) ships.
+
+- [ ] **REQ #B4 — `memory.low_citation_waste` severity + threshold drift**
+  - Spec section: §2 line 118
+  - Gap: spec=`warn` at `>50% scored <0.3`; implementation=`info` at `>40%` using `mcs.cited = false` flag (`recommendations/memoryCitation.ts:13–46`, `queries/memoryCitation.ts:48`).
+  - Suggested approach: confirm whether `mcs.cited = false` is the schema's encoding of "scored below threshold" — if so, lift threshold to 50% and bump severity to `warn`. If not, the query is reading the wrong signal entirely.
+
+- [ ] **REQ #B5 — `agent.routing_uncertainty` trigger semantics rewritten**
+  - Spec section: §2 line 119
+  - Gap: spec="confidence < 0.5 on > 30% of decisions, OR `secondLookTriggered` rate > 30%, sustained 7 days"; implementation uses 0.7 confidence threshold (not 0.5), drops the OR with `second_look_pct`, AND adds an undocumented `total_decisions >= 50` evaluator-level gate (`queries/routingUncertainty.ts:26`, `recommendations/routingUncertainty.ts:20–37`).
+  - Suggested approach: align all three to spec — set `LOW_CONFIDENCE_THRESHOLD=0.5`, OR-combine with second_look_pct, remove the >=50 evaluator gate (the spec's volume floor of 10 already lives in `materialDelta`).
+
+- [ ] **REQ #B6 — `llm.cache_poor_reuse` trigger semantics rewritten + missing volume floor**
+  - Spec section: §2 line 120
+  - Gap: spec="`cacheCreationTokens > cachedPromptTokens` AND total >= 5000"; implementation uses `reuse_ratio < 0.20` with NO volume floor (`recommendations/cacheEfficiency.ts:29–32`).
+  - Suggested approach: switch to `creation_tokens > reused_tokens` AND `(creation_tokens + reused_tokens) >= 5000`. Without the volume floor, low-volume agents will produce noisy info recommendations.
+
+- [ ] **REQ #B7 — `runOptimiser` orchestrator not wired to production schedule path**
+  - Spec section: §6.2 Run-level atomicity
+  - Gap: `optimiserOrchestrator.ts:runOptimiser` implements pre-sort + sequential calls + singleton key per spec, but no production callsite references it. The pg-boss schedule routes through `agentExecutionService.runAgent` (LLM-driven loop reading `AGENTS.md`), which provides no pre-sort guarantee.
+  - Suggested approach: either (a) wire `runOptimiser` as the queue handler for `subaccount-optimiser` runs (specialised dispatch path), OR (b) accept LLM-mediated ordering and weaken the atomicity invariant in §6.2 to "best-effort sort via system prompt directive". This is the largest single conformance gap and the most architecturally consequential.
+
+- [ ] **REQ #B8 — Cron timezone semantics divergence**
+  - Spec section: §4
+  - Gap: spec says "daily at sub-account local 06:00 (cron derived from sub-account's `timezone`)"; implementation runs at UTC 06:00–11:59 with deterministic stagger via `optimiserCronPure.ts`, ignoring `subaccounts.timezone` (`optimiserSubaccountHook.ts:131` registers with `'UTC'`).
+  - Suggested approach: read `subaccounts.timezone` and pass it to `agentScheduleService.registerSchedule` as the `tz` argument, while keeping the deterministic minute-stagger inside the 06:00 hour. Spec §13 schedule-storm risk is preserved by the minute spread; sub-account-local timing is preserved by reading `timezone`.
+
+- [ ] **REQ #B9 — `inactive.workflow` heartbeat-vs-cron path drift + grace buffer**
+  - Spec section: §2 line 111 / §3 line 174 / §5 line 222
+  - Gap: spec restricts to `subaccountAgents.scheduleEnabled = true AND scheduleCron IS NOT NULL` and "older than 1.5× expected cadence"; implementation ORs in `sa.heartbeat_enabled = true` (broadens scope) AND uses 1.25× grace buffer (tightens trigger) — both diverge from spec (`queries/inactiveWorkflows.ts:104–108, 70–71`).
+  - Suggested approach: drop the heartbeat path branch (or update the spec to acknowledge it), and change the grace buffer from `*0.25` (1.25×) to `*0.5` (1.5×) to match the spec.
+
+- [ ] **REQ #B10 — Acknowledge route response shape includes extra fields**
+  - Spec section: §6.5
+  - Gap: spec response is `{ success, alreadyAcknowledged }`; implementation returns `{ success, alreadyAcknowledged, scope_type, scope_id }` (the extras are read by the route layer to drive socket emission).
+  - Suggested approach: either pin spec to allow the extra fields, OR move the `scope_type`/`scope_id` lookup out of the response shape into a separate `getById` call inside the route handler.
+
+- [ ] **REQ #B11 — Cooldown / open-match queries lack explicit `organisation_id` predicate (RLS-only isolation)**
+  - Spec section: §6.2 Step 1, §6.5
+  - Gap: AMBIGUOUS — `agentRecommendationsService.ts:111–123, 167–175, 248–255, 300–312` all rely on connection-level `app.organisation_id` RLS to enforce isolation, but the service uses `db.transaction()` directly (not `withOrgTx`). If the calling context does not set `app.organisation_id`, RLS will see no session var and lookup will silently return zero rows.
+  - Suggested approach: confirm that `output.recommend` and the HTTP routes both run inside `withOrgTx` (or equivalent) before this service is invoked, OR add an explicit `AND organisation_id = ${ctx.organisationId}::uuid` predicate to all four queries as defense in depth.
+
+- [ ] **REQ #B12 — `listRecommendations` uses `sql.raw` with string interpolation**
+  - Spec section: §6.5
+  - Gap: `agentRecommendationsService.ts:530–544, 575–598` interpolates `orgId` and `scopeId` directly into `sql.raw(...)` strings. UUID format is validated for `scopeId` only; `orgId` comes from `req.orgId` (server-side), so practical injection is impossible — but the convention prefers parameterised drizzle-tagged-template `sql\`…\`` interpolation.
+  - Suggested approach: refactor to drizzle composable conditions (the descendant-subaccount IN clause is the reason raw was used; `inArray` + a subquery would express the same shape parameterised). OR add an inline comment naming the safety invariant ("orgId is server-side only").
+
+- [ ] **REQ #B13 — Defensive fallback can mask data corruption on dismiss path**
+  - Spec section: §6.5
+  - Gap: AMBIGUOUS — `agentRecommendationsService.ts:730` returns `target.dismissed_until ?? new Date().toISOString()` when the row's `dismissed_until` is NULL on an already-dismissed row. That state is impossible if the service is the only writer (single-writer invariant), so the fallback hides corruption rather than surfacing it.
+  - Suggested approach: log a warning if `dismissed_at IS NOT NULL AND dismissed_until IS NULL` is observed (impossible state under invariant), then return the timestamp.
+
+- [ ] **REQ #B14 — RLS policy variant on migration 0267 vs reference pattern in 0245**
+  - Spec section: §6.1 / §10
+  - Gap: AMBIGUOUS — migration 0267 uses one combined policy (`USING + WITH CHECK` on the same predicate). Spec references "per `0245_all_tenant_tables_rls.sql` pattern" without specifying single-policy vs split-policy convention. Verify against 0245.
+  - Suggested approach: if 0245 splits SELECT/INSERT/UPDATE/DELETE into separate policies, refactor 0267 to match. Otherwise PASS.
+
+- [ ] **REQ #B16 — Stale `progress.md` in main worktree**
+  - Spec section: §9 Phase 4 / §11
+  - Gap: AMBIGUOUS — main worktree `tasks/builds/subaccount-optimiser/progress.md` shows "IN PROGRESS — Phase 1 complete"; the feature-branch worktree shows "Status: COMPLETE" with full closeout. Resolution depends on which version lands on `main` after the merge.
+  - Suggested approach: confirm the worktree's `progress.md` is what merges (most likely true given the branch HEAD), no further action needed. If main's version persists, copy the closeout block over.
+
 Flag if: you intended an operator-visible UI in v1 (in which case settings page + route + schema entry need to be specced) rather than a backend-only flag.
