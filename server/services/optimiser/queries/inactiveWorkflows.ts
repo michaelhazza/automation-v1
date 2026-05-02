@@ -18,6 +18,7 @@ import { computeNextHeartbeatAt } from '../../scheduleCalendarServicePure.js';
 export interface InactiveWorkflowRow {
   subaccount_agent_id: string;
   agent_id: string;
+  agent_slug: string;
   agent_name: string;
   expected_cadence: string;  // human-readable description
   last_run_at: string | null; // ISO-8601 or null
@@ -87,6 +88,7 @@ export async function queryInactiveWorkflows(input: {
           SELECT
             sa.id                     AS subaccount_agent_id,
             sa.agent_id::text         AS agent_id,
+            a.slug                    AS agent_slug,
             a.name                    AS agent_name,
             sa.schedule_cron,
             sa.heartbeat_interval_hours,
@@ -103,7 +105,7 @@ export async function queryInactiveWorkflows(input: {
             AND sa.is_active = true
             AND sa.schedule_enabled = true
             AND sa.schedule_cron IS NOT NULL
-          GROUP BY sa.id, sa.agent_id, a.name, sa.schedule_cron,
+          GROUP BY sa.id, sa.agent_id, a.slug, a.name, sa.schedule_cron,
                    sa.heartbeat_interval_hours, sa.heartbeat_offset_hours,
                    sa.heartbeat_offset_minutes
         `);
@@ -112,6 +114,7 @@ export async function queryInactiveWorkflows(input: {
         const rows = result as unknown as Array<{
           subaccount_agent_id: string;
           agent_id: string;
+          agent_slug: string;
           agent_name: string;
           schedule_cron: string | null;
           heartbeat_interval_hours: number | null;
@@ -122,6 +125,9 @@ export async function queryInactiveWorkflows(input: {
 
         return rows
           .filter((row) => {
+            // Exclude the optimiser agent itself — it is not a user-facing workflow
+            if (row.agent_slug === 'subaccount-optimiser') return false;
+
             const lastRunAt = row.last_run_at ? new Date(row.last_run_at) : null;
             const intervalHours = row.heartbeat_interval_hours ?? 24;
             const offsetHours = row.heartbeat_offset_hours ?? 0;
@@ -138,6 +144,7 @@ export async function queryInactiveWorkflows(input: {
           .map((row) => ({
             subaccount_agent_id: String(row.subaccount_agent_id),
             agent_id: String(row.agent_id),
+            agent_slug: String(row.agent_slug || ''),
             agent_name: String(row.agent_name || ''),
             expected_cadence: row.schedule_cron
               ? describeCron(row.schedule_cron)

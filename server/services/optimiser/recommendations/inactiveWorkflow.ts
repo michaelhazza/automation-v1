@@ -25,6 +25,7 @@ export function evaluateInactiveWorkflow(
     evidence: {
       subaccount_agent_id: row.subaccount_agent_id,
       agent_id: row.agent_id,
+      agent_slug: row.agent_slug,
       agent_name: row.agent_name,
       expected_cadence: row.expected_cadence,
       last_run_at: row.last_run_at,

@@ -48,6 +48,7 @@ export async function queryAgentBudget(input: {
             FROM agents a
             JOIN subaccount_agents sa ON sa.agent_id = a.id
             WHERE sa.subaccount_id = ${subaccountId}
+              AND sa.organisation_id = ${organisationId}::uuid
               AND sa.is_active = true
           ),
           budget_rows AS (
