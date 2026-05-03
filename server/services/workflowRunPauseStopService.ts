@@ -100,6 +100,7 @@ export const WorkflowRunPauseStopService = {
     reason?: string;
     extensionCount?: number;
     currentStatus?: string;
+    cap?: 'cost_ceiling' | 'wall_clock';
   }> {
     // Load run.
     const [run] = await db
@@ -135,25 +136,18 @@ export const WorkflowRunPauseStopService = {
 
     // Extension count cap: check before capTriggered so client gets the terminal
     // error immediately without needing to first provide extension opts.
+    // Returns a structured result (not a throw) so the route handler can render
+    // the spec §7 flat-shape response without manual try/catch in the route layer.
     if (run.extensionCount >= 2) {
-      throw {
-        statusCode: 400,
-        message: 'Extension cap reached for this run',
-        errorCode: 'extension_cap_reached',
-      };
+      return { resumed: false, reason: 'extension_cap_reached' };
     }
 
     if (capTriggered && !opts?.extendCostCents && !opts?.extendSeconds) {
-      const capKind =
+      const capKind: 'cost_ceiling' | 'wall_clock' =
         costCeiling !== null && run.costAccumulatorCents >= costCeiling
           ? 'cost_ceiling'
           : 'wall_clock';
-      throw {
-        statusCode: 400,
-        message: 'Extension required after cap-triggered pause',
-        errorCode: 'extension_required',
-        cap: capKind,
-      };
+      return { resumed: false, reason: 'extension_required', cap: capKind };
     }
 
     // Pre-step cost-cap check: use conservative agent_call estimate (50 cents).

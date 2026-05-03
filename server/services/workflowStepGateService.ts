@@ -23,6 +23,7 @@ import { workflowStepGates } from '../db/schema/index.js';
 import type { WorkflowStepGateRow, NewWorkflowStepGateRow } from '../db/schema/workflowStepGates.js';
 import type { GateResolutionReason, ApproverPoolSnapshot } from '../../shared/types/workflowStepGate.js';
 import { logger } from '../lib/logger.js';
+import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import { buildGateSnapshot } from './workflowStepGateServicePure.js';
 import { WorkflowConfidenceService } from './workflowConfidenceService.js';
 import { WorkflowGateStallNotifyService } from './workflowGateStallNotifyService.js';
@@ -232,6 +233,17 @@ export const WorkflowStepGateService = {
     organisationId: string,
     tx: TxOrDb,
   ): Promise<void> {
+    // §8.18: terminal-status write must call assertValidTransition. The CAS
+    // predicate (isNull(resolvedAt)) is the correctness mechanism; this guard
+    // is the observability requirement so the transition is recorded by the
+    // workflow_step_gate state machine.
+    assertValidTransition({
+      kind: 'workflow_step_gate',
+      recordId: gateId,
+      from: 'open',
+      to: 'resolved',
+    });
+
     const result = await tx
       .update(workflowStepGates)
       .set({
@@ -282,6 +294,28 @@ export const WorkflowStepGateService = {
     organisationId: string,
     tx: TxOrDb,
   ): Promise<{ resolved: number }> {
+    // Pre-fetch open gate IDs so each transition is logged via
+    // assertValidTransition (§8.18 observability requirement). Bulk UPDATE with
+    // the same WHERE predicate then executes; the CAS guarantees no double-write.
+    const openGates = await (tx as typeof db)
+      .select({ id: workflowStepGates.id })
+      .from(workflowStepGates)
+      .where(
+        and(
+          eq(workflowStepGates.workflowRunId, workflowRunId),
+          eq(workflowStepGates.organisationId, organisationId),
+          isNull(workflowStepGates.resolvedAt),
+        ),
+      );
+    for (const g of openGates) {
+      assertValidTransition({
+        kind: 'workflow_step_gate',
+        recordId: g.id,
+        from: 'open',
+        to: 'resolved',
+      });
+    }
+
     const result = await tx
       .update(workflowStepGates)
       .set({

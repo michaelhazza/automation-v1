@@ -39,6 +39,23 @@ export const WorkflowStepReviewService = {
       organisationId?: string;
       approverGroup?: ApproverGroup;
       isCriticalSynthesised?: boolean;
+      // B1 fix (spec §6.3 audit invariant): forward gate-snapshot inputs
+      // through to openGate so seen_payload and seen_confidence are computed
+      // and persisted at gate-open. Optional — when absent, openGate falls
+      // back to NULL snapshots and emits a warn log.
+      stepDefinition?: {
+        id: string;
+        type: string;
+        name?: string;
+        params?: Record<string, unknown>;
+        isCritical?: boolean;
+        sideEffectClass?: string;
+      };
+      templateVersionId?: string;
+      subaccountId?: string | null;
+      agentReasoning?: string | null;
+      branchDecision?: { field: string; resolvedValue: unknown; targetStep: string } | null;
+      upstreamConfidence?: 'high' | 'medium' | 'low' | null;
     }
   ): Promise<void> {
     // Idempotency: check if a pending review already exists (outside transaction)
@@ -95,6 +112,15 @@ export const WorkflowStepReviewService = {
             isCriticalSynthesised: context?.isCriticalSynthesised ?? false,
             organisationId,
             requesterUserId: run?.startedByUserId ?? undefined,
+            // B1 fix (spec §6.3): forward gate-snapshot inputs so seen_payload
+            // and seen_confidence are computed at gate-open. Caller-supplied
+            // values win over run-derived defaults.
+            stepDefinition: context?.stepDefinition,
+            templateVersionId: context?.templateVersionId ?? run?.templateVersionId,
+            subaccountId: context?.subaccountId ?? run?.subaccountId ?? null,
+            agentReasoning: context?.agentReasoning ?? null,
+            branchDecision: context?.branchDecision ?? null,
+            upstreamConfidence: context?.upstreamConfidence ?? null,
           },
           tx,
         );

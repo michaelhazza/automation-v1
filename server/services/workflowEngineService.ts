@@ -1133,6 +1133,21 @@ export const WorkflowEngineService = {
     ) {
       await WorkflowStepReviewService.requireApproval(sr, {
         reviewKind: 'supervised_mode',
+        organisationId: run.organisationId,
+        // B1 fix (spec §6.3): forward step + run context so the gate row
+        // gets seen_payload + seen_confidence at open time.
+        stepDefinition: {
+          id: step.id,
+          type: step.type,
+          name: step.name,
+          params: step.params as Record<string, unknown> | undefined,
+          isCritical: step.params?.is_critical === true,
+          sideEffectClass: typeof step.params?.side_effect_class === 'string'
+            ? step.params.side_effect_class
+            : undefined,
+        },
+        templateVersionId: run.templateVersionId,
+        subaccountId: run.subaccountId,
       });
       // Step is now awaiting_approval; tick will re-check on next pass
       return;
@@ -1174,6 +1189,20 @@ export const WorkflowEngineService = {
             organisationId: run.organisationId,
             approverGroup: { kind: 'task_requester', quorum: 1 },
             isCriticalSynthesised: true,
+            // B1 fix (spec §6.3): forward step + run context so the
+            // synthesised gate row gets seen_payload + seen_confidence.
+            stepDefinition: {
+              id: step.id,
+              type: step.type,
+              name: step.name,
+              params: step.params as Record<string, unknown> | undefined,
+              isCritical: true,
+              sideEffectClass: typeof step.params?.side_effect_class === 'string'
+                ? step.params.side_effect_class
+                : undefined,
+            },
+            templateVersionId: run.templateVersionId,
+            subaccountId: run.subaccountId,
           });
 
           // Step is now awaiting_approval; tick will re-check on next pass
@@ -1776,7 +1805,23 @@ export const WorkflowEngineService = {
         }
 
         if (result.status === 'review_required') {
-          await WorkflowStepReviewService.requireApproval(sr, { reviewKind: 'invoke_automation_gate' });
+          await WorkflowStepReviewService.requireApproval(sr, {
+            reviewKind: 'invoke_automation_gate',
+            organisationId: run.organisationId,
+            // B1 fix (spec §6.3): forward step + run context.
+            stepDefinition: {
+              id: step.id,
+              type: step.type,
+              name: step.name,
+              params: step.params as Record<string, unknown> | undefined,
+              isCritical: step.params?.is_critical === true,
+              sideEffectClass: typeof step.params?.side_effect_class === 'string'
+                ? step.params.side_effect_class
+                : undefined,
+            },
+            templateVersionId: run.templateVersionId,
+            subaccountId: run.subaccountId,
+          });
           return;
         }
 
@@ -3413,7 +3458,27 @@ export const WorkflowEngineService = {
 
       await WorkflowStepReviewService.requireApproval(sr, {
         reviewKind: 'decision_confidence_escalation',
-      } as Parameters<typeof WorkflowStepReviewService.requireApproval>[1]);
+        organisationId: run.organisationId,
+        // B1 fix (spec §6.3): forward step + run context.
+        stepDefinition: {
+          id: step.id,
+          type: step.type,
+          name: step.name,
+          params: step.params as Record<string, unknown> | undefined,
+          isCritical: step.params?.is_critical === true,
+          sideEffectClass: typeof step.params?.side_effect_class === 'string'
+            ? step.params.side_effect_class
+            : undefined,
+        },
+        templateVersionId: run.templateVersionId,
+        subaccountId: run.subaccountId,
+        // Decision-step rationale supplied as agentReasoning so it lands
+        // in seen_payload at gate-open.
+        agentReasoning: typeof rationale === 'string' ? rationale : null,
+        upstreamConfidence: typeof confidence === 'number'
+          ? (confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low')
+          : null,
+      });
 
       logger.info('workflow_decision_low_confidence_escalated', {
         event: 'decision.low_confidence_escalation',

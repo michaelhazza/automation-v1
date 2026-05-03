@@ -135,10 +135,19 @@ export const WorkflowGateStallNotifyService = {
     cadence: WorkflowGateStallNotifyPayload['cadence'];
     gateKind: 'approval' | 'ask';
   }): Promise<void> {
+    // Explicit organisationId filter alongside RLS — DEVELOPMENT_GUIDELINES §1.
+    // Defends against a future deployment moving this code outside the worker's
+    // withOrgTx context (e.g. a maintenance script using withAdminConnection).
     const [user] = await db
       .select({ email: users.email })
       .from(users)
-      .where(and(eq(users.id, params.requesterUserId), isNull(users.deletedAt)))
+      .where(
+        and(
+          eq(users.id, params.requesterUserId),
+          eq(users.organisationId, params.organisationId),
+          isNull(users.deletedAt),
+        ),
+      )
       .limit(1);
 
     if (!user?.email) {

@@ -298,32 +298,40 @@ router.post(
     const { runId } = req.params;
     const { extendCostCents, extendSeconds } = req.body as { extendCostCents?: number; extendSeconds?: number };
 
-    let result: Awaited<ReturnType<typeof WorkflowRunPauseStopService.resumeRun>>;
-    try {
-      result = await WorkflowRunPauseStopService.resumeRun(runId, req.orgId!, req.user!.id, { extendCostCents, extendSeconds });
-    } catch (err: unknown) {
-      const e = err as { statusCode?: number; errorCode?: string; cap?: string };
-      if (e?.statusCode === 400 && e?.errorCode === 'extension_required') {
-        res.status(400).json({ error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: e.cap ?? 'cost_ceiling' });
-        return;
-      }
-      if (e?.statusCode === 400 && e?.errorCode === 'extension_cap_reached') {
-        res.status(400).json({ error: 'extension_cap_reached' });
-        return;
-      }
-      throw err; // re-throw unknown errors
-    }
+    const result = await WorkflowRunPauseStopService.resumeRun(
+      runId,
+      req.orgId!,
+      req.user!.id,
+      { extendCostCents, extendSeconds },
+    );
 
-    if (!result.resumed) {
-      const reason = result.reason ?? 'unknown';
-      if (reason === 'race_with_other_action') {
-        res.status(409).json({ error: 'race_with_other_action', current_status: result.currentStatus ?? 'unknown' });
-        return;
-      }
-      res.json({ resumed: false, reason });
+    if (result.resumed) {
+      res.json({ resumed: true, extension_count: result.extensionCount ?? 0 });
       return;
     }
-    res.json({ resumed: true, extension_count: result.extensionCount ?? 0 });
+
+    // Spec §7: flat-shape responses for resume failure modes.
+    const reason = result.reason ?? 'unknown';
+    if (reason === 'extension_required') {
+      res.status(400).json({
+        error: 'extension_required',
+        reason: 'previous_pause_was_cap_triggered',
+        cap: result.cap ?? 'cost_ceiling',
+      });
+      return;
+    }
+    if (reason === 'extension_cap_reached') {
+      res.status(400).json({ error: 'extension_cap_reached' });
+      return;
+    }
+    if (reason === 'race_with_other_action') {
+      res.status(409).json({
+        error: 'race_with_other_action',
+        current_status: result.currentStatus ?? 'unknown',
+      });
+      return;
+    }
+    res.json({ resumed: false, reason });
   })
 );
 
