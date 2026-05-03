@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/agentic-commerce/spec.md
-active_plan: tasks/builds/agentic-commerce/plan.md
-build_slug: agentic-commerce
-branch: claude/agentic-commerce-spending
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-04
+last_merge_ready_pr: #255
+last_merge_ready_slug: agentic-commerce
+last_merge_ready_branch: claude/agentic-commerce-spending
 -->
 
 # Current Focus
@@ -19,10 +22,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/agentic-commerce/spec.md` — Final, chatgpt-spec-review APPROVED (5 rounds, 2026-05-03).
-**Active plan:** `tasks/builds/agentic-commerce/plan.md` — LOCKED, chatgpt-plan-review APPROVED (3 rounds, 2026-05-03).
-**Active build slug:** `agentic-commerce`
-**Status:** **REVIEWING** — Phase 1 + Phase 2 complete. All 16 chunks built; static gates clean; spec-conformance CONFORMANT (re-verification scope); pr-reviewer 5 blocking + 4 strong all closed; dual-reviewer skipped (Codex unavailable, allowed); adversarial-reviewer DONE (1 blocker fixed in branch — webhook connectionStatus allowlist; 11 items deferred to `tasks/todo.md`; 3 reviewer findings dissolved as false positives or by-design). Branch `claude/agentic-commerce-spending`. Next step: open PR, then launch finalisation-coordinator (Phase 3) in a fresh session for S2 sync, G4 regression guard, chatgpt-pr-review, doc-sync sweep, KNOWLEDGE.md, MERGE_READY.
+**Active spec:** none.
+**Active plan:** none.
+**Active build slug:** none.
+**Status:** **MERGE_READY** — Phase 3 complete for `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). `ready-to-merge` label applied at 2026-05-03T22:55:22Z; CI is running G5. Awaiting CI green, then merge via the GitHub UI. After merge, set status to `MERGED` (or `NONE` to clear the trail). finalisation-coordinator does NOT auto-merge.
+
+**Last merge-ready build:** `agentic-commerce` — Stripe SPT-backed agent spending primitive. 16 chunks, ~140 files vs `origin/main`, 6 migrations (0270 Compute Budget rename, 0271 schema + RLS + append-only triggers, 0272 cost_aggregates RLS retrofit + spend dimensions, 0273 stripe_agent providerType, 0274 actions.agent_id nullable, 0275 grants_active_unique partial UNIQUE). New SPEND_APPROVER permission key. New webhook handler (`stripeAgentWebhook.ts`) with HMAC verification, three-layer dedup, tenant-context derivation, replay protection, connectionStatus allowlist gate. 6 new payment skills (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`, `promote_spending_policy_to_live`), 6 new pg-boss jobs (agent spend request/completion handlers, approval expiry, execution window timeout, shadow charge retention, Stripe agent reconciliation poll). 14 new client surfaces (Spending Budgets list/detail, Spend Ledger, SPT onboarding wizard, Org and Subaccount approval channels with grant management, kill switch, conservative defaults, top-block-reasons aggregation, retry grouping). Pipeline outcomes: spec-conformance CONFORMANT (re-verification scope, 1 latent DG closed) → pr-reviewer 5 blocking + 4 strong all closed in-branch → dual-reviewer skipped (Codex unavailable, allowed) → adversarial-reviewer 1 blocker fixed (webhook connectionStatus allowlist), 11 items deferred to `tasks/todo.md`, 3 dissolved → chatgpt-pr-review round 1 closed (5 of 8 findings auto-applied, 3 deferred; verdict Yellow → close to green) → doc-sync sweep complete (architecture.md migrations 0274+0275, capabilities.md new "Agent Spending" capability + changelog, integration-reference.md new `stripe_agent` integration) → KNOWLEDGE.md 4 patterns appended (trigger-enforced caller-identity GUC, webhook connectionStatus allowlist, DB-layer idempotency partial UNIQUE, pre-insert+post-resolution-snapshot). Build slug `agentic-commerce`, branch `claude/agentic-commerce-spending`.
 
 **Just merged:** GHL Module C — Agency OAuth (PR #254, merged 2026-05-03). Two-tier token model, FORCE-RLS `connector_location_tokens` (migration 0269), agency columns on `connector_configs` (migration 0268), webhook lifecycle dispatcher with HMAC + ordering invariant, disconnected-state circuit breaker.
 

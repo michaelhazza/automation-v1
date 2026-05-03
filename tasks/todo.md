@@ -2543,28 +2543,6 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 
 - [ ] **Operator-facing kill switch UI / endpoint for `connector_configs.status='disconnected'`.** The status enum (`'active' | 'error' | 'disconnected'`) and short-circuiting at `findAgencyConnectionByCompanyId` + `connectorPollingTick` are already in place. What's missing is a one-click admin path: `POST /api/admin/connector-configs/:id/disable` that flips the status to `disconnected` and soft-deletes the location tokens (see related cascade item above). Useful in production incident response when a partner integration is misbehaving. **When required:** before the first production incident (operator response time gates this). Source: chatgpt-pr-review PR #254 round 2 finding 7.
 
-## Deferred from spec-conformance review — agentic-commerce (2026-05-03)
-
-**Captured:** 2026-05-03T14:12:21Z
-**Source log:** `tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T14-12-21Z.md`
-**Spec:** `tasks/builds/agentic-commerce/spec.md`
-
-- [x] **Spend route permission guards do not match spec §11.3.** **CLOSED 2026-05-04.** Root mismatch was narrower than the original log suggested — most routes already used `SPEND_APPROVER` correctly. The single clear divergence was `POST /api/spending-budgets/:id/promote-to-live` using `SETTINGS_EDIT` instead of `SPEND_APPROVER` (HITL-gated per spec). Flipped to `SPEND_APPROVER` (`server/routes/spendingBudgets.ts:130`) and added a header comment documenting `SETTINGS_EDIT` as the canonical "admin" gate per spec §11.3 mapping.
-
-- [x] **`chargeRouterServicePure.ts` imports `canonicaliseJson` from impure `actionService.ts`.** **CLOSED 2026-05-04.** Extracted `canonicaliseJson` + `hashActionArgs` + `computeValidationDigest` to new pure module `server/lib/canonicalJsonPure.ts` (depends only on `crypto`). `actionService.ts` re-exports them for backward compat. `chargeRouterServicePure.ts:13` and the chargeRouter test file now import directly from `../lib/canonicalJsonPure.js`. Pure-helper boundary restored — pure module no longer drags transitive DB imports.
-
-- [x] **`app.spend_caller` GUC convention is unevenly applied.** **CLOSED 2026-05-04.** Tightened convention: `chargeRouterService.updateChargeStatus` now calls `SELECT set_config('app.spend_caller', $caller, true)` before every UPDATE so the trigger sees the same caller identity recorded in `last_transition_by`. All other UPDATE call sites (job handlers, webhook service, runPolicyGate) already set the GUC. Convention is now uniformly applied.
-
-- [x] **`promote_spending_policy_to_live` HITL action bypasses `actionService.proposeAction`.** **CLOSED 2026-05-04.** Registered `promote_spending_policy_to_live` in `ACTION_REGISTRY` (`actionCategory: 'api'`, `defaultGateLevel: 'review'`, `spendsMoney: false`, `directExternalSideEffect: false`, Zod schema for `{ spendingBudgetId, requesterId }`). Refactored `spendingBudgetService.requestPromotion` to call `actionService.proposeAction` with the canonical idempotency key (`promote:${policy.id}:${policy.version}`). Advisory lock + invariant 29 pre-check preserved. Spend-promotion now flows through the canonical HITL surface like every other registered action.
-
-## Deferred from spec-conformance review — agentic-commerce (2026-05-03 re-verification)
-
-**Captured:** 2026-05-03T20:51:25Z
-**Source log:** `tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T20-49-38Z.md`
-**Spec:** `tasks/builds/agentic-commerce/spec.md`
-
-- [x] **`agentId: ''` (empty string) passed to `actionService.proposeAction` for system-initiated actions; `actions.agent_id` is `uuid` and rejects empty strings at runtime.** **CLOSED 2026-05-04.** Widened `ProposeActionInput.agentId` from `string` to `string | null` (`server/services/actionService.ts:78-83`). Updated both empty-string call sites to pass `null`: `spendingBudgetService.ts:497` (system-initiated promote-to-live) and `chargeRouterService.ts:502` (`input.agentId ?? null`). Drizzle accepts `null` for the nullable `agent_id` column per migration 0274. Static gates pass clean (typecheck 0 errors, lint 0 errors). Regression test for system-initiated proposeAction call deferred — covered by CI-only test suite.
-
 ## Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)
 
 **Captured:** 2026-05-03T22:07:50Z

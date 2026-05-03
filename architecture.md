@@ -1842,6 +1842,8 @@ When introducing a new feature whose behaviour the agents will need to query, as
 109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0275` — Agentic Commerce hardening: partial UNIQUE index on `org_subaccount_channel_grants(org_channel_id, subaccount_id) WHERE active = true` — DB-level idempotency guard for the grant-active uniqueness invariant. Pairs with SELECT-then-INSERT race-handling in `approvalChannelService.addGrant`.
+- `0274` — Agentic Commerce Chunk 8: `actions.agent_id` made nullable to support agent-less spend reservations (system / cron / webhook-driven charges that do not originate from an agent run).
 - `0273` — Agentic Commerce Chunk 3: adds `'stripe_agent'` to `integration_connections.providerType`; documents SPT vault extension (TypeScript-layer only — providerType is TEXT, no DB ENUM)
 - `0272` — Agentic Commerce Chunk 2: `cost_aggregates` organisation_id column, backfill, RLS, spend dimensions
 - `0271` — Agentic Commerce Chunk 2: `agent_charges`, `spending_budgets`, `spending_policies`, `spending_budget_approvers`, `approval_channels`, `approval_channel_grants`, `agent_charge_status` ENUM, append-only triggers

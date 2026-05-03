@@ -1853,3 +1853,60 @@ The cheapest leverage on a multi-provider integration surface is making logs fil
 ### [2026-05-03] Pattern — ChatGPT "ship with confidence" + "do NOT run another round" is the terminal close signal, regardless of remaining checklist size
 
 ChatGPT review loops do not have a deterministic stop condition; the model will happily produce another checklist round if asked. The reliable terminal signal is when ChatGPT itself opens a round with both "you're basically there / ship with confidence" framing AND closes with explicit "Do NOT run another PR review loop / past diminishing returns" instruction. When both phrases co-occur, treat as CLOSED — even if the round opens with a 6-item or 7-item checklist (those checklists are operational verification items the operator runs against staging, not blockers for code change). PR #254 round 3 opened with "ship with confidence" and a 6-item checklist; treating it as a verification + cleanup pass (rather than another find-bugs round) yielded 1 surgical fix (silent-failure logs) + 1 documentation deliverable (pre-prod validation procedure) + 0 architectural changes — and respecting the close signal saved a round-4 hallucination spiral. **Rule:** detect the dual signal in the FIRST paragraph of any ChatGPT review response; when present, the next round is a cleanup pass not a triage pass, and there will be no round-after-next regardless of model output. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 3 close.
+
+### [2026-05-04] Pattern — Trigger-enforced caller-identity GUC for state-machine transitions
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a state-machine table has transitions that are *only* legal when invoked by a specific subsystem (e.g. "the `failed → succeeded` post-terminal override is permitted only for the Stripe webhook", "DELETE is permitted only for the retention-purge job"), enforce the caller identity at the **DB-trigger** layer rather than (or in addition to) the application layer. Pattern:
+
+1. Define a closed enum of valid caller names: `CREATE TYPE agent_charge_transition_caller AS ENUM ('charge_router','stripe_webhook','timeout_job','worker_completion','approval_expiry_job','retention_purge')`.
+2. Application sets the caller via `SET LOCAL "app.spend_caller" = '<name>'` inside the `withOrgTx` transaction, immediately before the gated UPDATE/DELETE.
+3. A `BEFORE UPDATE` trigger reads `current_setting('app.spend_caller', true)` and raises an error when the transition shape requires a specific caller and the GUC value does not match.
+4. The GUC is **NOT** an RLS variable — it does not appear in any policy USING clause. It is a one-shot caller-identity assertion within a transaction, separate from organisation/principal context.
+
+Why this beats app-layer-only enforcement: application code paths multiply over time (new entry points, new resume paths, jobs running outside the canonical service). A trigger fails closed regardless of which file did the UPDATE — it cannot be bypassed by adding a new writer. The closed ENUM also prevents typo drift; an unknown caller value becomes a SQL error, not a silent permission grant. Pattern shipped on `agent_charges` (migration 0271). The codebase's existing append-only tables (`llm_requests`, `audit_events`, `mcp_tool_invocations`) all use app-layer-only enforcement; `agent_charges` is the first DB-trigger-enforced state-machine table and the template for any future financial / audit / regulated state machine where caller-identity gates transitions.
+
+### [2026-05-04] Pattern — Webhook `connectionStatus` allowlist (NOT exclusion-list) when secret persists across state changes
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a webhook handler dispatches to per-tenant business logic gated on the parent connection's status, and the per-connection signing secret persists across state transitions (revoked, error, paused), the gate MUST be expressed as an **allowlist of permitted statuses**, not an exclusion-list of forbidden ones. The danger of an exclusion-list is silent: a future migration adds a new state value (e.g. `'suspended'`, `'pending_revoke'`, `'compromised'`); the exclusion-list does not list it; behaviour silently routes the new state to the "process normally" branch. By the time the bug is found, the new state has been processed as if active for some period.
+
+Pattern: hard-code the closed set of statuses that are valid to process (`['active', 'connected']` for most surfaces; some integrations also accept `'pending'` for handshake flows) and reject every other value with an explicit log + 4xx response. New states default to "do not process" instead of "process". The webhook secret outliving connection lifecycle is a feature, not a bug — it lets late-arriving events from before a revoke land in a structured rejection rather than a 500 error — but combined with an exclusion-list gate it becomes a footgun.
+
+Shipped at `server/routes/webhooks/stripeAgentWebhook.ts:155` (adversarial-reviewer Finding 2.2 fix in PR #255). Generalises to every webhook handler where the parent connection has a status field with more than two states.
+
+### [2026-05-04] Pattern — DB-layer idempotency (partial UNIQUE + 23505 catch) beats API-layer idempotency for soft-delete-tracked uniqueness
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+For an "at most one active row per (parent, child)" invariant where past inactive rows are kept as audit history (soft-delete via `active=false` + `revoked_at`), DB-layer idempotency wins over service-layer idempotency:
+
+```sql
+CREATE UNIQUE INDEX <table>_active_unique
+  ON <table> (parent_id, child_id) WHERE active = true;
+```
+
+Paired with a service-layer `SELECT ... WHERE active = true → INSERT → catch 23505 → re-SELECT` race-handler, the partial UNIQUE provides:
+
+1. **Race-tight:** double-clicks, retries, and concurrent writers all land in either a successful INSERT or a 23505 caught and resolved against the existing active row. No app-layer locking required.
+2. **Audit-clean:** revoked rows remain in the table with `active=false` for the full audit trail; the UNIQUE only constrains the live state.
+3. **Drift-resistant:** future contributors who add a new INSERT path automatically inherit the guarantee; they cannot accidentally create a duplicate active row even if they skip the service-layer dedupe.
+
+Shipped on `org_subaccount_channel_grants` (migration 0275, chatgpt-pr-review round 1 Finding 2 fix). Pairs with the existing KNOWLEDGE.md entry `[2026-04-25] Gotcha — Partial unique index predicate must match the upsert WHERE clause exactly` — that entry covers the maintenance discipline; this entry covers the *first decision* to use the pattern. Together they form a "use this pattern by default, here's what breaks if you don't maintain it" pair. **Rule:** for any "at most one active per (X, Y) with audit history" requirement, ship the partial UNIQUE in the same migration as the table, before the service code that depends on it.
+
+### [2026-05-04] Pattern — Pre-insert + post-resolution-snapshot for state-machine rows that need to lock during creation
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a state-machine row's *initial* values must be derived from policy/budget/capacity data that requires advisory-lock-protected reads, two write paths exist:
+
+1. **Read-then-insert:** Read budget/policy under lock, INSERT the row, COMMIT. Problem: the row does not exist between the read and the INSERT, so a concurrent transaction reading the same budget cannot see the in-flight reservation. Capacity overruns are possible.
+2. **Insert-then-snapshot (pattern):** INSERT the row in `proposed` state with placeholder values, acquire `pg_advisory_xact_lock(budget_id)`, SELECT current capacity (which now includes this in-flight row), evaluate policy, UPDATE the row to `approved | denied | pending_approval` with the resolved snapshot of `spending_policy_id`, `policy_version`, `mode`, etc. The trigger that protects post-insert immutability of these snapshot fields carves out the `proposed → X` transition (any other UPDATE that touches the snapshot fields raises an error).
+
+Why pattern 2 wins: capacity computation sees the in-flight row, so two concurrent proposals against the same budget serialise correctly under the advisory lock. The trigger carve-out is the cost — a single well-named exception path — and it pays for itself by making the snapshot fields immutable everywhere else. Documented as the resolution to a code-vs-trigger contradiction at `tasks/builds/agentic-commerce/spec.md §305-307`. Generalises to any state-machine row whose initial state requires lock-protected reads on related tables (budget reservations, capacity grants, queue admission, license counter consumption). **Rule:** if you find yourself reaching for "lock the parent, read capacity, insert child", invert the order — insert child in placeholder state, lock parent inside the same transaction, snapshot derived values onto the child via UPDATE before COMMIT.

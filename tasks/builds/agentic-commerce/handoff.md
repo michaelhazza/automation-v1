@@ -111,3 +111,30 @@ Three sections in `tasks/todo.md` capture the agentic-commerce backlog. None of 
 1. ~~Commit this handoff + bookkeeping + adversarial-reviewer fix (main session).~~ DONE — commit `581d22db`, pushed.
 2. ~~Open the PR (main session, manual `gh pr create`).~~ PR #255 already existed — title + body refreshed at Phase 3 entry.
 3. Launch finalisation-coordinator. Operator opted to resume in the same session rather than spawning a new one.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #255
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T22-41-01Z.md`
+**spec_deviations reviewed:** yes (gate-time-snapshot for `spending_policy_id`, `policy_version`, `mode` — verified consistent with the documented `agent_charges_validate_update` trigger carve-out at `architecture.md:1592`)
+**Doc-sync sweep verdicts:**
+- architecture.md: yes (Migrations — added 0274 + 0275 entries; other agentic-commerce coverage pre-existing from inline updates during build)
+- capabilities.md: yes (TOC, new "Agent Spending" capability section, 2026-05-04 changelog entry; Editorial Rules applied)
+- integration-reference.md: yes (new `stripe_agent` integration entry, `last_verified: 2026-05-04`)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — change-set introduced no new build-discipline rule, agent-fleet change, or §8 invariant
+- CONTRIBUTING.md: no — 3 new `eslint-disable` comments apply existing policy; no new pattern added
+- frontend-design-principles.md: no — new spend surfaces consume existing approval-card + admin-config patterns; no new design principle introduced
+- spec-context.md: n/a (spec-review sessions only)
+- KNOWLEDGE.md: yes (4 patterns appended)
+
+**KNOWLEDGE.md entries added:** 4
+1. Trigger-enforced caller-identity GUC for state-machine transitions
+2. Webhook `connectionStatus` allowlist (NOT exclusion-list) when secret persists across state changes
+3. DB-layer idempotency (partial UNIQUE + 23505 catch) beats API-layer idempotency for soft-delete-tracked uniqueness
+4. Pre-insert + post-resolution-snapshot for state-machine rows that need to lock during creation
+
+**tasks/todo.md items removed:** 5 closed `[x]` items removed (4 from `## Deferred from spec-conformance review — agentic-commerce (2026-05-03)` + 1 from `## Deferred from spec-conformance review — agentic-commerce (2026-05-03 re-verification)`); both fully-closed sections removed entirely. Open items in `## Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)` (11 items) and `## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 1)` (3 items) left untouched.
+
+**ready-to-merge label applied at:** 2026-05-03T22:55:22Z

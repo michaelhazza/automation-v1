@@ -395,6 +395,65 @@ last_verified: "2026-04-17"
 owner: platform-team
 ```
 
+### Stripe Agent (write-capable spend integration)
+
+```yaml integration
+slug: stripe_agent
+name: Stripe Agent
+provider_type: oauth
+status: ga
+visibility: public
+read_capabilities:
+  - charge_list
+  - charge_status
+write_capabilities:
+  - charge_create
+  - charge_refund
+  - subscription_create
+  - balance_topup
+skills_enabled:
+  - pay_invoice
+  - purchase_resource
+  - subscribe_to_service
+  - top_up_balance
+  - issue_refund
+primitives_required:
+  - oauth_connection
+  - webhook_receiver
+  - spt_vault
+  - charge_router
+  - spend_ledger
+auth_method: oauth2
+required_scopes:
+  - spt_issue
+  - charge_create
+  - charge_refund
+setup_steps_summary: Per-sub-account Stripe Programmable Tokens (SPT) connection for agent-driven money movement. SPT is short-lived, scoped, and revocable; renewals are automatic. Distinct from the read-only Stripe reporting integration.
+setup_doc_link: null
+typical_use_cases:
+  - Agent pays vendor invoices on a client's behalf
+  - Agent completes a one-shot purchase against a vendor's hosted checkout
+  - Agent activates a vendor subscription
+  - Agent tops up a prepaid balance or credits account
+  - Agent issues a refund against a prior charge
+broadly_useful_patterns:
+  - Per-sub-account spending budgets with hard ceilings and kill switch
+  - Shadow-mode policy rollout with explicit promotion approval
+  - Per-charge approval gates above operator-defined thresholds
+  - Append-only spend ledger with database-level lifecycle guards
+  - Idempotency at the charge-key layer prevents double-billing under retries
+client_specific_patterns:
+  - Allowlist of approved merchants per spending policy
+  - Per-currency policy rules (one currency per policy)
+known_gaps:
+  - Multi-currency-within-a-policy not supported (out of scope)
+  - Automatic FX not supported (out of scope)
+  - Customer-facing SPT issuance not supported (out of scope)
+implemented_since: "2026-05-04"
+last_verified: "2026-05-04"
+owner: platform-team
+```
+
 ### Monday.com
 
 ```yaml integration
