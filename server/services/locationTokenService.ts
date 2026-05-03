@@ -209,6 +209,11 @@ async function refreshLocationToken(
   }
 
   const claimedAt = new Date();
+  // Soft-delete-aware UPDATE: between the read of the cached row and this
+  // write, a parallel 401 handler may have soft-deleted the row. Without the
+  // isNull(deletedAt) guard the refresh would land on a tombstoned row that
+  // every live-read query filters out, leaving the system to mint a duplicate
+  // and burn an extra GHL refresh token.
   await db
     .update(connectorLocationTokens)
     .set({
@@ -218,7 +223,10 @@ async function refreshLocationToken(
       scope: data.scope,
       updatedAt: new Date(),
     })
-    .where(eq(connectorLocationTokens.id, tokenRowId));
+    .where(and(
+      eq(connectorLocationTokens.id, tokenRowId),
+      isNull(connectorLocationTokens.deletedAt),
+    ));
 
   logger.info('ghl.token.refresh', {
     event: 'ghl.token.refresh',

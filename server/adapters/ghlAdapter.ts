@@ -284,12 +284,18 @@ export const ghlAdapter: IntegrationAdapter = {
   // ── Webhook handling ─────────────────────────────────────────────────────
   webhook: {
     verifySignature(payload: Buffer, signature: string, secret: string): boolean {
+      // GHL may deliver the signature header with or without a `sha256=`
+      // prefix (matching the GitHub-style convention). Strip it before the
+      // length-equality check so the legitimate prefixed shape doesn't fail
+      // closed at timingSafeEqual's same-length precondition.
+      const sigHex = signature.startsWith('sha256=') ? signature.slice(7) : signature;
       const computed = crypto
         .createHmac('sha256', secret)
         .update(payload)
         .digest('hex');
+      if (sigHex.length !== computed.length) return false;
       try {
-        return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computed));
+        return crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(computed, 'hex'));
       } catch {
         return false;
       }

@@ -298,39 +298,51 @@ export const connectorConfigService = {
     expiresAt: Date;
     scope: string;
   }): Promise<typeof connectorConfigs.$inferSelect> {
+    // connector_configs has FORCE ROW LEVEL SECURITY. The OAuth callback that
+    // calls this is intentionally unauthenticated (browser redirect with no
+    // JWT), so app.organisation_id is never set. Use withAdminConnection +
+    // SET LOCAL ROLE admin_role to bypass RLS — orgId is already validated
+    // by the state-nonce consume step at the route layer, so org isolation
+    // is upheld at the application boundary.
     const encryptedAccess = connectionTokenService.encryptToken(params.accessToken);
     const encryptedRefresh = connectionTokenService.encryptToken(params.refreshToken);
     try {
-      const [row] = await db
-        .insert(connectorConfigs)
-        .values({
-          organisationId: params.orgId,
-          connectorType: 'ghl' as ConnectorType,
-          tokenScope: 'agency',
-          companyId: params.companyId,
-          accessToken: encryptedAccess,
-          refreshToken: encryptedRefresh,
-          expiresAt: params.expiresAt,
-          scope: params.scope,
-          status: 'active' as ConnectorStatus,
-          installedAt: new Date(),
-          disconnectedAt: null,
-        })
-        .onConflictDoUpdate({
-          target: [connectorConfigs.organisationId, connectorConfigs.connectorType, connectorConfigs.companyId],
-          targetWhere: sql`token_scope = 'agency' AND status <> 'disconnected'`,
-          set: {
-            accessToken: encryptedAccess,
-            refreshToken: encryptedRefresh,
-            expiresAt: params.expiresAt,
-            scope: params.scope,
-            status: 'active' as ConnectorStatus,
-            disconnectedAt: null,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
-      return row;
+      return await withAdminConnection(
+        { source: 'ghl_oauth_callback_upsert', skipAudit: true },
+        async (adminDb) => {
+          await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+          const [row] = await adminDb
+            .insert(connectorConfigs)
+            .values({
+              organisationId: params.orgId,
+              connectorType: 'ghl' as ConnectorType,
+              tokenScope: 'agency',
+              companyId: params.companyId,
+              accessToken: encryptedAccess,
+              refreshToken: encryptedRefresh,
+              expiresAt: params.expiresAt,
+              scope: params.scope,
+              status: 'active' as ConnectorStatus,
+              installedAt: new Date(),
+              disconnectedAt: null,
+            })
+            .onConflictDoUpdate({
+              target: [connectorConfigs.organisationId, connectorConfigs.connectorType, connectorConfigs.companyId],
+              targetWhere: sql`token_scope = 'agency' AND status <> 'disconnected'`,
+              set: {
+                accessToken: encryptedAccess,
+                refreshToken: encryptedRefresh,
+                expiresAt: params.expiresAt,
+                scope: params.scope,
+                status: 'active' as ConnectorStatus,
+                disconnectedAt: null,
+                updatedAt: new Date(),
+              },
+            })
+            .returning();
+          return row;
+        },
+      );
     } catch (err: unknown) {
       const pg = err as { code?: string; constraint?: string };
       if (pg.code === '23505' && pg.constraint?.includes('global_agency')) {
@@ -344,19 +356,30 @@ export const connectorConfigService = {
   },
 
   async findAgencyConnectionByCompanyId(companyId: string): Promise<typeof connectorConfigs.$inferSelect | null> {
-    const [row] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(
-        and(
-          eq(connectorConfigs.connectorType, 'ghl' as ConnectorType),
-          eq(connectorConfigs.companyId, companyId),
-          eq(connectorConfigs.tokenScope, 'agency'),
-          ne(connectorConfigs.status, 'disconnected'),
-        )
-      )
-      .limit(1);
-    return row ?? null;
+    // Cross-org primitive — used by the unauthenticated webhook route to map
+    // GHL companyId to the owning organisation. Plain `db` reads return zero
+    // rows under FORCE RLS without an app.organisation_id GUC. Bypass via
+    // admin role; the companyId match (with status<>disconnected and
+    // tokenScope=agency) provides the application-layer scoping.
+    return await withAdminConnection(
+      { source: 'ghl_webhook_company_lookup', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select()
+          .from(connectorConfigs)
+          .where(
+            and(
+              eq(connectorConfigs.connectorType, 'ghl' as ConnectorType),
+              eq(connectorConfigs.companyId, companyId),
+              eq(connectorConfigs.tokenScope, 'agency'),
+              ne(connectorConfigs.status, 'disconnected'),
+            )
+          )
+          .limit(1);
+        return row ?? null;
+      },
+    );
   },
 
   async refreshAgencyTokenIfExpired(configId: string): Promise<void> {
