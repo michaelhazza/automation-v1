@@ -3,32 +3,7 @@
  * Run: npx vitest run server/adapters/__tests__/ghlAdapter.test.ts
  */
 import { test, expect, vi } from 'vitest';
-
-// Pure representation of the withLocationToken 401-retry pattern extracted
-// for unit testing without DB/network dependencies.
-
-type WithLocationTokenOptions = {
-  getToken: () => Promise<string>;
-  handle401: () => Promise<string>;
-};
-
-async function withLocationTokenTest<T>(
-  fn: (token: string) => Promise<T>,
-  { getToken, handle401 }: WithLocationTokenOptions,
-): Promise<T> {
-  const token = await getToken();
-  try {
-    return await fn(token);
-  } catch (err) {
-    const e = err as { response?: { status?: number }; status?: number; statusCode?: number };
-    const status = e.response?.status ?? e.status ?? e.statusCode;
-    if (status === 401) {
-      const freshToken = await handle401();
-      return fn(freshToken);
-    }
-    throw err;
-  }
-}
+import { withLocationTokenRetry } from '../ghlAdapterPure.js';
 
 test('withLocationToken: 401 on first try triggers handle401 and retries with fresh token', async () => {
   let callCount = 0;
@@ -42,7 +17,7 @@ test('withLocationToken: 401 on first try triggers handle401 and retries with fr
 
   const handle401Mock = vi.fn(async () => 'fresh-token');
 
-  const result = await withLocationTokenTest(mockFn, {
+  const result = await withLocationTokenRetry(mockFn, {
     getToken: async () => 'initial-token',
     handle401: handle401Mock,
   });
@@ -58,7 +33,7 @@ test('withLocationToken: success on first try returns result without calling han
   const mockFn = vi.fn(async (token: string) => `result-${token}`);
   const handle401Mock = vi.fn(async () => 'should-not-be-called');
 
-  const result = await withLocationTokenTest(mockFn, {
+  const result = await withLocationTokenRetry(mockFn, {
     getToken: async () => 'access-token',
     handle401: handle401Mock,
   });
@@ -74,7 +49,7 @@ test('withLocationToken: non-401 error propagates without retry', async () => {
   const handle401Mock = vi.fn(async () => 'should-not-be-called');
 
   await expect(
-    withLocationTokenTest(mockFn, {
+    withLocationTokenRetry(mockFn, {
       getToken: async () => 'access-token',
       handle401: handle401Mock,
     }),
@@ -97,7 +72,7 @@ test('withLocationToken: handle401 throwing LOCATION_TOKEN_INVALID propagates th
   const handle401Mock = vi.fn(async () => { throw locationTokenError; });
 
   await expect(
-    withLocationTokenTest(mockFn, {
+    withLocationTokenRetry(mockFn, {
       getToken: async () => 'initial-token',
       handle401: handle401Mock,
     }),
@@ -121,7 +96,7 @@ test('withLocationToken: detects 401 via response.status (axios error shape)', a
 
   const handle401Mock = vi.fn(async () => 'refreshed-token');
 
-  const result = await withLocationTokenTest(mockFn, {
+  const result = await withLocationTokenRetry(mockFn, {
     getToken: async () => 'stale-token',
     handle401: handle401Mock,
   });

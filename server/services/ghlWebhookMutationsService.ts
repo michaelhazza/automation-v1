@@ -86,7 +86,7 @@ export async function recordGhlMutation(input: RecordGhlMutationInput): Promise<
     // admin_role to bypass RLS — application-layer scoping is preserved by the
     // organisationId/subaccountId columns explicitly written into the row, and
     // the upstream caller (ghlWebhook route) has already validated the org via
-    // findAgencyConnectionByCompanyId or canonicalAccounts→connectorConfigs lookup.
+    // findAgencyConnectionByCompanyId or the connector-configs service lookup.
     await withAdminConnection(
       { source: 'ghl_webhook_record_mutation', skipAudit: true },
       async (adminDb) => {
