@@ -312,3 +312,70 @@ Top themes (round 3):
 
 **ChatGPT verdict across all 3 rounds: ✅ Ready to build.**
 
+---
+
+## Round 4 — 2026-05-03T08:05:00Z (approx)
+
+### ChatGPT Feedback (raw)
+
+ChatGPT verdict: **✅ Hard green light — no blockers, no hidden architectural risks.** 5 final polish items, all yellow. 7 design decisions called out explicitly as "now strong, don't revisit."
+
+1. **🟡 Terminal state definition** — single canonical block; multiple sections now rely on monotonicity/overrides without a formal reference.
+2. **🟡 Approval expiry vs execution race** — once a charge enters `executed`, approval expiry should be ignored.
+3. **🟡 `executed` entered exactly once** — add explicit invariant against pg-boss retries, duplicate triggers, race conditions.
+4. **🟡 Stripe object binding** — validate `provider_charge_id` match explicitly; signature check doesn't prevent same-account cross-charge events.
+5. **🟡 `last_transition_event_id`** — add Stripe event ID / pg-boss job ID field alongside `last_transition_by`.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Canonical terminal state definition block | technical | apply | auto (apply) | low | Consolidation win — multiple sections now reference terminal-state semantics without a canonical anchor. One table eliminates future drift. |
+| 2 | Approval expiry immune to `executed` rows | technical | apply | auto (apply) | low | Real clarification gap — spec never explicitly scoped the job to `pending_approval` only. Future devs could expand the job incorrectly. |
+| 3 | `executed` entered exactly once | technical | apply (new invariant 22) | auto (apply) | low | Cheap invariant, strong guarantee against double-execution. |
+| 4 | `provider_charge_id` explicit matching | technical | apply | auto (apply) | low-medium | Closes the "cross-charge spoof or misrouted event" surface. Signature check is account-level; this is charge-level. |
+| 5 | `last_transition_event_id` column | technical | apply | auto (apply) | low | Completes the `last_transition_by` debugging picture; Stripe event ID → instant cross-reference to Stripe dashboard. |
+
+No user gate (all findings technical, severity low or low-medium). All resolved as auto.
+
+### Auto-applied (this round)
+
+- [auto] Finding 1: new "Canonical Terminal State Reference" subsection in §4 — authoritative table for truly-terminal, provisionally-terminal, functionally-settled, and non-terminal states.
+- [auto] Finding 2: §4 rules — "Approval expiry is scoped to `pending_approval` rows only" explicit clause added; `executed` rows immune.
+- [auto] Finding 3: §10 — new invariant 22 "`executed` entered exactly once." Prior invariants 22 and 23 renumbered to 23 and 24 respectively; all cross-references updated.
+- [auto] Finding 4: §7.5 — new "Row resolution by `provider_charge_id`" bullet in `stripeAgentWebhookService` responsibilities. Tenant-context cross-check added.
+- [auto] Finding 5: §5.1 `agent_charges` — new `last_transition_event_id text NULL` column. Added to mutable allowlist + migration scope. §17 Chunk 12 updated.
+
+### Edits applied this round
+
+- §4 (new subsection): "Canonical Terminal State Reference" table.
+- §4 rules: approval expiry scoped to `pending_approval` only; `executed` rows immune.
+- §4 rules: "Timeout failure is always reversible by webhook" bullet (moved from round 3 — now sits after the new terminal reference table for better context).
+- §5.1 `agent_charges`: new `last_transition_event_id text NULL` column.
+- §5.1 mutable allowlist: `last_transition_event_id` added.
+- §7.5: new `provider_charge_id`-based row resolution bullet with tenant cross-check.
+- §10 invariant 22 (NEW): `executed` entered exactly once. Invariants 22→23 and 23→24 renumbered.
+- §11.3 alert table: invariant reference updated to 24.
+- §17 Chunk 12: amount-match note updated to reference invariant 24 + currency check.
+- §18.3 migration scope: `last_transition_event_id text NULL` column added.
+
+### Integrity check (post-edit)
+
+- Forward references: all invariant cross-references updated (22→23, 23→24). §11.3 and §17 Chunk 12 reference invariant 24 consistently.
+- Contradictions: none. The canonical terminal-state table is consistent with §4's transition list, §9.4, and all prior invariants.
+- Missing inputs/outputs: none.
+
+### Round summary
+
+- Total findings: 5.
+- Auto-applied: 5 applied, 0 rejected = 5 auto.
+- User-decided: 0.
+- Deferred: 0.
+
+**ChatGPT verdict across all 4 rounds: ✅ Hard green light.**
+
+Top themes (round 4):
+- Consolidation (canonical terminal state reference eliminates scattered definitions).
+- Closing the last ambiguity gaps (approval expiry scope, executed-once, provider_charge_id binding).
+- Completing the debugging story (`last_transition_event_id` alongside `last_transition_by`).
+
