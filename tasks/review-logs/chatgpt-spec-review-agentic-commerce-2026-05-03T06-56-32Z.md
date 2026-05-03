@@ -243,3 +243,72 @@ Top themes (round 2):
 - Pushing back on "fixes" that would mask production incidents (§16.6 lockout-by-design).
 - One reversal of a round-1 decision: §16.12 `&`-strip removed (false-positive collision concern beats the "match AT&T == AT T" merge intent).
 
+---
+
+## Round 3 — 2026-05-03T07:45:00Z (approx)
+
+### ChatGPT Feedback (raw)
+
+ChatGPT verdict: **✅ Ready to build — no blockers.** 5 remaining areas of edge-case hardening and implementation traps, none blocking.
+
+1. **🟡 Currency + precision invariant** — extend invariant 23 to cover webhook.currency + ISO 4217 minor-unit exponent.
+2. **🟡 Webhook event ordering** — Stripe doesn't guarantee ordering; codify monotonicity + out-of-order handler rule.
+3. **🟡 Idempotency key entropy** — `intent` is free-text; recommend removing from key, deriving only from merchant/amount/currency/user.
+4. **🟡 State observability** — add `last_transition_at`, `last_transition_by`, `last_transition_reason` columns for debugging.
+5. **🟡 pg-boss / worker execution guarantees** — worker crash mid-execution → pg-boss retry → potential double form submission.
+6. **🟡 Timeout vs webhook race** — explicitly state timeout failure is reversible by webhook; prevent future "optimization" that removes the override.
+7. **🟢 Safe to defer** — SPT crypto binding, shadow-vs-live UI, per-skill timeouts, fraud detection / provenance.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | Extend invariant 23 (currency + exponent) | technical | apply | auto (apply) | medium | Real gap — webhook could carry wrong currency or wrong exponent for zero-decimal/three-decimal currencies. |
+| 2 | Out-of-order webhook event handling | technical | apply | auto (apply) | medium | Stripe production reality. Deterministic fast-forward model (apply missing transitions atomically) is cleaner than re-enqueue-only. Monotonicity codified. |
+| 3 | Remove `intent` from idempotency key | technical | reject | auto (reject) | medium | Intent is skill-generated code (not LLM free-text); invariant 21 already enforces determinism. `toolCallId` bounds the key per-execution-attempt. Removing intent would merge distinct charges for different purposes. |
+| 4 | `last_transition_by` column | technical | apply (lightweight: `last_transition_by` only; `last_transition_at` = `updated_at`; `last_transition_reason` = `failure_reason` + `decision_path`) | auto (apply) | medium | High debugging leverage; almost zero cost. Full version (3 columns) is unnecessary given existing timestamp + reason fields. |
+| 5 | pg-boss crash recovery / worker idempotency | technical | apply (clarification) | auto (apply) | medium | Spec didn't address the crash scenario explicitly. §8.4a and §7.2 now document the full recovery path (timeout fallback, webhook override, Stripe idempotency-key requirement). |
+| 6 | Timeout reversibility explicit statement | technical | apply | auto (apply) | low | "Future implementers MUST NOT optimize away the timeout override" is the kind of rule that only earns its value if written down before the first "optimization" attempt. |
+
+No user gate triggered this round (all findings technical, severity medium or below). All resolved as auto.
+
+### Auto-applied (this round)
+
+- [auto] Finding 1: §10 invariant 23 — extended to require webhook.currency match AND amount interpreted using ISO 4217 minor-unit exponent. Added ISO exponent rule (USD=cents, JPY=whole units, BHD=fils). Added `chargeRouterService.proposeCharge` validation note.
+- [auto] Finding 2: §7.5 `stripeAgentWebhookService` responsibilities — new "Out-of-order webhook events" handler rule: deterministic fast-forward for unambiguous sequences; re-enqueue + alert for ambiguous ones. Monotonicity guarantee added.
+- [auto] Finding 3: log-only reject. Intent stays in idempotency key — it's skill-generated code, not LLM free-text; invariant 21 covers determinism.
+- [auto] Finding 4: §5.1 `agent_charges` — new `last_transition_by text NOT NULL DEFAULT 'charge_router'` column with closed actor enum. Added to mutable-on-transition allowlist. §18.3 migration scope updated. §17 Chunk 5 note.
+- [auto] Finding 5: §8.4a — new "Worker-crash and pg-boss retry semantics" paragraph. Stripe-idempotency-key requirement on every merchant-side call (including post-crash re-execution) made explicit.
+- [auto] Finding 6: §4 rules — new "Timeout failure is always reversible by webhook" note. Future-proofed against "optimizations" that would remove the `failed → succeeded` post-terminal override.
+
+### Edits applied this round
+
+- §4 rules: new "Timeout failure is always reversible by webhook" bullet.
+- §5.1 `agent_charges`: new `last_transition_by` column definition.
+- §5.1 mutable allowlist: `last_transition_by` added.
+- §7.5: out-of-order webhook handling rule + monotonicity guarantee.
+- §8.4a: worker-crash / pg-boss retry semantics paragraph.
+- §10 invariant 23: extended to cover currency match + ISO 4217 exponent rule.
+- §17 Chunk 2 migration: `last_transition_by` column.
+- §17 Chunk 5: `last_transition_by` set on all transitions.
+
+### Integrity check (post-edit)
+
+- Forward references: none broken. `last_transition_by` cited in schema, mutable allowlist, migration scope, and Chunk 5. Invariant 23 extension is self-contained. `webhook_ordering_compensated` / `webhook_ordering_anomaly` introduced and contained within §7.5.
+- Contradictions: none. Monotonicity rule in §7.5 is consistent with §4 terminal-state definitions and §10 invariant 20 (webhook precedence).
+- Missing inputs/outputs: none.
+
+### Round summary
+
+- Total findings: 7.
+- Auto-applied (technical): 5 applied + 1 rejected = 6 auto.
+- User-decided: 0 (no user gate triggered — all medium or below severity, all technical).
+- Deferred: 0 (ChatGPT's §7 deferral list matches existing §20 items — no new additions).
+
+Top themes (round 3):
+- Closing the last precision gaps (currency + exponent, out-of-order events).
+- Naming the implicit (timeout reversibility, crash recovery, actor tracking).
+- Rejecting complexity that duplicates existing controls (`intent` in key — invariant 21 already covers the concern).
+
+**ChatGPT verdict across all 3 rounds: ✅ Ready to build.**
+
