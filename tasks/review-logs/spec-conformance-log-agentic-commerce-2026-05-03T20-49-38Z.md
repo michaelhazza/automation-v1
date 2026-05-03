@@ -7,6 +7,7 @@
 **Base:** `6d6c6ff4` (merge-base with main)
 **Scope:** **NARROW re-verification only.** The 4 DIRECTIONAL_GAPS deferred by the 2026-05-03T14:12:21Z run; quick sanity sweep for new mechanical/directional gaps the closure work introduced. The full 16-chunk conformance audit was completed in the prior run and recorded in `tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T14-12-21Z.md`.
 **Run at:** 2026-05-03T20:51:25Z
+**Commit at finish:** `e1d459f0` (this log itself; updated in a follow-up commit with the hash backfilled)
 
 ## Table of Contents
 
@@ -176,6 +177,6 @@ No source code was modified during this re-verification.
 
 The four prior directional gaps (DG#1–#4) are all verified PASS; their closure quality is good. The narrow scope of NEW DIRECTIONAL_GAP #5 is recorded so the main session can address it directly without re-reading this log.
 
-**Commit at finish:** _(set by auto-commit step below)_
+**Commit at finish:** `e1d459f0` (initial commit) — backfilled to log header; this commit and the follow-up backfill ship as two commits per the "never `--amend`" rule.
 
 
