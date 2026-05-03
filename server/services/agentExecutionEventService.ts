@@ -277,7 +277,7 @@ async function persistEvent(
       const taskRows = await tx
         .update(tasks)
         .set({ nextEventSeq: sql`${tasks.nextEventSeq} + 1` })
-        .where(eq(tasks.id, taskId))
+        .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, input.organisationId)))
         .returning({ nextEventSeq: tasks.nextEventSeq });
 
       if (taskRows.length === 0) {
@@ -858,7 +858,7 @@ export async function appendEventBundle(
     const taskRows = await executor
       .update(tasks)
       .set({ nextEventSeq: sql`${tasks.nextEventSeq} + 1` })
-      .where(eq(tasks.id, input.taskId))
+      .where(and(eq(tasks.id, input.taskId), eq(tasks.organisationId, input.organisationId)))
       .returning({ nextEventSeq: tasks.nextEventSeq });
 
     if (taskRows.length === 0) {
