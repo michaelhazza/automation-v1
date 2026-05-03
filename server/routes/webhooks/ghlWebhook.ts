@@ -1,5 +1,4 @@
 import { Router, raw } from 'express';
-import crypto from 'crypto';
 import { db } from '../../db/index.js';
 import { connectorConfigs, canonicalAccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
@@ -7,7 +6,7 @@ import { adapters } from '../../adapters/index.js';
 import { canonicalDataService } from '../../services/canonicalDataService.js';
 import { fromOrgId } from '../../services/principal/fromOrgId.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
-import { recordGhlMutation } from '../../services/ghlWebhookMutationsService.js';
+import { recordGhlMutation, dispatchWebhookSideEffects } from '../../services/ghlWebhookMutationsService.js';
 import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';
 import { recordIncident } from '../../services/incidentIngestor.js';
 
@@ -31,6 +30,44 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
     event = JSON.parse(rawBody.toString('utf-8'));
   } catch {
     res.status(400).json({ error: 'Invalid JSON' });
+    return;
+  }
+
+  // Agency lifecycle events (INSTALL/UNINSTALL/LocationCreate/LocationUpdate) carry
+  // webhookId + companyId but no meaningful locationId. Handle these synchronously
+  // before the location-scoped flow so that §5.4 dedupe ordering is enforced:
+  // side effects FIRST, then mark dedupe, then respond.
+  const eventType = event.type as string | undefined;
+  const webhookId = event.webhookId as string | undefined;
+  const companyId = event.companyId as string | undefined;
+  const lifecycleTypes = new Set(['INSTALL', 'UNINSTALL', 'LocationCreate', 'LocationUpdate']);
+
+  if (eventType && webhookId && companyId && lifecycleTypes.has(eventType)) {
+    // §5.4 hard invariant: side effects FIRST, dedupe mark only on success.
+    // Do not call isDuplicate before dispatch — a 503 must leave the dedupe store
+    // unmarked so GHL will re-deliver on retry.
+    let dispatchResult: { statusCode: 200 | 503 };
+    try {
+      dispatchResult = await dispatchWebhookSideEffects({
+        type: eventType,
+        webhookId,
+        companyId,
+        locationId: event.locationId as string | undefined,
+        installType: event.installType as string | undefined,
+      });
+    } catch {
+      res.status(503).json({ error: 'Side effect dispatch failed' });
+      return;
+    }
+
+    if (dispatchResult.statusCode === 503) {
+      res.status(503).json({ error: 'Upstream unavailable — retry' });
+      return;
+    }
+
+    // Side effects succeeded — mark dedupe, then ack
+    webhookDedupeStore.isDuplicate(webhookId);
+    res.status(200).json({ received: true });
     return;
   }
 

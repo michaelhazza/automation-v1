@@ -16,6 +16,7 @@ import type {
 } from './integrationAdapter.js';
 import { classifyAdapterError } from './integrationAdapter.js';
 import type { IntegrationConnection } from '../db/schema/index.js';
+import { getLocationToken, handleLocationToken401 } from '../services/locationTokenService.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const TIMEOUT_MS = 12_000;
@@ -34,6 +35,37 @@ function getHeaders(accessToken: string) {
 function decryptAccessToken(connection: IntegrationConnection): string {
   if (!connection.accessToken) throw new Error('Connection has no access token');
   return connectionTokenService.decryptToken(connection.accessToken);
+}
+
+type AgencyConnection = { id: string; companyId: string | null; organisationId: string; accessToken?: string | null; tokenScope?: string };
+
+async function resolveLocationToken(
+  connection: IntegrationConnection | AgencyConnection,
+  locationId: string,
+): Promise<string> {
+  if ('tokenScope' in connection && (connection as AgencyConnection).tokenScope === 'agency') {
+    return getLocationToken(connection as AgencyConnection, locationId);
+  }
+  return decryptAccessToken(connection as IntegrationConnection);
+}
+
+async function withLocationToken<T>(
+  connection: IntegrationConnection | AgencyConnection,
+  locationId: string,
+  fn: (token: string) => Promise<T>,
+): Promise<T> {
+  const token = await resolveLocationToken(connection, locationId);
+  try {
+    return await fn(token);
+  } catch (err) {
+    const e = err as { response?: { status?: number }; status?: number; statusCode?: number };
+    const status = e.response?.status ?? e.status ?? e.statusCode;
+    if (status === 401 && 'tokenScope' in connection && (connection as AgencyConnection).tokenScope === 'agency') {
+      const freshToken = await handleLocationToken401(connection as AgencyConnection, locationId);
+      return fn(freshToken);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -127,98 +159,98 @@ export const ghlAdapter: IntegrationAdapter = {
       }));
     },
 
-    async fetchContacts(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]> {
-      const accessToken = decryptAccessToken(connection);
+    async fetchContacts(connection: IntegrationConnection | AgencyConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]> {
       const params: Record<string, unknown> = { locationId: accountExternalId, limit: opts?.limit ?? 100 };
       if (opts?.since) params.startAfter = opts.since.toISOString();
 
       await acquireGhlToken(accountExternalId);
-      const response = await axios.get(`${GHL_API_BASE}/contacts/`, {
-        headers: getHeaders(accessToken),
-        params,
-        timeout: TIMEOUT_MS,
-      });
-
-      const contacts = (response.data as { contacts?: Array<Record<string, unknown>> })?.contacts ?? [];
-      return contacts.map((c) => ({
-        externalId: c.id as string,
-        firstName: c.firstName as string | undefined,
-        lastName: c.lastName as string | undefined,
-        email: c.email as string | undefined,
-        phone: c.phone as string | undefined,
-        tags: c.tags as string[] | undefined,
-        source: c.source as string | undefined,
-        externalCreatedAt: c.dateAdded ? new Date(c.dateAdded as string) : undefined,
-      }));
-    },
-
-    async fetchOpportunities(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalOpportunityData[]> {
-      const accessToken = decryptAccessToken(connection);
-      const params: Record<string, unknown> = { location_id: accountExternalId, limit: opts?.limit ?? 100 };
-
-      await acquireGhlToken(accountExternalId);
-      const response = await axios.get(`${GHL_API_BASE}/opportunities/search`, {
-        headers: getHeaders(accessToken),
-        params,
-        timeout: TIMEOUT_MS,
-      });
-
-      const opportunities = (response.data as { opportunities?: Array<Record<string, unknown>> })?.opportunities ?? [];
-      return opportunities.map((o) => ({
-        externalId: o.id as string,
-        name: o.name as string | undefined,
-        stage: (o.pipelineStageId as string) ?? (o.status as string),
-        value: o.monetaryValue ? Number(o.monetaryValue) : undefined,
-        currency: 'USD',
-        status: mapGhlOpportunityStatus(o.status as string),
-        stageEnteredAt: o.lastStageChangeAt ? new Date(o.lastStageChangeAt as string) : undefined,
-        externalCreatedAt: o.createdAt ? new Date(o.createdAt as string) : undefined,
-      }));
-    },
-
-    async fetchConversations(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalConversationData[]> {
-      const accessToken = decryptAccessToken(connection);
-      const params: Record<string, unknown> = { locationId: accountExternalId, limit: opts?.limit ?? 100 };
-
-      await acquireGhlToken(accountExternalId);
-      const response = await axios.get(`${GHL_API_BASE}/conversations/search`, {
-        headers: getHeaders(accessToken),
-        params,
-        timeout: TIMEOUT_MS,
-      });
-
-      const conversations = (response.data as { conversations?: Array<Record<string, unknown>> })?.conversations ?? [];
-      return conversations.map((c) => ({
-        externalId: c.id as string,
-        channel: mapGhlChannel(c.type as string),
-        status: (c.status === 'closed' ? 'closed' : 'active') as 'active' | 'inactive' | 'closed',
-        messageCount: (c.messageCount as number) ?? 0,
-        lastMessageAt: c.lastMessageDate ? new Date(c.lastMessageDate as string) : undefined,
-        externalCreatedAt: c.dateAdded ? new Date(c.dateAdded as string) : undefined,
-      }));
-    },
-
-    async fetchRevenue(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalRevenueData[]> {
-      const accessToken = decryptAccessToken(connection);
-      const params: Record<string, unknown> = { altId: accountExternalId, altType: 'location', limit: opts?.limit ?? 100 };
-
-      try {
-        await acquireGhlToken(accountExternalId);
-        const response = await axios.get(`${GHL_API_BASE}/payments/orders`, {
+      return withLocationToken(connection, accountExternalId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/contacts/`, {
           headers: getHeaders(accessToken),
           params,
           timeout: TIMEOUT_MS,
         });
-
-        const orders = (response.data as { data?: Array<Record<string, unknown>> })?.data ?? [];
-        return orders.map((o) => ({
-          externalId: o._id as string,
-          amount: Number(o.amount ?? 0) / 100, // GHL stores in cents
-          currency: (o.currency as string) ?? 'USD',
-          type: 'one_time' as const,
-          status: mapGhlPaymentStatus(o.status as string),
-          transactionDate: o.createdAt ? new Date(o.createdAt as string) : undefined,
+        const contacts = (response.data as { contacts?: Array<Record<string, unknown>> })?.contacts ?? [];
+        return contacts.map((c) => ({
+          externalId: c.id as string,
+          firstName: c.firstName as string | undefined,
+          lastName: c.lastName as string | undefined,
+          email: c.email as string | undefined,
+          phone: c.phone as string | undefined,
+          tags: c.tags as string[] | undefined,
+          source: c.source as string | undefined,
+          externalCreatedAt: c.dateAdded ? new Date(c.dateAdded as string) : undefined,
         }));
+      });
+    },
+
+    async fetchOpportunities(connection: IntegrationConnection | AgencyConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalOpportunityData[]> {
+      const params: Record<string, unknown> = { location_id: accountExternalId, limit: opts?.limit ?? 100 };
+
+      await acquireGhlToken(accountExternalId);
+      return withLocationToken(connection, accountExternalId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/opportunities/search`, {
+          headers: getHeaders(accessToken),
+          params,
+          timeout: TIMEOUT_MS,
+        });
+        const opportunities = (response.data as { opportunities?: Array<Record<string, unknown>> })?.opportunities ?? [];
+        return opportunities.map((o) => ({
+          externalId: o.id as string,
+          name: o.name as string | undefined,
+          stage: (o.pipelineStageId as string) ?? (o.status as string),
+          value: o.monetaryValue ? Number(o.monetaryValue) : undefined,
+          currency: 'USD',
+          status: mapGhlOpportunityStatus(o.status as string),
+          stageEnteredAt: o.lastStageChangeAt ? new Date(o.lastStageChangeAt as string) : undefined,
+          externalCreatedAt: o.createdAt ? new Date(o.createdAt as string) : undefined,
+        }));
+      });
+    },
+
+    async fetchConversations(connection: IntegrationConnection | AgencyConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalConversationData[]> {
+      const params: Record<string, unknown> = { locationId: accountExternalId, limit: opts?.limit ?? 100 };
+
+      await acquireGhlToken(accountExternalId);
+      return withLocationToken(connection, accountExternalId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/conversations/search`, {
+          headers: getHeaders(accessToken),
+          params,
+          timeout: TIMEOUT_MS,
+        });
+        const conversations = (response.data as { conversations?: Array<Record<string, unknown>> })?.conversations ?? [];
+        return conversations.map((c) => ({
+          externalId: c.id as string,
+          channel: mapGhlChannel(c.type as string),
+          status: (c.status === 'closed' ? 'closed' : 'active') as 'active' | 'inactive' | 'closed',
+          messageCount: (c.messageCount as number) ?? 0,
+          lastMessageAt: c.lastMessageDate ? new Date(c.lastMessageDate as string) : undefined,
+          externalCreatedAt: c.dateAdded ? new Date(c.dateAdded as string) : undefined,
+        }));
+      });
+    },
+
+    async fetchRevenue(connection: IntegrationConnection | AgencyConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalRevenueData[]> {
+      const params: Record<string, unknown> = { altId: accountExternalId, altType: 'location', limit: opts?.limit ?? 100 };
+
+      try {
+        await acquireGhlToken(accountExternalId);
+        return withLocationToken(connection, accountExternalId, async (accessToken) => {
+          const response = await axios.get(`${GHL_API_BASE}/payments/orders`, {
+            headers: getHeaders(accessToken),
+            params,
+            timeout: TIMEOUT_MS,
+          });
+          const orders = (response.data as { data?: Array<Record<string, unknown>> })?.data ?? [];
+          return orders.map((o) => ({
+            externalId: o._id as string,
+            amount: Number(o.amount ?? 0) / 100, // GHL stores in cents
+            currency: (o.currency as string) ?? 'USD',
+            type: 'one_time' as const,
+            status: mapGhlPaymentStatus(o.status as string),
+            transactionDate: o.createdAt ? new Date(o.createdAt as string) : undefined,
+          }));
+        });
       } catch {
         // Revenue endpoint may not be available for all GHL plans
         return [];
@@ -520,82 +552,87 @@ function classifyGhlHttpError(err: unknown): GhlFetchResult<never> {
 }
 
 export const ghlClientPulseFetchers = {
-  async fetchFunnels(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlFunnel[]>> {
+  async fetchFunnels(connection: IntegrationConnection | AgencyConnection, locationId: string): Promise<GhlFetchResult<GhlFunnel[]>> {
     try {
-      const accessToken = decryptAccessToken(connection);
       await acquireGhlToken(locationId);
-      const response = await axios.get(`${GHL_API_BASE}/funnels/funnel`, {
-        headers: getHeaders(accessToken),
-        params: { locationId },
-        timeout: TIMEOUT_MS,
+      return withLocationToken(connection, locationId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/funnels/funnel`, {
+          headers: getHeaders(accessToken),
+          params: { locationId },
+          timeout: TIMEOUT_MS,
+        });
+        const funnels = (response.data as { funnels?: GhlFunnel[] })?.funnels ?? [];
+        return { availability: 'available' as const, data: funnels };
       });
-      const funnels = (response.data as { funnels?: GhlFunnel[] })?.funnels ?? [];
-      return { availability: 'available', data: funnels };
     } catch (err) {
       return classifyGhlHttpError(err);
     }
   },
 
-  async fetchFunnelPages(connection: IntegrationConnection, locationId: string, funnelId: string): Promise<GhlFetchResult<GhlFunnelPage[]>> {
+  async fetchFunnelPages(connection: IntegrationConnection | AgencyConnection, locationId: string, funnelId: string): Promise<GhlFetchResult<GhlFunnelPage[]>> {
     try {
-      const accessToken = decryptAccessToken(connection);
       await acquireGhlToken(locationId);
-      const response = await axios.get(`${GHL_API_BASE}/funnels/funnel/${funnelId}/page`, {
-        headers: getHeaders(accessToken),
-        timeout: TIMEOUT_MS,
+      return withLocationToken(connection, locationId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/funnels/funnel/${funnelId}/page`, {
+          headers: getHeaders(accessToken),
+          timeout: TIMEOUT_MS,
+        });
+        const pages = (response.data as { pages?: GhlFunnelPage[] })?.pages ?? [];
+        return { availability: 'available' as const, data: pages };
       });
-      const pages = (response.data as { pages?: GhlFunnelPage[] })?.pages ?? [];
-      return { availability: 'available', data: pages };
     } catch (err) {
       return classifyGhlHttpError(err);
     }
   },
 
-  async fetchCalendars(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlCalendar[]>> {
+  async fetchCalendars(connection: IntegrationConnection | AgencyConnection, locationId: string): Promise<GhlFetchResult<GhlCalendar[]>> {
     try {
-      const accessToken = decryptAccessToken(connection);
       await acquireGhlToken(locationId);
-      const response = await axios.get(`${GHL_API_BASE}/calendars/`, {
-        headers: getHeaders(accessToken),
-        params: { locationId },
-        timeout: TIMEOUT_MS,
+      return withLocationToken(connection, locationId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/calendars/`, {
+          headers: getHeaders(accessToken),
+          params: { locationId },
+          timeout: TIMEOUT_MS,
+        });
+        const calendars = (response.data as { calendars?: GhlCalendar[] })?.calendars ?? [];
+        return { availability: 'available' as const, data: calendars };
       });
-      const calendars = (response.data as { calendars?: GhlCalendar[] })?.calendars ?? [];
-      return { availability: 'available', data: calendars };
     } catch (err) {
       return classifyGhlHttpError(err);
     }
   },
 
-  async fetchUsers(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlUser[]>> {
+  async fetchUsers(connection: IntegrationConnection | AgencyConnection, locationId: string): Promise<GhlFetchResult<GhlUser[]>> {
     try {
-      const accessToken = decryptAccessToken(connection);
       await acquireGhlToken(locationId);
-      const response = await axios.get(`${GHL_API_BASE}/users/search`, {
-        headers: getHeaders(accessToken),
-        params: { locationId },
-        timeout: TIMEOUT_MS,
+      return withLocationToken(connection, locationId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/users/search`, {
+          headers: getHeaders(accessToken),
+          params: { locationId },
+          timeout: TIMEOUT_MS,
+        });
+        const users = (response.data as { users?: GhlUser[] })?.users ?? [];
+        return { availability: 'available' as const, data: users };
       });
-      const users = (response.data as { users?: GhlUser[] })?.users ?? [];
-      return { availability: 'available', data: users };
     } catch (err) {
       return classifyGhlHttpError(err);
     }
   },
 
-  async fetchLocationDetails(connection: IntegrationConnection, locationId: string): Promise<GhlFetchResult<GhlLocationDetails>> {
+  async fetchLocationDetails(connection: IntegrationConnection | AgencyConnection, locationId: string): Promise<GhlFetchResult<GhlLocationDetails>> {
     try {
-      const accessToken = decryptAccessToken(connection);
       await acquireGhlToken(locationId);
-      const response = await axios.get(`${GHL_API_BASE}/locations/${locationId}`, {
-        headers: getHeaders(accessToken),
-        timeout: TIMEOUT_MS,
+      return withLocationToken(connection, locationId, async (accessToken) => {
+        const response = await axios.get(`${GHL_API_BASE}/locations/${locationId}`, {
+          headers: getHeaders(accessToken),
+          timeout: TIMEOUT_MS,
+        });
+        const location = (response.data as { location?: GhlLocationDetails })?.location;
+        if (!location) {
+          return { availability: 'unavailable_other' as const, data: null, errorCode: 'empty_response', message: 'location endpoint returned no payload' };
+        }
+        return { availability: 'available' as const, data: location };
       });
-      const location = (response.data as { location?: GhlLocationDetails })?.location;
-      if (!location) {
-        return { availability: 'unavailable_other', data: null, errorCode: 'empty_response', message: 'location endpoint returned no payload' };
-      }
-      return { availability: 'available', data: location };
     } catch (err) {
       return classifyGhlHttpError(err);
     }

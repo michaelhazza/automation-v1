@@ -9,7 +9,7 @@
  * inbound event after canonical upserts have run.
  */
 
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   canonicalSubaccountMutations,
@@ -17,12 +17,20 @@ import {
   type ExternalUserKind,
   type NewCanonicalSubaccountMutation,
 } from '../db/schema/clientPulseCanonicalTables.js';
+import { connectorConfigs, connectorLocationTokens } from '../db/schema/index.js';
 import { orgConfigService } from './orgConfigService.js';
+import { connectorConfigService } from './connectorConfigService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { logger } from '../lib/logger.js';
 import {
   normaliseGhlMutation,
   classifyUserKindByVolume,
+  classifyWebhookEvent,
   type GhlEventEnvelope,
+  type WebhookEnvelopeMinimal,
 } from './ghlWebhookMutationsPure.js';
+
+export { classifyWebhookEvent } from './ghlWebhookMutationsPure.js';
 
 export interface RecordGhlMutationInput {
   organisationId: string;
@@ -89,6 +97,147 @@ export async function recordGhlMutation(input: RecordGhlMutationInput): Promise<
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+// ── Lifecycle side-effect dispatcher (§5.4) ─────────────────────────────
+
+/**
+ * Side-effect handler for lifecycle webhook events.
+ * Call this BEFORE writing the dedupe row (per §5.4 hard invariant).
+ * If this returns 503 or throws, the route must respond 503 and NOT write the dedupe row.
+ * Only on 200: write the dedupe row, then respond 200.
+ */
+export async function dispatchWebhookSideEffects(
+  event: WebhookEnvelopeMinimal & { webhookId: string; companyId: string },
+): Promise<{ statusCode: 200 | 503 }> {
+  const eventClass = classifyWebhookEvent(event);
+
+  if (eventClass === 'install_company') {
+    logger.info('ghl.webhook.install_company', {
+      event: 'ghl.webhook.install_company',
+      orgId: null, companyId: event.companyId, locationId: null,
+      result: 'success', error: null,
+    });
+    const connection = await connectorConfigService.findAgencyConnectionByCompanyId(event.companyId);
+    if (!connection) return { statusCode: 200 };
+    try {
+      const { autoEnrolAgencyLocations } = await import('./ghlAgencyOauthService.js');
+      await autoEnrolAgencyLocations(connection.organisationId, connection, event.webhookId);
+    } catch (err) {
+      const e = err as { code?: string; statusCode?: number };
+      if (e.code === 'AGENCY_RATE_LIMITED' || (e.statusCode !== undefined && e.statusCode >= 500)) {
+        return { statusCode: 503 };
+      }
+    }
+    return { statusCode: 200 };
+  }
+
+  if (eventClass === 'install_location_ignored') {
+    logger.info('ghl.webhook.install_location_ignored', {
+      event: 'ghl.webhook.install_location_ignored',
+      orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
+      result: 'success', error: null,
+    });
+    return { statusCode: 200 };
+  }
+
+  if (eventClass === 'uninstall') {
+    logger.info('ghl.webhook.uninstall', {
+      event: 'ghl.webhook.uninstall',
+      orgId: null, companyId: event.companyId, locationId: null,
+      result: 'success', error: null,
+    });
+    const connection = await connectorConfigService.findAgencyConnectionByCompanyId(event.companyId);
+    if (!connection) return { statusCode: 200 };
+
+    // Decrypt the stored agency token before sending it as a Bearer credential —
+    // tokens at rest in `connector_configs.access_token` are encrypted via
+    // `connectionTokenService.encryptToken` (see upsertAgencyConnection).
+    try {
+      const agencyToken = connection.accessToken
+        ? connectionTokenService.decryptToken(connection.accessToken)
+        : '';
+      await fetch('https://services.leadconnectorhq.com/oauth/revoke', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${agencyToken}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      logger.warn('ghl.webhook.uninstall.revoke_failed', { companyId: event.companyId, error: String(err) });
+    }
+
+    await db
+      .update(connectorConfigs)
+      .set({ status: 'disconnected', disconnectedAt: new Date(), updatedAt: new Date() })
+      .where(eq(connectorConfigs.id, connection.id));
+
+    await db
+      .update(connectorLocationTokens)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(connectorLocationTokens.connectorConfigId, connection.id),
+          isNull(connectorLocationTokens.deletedAt),
+        ),
+      );
+
+    logger.info('ghl.webhook.uninstall.complete', {
+      event: 'ghl.webhook.uninstall',
+      orgId: connection.organisationId, companyId: event.companyId, locationId: null,
+      result: 'success', error: null,
+    });
+    return { statusCode: 200 };
+  }
+
+  if (eventClass === 'location_create') {
+    logger.info('ghl.webhook.location_create', {
+      event: 'ghl.webhook.location_create',
+      orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
+      result: 'success', error: null,
+    });
+    const connection = await connectorConfigService.findAgencyConnectionByCompanyId(event.companyId);
+    if (!connection || !event.locationId) return { statusCode: 200 };
+
+    const locId = event.locationId;
+    const locName = (event as unknown as Record<string, unknown>).name as string | undefined ?? locId;
+    const { generateSubaccountSlug } = await import('./ghlAgencyOauthServicePure.js');
+    const baseSlug = generateSubaccountSlug(locName, locId);
+
+    let result: { id: string; inserted: boolean } | undefined;
+    for (const slug of [baseSlug, `${baseSlug}-${locId.slice(-4)}`]) {
+      try {
+        const [row] = await db.execute<{ id: string; inserted: boolean }>(sql`
+          INSERT INTO subaccounts (id, organisation_id, name, slug, status, connector_config_id, external_id, created_at, updated_at)
+          VALUES (gen_random_uuid(), ${connection.organisationId}, ${locName}, ${slug}, 'active', ${connection.id}, ${locId}, now(), now())
+          ON CONFLICT (connector_config_id, external_id)
+            WHERE deleted_at IS NULL AND connector_config_id IS NOT NULL AND external_id IS NOT NULL
+          DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+          RETURNING id, (xmax = 0) AS inserted
+        `);
+        result = row;
+        break;
+      } catch (err) {
+        const pg = err as { code?: string; constraint?: string };
+        if (pg.code === '23505' && pg.constraint?.includes('slug')) continue;
+        throw err;
+      }
+    }
+
+    if (result?.inserted) {
+      try {
+        const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
+        await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
+          organisationId: connection.organisationId,
+          subaccountId: result.id,
+          startedByUserId: 'system',
+        });
+      } catch { /* non-fatal */ }
+    }
+
+    return { statusCode: 200 };
+  }
+
+  return { statusCode: 200 };
 }
 
 // ── Internal: outlier-volume classifier (§2.0b) ─────────────────────────
