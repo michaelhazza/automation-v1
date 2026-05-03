@@ -159,3 +159,87 @@ Top themes (round 1):
 - Tightening invariant surface (currency match, positive amounts, deterministic args, audit trail).
 - Defining algorithms left implicit (merchant descriptor normalisation, expires_at reset, settled-vs-in-flight semantics).
 
+---
+
+## Round 2 — 2026-05-03T07:25:00Z (approx)
+
+### ChatGPT Feedback (raw)
+
+Senior-level review. ChatGPT flagged 7 areas:
+
+1. **🔴 SPT exposure model (high risk)** — v1 accepts SPT-not-bound risk; ChatGPT pushes for a minimum binding constraint (Option A merchant+amount metadata, Option B short-lived proxy token, Option C spend-ceiling per response).
+2. **🟠 Worker-hosted-form trust boundary** — Worker can transition `executed → failed` per round-1 invariant 20; ChatGPT argues worker should be observer-only, never change status (cleaner mental model: chargeRouter / webhook / timeout job are the only status writers).
+3. **🟠 Reserved capacity edge cases** — long-lived pending approvals (already solved via approval_expires_at), executed-but-no-webhook (no max-bound), refund timing mismatch. Proposes time-bound carve-out for stuck `executed` rows.
+4. **🟡 Webhook vs completion race** — same concern as 2, framed as actor-model simplification: only chargeRouter / webhook / timeout-job can change status, worker is metadata-only.
+5. **🟡 Policy versioning + replay semantics** — Spec says retry = new row but doesn't explicitly name "retries use latest policy". ChatGPT proposes adding as an invariant.
+6. **🟡 Operator UX gaps (3 sub-items)** — Empty allowlist UX risk, missing "top block reasons" aggregation, missing shadow-vs-live delta view.
+7. **Minor tightening:**
+   - 7A: Idempotency key includes raw `intent` string — wording drift could create duplicate. Recommend deterministic intent.
+   - 7B: `&` strip in §16.12 normalisation collides ("AT&T" → "ATT" matches unrelated "ATT" merchants).
+   - 7C: Single global `EXECUTION_TIMEOUT_MINUTES` may not fit subscriptions vs purchases.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| 1 | SPT exposure / amount-bound | technical-escalated | apply lightweight (webhook amount-match invariant 23); broader Options A/B/C deferred | apply (user-approved) | high | Webhook-amount-match is one new invariant + one webhook handler check; meaningful defense-in-depth without a token wrapper. |
+| 2 | Worker observer-only model | technical-escalated | reject | reject (user-approved) | medium-high | Reversing round-1 invariant 20 means 30-min lockout for worker-observed failures. The `failed → succeeded` post-terminal override (§4) already mitigates the temporal-inconsistency case. |
+| 3 | Reserved capacity time-bound | technical-escalated | reject + clarify §16.6 | reject + clarify (user-approved) | medium-high | Lockout from prolonged webhook outage is a production-incident path, not a normal-operation feature. Carve-out would mask outages. |
+| 4 | Actor-model simplification | technical | reject (already covered by invariant 20) | auto (reject) | low | Same concern as 2; no spec change needed. |
+| 5 | Replay-uses-latest-policy | technical | apply | auto (apply) | medium | Existing behaviour, just never named as an invariant. Add as invariant 22. |
+| 6.1 | Empty-allowlist UX banner | user-facing | apply | apply (user-approved) | medium | Closes the perception gap on the create flow. |
+| 6.2 | Top block reasons panel | user-facing | apply (small) | apply (user-approved) | medium | Single SELECT GROUP BY; high diagnostic value for policy tuning. |
+| 6.3 | Shadow-vs-live delta panel | user-facing | defer | defer (user-approved) | medium | Non-trivial UI surface; existing Spend Ledger `mode = shadow` filter captures most value. |
+| 7A | Deterministic intent (extension to invariant 21) | technical | apply | auto (apply) | medium | Same defence as args determinism; one-line extension. |
+| 7B | Drop `&` from §16.12 strip set | technical | apply | auto (apply) | low-medium | False-positive collision risk outweighs the "AT&T = AT T" merge intent. |
+| 7C | Per-skill execution-timeout overrides | technical-escalated | defer | defer (user-approved) | low | No production evidence yet; non-breaking when added later. |
+
+### Auto-applied (this round, before operator gate)
+
+- [auto] Finding 4: log-only reject; no spec change (already covered by round-1 invariant 20).
+- [auto] Finding 5: §10 — new invariant 22 "Retries always use the latest policy".
+- [auto] Finding 7A: §10 — invariant 21 extended to require deterministic `args` AND `intent`.
+- [auto] Finding 7B: §16.12 — `&` removed from punctuation strip set; updated note explains the false-positive concern.
+
+### User-approved (post operator gate, "as recommended")
+
+- [user] Finding 1 apply: §10 — new invariant 23 "Webhook amount-match"; §11.3 alert table — new "Ledger amount mismatch" critical row; §17 Chunk 12 — handler check note.
+- [user] Finding 2 reject: no spec change; round-1 invariant 20 preserved.
+- [user] Finding 3 reject + clarify: §16.6 — new "Lockout-by-design" paragraph explaining why no time-bound auto-release.
+- [user] Finding 6.1 apply: §17 Chunk 14 — empty-allowlist banner requirement on Spending Budget create / detail flow.
+- [user] Finding 6.2 apply: §17 Chunk 14 — "Top block reasons (last 7 days)" aggregation panel on Spend Ledger dashboard.
+- [user] Finding 6.3 defer: §20 — added as deferred item.
+- [user] Finding 7C defer: §20 — added as deferred item.
+
+### Edits applied this round
+
+- §10 invariant 21: extended to require deterministic `args` AND `intent` strings (per 7A).
+- §10 invariant 22 (NEW): retries always use the latest policy (per 5).
+- §10 invariant 23 (NEW): webhook amount-match (per 1).
+- §11.3 alert table: new "Ledger amount mismatch" critical row (per 1).
+- §16.6: new "Lockout-by-design" paragraph (per 3).
+- §16.12: `&` removed from punctuation-strip regex; updated note explaining the false-positive risk (per 7B).
+- §17 Chunk 12: webhook handler now performs amount-match check + `ledger_amount_mismatch` alert path (per 1).
+- §17 Chunk 14: empty-allowlist banner + "Top block reasons" panel added (per 6.1, 6.2).
+- §20 deferred items: shadow-vs-live delta panel; per-skill execution-timeout overrides (per 6.3, 7C).
+
+### Integrity check (post-edit)
+
+- Forward references: none broken. New invariant numbers (22, 23) are referenced from at least two locations each. New `ledger_amount_mismatch` failure-reason value cited from §10 invariant 23 + §11.3 alert table + §17 Chunk 12.
+- Contradictions: none introduced. The reject of finding 2 preserves round-1 invariant 20 behaviour; the §16.6 clarification is additive (does not conflict with §10 invariant 9 reserved-capacity rule).
+- Missing inputs/outputs: none. All new requirements cite their enforcement points (`stripeAgentWebhookService` for invariant 23; Chunk 12 handler; Chunk 14 UI banner / panel).
+
+### Round summary
+
+- Total findings: 11 (after splitting 6 into 3 sub-items and 7 into A/B/C).
+- Auto-applied (technical): 3 applied + 1 rejected (log-only) = 4 auto.
+- User-decided (escalated to operator gate): 3 applied + 2 rejected + 2 deferred = 7 user-decided. All 7 resolved per the agent's recommendation column on operator's "as recommended" reply.
+- Deferred: 2 (6.3 shadow-vs-live delta panel, 7C per-skill execution-timeout overrides).
+
+Top themes (round 2):
+- Defense-in-depth on the SPT exposure surface (invariant 23 amount-match) without adopting full token-wrapping.
+- Naming the unstated (replay uses latest policy, deterministic intent).
+- Operator UX hardening (empty-allowlist banner, top block reasons panel) — non-correctness gains that still affect production usability.
+- Pushing back on "fixes" that would mask production incidents (§16.6 lockout-by-design).
+- One reversal of a round-1 decision: §16.12 `&`-strip removed (false-positive collision concern beats the "match AT&T == AT T" merge intent).
+
