@@ -1,12 +1,14 @@
-# Agentic Commerce — development brief (v2)
+# Agentic Commerce — development brief (v3)
 
-**Status:** Draft for stakeholder review
+**Status:** Structural precision pass complete — ready for spec-coordinator (use with addendum v3)
 **Owner:** TBD
 **Source branch:** claude/stripe-agent-payments-9Og9n (recommend renaming to claude/agentic-commerce-spending)
 **Suggested build slug:** agentic-commerce
 **Classification:** Major task
 
-**Changes from v1:** Phase 1 and Phase 2 collapsed into a single build. Shadow mode promoted to a day-one deliverable. Codebase exploration section added (Section 8) for Claude Code to resolve before spec freezes. Three product decisions resolved (Section 9). Failure modes, kill-switch surface, and cost-attribution model added.
+**Changes from v1:** Phase 1 and Phase 2 collapsed into a single build. Shadow mode promoted to a day-one deliverable. Codebase exploration section added (Section 8) for Claude Code to resolve before spec freezes. Three product decisions resolved (Section 7). Failure modes, kill-switch surface, and cost-attribution model added.
+
+**Changes from v2:** Applied vocabulary lock (Spending Budget, Spending Policy, Charge Router, Spend Ledger, Kill Switch) per addendum Section B. Added core domain model and charge lifecycle state machine to Section 2. Tightened shadow-mode execution semantics, kill-switch in-flight behaviour, failure-mode rules, and source-of-truth split. Added Section 10: system invariants, execution contract, and integration boundaries. Flagged net-new subsystems in Section 8. The addendum (v3) remains the authoritative resolution document for all stakeholder-decided questions; this brief is updated to be structurally precise enough for spec-coordinator to translate without inventing structure.
 
 This is a brief, not a spec. It frames the problem, the unlock, what it enables in human terms, and the constraints. The spec is written after this brief is approved and after Claude Code completes the codebase exploration in Section 8.
 
@@ -38,17 +40,60 @@ A single primitive that gives agents real spending authority, with policy enforc
 
 The primitive has six parts:
 
-**Spending policy.** A structured object attached to an agent or a skill. `{ maxPerTxn, maxPerDay, maxPerMonth, merchantAllowlist, currency, requiresApprovalAbove, mode: 'shadow' | 'live' }`. Stored in the database, versioned, editable via the existing agent config UI.
+**Spending Budget.** The operator-facing umbrella concept. Attached to an agent (primary) with an optional sub-account override. Contains a Spending Policy — the rules object holding Spending Limits, Merchant Allowlist, Approval Threshold, and Spending Mode. Stored as two related rows (`spending_budgets`, `spending_policies`), versioned, editable via the agent config UI. The Spending Budget is the accounting container; the Spending Policy is the rules object inside it.
 
-**SPT vault.** Per-tenant store of Stripe-issued payment tokens, scoped to the policy. Tokens never expose card numbers, expire, and are revocable from a single admin screen. Stored alongside other secrets in `integrationConnections` with a new `providerType` (`stripe_agent`).
+**SPT vault.** Per-sub-account store of Stripe-issued Shared Payment Tokens, scoped to the Spending Budget. Tokens never expose card numbers, expire, and are revocable from a single admin screen. Stored in `integrationConnections` with `providerType: 'stripe_agent'`.
 
-**Charge router.** Server-side service every payment-issuing skill calls. Enforces the policy, splits auto-execute from needs-approval, routes over-threshold charges into the existing HITL queue, writes a full audit row per attempt (allowed, denied, approved, executed, failed, shadow), and respects the policy mode (shadow vs. live).
+**Charge Router.** Server-side service that every spend-enabled skill calls. Lives exclusively in the main app. Enforces the Spending Policy, splits auto-execute from needs-approval, routes over-threshold Charges into the HITL queue, writes a Spend Ledger row per attempt, and respects the Spending Mode. Workers authorise spend via a pg-boss request-reply round-trip — they never call Stripe directly.
 
-**Spend ledger.** Every authorised charge writes to a per-tenant ledger that feeds the existing cost-aggregation surface so operators see agent spend in the same place they see workflow cost today. Shadow-mode charges write to the same ledger with a `shadow: true` flag.
+**Spend Ledger.** Append-only per-tenant ledger. Every Charge — allowed, denied, executed, failed, or shadow — writes a row. Feeds the existing cost-aggregation surface so operators see agent spend alongside compute cost. Stripe is the financial source of truth for charge state; the Spend Ledger is the system source of truth for agent intent and audit trail. They reconcile via webhook.
 
-**Shadow mode.** A per-policy mode flag (default `shadow`, opt-in to `live`). Every charge attempt runs through the full policy check, allowlist match, threshold compare, and HITL routing. At the moment of execution, shadow mode writes a `shadow_charge` ledger row instead of calling Stripe. Operators see the full audit trail of what would have happened. Flipping from shadow to live is per-policy, not global, and is itself a HITL-gated action.
+**Shadow mode.** Per-policy Spending Mode, default `shadow`, opt-in to `live`. Every charge attempt runs the full policy check, allowlist match, threshold compare, and HITL routing in both modes. At execution: shadow mode writes a `shadow_settled` ledger row instead of calling Stripe, then returns a successful execution result to the caller. The workflow continues as if the charge succeeded; no external side effect is produced. Operators verify the full workflow end-to-end before spending real money. Promotion from shadow to live is per-policy, not global, and is HITL-gated. Shadow-mode executions must produce identical decision paths and workflow outcomes to live mode, differing only in external side effects. Shadow mode is not an approximation — it is the live execution path with the Stripe call replaced by a ledger write. This guarantees that the shadow audit trail is trustworthy evidence for the promotion decision. From the caller's perspective, shadow and live execution return identical response shapes and status semantics — no workflow or skill may branch on whether execution was shadow or live.
 
-**Kill switches.** Three-level revocation: per-policy (revoke this agent's spending authority), per-sub-account (revoke all agent spending in this sub-account), per-org (global stop). Each is a single-screen action, audit-logged, and immediately effective across every running agent.
+**Kill Switch.** Three-level revocation: per-policy, per-sub-account, per-org. Single-screen action, audit-logged, immediately effective. New Charges are blocked from the moment of activation. In-flight Charges already submitted to Stripe resolve normally and are not reversed. Charges pending HITL approval are auto-cancelled. No retries are permitted after the Kill Switch fires.
+
+### Core domain model
+
+Entity relationships, authoritatively:
+
+```
+Agent          → SpendingBudget          (optional; one per agent)
+SpendingBudget → SpendingPolicy          (one-to-one; contains the rules)
+SpendingBudget → Charges                 (one-to-many; every money-movement attempt)
+Charge         → ApprovalRequest         (zero or one; fires when over Approval Threshold)
+SubAccount     → SPTConnection           (one per sub-account; stored in integrationConnections)
+SubAccount     → ApprovalChannels        (owned by subaccount; org may add grant channels)
+```
+
+Key distinctions:
+- **Spending Budget** is the accounting container (limits, mode, currency, balance tracking).
+- **Spending Policy** is the rules object inside it (allowlist, thresholds, gate behaviour).
+- **Charge** is the unit of record — every attempt regardless of outcome.
+- **Spend Ledger** is the table of all Charges. System source of truth. Distinct from Stripe's payment record.
+- **SPTConnection** is the Stripe-issued credential stored as `accessToken` in `integrationConnections` (`providerType: 'stripe_agent'`).
+
+### Charge lifecycle
+
+States and transitions:
+- `proposed`: entry state for every charge attempt — Charge Router writes this row first, before any policy evaluation
+- `proposed → blocked`: policy denied (terminal — allowlist miss, limit exceeded, Kill Switch active)
+- `proposed → pending_approval`: over Approval Threshold, waiting for HITL
+- `pending_approval → approved`: operator approved
+- `pending_approval → denied`: operator rejected (terminal)
+- `proposed → approved`: under threshold, auto-approved
+- `approved → executed`: Stripe API call made (live mode)
+- `approved → shadow_settled`: no Stripe call, success returned to caller (shadow mode, terminal)
+- `executed → succeeded`: Stripe webhook confirms payment
+- `executed → failed`: Stripe error, SPT expired, or timeout (terminal)
+- `succeeded → refunded`: refund issued (terminal)
+- `succeeded → disputed`: chargeback opened
+
+Rules:
+- `blocked` and `denied` are terminal. No retry without a new charge attempt.
+- `failed` is terminal for the row. The workflow surfaces the failed-but-charged state to HITL; no auto-retry, no auto-refund.
+- Status transitions are enforced by append-only DB triggers on `agent_charges` (addendum Section M).
+- Stripe webhooks drive the `executed → succeeded/failed/refunded/disputed` transitions post-execution.
+- Retried Charges share the same `intent_id` as the original attempt, grouping all attempts under one Spend Intent. See Section 11.1.
 
 ### What it does NOT include
 
@@ -140,15 +185,22 @@ Per-sub-account spend attribution feeds the white-labeled client ROI dashboard w
 
 **Audit non-negotiable.** Every charge attempt (allowed, denied, approved, executed, failed, shadow) writes to the ledger. No code path may charge without a ledger row. Adversarial-reviewer pass should validate this.
 
-**Webhook reconciliation.** Stripe's webhook stream remains the source of truth for charge state. Local ledger entries must reconcile against webhooks. Any divergence triggers an alert.
+**Webhook reconciliation.** Two sources of truth with different authorities. Stripe is the financial source of truth: Stripe's webhook stream is authoritative for whether money actually moved and for the final payment state of a Charge. The Spend Ledger is the system source of truth: it is authoritative for agent intent, policy decisions, and audit history, and records every attempt regardless of Stripe outcome. Reconciliation flows one way — Stripe outcome updates ledger charge status; the ledger's intent record is immutable. Divergence between optimistic ledger state and webhook outcome triggers an alert. Stripe webhook outcomes always override non-terminal or ambiguous ledger states — if a webhook arrives for a Charge the ledger considers `failed` (e.g., via timeout path), Stripe's determination takes precedence and the ledger is updated accordingly.
 
-**Idempotency.** Every `chargeRouter` call carries an idempotency key derived from `(skillRunId, intent)`. A retried skill run must not double-charge.
+**Idempotency.** Every Charge Router call carries an idempotency key. A key derived only from `(skillRunId, intent)` is insufficient for multi-charge skill runs. The locked key shape includes `skillRunId`, `toolCallId`, `intent`, and an args hash; see addendum Section K for the full shape. A retried skill run must not double-charge. Enforced at DB level via UNIQUE constraint on `agent_charges`.
 
 **Don't double-count with existing data ingestion.** The existing Stripe data connector ingests charges for analytics. The new ledger is the authoritative record of agent-initiated charges. The data connector continues for everything else. Reporting needs a clear story for which view shows what.
 
 **Rate limits.** Stripe's per-account rate limits apply to SPT operations. Per-tenant queueing if we approach limits during high-volume workflows.
 
-**Failure-mode semantics.** When a workflow fails after a successful charge, the default is to surface the failed-but-charged state to HITL with three suggested actions: refund, manually retry the failed steps, or accept the partial state. No automatic refund-on-rollback in v1, because automatic refunds create their own failure modes (refund fails, partial refund accepted by Stripe, refund-then-retry charges twice). Document this behaviour explicitly so operators know to expect it.
+**Failure-mode semantics.** Three explicit rules:
+- Charge success is optimistic at execution time. The Charge Router writes `executed` and returns success to the caller; Stripe webhook confirmation is required to settle `executed → succeeded`. Divergence between optimistic state and webhook outcome triggers reconciliation.
+- Reconciliation may mutate charge status post-execution. This is expected; the ledger reflects Stripe's final state.
+- When a workflow fails after a successful charge, the system surfaces the failed-but-charged state to HITL with three options: refund, manually retry the failed steps, or accept partial state. No automatic refund-on-rollback in v1 — automatic refunds introduce their own failure modes (refund fails, double-charge on retry, partial-refund acceptance).
+
+**Kill Switch edge cases.** Kill Switch blocks new Charges immediately. In-flight Charges (already submitted to Stripe, awaiting webhook) resolve normally and are not reversed. Charges in `pending_approval` state at the moment the Kill Switch fires are auto-cancelled. No retries are permitted post-kill. Every Kill Switch event is audit-logged with the triggered-by user, timestamp, and scope.
+
+**Alert severity.** Critical: reconciliation mismatch, cross-tenant SPT access attempt, ledger inconsistency. Warning: webhook delay beyond 30 minutes, Charge in `executed` pending confirmation beyond 1 hour. Informational: Kill Switch activation (audit event; not page-worthy on its own). This distinction must inform observability design from the start to avoid alert fatigue.
 
 **Operator trust runway.** Shadow mode is mandatory v1, defaulted on, and the only path from shadow to live is itself a HITL-gated action with audit. Without this, adoption stalls regardless of how good the technical implementation is.
 
@@ -158,13 +210,13 @@ Per-sub-account spend attribution feeds the white-labeled client ROI dashboard w
 
 These were open questions in v1, now resolved.
 
-**Policy default.** New agents inherit a zero-spend policy by default. Spending is opt-in per agent, per policy, with shadow mode mandatory before live mode is allowed. Conservative defaults (e.g. $20/txn, $100/day) appear as templates the operator can apply, not as automatic inheritance.
+**Policy default.** New agents have no Spending Budget by default. Spending is opt-in per agent, per Spending Budget, with shadow Spending Mode mandatory before live mode is allowed. Conservative defaults (e.g. $20/txn, $100/day) appear as templates the operator can apply, not as automatic inheritance.
 
 **Org vs. sub-account SPT.** One SPT per sub-account. Cleaner isolation, cleaner cost attribution per the GoHighLevel research finding that agencies are hyper-sensitive to per-sub-account margin transparency. Slightly higher setup cost is recouped immediately on the reporting side.
 
 **Approval routing.** Reuse the existing HITL queue. Faster to ship, consistent operator mental model, and the queue is already the right governance surface. Approval surface gets a `category: 'spend'` filter for operators who want a focused view.
 
-**Portfolio Health budget model.** Spending policy attaches to the agent first, with an optional sub-account override. Portfolio Health Agent gets a global retention-gift policy at the org level (e.g. $50/gift, $500/month, allowlist of Goldbelly + Harry & David) but each gift charge attributes to the recipient sub-account in the ledger. This solves the cross-sub-account spending need without breaking the per-sub-account isolation principle.
+**Portfolio Health budget model.** Spending Budget attaches to the agent first, with an optional sub-account override. Portfolio Health Agent gets a Spending Budget at the org level with a Spending Policy allowing retention gifts (e.g. $50/gift, $500/month, Merchant Allowlist of Goldbelly + Harry & David) but each gift Charge attributes to the recipient sub-account in the Spend Ledger. This solves the cross-sub-account spending need without breaking the per-sub-account isolation principle.
 
 **Sales Autopilot Playbook v1.** Sales Autopilot Playbook does NOT get spending capability in v1. Twilio costs continue to flow through the existing agency-billed model. Adding spending to Sales Autopilot is a follow-up after this build ships, because the Sales Autopilot is itself in active development and adding two moving parts at once is unwise.
 
@@ -177,6 +229,11 @@ These were open questions in v1, now resolved.
 ## 8. Codebase exploration required before spec freezes
 
 This section is the explicit handoff to Claude Code. The spec cannot be written until these questions are answered with reference to the actual codebase. Each item produces either a confirmation, a recommended approach, or a flag back for stakeholder decision.
+
+**Net-new subsystems (not extensions).** Three areas this brief initially framed as extensions to existing code are net-new, and must be sized accordingly by the architect:
+- Stripe webhook ingestion for charge reconciliation does not exist today. The existing Stripe data connector does not produce a reconcilable webhook stream for agent-initiated charges. This is a new subsystem, not a modification of the existing connector.
+- Worker-to-Charge-Router communication requires a new pg-boss request-reply channel. Workers have no charge-routing capability today. All spend initiated from a worker must round-trip through the main app.
+- `cost_aggregates` has no RLS policy today. Adding agent-spend dimensions without retrofitting RLS leaks spend data across orgs at the read layer. The retrofit is mandatory before any new dimensions land; it is not optional (resolved in addendum Section L).
 
 **8.1 Skill registry integration.** How does the existing SKILL.md gate model (auto / review / block) interact with spending policies? Options to evaluate: (a) new gate type `spend` that triggers policy check, (b) spend as an orthogonal dimension on every gate type, (c) policy check happens inside the skill executor regardless of gate. Recommend an approach with reference to the existing skill executor surface.
 
@@ -228,7 +285,85 @@ Sales Autopilot Playbook spending capability.
 
 ---
 
-## 10. Next steps
+## 10. System invariants, execution contract, and boundaries
+
+### 10.1 Non-negotiable invariants
+
+These rules hold in every code path. Violations are blocking issues in adversarial-reviewer and spec-conformance passes.
+
+- **Ledger row before charge.** The Charge Router writes a `proposed` Spend Ledger row before contacting Stripe. No code path reaches Stripe without a ledger row already written.
+- **Policy check before execution.** No spend-enabled skill calls Stripe directly. All execution flows through the Charge Router.
+- **Worker never charges directly.** IEE workers carry no SPT credentials. All spend is authorised by the main app via the pg-boss round-trip (addendum Section D).
+- **Idempotency at DB level.** `agent_charges` has a UNIQUE constraint on the idempotency key. Duplicates resolve via `INSERT ... ON CONFLICT DO UPDATE`, not application-layer deduplication.
+- **Tenant isolation.** RLS policies protect `spending_budgets`, `spending_policies`, and `agent_charges`. Cross-tenant SPT access is a critical incident.
+- **Shadow charges write to the real ledger.** Shadow mode does not skip the Spend Ledger. Every shadow attempt gets a full `shadow_settled` row with policy decision, Merchant Allowlist result, and Charge Intent recorded.
+- **Kill Switch is synchronous.** A fired Kill Switch blocks new Charges immediately. In-flight Charges resolve normally; pending-approval Charges auto-cancel; no retries are permitted.
+- **`cost_aggregates` RLS before new dimensions.** The RLS retrofit on `cost_aggregates` ships in the same migration as the first new entityType values. No spend data lands in the table without RLS protection.
+- **No silent drops.** Every proposed Charge must reach a terminal state or an explicit intermediate state (`pending_approval`, `executed`). No Charge attempt may be silently dropped. Terminal states: `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded`, `disputed`. Non-terminal Charges (`pending_approval`, `executed`) still hold their reserved amount against limits.
+- **Blocked vs denied.** Blocked = system-enforced denial (policy, limits, Kill Switch). Denied = human rejection via HITL. Distinct categories for analytics, debugging, and audit semantics.
+- **Execution window.** A Charge in `approved` state must transition to `executed`, `shadow_settled`, or `failed` within a bounded execution window. If the window expires without a transition, the Charge is auto-marked `failed` with reason `execution_timeout`. This prevents permanent reserved-capacity lock and keeps the system self-healing.
+
+### 10.2 Execution contract
+
+Every spend follows the same four-step flow. No spend-enabled skill may implement a different path.
+
+1. **Propose.** Skill calls Charge Router with `{ intent, amountMinor, merchant, idempotencyKey, ... }`. Router writes a `proposed` ledger row.
+2. **Gate.** Router evaluates Spending Policy: checks Spending Mode, Spending Limits, Merchant Allowlist, Approval Threshold. Outcome: `approved`, `blocked`, or `pending_approval`.
+3. **Execute.** Live mode + approved: call Stripe via SPT, write result. Shadow mode + approved: write `shadow_settled`, return success to caller with no external call. Blocked: write `blocked`, return denial. Pending approval: write `pending_approval`, enqueue HITL, suspend workflow.
+4. **Settle.** Stripe webhook arrives. Reconciliation job transitions `executed → succeeded`, `executed → failed`, `succeeded → refunded`, or `succeeded → disputed`.
+
+### 10.3 Integration boundaries
+
+- **Main app vs worker.** The Charge Router lives exclusively in the main app. Workers access it via pg-boss request-reply with a 30-second deadline (addendum Section D). RLS context is established at the main-app boundary.
+- **Spending Policy vs Charge Router.** The Spending Policy holds the rules. The Charge Router evaluates them. Policy is a data object; Charge Router is the enforcement service.
+- **Stripe vs Spend Ledger.** Stripe is the financial source of truth (payment state). The Spend Ledger is the system source of truth (agent intent, policy decisions, audit trail). Reconciliation updates the ledger from Stripe; it does not update Stripe from the ledger.
+- **Workflow engine vs Charge Router.** Spend is a workflow action. The workflow engine calls the Charge Router via the existing action execution path, not a separate path. Spend approval routing follows the same pause-resume mechanics as other HITL actions.
+
+---
+
+## 11. Edge-case semantics
+
+### 11.1 Spend Intent vs Charge
+
+A Spend Intent is the logical operation ("buy domain example.com"). A Charge is a single execution attempt. Multiple Charges may share one Spend Intent — when a Charge fails and is retried, both carry the same `intent_id`. This field lives on `agent_charges` and is the grouping key for retry chains in the UI and analytics. The idempotency key distinguishes individual attempts; `intent_id` groups them under one operation. Retries are explicit actions — a `failed` Charge is terminal; a retry is a new Charge under the same `intent_id`, initiated by either the workflow (if explicitly designed to retry) or an operator action. There are no automatic system retries.
+
+### 11.2 Concurrency and reserved capacity
+
+Spending Limits are enforced against settled Charges plus all in-flight approved Charges. An `approved` or `executed` Charge reserves its amount against the relevant limits until it reaches a terminal state. Two concurrent charges that would individually fit a limit but collectively exceed it — the second is blocked. This prevents race-condition overspend during high-volume runs. Limits are evaluated at the Gate step — before approval routing and before execution.
+
+### 11.3 Approval expiry and policy revalidation
+
+Pending approvals expire after 24 hours by default (configurable per Spending Budget). When an approval is acted on, the Charge Router re-checks the current Spending Policy before executing. If the policy has changed such that the Charge would now be blocked — limit reduced, merchant removed, Kill Switch fired — the Charge is auto-denied with reason `policy_changed`. Approval is a gate, not a blank cheque. Approval resolution is atomic — the first valid response wins; subsequent responses are ignored and recorded as superseded.
+
+### 11.4 Merchant identity
+
+Merchant matching uses Stripe merchant ID as the primary identifier where available. Fallback: normalised string matching against the merchant descriptor. Exact-match semantics in v1. Pattern matching and category grouping are deferred to follow-up builds.
+
+### 11.5 Recurring charges
+
+Every recurring Charge (subscription renewal, scheduled top-up) is evaluated against the current Spending Policy at execution time. Pre-approval does not carry forward across billing cycles. Operators who want low-friction renewals configure permissive limits and allowlists — not pre-approved subscriptions.
+
+### 11.6 Webhook failure
+
+If a Stripe webhook for an `executed` Charge has not arrived within 30 minutes, a reconciliation poll runs against Stripe's API. The Charge remains `executed` until confirmed. If the poll also fails, the Charge stays `executed`, surfaces in the dashboard as "pending confirmation," and an alert fires. Manual reconciliation is the resolution path. Until webhook confirmation, `executed` is treated as pending external confirmation and is not considered settled for limit release or reporting purposes.
+
+### 11.7 Net spend and refunds
+
+Spending Limits are enforced on net spend: settled charges minus refunds. A $50 refund against a $100 daily limit restores $50 of available capacity. Per-transaction limits are point-in-time and are not affected by subsequent refunds.
+
+### 11.8 Ledger immutability
+
+Spend Ledger rows are immutable except for state transitions enforced by the charge lifecycle state machine. No other field mutations are permitted. Enforced by append-only DB triggers (addendum Section M). This rule applies to both executed and shadow rows.
+
+### 11.9 Future extension points (decisions locked, implementation deferred)
+
+- **Spend velocity.** The Spending Policy schema must support an optional rate limit (max N charges per minute or hour). Not built in v1; schema must not preclude it.
+- **Confidence gating.** Spending Policy may optionally consider agent confidence score as a gating signal — high confidence auto-executes within limits, low confidence routes to approval even under threshold. Deferred to post-v1; policy schema must not foreclose it.
+- **Charge provenance.** `agent_charges` should include an optional `provenance` field (`'workflow' | 'manual' | 'scheduled' | 'retry'`) for later use in analytics, debugging, and fraud detection. Not required for v1 logic; schema must not foreclose it.
+
+---
+
+## 12. Next steps
 
 Stakeholder review of this brief. Approve, amend, or reject.
 
