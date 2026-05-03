@@ -163,3 +163,71 @@ test('error carries kind / recordId / from / to fields', () => {
 });
 
 console.log('');
+
+// ---------------------------------------------------------------------------
+// workflow_step_gate (added in workflows-v1 Chunk 4)
+// ---------------------------------------------------------------------------
+
+test('workflow_step_gate: open → resolved is valid', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_step_gate', recordId: 'g1', from: 'open', to: 'resolved' }),
+  );
+});
+
+test('workflow_step_gate: same-state idempotent (resolved → resolved) is allowed', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_step_gate', recordId: 'g1', from: 'resolved', to: 'resolved' }),
+  );
+});
+
+test('workflow_step_gate: resolved → open is rejected (post-terminal mutation)', () => {
+  const err = assertThrows(
+    () => assertValidTransition({ kind: 'workflow_step_gate', recordId: 'g1', from: 'resolved', to: 'open' }),
+    'workflow_step_gate',
+  );
+  if (err.kind !== 'workflow_step_gate' || err.from !== 'resolved' || err.to !== 'open') {
+    throw new Error(`unexpected error fields: kind=${err.kind} from=${err.from} to=${err.to}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// workflow_run paused (added in workflows-v1 Chunk 7)
+// ---------------------------------------------------------------------------
+
+test('workflow_run: running → paused is valid', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'running', to: 'paused' }),
+  );
+});
+
+test('workflow_run: paused → running is valid (resume)', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'paused', to: 'running' }),
+  );
+});
+
+test('workflow_run: paused → cancelling is valid (Stop while paused)', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'paused', to: 'cancelling' }),
+  );
+});
+
+test('workflow_run: paused → failed is valid (terminal stop)', () => {
+  assertNoThrow(() =>
+    assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'paused', to: 'failed' }),
+  );
+});
+
+test('workflow_run: completed → paused is rejected (post-terminal mutation)', () => {
+  assertThrows(
+    () => assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'completed', to: 'paused' }),
+    'workflow_run paused after completed',
+  );
+});
+
+test('workflow_run: cancelled → paused is rejected (post-terminal mutation)', () => {
+  assertThrows(
+    () => assertValidTransition({ kind: 'workflow_run', recordId: 'wr1', from: 'cancelled', to: 'paused' }),
+    'workflow_run paused after cancelled',
+  );
+});

@@ -363,6 +363,26 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [ ] [user] **R4-F5 — Bypass-once-per-cooldown-window guard.** ChatGPT R4 proposed tracking `last_escalation_bypass_at` and allowing severity-escalation cooldown bypass only once per cooldown window, to prevent warn→critical oscillation causing flip-flop re-surfacing. Deferred because the scenario requires multiple severity oscillations within one cooldown window — implausible in pre-production. **Reconsider per trigger:** post-launch production logs show cooldown-bypass or eviction patterns for specific categories that indicate oscillation.
 - [ ] [user] **R3-F7 — "Ongoing for X days" UI persistence indicator.** `created_at` and `updated_at` are both stored; the UI today sorts by `updated_at` desc but doesn't surface persistence ("open for 5 days"). Deferred because v1's surface is "what to look at right now" — persistence indicators need an established operator workflow that benefits from them, which doesn't exist pre-launch. **Reconsider per trigger:** when v1.1 surface design picks up dashboard refinements, OR when operator feedback indicates persistence context would help triage.
 
+### workflows-dev-spec (2026-05-02)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-workflows-dev-spec-2026-05-02T10-00-00Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**PR:** #252 — https://github.com/michaelhazza/automation-v1/pull/252
+**Branch:** `claude/workflows-brainstorm-LSdMm`
+
+All ten items below are **architect-time runtime quotas / picks** — none are spec-blocking. They surface during the `architect` decomposition pass as concrete numbers / endpoints to pin in the implementation chunks.
+
+- [ ] [user] **M1 — Define max approver pool size.** UI guard (picker shows up to N users) + query-time performance cap. Architect to pick at decomposition.
+- [ ] [user] **M2 — Define max Ask fields per step.** Validator rule + UX field-count limit. Architect to pick at decomposition.
+- [ ] [user] **M3 — Define max files per task before grouping becomes mandatory.** UI threshold based on strip overflow profiling. Architect to pick after first real task with many files.
+- [ ] [user] **M4 — Timeout for /run/resume race window.** Confirm against §19 open extension-cap parameters. Architect-time confirmation.
+- [ ] [user] **F21 — Max step count per run runtime quota (e.g. 10k).** §4.4 prevents structural infinite loops at validation; this guards against Approval-on-reject runtime cycles. Simple `max_steps_per_run` quota; architect to pick value.
+- [ ] [user] **F23 — Fan-in result ordering by `task_sequence` of producing event.** §4.3 fan-in doesn't address result aggregation order; the right answer is "by `task_sequence` of the producing event" so downstream LLM inputs are deterministic. Architect to confirm during decomposition; depends on existing engine fan-in semantics.
+- [ ] [user] **F24 — Permission drift policy (snapshot for gates, live for controls).** Spec already has the consistent split (snapshot for `workflow_step_gates.approver_pool_snapshot` per §5.1; live for Pause/Stop buttons per §7.5). Worth a one-line statement in §14 making this split explicit. Not a blocking gap — architect-time clarification.
+- [ ] [auto] **F38 — Max concurrent steps per run / per org runtime quota.** Same family as F21 — runtime safety rail; bundle the picks.
+- [ ] [auto] **F40 — Hard upper bounds (max tasks per run, max steps per task, max runtime duration).** Same family as F21 + M1–M3 — architect-time quotas.
+- [ ] [auto] **F42 — Visibility timeout / stuck execution recovery.** Engine/worker-level concern; existing `createWorker()` + `withBackoff` primitives handle worker death. Architect to confirm the recovery semantics are wired correctly during decomposition.
+
 ---
 
 ### LAEL-RELATED — `External Call Safety Contract` abstraction (cross-feature, unscoped)
@@ -2217,6 +2237,58 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
 
 
+## Deferred spec decisions — workflows-dev-spec
+
+**Source:** spec-reviewer iteration 1 — 2026-05-02T00-48-25Z
+**Spec:** `docs/workflows-dev-spec.md` (v1)
+**Brief:** `docs/workflows-dev-brief.md` (v2)
+
+The spec-reviewer auto-decided the following directional findings during iteration 1. Each was accepted and applied to the spec mechanically using the most conservative resolution available; flagged here so a human can validate the resolution before implementation proceeds.
+
+### D-W1-C2: Ask multi-submitter / quorum semantics — resolved as single-submit / first-wins
+
+**Codex:** the spec inherits Approval-style `quorum` for Ask via the shared `submitterGroup` shape, but Ask runtime persists a single submitted-value JSON and never defines what multiple submitters mean.
+
+**Resolution applied:** Ask is single-submit / first-submit-wins. Validator caps `quorum` at 1 for Ask in §4.8; subsequent submissions return 409 with the existing submitter info. Matches the brief's implicit model (one row of submitted values per Ask step) and avoids inventing a multi-submit aggregation concept.
+
+**What to validate:** confirm with the brief author that "multiple people in the submitter group, only one fills the form" is the intended UX. If multi-submitter aggregation is wanted in V1, this needs a redo.
+
+### D-W1-C3: Idempotency / concurrency / unique-constraint→HTTP for Approval and Ask writes — resolved with state-based predicate + UNIQUE on review row
+
+**Codex:** new write paths had no idempotency posture, no concurrency guard, no duplicate-request HTTP mapping (spec-authoring-checklist §10 requires all three).
+
+**Resolution applied:** standard repo posture (per checklist §10 examples) — Approval writes get key-based + state-based posture (UNIQUE on `(workflow_run_id, step_id, deciding_user_id)` for double-click idempotency, optimistic predicate on step status for first-commit-wins quorum-counting, 23505 → 200 idempotent-hit). Ask writes get state-based posture (predicate on step status, 0-rows-updated → 409 already_submitted). State machine closure pinned in §5.1.1 + §11.4.1.
+
+**What to validate:** confirm the (workflow_run_id, step_id, deciding_user_id) UNIQUE constraint is the right granularity (vs (run_id, step_id) — but that disallows multi-approver quorum, which is wrong). Architect to verify the existing schema doesn't already have a conflicting constraint.
+
+### D-W1-I6: Ask form `params` Contracts entry — applied with the seven field types pinned
+
+**Codex:** Ask form contract underspecified — no canonical `params` schema, no `autoFillFrom` enum, skip-flag schema, `error_message` field.
+
+**Resolution applied:** added a Contracts subsection to §3.2 pinning the full Ask `params` shape (prompt, fields[] with seven types + per-field error_message, submitterGroup, quorum=1, autoFillFrom enum 'none'|'last_completed_run', allowSkip:boolean default false).
+
+**What to validate:** confirm the seven field types are the right V1 set. Confirm `autoFillFrom` is the right enum shape (vs a more flexible structure). Confirm reserved field-key list (currently unspecified — architect picks).
+
+### D-W1-I7: Pause / resume / extend state machine + API — resolved with full pin (path b)
+
+**Codex:** Pause system promised resume/extend but no endpoint, no persisted state, no permission contract, no state-machine closure.
+
+**Resolution applied:** path b chosen (pin the full state machine + resume API rather than cutting extend from V1). Added a §7.5 subsection with: new `paused` status, valid transitions (running ↔ paused, running/paused → failed via Stop), forbidden transitions, resume API contract (`POST /api/tasks/:taskId/run/resume` with optional extension params), Stop API contract, idempotency posture (state-based), permission guard (§14.5 visibility set), default 2-extension cap per run.
+
+**What to validate:** confirm the codebase wants to ship `Continue for another 30 minutes / $2.50` extension affordance in V1, OR whether path a (Stop only, no extend) is preferred for simplicity. The current spec assumes extend is in scope per §7.2 mock and spec-time decision #4.
+
+### D-W1-R2: Staging deploy step — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `staged_rollout: never_for_this_codebase_yet` and `rollout_model: commit_and_revert`. §18.1 step 5 was rewritten to commit-and-revert; staging smoke-test step removed.
+
+**What to validate:** if the codebase has actually moved to a staged rollout posture (e.g. an internal staging environment for the workflows feature specifically), the spec-context.md framing needs to be updated and this rejection re-litigated.
+
+### D-W1-R4: Frontend `*.test.tsx` tests — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `frontend_tests: none_for_now` and `convention_rejections` explicitly says "do not add frontend unit tests". §17.5 .test.tsx block was removed and replaced with a deviation note pointing back at spec-context.md; one .test.tsx in §17.6 was renamed to a server-side .test.ts.
+
+**What to validate:** if the codebase is ready to land a frontend testing posture for this feature specifically (justifiable because of the WebSocket-coordinated multi-pane UI), update spec-context.md first, then re-litigate.
+
 ---
 
 ## Deferred spec decisions — subaccount-optimiser
@@ -2473,6 +2545,96 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **P2.1 (R3) — CI enforcement check for `eslint-disable` requiring `// reason:` on the preceding line.** Add a CI step (script under `scripts/` or `.github/workflows/`) that walks line pairs across the codebase and fails the build when an `eslint-disable` directive is not preceded by a `// reason:` comment line. Naive `grep -v` matches reason anywhere on the same line; the correct check needs an awk/script that handles preceding-line semantics and skips block-comment regions. Belongs in its own focused PR with test coverage of the script itself. [user] — out of scope for the lint-cleanup PR; requires its own design + tests.
 - [ ] **P2.4 (R3) — Add "React effect dependency policy" section to `CONTRIBUTING.md`.** Document the target pattern (`useCallback` or `useRef`-stabilised inline function) for `useEffect` bodies that close over component state, alongside the existing lint-suppression policy. Coupling: write this when the React effect refactor (R1 P2.1) lands so the doc describes the post-refactor pattern, not the current inline-async pattern. [user] — defer until the refactor PR ships so the policy and the code agree from day one.
 
+---
+
+## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
+
+Source logs:
+- `tasks/review-logs/pr-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+- `tasks/review-logs/adversarial-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+
+Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blocking findings (B1–B5) and CRITICAL/HIGH adversarial findings (F1, F2, F5, F6, F8) plus strong pr-reviewer findings (S1–S6) have been applied in-spec / in-plan in the same session. Remaining items below are non-blocking improvements and lower-severity adversarial concerns deferred to either the workflows-v1 implementation (where they land in the relevant chunk's acceptance criteria) or to a follow-up V2 spec.
+
+### W1-N1 — Spec §3.1 `agent_execution_events` invariant duplicates §8.1
+
+**Source:** pr-reviewer N1.
+**Action:** condense §3.1 row to a one-line cross-reference to §8.1 (which has the canonical allocation invariant in full). Cleanup, not load-bearing.
+**Owner:** spec polish; can fold into Chunk 1 PR or a docs-sync follow-up.
+
+### W1-N2 — Plan Chunk 0 spike effort accounting
+
+**Source:** pr-reviewer N2.
+**Action:** clarify that the 2-day spike is on top of the ~40-day baseline, not inside it. Plan reads ambiguous; the operator should know the spike is a sunk cost on top.
+**Owner:** plan polish; can fold into the next plan revision.
+
+### W1-N3 — Spec §16.5 effort estimate (~59d) vs plan's revised baseline (~40d)
+
+**Source:** pr-reviewer N3.
+**Action:** spec §16.5 still cites ~59 engineer-days; plan's primitive-reuse re-baseline is ~40d. Either update spec §16.5 or add a one-line "plan-gate re-baseline: ~40 engineer-days (see plan.md line 303)" so future spec readers know the spec figure is stale.
+**Owner:** spec polish.
+
+### W1-N4 — Plan §Risks markdown anchor links
+
+**Source:** pr-reviewer N4.
+**Action:** for the most consequential risks, add `(Chunk N)` anchor links in the mitigation cells. Low-effort navigation improvement.
+**Owner:** plan polish.
+
+### W1-F3 — `assignable-users` email enumeration mitigation
+
+**Source:** adversarial-reviewer F3 (MEDIUM).
+**Action:** consider redacting email for users not in caller's subaccount membership; OR rate-limiting the endpoint (max 10 unique subaccount-IDs per minute per org admin); OR requiring an explicit "I want to assign across subaccounts" admin permission. V1 may ship as-is if the operator accepts the tradeoff (org admins are relatively trusted), but it should be a deliberate trade-off, not an oversight.
+**Owner:** Chunk 10 acceptance criteria — operator decides ship-as-is vs. add mitigation.
+
+### W1-F4 — Approver-pool snapshot UUID normalisation
+
+**Source:** adversarial-reviewer F4 (LOW, worth-confirming).
+**Action:** spec §5.1 should pin the `ApproverPoolSnapshot` normalisation contract — UUIDs lowercase, branded type, parsed at write-time. Without this, a `userInPool` equality check could fail for a legitimate approver if the snapshot captured uppercase UUIDs or surrogate IDs.
+**Owner:** Chunk 4 acceptance criteria + spec §5.1 polish.
+
+### W1-F7 — Stall-and-notify cancellation race verification
+
+**Source:** adversarial-reviewer F7 (LOW, worth-confirming).
+**Action:** verify at Chunk 8 implementation time that the `expectedCreatedAt` stale-fire guard correctly handles the race where the pg-boss job starts executing between `resolved_at` SET and the job-cancel call. Spec analysis suggests it does; confirm with a unit test.
+**Owner:** Chunk 8 implementation + test author.
+
+### W1-F9 — Cadence-detection NLP heuristic gameability note
+
+**Source:** adversarial-reviewer F9 (LOW).
+**Action:** add a one-line note in spec §13.1 that the cadence-detection heuristic is advisory only — any draft created from it goes through the standard publish flow with full validation, so user-tuned prompts can't bypass authorisation. Documentation only; no code change.
+**Owner:** spec polish.
+
+### W1-F10 — Aggregate cost cap across `workflow.run.start`-spawned children (V2)
+
+**Source:** adversarial-reviewer F10 (MEDIUM).
+**Action:** V1 acceptable as-is now that F6's depth cap (max 3) is in place (3 levels × ~10 children per level × $5 = $150 worst-case). V2 should add an aggregate "lineage cost" cap across a parent run and all `workflow.run.start`-spawned descendants. Track in workflows V2 spec.
+**Owner:** workflows V2 spec.
+
+### W1-F11 — `approval.queued` event approver-pool ID broadcast
+
+**Source:** adversarial-reviewer F11 (LOW).
+**Action:** verify at Chunk 9 implementation time whether the client resolves approver-pool IDs to display names. If yes, consider broadcasting only a hash + count rather than the full ID list, OR scope the broadcast to subscribers who are themselves in the pool.
+**Owner:** Chunk 9 implementation + Chunk 11 (open task UI) consumer review.
+
+### W1-spec19 — Confidence-chip cut-points decision before launch
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** spec §19.1 #A (confidence-chip cut-points) is left to architect after collecting 100 internal cards. Track as a release blocker in spec §19; if never formally decided, `workflowConfidenceCopyMap.ts` ships with placeholder values producing misleading confidence in production.
+**Owner:** architect post-Chunk-6.
+
+### W1-pre-existing-1 — Pool-membership CI gap documentation
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** add a note to `DEVELOPMENT_GUIDELINES.md` that `verify-rls-coverage.sh` does NOT catch pool-membership / authz checks (it's RLS-coverage only). Manual reviewer is the only gate today; improving CI coverage of authz patterns is a separate codebase-audit follow-up.
+**Owner:** DEVELOPMENT_GUIDELINES.md docs-sync follow-up.
+
+### W1-approval-pool-refresh — `approval.pool_refreshed` event payload
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** confirm at Chunk 5 implementation time that the Approval card re-fetches the gate's authoritative pool snapshot after a `pool_refreshed` event (not just the `new_pool_size`). If the client renders pool members anywhere, stale display is possible without the re-fetch.
+**Owner:** Chunk 5 + Chunk 11 consumer review.
+
+---
+
 ## Deferred from spec-conformance review — ghl-module-c-oauth (2026-05-03)
 
 **Captured:** 2026-05-03T04:47:51Z
@@ -2534,3 +2696,29 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **Add `grant_type` / token-source column to `connector_location_tokens` and `connector_configs`.** Currently both tables persist tokens without recording how the token was acquired (`agency_oauth_mint`, `location_oauth`, `direct_install`, `manual_paste`, `user_oauth`, future provider-specific grant types). When a second OAuth provider lands or when GHL adds a new grant flow, distinguishing source is a join-on-nothing problem. Cheap migration now (`token_source text`, default backfill `'agency_oauth_mint'` for existing GHL rows) saves a debugging session later when an operator needs to filter by source. **When required:** when the second OAuth provider lands. Source: chatgpt-pr-review PR #254 round 2 finding 6.
 
 - [ ] **Operator-facing kill switch UI / endpoint for `connector_configs.status='disconnected'`.** The status enum (`'active' | 'error' | 'disconnected'`) and short-circuiting at `findAgencyConnectionByCompanyId` + `connectorPollingTick` are already in place. What's missing is a one-click admin path: `POST /api/admin/connector-configs/:id/disable` that flips the status to `disconnected` and soft-deletes the location tokens (see related cascade item above). Useful in production incident response when a partner integration is misbehaving. **When required:** before the first production incident (operator response time gates this). Source: chatgpt-pr-review PR #254 round 2 finding 7.
+
+## Deferred from Workflows V1 Chunks 5–6 (2026-05-03)
+
+- [ ] **Chunk 5: `task_requester` pool uses `workflowRuns.startedByUserId` instead of `tasks.created_by_user_id`.** `server/services/workflowApproverPoolService.ts` task_requester branch resolves from `workflowRuns.startedByUserId` because `tasks` has no `workflow_run_id` FK in V1. When a `workflow_run_id` FK is added to `tasks`, update this branch to resolve from `tasks.created_by_user_id` instead. A V1/V2 comment is already in the code at the resolution site.
+
+- [ ] **Chunk 5: `approval.pool_refreshed` WebSocket event not emitted on `/refresh-pool`.** Spec §5.1.2 requires emitting `approval.pool_refreshed` so open clients update their Approval card. This emission is deferred to Chunk 9 which owns the event taxonomy and WebSocket transport layer. Implement in `workflowStepGateService.ts resolveGate` / `workflowGateRefreshPoolService.ts` once Chunk 9's `emitTaskEvent` primitive is available.
+
+- [ ] **Chunk 6: Minor quality cleanup (non-blocking).** `workflowRunService.ts` has 4 identical V1-atomicity-gap NOTE blocks (lines ~558, 716, 774, 814) — extract to a single comment. `workflowStepGateService.ts` has inline `import('...')` types for `SeenPayload`/`SeenConfidence` — move to top-level import block. `workflowConfidenceServicePure.ts signals` array emits all 5 entries (0-weight non-firing rules) while the fallback path emits `[]` — align to one shape.
+
+
+## Deferred from spec-conformance review — workflows-v1 (2026-05-03)
+
+**Captured:** 2026-05-03T20:29:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-workflows-v1-chunks-3-8-2026-05-03T20-29-16Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**Scope verified:** Chunks 3-8
+
+- [ ] **REQ 6.4 — `workflowSeenPayloadService.ts` (impure wrapper) does not exist.** Plan Chunk 6 named this file as an impure orchestrator that loads run context. Implementation calls the pure builder (`buildSeenPayload`) directly from `workflowStepGateServicePure.ts → buildGateSnapshot`. Whether this is a missing layer or an intentional simplification (avoiding premature abstraction; gate service already loads runContext) needs human judgment.
+  - Spec section: Plan Chunk 6 file list
+  - Gap: file named in plan does not exist on disk
+  - Suggested approach: either (a) add a one-line passthrough wrapper to satisfy the literal plan requirement, or (b) update the plan to reflect the inlined call chain. Option (b) is cleaner — the impure wrapper would be redundant since the gate service already provides the run-context load step.
+
+- [ ] **REQ 7.9 — Pause / Resume / Stop routes diverge from spec contract.** Spec §7 names `POST /api/tasks/:taskId/run/{pause,resume,stop}`; implementation lands them at `POST /api/workflow-runs/:runId/{pause,resume,stop}` (`server/routes/workflowRuns.ts` lines 274, 294, 331). Implementation pattern matches existing approval route (`/api/workflow-runs/:runId/steps/:stepRunId/approve`); migrating to task-scoped URLs requires a `tasks → workflow_runs` lookup that depends on the deferred `workflow_run_id` FK on tasks (already noted in this todo file).
+  - Spec section: §7 (Pause/Resume/Stop routes)
+  - Gap: route URLs are run-scoped instead of spec-mandated task-scoped
+  - Suggested approach: defer until the `workflow_run_id` FK on tasks lands; then add task-scoped variants (or replace the run-scoped routes). Alternatively, amend spec §7 to use run-scoped URLs to match the existing approval route convention — that would be a `chatgpt-spec-review` decision. Chunk 11 (open task UI) will consume these endpoints, so the decision must be made before Chunk 11 ships.

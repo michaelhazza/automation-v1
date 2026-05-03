@@ -33,6 +33,8 @@ import type {
 } from '../db/schema/index.js';
 import { validateDefinition } from '../lib/workflow/validator.js';
 import type { WorkflowDefinition, ValidationResult } from '../lib/workflow/types.js';
+import { validate as validateV1Rules } from './workflowValidatorPure.js';
+import type { ValidatorResult } from '../../shared/types/workflowValidator.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -159,6 +161,31 @@ export const WorkflowTemplateService = {
         message: `Workflow '${def.slug}' failed validation`,
         errorCode: 'workflow_dag_invalid',
         details: validation.errors,
+      };
+    }
+
+    // V1 publish-time rules. System templates use engine type names so
+    // acceptLegacyTypes is always true here.
+    const v1Validation: ValidatorResult = validateV1Rules(
+      {
+        steps: def.steps.map((s) => ({
+          id: s.id,
+          type: s.type,
+          dependsOn: s.dependsOn,
+          params: s.params,
+          onSuccess: (s as unknown as { onSuccess?: string | string[] }).onSuccess,
+          onFail: (s as unknown as { onFail?: string }).onFail,
+          onReject: (s as unknown as { onReject?: string }).onReject,
+        })),
+      },
+      { acceptLegacyTypes: true }
+    );
+    if (!v1Validation.ok) {
+      throw {
+        statusCode: 422,
+        message: `Workflow '${def.slug}' failed validation`,
+        errorCode: 'validation_failed',
+        errors: v1Validation.errors,
       };
     }
 
@@ -338,12 +365,16 @@ export const WorkflowTemplateService = {
    * Publishes a new version of an org template. Re-runs the validator
    * against the supplied definition with strict version monotonicity, then
    * appends a new immutable workflow_template_versions row.
+   *
+   * `publishNotes` is persisted to workflow_template_versions.publish_notes.
+   * Pass undefined to leave it NULL for the new version row.
    */
   async publishOrgTemplate(
     organisationId: string,
     templateId: string,
     def: WorkflowDefinition,
-    userId: string
+    userId: string,
+    publishNotes?: string
   ): Promise<{ version: number }> {
     const template = await this.getOrgTemplate(organisationId, templateId);
     if (!template) {
@@ -360,12 +391,40 @@ export const WorkflowTemplateService = {
       };
     }
 
+    // V1 publish-time rules. Accept legacy engine type names only when the
+    // template was forked from a system template (may still carry engine names).
+    // Fresh Studio-authored templates must use V1 user-facing type names.
+    const acceptLegacyTypes = !!template.forkedFromSystemId;
+    const v1Validation: ValidatorResult = validateV1Rules(
+      {
+        steps: def.steps.map((s) => ({
+          id: s.id,
+          type: s.type,
+          dependsOn: s.dependsOn,
+          params: s.params,
+          onSuccess: (s as unknown as { onSuccess?: string | string[] }).onSuccess,
+          onFail: (s as unknown as { onFail?: string }).onFail,
+          onReject: (s as unknown as { onReject?: string }).onReject,
+        })),
+      },
+      { acceptLegacyTypes }
+    );
+    if (!v1Validation.ok) {
+      throw {
+        statusCode: 422,
+        message: 'Workflow template failed validation',
+        errorCode: 'validation_failed',
+        errors: v1Validation.errors,
+      };
+    }
+
     await db.transaction(async (tx) => {
       await tx.insert(workflowTemplateVersions).values({
         templateId,
         version: def.version,
         definitionJson: serialiseDefinition(def),
         publishedByUserId: userId,
+        publishNotes: publishNotes ?? null,
       });
       await tx
         .update(workflowTemplates)

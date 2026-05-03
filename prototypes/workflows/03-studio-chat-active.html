@@ -1,0 +1,363 @@
+<!doctype html>
+<!--
+  Workflow Studio · 03 — Chat power tool, activated state
+  =======================================================
+  Companion to mock 02. Shows what the workspace looks like once the
+  user clicks "Ask Studio" (or hits ⌘K) on mock 02.
+
+  Design intent:
+    - Chat slides in from the left as a workspace panel (~380px), not as
+      a floating popup. It is a tool, not a chatbot.
+    - Canvas stays primary — it shrinks to make room rather than being
+      replaced. The user always sees the workflow they're modifying.
+    - Inspector closes when chat opens. Two side panels open at once is
+      the busy-screen anti-pattern from mock 01. Studio mode and
+      direct-edit mode are mutually exclusive surfaces for the same
+      task: changing the workflow.
+    - The conversation demonstrates the "big move" use case — one
+      sentence accomplishes what would otherwise take several clicks
+      across multiple steps. This is when chat earns its keep.
+    - The agent's proposal renders as a *preview* the user accepts
+      explicitly — never silent edits. This is critical for trust:
+      with chat-driven authoring, every change must be reviewable
+      before it lands on the canvas.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workflow Studio — chat active</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#fafafa; color:#1e293b; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .icn-skill   { background:#eef2ff; color:#4338ca; }
+  .icn-agent   { background:#faf5ff; color:#6b21a8; }
+  .icn-approve { background:#fff7ed; color:#9a3412; }
+  .icn-extern  { background:#ecfdf5; color:#047857; }
+
+  .connector { width: 1.5px; background: #d1d5db; margin: 0 auto; }
+
+  .step-card {
+    width: 360px; background:white; border:1px solid #e5e7eb; border-radius:10px;
+    padding: 12px 14px; display:flex; align-items:center; gap:12px;
+    cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .step-card:hover { border-color:#cbd5e1; box-shadow: 0 2px 6px rgba(15,23,42,0.04); }
+  .step-card.preview-add { border-color:#22c55e; background: #f0fdf4; box-shadow: 0 0 0 3px rgba(34,197,94,0.10); }
+  .step-card.preview-edit { border-color:#6366f1; background: #eef2ff; box-shadow: 0 0 0 3px rgba(99,102,241,0.10); }
+
+  .icn-wrap { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative; }
+  .flag-dot { position:absolute; top:-3px; right:-3px; width:10px; height:10px; border-radius:999px; border:2px solid white; }
+  .flag-dot.danger { background:#dc2626; }
+
+  .bottom-bar {
+    position: fixed; bottom: 18px;
+    /* canvas runs from chat panel right-edge (380px) to viewport right-edge.
+       Centre the bar on that area. */
+    left: calc(380px + (100vw - 380px) / 2); transform: translateX(-50%);
+    background:white; border:1px solid #e5e7eb; border-radius: 999px;
+    padding: 6px 6px 6px 18px; display:flex; align-items:center; gap:14px;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+    font-size: 12.5px; z-index: 30;
+  }
+  .bottom-bar .save { padding: 8px 16px; border-radius:999px; background:#4f46e5; color:white; font-weight:600; font-size:12.5px; }
+
+  /* Chat panel (active) */
+  .chat-panel {
+    position: fixed; left: 0; top: 96px; bottom: 0; width: 380px;
+    background: white; border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column;
+    z-index: 25;
+  }
+
+  .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+
+  /* Diff/preview chip styling inside the chat */
+  .diff-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 600;
+  }
+  .diff-add { background: #dcfce7; color: #166534; }
+  .diff-edit { background: #e0e7ff; color: #3730a3; }
+  .diff-rm { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body class="min-h-screen pb-32">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Workflows</a>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Studio</span>
+  <div class="ml-auto text-[12px] text-slate-500">acme-org · sysadmin</div>
+</div>
+
+<!-- Page header -->
+<div class="bg-white border-b border-slate-200 px-6 py-4">
+  <div style="margin-left: 380px;" class="px-6 flex items-center gap-3">
+    <h1 class="text-[18px] font-semibold text-slate-900">Weekly Lead Re-engagement</h1>
+    <span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-amber-100 text-amber-800 uppercase tracking-wide">Draft</span>
+    <span class="text-[12px] text-slate-500 ml-auto">Forked from <span class="text-slate-700">system/lead-reengagement v3</span> · saved 14s ago</span>
+  </div>
+</div>
+
+<!-- ====================== Chat panel (active) ====================== -->
+<div class="chat-panel">
+
+  <!-- Chat header -->
+  <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="w-7 h-7 rounded-md bg-slate-900 text-white flex items-center justify-center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div>
+        <div class="text-[13px] font-semibold text-slate-900 leading-tight">Studio agent</div>
+        <div class="text-[10.5px] text-slate-500">Big-move assistant · ⌘K to toggle</div>
+      </div>
+    </div>
+    <button class="text-slate-400 hover:text-slate-700 -mr-1" title="Close (Esc)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <!-- Conversation -->
+  <div class="flex-1 overflow-y-auto scroll px-4 py-4 space-y-4 text-[13px] leading-relaxed">
+
+    <!-- Empty-state hint shown above the first message when conversation is short -->
+    <div class="text-[11.5px] text-slate-400 text-center pb-1">Studio is best for big moves — restructures, bulk edits, "build me X". For small tweaks, click a step on the canvas.</div>
+
+    <!-- User asks for a non-trivial restructure -->
+    <div class="flex gap-2.5 flex-row-reverse">
+      <div class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center flex-shrink-0">M</div>
+      <div class="flex-1 max-w-[280px]">
+        <div class="bg-indigo-600 text-white px-3 py-2 rounded-lg rounded-tr-sm">Make the approval require sign-off from <strong>two</strong> people on the marketing team, and CC the requester on every approval email.</div>
+        <div class="text-[10.5px] text-slate-400 mt-1 text-right">just now</div>
+      </div>
+    </div>
+
+    <!-- Agent proposes a diff — does NOT silently apply -->
+    <div class="flex gap-2.5">
+      <div class="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-semibold flex items-center justify-center flex-shrink-0">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="flex-1">
+        <div class="text-slate-800 mb-2">Here's what I'd change. Review before applying.</div>
+
+        <!-- Proposal card — diff-like preview -->
+        <div class="border border-slate-200 rounded-lg overflow-hidden">
+
+          <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-[11.5px] text-slate-600 flex items-center justify-between">
+            <span><span class="num font-semibold text-slate-800">2</span> changes to step <span class="num font-semibold text-slate-800">5</span> · Approval before send</span>
+          </div>
+
+          <div class="px-3 py-3 space-y-2.5">
+            <div class="flex items-start gap-2">
+              <span class="diff-chip diff-edit mt-0.5">EDIT</span>
+              <div class="flex-1 text-[12.5px]">
+                <div class="text-slate-700">Approver group:</div>
+                <div class="text-slate-500"><span class="line-through">— unset —</span> → <span class="text-slate-900 font-medium">Marketing team</span></div>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-2">
+              <span class="diff-chip diff-edit mt-0.5">EDIT</span>
+              <div class="flex-1 text-[12.5px]">
+                <div class="text-slate-700">Quorum:</div>
+                <div class="text-slate-500"><span class="line-through">1 approver</span> → <span class="text-slate-900 font-medium">2 approvers</span></div>
+              </div>
+            </div>
+
+            <div class="flex items-start gap-2">
+              <span class="diff-chip diff-add mt-0.5">ADD</span>
+              <div class="flex-1 text-[12.5px]">
+                <div class="text-slate-700">Notify on request:</div>
+                <div class="text-slate-900 font-medium">CC requester (<span class="font-mono text-[11.5px]">{{ run.startedBy }}</span>) on the review email</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Apply / discard -->
+          <div class="px-3 py-2 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
+            <button class="px-2.5 py-1 bg-slate-900 hover:bg-black text-white text-[11.5px] font-semibold rounded-md flex items-center gap-1.5">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Apply changes
+            </button>
+            <button class="px-2.5 py-1 border border-slate-200 hover:bg-white text-slate-700 text-[11.5px] font-medium rounded-md">Discard</button>
+            <button class="ml-auto text-[11px] text-slate-500 hover:text-slate-800">View raw</button>
+          </div>
+        </div>
+
+        <div class="text-[10.5px] text-slate-400 mt-1.5">No estimated cost change. Won't affect step 6.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Quick-action chips -->
+  <div class="px-4 pt-3 pb-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+    <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Add an approval before every irreversible step</button>
+    <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Diff vs published</button>
+    <button class="px-2 py-1 text-[11.5px] rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">Explain this flow</button>
+  </div>
+
+  <!-- Input -->
+  <div class="px-4 pb-4 pt-1">
+    <div class="border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-md bg-white flex items-end">
+      <textarea rows="2" placeholder="Describe a big move…" class="flex-1 resize-none px-3 py-2 text-[13px] outline-none bg-transparent"></textarea>
+      <button class="m-1.5 p-1.5 rounded bg-slate-900 hover:bg-black text-white">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ====================== Canvas (offset by chat panel) ====================== -->
+<div style="margin-left: 380px;" class="px-6 py-10">
+  <div style="max-width: 720px;" class="mx-auto">
+
+    <!-- Step 1 -->
+    <div class="flex justify-center">
+      <div class="step-card">
+        <div class="icn-wrap icn-skill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[14px] font-medium text-slate-900 truncate">Find stale leads</div>
+          <div class="text-[12px] text-slate-500 truncate">Search GHL contacts not contacted in 30 days</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">1</div>
+      </div>
+    </div>
+
+    <div class="connector" style="height:32px;"></div>
+
+    <!-- Step 2 -->
+    <div class="flex justify-center">
+      <div class="step-card">
+        <div class="icn-wrap icn-agent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[14px] font-medium text-slate-900 truncate">Classify by fit</div>
+          <div class="text-[12px] text-slate-500 truncate">Copywriter agent · sets <code class="text-[11px] bg-slate-100 px-1 rounded">tier</code> = hot or cold</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">2</div>
+      </div>
+    </div>
+
+    <div class="connector" style="height:24px;"></div>
+    <div class="text-center text-[12px] text-slate-500 mb-2">If <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded font-medium text-slate-700">tier</code> is</div>
+
+    <!-- Branch -->
+    <div class="grid grid-cols-2 gap-6">
+      <div class="flex flex-col items-center gap-3">
+        <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">hot</span>
+        <div class="step-card" style="width: 300px;">
+          <div class="icn-wrap icn-agent">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[13.5px] font-medium text-slate-900 truncate">Draft personal email</div>
+            <div class="text-[11.5px] text-slate-500 truncate">Copywriter agent</div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 num">3</div>
+        </div>
+      </div>
+
+      <div class="flex flex-col items-center gap-3">
+        <span class="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold">cold</span>
+        <div class="step-card" style="width: 300px;">
+          <div class="icn-wrap icn-skill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[13.5px] font-medium text-slate-900 truncate">Add to nurture list</div>
+            <div class="text-[11.5px] text-slate-500 truncate">Tag in GHL</div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 num">4</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-6 mt-1">
+      <div class="flex flex-col items-center"><div class="connector" style="height:24px;"></div></div>
+      <div class="flex justify-center"><span class="text-[11px] text-slate-400 italic mt-2">— ends —</span></div>
+    </div>
+
+    <!-- Step 5 — preview-edit (chat is proposing changes here) -->
+    <div class="grid grid-cols-2 gap-6">
+      <div class="flex flex-col items-center">
+        <div class="step-card preview-edit" style="width: 300px;">
+          <div class="icn-wrap icn-approve">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5">
+              <div class="text-[13.5px] font-medium text-slate-900 truncate">Approval before send</div>
+              <span class="diff-chip diff-edit" style="font-size:9.5px; padding:1px 5px;">PROPOSED</span>
+            </div>
+            <div class="text-[11.5px] text-indigo-700 truncate">2 approvers from Marketing · CC requester</div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 num">5</div>
+        </div>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-6">
+      <div class="flex flex-col items-center"><div class="connector" style="height:24px;"></div></div>
+      <div></div>
+    </div>
+
+    <!-- Step 6 -->
+    <div class="grid grid-cols-2 gap-6">
+      <div class="flex flex-col items-center">
+        <div class="step-card" style="width: 300px;">
+          <div class="icn-wrap icn-extern">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span class="flag-dot danger" title="Irreversible"></span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[13.5px] font-medium text-slate-900 truncate">Send via Mailchimp</div>
+            <div class="text-[11.5px] text-slate-500 truncate">Automation · campaigns/send</div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 num">6</div>
+        </div>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-6 mt-2">
+      <div class="flex flex-col items-center"><span class="text-[11px] text-slate-400 italic">— ends —</span></div>
+      <div></div>
+    </div>
+
+    <div class="text-center mt-12 text-[12px] text-slate-400">
+      Studio is proposing changes to step 5. Apply or discard from the chat — the canvas previews them in indigo first.
+    </div>
+  </div>
+</div>
+
+<!-- Bottom action bar -->
+<div class="bottom-bar">
+  <div class="flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+    <span class="text-slate-700">1 issue</span>
+  </div>
+  <div class="w-px h-4 bg-slate-200"></div>
+  <div class="text-slate-600 num">~$0.084 / run</div>
+  <div class="w-px h-4 bg-slate-200"></div>
+  <button class="save">Publish v4</button>
+</div>
+
+</body>
+</html>
