@@ -13,6 +13,7 @@ import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { WorkflowRunService } from '../services/workflowRunService.js';
+import { WorkflowRunPauseStopService } from '../services/workflowRunPauseStopService.js';
 
 const router = Router();
 
@@ -232,10 +233,11 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { runId, stepRunId } = req.params;
-    const { decision, editedOutput, expectedVersion } = req.body as {
+    const { decision, editedOutput, expectedVersion, decisionReason } = req.body as {
       decision?: 'approved' | 'rejected' | 'edited';
       editedOutput?: Record<string, unknown>;
       expectedVersion?: number;
+      decisionReason?: string;
     };
     if (!decision || !['approved', 'rejected', 'edited'].includes(decision)) {
       res.status(400).json({ error: 'decision must be approved | rejected | edited' });
@@ -245,6 +247,12 @@ router.post(
       res.status(400).json({ error: 'editedOutput is required when decision === "edited"' });
       return;
     }
+
+    // Pre-existing violation #1 fix (spec §18.1): pool-membership check.
+    // Delegated to the service so the query runs with org context and
+    // correct RLS variables (workflow_step_gates has FORCE ROW LEVEL SECURITY).
+    await WorkflowRunService.assertCallerInApproverPool(req.orgId!, runId, stepRunId, req.user!.id);
+
     const result = await WorkflowRunService.decideApproval(
       req.orgId!,
       runId,
@@ -252,9 +260,85 @@ router.post(
       decision,
       editedOutput,
       req.user!.id,
-      expectedVersion
+      expectedVersion,
+      decisionReason,
     );
     res.json({ ok: true, ...result });
+  })
+);
+
+// ─── Pause / Resume / Stop ───────────────────────────────────────────────────
+// Spec: tasks/Workflows-spec.md §7 — operator-initiated pause, resume, stop.
+
+router.post(
+  '/api/workflow-runs/:runId/pause',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { runId } = req.params;
+    const result = await WorkflowRunPauseStopService.pauseRun(
+      runId,
+      req.orgId!,
+      req.user!.id,
+      'by_user',
+    );
+    if (!result.paused) {
+      res.json({ paused: false, reason: result.reason ?? 'not_running' });
+      return;
+    }
+    res.json({ paused: true });
+  })
+);
+
+router.post(
+  '/api/workflow-runs/:runId/resume',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { runId } = req.params;
+    const { extendCostCents, extendSeconds } = req.body as { extendCostCents?: number; extendSeconds?: number };
+
+    let result: Awaited<ReturnType<typeof WorkflowRunPauseStopService.resumeRun>>;
+    try {
+      result = await WorkflowRunPauseStopService.resumeRun(runId, req.orgId!, req.user!.id, { extendCostCents, extendSeconds });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; errorCode?: string; cap?: string };
+      if (e?.statusCode === 400 && e?.errorCode === 'extension_required') {
+        res.status(400).json({ error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: e.cap ?? 'cost_ceiling' });
+        return;
+      }
+      if (e?.statusCode === 400 && e?.errorCode === 'extension_cap_reached') {
+        res.status(400).json({ error: 'extension_cap_reached' });
+        return;
+      }
+      throw err; // re-throw unknown errors
+    }
+
+    if (!result.resumed) {
+      const reason = result.reason ?? 'unknown';
+      if (reason === 'race_with_other_action') {
+        res.status(409).json({ error: 'race_with_other_action', current_status: result.currentStatus ?? 'unknown' });
+        return;
+      }
+      res.json({ resumed: false, reason });
+      return;
+    }
+    res.json({ resumed: true, extension_count: result.extensionCount ?? 0 });
+  })
+);
+
+router.post(
+  '/api/workflow-runs/:runId/stop',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { runId } = req.params;
+    const result = await WorkflowRunPauseStopService.stopRun(runId, req.orgId!, req.user!.id);
+    if (!result.stopped) {
+      res.json({ stopped: false, reason: result.reason, current_status: result.currentStatus });
+      return;
+    }
+    res.json({ stopped: true });
   })
 );
 

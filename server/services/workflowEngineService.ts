@@ -70,6 +70,7 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
 import { WorkflowStepReviewService } from './workflowStepReviewService.js';
+import { WorkflowStepGateService } from './workflowStepGateService.js';
 import {
   executeActionCall,
   resolveConfigurationAssistantAgentId,
@@ -85,6 +86,10 @@ import {
   assertValidTransition,
   InvalidTransitionError,
 } from '../../shared/stateMachineGuards.js';
+import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
+import { decideRunNextState } from './workflowRunPauseStopServicePure.js';
+import { getStepCostEstimate } from '../lib/workflow/costEstimationDefaults.js';
+import { WorkflowRunCostLedgerService } from './workflowRunCostLedgerService.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -900,6 +905,20 @@ export const WorkflowEngineService = {
       }
 
       // Not terminal — propagate the awaiting/running status.
+      // Log when the run cannot complete and no step is actively running or awaiting input.
+      if (!anyRunning && !anyAwaiting) {
+        const blockingStep = liveStepRuns.find(
+          (s) => s.status !== 'completed' && s.status !== 'skipped'
+        );
+        if (blockingStep) {
+          logger.info('run_completion_blocked_by_open_step', {
+            runId,
+            organisationId: run.organisationId,
+            blockingStepId: blockingStep.stepId,
+            blockingStepStatus: blockingStep.status,
+          });
+        }
+      }
       let aggregate: WorkflowRun['status'] = run.status;
       if (anyRunning) aggregate = 'running';
       else if (anyAwaiting) {
@@ -933,7 +952,90 @@ export const WorkflowEngineService = {
       });
     }
 
+    // §7 between-step runaway check — fires before dispatching any next step.
+    // Reads DB-clock elapsed time to avoid drift from Node.js process clock.
+    if (toDispatch.length > 0) {
+      const capCheckResult = await db.execute(
+        sql`SELECT cost_accumulator_cents,
+                   EXTRACT(EPOCH FROM (now() - started_at))::integer AS elapsed_seconds
+            FROM workflow_runs
+            WHERE id = ${runId}`,
+      );
+      const capRow = (capCheckResult as unknown as { rows?: Array<{ cost_accumulator_cents: number; elapsed_seconds: number }> }).rows?.[0];
+      if (capRow) {
+        const capDecision = decideRunNextState({
+          currentStatus: 'running',
+          currentCostCents: capRow.cost_accumulator_cents,
+          currentElapsedSeconds: capRow.elapsed_seconds,
+          effectiveCostCeilingCents: run.effectiveCostCeilingCents,
+          effectiveWallClockCapSeconds: run.effectiveWallClockCapSeconds,
+        });
+        if (capDecision.shouldPause) {
+          // System-initiated pause — use 'system' as actor userId.
+          await WorkflowRunPauseStopService.pauseRun(
+            runId,
+            run.organisationId,
+            'system',
+            capDecision.reason as 'cost_ceiling' | 'wall_clock',
+          );
+          logger.info('workflow_engine_between_step_pause', {
+            runId,
+            reason: capDecision.reason,
+            costCents: capRow.cost_accumulator_cents,
+            elapsedSeconds: capRow.elapsed_seconds,
+          });
+          return; // Do not dispatch next step.
+        }
+      }
+    }
+
     for (const step of toDispatch) {
+      // Pre-dispatch: re-read run status to catch external pause/cancel/fail.
+      const [freshRun] = await db
+        .select({ status: workflowRuns.status })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, runId));
+      if (
+        freshRun &&
+        (freshRun.status === 'cancelled' ||
+          freshRun.status === 'failed' ||
+          freshRun.status === 'paused')
+      ) {
+        logger.info('workflow_engine_dispatch_aborted', {
+          runId,
+          stepId: step.id,
+          status: freshRun.status,
+        });
+        return; // Abort dispatch; do not process remaining steps.
+      }
+
+      // Pre-step cost-cap check.
+      if (run.effectiveCostCeilingCents !== null) {
+        const costEstimate = (step.params?.estimatedCostCents as number | undefined) ?? getStepCostEstimate(step.type ?? '');
+        const latestCostResult = await db.execute(
+          sql`SELECT cost_accumulator_cents FROM workflow_runs WHERE id = ${runId}`,
+        );
+        const latestCostRow = (latestCostResult as unknown as { rows?: Array<{ cost_accumulator_cents: number }> }).rows?.[0];
+        const latestCost = latestCostRow?.cost_accumulator_cents ?? 0;
+        if (latestCost + costEstimate >= run.effectiveCostCeilingCents) {
+          await WorkflowRunPauseStopService.pauseRun(
+            runId,
+            run.organisationId,
+            'system',
+            'cost_ceiling',
+          );
+          logger.info('workflow_engine_pre_step_pause', {
+            runId,
+            stepId: step.id,
+            stepType: step.type,
+            costEstimate,
+            latestCost,
+            ceiling: run.effectiveCostCeilingCents,
+          });
+          return; // Do not dispatch this or subsequent steps.
+        }
+      }
+
       try {
         await this.dispatchStep(run, def, step, liveStepRuns);
       } catch (err) {
@@ -1034,6 +1136,50 @@ export const WorkflowEngineService = {
       });
       // Step is now awaiting_approval; tick will re-check on next pass
       return;
+    }
+
+    // ── Workflows V1: isCritical synthesis gate ────────────────────────────
+    // When a step declares `params.is_critical: true` and is one of the
+    // side-effecting step types, synthesise an Approval gate before dispatch.
+    // Guard: if a gate is already open for this step (re-entrant tick or race),
+    // skip synthesis to avoid double-gating.
+    const IS_CRITICAL_STEP_TYPES = [
+      'agent_call', 'prompt', 'action_call', 'invoke_automation',
+      'agent', 'action',
+    ] as const;
+
+    if (
+      sr.status === 'pending' &&
+      (step.params?.is_critical === true) &&
+      (IS_CRITICAL_STEP_TYPES as readonly string[]).includes(step.type)
+    ) {
+      // Re-entrant guard: check if a gate is already open for this step.
+      const existingGate = await WorkflowStepGateService.getOpenGate(
+        sr.runId,
+        sr.stepId,
+        run.organisationId,
+      );
+      if (!existingGate) {
+        // "No double-gate" rule: check if the immediately preceding step was
+        // an Approval-type step. If so, skip synthesis.
+        const prevStepIds = step.dependsOn ?? [];
+        const prevIsApproval = prevStepIds.some((prevId) => {
+          const prevDef = def.steps.find((s) => s.id === prevId);
+          return prevDef?.type === 'approval';
+        });
+
+        if (!prevIsApproval) {
+          await WorkflowStepReviewService.requireApproval(sr, {
+            reviewKind: 'is_critical_synthesised',
+            organisationId: run.organisationId,
+            approverGroup: { kind: 'task_requester', quorum: 1 },
+            isCriticalSynthesised: true,
+          });
+
+          // Step is now awaiting_approval; tick will re-check on next pass
+          return;
+        }
+      }
     }
 
     switch (step.type) {
@@ -2747,6 +2893,8 @@ export const WorkflowEngineService = {
       to: 'completed',
     });
 
+    const costDelta = getStepCostEstimate(sr.stepType ?? '');
+
     await db.transaction(async (tx) => {
       await tx
         .update(workflowStepRuns)
@@ -2768,6 +2916,8 @@ export const WorkflowEngineService = {
           updatedAt: new Date(),
         })
         .where(eq(workflowRuns.id, run.id));
+
+      await WorkflowRunCostLedgerService.incrementAccumulator(run.id, costDelta, tx);
     });
 
     logger.info('workflow_step_completed', {

@@ -60,6 +60,9 @@ export const tasks = pgTable(
     linkedEntityKind: text('linked_entity_kind'),
     linkedEntityId: uuid('linked_entity_id'),
 
+    // Workflows V1 (migration 0270) — monotonic event sequence counter for workflow-task events
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
