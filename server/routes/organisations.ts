@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin, requireOrgPermission } from '../middleware/auth.js';
 import {
   organisationService,
   createOrganisationFromTemplate,
@@ -7,6 +7,10 @@ import {
 import { parsePositiveInt, validateBody } from '../middleware/validate.js';
 import { createOrganisationBody, updateOrganisationBody } from '../schemas/organisations.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { organisations } from '../db/schema/index.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -69,5 +73,32 @@ router.delete('/api/organisations/:id', authenticate, requireSystemAdmin, asyncH
   const result = await organisationService.deleteOrganisation(req.params.id);
   res.json(result);
 }));
+
+// Per-org shadow charge retention window (admin-only).
+// Range: [1, 365]. Default: 90 (spec §14).
+router.patch(
+  '/api/org/shadow-charge-retention-days',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { shadowChargeRetentionDays } = req.body;
+    const parsed = typeof shadowChargeRetentionDays === 'number'
+      ? shadowChargeRetentionDays
+      : parseInt(shadowChargeRetentionDays as string, 10);
+
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+      res.status(400).json({ error: 'shadowChargeRetentionDays must be an integer between 1 and 365' });
+      return;
+    }
+
+    const [updated] = await db
+      .update(organisations)
+      .set({ shadowChargeRetentionDays: parsed, updatedAt: new Date() })
+      .where(eq(organisations.id, req.orgId!))
+      .returning({ shadowChargeRetentionDays: organisations.shadowChargeRetentionDays });
+
+    res.json({ shadowChargeRetentionDays: updated.shadowChargeRetentionDays });
+  }),
+);
 
 export default router;

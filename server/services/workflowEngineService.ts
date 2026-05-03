@@ -75,6 +75,7 @@ import {
   resolveConfigurationAssistantAgentId,
   ActionTimeoutError,
 } from './workflowActionCallExecutor.js';
+import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
 import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types.js';
 import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
@@ -1412,6 +1413,9 @@ export const WorkflowEngineService = {
             return;
           }
           if (result.status === 'pending_approval') {
+            const reviewKind = (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(actionStep.actionSlug ?? '')
+              ? 'spend_approval'
+              : 'action_call_approval';
             await db
               .update(workflowStepRuns)
               .set({
@@ -1423,7 +1427,7 @@ export const WorkflowEngineService = {
               run.id,
               run.subaccountId,
               'Workflow:step:awaiting_approval',
-              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId },
+              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
             );
             return;
           }

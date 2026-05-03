@@ -659,10 +659,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-level overrides for agent configuration — expose custom agent parameters and capability settings.',
   },
   {
-    tableName: 'org_budgets',
-    schemaFile: 'orgBudgets.ts',
+    tableName: 'org_compute_budgets',
+    schemaFile: 'orgComputeBudgets.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org LLM and execution budget limits — cross-tenant leak reveals financial configuration and usage caps.',
+    rationale: 'Per-org LLM and compute cost limits (Compute Budget) — cross-tenant leak reveals financial configuration and usage caps.',
   },
   {
     tableName: 'org_margin_configs',
@@ -948,6 +948,56 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'connectorLocationTokens.ts',
     policyMigration: '0269_connector_location_tokens.sql',
     rationale: 'Per-agency-connection GHL location access tokens — direct credential leak risk; tenant-isolated via parent connector_configs.organisation_id JOIN policy (no direct organisation_id column).',
+  },
+  // 0271 — Agentic Commerce: 7 new tables with canonical org-isolation RLS
+  {
+    tableName: 'spending_budgets',
+    schemaFile: 'spendingBudgets.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spending Budget accounting containers — carry operator-defined spending authority, kill-switch timestamps, and alert thresholds. Cross-tenant leak exposes financial configuration.',
+  },
+  {
+    tableName: 'spending_policies',
+    schemaFile: 'spendingPolicies.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spending Policy rules objects — hold per-transaction / daily / monthly limits, merchant allowlists, approval thresholds, and shadow/live mode. Cross-tenant leak exposes spend controls.',
+  },
+  {
+    tableName: 'agent_charges',
+    schemaFile: 'agentCharges.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spend Ledger — every money-movement attempt with full policy decision trace, idempotency key, and status lifecycle. Highest-sensitivity financial audit record; cross-tenant leak is a critical incident.',
+  },
+  {
+    tableName: 'subaccount_approval_channels',
+    schemaFile: 'subaccountApprovalChannels.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Per-sub-account HITL approval channel configs — reveal notification routing and approval workflow configuration.',
+  },
+  {
+    tableName: 'org_approval_channels',
+    schemaFile: 'orgApprovalChannels.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Org-owned HITL approval channel configs — reveal org-level notification routing for spend approvals.',
+  },
+  {
+    tableName: 'org_subaccount_channel_grants',
+    schemaFile: 'orgSubaccountChannelGrants.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Bridge table granting org channels to sub-accounts — reveals approval delegation topology.',
+  },
+  {
+    tableName: 'spending_budget_approvers',
+    schemaFile: 'spendingBudgetApprovers.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Explicit per-user approver grants for spending budgets — reveals who may approve charges; cross-tenant leak exposes access control configuration.',
+  },
+  // 0272 — cost_aggregates RLS retrofit (agentic commerce spend dimensions)
+  {
+    tableName: 'cost_aggregates',
+    schemaFile: 'costAggregates.ts',
+    policyMigration: '0272_cost_aggregates_rls_and_spend_dims.sql',
+    rationale: 'Pre-aggregated LLM and agent spend rollups — new agent_spend_* dimensions carry per-subaccount and per-org spend totals that are financially sensitive. Sentinel UUID rows (platform/provider) are globally readable per policy.',
   },
 ];
 

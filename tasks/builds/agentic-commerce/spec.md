@@ -302,7 +302,9 @@ Spend Ledger. Append-only for non-terminal rows. DB-level trigger prevents UPDAT
 
 The trigger's "valid lifecycle UPDATE" check accepts an UPDATE either as part of a status transition listed in §4 OR as a `WorkerSpendCompletion`-style non-status update setting only `provider_charge_id` (+ `updated_at`) on a row already in `executed` (the only no-op-status update permitted; gated on caller identity matching the completion handler).
 
-Every other column on `agent_charges` (organisation_id, subaccount_id, spending_budget_id, spending_policy_id, policy_version, agent_id, skill_run_id, idempotency_key, intent_id, intent, charge_type, direction, amount_minor, currency, merchant_id, merchant_descriptor, mode, parent_charge_id, replay_of_charge_id, provenance, created_at) is immutable post-insert and the trigger raises if any UPDATE attempts to change it.
+Every other column on `agent_charges` (organisation_id, subaccount_id, spending_budget_id, agent_id, skill_run_id, idempotency_key, intent_id, intent, charge_type, direction, amount_minor, currency, merchant_id, merchant_descriptor, kind, parent_charge_id, replay_of_charge_id, provenance, created_at) is immutable post-insert and the trigger raises if any UPDATE attempts to change it.
+
+Three columns — `spending_policy_id`, `policy_version`, and `mode` — are snapshot at gate-evaluation time, not at INSERT time: `proposeCharge` inserts the `proposed` row with placeholder values (the spendingPolicyId from the routing layer, `policy_version = 0`, `mode = 'live'`), and the gate transition (`proposed → blocked|pending_approval|approved|shadow_settled`) writes the evaluated values atomically. The trigger permits these three columns to change only on a transition out of `proposed`; they are immutable thereafter.
 
 #### `subaccount_approval_channels`
 

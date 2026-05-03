@@ -11,6 +11,7 @@ const LANE_CONFIG: Record<string, LaneConfig> = {
   client: { badgeText: 'ClientPulse', dotClass: 'bg-rose-700' },
   major: { badgeText: 'Config change', dotClass: 'bg-amber-500' },
   internal: { badgeText: 'Agent clarification', dotClass: 'bg-slate-500' },
+  spend: { badgeText: 'Spend', dotClass: 'bg-emerald-600' },
 };
 
 function getLaneConfig(lane: string): LaneConfig {

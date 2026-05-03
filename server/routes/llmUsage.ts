@@ -9,7 +9,7 @@ import {
   llmRequests,
   llmPricing,
   orgMarginConfigs,
-  orgBudgets,
+  orgComputeBudgets,
   workspaceLimits,
   agentRuns,
   subaccounts,
@@ -820,7 +820,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const [budget] = await db.select().from(orgBudgets).where(eq(orgBudgets.organisationId, orgId));
+    const [budget] = await db.select().from(orgComputeBudgets).where(eq(orgComputeBudgets.organisationId, orgId));
     res.json(budget ?? null);
   }),
 );
@@ -837,17 +837,17 @@ router.put(
     };
 
     const [upserted] = await db
-      .insert(orgBudgets)
+      .insert(orgComputeBudgets)
       .values({
         organisationId: orgId,
-        monthlyCostLimitCents: monthlyCostLimitCents ?? null,
+        monthlyComputeLimitCents: monthlyCostLimitCents ?? null,
         alertThresholdPct: alertThresholdPct ?? 80,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
-        target: orgBudgets.organisationId,
+        target: orgComputeBudgets.organisationId,
         set: {
-          monthlyCostLimitCents: monthlyCostLimitCents ?? null,
+          monthlyComputeLimitCents: monthlyCostLimitCents ?? null,
           alertThresholdPct: alertThresholdPct ?? 80,
           updatedAt: new Date(),
         },

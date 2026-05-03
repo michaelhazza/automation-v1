@@ -718,7 +718,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 112 skills.
+Complete list of all 117 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -824,6 +824,18 @@ Complete list of all 112 skills.
 | `reconcile_transactions` | Match transactions against expected records and flag discrepancies for review | Deterministic | HITL |
 | `send_invoice` | Deliver a generated invoice to the client via email with payment link | Deterministic | HITL |
 | `track_subscriptions` | Audit SaaS subscription inventory against approved vendor list and flag unexpected charges | Deterministic | — |
+
+### Payment & Financial Operations
+
+Skills that complete transactions autonomously on behalf of agents. All payment operations run through the charge policy engine — each charge is gated against operator-defined spending policies, allowlists, and approval thresholds before execution. A kill switch revokes authorisation at any time.
+
+| Skill | Description | Type | Gate |
+|-------|-------------|------|------|
+| `pay_invoice` | Pay an outstanding invoice via the configured payment integration. Feeder for `process_bill`. All payments gated by spending policy. | Deterministic | HITL |
+| `purchase_resource` | Complete a one-shot purchase against a vendor's hosted checkout flow. Policy-gated; worker fills the merchant form after authorisation. | Deterministic | HITL |
+| `subscribe_to_service` | Activate a vendor subscription via a hosted signup flow. Read mirror: `track_subscriptions`. Policy-gated; worker fills the vendor form after authorisation. | Deterministic | HITL |
+| `top_up_balance` | Top up a prepaid balance or credits account via a vendor's hosted top-up flow. Distinct from ad-platform budget operations. Policy-gated. | Deterministic | HITL |
+| `issue_refund` | Issue a refund against a prior charge via the payment integration. Creates a new inbound-refund ledger entry; the original charge record is preserved. Policy-gated. | Deterministic | HITL |
 
 ### Task & Board Management
 

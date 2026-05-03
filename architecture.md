@@ -67,6 +67,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Memory blocks | `memoryBlocks.ts` |
 | Scheduled tasks | `scheduledTasks.ts` |
 | GitHub webhook | `githubWebhook.ts` |
+| Stripe agent webhook | `webhooks/stripeAgentWebhook.ts` — `/api/webhooks/stripe-agent/:connectionId`. Raw body, signature verification against `configJson.webhookSecret`, TTL≥96h dedupe, async dispatch to `stripeAgentWebhookService`. Mounted before global JSON body parser. |
 | Auth | `auth.ts` |
 | Users | `users.ts` |
 | Subaccounts | `subaccounts.ts` |
@@ -681,7 +682,7 @@ A deterministic-first natural-language CRM read layer shipped as PR #177. Staged
 
 - **One terminal event per run.** `plannerEvents.ts` forwards `planner.result_emitted` / `planner.error_emitted` to `agentExecutionEventService` exactly once — `planner.classified` is NOT terminal for agent-log purposes. This prevents double-counting `skill.completed` when a run emits both classification and result/error.
 
-- **Budget-error classification.** `isBudgetExceededError` discriminates on `code === 'BUDGET_EXCEEDED'` for the plain-object 402 shape — `{ statusCode: 402, code: 'RATE_LIMITED' }` (router reservation-side rate limiting) falls through to `ambiguous_intent`. Also matches `BudgetExceededError` instance (legacy) and `FailureError` with `failureDetail === 'cost_limit_exceeded'` (post-ledger `runCostBreaker`).
+- **Budget-error classification.** `isComputeBudgetExhaustedError` discriminates on `code === 'COMPUTE_BUDGET_EXCEEDED'` for the plain-object 402 shape — `{ statusCode: 402, code: 'RATE_LIMITED' }` (router reservation-side rate limiting) falls through to `ambiguous_intent`. Also matches `ComputeBudgetExceededError` instance and `FailureError` with `failureDetail === 'cost_limit_exceeded'` (post-ledger `runCostBreaker`).
 
 - **Error subcategory split (§16.2).** External artefact stays `ambiguous_intent` for UX stability, but `planner.error_emitted` payload carries `errorSubcategory: 'parse_failure' | 'rate_limited' | 'planner_internal_error' | 'validation_failed'` — operators distinguish internal failures from true user ambiguity without touching the user-facing copy.
 
@@ -780,6 +781,21 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in `skillExecutor.ts`'s `SKILL_HANDLERS` map, enforced at server boot by `validateSystemSkillHandlers()`.
 
 **Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
+
+### Spend-skill registration pattern (Agentic Commerce, Chunk 6)
+
+Spend-enabled skills (`spendsMoney: true` in `ActionDefinition`) follow an extended registration pattern:
+
+1. **Skill markdown file** — `server/skills/<slug>.md` documents parameters and expected output shape.
+2. **Action registry entry** — `server/config/actionRegistry.ts` declares `spendsMoney: true`, `executionPath` (`'main_app_stripe'` or `'worker_hosted_form'`), `idempotencyStrategy: 'locked'`, `requiredIntegration: 'stripe_agent'`, `defaultGateLevel: 'review'`.
+3. **SKILL_HANDLERS entry** — `server/services/skillExecutor.ts` delegates to a thin shell in `server/services/spendSkillHandlers.ts`.
+4. **Allowlist entry** — slug included in `SPEND_ACTION_ALLOWED_SLUGS` (exported from `actionRegistry.ts`), which is concatenated into `ACTION_CALL_ALLOWED_SLUGS` in `server/lib/workflow/actionCallAllowlist.ts`.
+
+Invariant 14: every `spendsMoney: true` entry in `ACTION_REGISTRY` must have a matching `SKILL_HANDLERS` entry. Verified by `pr-reviewer` and CI gate `verify-idempotency-strategy-declared.sh`.
+
+Spend handlers (in `spendSkillHandlers.ts`) each: validate input with the registered Zod schema, resolve the active spending budget + policy for the agent/subaccount, normalise the merchant descriptor via `normaliseMerchantDescriptor` before building the idempotency key (invariant 21), and call `chargeRouterService.proposeCharge`. Handlers are thin shells — no policy logic lives in them.
+
+`issue_refund` is the exception: it calls `proposeCharge` with `kind: 'inbound_refund'`, `parentChargeId`, and `direction: 'subtract'`, creating a NEW row. It never issues `UPDATE agent_charges SET status = 'refunded'` on the parent (invariant 41).
 
 ---
 
@@ -1569,6 +1585,20 @@ The only session variables that RLS policies may reference are:
 
 **Never use `app.current_organisation_id`** — that name is not set anywhere. A policy that references it silently disables itself (because `current_setting(..., true)` returns NULL when the variable is unset). The naming asymmetry (`app.organisation_id` without the `current_` prefix, while principal vars use it) is an accepted decision — see `docs/canonical-data-platform-roadmap.md` §P3B and `docs/canonical-data-platform-p1-p2-p3-impl.md` §623. Migration `0213_fix_cached_context_rls.sql` repairs earlier migrations that violated this rule. CI gate `verify-rls-session-var-canon.sh` enforces the ban going forward.
 
+### Trigger-only GUC: `app.spend_caller`
+
+**NOT an RLS variable.** `app.spend_caller` is set via `SET LOCAL "app.spend_caller" = '<caller>'` inside a `withOrgTx` transaction, immediately before an `agent_charges` UPDATE that requires caller-identity gating.
+
+The `agent_charges_validate_update` trigger (migration 0271) reads this GUC to enforce:
+- The `failed → succeeded` post-terminal override (invariant 33): only permitted when `app.spend_caller = 'stripe_webhook'`.
+- Non-status `provider_charge_id` updates on `executed` rows: only permitted when `app.spend_caller IN ('worker_completion', 'stripe_webhook')`.
+
+The `agent_charges_validate_delete` trigger reads it to permit DELETE only when `app.spend_caller = 'retention_purge'` AND the row is in `shadow_settled`.
+
+Valid values (closed enum `agent_charge_transition_caller`): `'charge_router'`, `'stripe_webhook'`, `'timeout_job'`, `'worker_completion'`, `'approval_expiry_job'`, `'retention_purge'`.
+
+`verify-rls-session-var-canon.sh` must not match on `app.spend_caller` — it is explicitly NOT used by any RLS policy.
+
 ### CI gates
 
 - `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
@@ -1577,11 +1607,39 @@ The only session variables that RLS policies may reference are:
 
 ---
 
+## Agentic Commerce
+
+### SPT Vault — `integration_connections` provider type `'stripe_agent'`
+
+`integration_connections.providerType = 'stripe_agent'` is the Stripe agent integration type added by Agentic Commerce Chunk 3 (migration 0273). One row per sub-account.
+
+**Storage layout:**
+- `accessToken` — AES-256-GCM encrypted Stripe SPT (short-lived Shared Payment Token)
+- `refreshToken` — encrypted Stripe connected account ID (`acct_...`; stable; used as the `Stripe-Account` header when minting a fresh ephemeral key via `POST /v1/ephemeral_keys`)
+- `configJson.webhookSecret` — per-connection HMAC signing secret for Stripe webhook verification (Chunk 12). Populated by the SPT onboarding flow (Chunk 16) at OAuth completion.
+- `authType` — `'oauth2'` (uses `connectionTokenService` token rotation)
+- `tokenExpiresAt` + `claimedAt` + `expiresIn` — standard expiry tracking
+
+**Refresh buffer:** 600,000 ms (10 min) — longer pre-roll than the default 5-min buffer. Defined in `server/services/connectionTokenServicePure.ts::getRefreshBufferMs('stripe_agent')`.
+
+**Recognised `providerType` values** in `server/db/schema/integrationConnections.ts`:
+`'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'stripe_agent' | 'teamwork' | 'web_login' | 'custom' | 'google_drive'`
+
+**Services:**
+- `server/services/sptVaultService.ts` — thin facade: `getActiveSpt(subaccountId, orgId)`, `revokeSubaccountConnection(subaccountId, orgId)`, `refreshIfExpired(connectionId, options)`
+- `server/services/connectionTokenService.ts` — `case 'stripe_agent':` in `performTokenRefresh`; per-provider buffer via `getRefreshBufferMs`
+- `server/services/integrationConnectionService.ts` — `revokeSubaccountConnection(subaccountId, orgId, providerType)` (idempotent; audit-logged)
+- `server/adapters/stripeAdapter.ts` — `getAgentSpendToken(conn)` for the agent-spend path (reads via `connectionTokenService.getAccessToken`); existing `createCheckout` path unchanged
+
+**Kill switch:** `sptVaultService.revokeSubaccountConnection` sets `connectionStatus='revoked'` and nulls both tokens for all `stripe_agent` rows in the sub-account. Kill-switch is double-checked at execute-time by `chargeRouterService` (plan invariant 7).
+
+---
+
 ## Cost Tracking & Budgets
 
-- `budgetReservations` — pre-allocate token budget before a run starts
+- `computeReservations` — pre-allocate token budget before a run starts
 - `costAggregates` — actual spend tracked after run completes
-- `budgetService` — enforces per-run and per-org limits; throws if exceeded
+- `computeBudgetService` — enforces per-run and per-org limits; throws if exceeded
 - `llmPricing` table — model + provider pricing reference
 - `llmRequests` table — every LLM call logged with tokens, cost, model
 
@@ -1784,6 +1842,10 @@ When introducing a new feature whose behaviour the agents will need to query, as
 109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0273` — Agentic Commerce Chunk 3: adds `'stripe_agent'` to `integration_connections.providerType`; documents SPT vault extension (TypeScript-layer only — providerType is TEXT, no DB ENUM)
+- `0272` — Agentic Commerce Chunk 2: `cost_aggregates` organisation_id column, backfill, RLS, spend dimensions
+- `0271` — Agentic Commerce Chunk 2: `agent_charges`, `spending_budgets`, `spending_policies`, `spending_budget_approvers`, `approval_channels`, `approval_channel_grants`, `agent_charge_status` ENUM, append-only triggers
+- `0270` — Agentic Commerce Chunk 1: Compute Budget rename (budgetReservations → computeReservations, BudgetExceededError → ComputeBudgetExceededError)
 - `0177` — ClientPulse Phase 1 follow-up: `integration_fingerprints`, `integration_detections`, `integration_unclassified_signals` (bumped from 0176 after merge with IEE 0176)
 - `0176` — IEE Phase 0: denormalised `agent_runs.iee_run_id` column + in-flight partial index
 - `0170–0175` — ClientPulse Phases 0–3: template extension, playbook scope refactor, canonical mutation/artifact tables, health snapshots, churn assessments, ingestion idempotency
@@ -2929,7 +2991,7 @@ Every LLM call is observable. The ledger row carries enough dimensions that cost
 `system` and `analyzer` source types represent platform overhead — work Synthetos performs on its own behalf (memory compilation, skill classification, orchestrator hints). They have no customer to bill:
 
 - `pricingService.resolveMarginMultiplier()` returns **1.0×** for `sourceType ∈ {'system', 'analyzer'}` — no margin applied. The `cost_with_margin` column equals `cost_raw`, and `cost_with_margin_cents` equals the raw-cost rounding.
-- `budgetService.checkAndReserve` returns **`string | null`** — a reservation id for customer-billable calls, `null` for system/analyzer. The commit and release paths tolerate the null id and no-op.
+- `computeBudgetService.checkAndReserve` returns **`string | null`** — a reservation id for customer-billable calls, `null` for system/analyzer. The commit and release paths tolerate the null id and no-op.
 - The System P&L page surfaces these as the "Platform Overhead" row and subtracts them from gross profit to derive net profit.
 
 #### Structured parse failures
@@ -3104,7 +3166,7 @@ Zod schemas + typed errors imported by both server and worker:
 - `IEEJobPayload`, `BrowserTaskPayload`, `DevTaskPayload`, `ResultSummary`
 - `ExecutionAction` union (`navigate` | `click` | `type` | `extract` | `download` | `run_command` | `write_file` | `read_file` | `git_clone` | `git_commit` | `done` | `failed`)
 - `Observation` (`url`, `pageText`, `clickableElements`, `inputs`, `files`, `lastCommandOutput`, `lastCommandExitCode`, `lastActionResult`)
-- `FailureReason` enum and typed errors: `TimeoutError`, `StepLimitError`, `SafetyError`, `BudgetExceededError`, `RouterContractError`
+- `FailureReason` enum and typed errors: `TimeoutError`, `StepLimitError`, `SafetyError`, `ComputeBudgetExceededError`, `RouterContractError`
 
 ### Environment variables
 
@@ -3270,6 +3332,12 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
 | Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
 | Modify the Agent Recommendations surface | `server/services/agentRecommendationsService.ts` (single-writer — advisory_xact_lock + cooldown + open-match update + cap+eviction + 23505 catch) + `server/services/agentRecommendationsServicePure.ts` (`comparePriority`) + `server/services/optimiser/renderVersion.ts` (`RENDER_VERSION` constant — bump on prompt/evidence/output-shape change) + `server/routes/agentRecommendations.ts` + `server/db/schema/agentRecommendations.ts` + `shared/types/agentRecommendations.ts` (discriminated-union evidence types per category, `materialDelta`, `evidenceHash`, `COOLDOWN_HOURS_BY_SEVERITY`) + `client/src/components/recommendations/AgentRecommendationsList.tsx` + `client/src/hooks/useAgentRecommendations.ts`. Migration 0267 + `subaccounts.optimiser_enabled`. Single-writer enforcement: `agentRecommendations.singleWriter.test.ts` static-analysis test. See §Agent Recommendations Surface. |
+| Modify the charge router (agent spending) | `server/services/chargeRouterService.ts` (proposeCharge / executeApproved / resolveApproval — single entry point for all money movement) + `server/services/chargeRouterServicePure.ts` (pure policy evaluation, key building, error classification) + `server/adapters/stripeAdapter.ts` (chargeViaSpt) + `server/jobs/executionWindowTimeoutJob.ts` (sweeps approved rows past expires_at → blocked) + `server/jobs/executionWindowTimeoutJobPure.ts` (pure cutoff + decideTimeout) + `server/jobs/approvalExpiryJob.ts` (sweeps pending_approval rows past approval_expires_at → expired) + `server/jobs/approvalExpiryJobPure.ts` (pure cutoff + decideApprovalExpiry). Invariants: 1 (ledger before charge), 2 (policy before execution), 11 (executed rows never timed out), 12 (approval_expires_at inert outside pending_approval), 25 (capacity reads inside advisory lock), 35 (Stripe call outside lock). Jobs registered in `queueService.ts` as `maintenance:execution-window-timeout` and `maintenance:approval-expiry` (per-minute). |
+| Manage Spending Budgets and policies (agent spending) | `server/routes/spendingBudgets.ts` (CRUD + promote-to-live stub) + `server/routes/spendingPolicies.ts` (GET/PATCH policy) + `server/services/spendingBudgetService.ts` (create/update/get/list + default spend_approver grant + allowlist validation) + `server/services/spendingBudgetServicePure.ts` (validateMerchantAllowlist, incrementPolicyVersion, resolvePromotionTransition, computeDefaultGrantScope). Allowlist cap: `MERCHANT_ALLOWLIST_MAX_ENTRIES = 250` (spendConstants.ts). Default-grant runs atomically inside the budget INSERT transaction. |
+| Query agent-charge ledger (spend ledger reads) | `server/routes/agentCharges.ts` — `GET /api/agent-charges` (list + filters), `GET /api/agent-charges/:id`, `GET /api/agent-charges/aggregates?dimension=agent_spend_subaccount\|agent_spend_org\|agent_spend_run`. Aggregates endpoint returns settled spend from cost_aggregates + live in-flight reserved figure. Spec §7.6 settled-vs-in-flight rule enforced. |
+| Manage approval channels (HITL channel CRUD) | `server/routes/approvalChannels.ts` — subaccount_approval_channels CRUD + org_approval_channels CRUD + org_subaccount_channel_grants POST/DELETE (grant/revoke). Service logic in `server/services/approvalChannelService.ts`. |
+| Modify the spend aggregate writer | `server/services/agentSpendAggregateService.ts` (impure: upsertAgentSpend — writes agent_spend_* dimensions to cost_aggregates, idempotent per chargeId+state, non-negative clamp) + `server/services/agentSpendAggregateServicePure.ts` (resolveDirection, buildDimensionUpserts, applyClamp, isTerminalStateForAggregation, needsAggregationUpdate). Called from `stripeAgentWebhookService.ts` on succeeded/refunded transitions. MUST NOT be called from costAggregateService.upsertAggregates (kept separate per spec §6.1). |
+| Configure spend alert thresholds | `server/config/spendAlertConfig.ts` — NEGATIVE_AGGREGATE_CLAMP_LEVEL, WEBHOOK_DELIVERY_DELAY_WARNING_MS, CHARGE_RETRY_ATTEMPTS_WARNING_THRESHOLD, ADVISORY_LOCK_WAIT_WARNING_MS, SPEND_THROUGHPUT_ANOMALY_* constants. All tunable via env-var overrides. |
 | Modify the CRM Query Planner | Spec: `tasks/builds/crm-query-planner/spec.md`. Orchestration: `server/services/crmQueryPlanner/crmQueryPlannerService.ts` (§3 / §19; wraps pipeline in `withPrincipalContext` per §16.4 when outer `withOrgTx` is active; `runLlmStage3` seam on `RunQueryDeps` for test stubbing). Pure layer: `normaliseIntentPure.ts`, `registryMatcherPure.ts`, `validatePlanPure.ts` (10-rule validator + three-case canonical-precedence — case b uses `isLiveOnlyField` from `liveExecutorPure.ts`), `planCachePure.ts`, `approvalCardGeneratorPure.ts`, `plannerCostPure.ts`, `resultNormaliserPure.ts`, `schemaContextPure.ts`, `llmPlannerPromptPure.ts`. Executors: `executors/canonicalExecutor.ts` (skip-unknown-capability rule §12.1 + debug `canonical.capability_skipped`), `executors/liveExecutor.ts` + `liveExecutorPure.ts` (rate-limiter keyed on real GHL `locationId` from `resolveGhlContext`, NOT `context.subaccountLocationId`), `executors/hybridExecutor.ts` + `hybridExecutorPure.ts` (row-count guard before live dispatch), `executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`. LLM fallback: `llmPlanner.ts` (single-escalation retry; passes `wasEscalated: true` + `escalationReason` on router context so `getPlannerMetrics.escalationRate` populates). Cache: `planCache.ts` (LRU with discriminated `{ hit, plan, entry } \| { hit: false, reason }` result). Events: `plannerEvents.ts` (forwards ONLY `planner.result_emitted` / `planner.error_emitted` to agent execution log — exactly one `skill.completed` per planner run). Budget classification: `isBudgetExceededError` helper discriminates `{statusCode: 402, code: 'BUDGET_EXCEEDED'}` vs `RATE_LIMITED`; `classifyStage3FallbackSubcategory` splits `parse_failure` / `rate_limited` / `planner_internal_error` / `validation_failed` on `errorSubcategory` (external `ambiguous_intent` unchanged). Route: `server/routes/crmQueryPlanner.ts` (authenticate → `resolveSubaccount` → `listAgentCapabilityMaps` union for `crm.query` gate). Skill surface: `'crm.query'` handler in `server/services/skillExecutor.ts` with `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort`. Observability: `getPlannerMetrics` in `server/services/systemPnlService.ts` + route in `server/routes/systemPnl.ts` + `SystemPnlPage.tsx` panel. Trace: `PlannerTrace` accumulator threaded through pipeline with top-level `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` + deep-frozen at terminal emission. CI guard: `scripts/verify-crm-query-planner-read-only.sh` (import-restriction enforcement; read-only is structural). |
 
 ---
@@ -3432,6 +3500,7 @@ Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missin
 - **DLQ subscriptions (G1, G5):** `dlqMonitorService.ts` derives 40 queue names dynamically via `deriveDlqQueueNames(JOB_CONFIG)` (up from 8 hard-coded). Any new queue in `JOB_CONFIG` with a `deadLetter` field is covered automatically. The DLQ handler calls `recordIncident(..., { forceSync: true })` so DLQ signals bypass the throttle (G5) — pg-boss already gates delivery and the throttle would otherwise drop bursty same-fingerprint DLQ deliveries instead of incrementing `occurrenceCount`.
 - **Async-ingest worker (G3):** When `SYSTEM_INCIDENT_INGEST_MODE=async`, the ingest queue worker is registered in `server/index.ts` (`system-monitor-ingest`, retryLimit=3, expireInSeconds=60, deadLetter=`system-monitor-ingest__dlq`). On every boot the resolved mode is logged unconditionally as `incident_ingest_mode` (mode + asyncWorkerRegistered fields) so operators see the active path without grepping env config.
 - **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `workflowEngineService.ts`; `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry).
+- **Agentic-commerce spend queues:** Three queues handle the worker round-trip for `spend_request` tool calls. `agent-spend-request` (worker→main, handled by `agentSpendRequestHandler.ts`) carries the charge proposal; `agent-spend-response` (main→worker, keyed by `correlationId`) delivers the immediate decision (`approved | blocked | pending_approval`) plus optional SPT metadata; `agent-spend-completion` (worker→main, handled by `agentSpendCompletionHandler.ts`) reports merchant outcome. The response queue is consumed directly by the worker via polling in `awaitSpendResponse()`; the other two are registered in `queueService.ts`.
 - **Webhook 5xx emission (G7):** GHL webhook DB-lookup failure (`server/routes/webhooks/ghlWebhook.ts`) and GitHub webhook handler error (`server/routes/githubWebhook.ts`) both call `recordIncident` directly.
 - **Skill-analyzer terminal failure (G11):** A wrapper helper (`runSkillAnalyzerJobWithIncidentEmission` in `server/jobs/skillAnalyzerJobWithIncidentEmission.ts`) gates emission on `retryCount >= retryLimit` so only the FINAL retry attempt records an incident — earlier-attempt throws rethrow without emitting. The wrapper is invoked from the `skill-analyzer` pg-boss handler in `server/index.ts:499`. pg-boss retry exhaustion also lands in `skill-analyzer__dlq` (covered by G1's DLQ derivation); the wrapper gives faster visibility ahead of the DLQ landing.
 

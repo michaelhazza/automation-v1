@@ -1,0 +1,42 @@
+-- Migration 0273: integration_connections — add 'stripe_agent' to providerType enum
+-- Spec: tasks/builds/agentic-commerce/spec.md §7.5, §7.7; plan §2.5 / Chunk 3
+-- Branch: claude/agentic-commerce-spending
+--
+-- Purpose:
+--   Adds 'stripe_agent' to the application-layer providerType union on
+--   integration_connections. The providerType column is a TEXT column with
+--   a TypeScript-layer union type (not a Postgres ENUM), so this migration
+--   adds a CHECK constraint that lists the new value alongside the existing
+--   provider set.
+--
+-- NOTE: The providerType column in integration_connections is TEXT, not a
+-- Postgres ENUM type. The TypeScript type is enforced via Drizzle's .$type<>()
+-- annotation. This migration therefore adds the 'stripe_agent' value to the
+-- column-level CHECK constraint (if one exists), or documents the extension
+-- if no DB-layer constraint is present. Per §2.5: SPT stored in accessToken
+-- (encrypted); webhook secret in configJson.webhookSecret; the Chunk 16
+-- onboarding flow populates both at OAuth completion.
+--
+-- If no CHECK constraint currently exists on provider_type (the column uses
+-- TEXT with TypeScript-only enumeration), this migration is a no-op at the
+-- DB layer and the change is purely in the schema TypeScript file. This is
+-- consistent with the existing pattern for other provider types added to
+-- integration_connections without a corresponding DB migration.
+--
+-- The 'stripe_agent' connection type:
+--   - accessToken: short-lived Stripe-issued SPT (encrypted at rest)
+--   - refreshToken: Stripe refresh token (encrypted at rest, if issued)
+--   - configJson.webhookSecret: per-connection HMAC webhook signing secret
+--   - authType: 'oauth2' (uses token rotation via connectionTokenService)
+--   - Refresh buffer: 600,000 ms (10 min) — longer pre-roll than the standard
+--     5-min buffer due to Stripe's SPT TTL characteristics.
+--
+-- Tenant isolation: existing RLS on integration_connections covers this new
+-- providerType automatically — no additional policy needed.
+
+-- No-op: providerType is TEXT (no DB-level ENUM to alter). The TypeScript
+-- schema file (server/db/schema/integrationConnections.ts) and the
+-- application-layer service code carry the enumeration constraint.
+-- This file exists to document the change in the migration history and
+-- serve as the canonical reference point for the 'stripe_agent' addition.
+SELECT 1;

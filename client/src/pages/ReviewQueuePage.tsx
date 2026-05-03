@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
+import { formatSpendCardPure } from '../components/spend/formatSpendCardPure.js';
 
 // ── Review types ─────────────────────────────────────────────────────────────
 
@@ -66,11 +67,21 @@ interface SubaccountAgent {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ACTION_BADGE: Record<string, string> = {
-  send_email:    'bg-blue-100 text-blue-800',
-  update_record: 'bg-green-100 text-green-800',
-  create_record: 'bg-indigo-100 text-indigo-800',
-  delete_record: 'bg-red-100 text-red-800',
+  send_email:             'bg-blue-100 text-blue-800',
+  update_record:          'bg-green-100 text-green-800',
+  create_record:          'bg-indigo-100 text-indigo-800',
+  delete_record:          'bg-red-100 text-red-800',
+  // Agentic Commerce — spend skills (Chunk 6)
+  pay_invoice:            'bg-emerald-100 text-emerald-800',
+  purchase_resource:      'bg-emerald-100 text-emerald-800',
+  subscribe_to_service:   'bg-emerald-100 text-emerald-800',
+  top_up_balance:         'bg-emerald-100 text-emerald-800',
+  issue_refund:           'bg-teal-100 text-teal-800',
 };
+
+const SPEND_ACTION_TYPES = new Set([
+  'pay_invoice', 'purchase_resource', 'subscribe_to_service', 'top_up_balance', 'issue_refund',
+]);
 
 const PRIORITY_CLS: Record<string, string> = {
   urgent: 'bg-red-100 text-red-700',
@@ -219,6 +230,10 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
   // workflowContext keyed by actionId — populated from agent-inbox endpoint
   const [workflowContextByActionId, setWorkflowContextByActionId] = useState<Map<string, WorkflowContext>>(new Map());
+  // spend_approver permission — fetched once; false until confirmed
+  const [canApproveSpend, setCanApproveSpend] = useState(false);
+  // spend lane filter — true = show spend items in queue
+  const [showSpendLane, setShowSpendLane] = useState(true);
 
   // Briefs state
   const [briefs, setBriefs] = useState<Brief[]>([]);
@@ -280,6 +295,13 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     loadReview();
     loadBriefs();
     loadAgents();
+    api.get('/api/my-permissions')
+      .then(({ data }) => {
+        const perms: string[] = data?.permissions ?? [];
+        const isAdmin = perms.includes('__system_admin__') || perms.includes('__org_admin__');
+        setCanApproveSpend(isAdmin || perms.includes('spend_approver'));
+      })
+      .catch(() => setCanApproveSpend(false));
   }, [loadReview, loadBriefs, loadAgents]);
 
   // ── Review actions ────────────────────────────────────────────────────────
@@ -367,8 +389,76 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
-  const renderProposedPayload = (item: ReviewItem) => {
+  const renderSpendPayload = (item: ReviewItem, isLoading: boolean) => {
+    try {
+      const p = item.reviewPayloadJson.proposedPayload as Record<string, unknown>;
+      const merchant = p.merchant as { id?: string | null; descriptor?: string } | undefined;
+      const amountMinor = typeof p.amount === 'number' ? p.amount : null;
+      const currency = typeof p.currency === 'string' ? p.currency : null;
+      const intent = typeof p.intent === 'string' ? p.intent : null;
+      const sptLast4 = typeof (p as Record<string, unknown>).sptLast4 === 'string'
+        ? (p as Record<string, unknown>).sptLast4 as string
+        : null;
+
+      if (amountMinor === null || currency === null || !merchant?.descriptor) {
+        return (
+          <p className="text-[13px] text-slate-500 italic">Spend approval — details unavailable</p>
+        );
+      }
+
+      const { amountDisplay, merchantDisplay } = formatSpendCardPure({
+        amountMinor,
+        currency,
+        merchantId: merchant.id ?? null,
+        merchantDescriptor: merchant.descriptor,
+      });
+
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+            <div className="text-[13px]">
+              <span className="text-slate-500 font-medium">Amount: </span>
+              <span className="text-slate-900 font-semibold">{amountDisplay}</span>
+            </div>
+            <div className="text-[13px]">
+              <span className="text-slate-500 font-medium">Merchant: </span>
+              <span className="text-slate-800">{merchantDisplay}</span>
+            </div>
+            {intent && (
+              <div className="text-[13px]">
+                <span className="text-slate-500 font-medium">Intent: </span>
+                <span className="text-slate-700">{intent}</span>
+              </div>
+            )}
+            {sptLast4 && (
+              <div className="text-[13px]">
+                <span className="text-slate-500 font-medium">Card: </span>
+                <span className="text-slate-700 font-mono">**** {sptLast4}</span>
+              </div>
+            )}
+          </div>
+          {canApproveSpend ? (
+            <div className="flex gap-2 mt-1">
+              <button onClick={() => handleApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve</button>
+              <button onClick={() => handleReject(item.id)} disabled={isLoading} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Deny</button>
+            </div>
+          ) : (
+            <p className="text-[12px] text-slate-400 italic">You need the spend_approver permission to action this.</p>
+          )}
+        </div>
+      );
+    } catch {
+      return (
+        <p className="text-[13px] text-slate-500 italic">Spend approval — details unavailable</p>
+      );
+    }
+  };
+
+  const renderProposedPayload = (item: ReviewItem, isLoading = false) => {
     const payload = item.reviewPayloadJson.proposedPayload;
+    if (SPEND_ACTION_TYPES.has(item.reviewPayloadJson.actionType)) {
+      return renderSpendPayload(item, isLoading);
+    }
     if (item.reviewPayloadJson.actionType === 'send_email' && payload) {
       const p = payload as Record<string, unknown>;
       return (
@@ -456,7 +546,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
             {workflowCtx && renderWorkflowBanner(workflowCtx)}
 
-            {!isEditing && renderProposedPayload(item)}
+            {!isEditing && renderProposedPayload(item, isLoading)}
 
             {isEditing && (
               <div className="mt-2">
@@ -468,20 +558,22 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
               </div>
             )}
 
-            <div className="flex gap-2 mt-3">
-              {!isEditing ? (
-                <>
-                  <button onClick={() => handleApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve</button>
-                  <button onClick={() => startEditing(item)} disabled={isLoading} className="btn btn-sm btn-secondary">Edit &amp; Approve</button>
-                  <button onClick={() => handleReject(item.id)} disabled={isLoading} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => handleEditApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve with Edits</button>
-                  <button onClick={() => setEditingId(null)} className="btn btn-sm btn-secondary">Cancel</button>
-                </>
-              )}
-            </div>
+            {!SPEND_ACTION_TYPES.has(item.reviewPayloadJson.actionType) && (
+              <div className="flex gap-2 mt-3">
+                {!isEditing ? (
+                  <>
+                    <button onClick={() => handleApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve</button>
+                    <button onClick={() => startEditing(item)} disabled={isLoading} className="btn btn-sm btn-secondary">Edit &amp; Approve</button>
+                    <button onClick={() => handleReject(item.id)} disabled={isLoading} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => handleEditApprove(item.id)} disabled={isLoading} className="btn btn-sm btn-success">Approve with Edits</button>
+                    <button onClick={() => setEditingId(null)} className="btn btn-sm btn-secondary">Cancel</button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -582,34 +674,42 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
         {!groupByRun && reviewItems.length > 0 && (
           <div className="flex flex-col gap-3">
-            {reviewItems.map((item) => renderItemCard(item))}
+            {reviewItems
+              .filter((item) => showSpendLane || !SPEND_ACTION_TYPES.has(item.reviewPayloadJson.actionType))
+              .map((item) => renderItemCard(item))}
           </div>
         )}
 
         {groupByRun && reviewItems.length > 0 && (
           <div className="flex flex-col gap-5">
-            {groupedByRun().map((group) => (
-              <div key={group.agentRunId} className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-[14px] font-semibold text-slate-800">{group.agentName}</span>
-                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
-                      {group.items.length} action{group.items.length !== 1 ? 's' : ''}
-                    </span>
-                    {group.agentRunId !== '__ungrouped__' && (
-                      <span className="text-[12px] text-slate-400 font-mono">{group.agentRunId.substring(0, 8)}...</span>
-                    )}
+            {groupedByRun().map((group) => {
+              const visibleItems = group.items.filter(
+                (item) => showSpendLane || !SPEND_ACTION_TYPES.has(item.reviewPayloadJson.actionType),
+              );
+              if (visibleItems.length === 0) return null;
+              return (
+                <div key={group.agentRunId} className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-[14px] font-semibold text-slate-800">{group.agentName}</span>
+                      <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
+                        {visibleItems.length} action{visibleItems.length !== 1 ? 's' : ''}
+                      </span>
+                      {group.agentRunId !== '__ungrouped__' && (
+                        <span className="text-[12px] text-slate-400 font-mono">{group.agentRunId.substring(0, 8)}...</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleApproveRun(visibleItems)} className="btn btn-sm btn-success">Approve All in Run</button>
+                      <button onClick={() => handleRejectRun(visibleItems)} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject All in Run</button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleApproveRun(group.items)} className="btn btn-sm btn-success">Approve All in Run</button>
-                    <button onClick={() => handleRejectRun(group.items)} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700">Reject All in Run</button>
+                  <div className="divide-y divide-slate-50">
+                    {visibleItems.map((item) => renderItemCard(item))}
                   </div>
                 </div>
-                <div className="divide-y divide-slate-50">
-                  {group.items.map((item) => renderItemCard(item))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </>
@@ -631,6 +731,17 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
             <p className="text-[14px] text-slate-500 m-0">Briefs assigned to your AI team and agent actions awaiting approval.</p>
           </div>
           <div className="flex gap-2 items-center">
+            {tab === 'review' && (
+              <label className="flex items-center gap-1.5 cursor-pointer text-[13px] text-slate-600 select-none px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100">
+                <input
+                  type="checkbox"
+                  checked={showSpendLane}
+                  onChange={() => setShowSpendLane(!showSpendLane)}
+                  className="cursor-pointer accent-emerald-600"
+                />
+                Spend
+              </label>
+            )}
             {tab === 'review' && (
               <button
                 onClick={() => setGroupByRun(!groupByRun)}
