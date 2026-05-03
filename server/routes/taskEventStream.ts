@@ -13,10 +13,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { TaskEventService } from '../services/taskEventService.js';
-import { assertTaskVisibility } from '../websocket/taskRoom.js';
-import { db } from '../db/index.js';
-import { tasks } from '../db/schema/tasks.js';
-import { eq, and } from 'drizzle-orm';
+import { resolveTaskVisibilityFromContext, loadTaskVisibilityContext } from '../services/taskVisibilityService.js';
 
 const router = Router();
 
@@ -58,41 +55,19 @@ router.get(
       return;
     }
 
-    // ── Visibility check ─────────────────────────────────────────────────
-    // TODO(Chunk 10): the assertTaskVisibility call below uses a permissive stub
-    // that allows any org member. Replace with the real permission helper
-    // (requesterUserId + org admins + subaccount admins) before shipping to prod.
-    // Structured log: task_room_visibility_stub_used (searchable in prod logs).
-    //
-    // org_admin / system_admin bypass fine-grained visibility
-    if (userRole !== 'org_admin' && userRole !== 'system_admin') {
-      // Verify task belongs to org first
-      const [task] = await db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId)));
+    // ── Visibility check — returns false when task not found ─────────────
+    // resolveTaskVisibility also returns false for 404 (not found in org).
+    // We distinguish 404 vs 403 by pre-loading context.
+    const ctx = await loadTaskVisibilityContext(taskId, orgId);
+    if (!ctx) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
 
-      if (!task) {
-        res.status(404).json({ error: 'Task not found' });
-        return;
-      }
-
-      const allowed = await assertTaskVisibility(userId, taskId, orgId);
-      if (!allowed) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
-      }
-    } else {
-      // Admin: still verify org ownership
-      const [task] = await db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId)));
-
-      if (!task) {
-        res.status(404).json({ error: 'Task not found' });
-        return;
-      }
+    const allowed = await resolveTaskVisibilityFromContext(userId, userRole, ctx, orgId);
+    if (!allowed) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
     }
 
     // ── Parse cursor params ───────────────────────────────────────────────

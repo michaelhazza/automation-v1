@@ -95,6 +95,8 @@ export const ORG_PERMISSIONS = {
   DOCUMENT_BUNDLES_READ:          'document_bundles.read',
   DOCUMENT_BUNDLES_WRITE:         'document_bundles.write',
   DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
+  // ── Teams (Chunk 10 — spec §16.2 #31) ───────────────────────────────────
+  TEAMS_MANAGE: 'org.teams.manage',
 } as const;
 
 // ─── System-level permissions (sysadmin-only surfaces) ───────────────────────
@@ -319,6 +321,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_MAILBOX,        description: "View an agent's mailbox",                                   groupName: 'subaccount.agents' },
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_CALENDAR,       description: "View an agent's calendar",                                  groupName: 'subaccount.agents' },
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_ACTIVITY,       description: "View an agent's activity feed",                             groupName: 'subaccount.agents' },
+  // org.teams (Chunk 10 — spec §16.2 #31)
+  { key: ORG_PERMISSIONS.TEAMS_MANAGE, description: 'Create, edit, delete, and manage team members', groupName: 'org.teams' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

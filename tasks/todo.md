@@ -2603,3 +2603,29 @@ The spec-reviewer auto-decided the following directional findings during iterati
     Thread `agentRunId` through to the gate open path or resolve via the most recent
     agent run for the workflow step.
   - File stubs: `server/services/workflowStepGateService.ts` (openGate comment ~line 90).
+
+## Deferred from Chunk 10 review — 2026-05-03
+
+**Captured:** 2026-05-03T00:00:00Z
+**Source:** Chunk 10 review findings N2, N3, Concern #1
+
+### N2 — Unique constraint on (organisationId, name) for teams
+
+- [ ] Add unique constraint on `(organisationId, name)` for `teams` table
+  - TOCTOU race: two concurrent team creates with the same name may both succeed.
+  - Impact: UX/data quality issue; not a security or data integrity bug. No cross-tenant exposure.
+  - Suggested approach: migration adding `UNIQUE (organisation_id, name) WHERE deleted_at IS NULL` (partial unique index on Postgres).
+
+### N3 — TeamsAdminPage uses imperative state instead of react-query
+
+- [ ] Refactor `TeamsAdminPage` to use react-query for data fetching
+  - Today: uses manual `useState` + `useEffect` + explicit `loadTeams()` / `loadMembers()` calls.
+  - Convention drift: other admin pages use react-query. Manual state is functional but makes cache invalidation ad-hoc.
+  - Suggested approach: `useQuery` for teams list + members-per-team, `useMutation` for create / edit / delete / add-member / remove-member. Low priority; non-breaking.
+
+### Concern #1 — Orphan tasks (no createdByUserId on tasks table)
+
+- [ ] Tasks table lacks `createdByUserId` / `requesterUserId` column
+  - Today: visibility's "requester sees their own task" rule maps to `workflowRuns.startedByUserId`. Tasks not originating from a workflow run (manual tasks, agent-created tasks) have null `requesterUserId` — no user matches the requester rule.
+  - Spec §14.5 references `task.requesterUserId` as a first-class concept.
+  - Suggested approach: add `tasks.createdByUserId uuid REFERENCES users(id)` in a follow-up migration. Backfill from `workflowRuns.startedByUserId` for existing rows where applicable.

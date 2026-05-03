@@ -9,6 +9,7 @@ import AdminCategoriesPage from './AdminCategoriesPage';
 import AdminEnginesPage from './AdminEnginesPage';
 import OrgMemoryPage from './OrgMemoryPage';
 import IntegrationsAndCredentialsPage from './IntegrationsAndCredentialsPage';
+import TeamsAdminPage from './TeamsAdminPage';
 
 interface OrgData {
   id: string;
@@ -24,7 +25,7 @@ interface OrgData {
   defaultCurrencyCode: string;
 }
 
-type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'integrations' | 'general' | 'permissions';
+type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'integrations' | 'general' | 'permissions' | 'teams';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   board: 'Board Config',
@@ -34,6 +35,7 @@ const TAB_LABELS: Record<ActiveTab, string> = {
   integrations: 'Integrations',
   general: 'General',
   permissions: 'Permissions',
+  teams: 'Teams',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -41,7 +43,7 @@ const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px
 export default function OrgSettingsPage({ user }: { user: User }) {
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const initialTab: ActiveTab = tabParam && ['board', 'categories', 'engines', 'memory', 'integrations', 'general', 'permissions'].includes(tabParam)
+  const initialTab: ActiveTab = tabParam && ['board', 'categories', 'engines', 'memory', 'integrations', 'general', 'permissions', 'teams'].includes(tabParam)
     ? tabParam as ActiveTab : 'board';
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
@@ -49,11 +51,17 @@ export default function OrgSettingsPage({ user }: { user: User }) {
   const orgName = getActiveOrgName();
   const isSystemAdmin = user.role === 'system_admin';
 
-  // Non-system-admins see: board, categories, engines
+  const isOrgAdmin = user.role === 'org_admin';
+  // 'teams' tab requires TEAMS_MANAGE (org.teams.manage), held only by org_admin and system_admin
+  const canManageTeams = isOrgAdmin || isSystemAdmin;
+
+  // Non-system-admins see: board, categories, engines, memory, integrations, teams (if org_admin)
   // System admins additionally see: general, permissions
-  const visibleTabs: ActiveTab[] = isSystemAdmin
-    ? ['board', 'categories', 'engines', 'memory', 'integrations', 'general', 'permissions']
-    : ['board', 'categories', 'engines', 'memory', 'integrations'];
+  const visibleTabs: ActiveTab[] = [
+    'board', 'categories', 'engines', 'memory', 'integrations',
+    ...(canManageTeams ? ['teams' as ActiveTab] : []),
+    ...(isSystemAdmin ? ['general' as ActiveTab, 'permissions' as ActiveTab] : []),
+  ];
 
   if (!orgId) {
     return (
@@ -90,6 +98,7 @@ export default function OrgSettingsPage({ user }: { user: User }) {
       {activeTab === 'integrations' && <IntegrationsAndCredentialsPage user={user} embedded />}
       {activeTab === 'general' && <GeneralTab orgId={orgId} orgName={orgName} />}
       {activeTab === 'permissions' && <PermissionsTab />}
+      {activeTab === 'teams' && <TeamsAdminPage embedded />}
     </div>
   );
 }
