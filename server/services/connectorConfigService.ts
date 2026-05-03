@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
 
 export function buildWorkspaceTenantConfig(
@@ -359,10 +360,22 @@ export const connectorConfigService = {
   },
 
   async refreshAgencyTokenIfExpired(configId: string): Promise<void> {
-    const [config] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.id, configId), eq(connectorConfigs.tokenScope, 'agency')));
+    // connector_configs has FORCE ROW LEVEL SECURITY — a plain `db` handle with
+    // no app.organisation_id set returns zero rows. Use withAdminConnection +
+    // SET LOCAL ROLE admin_role for every DB operation in this cross-org sweep.
+    // The network call to GHL runs outside any transaction to avoid holding a
+    // connection for up to 20 seconds.
+    const config = await withAdminConnection(
+      { source: 'connector_polling_agency_refresh', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select()
+          .from(connectorConfigs)
+          .where(and(eq(connectorConfigs.id, configId), eq(connectorConfigs.tokenScope, 'agency')));
+        return row ?? null;
+      },
+    );
     if (!config || !config.expiresAt) return;
 
     const { isAgencyTokenExpiringSoon, buildRefreshTokenBody } =
@@ -392,10 +405,16 @@ export const connectorConfigService = {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       if (response.status === 401) {
-        await db
-          .update(connectorConfigs)
-          .set({ status: 'disconnected', disconnectedAt: new Date(), updatedAt: new Date() })
-          .where(eq(connectorConfigs.id, configId));
+        await withAdminConnection(
+          { source: 'connector_polling_agency_refresh', skipAudit: true },
+          async (adminDb) => {
+            await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+            await adminDb
+              .update(connectorConfigs)
+              .set({ status: 'disconnected', disconnectedAt: new Date(), updatedAt: new Date() })
+              .where(eq(connectorConfigs.id, configId));
+          },
+        );
         throw Object.assign(new Error(`Agency token permanently revoked for config ${configId}`), {
           code: 'AGENCY_TOKEN_REVOKED',
           statusCode: 401,
@@ -411,15 +430,21 @@ export const connectorConfigService = {
     const claimedAt = new Date();
     const { computeAgencyTokenExpiresAt } = await import('./ghlAgencyOauthServicePure.js');
 
-    await db
-      .update(connectorConfigs)
-      .set({
-        accessToken: connectionTokenService.encryptToken(data.access_token),
-        refreshToken: connectionTokenService.encryptToken(data.refresh_token),
-        expiresAt: computeAgencyTokenExpiresAt(claimedAt, data.expires_in),
-        scope: data.scope,
-        updatedAt: new Date(),
-      })
-      .where(eq(connectorConfigs.id, configId));
+    await withAdminConnection(
+      { source: 'connector_polling_agency_refresh', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        await adminDb
+          .update(connectorConfigs)
+          .set({
+            accessToken: connectionTokenService.encryptToken(data.access_token),
+            refreshToken: connectionTokenService.encryptToken(data.refresh_token),
+            expiresAt: computeAgencyTokenExpiresAt(claimedAt, data.expires_in),
+            scope: data.scope,
+            updatedAt: new Date(),
+          })
+          .where(eq(connectorConfigs.id, configId));
+      },
+    );
   },
 };

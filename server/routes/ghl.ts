@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId } from '../config/oauthProviders.js';
 import { setGhlOAuthState } from '../lib/ghlOAuthStateStore.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -21,8 +22,17 @@ router.get('/api/ghl/oauth-url', authenticate, asyncHandler(async (req, res) => 
     );
   }
 
+  const orgId = req.orgId;
+  if (!orgId) throw Object.assign(new Error('orgId missing on authenticated request'), { statusCode: 500 });
+
+  const hasPermission = await checkOrgPermission(
+    req.user!.id, orgId, req.user!.role, ORG_PERMISSIONS.CONNECTIONS_MANAGE,
+  );
+  if (!hasPermission) {
+    throw Object.assign(new Error('Forbidden: org.connections.manage permission required'), { statusCode: 403 });
+  }
+
   const nonce = crypto.randomBytes(32).toString('hex');
-  const orgId = req.orgId ?? '';
   setGhlOAuthState(nonce, orgId);
 
   const appBase = process.env.OAUTH_CALLBACK_BASE_URL || process.env.APP_BASE_URL || '';

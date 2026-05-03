@@ -9,6 +9,7 @@ import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { recordGhlMutation, dispatchWebhookSideEffects } from '../../services/ghlWebhookMutationsService.js';
 import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';
 import { recordIncident } from '../../services/incidentIngestor.js';
+import { env } from '../../lib/env.js';
 
 const router = Router();
 
@@ -43,6 +44,27 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
   const lifecycleTypes = new Set(['INSTALL', 'UNINSTALL', 'LocationCreate', 'LocationUpdate']);
 
   if (eventType && webhookId && companyId && lifecycleTypes.has(eventType)) {
+    // Verify HMAC signature for agency lifecycle events before any side effects.
+    // Uses the app-level GHL webhook signing secret (GHL_WEBHOOK_SIGNING_SECRET).
+    // When unset, signature verification is skipped with a warning (dev/test only).
+    const lifecycleSigningSecret = env.GHL_WEBHOOK_SIGNING_SECRET;
+    if (lifecycleSigningSecret) {
+      const signature = req.headers['x-ghl-signature'] as string | undefined;
+      if (!signature) {
+        console.warn('[GHL Webhook] Missing signature header on lifecycle event, rejecting');
+        res.status(401).json({ error: 'Missing signature' });
+        return;
+      }
+      const adapter = adapters.ghl;
+      if (!adapter?.webhook?.verifySignature(rawBody, signature, lifecycleSigningSecret)) {
+        console.warn('[GHL Webhook] Invalid signature on lifecycle event, rejecting');
+        res.status(401).json({ error: 'Invalid signature' });
+        return;
+      }
+    } else {
+      console.warn('[GHL Webhook] GHL_WEBHOOK_SIGNING_SECRET not configured — processing lifecycle event without HMAC verification');
+    }
+
     // §5.4 hard invariant: side effects FIRST, dedupe mark only on success.
     // Do not call isDuplicate before dispatch — a 503 must leave the dedupe store
     // unmarked so GHL will re-deliver on retry.
