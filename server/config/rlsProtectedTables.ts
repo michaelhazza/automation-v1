@@ -942,11 +942,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0267_agent_recommendations.sql',
     rationale: 'Operator-facing recommendation rows per org/subaccount — may contain business intelligence, budget overruns, and performance findings that must not leak cross-tenant.',
   },
-  // connector_location_tokens (migration 0269) is intentionally absent from this manifest.
-  // The table has FORCE ROW LEVEL SECURITY enabled, but tenant isolation is enforced via a
-  // JOIN policy on connector_configs.organisation_id (not a direct organisation_id column),
-  // so the gate's awk scanner cannot detect it. The RLS policy is verified by migration 0269
-  // itself and the FORCE RLS enforcement prevents unscoped reads at the DB layer.
+  // 0269 — GHL location token cache (join-scoped; see check2-exempt in rls-not-applicable-allowlist.txt)
+  {
+    tableName: 'connector_location_tokens',
+    schemaFile: 'connectorLocationTokens.ts',
+    policyMigration: '0269_connector_location_tokens.sql',
+    rationale: 'Per-agency-connection GHL location access tokens — direct credential leak risk; tenant-isolated via parent connector_configs.organisation_id JOIN policy (no direct organisation_id column).',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
