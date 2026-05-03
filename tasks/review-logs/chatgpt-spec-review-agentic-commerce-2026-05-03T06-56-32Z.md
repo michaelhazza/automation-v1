@@ -374,6 +374,24 @@ No user gate (all findings technical, severity low or low-medium). All resolved 
 
 **ChatGPT verdict across all 4 rounds: ✅ Hard green light.**
 
+---
+
+## Round 5 — 2026-05-03T08:20:00Z (approx)
+
+### ChatGPT Feedback (raw)
+
+> "You're in a very strong position... There's no more 'anything else' at the spec level. You've reached: Spec completeness + correctness + production safety."
+>
+> Zero spec findings. One optional advisory: produce an "Implementation Contract Checklist" that translates spec invariants into enforceable rules (DB constraints, allowed transitions map, idempotency enforcement points, webhook validation checklist, retry classification enforcement, required logs per transition).
+
+### Decision
+
+Round 5 — zero spec findings. ChatGPT verdict: **APPROVED**. No changes to spec.
+
+Advisory (Implementation Contract Checklist): out of scope for the spec-review session. Routed to triage for consideration as a pre-build artifact.
+
+**ChatGPT verdict across all 5 rounds: ✅ APPROVED.**
+
 Top themes (round 4):
 - Consolidation (canonical terminal state reference eliminates scattered definitions).
 - Closing the last ambiguity gaps (approval expiry scope, executed-once, provider_charge_id binding).
