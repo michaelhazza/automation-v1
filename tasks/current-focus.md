@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/sub-account-optimiser-spec.md
-active_plan: tasks/builds/subaccount-optimiser/plan.md
-build_slug: subaccount-optimiser
-branch: claude/evaluate-new-features-waqfY
-status: REVIEWING
-last_updated: 2026-05-02
+active_spec: docs/agentic-commerce-brief-addendum.md
+active_plan: tasks/builds/agentic-commerce/plan.md
+build_slug: agentic-commerce
+branch: claude/agentic-commerce-spending
+status: PLANNING
+last_updated: 2026-05-03
 -->
 
 # Current Focus
@@ -19,10 +19,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/sub-account-optimiser-spec.md (F2 of the F1/F2/F3 sub-account feature wave; PR #250)
-**Active plan:** tasks/builds/subaccount-optimiser/plan.md
-**Active build slug:** subaccount-optimiser (currently on spec-authoring branch `claude/evaluate-new-features-waqfY`; F2 implementation moves to `claude/subaccount-optimiser` per spec metadata)
-**Status:** **REVIEWING** — chunk 1 (generic agent-output primitive) committed; PR #250 in ChatGPT PR review finalisation (2026-05-02, verdict APPROVED). Spec ready post-9-iteration review chain (`spec-reviewer` 4 iter + `chatgpt-spec-review` 5 rounds). Migration `0267` shipped (table + RLS + `subaccounts.optimiser_enabled`). Sister branches still pending: F1 `subaccount-artefacts` (migration `0266`) and F3 `baseline-capture` (migrations `0268-0270`). **Next after PR #250 merge:** invoke `architect` (Opus) to decompose remaining chunks at `tasks/builds/subaccount-optimiser/plan.md`.
+**Active spec:** none yet — Phase 1 input package on branch `claude/agentic-commerce-spending`:
+- `docs/agentic-commerce-brief.md` (v2, strategic frame)
+- `docs/agentic-commerce-exploration-report.md` (codebase reconnaissance)
+- `docs/agentic-commerce-brief-addendum.md` (v3, stakeholder-resolved decisions; authoritative on conflicts)
+**Active plan:** `tasks/builds/agentic-commerce/plan.md` (TBD — produced by spec-coordinator → architect)
+**Active build slug:** `agentic-commerce`
+**Status:** **PLANNING** — Phase 1 spec-coordinator running against the three-document input package on branch `claude/agentic-commerce-spending`. Build is the Stripe SPT-backed agent spending primitive (Spending Budgets, shadow mode, charge router, append-only ledger via DB triggers, three-table approval-channel model with subaccount-as-first-class-tenant tenet). Major task. Mandatory pipeline: spec-coordinator → architect → chunked build → full review pass → finalisation-coordinator. Estimated 4 weeks single-builder, 2.5-3 weeks with chunks 4-5 + 13-14 parallelised.
+
+**Just merged:** `subaccount-optimiser` (PR #250, merge `028a9c10`) and PR #251 follow-up (`a460af16`). The lock previously held by `subaccount-optimiser` was stale; released 2026-05-03 to make room for `agentic-commerce`.
 
 **Just merged:** PR [#249](https://github.com/michaelhazza/automation-v1/pull/249) — lint-typecheck-post-merge-tasks (squash merge `9e751566`, merged 2026-05-01T09:33:13Z). Drives `npm run lint` and `npm run typecheck` to exit 0; wires `lint_and_typecheck` as a blocking unconditional CI gate. Closes PR #246 review findings (S1 IdempotencyContract four fields, S2 visibilityPredicatePure 'system' case, S3 SystemPrincipal test coverage, N1/N3/N4). Worker T8 `no-restricted-imports` rule ported from legacy `worker/.eslintrc.cjs` (deleted) into `eslint.config.js` flat config. McpServersPage sync button now surfaces failures via `toast.error`. **Pipeline:** spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED (1 strong + 4 non-blocking; S-1/N-5 resolved at finalisation, others backlogged) → dual-reviewer (Codex) APPROVED 0 findings → chatgpt-pr-review CLOSED at 3 rounds (1 implement / 12 reject / 3 defer / 1 no-op) → doc-sync sweep PASS (2 stale refs fixed in `docs/reporting-agent-handoff.md` and `docs/reporting-agent-paywall-workflow-spec.md`) → MERGED. **KNOWLEDGE.md additions (4 patterns):** ChatGPT diff-misreading rule (grep-verify duplicate claims); post-increment-on-dead-store is a no-op; chatgpt-pr-review close after 2 unproductive rounds; **Correction** — `gh pr edit --add-label ready-to-merge` must be paired with `ScheduleWakeup(90-120s)` per CLAUDE.md §12.
 
