@@ -185,6 +185,8 @@ import asksRouter from './routes/asks.js';
 // Workflows V1 Chunk 13 — File diff + hunk revert
 import fileDiffRouter from './routes/fileDiff.js';
 import fileRevertRouter from './routes/fileRevert.js';
+// Workflows V1 Chunk 14b — workflow draft lifecycle
+import workflowDraftsRouter from './routes/workflowDrafts.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -407,6 +409,8 @@ app.use(asksRouter);
 // Workflows V1 Chunk 13 — File diff + hunk revert
 app.use(fileDiffRouter);
 app.use(fileRevertRouter);
+// Workflows V1 Chunk 14b — workflow draft lifecycle
+app.use(workflowDraftsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

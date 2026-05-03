@@ -9,8 +9,7 @@
  *   - Parallel steps: side-by-side at the same row.
  *   - Approval-on-reject: dashed back-arrow from Approval to rollback target.
  *   - Inline validation pills on steps with errors.
- *   - Inspector mount-point: a div with id="studio-inspector-mount" where
- *     Chunk 14b will portal the inspector panel.
+ *   - Inspector mount-point: div id="studio-inspector-mount" (portal anchor).
  */
 
 import React from 'react';
@@ -130,7 +129,7 @@ function StepCard({ step, errors, isBranchChild, branchLabel, onEdit }: StepCard
             </span>
           )}
 
-          {/* Edit affordance (Chunk 14b wires inspector open) */}
+          {/* Edit affordance — opens StudioInspector via onEditStep callback */}
           {onEdit && (
             <button
               type="button"
@@ -190,7 +189,6 @@ export default function StudioCanvas({ steps, validationErrors, onEditStep }: St
       <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-sm">
         <div className="mb-2 text-2xl">+</div>
         <div>No steps yet. Add steps to build your workflow.</div>
-        {/* Inspector mount-point (Chunk 14b portals inspector here) */}
         <div id="studio-inspector-mount" />
       </div>
     );
@@ -255,7 +253,7 @@ export default function StudioCanvas({ steps, validationErrors, onEditStep }: St
         );
       })}
 
-      {/* Inspector mount-point — Chunk 14b portals the slide-out inspector here. */}
+      {/* Inspector mount-point — used by StudioInspector for portal anchoring. */}
       <div id="studio-inspector-mount" />
     </div>
   );
