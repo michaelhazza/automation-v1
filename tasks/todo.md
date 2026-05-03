@@ -2704,3 +2704,21 @@ Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blo
 - [ ] **Chunk 5: `approval.pool_refreshed` WebSocket event not emitted on `/refresh-pool`.** Spec §5.1.2 requires emitting `approval.pool_refreshed` so open clients update their Approval card. This emission is deferred to Chunk 9 which owns the event taxonomy and WebSocket transport layer. Implement in `workflowStepGateService.ts resolveGate` / `workflowGateRefreshPoolService.ts` once Chunk 9's `emitTaskEvent` primitive is available.
 
 - [ ] **Chunk 6: Minor quality cleanup (non-blocking).** `workflowRunService.ts` has 4 identical V1-atomicity-gap NOTE blocks (lines ~558, 716, 774, 814) — extract to a single comment. `workflowStepGateService.ts` has inline `import('...')` types for `SeenPayload`/`SeenConfidence` — move to top-level import block. `workflowConfidenceServicePure.ts signals` array emits all 5 entries (0-weight non-firing rules) while the fallback path emits `[]` — align to one shape.
+
+
+## Deferred from spec-conformance review — workflows-v1 (2026-05-03)
+
+**Captured:** 2026-05-03T20:29:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-workflows-v1-chunks-3-8-2026-05-03T20-29-16Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**Scope verified:** Chunks 3-8
+
+- [ ] **REQ 6.4 — `workflowSeenPayloadService.ts` (impure wrapper) does not exist.** Plan Chunk 6 named this file as an impure orchestrator that loads run context. Implementation calls the pure builder (`buildSeenPayload`) directly from `workflowStepGateServicePure.ts → buildGateSnapshot`. Whether this is a missing layer or an intentional simplification (avoiding premature abstraction; gate service already loads runContext) needs human judgment.
+  - Spec section: Plan Chunk 6 file list
+  - Gap: file named in plan does not exist on disk
+  - Suggested approach: either (a) add a one-line passthrough wrapper to satisfy the literal plan requirement, or (b) update the plan to reflect the inlined call chain. Option (b) is cleaner — the impure wrapper would be redundant since the gate service already provides the run-context load step.
+
+- [ ] **REQ 7.9 — Pause / Resume / Stop routes diverge from spec contract.** Spec §7 names `POST /api/tasks/:taskId/run/{pause,resume,stop}`; implementation lands them at `POST /api/workflow-runs/:runId/{pause,resume,stop}` (`server/routes/workflowRuns.ts` lines 274, 294, 331). Implementation pattern matches existing approval route (`/api/workflow-runs/:runId/steps/:stepRunId/approve`); migrating to task-scoped URLs requires a `tasks → workflow_runs` lookup that depends on the deferred `workflow_run_id` FK on tasks (already noted in this todo file).
+  - Spec section: §7 (Pause/Resume/Stop routes)
+  - Gap: route URLs are run-scoped instead of spec-mandated task-scoped
+  - Suggested approach: defer until the `workflow_run_id` FK on tasks lands; then add task-scoped variants (or replace the run-scoped routes). Alternatively, amend spec §7 to use run-scoped URLs to match the existing approval route convention — that would be a `chatgpt-spec-review` decision. Chunk 11 (open task UI) will consume these endpoints, so the decision must be made before Chunk 11 ships.
