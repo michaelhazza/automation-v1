@@ -308,13 +308,33 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   const appBase = env.APP_BASE_URL;
   const { code, state } = req.query as Record<string, string | undefined>;
 
+  // ghl.oauth.callback_failure logger helper — mandatory event per spec §5.9.
+  // orgId is null until the state nonce is consumed; companyId is null until
+  // the token exchange returns.
+  const logCallbackFailure = (
+    reason: string,
+    orgId: string | null,
+    companyId: string | null,
+  ): void => {
+    logger.warn('ghl.oauth.callback_failure', {
+      event: 'ghl.oauth.callback_failure',
+      orgId,
+      companyId,
+      locationId: null,
+      result: 'failure',
+      error: { code: reason, message: reason },
+    });
+  };
+
   if (!code || !state) {
+    logCallbackFailure('invalid_callback', null, null);
     return res.redirect(`${appBase}/onboarding?error=invalid_callback`);
   }
 
   const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
   const ghlOrgId = consumeGhlOAuthState(state);
   if (!ghlOrgId) {
+    logCallbackFailure('invalid_state', null, null);
     return res.redirect(`${appBase}/onboarding?error=invalid_state`);
   }
 
@@ -324,6 +344,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   const { exchangeGhlAuthCode } = await import('../services/ghlAgencyOauthService.js');
   const tokenData = await exchangeGhlAuthCode(code, redirectUri);
   if (!tokenData) {
+    logCallbackFailure('token_exchange_failed', ghlOrgId, null);
     return res.redirect(`${appBase}/onboarding?error=token_exchange_failed`);
   }
 
@@ -333,6 +354,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   try {
     validateAgencyTokenResponse(tokenData);
   } catch {
+    logCallbackFailure('token_validation_failed', ghlOrgId, tokenData.companyId ?? null);
     return res.redirect(`${appBase}/onboarding?error=token_validation_failed`);
   }
 
@@ -354,8 +376,10 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   } catch (err: unknown) {
     const e = err as { statusCode?: number };
     if (e.statusCode === 409) {
+      logCallbackFailure('agency_already_installed', ghlOrgId, tokenData.companyId);
       return res.redirect(`${appBase}/onboarding?error=agency_already_installed`);
     }
+    logCallbackFailure('storage_failed', ghlOrgId, tokenData.companyId);
     return res.redirect(`${appBase}/onboarding?error=storage_failed`);
   }
 
