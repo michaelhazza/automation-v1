@@ -66,8 +66,8 @@ The vocabulary lock below is authoritative. Any prose in this spec, migration co
 
 | Term | Meaning |
 |---|---|
-| **Spending Budget** | Umbrella operator concept. The total money allocated for an agent or sub-account to spend. Accounting container. |
-| **Spending Policy** | Rules object inside a Spending Budget. Contains Spending Limits, Merchant Allowlist, Approval Threshold, Spending Mode. Foreign-keyed from `spending_budgets`. |
+| **Spending Budget** | Umbrella operator concept. Accounting container holding ownership scope, currency, name, monthly-spend alert threshold, and kill-switch timestamp. Limits, mode, allowlist, and thresholds live on the Spending Policy, not here. |
+| **Spending Policy** | Rules object inside a Spending Budget. Sole owner of Spending Limits, Merchant Allowlist, Approval Threshold, Spending Mode, approval-expiry window, and policy version. Foreign-keyed one-to-one from `spending_budgets`. |
 | **Spending Limit** | Single cap (per-transaction, daily, monthly). |
 | **Spending Mode** | `shadow` or `live`. Per Spending Policy. |
 | **Charge** | Unit row in `agent_charges`. Every money-movement attempt, regardless of outcome. |
@@ -110,8 +110,8 @@ SpendingBudget      → SpendingBudgetApprovers  (one-to-many; explicit approver
 
 ### Key distinctions
 
-- **Spending Budget** is the accounting container (limits, mode, currency, balance tracking). One per agent, or one per sub-account, or org-level (for cross-sub-account agents like Portfolio Health Agent).
-- **Spending Policy** is the rules object inside the budget (allowlist, thresholds, gate behaviour). Never accessed directly by skills — only via the Charge Router.
+- **Spending Budget** is the accounting container (ownership scope, currency, name, monthly-spend alert threshold, kill-switch timestamp). It does NOT carry limits, mode, allowlist, or thresholds — those live exclusively on `spending_policies`. One per agent, or per sub-account (one per currency), or org-level (for cross-sub-account agents like Portfolio Health Agent).
+- **Spending Policy** is the rules object inside the budget. It owns Spending Limits (per-txn, daily, monthly), Spending Mode (`shadow`/`live`), Merchant Allowlist, Approval Threshold, approval-expiry window, and policy version. Never accessed directly by skills — only via the Charge Router.
 - **Charge** is the unit of record. Every attempt regardless of outcome.
 - **Spend Ledger** (`agent_charges`) is the table of all Charges. System source of truth for agent intent. Stripe is the financial source of truth for payment state.
 - **SPTConnection** is the Stripe-issued credential stored as `accessToken` in `integrationConnections` (`providerType = 'stripe_agent'`). One per sub-account. Scoped to the Spending Budget for that sub-account.
@@ -140,10 +140,12 @@ The Portfolio Health Agent holds a Spending Budget at the org level with a Spend
 
 ### Transitions
 
+Evaluation order from `proposed` is fixed: (1) Kill Switch / SPT validity, (2) Merchant Allowlist, (3) Spending Limits including in-flight reserved capacity, (4) Approval Threshold. The first failing gate determines the outgoing transition. Limits set to `0` are treated as unset (no cap) and never trip the limit gate.
+
 ```
-proposed → blocked             (policy denied: allowlist miss, limit exceeded, Kill Switch)
-proposed → pending_approval    (amount > approval_threshold)
-proposed → approved            (amount <= approval_threshold, auto-approved)
+proposed → blocked             (Kill Switch active, SPT expired/revoked, allowlist miss, or limit exceeded)
+proposed → pending_approval    (all gates pass; amount > approval_threshold)
+proposed → approved            (all gates pass; amount <= approval_threshold, auto-approved)
 pending_approval → approved    (HITL operator approved)
 pending_approval → denied      (HITL operator rejected)
 approved → executed            (live mode — Stripe call made)
@@ -179,7 +181,7 @@ All new tables follow the canonical RLS pattern from `migrations/0267_agent_reco
 
 #### `spending_budgets`
 
-Umbrella accounting container. One per agent (primary) with optional sub-account override, or org-level for cross-sub-account agents.
+Umbrella accounting container. One per agent (primary), or per sub-account (at most one per currency), or org-level for cross-sub-account agents. Cardinality is enforced by the unique constraints in §9.5.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -204,11 +206,11 @@ Rules object. One-to-one with `spending_budgets`.
 | `organisation_id` | uuid NOT NULL FK → organisations | RLS anchor |
 | `spending_budget_id` | uuid NOT NULL FK → spending_budgets | |
 | `mode` | text NOT NULL | `shadow` or `live` |
-| `per_txn_limit_minor` | integer NOT NULL | 0 = everything goes to HITL |
-| `daily_limit_minor` | integer NOT NULL | |
-| `monthly_limit_minor` | integer NOT NULL | |
-| `approval_threshold_minor` | integer NOT NULL | Charges above this value route to HITL |
-| `merchant_allowlist` | jsonb NOT NULL | Array of `{ id: string, name: string, source: 'stripe_id' \| 'descriptor' }` |
+| `per_txn_limit_minor` | integer NOT NULL | Per-transaction cap on `amount_minor`. `0` = unset (no per-txn cap; gating is left to `approval_threshold_minor`). |
+| `daily_limit_minor` | integer NOT NULL | Cap on net daily spend (settled outbound charges minus inbound refunds plus in-flight reserved). `0` = unset (no daily cap). |
+| `monthly_limit_minor` | integer NOT NULL | Cap on net monthly spend (same accounting as daily). `0` = unset (no monthly cap). |
+| `approval_threshold_minor` | integer NOT NULL | Charges with `amount_minor > approval_threshold_minor` route to HITL. `0` routes every positive charge to HITL. |
+| `merchant_allowlist` | jsonb NOT NULL | Array of `{ id: string \| null, descriptor: string, source: 'stripe_id' \| 'descriptor' }`. Identical shape to the §8.5 SpendingPolicy contract and to the §8.1 ChargeRouterRequest `merchant` field. `id` is the Stripe merchant ID when available; `descriptor` is the normalised string fallback (always present). |
 | `approval_expires_hours` | integer NOT NULL | Default 24 |
 | `version` | integer NOT NULL | Incremented on every update; used for policy_changed revalidation |
 | `created_at` | timestamptz NOT NULL | |
@@ -257,7 +259,22 @@ Spend Ledger. Append-only for non-terminal rows. DB-level trigger prevents UPDAT
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
-**Append-only enforcement:** `BEFORE UPDATE` trigger raises unless transitioning between valid lifecycle states (see §4). `BEFORE DELETE` trigger raises unless invoked by the retention job purging a `shadow_settled` row past its retention date. Deviates from the app-layer precedent of `llm_requests`/`audit_events` — financial records warrant stronger durability.
+**Append-only enforcement:** `BEFORE UPDATE` trigger raises unless the UPDATE is part of a valid lifecycle state transition (see §4) AND only mutates columns from the explicit mutable-on-transition allowlist below. `BEFORE DELETE` trigger raises unless invoked by the retention job purging a `shadow_settled` row past its retention date. Deviates from the app-layer precedent of `llm_requests`/`audit_events` — financial records warrant stronger durability.
+
+**Mutable-on-transition allowlist** (the only columns the trigger permits an UPDATE to write):
+
+- `status` (the transition itself)
+- `action_id` (set when transitioning to `pending_approval` if HITL action created)
+- `provider_charge_id` (set when transitioning to `executed`)
+- `spt_connection_id` (set when transitioning to `executed` or `shadow_settled`)
+- `decision_path` (extended at each gate evaluation; append-only JSON merge at the trigger level)
+- `failure_reason` (set when transitioning to `blocked`, `denied`, or `failed`)
+- `approved_at` (set when transitioning to `approved`)
+- `executed_at` (set when transitioning to `executed` or `shadow_settled`)
+- `settled_at` (set when transitioning to `succeeded`, `refunded`, or `failed`)
+- `updated_at` (always)
+
+Every other column on `agent_charges` (organisation_id, subaccount_id, spending_budget_id, spending_policy_id, policy_version, agent_id, skill_run_id, idempotency_key, intent_id, intent, charge_type, direction, amount_minor, currency, merchant_id, merchant_descriptor, mode, parent_charge_id, replay_of_charge_id, provenance, expires_at, approval_expires_at, created_at) is immutable post-insert and the trigger raises if any UPDATE attempts to change it.
 
 #### `subaccount_approval_channels`
 
@@ -337,6 +354,10 @@ New `entityType` values (comment-only migration, precedent: `0186_cost_aggregate
 #### `actions`
 
 No schema change. Write `metadata_json.category: 'spend'` at spend action creation time to enable HITL filtering. Existing `actions.actionCategory` enum is not modified.
+
+#### `organisations`
+
+Add `shadow_charge_retention_days integer NOT NULL DEFAULT 90`. Source-of-truth for the per-org shadow-retention window consumed by the shadow charge retention purge job (see §14, §17 Chunk 16). Migration ships in Chunk 2 alongside the new tables.
 
 #### `shared/types/agentExecutionLog.ts`
 
@@ -503,12 +524,12 @@ Each skill is a thin shell over `chargeRouterService.proposeCharge`. Skills carr
 
 **Decision: pg-boss request-reply with correlation IDs.**
 
-Workers carry no SPT credentials. All spend is authorised by the main app. The round-trip mechanism:
+Workers carry no persistent SPT credentials and have no direct DB access to `integration_connections`. All spend is authorised by the main app. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns the SPT in the response payload as ephemeral, single-use material (see invariant 3). The round-trip mechanism:
 
 1. Worker decides to make a purchase (Playwright loop emits `spend_request` action in `iee_steps`).
 2. Worker writes a job to `agent-spend-request` queue: `{ ieeRunId, agentRunId, organisationId, subaccountId, agentId, intent, amountMinor, merchant, idempotencyKey, correlationId }`.
-3. Main app processes the job: `chargeRouterService.proposeCharge()` → `actionService.proposeAction()`. Writes response to `agent-spend-response` queue: `{ correlationId, decision: 'approved' | 'denied' | 'pending_approval', chargeToken?, ledgerRowId, errorReason? }`.
-4. Worker picks up response by `correlationId`. Deadline: 30 seconds. If no response: write `failed` charge row with `reason = 'roundtrip_timeout'`.
+3. Main app processes the job: `chargeRouterService.proposeCharge()` → `actionService.proposeAction()`. Writes response to `agent-spend-response` queue: `{ correlationId, decision: 'approved' | 'blocked' | 'denied' | 'pending_approval', chargeToken?, ledgerRowId, errorReason? }` (see §8.4 for the full contract; `blocked` and `denied` stay distinct on the wire per invariant 10).
+4. Worker picks up response by `correlationId`. Deadline: 30 seconds. If no response within 30s, the worker records the timeout locally (worker log + IEE step) and abandons the in-flight purchase attempt. The worker MUST NOT write to `agent_charges` directly — invariant 1 reserves all ledger writes for `chargeRouterService`. The main app's execution-window timeout job (see §4 rules; runs in `chargeRouterService`) reconciles the orphaned row to `failed` with `reason = 'roundtrip_timeout'` once the row's `expires_at` passes.
 5. Auto-approved charge: `chargeToken` (SPT) returned; worker fills the merchant's payment form and observes result.
 6. `pending_approval`: workflow pauses (same pause-resume mechanics as other HITL actions). Worker does not proceed until the approval resolves and the response queue delivers the outcome.
 
@@ -560,8 +581,10 @@ The existing Stripe data connector has no webhook handler — brief option (a) "
 - Record incident via `recordIncident` on verification failure.
 
 **`stripeAgentWebhookService` responsibilities:**
-- Transition `agent_charges` rows: `executed → succeeded`, `executed → failed`, `succeeded → refunded`, `succeeded → disputed`.
-- On `succeeded`: trigger `agentSpendAggregateService.upsertAgentSpend`.
+- Transition `agent_charges` rows: `executed → succeeded`, `executed → failed`, `succeeded → refunded`, `succeeded → disputed`, `disputed → succeeded`, `disputed → refunded`.
+- On `succeeded`: trigger `agentSpendAggregateService.upsertAgentSpend(charge)` to add the charge to the relevant `agent_spend_*` rollups.
+- On `refunded` (either `succeeded → refunded` or `disputed → refunded`): trigger `agentSpendAggregateService.upsertAgentSpend(charge)` again, this time as a net-spend reduction. The aggregate write path consumes the charge's `direction`/`status` to know whether to add or subtract from the rollup totals (`'inbound_refund'` rows subtract; `succeeded` outbound rows add). This keeps `cost_aggregates` consistent with the §16.7 net-spend definition without requiring a periodic recompute.
+- On `disputed` and `disputed → succeeded`: aggregates remain unchanged. The original `succeeded → disputed` transition does not retroactively reverse the rollup; only a final `→ refunded` outcome reduces the aggregate.
 - Alert if `executed` row not found for a webhook event (reconciliation mismatch — critical alert).
 - Handle the case where a webhook arrives for a row the ledger considers `failed` (e.g. via timeout path): Stripe's determination takes precedence, update ledger.
 
@@ -576,7 +599,7 @@ The existing Stripe data connector has no webhook handler — brief option (a) "
 - `agent_spend_org` — monthly + daily rollups keyed by `organisationId`.
 - `agent_spend_run` — per-run total keyed by `agentRunId`.
 
-The upsert path mirrors `costAggregateService.upsertAggregates` but accepts a `Charge` input shape (not `LlmRequest`). Sets `totalCostCents = amount_minor`, `requestCount += 1`, `totalTokensIn/Out = 0`. Non-commingled because dashboards filter by `entityType`.
+The upsert path mirrors `costAggregateService.upsertAggregates` but accepts a `Charge` input shape (not `LlmRequest`). For outbound `succeeded` rows it adds `amount_minor` to `totalCostCents` and increments `requestCount`. For `inbound_refund` charges that reach `succeeded` (i.e. a refund settled by Stripe) it subtracts the refund's `amount_minor` from the rollup of the parent charge's window so net-spend stays consistent with §16.7. For `succeeded → refunded` transitions on outbound charges (refunds issued via `issue_refund`), the same subtraction applies. `totalTokensIn/Out = 0`. Non-commingled because dashboards filter by `entityType`.
 
 Dashboard query routes (`server/routes/agentCharges.ts`) expose the ledger directly; the aggregate surface provides the rollup numbers.
 
@@ -701,14 +724,16 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
 ```typescript
 {
   correlationId: string
-  decision: 'approved' | 'denied' | 'pending_approval'
+  decision: 'approved' | 'blocked' | 'denied' | 'pending_approval'
   chargeToken: string | null   // SPT for worker to use; present only when decision = 'approved' in live mode
   ledgerRowId: string          // uuid; always present
   errorReason: string | null
 }
 ```
 
-**Deadline:** 30 seconds. Worker writes `failed` charge with `reason = 'roundtrip_timeout'` if no response arrives.
+`blocked` and `denied` are kept distinct on the wire so the worker can respect invariant 10 (system-enforced denial vs human rejection). `blocked` is returned for policy / limit / allowlist / Kill Switch / SPT-failure outcomes; `denied` is reserved for HITL rejection responses.
+
+**Deadline:** 30 seconds. If no response arrives within 30s, the worker records the timeout locally and abandons the attempt; the main app's execution-window timeout job reconciles the orphaned ledger row to `failed` with `reason = 'roundtrip_timeout'` once `expires_at` passes (per invariant 1 the worker never writes ledger rows itself).
 
 ### 8.5 SpendingPolicy Shape
 
@@ -803,10 +828,12 @@ Key stored as `UNIQUE NOT NULL` on `agent_charges.idempotency_key`. Insert via `
 
 Every charge attempt produces exactly one terminal state transition. Mutually exclusive terminal states: `blocked`, `denied`, `shadow_settled`, `succeeded`, `failed`, `refunded`.
 
-Cross-flow event chain:
-1. `spend.proposed` — emitted when `agent_charges` row first written.
-2. `spend.approved` — emitted when charge transitions to `approved`.
-3. `spend.executed` — emitted when Stripe call made (live mode only).
+The `spend.*` event labels below are **logical state-machine event names** used in audit reasoning, dashboards, and the charge `decision_path` JSON — they are NOT separate rows on `agent_execution_events`. The `agent_execution_events` table receives exactly one cross-reference event per charge attempt (a `skill.completed`-class event with `linkedEntityType: 'spend_ledger'`, `linkedEntityId: <agent_charges.id>`), per §7.9. Per-state-transition history lives on `agent_charges` itself (status column + `decision_path` JSON + the timestamp columns).
+
+Logical event chain (for analytics and audit reasoning, not a separate event stream):
+1. `spend.proposed` — `agent_charges` row first written.
+2. `spend.approved` — charge transitions to `approved`.
+3. `spend.executed` — Stripe call made (live mode only).
 4. `spend.shadow_settled` — terminal event for shadow mode execution.
 5. `spend.succeeded` — terminal event for confirmed live payment (from webhook).
 6. `spend.blocked` — terminal event for system-enforced denial (policy, limits, Kill Switch, SPT failure). Distinct from `spend.denied` for analytics.
@@ -814,7 +841,7 @@ Cross-flow event chain:
 8. `spend.failed` — terminal event for execution failures (Stripe error, timeout, SPT expiry).
 9. `spend.refunded` — terminal event for refund settlement.
 
-**Post-terminal prohibition:** no further `spend.*` events are emitted for a charge after it reaches a terminal state. Enforced by: state machine guard blocks invalid transitions, and the DB trigger raises on UPDATE to terminal rows.
+**Post-terminal prohibition:** no further state transitions occur for a charge after it reaches a terminal state. Enforced by: state machine guard blocks invalid transitions, and the DB trigger raises on UPDATE to terminal rows.
 
 **Partial success:** no partial success is possible on a single charge (atomic). Workflow-level partial success (charge succeeded but subsequent step failed) surfaces as the `failed-but-charged` state, which fires a HITL with three options: refund, manually retry failed steps, or accept partial state. The terminal event for the charge itself is `spend.succeeded`; the workflow emits a separate `workflow.partial_completion` event.
 
@@ -823,7 +850,8 @@ Cross-flow event chain:
 | Constraint | Violation means | HTTP response |
 |---|---|---|
 | `agent_charges.idempotency_key` UNIQUE | Duplicate charge attempt | 200 — return existing charge row (idempotent hit) |
-| `spending_budgets (organisation_id, agent_id)` UNIQUE WHERE `agent_id IS NOT NULL` | Duplicate budget for same agent (one budget per agent; sub-accounts may have multiple budgets in different currencies) | 409 — "Agent already has a Spending Budget" |
+| `spending_budgets (organisation_id, agent_id)` UNIQUE WHERE `agent_id IS NOT NULL` | Duplicate budget for same agent (one budget per agent) | 409 — "Agent already has a Spending Budget" |
+| `spending_budgets (organisation_id, subaccount_id, currency)` UNIQUE WHERE `agent_id IS NULL AND subaccount_id IS NOT NULL` | Duplicate sub-account-wide budget for same currency (sub-accounts may have multiple budgets, but at most one per currency) | 409 — "Sub-account already has a Spending Budget in this currency" |
 | `spending_policies.spending_budget_id` UNIQUE | Duplicate policy for same budget | 409 — "Spending Budget already has a policy" |
 | `spending_budget_approvers (spending_budget_id, user_id)` UNIQUE | Duplicate approver grant | 409 — "User is already an approver for this budget" |
 
@@ -835,13 +863,13 @@ These rules hold in every code path. Violations are blocking issues in adversari
 
 1. **Ledger row before charge.** `chargeRouterService` writes a `proposed` row in `agent_charges` before contacting Stripe or calling any external service. No code path reaches Stripe without a ledger row already written.
 2. **Policy check before execution.** No spend-enabled skill calls Stripe directly. All execution flows through `chargeRouterService.proposeCharge`.
-3. **Worker never charges directly.** IEE workers carry no SPT credentials. All spend is authorised by the main app via the pg-boss request-reply round-trip.
+3. **Worker never charges directly.** IEE workers hold no persistent SPT credentials, have no DB access to `integration_connections`, and never authorise spend on their own. All spend is authorised by the main app via the pg-boss request-reply round-trip. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns an ephemeral SPT in the response payload (single-use, scoped to that one charge); the worker uses it inline and discards it. No SPT is logged, persisted, or reused on the worker side.
 4. **Idempotency at DB level.** `agent_charges.idempotency_key` is UNIQUE. Duplicates resolve via `INSERT ... ON CONFLICT DO UPDATE`, not application-layer deduplication.
 5. **Tenant isolation.** RLS policies protect `spending_budgets`, `spending_policies`, and `agent_charges`. Cross-tenant SPT access is a critical incident.
 6. **Shadow charges write to the real ledger.** Shadow mode does not skip the Spend Ledger. Every shadow attempt gets a full `shadow_settled` row with policy decision, allowlist result, and Charge Intent recorded.
 7. **Kill Switch is synchronous.** A fired Kill Switch blocks new charges immediately. In-flight `executed` charges resolve normally. `pending_approval` charges are auto-cancelled. No retries permitted after kill.
 8. **`cost_aggregates` RLS before new dimensions.** The RLS retrofit on `cost_aggregates` ships in the same migration as the first new `entityType` values. No spend data lands in the table without RLS protection.
-9. **No silent drops.** Every proposed charge must reach a terminal state or an explicit intermediate state. Terminal states: `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded`, `disputed`. Non-terminal charges (`pending_approval`, `executed`) hold their reserved amount against limits.
+9. **No silent drops.** Every proposed charge must reach a terminal state or an explicit intermediate state. Terminal states: `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded`. Non-terminal charges (`pending_approval`, `executed`, `disputed`) hold their reserved amount against limits until they reach a terminal state. `disputed` is non-terminal — it resolves to `succeeded` or `refunded` per §4 once Stripe's chargeback flow concludes.
 10. **Blocked vs denied.** `blocked` = system-enforced denial (policy, limits, Kill Switch, SPT failure). `denied` = human rejection via HITL. Distinct categories for analytics, debugging, and audit semantics.
 11. **Execution window.** An `approved` charge that does not transition within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`. Prevents permanent reserved-capacity lock.
 12. **Approval window.** A `pending_approval` charge whose `approval_expires_at` passes without a response is auto-marked `denied` with `reason = 'approval_expired'`.
@@ -856,13 +884,20 @@ These rules hold in every code path. Violations are blocking issues in adversari
 
 New permission key: `spend_approver`. Added to the existing permission system (same mechanism as current `requirePermission(key)` guards).
 
+**Authority rule:** a user is eligible to approve a charge against a Spending Budget B if and only if BOTH of the following hold:
+
+1. The user holds the `spend_approver` permission key (granted by default to admins per the rules below, or granted explicitly by an admin).
+2. The user is in B's approver scope, where "in scope" is defined as either (a) the role-based default grant for B (org admin if B is org-scoped; sub-account admin if B is sub-account-scoped or sub-account-agent-scoped), OR (b) an explicit row in `spending_budget_approvers` for `(B.id, user.id)`.
+
+Both conditions must hold; neither alone is sufficient. Holding `spend_approver` without scope membership is not approval authority for B; scope membership without `spend_approver` (e.g. the permission was revoked) is also not approval authority.
+
 **Default grant:** when a new Spending Budget is created:
-- Budget scoped to an org-level agent: `spend_approver` granted to the org admin.
-- Budget scoped to a sub-account or sub-account agent: `spend_approver` granted to the sub-account admin.
+- Budget scoped to an org-level agent: `spend_approver` granted to the org admin, and the org admin is treated as in-scope by role for that budget.
+- Budget scoped to a sub-account or sub-account agent: `spend_approver` granted to the sub-account admin, and the sub-account admin is treated as in-scope by role for that budget.
 
-**Explicit additional grants:** via `spending_budget_approvers` join table. Org admin or sub-account admin can add additional approvers.
+**Explicit additional grants:** via `spending_budget_approvers` join table. Org admin or sub-account admin (whichever owns the budget's scope) can add additional approvers. The added user must already hold (or be granted alongside) the `spend_approver` permission for the authority rule above to apply.
 
-**Approval routing:** all users with `spend_approver` for the relevant budget scope, via the fan-out channel config (see §13). First approval wins.
+**Approval routing:** when an approval fires, the system collects all users satisfying the authority rule for the relevant budget and notifies them via the fan-out channel config (see §13). First approval wins.
 
 ### 11.2 RLS Coverage Table
 
@@ -957,7 +992,7 @@ Shadow mode is not an approximation. It is the live execution path with the Stri
 **What shadow mode does:**
 - Runs the full policy check: Spending Mode, Spending Limits, Merchant Allowlist, Approval Threshold.
 - Routes over-threshold charges to HITL (approval request is real; the HITL queue entry is a real entry).
-- Writes a full ledger row with `mode = 'shadow'`, `status = 'shadow_settled'` (on auto-approval) or the HITL-resolved state.
+- Writes a full ledger row with `mode = 'shadow'`. Auto-approved (under threshold) charges land directly at `status = 'shadow_settled'`. HITL-approved charges transition `pending_approval → approved → shadow_settled` (the `approved → shadow_settled` step in §4 fires regardless of whether the approval was auto or HITL). HITL-denied charges land at `denied`.
 - Returns a success response to the caller with the same shape as live mode. The workflow continues as if the charge succeeded.
 
 **What shadow mode does NOT do:**
@@ -974,18 +1009,19 @@ Shadow mode is not an approximation. It is the live execution path with the Stri
 4. First approval: `chargeRouterService` re-validates the current policy (version check), flips `spending_policies.mode = 'live'`, increments `version`, audit-logs the promotion.
 5. Past shadow charges remain `shadow_settled`. Only future charges use live mode.
 
-**Shadow retention:** `shadow_settled` rows are retained for 90 days by default (configurable per org). A scheduled retention job purges aged shadow rows. The retention job is the only DB path that may delete `agent_charges` rows.
+**Shadow retention:** `shadow_settled` rows are retained for `organisations.shadow_charge_retention_days` (new column added by this build, `integer NOT NULL DEFAULT 90`). A scheduled retention job purges aged shadow rows whose `settled_at + shadow_charge_retention_days < NOW()`. The retention job is the only DB path that may delete `agent_charges` rows.
 
 **Conservative defaults on new Spending Budget:**
 ```
 mode: 'shadow'
-per_txn_limit_minor: 0
-daily_limit_minor: 0
-monthly_limit_minor: 0
-merchant_allowlist: []
-approval_threshold_minor: 0  (everything goes to HITL until configured)
+per_txn_limit_minor: 0          (unset — no per-txn cap)
+daily_limit_minor: 0            (unset — no daily cap)
+monthly_limit_minor: 0          (unset — no monthly cap)
+merchant_allowlist: []          (empty — every charge fails the allowlist gate and is blocked)
+approval_threshold_minor: 0     (every positive charge routes to HITL)
 ```
-A "Load conservative defaults" one-click template populates: $20 per transaction, $100 per day, $500 per month, allowlist of common SaaS tooling (Namecheap, OpenAI, Anthropic, Cloudflare, Twilio, Stripe).
+
+These defaults are intentionally maximally conservative: with an empty allowlist every proposed charge blocks before reaching the approval-threshold gate. Operators must configure the allowlist (and ideally limits) before the policy is useful, even in shadow mode. A "Load conservative defaults" one-click template populates working values: $20 per transaction, $100 per day, $500 per month, allowlist of common SaaS tooling (Namecheap, OpenAI, Anthropic, Cloudflare, Twilio, Stripe), `approval_threshold_minor` left at 0 so every charge still routes to HITL until the operator widens it.
 
 ## 15. Kill Switch
 
@@ -1044,7 +1080,7 @@ Spending Limits are enforced on **net spend**: settled charges minus `inbound_re
 
 ### 16.8 Ledger Immutability
 
-`agent_charges` rows are immutable except for state transitions enforced by the charge lifecycle state machine. No other field mutations are permitted. Enforced by DB-level `BEFORE UPDATE` / `BEFORE DELETE` triggers. Shadow rows are additionally purgeable by the retention job.
+`agent_charges` rows are immutable except for the columns on the explicit "Mutable-on-transition allowlist" defined in §5.1, and only when an UPDATE accompanies a valid state-machine transition. Every other column is fixed at insert time. Enforced by DB-level `BEFORE UPDATE` / `BEFORE DELETE` triggers. Shadow rows are additionally purgeable by the retention job.
 
 ### 16.9 SPT Mid-Workflow Expiry
 
@@ -1098,7 +1134,8 @@ Both migrations, all new schema files, manifest entries.
 - `subaccountApprovalChannels.ts`, `orgApprovalChannels.ts`, `orgSubaccountChannelGrants.ts`, `spendingBudgetApprovers.ts`
 - Canonical RLS policies for all 7 new tables
 - `cost_aggregates` RLS retrofit (add `organisation_id`, canonical policy)
-- Append-only triggers on `agent_charges`
+- Append-only triggers on `agent_charges` (mutable-column allowlist per §5.1)
+- `organisations.shadow_charge_retention_days integer NOT NULL DEFAULT 90` column add
 - All entries in `server/config/rlsProtectedTables.ts`
 - `shared/stateMachineGuards.ts` extended for `agent_charges` transitions
 
@@ -1196,7 +1233,9 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - New `entityType` values: `agent_spend_subaccount`, `agent_spend_org`, `agent_spend_run`
 - Comment-only migration for new values (precedent: `0186`)
 - Dashboard query routes: `server/routes/agentCharges.ts` (read-only ledger queries)
-- `server/routes/spendingPolicies.ts` (CRUD)
+- `server/routes/spendingBudgets.ts` (CRUD + promote-to-live)
+- `server/routes/spendingPolicies.ts` (CRUD on policy fields)
+- `server/routes/approvalChannels.ts` (channel + grant CRUD)
 - Net spend calculation (refunds included)
 
 ### Chunk 14 — Admin UI
@@ -1219,7 +1258,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 ### Chunk 16 — Default Templates and Onboarding
 
 - Conservative-defaults one-click template button
-- Per-org shadow retention configuration (organisations table or config row)
+- Per-org shadow retention configuration: `organisations.shadow_charge_retention_days integer NOT NULL DEFAULT 90` (added in Chunk 2's schema migration; admin UI surface lands in Chunk 16)
 - `spend_approver` default-grant logic on Spending Budget creation
 - SPT onboarding flow integration with existing `integrationConnections` OAuth UI
 
@@ -1251,8 +1290,10 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - `computeBudgetServicePure.ts` (renamed from `budgetServicePure.ts` — Chunk 1)
 
 **Route files (`server/routes/`):**
-- `spendingPolicies.ts`
-- `agentCharges.ts`
+- `spendingBudgets.ts` — CRUD + `POST /:id/promote-to-live`
+- `spendingPolicies.ts` — `GET`/`PATCH /spending-budgets/:id/policy`
+- `agentCharges.ts` — read-only ledger queries
+- `approvalChannels.ts` — CRUD for `subaccount_approval_channels`, `org_approval_channels`, and `org_subaccount_channel_grants`
 - `webhooks/stripeAgentWebhook.ts`
 
 **Skill files (`server/skills/`):**
@@ -1283,6 +1324,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 ### 18.2 Modified Files
 
 **Server:**
+- `server/db/schema/organisations.ts` — add `shadow_charge_retention_days integer NOT NULL DEFAULT 90`
 - `server/db/schema/integrationConnections.ts` — add `'stripe_agent'` to `providerType`
 - `server/services/connectionTokenService.ts` — `stripe_agent` refresh case, parameterise buffer
 - `server/services/integrationConnectionService.ts` — add `revokeSubaccountConnection`
@@ -1320,7 +1362,7 @@ Minimum 3 migrations. Numbers assigned at merge time per `DEVELOPMENT_GUIDELINES
 | Migration | Scope | Chunk |
 |---|---|---|
 | `<NNNN>_compute_budget_rename.sql` | `ALTER TABLE budget_reservations RENAME TO compute_reservations`, `ALTER TABLE org_budgets RENAME TO org_compute_budgets`, column renames | 1 |
-| `<NNNN+1>_agentic_commerce_schema.sql` | Create all 7 new tables + RLS policies for all 7 + append-only triggers on `agent_charges` + `agent_charges` state machine + `stateMachineGuards` extension | 2 |
+| `<NNNN+1>_agentic_commerce_schema.sql` | Create all 7 new tables + RLS policies for all 7 + append-only triggers on `agent_charges` (mutable-column allowlist per §5.1) + `agent_charges` state machine + `stateMachineGuards` extension + `organisations.shadow_charge_retention_days` column | 2 |
 | `<NNNN+2>_cost_aggregates_rls_and_spend_dims.sql` | Add `organisation_id` to `cost_aggregates`, canonical RLS policy, backfill, new entityType comment | 2 |
 | `<NNNN+3>_integration_connections_stripe_agent.sql` | Add `'stripe_agent'` to `providerType` enum | 3 |
 
