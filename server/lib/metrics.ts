@@ -1,21 +1,37 @@
 /**
  * metrics.ts — observability counter wrapper.
  *
- * TODO: Replace NOOP implementation with a real prom-client exporter when
- * Prometheus scraping is configured. The counter names match the Workflows V1
- * spec (docs/workflows-dev-spec.md §8 observability section):
+ * NOOP implementation: counters are stored in-memory and exposed via
+ * getCounterValue / getAllCounters (health endpoint). Replace with a real
+ * prom-client exporter when Prometheus scraping is configured — callers
+ * use the same incrementCounter(name, labels) signature so the swap is
+ * transparent.
+ *
+ * Registered counter catalogue (Workflows V1, docs/workflows-dev-spec.md §8):
+ *
+ *   workflow_run_paused_total{reason, template_id, organisation_id}
+ *     — operator or cap-triggered run pause.
+ *
+ *   workflow_gate_open_total{gate_kind, is_critical_synthesised, organisation_id}
+ *     — gate opened (approval or ask).
+ *
+ *   workflow_gate_resolved_total{resolution_reason, gate_kind, organisation_id}
+ *     — gate resolved (approved / rejected / answered).
+ *
+ *   workflow_gate_stalled_total{cadence, organisation_id}
+ *     — stall notification fired (cadence: 24h / 72h / 7d).
+ *
+ *   workflow_gate_orphaned_cascade_total{organisation_id}
+ *     — orphaned gate cascade triggered on run completion.
  *
  *   task_event_gap_detected_total{organisation_id}
- *   task_event_subsequence_collision_total{organisation_id}
- *   workflow_run_paused_total
- *   workflow_gate_open_total
- *   workflow_gate_resolved_total
- *   workflow_gate_stalled_total
- *   workflow_gate_orphaned_cascade_total
- *   workflow_cost_accumulator_skew_total
+ *     — gap in task event sequence detected.
  *
- * Shape mirrors prom-client's Counter.inc() so a future real implementation
- * can drop in without changing callers.
+ *   task_event_subsequence_collision_total{organisation_id}
+ *     — duplicate subsequence key collision detected.
+ *
+ *   workflow_cost_accumulator_skew_total{organisation_id}
+ *     — cost accumulator skew detected (ledger vs. DB drift).
  */
 
 // ─── In-memory accumulator (visible via health endpoint) ─────────────────────

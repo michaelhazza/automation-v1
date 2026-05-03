@@ -326,7 +326,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
     <div className="flex flex-col h-full">
       {/* Breadcrumb */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 text-sm">
-        <Link to="/" className="text-gray-400 hover:text-gray-600">Briefs</Link>
+        <Link to="/tasks" className="text-gray-400 hover:text-gray-600">Tasks</Link>
         {brief?.title && <><span className="text-gray-300">/</span><span className="text-gray-600 truncate">{brief.title}</span></>}
       </div>
 
@@ -340,7 +340,7 @@ export default function BriefDetailPage({ user: _user }: BriefDetailPageProps) {
         {/* Left — chat panel */}
         <div className={`flex flex-col min-h-0 transition-all ${activeRunId && showGraph ? 'w-1/2 border-r border-gray-100' : 'w-full max-w-3xl mx-auto'}`}>
           <div className="px-4 pt-4 pb-2 shrink-0">
-            <h1 className="text-lg font-semibold text-gray-900">{brief?.title ?? 'Brief'}</h1>
+            <h1 className="text-lg font-semibold text-gray-900">{brief?.title ?? 'Task'}</h1>
             {brief?.status && <span className="text-xs text-gray-500">{briefStatusLabel(brief.status)}</span>}
           </div>
 

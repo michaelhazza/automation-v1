@@ -135,7 +135,7 @@ function NewBriefModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
+          <h2 className="text-[17px] font-bold text-slate-900 m-0">New Task</h2>
           <button onClick={onClose} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
@@ -191,7 +191,7 @@ function NewBriefModal({
               Cancel
             </button>
             <button type="submit" disabled={saving || !title.trim()} className="btn btn-primary">
-              {saving ? 'Creating...' : 'Create Brief'}
+              {saving ? 'Creating...' : 'Create task'}
             </button>
           </div>
         </form>
@@ -510,7 +510,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
           onClick={() => setShowNewBrief(true)}
           className="btn btn-sm btn-primary"
         >
-          + New Brief
+          + New Task
         </button>
       </div>
     );
@@ -628,7 +628,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Inbox</h1>
-            <p className="text-[14px] text-slate-500 m-0">Briefs assigned to your AI team and agent actions awaiting approval.</p>
+            <p className="text-[14px] text-slate-500 m-0">Tasks assigned to your AI team and agent actions awaiting approval.</p>
           </div>
           <div className="flex gap-2 items-center">
             {tab === 'review' && (
@@ -649,7 +649,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
                 onClick={() => setShowNewBrief(true)}
                 className="btn btn-sm btn-primary"
               >
-                + New Brief
+                + New Task
               </button>
             )}
           </div>
@@ -669,7 +669,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
           onClick={() => setTab('briefs')}
           className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-colors border-0 cursor-pointer ${tab === 'briefs' ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
         >
-          Briefs
+          Tasks
           {briefs.length > 0 && (
             <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[11px] font-bold">{briefs.length}</span>
           )}

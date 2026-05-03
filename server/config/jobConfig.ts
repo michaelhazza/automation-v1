@@ -493,6 +493,18 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
   },
 
+  // Workflows V1 §16.3 — daily cleanup of unconsumed workflow_drafts older
+  // than 7 days. Admin-bypass cross-org sweep; each tick re-reads DB state
+  // so duplicate deliveries are a no-op.
+  'maintenance:workflow-drafts-cleanup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'maintenance:workflow-drafts-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
   'system-monitor-ingest': {
     retryLimit: 3,

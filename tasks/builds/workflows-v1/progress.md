@@ -2,7 +2,7 @@
 
 Branch: `feature/workflows-v1` · Worktree: `.worktrees/workflows-v1-impl/`
 
-## Chunks status
+## Chunks status — ALL COMPLETE
 
 - [x] **Chunk 1** — Schema migration + RLS (in commit `c9b65945`)
 - [x] **Chunk 2** — Engine validator (in commit `c9b65945`)
@@ -10,17 +10,17 @@ Branch: `feature/workflows-v1` · Worktree: `.worktrees/workflows-v1-impl/`
 - [x] **Chunk 4** — Gate primitive + state machine (in commit `c9b65945`)
 - [x] **Chunk 5** — Approval routing + isCritical (in commit `c9b65945`)
 - [x] **Chunk 6** — Confidence + audit (in commit `c9b65945`)
-- [x] **Chunk 7** — Cost / wall-clock runaway protection (in commits `c9b65945` + `de6b34e3` review-cycle fixes)
-- [ ] **Chunk 8** — Stall-and-notify + schedule pinning (in progress)
-- [ ] **Chunk 9** — Real-time WebSocket coordination
-- [ ] **Chunk 10** — Permissions API + Teams CRUD
-- [ ] **Chunk 11** — Open task view UI
-- [ ] **Chunk 12** — Ask form runtime
-- [ ] **Chunk 13** — Files tab + diff renderer
-- [ ] **Chunk 14a** — Studio canvas + publish
-- [ ] **Chunk 14b** — Inspectors + draft hydration
-- [ ] **Chunk 15** — Orchestrator changes
-- [ ] **Chunk 16** — Naming cleanup + cleanup job
+- [x] **Chunk 7** — Cost / wall-clock runaway protection (`c9b65945` + `de6b34e3` review-cycle fixes)
+- [x] **Chunk 8** — Stall-and-notify + schedule pinning (`088638a6`)
+- [x] **Chunk 9** — Real-time WebSocket coordination (`7d605026`) + migrations 0269 (`workflow_runs.task_id`) + 0270 (`agent_execution_events.run_id` nullable)
+- [x] **Chunk 10** — Permissions API + Teams CRUD (`700640ce`)
+- [x] **Chunk 11** — Open task view UI (`b947c7d9`)
+- [x] **Chunk 12** — Ask form runtime (`73cd3763`)
+- [x] **Chunk 13** — Files tab + diff renderer (`df756bcd`) + migration 0271 (`task_deliverable_versions`)
+- [x] **Chunk 14a** — Studio canvas + publish (`0004a49d`)
+- [x] **Chunk 14b** — Inspectors + draft hydration (`1e4e9dfb`)
+- [x] **Chunk 15** — Orchestrator changes (`fe577fd0`)
+- [x] **Chunk 16** — Naming cleanup + cleanup job (this commit)
 
 ## Review cadence per chunk
 

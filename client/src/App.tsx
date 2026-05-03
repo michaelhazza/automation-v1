@@ -123,6 +123,12 @@ function PageLoader() {
   );
 }
 
+/** Chunk 16 — redirect /briefs/:taskId to /tasks/:taskId. */
+function BriefIdRedirect() {
+  const { taskId } = useParams<{ taskId: string }>();
+  return <Navigate to={`/tasks/${taskId ?? ''}`} replace />;
+}
+
 function ProtectedLayout({ user, loading }: { user: User | null; loading: boolean }) {
   // Session 1 (spec §7.4) — on first render of a protected surface, check
   // whether the org's onboarding wizard should auto-open. `needsOnboarding`
@@ -366,8 +372,12 @@ export default function App() {
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
             {/* Universal Brief detail page (Phase 2) */}
             <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
-            {/* Workflows V1 — open task view (Chunk 11). Chunk 16 adds /briefs/:taskId redirect. */}
+            {/* Workflows V1 — open task view (Chunk 11). */}
+            <Route path="/tasks" element={<OpenTaskView user={user!} />} />
             <Route path="/tasks/:taskId" element={<OpenTaskView user={user!} />} />
+            {/* Chunk 16 — /briefs redirects to /tasks for backward compatibility */}
+            <Route path="/briefs" element={<Navigate to="/tasks" replace />} />
+            <Route path="/briefs/:taskId" element={<BriefIdRedirect />} />
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
