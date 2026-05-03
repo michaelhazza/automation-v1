@@ -160,10 +160,11 @@ disputed → refunded            (chargeback resolved in customer's favour — S
 
 ### Rules
 
-- `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded` are terminal. No further transitions. No automatic retry. **One narrow exception:** an inbound Stripe webhook MAY override a row currently in `failed` if Stripe reports a `succeeded` outcome for that `provider_charge_id` (only possible when the row was failed via `roundtrip_timeout` or `execution_timeout` but the Stripe call actually succeeded). This `failed → succeeded` override is the ONLY permitted post-terminal transition; it is whitelisted in `stateMachineGuards` and the DB trigger, gated on the inbound transition originating from `stripeAgentWebhookService` (server-side caller identity check). All other post-terminal transitions raise. See §8.6 precedence rule 4 and §9.4 post-terminal carve-out.
+- `blocked`, `denied`, `failed`, `shadow_settled`, `refunded` are terminal. No further transitions. `succeeded` is **conditionally terminal** — it is terminal under normal flow (no further transitions for the vast majority of charges) but Stripe-webhook-driven transitions `succeeded → refunded` (dispute-loss refund settled) and `succeeded → disputed` (chargeback opened) are explicit allowed transitions per the state diagram above. These are the only paths out of `succeeded`. From the caller's perspective `succeeded` is reported as "settled, no further action expected" and downstream code treats it as terminal; the post-succeeded webhook transitions are observability-only state changes for the dispute / refund lifecycle.
+- No automatic retry on any terminal state. **One narrow post-terminal exception:** an inbound Stripe webhook MAY override a row currently in `failed` if Stripe reports a `succeeded` outcome for that `provider_charge_id` (only possible when the row was failed via `roundtrip_timeout` or `execution_timeout` but the Stripe call actually succeeded). This `failed → succeeded` override is the ONLY permitted truly-post-terminal transition; it is whitelisted in `stateMachineGuards` and the DB trigger, gated on the inbound transition originating from `stripeAgentWebhookService` (server-side caller identity check). All other post-terminal transitions raise. See §8.6 precedence rule 4 and §9.4 post-terminal carve-out.
 - `failed` is terminal for the row. A retry is a new Charge row under the same `intent_id`.
 - All non-terminal states (`pending_approval`, `approved`, `executed`, `disputed`) reserve their `amount_minor` against Spending Limits until the row reaches a terminal state. Reserved capacity is consistent across §9.3 and §16.2 — anything not yet terminal counts.
-- An `approved` Charge that does not transition to `executed` or `shadow_settled` within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`. The execution window is `EXECUTION_TIMEOUT_MINUTES` (a global constant in `server/config/spendConstants.ts`, default `30`). `expires_at` is set at the `proposed → approved` transition as `NOW() + EXECUTION_TIMEOUT_MINUTES`. The execution-window timeout job (registered in `server/jobs/`) scans `agent_charges WHERE status IN ('approved','executed') AND expires_at < NOW()` every minute and transitions matching rows to `failed`.
+- An `approved` Charge that does not transition to `executed` or `shadow_settled` within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`. The execution window is `EXECUTION_TIMEOUT_MINUTES` (a global constant in `server/config/spendConstants.ts`, default `30`). `expires_at` is set at the `proposed → approved` transition as `NOW() + EXECUTION_TIMEOUT_MINUTES`. The execution-window timeout job (registered in `server/jobs/`) scans `agent_charges WHERE status = 'approved' AND expires_at < NOW()` every minute and transitions matching rows to `failed`. The job does NOT touch `executed` rows — once a charge has been handed to Stripe (live + `main_app_stripe`) or to the worker (live + `worker_hosted_form`), webhook arrival or worker completion is the only path to a terminal state. Stale `executed` rows stuck without webhook confirmation are surfaced by §16.6's reconciliation-poll mechanism (warning alert), NOT the execution-timeout job.
 - A `pending_approval` Charge that receives no response within `approval_expires_at` is auto-marked `denied` with `reason = 'approval_expired'`.
 - When a Kill Switch fires, all `pending_approval` Charges for that scope are immediately auto-cancelled (transition to `denied` with `reason = 'kill_switch'`). In-flight `executed` Charges continue to their Stripe outcome.
 - Transitions are enforced by `shared/stateMachineGuards.ts::assertValidTransition`. Every code path that writes a status update calls this guard before the UPDATE.
@@ -263,18 +264,22 @@ Spend Ledger. Append-only for non-terminal rows. DB-level trigger prevents UPDAT
 
 **Mutable-on-transition allowlist** (the only columns the trigger permits an UPDATE to write):
 
-- `status` (the transition itself)
+- `status` (the transition itself; allowed when the from-/to-status pair is in §4)
 - `action_id` (set when transitioning to `pending_approval` if HITL action created)
-- `provider_charge_id` (set when transitioning to `executed`)
+- `provider_charge_id` (set when transitioning to `executed` for `executionPath: 'main_app_stripe'`; also settable as a non-status update on rows already in `executed` from `stripeAgentWebhookService` workflows or from the `WorkerSpendCompletion` handler — see §6.1 worker-hosted-form path and §8.4a)
 - `spt_connection_id` (set when transitioning to `executed` or `shadow_settled`)
 - `decision_path` (extended at each gate evaluation; append-only JSON merge at the trigger level)
 - `failure_reason` (set when transitioning to `blocked`, `denied`, or `failed`)
 - `approved_at` (set when transitioning to `approved`)
 - `executed_at` (set when transitioning to `executed` or `shadow_settled`)
 - `settled_at` (set when transitioning to `succeeded`, `refunded`, or `failed`)
+- `expires_at` (set at `proposed → approved`; the execution-window deadline)
+- `approval_expires_at` (set at `proposed → pending_approval`; the approval-window deadline)
 - `updated_at` (always)
 
-Every other column on `agent_charges` (organisation_id, subaccount_id, spending_budget_id, spending_policy_id, policy_version, agent_id, skill_run_id, idempotency_key, intent_id, intent, charge_type, direction, amount_minor, currency, merchant_id, merchant_descriptor, mode, parent_charge_id, replay_of_charge_id, provenance, expires_at, approval_expires_at, created_at) is immutable post-insert and the trigger raises if any UPDATE attempts to change it.
+The trigger's "valid lifecycle UPDATE" check accepts an UPDATE either as part of a status transition listed in §4 OR as a `WorkerSpendCompletion`-style non-status update setting only `provider_charge_id` (+ `updated_at`) on a row already in `executed` (the only no-op-status update permitted; gated on caller identity matching the completion handler).
+
+Every other column on `agent_charges` (organisation_id, subaccount_id, spending_budget_id, spending_policy_id, policy_version, agent_id, skill_run_id, idempotency_key, intent_id, intent, charge_type, direction, amount_minor, currency, merchant_id, merchant_descriptor, mode, parent_charge_id, replay_of_charge_id, provenance, created_at) is immutable post-insert and the trigger raises if any UPDATE attempts to change it.
 
 #### `subaccount_approval_channels`
 
@@ -365,7 +370,7 @@ Add `'spend_ledger'` to `LinkedEntityType` union.
 
 #### `shared/iee/actionSchema.ts`
 
-Add `spend_request` action to the IEE worker's loop vocabulary (uniform audit trail in `iee_steps`).
+Add `spend_request` and `spend_completion` actions to the IEE worker's loop vocabulary (uniform audit trail in `iee_steps`). `spend_completion` is emitted only on the `executionPath: 'worker_hosted_form'` path after the worker resolves the merchant form-fill (corresponds to the `WorkerSpendCompletion` queue contract in §8.4a).
 
 ### 5.3 RLS Coverage
 
@@ -407,7 +412,7 @@ The single entry point for all money movement. Every spend-enabled skill calls `
 - On `approved` + live mode + **main-app-direct execution path** (merchant supports a direct Stripe API call — e.g. `pay_invoice` against Stripe Invoices, `issue_refund` against Stripe Refunds): the main app calls Stripe via the SPT, writes the `executed` row WITH `provider_charge_id` populated, and returns `{ outcome: 'executed', chargeId, providerChargeId }` to the caller (or via `agent-spend-response` for worker-originated requests).
 - On `approved` + live mode + **worker-hosted-form execution path** (merchant requires filling a hosted payment form — e.g. `purchase_resource` from a Playwright loop, `subscribe_to_service` against a vendor signup form): the main app writes the `executed` row WITHOUT `provider_charge_id` (left NULL until completion is reported), returns `chargeToken` (the SPT) plus `ledgerRowId` to the worker via `agent-spend-response`. The worker then fills the merchant's form, observes the result, and reports completion back via the `WorkerSpendCompletion` job (§8.7) which updates the row with `provider_charge_id`. The Stripe webhook still fires later to confirm the payment and transition `executed → succeeded`.
 - The execution-path choice is per-skill: declared as `executionPath: 'main_app_stripe' | 'worker_hosted_form'` on each spend-skill `ActionDefinition` entry in `actionRegistry.ts`. `pay_invoice` and `issue_refund` use `main_app_stripe`. `purchase_resource`, `subscribe_to_service`, `top_up_balance` use `worker_hosted_form`.
-- On `approved` + shadow mode: write `shadow_settled` row, return success to caller (same response shape as live; no Stripe call regardless of execution path).
+- On `approved` + shadow mode: write `shadow_settled` row, return `{ outcome: 'shadow_settled', chargeId }` to caller (per §8.2 union member; distinct from the live `'executed'` shape, but both are success outcomes — callers must NOT branch on the discriminator beyond success-vs-failure). No Stripe call regardless of execution path. The `chargeToken` and `providerChargeId` fields are absent from the shadow response shape entirely.
 - Emit `'spend_ledger'` cross-reference event on `agent_execution_events` for every attempt.
 - After HITL approval: re-evaluate policy (policy may have changed), block if policy now denies.
 
@@ -715,8 +720,8 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
 
 ```typescript
 {
-  ieeRunId: string           // uuid
-  agentRunId: string         // uuid
+  ieeRunId: string           // uuid; identifier of the IEE worker's own run row
+  skillRunId: string         // uuid; the agent run that initiated this spend (same value as ChargeRouterRequest.skillRunId; used in the idempotency key)
   organisationId: string     // uuid
   subaccountId: string       // uuid
   agentId: string            // uuid
@@ -734,6 +739,8 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
   correlationId: string      // uuid; used to match response
 }
 ```
+
+`skillRunId` and `agentRunId` refer to the same uuid throughout the spec — the agent run that initiated the spend. The wire/contract field is named `skillRunId` (matching §8.1 `ChargeRouterRequest.skillRunId` and the idempotency-key shape in §9.1). `agentRunId` survives only in narrative prose and §17 Chunk 11 worker job-helper names; conceptually identical.
 
 ### 8.4 WorkerSpendResponse (pg-boss queue `agent-spend-response`)
 
@@ -925,9 +932,9 @@ New permission key: `spend_approver`. Added to the existing permission system (s
 **Authority rule:** a user is eligible to approve a charge against a Spending Budget B if and only if BOTH of the following hold:
 
 1. The user holds the `spend_approver` permission key (granted by default to admins per the rules below, or granted explicitly by an admin).
-2. The user is in B's approver scope, where "in scope" is defined as either (a) the role-based default grant for B (org admin if B is org-scoped; sub-account admin if B is sub-account-scoped or sub-account-agent-scoped), OR (b) an explicit row in `spending_budget_approvers` for `(B.id, user.id)`.
+2. The user is in B's approver scope, where "in scope" is defined as either (a) the user CURRENTLY holds the role for B's scope (org admin if B is org-scoped; sub-account admin if B is sub-account-scoped or sub-account-agent-scoped), OR (b) an explicit row in `spending_budget_approvers` for `(B.id, user.id)`.
 
-Both conditions must hold; neither alone is sufficient. Holding `spend_approver` without scope membership is not approval authority for B; scope membership without `spend_approver` (e.g. the permission was revoked) is also not approval authority.
+Both conditions must hold; neither alone is sufficient. Holding `spend_approver` without current scope membership AND without an explicit approver row is not approval authority for B; current scope membership without `spend_approver` (e.g. the permission was revoked) is also not approval authority. **Important:** scope membership is evaluated against the user's CURRENT role state. A former admin who lost the role but retained the `spend_approver` permission falls out of authority for any budget where they were not added as an explicit `spending_budget_approvers` row — the role-based default grant evaporates the moment the role is removed, even if the permission persists. Operators who want a former admin to retain approval authority for specific budgets must add them to `spending_budget_approvers` BEFORE removing the admin role.
 
 **Default grant:** when a new Spending Budget is created:
 - Budget scoped to an org-level agent: `spend_approver` granted to ALL users currently holding the org-admin role for that organisation. All such users are treated as in-scope by role for that budget.
@@ -1033,12 +1040,13 @@ Shadow mode is not an approximation. It is the live execution path with the Stri
 - Runs the full policy check: Spending Mode, Spending Limits, Merchant Allowlist, Approval Threshold.
 - Routes over-threshold charges to HITL (approval request is real; the HITL queue entry is a real entry).
 - Writes a full ledger row with `mode = 'shadow'`. Auto-approved (under threshold) charges land directly at `status = 'shadow_settled'`. HITL-approved charges transition `pending_approval → approved → shadow_settled` (the `approved → shadow_settled` step in §4 fires regardless of whether the approval was auto or HITL). HITL-denied charges land at `denied`.
-- Returns a success response to the caller with the same shape as live mode. The workflow continues as if the charge succeeded.
+- Returns a success-class response to the caller. The shadow response shape is `{ outcome: 'shadow_settled', chargeId }` per §8.2 — distinct from the live `'executed'` discriminator. Skills must treat both as successful completions and must NOT branch on the discriminator beyond success-vs-failure. The workflow continues as if the charge succeeded.
 
 **What shadow mode does NOT do:**
 - Does not call Stripe.
-- Does not return a real SPT to the IEE worker (worker returns `chargeToken: null`; worker does not fill a payment form).
-- Does not produce a `providerChargeId`.
+- For worker-hosted-form skills: the immediate response on `agent-spend-response` carries `chargeToken: null` and `providerChargeId: null`; the worker does NOT fill a payment form because there is no live SPT to use. The worker proceeds as if the charge succeeded but skips the form-fill step in shadow mode.
+- For main-app-direct skills: the main app skips the Stripe API call entirely; there is no `providerChargeId` to populate.
+- No row ever transitions to `executed` in shadow mode (shadow charges go directly `approved → shadow_settled`).
 
 **From the caller's perspective:** shadow auto-approved charges return `outcome: 'shadow_settled'` and live auto-approved charges return `outcome: 'executed'`. Both are success outcomes. No workflow or skill may branch on mode — treat both as successful completions. The `mode` field on the ledger row is the observability signal.
 
@@ -1275,7 +1283,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 
 ### Chunk 12 — Stripe Webhook Ingestion
 
-- `server/routes/webhooks/stripeAgentWebhook.ts` mounted at `/api/webhooks/stripe-agent`
+- `server/routes/webhooks/stripeAgentWebhook.ts` mounted at `/api/webhooks/stripe-agent/:connectionId` (the `:connectionId` path parameter is required for signature lookup — see §7.5)
 - `stripeAgentWebhookService.ts`
 - Signature verification, body parser order, dedupe via `webhookDedupeStore`
 - State-machine transitions: `executed → succeeded/failed/refunded/disputed`
