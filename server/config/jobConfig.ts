@@ -414,6 +414,19 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
   },
 
+  // Wall-clock heartbeat: fires every minute (pg-boss cron minimum), pauses
+  // runs whose wall-clock cap has been exceeded between step boundaries.
+  // Spec target was 30s; accepted 60s cadence pending a scheduling strategy
+  // decision (see tasks/todo.md §Deferred from Chunk 7).
+  'workflow-wall-clock-heartbeat': {
+    retryLimit: 0,
+    retryDelay: 0,
+    retryBackoff: false,
+    expireInSeconds: 55,
+    deadLetter: 'workflow-wall-clock-heartbeat__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+
   // ── Canonical Data Platform P1: Connector polling ──────────────────
   // Tick job: every-minute cron that selects connections due for sync
   // and fan-outs one connector-polling-sync per connection.

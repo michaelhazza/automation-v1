@@ -12,6 +12,8 @@
 import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { OrgScopedTx } from '../db/index.js';
+import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
+import type { PauseResult, StopResult, ResumeOptions } from './workflowRunPauseStopService.js';
 import {
   workflowRuns,
   workflowStepRuns,
@@ -617,6 +619,35 @@ export const WorkflowRunService = {
       stepRunId,
       options
     );
+  },
+
+  /** Pass-through to WorkflowRunPauseStopService.pauseRun. */
+  async pauseRun(
+    runId: string,
+    organisationId: string,
+    userId: string,
+    reason: import('./workflowRunPauseStopServicePure.js').PauseReason | 'operator'
+  ): Promise<PauseResult> {
+    return WorkflowRunPauseStopService.pauseRun(runId, organisationId, userId, reason);
+  },
+
+  /** Pass-through to WorkflowRunPauseStopService.resumeRun. */
+  async resumeRun(
+    runId: string,
+    organisationId: string,
+    userId: string,
+    opts: ResumeOptions
+  ): Promise<{ resumed: boolean; reason?: 'not_paused'; extension_count?: number }> {
+    return WorkflowRunPauseStopService.resumeRun(runId, organisationId, userId, opts);
+  },
+
+  /** Pass-through to WorkflowRunPauseStopService.stopRun. */
+  async stopRun(
+    runId: string,
+    organisationId: string,
+    userId: string
+  ): Promise<StopResult> {
+    return WorkflowRunPauseStopService.stopRun(runId, organisationId, userId);
   },
 
   /**

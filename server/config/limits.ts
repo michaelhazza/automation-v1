@@ -672,6 +672,15 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
 
+// ── Workflows V1 — run-extension cap ────────────────────────────────────────
+
+/**
+ * Maximum number of cap-breach extensions allowed per workflow run.
+ * Applies to both cost-ceiling and wall-clock pause extensions.
+ * Spec: tasks/Workflows-spec.md §5.7 (D-W1-I7 resume / extend state machine).
+ */
+export const MAX_EXTENSIONS_PER_RUN = 2;
+
 // ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
 
 /**

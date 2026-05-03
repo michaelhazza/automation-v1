@@ -96,3 +96,66 @@ export function decideRunNextState(inputs: RunStateInputs): RunStateDecision {
 export function computeRetryBackoffMs(attemptNumber: number): number {
   return Math.min(1000 * Math.pow(2, attemptNumber - 1), 60_000);
 }
+
+/**
+ * Decision result for step retry containment.
+ */
+export interface StepRetryDecision {
+  shouldRetry: boolean;
+  nextAttempt: number;
+  backoffMs: number;
+  failReason: string;
+}
+
+/**
+ * Pure retry-containment decision for a failed step.
+ *
+ * Spec B1: read `params.maxAttempts` (default 3), compare against current
+ * `attempt`. If below the ceiling, return a retry decision with the next
+ * attempt number and computed backoff. Otherwise return no-retry.
+ *
+ * `maxAttempts` of 1 means "one attempt only" — no retries.
+ * Default is 3 (two automatic retries after the first attempt).
+ */
+export function decideStepRetry(
+  attempt: number,
+  params: Record<string, unknown> | null | undefined,
+  retryPolicy: { maxAttempts?: number } | null | undefined
+): StepRetryDecision {
+  const maxAttempts = typeof params?.['maxAttempts'] === 'number'
+    ? params['maxAttempts']
+    : typeof retryPolicy?.maxAttempts === 'number'
+      ? retryPolicy.maxAttempts
+      : 3;
+
+  if (attempt < maxAttempts) {
+    const nextAttempt = attempt + 1;
+    return {
+      shouldRetry: true,
+      nextAttempt,
+      backoffMs: computeRetryBackoffMs(nextAttempt),
+      failReason: '',
+    };
+  }
+
+  return {
+    shouldRetry: false,
+    nextAttempt: attempt,
+    backoffMs: 0,
+    failReason: maxAttempts > 1 ? 'max_attempts_exceeded' : '',
+  };
+}
+
+/**
+ * Pure decision for whether a resume increments the extension count.
+ *
+ * Spec A5: only increment when an actual extension (cost or time) was applied.
+ * A plain operator-initiated pause + resume with no extension body must NOT
+ * consume an extension slot.
+ */
+export function shouldIncrementExtensionCount(opts: {
+  extendCostCents?: number;
+  extendSeconds?: number;
+}): boolean {
+  return (opts.extendCostCents ?? 0) > 0 || (opts.extendSeconds ?? 0) > 0;
+}

@@ -20,6 +20,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { OrgScopedTx } from '../db/index.js';
 import { workflowRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { computeAccumulatorDelta } from './workflowRunCostLedgerServicePure.js';
 
 /**
  * Record a cost delta for a workflow run.
@@ -39,7 +40,8 @@ export async function writeCostLedgerRow(
   description: string,
   tx: OrgScopedTx
 ): Promise<void> {
-  if (delta <= 0) return; // zero / negative deltas are no-ops
+  const { shouldWrite } = computeAccumulatorDelta(0, delta);
+  if (!shouldWrite) return; // zero / negative deltas are no-ops
 
   // Increment the control-flow accumulator.
   await tx

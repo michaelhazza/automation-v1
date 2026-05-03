@@ -5,10 +5,7 @@
  * idempotency key derived from `(run_id, step_id, task_sequence)` so that
  * retried steps hit the same key and the receiver dedups correctly.
  *
- * Format: `${NODE_ENV}:${runId}:${stepId}:${taskSequence}`
- *
- * The environment prefix prevents key collisions between dev/staging/prod when
- * external providers share a credential namespace.
+ * Format: `${runId}:${stepId}:${taskSequence}`
  */
 
 export function buildIdempotencyKey(
@@ -16,6 +13,5 @@ export function buildIdempotencyKey(
   stepId: string,
   taskSequence: number
 ): string {
-  const envName = process.env['NODE_ENV'] ?? 'unknown';
-  return `${envName}:${runId}:${stepId}:${taskSequence}`;
+  return `${runId}:${stepId}:${taskSequence}`;
 }

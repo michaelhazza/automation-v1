@@ -17,6 +17,8 @@ import { logger } from '../lib/logger.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import type { PauseReason } from './workflowRunPauseStopServicePure.js';
+import { shouldIncrementExtensionCount } from './workflowRunPauseStopServicePure.js';
+import { MAX_EXTENSIONS_PER_RUN } from '../config/limits.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,7 +132,7 @@ export const WorkflowRunPauseStopService = {
     organisationId: string,
     _userId: string,
     opts: ResumeOptions
-  ): Promise<{ resumed: boolean }> {
+  ): Promise<{ resumed: boolean; reason?: 'not_paused'; extension_count?: number }> {
     // Pre-flight: load run state outside the transaction.
     const [run] = await db
       .select({
@@ -150,12 +152,7 @@ export const WorkflowRunPauseStopService = {
       throw { statusCode: 404, message: 'Workflow run not found' };
     }
     if (run.status !== 'paused') {
-      throw {
-        statusCode: 409,
-        message: `Run is not paused (current status: ${run.status})`,
-        errorCode: 'run_not_paused',
-        current_status: run.status,
-      };
+      return { resumed: false, reason: 'not_paused' };
     }
 
     const capTriggered =
@@ -170,13 +167,19 @@ export const WorkflowRunPauseStopService = {
       };
     }
 
-    if ((run.extensionCount ?? 0) >= 2) {
+    if ((run.extensionCount ?? 0) >= MAX_EXTENSIONS_PER_RUN) {
       throw {
         statusCode: 400,
-        message: 'Maximum of 2 extensions per run has been reached',
+        message: `Maximum of ${MAX_EXTENSIONS_PER_RUN} extensions per run has been reached`,
         errorCode: 'extension_cap_reached',
       };
     }
+
+    const costDelta = opts.extendCostCents ?? 0;
+    const timeDelta = opts.extendSeconds ?? 0;
+    const isExtension = shouldIncrementExtensionCount(opts);
+
+    let extensionCountAfter: number = run.extensionCount ?? 0;
 
     await db.transaction(async (tx) => {
       assertValidTransition({
@@ -186,15 +189,14 @@ export const WorkflowRunPauseStopService = {
         to: 'running',
       });
 
-      const costDelta = opts.extendCostCents ?? 0;
-      const timeDelta = opts.extendSeconds ?? 0;
-
       const updated = await tx
         .update(workflowRuns)
         .set({
           status: 'running',
           degradationReason: null,
-          extensionCount: sql`${workflowRuns.extensionCount} + 1`,
+          extensionCount: isExtension
+            ? sql`${workflowRuns.extensionCount} + 1`
+            : workflowRuns.extensionCount,
           effectiveCostCeilingCents:
             costDelta > 0
               ? sql`COALESCE(${workflowRuns.effectiveCostCeilingCents}, 0) + ${costDelta}`
@@ -226,6 +228,10 @@ export const WorkflowRunPauseStopService = {
           current_status: current?.status ?? 'unknown',
         };
       }
+
+      if (isExtension) {
+        extensionCountAfter = (run.extensionCount ?? 0) + 1;
+      }
     });
 
     logger.info('workflow_run_resumed', {
@@ -237,11 +243,13 @@ export const WorkflowRunPauseStopService = {
     });
 
     // Enqueue a tick to restart execution after the transaction has committed.
-    // Lazy import to avoid a circular reference at module load time.
+    // Lazy-imported: workflowEngineService.ts imports WorkflowRunPauseStopService
+    // at module load, so a top-level import here would form an ESM cycle and TDZ
+    // would leave WorkflowEngineService undefined on first use.
     const { WorkflowEngineService } = await import('./workflowEngineService.js');
     await WorkflowEngineService.enqueueTick(runId);
 
-    return { resumed: true };
+    return { resumed: true, extension_count: extensionCountAfter };
   },
 
   /**
@@ -331,7 +339,7 @@ export const WorkflowRunPauseStopService = {
 
     if (result.stopped) {
       logger.info('workflow_run_stopped', {
-        event: 'run.stopped',
+        event: 'run.stopped.by_user',
         runId,
         organisationId,
       });
@@ -349,7 +357,7 @@ export const WorkflowRunPauseStopService = {
    */
   async pauseRunBetweenSteps(
     runId: string,
-    _organisationId: string,
+    organisationId: string,
     capType: 'cost_ceiling' | 'wall_clock',
     tx: OrgScopedTx
   ): Promise<{ paused: boolean }> {
@@ -370,6 +378,7 @@ export const WorkflowRunPauseStopService = {
       .where(
         and(
           eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, organisationId),
           eq(workflowRuns.status, 'running')
         )
       )

@@ -31,7 +31,7 @@ export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run
 const AGENT_RUN_TERMINAL: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 const AGENT_RUN_KNOWN: ReadonlySet<string> = new Set(Object.values(AGENT_RUN_STATUS));
 
-const WORKFLOW_RUN_TERMINAL: ReadonlySet<string> = new Set([
+export const WORKFLOW_RUN_TERMINAL: ReadonlySet<string> = new Set([
   'completed',
   'completed_with_errors',
   'failed',

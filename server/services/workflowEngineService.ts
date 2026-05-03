@@ -31,7 +31,7 @@
  *                              agentScheduleService.initialize()
  */
 
-import { eq, and, sql, isNull, lt, inArray, ne } from 'drizzle-orm';
+import { eq, and, sql, isNull, lt, inArray, ne, notInArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workflowRuns,
@@ -85,10 +85,13 @@ import { writeReferenceFromBinding } from './knowledgeService.js';
 import {
   assertValidTransition,
   InvalidTransitionError,
+  WORKFLOW_RUN_TERMINAL,
 } from '../../shared/stateMachineGuards.js';
 import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
-import { decideRunNextState } from './workflowRunPauseStopServicePure.js';
+import { decideRunNextState, decideStepRetry } from './workflowRunPauseStopServicePure.js';
 import { estimateStepCostCents } from '../lib/workflow/costEstimationDefaults.js';
+import { buildIdempotencyKey } from '../lib/workflow/idempotencyKey.js';
+import { WALL_CLOCK_HEARTBEAT_QUEUE, runWallClockHeartbeat } from '../jobs/workflowWallClockHeartbeatJob.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -878,16 +881,39 @@ export const WorkflowEngineService = {
         }
 
         const completedAt = new Date();
+        // Guard against post-terminal overwrites (e.g. stop+completion race).
+        assertValidTransition({
+          kind: 'workflow_run',
+          recordId: runId,
+          from: run.status,
+          to: finalStatus,
+        });
         // Defensive gate cascade + terminal status write — must be atomic.
         // There SHOULD be no open gates at normal completion, but the spec
         // requires resolveOpenGatesForRun unconditionally for all terminal writes.
-        await db.transaction(async (tx) => {
+        // CAS predicate: skip silently if another writer already reached terminal.
+        const completionResult = await db.transaction(async (tx) => {
           await WorkflowStepGateService.resolveOpenGatesForRun(run.id, 'run_terminated', run.organisationId, tx);
-          await tx
+          const updated = await tx
             .update(workflowRuns)
             .set({ status: finalStatus, completedAt, updatedAt: completedAt })
-            .where(eq(workflowRuns.id, runId));
+            .where(
+              and(
+                eq(workflowRuns.id, runId),
+                notInArray(workflowRuns.status, [...WORKFLOW_RUN_TERMINAL])
+              )
+            )
+            .returning({ id: workflowRuns.id });
+          return { rowsUpdated: updated.length };
         });
+        if (completionResult.rowsUpdated === 0) {
+          logger.info('run.complete_cas_noop', {
+            event: 'run.complete_cas_noop',
+            runId,
+            attemptedStatus: finalStatus,
+          });
+          return;
+        }
         // §10.3 — onboarding-state bookkeeping (best-effort).
         await upsertSubaccountOnboardingState({
           runId,
@@ -1015,6 +1041,7 @@ export const WorkflowEngineService = {
 
         // Pre-step cost-cap estimate: if the projected cost after the next step
         // would exceed the cap, pause before dispatching.
+        // Checks first dispatchable; multi-step parallel-dispatch fan-out cap-check is V2 — see tasks/todo.md
         const nextStep = toDispatch[0];
         if (nextStep && capRow.effectiveCostCeilingCents !== null) {
           const estimate = estimateStepCostCents(
@@ -1022,7 +1049,7 @@ export const WorkflowEngineService = {
             nextStep.params as Record<string, unknown> | undefined
           );
           const projectedCost = (capRow.costAccumulatorCents ?? 0) + estimate;
-          if (projectedCost > (capRow.effectiveCostCeilingCents ?? Infinity)) {
+          if (projectedCost > capRow.effectiveCostCeilingCents) {
             await db.transaction(async (tx) => {
               await WorkflowRunPauseStopService.pauseRunBetweenSteps(
                 runId,
@@ -1090,7 +1117,8 @@ export const WorkflowEngineService = {
               from: sr.status,
               to: 'failed',
             });
-            await db
+            const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
+            const failedRows = await db
               .update(workflowStepRuns)
               .set({
                 status: 'failed',
@@ -1099,7 +1127,22 @@ export const WorkflowEngineService = {
                 version: sr.version + 1,
                 updatedAt: new Date(),
               })
-              .where(eq(workflowStepRuns.id, sr.id));
+              .where(
+                and(
+                  eq(workflowStepRuns.id, sr.id),
+                  notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+                )
+              )
+              .returning({ id: workflowStepRuns.id });
+            if (failedRows.length === 0) {
+              logger.info('workflow_step_fail_cas_noop', {
+                event: 'step.fail_cas_noop',
+                runId: sr.runId,
+                stepRunId: sr.id,
+                stepId: sr.stepId,
+                via: 'dispatch_error_path',
+              });
+            }
           } catch (assertErr) {
             if (assertErr instanceof InvalidTransitionError) {
               logger.warn('workflow_step_invalid_transition_skipped', {
@@ -1512,10 +1555,11 @@ export const WorkflowEngineService = {
           .where(eq(workflowStepRuns.id, sr.id));
 
         // Idempotency key — entity-scoped for singleton resources, run-scoped otherwise.
+        // Run-scoped keys use the canonical format from buildIdempotencyKey (§3.6).
         const idempotencyKey =
           actionStep.idempotencyScope === 'entity' && actionStep.entityKey
             ? `entity:${actionStep.entityKey}`
-            : `Workflow:${run.id}:${step.id}:${sr.attempt}`;
+            : buildIdempotencyKey(run.id, step.id, sr.attempt);
 
         logger.info('workflow_action_call_dispatched', {
           event: 'step.dispatched',
@@ -2057,7 +2101,105 @@ export const WorkflowEngineService = {
   },
 
   async failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
-    await db
+    const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
+
+    // Retry containment: check whether the step has a retry policy and whether
+    // this attempt is below maxAttempts. If so, insert a new pending row at
+    // attempt+1 instead of writing a terminal failure.
+    const [parentRun] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, sr.runId));
+    const def = parentRun ? await loadDefinitionForRun(parentRun) : null;
+    if (def) {
+      const stepDef = findStepInDefinition(def, sr.stepId);
+      if (stepDef) {
+        const retryDecision = decideStepRetry(sr.attempt, stepDef.params, stepDef.retryPolicy ?? null);
+        const onFail = typeof stepDef.params?.['onFail'] === 'string'
+          ? stepDef.params['onFail'] as 'fail' | 'continue' | 'gate'
+          : 'fail';
+
+        if (retryDecision.shouldRetry) {
+          const failedRows = await db
+            .update(workflowStepRuns)
+            .set({
+              status: 'failed',
+              error: reason,
+              completedAt: new Date(),
+              version: sr.version + 1,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(workflowStepRuns.id, sr.id),
+                notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+              )
+            )
+            .returning({ id: workflowStepRuns.id });
+          if (failedRows.length === 0) {
+            logger.info('workflow_step_fail_cas_noop', {
+              event: 'step.fail_cas_noop',
+              runId: sr.runId,
+              stepRunId: sr.id,
+              stepId: sr.stepId,
+              reason,
+            });
+            return;
+          }
+
+          try {
+            await db.insert(workflowStepRuns).values({
+              runId: sr.runId,
+              stepId: sr.stepId,
+              stepType: sr.stepType,
+              status: 'pending',
+              sideEffectType: sr.sideEffectType,
+              dependsOn: sr.dependsOn as string[],
+              attempt: retryDecision.nextAttempt,
+            });
+          } catch {
+            // Concurrent tick inserted the retry row — safe to ignore.
+          }
+
+          logger.info('workflow_step_retry_scheduled', {
+            event: 'step.retry_scheduled',
+            runId: sr.runId,
+            stepRunId: sr.id,
+            stepId: sr.stepId,
+            attempt: sr.attempt,
+            nextAttempt: retryDecision.nextAttempt,
+            backoffMs: retryDecision.backoffMs,
+            reason,
+          });
+
+          const pgboss = (await getPgBoss()) as unknown as {
+            send: (name: string, data: object, options: Record<string, unknown>) => Promise<string | null>;
+          };
+          await pgboss.send(
+            TICK_QUEUE,
+            { runId: sr.runId },
+            {
+              ...getJobConfig('workflow-run-tick'),
+              singletonKey: sr.runId,
+              useSingletonQueue: true,
+              startAfter: Math.ceil(retryDecision.backoffMs / 1000),
+            }
+          );
+          return;
+        }
+
+        if (retryDecision.failReason) {
+          reason = retryDecision.failReason;
+          logger.info('workflow_step_max_attempts_exceeded', {
+            event: 'step.max_attempts_exceeded',
+            runId: sr.runId,
+            stepRunId: sr.id,
+            stepId: sr.stepId,
+            attempt: sr.attempt,
+            onFail,
+          });
+        }
+      }
+    }
+
+    const failedRows = await db
       .update(workflowStepRuns)
       .set({
         status: 'failed',
@@ -2066,7 +2208,23 @@ export const WorkflowEngineService = {
         version: sr.version + 1,
         updatedAt: new Date(),
       })
-      .where(eq(workflowStepRuns.id, sr.id));
+      .where(
+        and(
+          eq(workflowStepRuns.id, sr.id),
+          notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+        )
+      )
+      .returning({ id: workflowStepRuns.id });
+    if (failedRows.length === 0) {
+      logger.info('workflow_step_fail_cas_noop', {
+        event: 'step.fail_cas_noop',
+        runId: sr.runId,
+        stepRunId: sr.id,
+        stepId: sr.stepId,
+        reason,
+      });
+      return;
+    }
     await this.enqueueTick(sr.runId);
   },
 
@@ -2918,8 +3076,10 @@ export const WorkflowEngineService = {
       to: 'completed',
     });
 
+    const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
+
     await db.transaction(async (tx) => {
-      await tx
+      const completedRows = await tx
         .update(workflowStepRuns)
         .set({
           status: 'completed',
@@ -2929,7 +3089,24 @@ export const WorkflowEngineService = {
           version: sr.version + 1,
           updatedAt: new Date(),
         })
-        .where(eq(workflowStepRuns.id, sr.id));
+        .where(
+          and(
+            eq(workflowStepRuns.id, sr.id),
+            notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+          )
+        )
+        .returning({ id: workflowStepRuns.id });
+
+      if (completedRows.length === 0) {
+        logger.info('workflow_step_complete_cas_noop', {
+          event: 'step.complete_cas_noop',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: sr.stepId,
+          via,
+        });
+        return;
+      }
 
       await tx
         .update(workflowRuns)
@@ -3058,13 +3235,8 @@ export const WorkflowEngineService = {
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.id, stepRunId));
     if (!sr) return;
-    assertValidTransition({
-      kind: 'workflow_step_run',
-      recordId: sr.id,
-      from: sr.status,
-      to: 'failed',
-    });
-    await db
+    const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
+    const failedRows = await db
       .update(workflowStepRuns)
       .set({
         status: 'failed',
@@ -3073,7 +3245,23 @@ export const WorkflowEngineService = {
         version: sr.version + 1,
         updatedAt: new Date(),
       })
-      .where(eq(workflowStepRuns.id, stepRunId));
+      .where(
+        and(
+          eq(workflowStepRuns.id, stepRunId),
+          notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+        )
+      )
+      .returning({ id: workflowStepRuns.id });
+    if (failedRows.length === 0) {
+      logger.info('workflow_step_fail_cas_noop', {
+        event: 'step.fail_cas_noop',
+        runId: sr.runId,
+        stepRunId,
+        stepId: sr.stepId,
+        reason,
+      });
+      return;
+    }
     logger.info('workflow_step_failed', {
       event: 'step.failed',
       runId: sr.runId,
@@ -3346,8 +3534,9 @@ export const WorkflowEngineService = {
           return;
         }
         const outputHash = hashValue(stepOutput);
+        const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
         await db.transaction(async (tx) => {
-          await tx
+          const completedRows = await tx
             .update(workflowStepRuns)
             .set({
               status: 'completed',
@@ -3357,7 +3546,23 @@ export const WorkflowEngineService = {
               version: sr.version + 1,
               updatedAt: new Date(),
             })
-            .where(eq(workflowStepRuns.id, sr.id));
+            .where(
+              and(
+                eq(workflowStepRuns.id, sr.id),
+                notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+              )
+            )
+            .returning({ id: workflowStepRuns.id });
+          if (completedRows.length === 0) {
+            logger.info('workflow_step_complete_cas_noop', {
+              event: 'step.complete_cas_noop',
+              runId: run.id,
+              stepRunId: sr.id,
+              stepId: step.id,
+            });
+            return;
+          }
+          const TERMINAL_STEP_STATUSES_SKIP = ['completed', 'failed', 'skipped', 'cancelled'] as const;
           for (const skippedStepId of skipSet) {
             const skippedStepDef = findStepInDefinition(def, skippedStepId);
             if (!skippedStepDef) continue;
@@ -3372,15 +3577,25 @@ export const WorkflowEngineService = {
                 completedAt: new Date(),
               });
             } catch {
-              await tx
+              // Unique constraint — row exists; only overwrite if not yet terminal (CAS).
+              const skippedRows = await tx
                 .update(workflowStepRuns)
                 .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
                 .where(
                   and(
                     eq(workflowStepRuns.runId, run.id),
-                    eq(workflowStepRuns.stepId, skippedStepId)
+                    eq(workflowStepRuns.stepId, skippedStepId),
+                    notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES_SKIP])
                   )
-                );
+                )
+                .returning({ id: workflowStepRuns.id });
+              if (skippedRows.length === 0) {
+                logger.info('workflow_step_skip_cas_noop', {
+                  event: 'step.skip_cas_noop',
+                  runId: run.id,
+                  stepId: skippedStepId,
+                });
+              }
             }
           }
           await tx
@@ -3517,11 +3732,12 @@ export const WorkflowEngineService = {
     }
 
     const outputHash = hashValue(stepOutput);
+    const TERMINAL_STEP_STATUSES = ['completed', 'failed', 'skipped', 'cancelled'] as const;
 
     // Single transaction: complete the decision step + create skipped rows + update context.
     await db.transaction(async (tx) => {
       // Mark decision step completed.
-      await tx
+      const completedRows = await tx
         .update(workflowStepRuns)
         .set({
           status: 'completed',
@@ -3531,10 +3747,28 @@ export const WorkflowEngineService = {
           version: sr.version + 1,
           updatedAt: new Date(),
         })
-        .where(eq(workflowStepRuns.id, sr.id));
+        .where(
+          and(
+            eq(workflowStepRuns.id, sr.id),
+            notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES])
+          )
+        )
+        .returning({ id: workflowStepRuns.id });
+
+      if (completedRows.length === 0) {
+        logger.info('workflow_step_complete_cas_noop', {
+          event: 'step.complete_cas_noop',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+        });
+        return;
+      }
 
       // Create skipped rows for each step in the skip set.
-      // If a row already exists (e.g. from a concurrent tick), mark it skipped.
+      // If a row already exists (e.g. from a concurrent tick), only mark it skipped
+      // if it has not already reached a terminal status (CAS guard).
+      const TERMINAL_STEP_STATUSES_SKIP = ['completed', 'failed', 'skipped', 'cancelled'] as const;
       for (const skippedStepId of skipSet) {
         const skippedStepDef = findStepInDefinition(def, skippedStepId);
         if (!skippedStepDef) continue;
@@ -3549,16 +3783,25 @@ export const WorkflowEngineService = {
             completedAt: new Date(),
           });
         } catch {
-          // Unique constraint — row exists; mark it skipped.
-          await tx
+          // Unique constraint — row exists; only overwrite if not yet terminal (CAS).
+          const skippedRows = await tx
             .update(workflowStepRuns)
             .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
             .where(
               and(
                 eq(workflowStepRuns.runId, run.id),
-                eq(workflowStepRuns.stepId, skippedStepId)
+                eq(workflowStepRuns.stepId, skippedStepId),
+                notInArray(workflowStepRuns.status, [...TERMINAL_STEP_STATUSES_SKIP])
               )
-            );
+            )
+            .returning({ id: workflowStepRuns.id });
+          if (skippedRows.length === 0) {
+            logger.info('workflow_step_skip_cas_noop', {
+              event: 'step.skip_cas_noop',
+              runId: run.id,
+              stepId: skippedStepId,
+            });
+          }
         }
       }
 
@@ -3827,6 +4070,28 @@ export const WorkflowEngineService = {
       await pgboss.schedule(WATCHDOG_QUEUE, '* * * * *', {}, getJobConfig('workflow-watchdog'));
     } catch (err) {
       logger.warn('workflow_watchdog_schedule_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Wall-clock heartbeat — pauses runs whose wall-clock cap has been exceeded
+    // between step boundaries. Spec target is 30s; pg-boss cron minimum is 1
+    // minute, so this fires every minute in practice. The between-step cap
+    // check in the tick loop handles sub-minute precision for actively running steps.
+    await createWorker<Record<string, never>>({
+      queue: WALL_CLOCK_HEARTBEAT_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      resolveOrgContext: () => null,
+      handler: async () => {
+        await runWallClockHeartbeat();
+      },
+    });
+
+    try {
+      await pgboss.schedule(WALL_CLOCK_HEARTBEAT_QUEUE, '* * * * *', {});
+    } catch (err) {
+      logger.warn('workflow_wall_clock_heartbeat_schedule_failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

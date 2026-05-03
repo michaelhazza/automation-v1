@@ -2544,4 +2544,38 @@ The spec-reviewer auto-decided the following directional findings during iterati
 
 **Auto-rejected** because `docs/spec-context.md` declares `frontend_tests: none_for_now` and `convention_rejections` explicitly says "do not add frontend unit tests". §17.5 .test.tsx block was removed and replaced with a deviation note pointing back at spec-context.md; one .test.tsx in §17.6 was renamed to a server-side .test.ts.
 
+## Deferred from Chunk 7 spec review (workflows-v1) — 2026-05-03
+
+**Captured:** 2026-05-03T00:00:00Z
+**Source:** Chunk 7 spec review round 1
+**Spec:** `tasks/builds/workflows-v1/plan.md` (Chunk 7, round-2 invariant "Pre-step cost-cap check")
+
+- [ ] Pre-step cost-cap check for parallel multi-step dispatch
+  - Today: only `toDispatch[0]` is checked before the dispatch loop.
+  - Risk: parallel fan-out where step 2..N each cost `>0` could overshoot the cap.
+  - Suggested approach: evaluate `cost_accumulator_cents + sum(estimate(s) for s in toDispatch)` before any dispatch; pause + emit `run.paused.cost_ceiling` if projected total exceeds cap. Or sequentialise per-step pre-checks and abort the rest of the dispatch loop on first overshoot.
+- [ ] Audit of skill executors that don't natively support idempotency headers
+  - List which executors don't pass idempotency through to their provider.
+  - Decide whether a per-org `external_call_log` table is needed or whether deduplication at the executor level suffices.
+- [ ] Wire `params.onFail` propagation on max-attempts exhaustion
+  - Today: `params.onFail` is read and logged at exhaustion in `workflowEngineService.ts` but does not affect run-failure propagation.
+  - `'fail'` works (current default behaviour). `'continue'` is partly covered by the existing `failurePolicy: 'continue'` evaluation at run termination, but the per-step `params.onFail = 'continue'` surface is distinct. `'gate'` requires synthesis of an Approval card with the failure reason -- no existing primitive.
+  - Suggested approach: extend `decideStepRetry` to return a third `runFailurePropagation: 'fail' | 'continue' | 'gate'` field; engine acts on it after the step row is persisted as `failed`.
+- [ ] Wall-clock heartbeat cadence is 60s, spec target 30s
+  - Constraint: pg-boss cron-scheduled jobs have a 1-minute minimum resolution.
+  - Mitigation in place: the between-step cap check in the engine tick loop covers actively executing steps with sub-minute precision; the heartbeat catches runs stalled on external I/O.
+  - Options if 30s precision is required: (a) self-scheduling via `pg-boss send + startAfter` rather than cron, (b) two heartbeat workers offset by 30s, (c) accept 60s cadence (current).
+  - Decision needed: user acceptance of (c), or implementation of (a) or (b).
+- [ ] Convert `workflowRunPauseStopServicePure.test.ts` from ad-hoc assertions to Vitest
+  - Today: file uses hand-rolled `assert` / `assertEqual` and runs via `npx tsx`.
+  - Convention: `docs/testing-conventions.md` calls for Vitest with `import { describe, it, expect } from 'vitest'` and execution via `npx vitest run <path>`.
+  - Suggested approach: mechanical port -- each `assert(cond)` to `expect(cond).toBe(true)`, each `assertEqual(a, b)` to `expect(a).toEqual(b)`, group related tests into `describe(...)` blocks. ~30 cases.
+- [ ] Decide fate of `decideRunNextState.currentStatus` parameter
+  - Today: `currentStatus` is in the `RunStateInputs` interface but never read by the function.
+  - Two options: (a) wire the `'already_terminal'` short-circuit at the top of the function, returning `{ shouldPause: false, reason: 'already_terminal', ... }` when `currentStatus` is in the workflow_run terminal set, OR (b) drop `currentStatus` from the interface entirely.
+  - Suggested approach: option (a) -- the `reason` enum already names the case, so this looks like an unfinished feature, not dead code. Wiring it makes the resume/stop-on-terminal-run paths cleaner.
+- [ ] Audit STEP_COST_ESTIMATE_CENTS aliases
+  - Today: keys include `agent_call`/`agent` and `action_call`/`action`. Two pairs of synonyms.
+  - Suggested approach: cross-reference `WorkflowDefinition` step-type union; remove dead aliases or add a one-line comment naming why they exist.
+
 **What to validate:** if the codebase is ready to land a frontend testing posture for this feature specifically (justifiable because of the WebSocket-coordinated multi-pane UI), update spec-context.md first, then re-litigate.

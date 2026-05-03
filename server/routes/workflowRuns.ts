@@ -15,7 +15,6 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { WorkflowRunService } from '../services/workflowRunService.js';
 import { WorkflowStepGateService } from '../services/workflowStepGateService.js';
 import { userInApproverPool } from '../services/workflowApprovalPoolPure.js';
-import { WorkflowRunPauseStopService } from '../services/workflowRunPauseStopService.js';
 
 const router = Router();
 
@@ -276,13 +275,17 @@ router.post(
 // ─── Pause / resume / stop (Chunk 7 — runaway protection) ───────────────────
 
 /**
- * POST /api/workflow-runs/:runId/resume
+ * POST /api/tasks/:taskId/run/resume
  *
- * Resume a paused run. For cap-triggered pauses, an extension is required:
- *   { extendCostCents?: number; extendSeconds?: number }
+ * Resume a paused run. `:taskId` is the workflow run id. For cap-triggered
+ * pauses, an extension is required: { extendCostCents?: number; extendSeconds?: number }
+ *
+ * 200: { resumed: true, extension_count: number }
+ *    | { resumed: false, reason: 'not_paused' }
+ * 409: { errorCode: 'race_with_other_action' }
  */
 router.post(
-  '/api/workflow-runs/:runId/resume',
+  '/api/tasks/:taskId/run/resume',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
@@ -290,8 +293,8 @@ router.post(
       extendCostCents?: number;
       extendSeconds?: number;
     };
-    const result = await WorkflowRunPauseStopService.resumeRun(
-      req.params.runId,
+    const result = await WorkflowRunService.resumeRun(
+      req.params.taskId,
       req.orgId!,
       req.user!.id,
       { extendCostCents, extendSeconds }
@@ -301,17 +304,18 @@ router.post(
 );
 
 /**
- * POST /api/workflow-runs/:runId/stop
+ * POST /api/tasks/:taskId/run/stop
  *
- * Hard-stop (fail) a run. Cascades open gates. Idempotent on terminal runs.
+ * Hard-stop (fail) a run. `:taskId` is the workflow run id.
+ * Cascades open gates. Idempotent on terminal runs.
  */
 router.post(
-  '/api/workflow-runs/:runId/stop',
+  '/api/tasks/:taskId/run/stop',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const result = await WorkflowRunPauseStopService.stopRun(
-      req.params.runId,
+    const result = await WorkflowRunService.stopRun(
+      req.params.taskId,
       req.orgId!,
       req.user!.id
     );
