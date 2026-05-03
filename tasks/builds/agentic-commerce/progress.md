@@ -12,9 +12,9 @@
 
 | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|
-| Phase 1 — SPEC (spec-coordinator) | IN PROGRESS | 2026-05-03 | — | S0 clean (0 commits behind, 5 ahead). Conflict scan complete; no unresolved conflicts. |
-| Phase 2 — BUILD (feature-coordinator) | NOT STARTED | — | — | Awaits Phase 1 handoff. |
-| Phase 3 — FINALISATION (finalisation-coordinator) | NOT STARTED | — | — | Awaits Phase 2. |
+| Phase 1 — SPEC (spec-coordinator) | DONE | 2026-05-03 | 2026-05-03 | Spec locked Final, chatgpt-spec-review APPROVED 5 rounds. Plan locked, chatgpt-plan-review APPROVED 3 rounds. |
+| Phase 2 — BUILD (feature-coordinator) | DONE | 2026-05-03 | 2026-05-04 | All 16 chunks built. spec-conformance CONFORMANT_AFTER_FIXES + re-verification (1 NON_CONFORMANT gap closed). pr-reviewer 5 blocking + 4 strong all closed. dual-reviewer skipped (Codex unavailable — allowed). adversarial-reviewer DONE (1 blocker fixed; 11 deferred to tasks/todo.md; 3 dissolved as false positives). doc-sync gate inline only — full sweep deferred to Phase 3. |
+| Phase 3 — FINALISATION (finalisation-coordinator) | NOT STARTED | — | — | Awaits PR open + new session. |
 
 ---
 
@@ -26,12 +26,29 @@
 | S0 sync + freshness check | DONE | 0 commits behind origin/main; 5 ahead. No merge needed. |
 | Brief intake + conflict scan | DONE | Major + UI-touching. No unresolved conflicts across the three input docs; addendum (v3) cleanly resolves every conflict raised by exploration. |
 | Build slug + directory | DONE | `tasks/builds/agentic-commerce/` created. |
-| Mockup loop | NOT STARTED | Eight UI surfaces to cover. |
-| Spec authoring | NOT STARTED | Target: `docs/superpowers/specs/2026-05-03-agentic-commerce-spec.md`. |
-| spec-reviewer | NOT STARTED | — |
-| chatgpt-spec-review | NOT STARTED | — |
-| handoff.md | NOT STARTED | — |
-| current-focus.md → BUILDING | NOT STARTED | — |
+| Mockup loop | DONE | Eight UI surfaces covered (inline implementation, no separate prototypes/ directory). |
+| Spec authoring | DONE | Locked Final at `tasks/builds/agentic-commerce/spec.md`. |
+| spec-reviewer | DONE | 5 Codex iterations. Final report at `tasks/review-logs/spec-review-final-agentic-commerce-2026-05-03T06-08-30Z.md`. |
+| chatgpt-spec-review | DONE | 5 rounds, APPROVED. Log at `tasks/review-logs/chatgpt-spec-review-agentic-commerce-2026-05-03T06-56-32Z.md`. |
+| handoff.md (Phase 1 → 2) | SKIPPED (manual handoff) | Phase 2 was driven manually rather than via feature-coordinator; no Phase 1 → 2 handoff doc was written. Captured here in retrospect. |
+| current-focus.md → BUILDING | SKIPPED | Pointer was not advanced during Phase 2; corrected at Phase 3 entry. |
+
+---
+
+## Phase 2 sub-step status
+
+| Step | Status | Notes |
+|---|---|---|
+| architect | DONE | Implementation plan at `tasks/builds/agentic-commerce/plan.md` — locked, chatgpt-plan-review APPROVED 3 rounds. |
+| chatgpt-plan-review | DONE | 3 rounds, APPROVED. Plan locked at commit `48cd8b5c`. |
+| Chunked build (16 chunks) | DONE | All chunks 1-16 implemented. Single squash-style implementation commit `be750ad2`. |
+| Per-chunk G1 + integrated G2 | DONE | Static gates clean (typecheck 0 errors, lint 0 errors / 726 baseline warnings, build:server clean). |
+| spec-conformance | DONE | 2 runs. Run 1 (2026-05-03T14:12:21Z) CONFORMANT_AFTER_FIXES (1 mechanical + 4 directional fixed; 4 additional DGs deferred). Run 2 (2026-05-03T20:51:25Z) re-verification — 4 prior DGs CLOSED, 1 new DG surfaced (`agentId: ''` empty-string drift) and closed in branch. Final verdict: CONFORMANT (re-verification scope). |
+| pr-reviewer | DONE | Log `tasks/review-logs/pr-review-log-agentic-commerce-2026-05-03T21-16-46Z.md`. 5 blocking (B1-B5) + 4 strong (S1-S4) all closed in-branch. 3 of 4 nice-to-have (N1, N2, N3) deferred with rationale; N4 out of scope. |
+| dual-reviewer | SKIPPED (Codex unavailable) | Allowed per CLAUDE.md (local-dev only; auto-skip permitted). Recorded in handoff. |
+| adversarial-reviewer | DONE | Log `tasks/review-logs/adversarial-review-log-agentic-commerce-2026-05-03T22-07-50Z.md`. 1 blocker fixed in branch (Finding 2.2 — webhook `connectionStatus` allowlist at `server/routes/webhooks/stripeAgentWebhook.ts:155`). 11 items deferred to `tasks/todo.md § Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)`. 3 reviewer findings dissolved against codebase contracts (1.1 set_config tx semantics, 1.2 cost_aggregates sentinel-org by-design, 2.1 SETTINGS_EDIT org-wide scope). |
+| Doc-sync gate | PARTIAL | Inline-only updates in `architecture.md`, `docs/capabilities.md`. Full doc-sync sweep deferred to Phase 3. |
+| handoff.md (Phase 2 → 3) | DONE | Written at Phase 3 entry — see `handoff.md`. |
 
 ---
 
@@ -69,10 +86,10 @@ Authority order on conflict: addendum > exploration > v2 brief.
 - Sales Autopilot Playbook spending integration.
 - Org-exclusive channel mode in v1 UI.
 - Automatic FX.
-- Settlement-currency translation in reporting.
+- Settlement-currency translation in reserving in reporting.
 
 ---
 
-## Open questions for Phase 2
+## Open questions for Phase 3
 
-To be filled in by handoff.md once Phase 1 completes.
+See `handoff.md`. The deferred-items backlog in `tasks/todo.md § Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)` plus the existing `Deferred from spec-conformance review — agentic-commerce (...)` and `Deferred from pr-review` sections constitute the post-merge backlog. Phase 3 finalisation does not need to address them.

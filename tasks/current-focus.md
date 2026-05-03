@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/agentic-commerce-brief-addendum.md
+active_spec: tasks/builds/agentic-commerce/spec.md
 active_plan: tasks/builds/agentic-commerce/plan.md
 build_slug: agentic-commerce
 branch: claude/agentic-commerce-spending
-status: PLANNING
-last_updated: 2026-05-03
+status: REVIEWING
+last_updated: 2026-05-04
 -->
 
 # Current Focus
@@ -19,10 +19,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/agentic-commerce/spec.md` — chatgpt-spec-review APPROVED (5 rounds, 2026-05-03). Ready for architect → implementation plan.
-**Active plan:** `tasks/builds/agentic-commerce/plan.md` (TBD — architect next)
+**Active spec:** `tasks/builds/agentic-commerce/spec.md` — Final, chatgpt-spec-review APPROVED (5 rounds, 2026-05-03).
+**Active plan:** `tasks/builds/agentic-commerce/plan.md` — LOCKED, chatgpt-plan-review APPROVED (3 rounds, 2026-05-03).
 **Active build slug:** `agentic-commerce`
-**Status:** **PLANNING** — spec locked. Branch `claude/agentic-commerce-spending`. Build is the Stripe SPT-backed agent spending primitive (Spending Budgets, shadow mode, charge router, append-only ledger, three-table approval-channel model). Major task. Next step: invoke `architect` (Opus) to decompose spec into implementation chunks. Mandatory pipeline: architect → chunked build → spec-conformance → pr-reviewer → adversarial-reviewer → finalisation-coordinator.
+**Status:** **REVIEWING** — Phase 1 + Phase 2 complete. All 16 chunks built; static gates clean; spec-conformance CONFORMANT (re-verification scope); pr-reviewer 5 blocking + 4 strong all closed; dual-reviewer skipped (Codex unavailable, allowed); adversarial-reviewer DONE (1 blocker fixed in branch — webhook connectionStatus allowlist; 11 items deferred to `tasks/todo.md`; 3 reviewer findings dissolved as false positives or by-design). Branch `claude/agentic-commerce-spending`. Next step: open PR, then launch finalisation-coordinator (Phase 3) in a fresh session for S2 sync, G4 regression guard, chatgpt-pr-review, doc-sync sweep, KNOWLEDGE.md, MERGE_READY.
 
 **Just merged:** GHL Module C — Agency OAuth (PR #254, merged 2026-05-03). Two-tier token model, FORCE-RLS `connector_location_tokens` (migration 0269), agency columns on `connector_configs` (migration 0268), webhook lifecycle dispatcher with HMAC + ordering invariant, disconnected-state circuit breaker.
 

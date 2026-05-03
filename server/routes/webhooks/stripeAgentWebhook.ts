@@ -152,8 +152,20 @@ router.post(
       return;
     }
 
-    if (connection.connectionStatus === 'revoked') {
-      res.status(404).json({ error: 'Connection revoked' });
+    // Allowlist: only `active` connections may receive webhooks. `revoked` and
+    // `error` (and any future non-active state) are rejected here. The webhook
+    // secret persists in `configJson` after a state change, so an exclusion-only
+    // check that misses a future state would let signed events from a non-active
+    // connection inject state transitions into agent_charges.
+    if (connection.connectionStatus !== 'active') {
+      recordIncident({
+        source: 'route',
+        summary: `Stripe agent webhook: non-active connection rejected (connectionId=${connectionId}, status=${connection.connectionStatus})`,
+        errorCode: 'stripeAgentWebhook.non_active_connection',
+        fingerprintOverride: `webhook:stripe-agent:non_active:${connectionId}:${connection.connectionStatus}`,
+        errorDetail: { connectionId, connectionStatus: connection.connectionStatus },
+      });
+      res.status(404).json({ error: 'Connection not active' });
       return;
     }
 
