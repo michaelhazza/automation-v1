@@ -83,7 +83,7 @@ export const workspaceActorService = {
           );
         }
 
-        // eslint-disable-next-line no-await-in-loop
+         
         current = await workspaceActorService.getActorById(current.parentActorId);
       }
     }

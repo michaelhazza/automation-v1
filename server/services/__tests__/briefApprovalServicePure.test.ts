@@ -75,7 +75,7 @@ test('completed brief → not stale', () => {
 
 // ── proposeAction failure → executionStatus: failed ──────────────────────────
 test('proposeAction throws → executionStatus falls back to failed', () => {
-  let executionStatus: 'pending' | 'failed' = 'failed';
+  let executionStatus: 'pending' | 'failed';
   try {
     throw new Error('proposeAction failure');
   } catch {

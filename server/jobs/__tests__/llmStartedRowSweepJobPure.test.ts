@@ -35,6 +35,6 @@ test('computeStartedRowSweepCutoff — variable providerTimeoutMs', () => {
   ];
   for (const { providerTimeoutMs, expected } of cases) {
     const cutoff = computeStartedRowSweepCutoff({ nowMs: now, providerTimeoutMs });
-    expect(cutoff.toISOString()).toBe(expected, `providerTimeoutMs=${providerTimeoutMs}`);
+    expect(cutoff.toISOString(), `providerTimeoutMs=${providerTimeoutMs}`).toBe(expected);
   }
 });

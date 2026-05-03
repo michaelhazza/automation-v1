@@ -17,6 +17,7 @@
 
 import { expect, test } from 'vitest';
 import { createFakeProviderAdapter } from '../fakeProviderAdapter.js';
+import type { LLMProviderAdapter } from '../../../providers/types.js';
 // NOTE: registry is NOT imported here. It is imported lazily (see below, between
 // Case 6 and Case 7) so that Cases 1–6 — which test only the adapter itself —
 // can run in environments without the production env vars that registry.ts
@@ -156,7 +157,7 @@ test('reset() clears calls + cancels pending error/latency/response overrides', 
 // These tests require DATABASE_URL + integration env to load providers/registry.js.
 // Skipped when SKIP=true to avoid env-var validation errors on import.
 let registerProviderAdapter: ((key: string, a: unknown) => () => void) | undefined;
-let getProviderAdapter: ((key: string) => unknown) | undefined;
+let getProviderAdapter: ((key: string) => LLMProviderAdapter) | undefined;
 
 if (!SKIP) {
   const registry = await import('../../../providers/registry.js');
@@ -168,48 +169,48 @@ if (!SKIP) {
 test.skipIf(SKIP)('register + restore restores the EXACT prior state at the key', async () => {
   // Verify pre-state: no entry at fake-test-provider
   let priorThrew = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { priorThrew = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { priorThrew = true; }
   expect(priorThrew).toBeTruthy();
 
   const a = createFakeProviderAdapter({ provider: 'fake-test-provider' });
-  const restoreA = registerProviderAdapter('fake-test-provider', a);
+  const restoreA = registerProviderAdapter!('fake-test-provider', a);
   try {
-    expect(getProviderAdapter('fake-test-provider')).toBe(a);
+    expect(getProviderAdapter!('fake-test-provider')).toBe(a);
   } finally {
     restoreA();
   }
 
   // After restore: the key is absent again (was unbound before register).
   let postThrew = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { postThrew = true; }
   expect(postThrew).toBeTruthy();
 });
 
 // ─── Case 8: restore is idempotent ──────────────────────────────────────────
 test.skipIf(SKIP)('calling restore() twice is a no-op the second time', async () => {
   const a = createFakeProviderAdapter();
-  const restore = registerProviderAdapter('fake-test-provider', a);
+  const restore = registerProviderAdapter!('fake-test-provider', a);
   restore();
   // Second call must not throw.
   restore();
   let threw = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { threw = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { threw = true; }
   expect(threw).toBeTruthy();
 });
 
 // ─── Case 9: register over a prior adapter, restore brings prior back ───────
 test.skipIf(SKIP)('registering B over A and restoring B brings A back', async () => {
   const a = createFakeProviderAdapter();
-  const restoreA = registerProviderAdapter('fake-test-provider', a);
+  const restoreA = registerProviderAdapter!('fake-test-provider', a);
   try {
     const b = createFakeProviderAdapter();
-    const restoreB = registerProviderAdapter('fake-test-provider', b);
+    const restoreB = registerProviderAdapter!('fake-test-provider', b);
     try {
-      expect(getProviderAdapter('fake-test-provider')).toBe(b);
+      expect(getProviderAdapter!('fake-test-provider')).toBe(b);
     } finally {
       restoreB();
     }
-    expect(getProviderAdapter('fake-test-provider')).toBe(a);
+    expect(getProviderAdapter!('fake-test-provider')).toBe(a);
   } finally {
     restoreA();
   }
@@ -218,9 +219,9 @@ test.skipIf(SKIP)('registering B over A and restoring B brings A back', async ()
 // ─── Case 10: SAME-KEY SEQUENTIAL non-interference (mandatory variant 1) ────
 test.skipIf(SKIP)('same-key SEQUENTIAL: B sees only its own calls', async () => {
   const a = createFakeProviderAdapter();
-  const restoreA = registerProviderAdapter('fake-test-provider', a);
+  const restoreA = registerProviderAdapter!('fake-test-provider', a);
   try {
-    const adapterA = getProviderAdapter('fake-test-provider');
+    const adapterA = getProviderAdapter!('fake-test-provider');
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a1' }] });
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a2' }] });
     await adapterA.call({ model: 'fake-model', messages: [{ role: 'user', content: 'a3' }] });
@@ -229,9 +230,9 @@ test.skipIf(SKIP)('same-key SEQUENTIAL: B sees only its own calls', async () => 
     restoreA();
   }
   const b = createFakeProviderAdapter();
-  const restoreB = registerProviderAdapter('fake-test-provider', b);
+  const restoreB = registerProviderAdapter!('fake-test-provider', b);
   try {
-    const adapterB = getProviderAdapter('fake-test-provider');
+    const adapterB = getProviderAdapter!('fake-test-provider');
     await adapterB.call({ model: 'fake-model', messages: [{ role: 'user', content: 'b1' }] });
     expect(b.callCount).toBe(1);
     expect(a.callCount).toBe(3);
@@ -251,7 +252,7 @@ test.skipIf(SKIP)('same-key PARALLEL: each adapter sees only its own calls', asy
   const b = createFakeProviderAdapter();
 
   async function task(adapter: typeof a, label: string) {
-    const restore = registerProviderAdapter('fake-test-provider', adapter);
+    const restore = registerProviderAdapter!('fake-test-provider', adapter);
     try {
       // Drive calls through the local adapter reference (NOT through
       // getProviderAdapter, which would race with the other task's
@@ -287,7 +288,7 @@ test.skipIf(SKIP)('same-key PARALLEL: each adapter sees only its own calls', asy
 
   // Registry returns to its pre-test state after BOTH restores have run.
   let postThrew = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { postThrew = true; }
   expect(postThrew).toBeTruthy();
 });
 
@@ -295,17 +296,17 @@ test.skipIf(SKIP)('same-key PARALLEL: each adapter sees only its own calls', asy
 test.skipIf(SKIP)('non-LIFO restore: outer registration restored BEFORE inner returns to original state', async () => {
   // Pre-state: key absent.
   let priorThrew = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { priorThrew = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { priorThrew = true; }
   expect(priorThrew).toBeTruthy();
 
   const a = createFakeProviderAdapter();
   const b = createFakeProviderAdapter();
 
   // Register A (outer), then B (inner) on top.
-  const restoreA = registerProviderAdapter('fake-test-provider', a);
-  const restoreB = registerProviderAdapter('fake-test-provider', b);
+  const restoreA = registerProviderAdapter!('fake-test-provider', a);
+  const restoreB = registerProviderAdapter!('fake-test-provider', b);
   // Currently active: B (top of stack).
-  expect(getProviderAdapter('fake-test-provider')).toBe(b);
+  expect(getProviderAdapter!('fake-test-provider')).toBe(b);
 
   // NON-LIFO restore: outer (A) restores FIRST while inner (B) is still
   // logically active. With the old closure-capture-prior-state implementation,
@@ -315,12 +316,12 @@ test.skipIf(SKIP)('non-LIFO restore: outer registration restored BEFORE inner re
   // this case correct: A's restore removes A's entry from the stack, sees
   // B is still on top, leaves registry pointing at B.
   restoreA();
-  expect(getProviderAdapter('fake-test-provider')).toBe(b);
+  expect(getProviderAdapter!('fake-test-provider')).toBe(b);
 
   // Now restore B — last active registration → original state (absent).
   restoreB();
   let postThrew = false;
-  try { getProviderAdapter('fake-test-provider'); } catch { postThrew = true; }
+  try { getProviderAdapter!('fake-test-provider'); } catch { postThrew = true; }
   expect(postThrew).toBeTruthy();
 });
 
@@ -330,21 +331,21 @@ test.skipIf(SKIP)('non-LIFO restore preserves pre-existing prior across out-of-o
   // Use 'anthropic' which is bound to the real anthropic adapter at
   // module load — register fakes over it, restore non-LIFO, verify the
   // real anthropic adapter is restored.
-  const realAnthropic = getProviderAdapter('anthropic');
+  const realAnthropic = getProviderAdapter!('anthropic');
 
   const fakeA = createFakeProviderAdapter();
   const fakeB = createFakeProviderAdapter();
 
-  const restoreA = registerProviderAdapter('anthropic', fakeA);
-  const restoreB = registerProviderAdapter('anthropic', fakeB);
-  expect(getProviderAdapter('anthropic')).toBe(fakeB);
+  const restoreA = registerProviderAdapter!('anthropic', fakeA);
+  const restoreB = registerProviderAdapter!('anthropic', fakeB);
+  expect(getProviderAdapter!('anthropic')).toBe(fakeB);
 
   // Out-of-order: A first, then B.
   restoreA();
-  expect(getProviderAdapter('anthropic')).toBe(fakeB);
+  expect(getProviderAdapter!('anthropic')).toBe(fakeB);
 
   restoreB();
-  expect(getProviderAdapter('anthropic')).toBe(realAnthropic);
+  expect(getProviderAdapter!('anthropic')).toBe(realAnthropic);
 });
 
 console.log('');

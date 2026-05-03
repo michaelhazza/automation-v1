@@ -69,7 +69,7 @@ export const orgMemoryService = {
     scopeTagValue?: string;
     limit?: number;
   }) {
-    let query = db
+    const query = db
       .select()
       .from(orgMemoryEntries)
       .where(eq(orgMemoryEntries.organisationId, organisationId))

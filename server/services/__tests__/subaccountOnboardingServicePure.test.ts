@@ -72,7 +72,7 @@ test('all 9 steps completed → allowed', () => {
 });
 
 test('skip fulfilment satisfies optional steps but not required', () => {
-  let s = emptyOnboardingState();
+  const s = emptyOnboardingState();
   s.skipFulfilled = { audience: true, voice: true };
   // Still missing identity + briefing + digest
   const r = canMarkReady(s);
@@ -107,7 +107,7 @@ test('after Step 1 → next is audience (step 2)', () => {
 });
 
 test('skip-fulfilled steps are skipped', () => {
-  let s = recordStepAnswer({ state: emptyOnboardingState(), stepId: 'identity', answers: {} });
+  const s = recordStepAnswer({ state: emptyOnboardingState(), stepId: 'identity', answers: {} });
   s.skipFulfilled = { audience: true, voice: true };
   expect(nextStep(s)?.id, 'jumps to 4').toBe('integrations');
 });

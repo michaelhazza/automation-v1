@@ -25,9 +25,9 @@ test('payload store — set + get round-trip', () => {
   set('rt_1', { messages: tinyMessages('a') });
   const snap = get('rt_1');
   expect(snap).toBeTruthy();
-  expect(snap.truncated).toBe(false);
-  expect(snap.messages).toEqual(tinyMessages('a'));
-  expect(snap.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(snap!.truncated).toBe(false);
+  expect(snap!.messages).toEqual(tinyMessages('a'));
+  expect(snap!.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 });
 
 test('payload store — get returns null when missing', () => {
@@ -77,8 +77,8 @@ test('payload store — truncates oversized payloads', () => {
   set('rt_huge', { messages: [{ role: 'user', content: huge }] });
   const snap = get('rt_huge');
   expect(snap).toBeTruthy();
-  expect(snap.truncated, 'oversized payload should be truncated').toBe(true);
-  expect(snap.messages, 'messages dropped on truncation').toBe(null);
+  expect(snap!.truncated, 'oversized payload should be truncated').toBe(true);
+  expect(snap!.messages, 'messages dropped on truncation').toBe(null);
 });
 
 test('payload store — truncation surfaces originalSizeBytes', () => {
@@ -92,9 +92,9 @@ test('payload store — truncation surfaces originalSizeBytes', () => {
   set('rt_huge', { messages: [{ role: 'user', content: huge }] });
   const snap = get('rt_huge');
   expect(snap).toBeTruthy();
-  expect(snap.truncated).toBe(true);
-  expect(typeof snap.originalSizeBytes).toBe('number');
-  expect(snap.originalSizeBytes! > MAX_PAYLOAD_BYTES).toBeTruthy();
+  expect(snap!.truncated).toBe(true);
+  expect(typeof snap!.originalSizeBytes).toBe('number');
+  expect(snap!.originalSizeBytes! > MAX_PAYLOAD_BYTES).toBeTruthy();
 });
 
 test('payload store — non-truncated payloads carry originalSizeBytes: null', () => {
@@ -102,8 +102,8 @@ test('payload store — non-truncated payloads carry originalSizeBytes: null', (
   set('rt_small', { messages: tinyMessages('a') });
   const snap = get('rt_small');
   expect(snap).toBeTruthy();
-  expect(snap.truncated).toBe(false);
-  expect(snap.originalSizeBytes, 'originalSizeBytes is null when truncated=false — the payload itself is the truth').toBe(null);
+  expect(snap!.truncated).toBe(false);
+  expect(snap!.originalSizeBytes, 'originalSizeBytes is null when truncated=false — the payload itself is the truth').toBe(null);
 });
 
 test('payload store — set never throws on bad input', () => {

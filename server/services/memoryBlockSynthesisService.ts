@@ -61,7 +61,6 @@ export async function runSynthesisForSubaccount(
   organisationId: string,
 ): Promise<SynthesisRunSummary> {
   const started = Date.now();
-  let clustersFormed = 0;
   let blocksAutoActivated = 0;
   let blocksQueuedForReview = 0;
   let clustersDiscarded = 0;
@@ -164,7 +163,7 @@ export async function runSynthesisForSubaccount(
   }
 
   const viableClusters = clusters.filter((c) => c.length >= SYNTHESIS_MIN_CLUSTER_SIZE);
-  clustersFormed = viableClusters.length;
+  const clustersFormed = viableClusters.length;
 
   // ── 4. Route clusters per confidence tier
   for (const cluster of viableClusters) {

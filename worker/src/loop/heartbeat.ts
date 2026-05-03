@@ -6,7 +6,7 @@
 // at most one DB write per interval.
 // ---------------------------------------------------------------------------
 
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../db.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
 import { env } from '../config/env.js';

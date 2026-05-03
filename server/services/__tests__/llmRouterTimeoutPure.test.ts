@@ -46,8 +46,8 @@ test('callWithTimeout — timer fires before promise resolves → aborts inner s
 
   // The inner signal must have been aborted — this is the whole point.
   expect(holder.signal).toBeTruthy();
-  expect(holder.signal.aborted).toBe(true);
-  expect(holder.signal.reason instanceof ProviderTimeoutError).toBeTruthy();
+  expect(holder.signal!.aborted).toBe(true);
+  expect(holder.signal!.reason instanceof ProviderTimeoutError).toBeTruthy();
 });
 
 test('callWithTimeout — caller signal abort propagates to inner signal', async () => {
@@ -67,9 +67,9 @@ test('callWithTimeout — caller signal abort propagates to inner signal', async
   await new Promise((r) => setTimeout(r, 5));
   callerController.abort(new Error('caller cancelled'));
 
-  await await expect(pending).rejects.toThrow();
+  await expect(pending).rejects.toThrow();
   expect(holder.signal).toBeTruthy();
-  expect(holder.signal.aborted).toBe(true);
+  expect(holder.signal!.aborted).toBe(true);
 });
 
 test('callWithTimeout — promise resolves before timer → returns value, no abort', async () => {
@@ -83,7 +83,7 @@ test('callWithTimeout — promise resolves before timer → returns value, no ab
 
   expect(value).toBe('ok');
   expect(holder.signal).toBeTruthy();
-  expect(holder.signal.aborted).toBe(false);
+  expect(holder.signal!.aborted).toBe(false);
 });
 
 test('callWithTimeout — inner throw (non-timeout) propagates the original error', async () => {

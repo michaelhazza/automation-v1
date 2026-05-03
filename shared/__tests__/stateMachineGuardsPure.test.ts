@@ -154,6 +154,7 @@ test('workflow_step_run: awaiting_approval → running is valid (resume path)', 
 test('error carries kind / recordId / from / to fields', () => {
   const err = assertThrows(() =>
     assertValidTransition({ kind: 'agent_run', recordId: 'abc-123', from: 'completed', to: 'failed' }),
+    'error carries kind / recordId / from / to fields',
   );
   if (err.kind !== 'agent_run') throw new Error(`kind: ${err.kind}`);
   if (err.recordId !== 'abc-123') throw new Error(`recordId: ${err.recordId}`);

@@ -16,7 +16,7 @@ import { eq, sql } from 'drizzle-orm';
 export const budgetGuardrailProcessor: Pick<ProcessorHooks, 'processOutputStep'> = {
   async processOutputStep(ctx: ProcessorContext, result: unknown): Promise<unknown> {
     const resultObj = result as Record<string, unknown> | null;
-    const costUsd = (resultObj as Record<string, unknown> | null)?.cost_usd;
+    const costUsd = resultObj?.cost_usd;
     if (typeof costUsd !== 'number' || costUsd === 0) return result;
 
     // Accumulate cost on the run row and compare against the workspace budget

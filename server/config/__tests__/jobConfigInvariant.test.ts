@@ -9,8 +9,7 @@ test('every JOB_CONFIG entry declares a deadLetter queue', () => {
       missing.push(name);
     }
   }
-  expect(missing).toEqual([],
-    `Queues without deadLetter — every entry MUST declare one to be visible to dlqMonitorService:\n${missing.join('\n')}`);
+  expect(missing, `Queues without deadLetter — every entry MUST declare one to be visible to dlqMonitorService:\n${missing.join('\n')}`).toEqual([]);
 });
 
 test('every deadLetter follows the <queue>__dlq convention', () => {
@@ -23,6 +22,5 @@ test('every deadLetter follows the <queue>__dlq convention', () => {
       violations.push({ queue: name, deadLetter: dlq });
     }
   }
-  expect(violations).toEqual([],
-    `Queues with deadLetter that doesn't match <queue>__dlq:\n${violations.map(v => `${v.queue} → ${v.deadLetter}`).join('\n')}`);
+  expect(violations, `Queues with deadLetter that doesn't match <queue>__dlq:\n${violations.map(v => `${v.queue} → ${v.deadLetter}`).join('\n')}`).toEqual([]);
 });

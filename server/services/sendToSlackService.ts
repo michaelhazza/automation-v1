@@ -309,7 +309,7 @@ async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<
     .where(eq(agentRuns.id, runId))
     .limit(1);
   if (!row) return;
-  const meta = ((row.runMetadata as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  const meta = (row.runMetadata as Record<string, unknown> | null) ?? {};
   const slackPosts = ((meta.slackPosts as PostedSlackEntry[] | undefined) ?? []).slice();
   slackPosts.push(entry);
   meta.slackPosts = slackPosts;

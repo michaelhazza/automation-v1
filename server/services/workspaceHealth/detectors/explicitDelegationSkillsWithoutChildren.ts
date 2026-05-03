@@ -10,7 +10,7 @@
  * is still intentional after team restructures.
  */
 
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
 import { agents } from '../../../db/schema/agents.js';
 import { subaccountAgents } from '../../../db/schema/subaccountAgents.js';
@@ -38,7 +38,7 @@ export async function detectExplicitDelegationSkillsWithoutChildren(
       agentName: agents.name,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.organisationId, organisationId),

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * scripts/apply-skill-visibility.ts
  *
  * Bulk-apply the skill visibility classification from
@@ -39,7 +39,7 @@ interface FrontmatterState {
 function parseFile(raw: string): FrontmatterState | null {
   const eol: '\r\n' | '\n' = raw.includes('\r\n') ? '\r\n' : '\n';
   // Strip UTF-8 BOM so the leading `^---` anchor matches files saved with BOM.
-  const normalised = raw.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+  const normalised = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 
   const match = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   let files: string[];
   try {
     files = await readdir(SKILLS_DIR);
-  } catch (err) {
+  } catch {
     console.error(`✗ skills directory not found: ${SKILLS_DIR}`);
     process.exit(1);
   }

@@ -97,6 +97,7 @@ export function useSocket(
     };
     socket.on(event, handler);
     return () => { socket.off(event, handler); };
+    // reason: `callback` is intentionally omitted — it is kept current via callbackRef so stale-closure re-subscriptions are avoided.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event, ...deps]);
 }

@@ -85,6 +85,6 @@ test('canViewPayload strictly implies canView (all positive cases)', () => {
   ];
   for (const [r, u] of cases) {
     const v = resolveAgentRunVisibility(r, u);
-    if (v.canViewPayload) expect(v.canView).toBe(true, 'payload implies view');
+    if (v.canViewPayload) expect(v.canView, 'payload implies view').toBe(true);
   }
 });

@@ -5,7 +5,7 @@ const allowed = [
   'server/adapters/workspace/__tests__/',
 ];
 
-let rawOutput = '';
+let rawOutput: string;
 try {
   rawOutput = execSync(
     `git grep -n "\\.sendEmail(" -- "server/**/*.ts" "client/**/*.ts"`,

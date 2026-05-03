@@ -235,8 +235,7 @@ export function InvocationsCard(props: InvocationsCardProps) {
         : 'Failed to save.';
       setWebhookError(msg);
     } finally {
-      if (!mountedRef.current) return;
-      setWebhookSaving(false);
+      if (mountedRef.current) setWebhookSaving(false);
     }
   };
 

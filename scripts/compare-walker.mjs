@@ -1,6 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
 
 const EXCLUDED = new Set(["node_modules","dist",".git","coverage","tools","worker","migrations",".github",".claude"]);
 

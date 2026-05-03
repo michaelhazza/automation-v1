@@ -306,8 +306,8 @@ async function scanTranscript(
 
   for await (const rawLine of rl) {
     if (!rawLine) continue;
-    let entry: any;
-    try { entry = JSON.parse(rawLine); } catch { continue; }
+    let entry: Record<string, unknown>;
+    try { entry = JSON.parse(rawLine) as Record<string, unknown>; } catch { continue; }
 
     const ts = entry.timestamp;
     if (typeof ts === 'string') {
@@ -456,9 +456,9 @@ function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
+  } catch (err) {
     // ESRCH = no such process. EPERM = exists but we can't signal (still alive).
-    return err?.code === 'EPERM';
+    return (err as { code?: string })?.code === 'EPERM';
   }
 }
 
@@ -490,7 +490,7 @@ async function collectOperational(): Promise<OperationalSignals> {
     out.watcherLogLargeFlag = st.size > LOG_SIZE_FLAG_BYTES;
     out.watcherLogMtime = st.mtime.toISOString();
     out.watcherLogTail = await readLastLines(WATCHER_LOG_PATH, 1000);
-    for (const { name, re } of ERROR_PATTERNS) out.errorPatternCounts[name] = 0;
+    for (const { name } of ERROR_PATTERNS) out.errorPatternCounts[name] = 0;
     for (const line of out.watcherLogTail) {
       for (const { name, re } of ERROR_PATTERNS) {
         if (re.test(line)) {
@@ -566,9 +566,9 @@ async function collectOperational(): Promise<OperationalSignals> {
     }
     try {
       JSON.parse(await fs.readFile(shard, 'utf8'));
-    } catch (err: any) {
+    } catch (err) {
       out.shardOk = false;
-      out.shardErrors.push(`${name}: invalid JSON (${err?.message ?? 'unknown'})`);
+      out.shardErrors.push(`${name}: invalid JSON (${(err as Error)?.message ?? 'unknown'})`);
     }
   }
 
@@ -619,7 +619,7 @@ async function collectCoverage(): Promise<CoverageSignals> {
     for (const line of lines) {
       // Each line is `path/to/file.ts: reason`. Bucket by top-level dir.
       const filePart = line.split(':')[0]?.trim() ?? '';
-      const top = filePart.split(/[\/\\]/)[0];
+      const top = filePart.split(/[/\\]/)[0];
       if (top && (TOP_DIRS as readonly string[]).includes(top)) {
         skipsByDir[top] = (skipsByDir[top] || 0) + 1;
       }
@@ -660,7 +660,7 @@ async function collectCoverage(): Promise<CoverageSignals> {
 function computeVerdict(d: CollectedData): Verdict {
   const reasons: string[] = [];
   let status: Status = 'GREEN';
-  let recommendation: Recommendation = 'KEEP';
+  let recommendation: Recommendation;
 
   // RED conditions ----------------------------------------------------------
   const hasOperationalFailure =
@@ -890,13 +890,14 @@ async function callAnthropic(system: string, user: string, apiKey: string): Prom
       const body = await res.text().catch(() => '');
       return { ok: false, reason: `HTTP ${res.status}: ${body.slice(0, 300)}` };
     }
-    const json: any = await res.json();
-    const block = json?.content?.find?.((b: any) => b?.type === 'text');
+    const json = await res.json() as { content?: Array<{ type?: string; text?: string }> };
+    const block = json?.content?.find?.((b) => b?.type === 'text');
     const text = typeof block?.text === 'string' ? block.text : '';
     if (!text) return { ok: false, reason: 'response had no text content' };
     return { ok: true, markdown: text.trim() };
-  } catch (err: any) {
-    return { ok: false, reason: err?.name === 'AbortError' ? `timeout after ${ANTHROPIC_TIMEOUT_MS}ms` : (err?.message ?? 'unknown error') };
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    return { ok: false, reason: e?.name === 'AbortError' ? `timeout after ${ANTHROPIC_TIMEOUT_MS}ms` : (e?.message ?? 'unknown error') };
   } finally {
     clearTimeout(timeout);
   }

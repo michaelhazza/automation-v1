@@ -113,7 +113,7 @@ export async function executeWithRetry<T>(
   // Resolve retry config from action registry or fallback to defaults
   let maxRetries = options?.maxRetries ?? 1;
   let strategy: RetryPolicy['strategy'] = 'fixed';
-  let baseDelay = options?.delayMs ?? 1000;
+  const baseDelay = options?.delayMs ?? 1000;
 
   if (actionType) {
     const def = getActionDefinition(actionType);

@@ -167,7 +167,7 @@ const dbStub = {
 
 test('canonicalDataService.getAccountById throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await await expect(() => (canonicalDataService.getAccountById as unknown as (p: unknown, id: string) => Promise<unknown>)(
+  await expect(() => (canonicalDataService.getAccountById as unknown as (p: unknown, id: string) => Promise<unknown>)(
       null,
       'acc-1',
     )).rejects.toThrow(/principal is required/);
@@ -175,7 +175,7 @@ test('canonicalDataService.getAccountById throws when principal is null', async 
 
 test('canonicalDataService.upsertAccount throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await await expect(() => (canonicalDataService.upsertAccount as unknown as (
+  await expect(() => (canonicalDataService.upsertAccount as unknown as (
       p: unknown,
       ccid: string,
       data: Record<string, unknown>,
@@ -188,12 +188,12 @@ test('canonicalDataService.upsertAccount throws when principal is null', async (
 
 test('canonicalDataService.getAccountsByOrg throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await await expect(() => (canonicalDataService.getAccountsByOrg as unknown as (p: unknown) => Promise<unknown>)(null)).rejects.toThrow(/principal is required/);
+  await expect(() => (canonicalDataService.getAccountsByOrg as unknown as (p: unknown) => Promise<unknown>)(null)).rejects.toThrow(/principal is required/);
 });
 
 test('canonicalDataService.findAccountBySubaccountId throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await await expect(() => (canonicalDataService.findAccountBySubaccountId as unknown as (
+  await expect(() => (canonicalDataService.findAccountBySubaccountId as unknown as (
       p: unknown,
       sub: string,
     ) => Promise<unknown>)(null, 'sub-1')).rejects.toThrow(/principal is required/);
@@ -201,7 +201,7 @@ test('canonicalDataService.findAccountBySubaccountId throws when principal is nu
 
 test('canonicalDataService.listInactiveContacts throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await await expect(() => (canonicalDataService.listInactiveContacts as unknown as (
+  await expect(() => (canonicalDataService.listInactiveContacts as unknown as (
       p: unknown,
       a: Record<string, unknown>,
     ) => Promise<unknown>)(

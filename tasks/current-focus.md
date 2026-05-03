@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
-active_plan: tasks/builds/pre-prod-tenancy/plan.md
-build_slug: pre-prod-tenancy
-branch: pre-prod-tenancy
-status: PLANNING
-last_updated: 2026-04-29
+active_spec: docs/sub-account-optimiser-spec.md
+active_plan: tasks/builds/subaccount-optimiser/plan.md
+build_slug: subaccount-optimiser
+branch: claude/evaluate-new-features-waqfY
+status: REVIEWING
+last_updated: 2026-05-02
 -->
 
 # Current Focus
@@ -19,13 +19,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md
-**Active plan:** tasks/builds/pre-prod-tenancy/plan.md (pending — architect agent to author after `spec-reviewer`)
-**Active build slug:** pre-prod-tenancy (branch `pre-prod-tenancy`)
-**Status:** **PLANNING** — Major (architect first; full review pipeline). Branch created from origin/main. Verification pass against the source brief found that 14 of the 17 listed items are already shipped on `main` (Phase 1 RLS DB hardening closed by migrations 0227 / 0228 / 0229; route+service refactors P3-C6/C7/C8/C9/C10/C11/H2/H3 closed in-tree). Spec narrowed to three phases: (1) `SC-2026-04-26-1` RLS protected-tables registry triage — bring `verify-rls-protected-tables.sh` to exit 0 (currently 67 violations: 63 unregistered tenant tables + 4 stale entries); (2) `CHATGPT-PR203-R2` `intervention_outcomes` UNIQUE index + `ON CONFLICT DO NOTHING` migration + job refactor; (3) `B10` per-org `withOrgTx` defense-in-depth on three maintenance jobs (optional, conditional on §5.5 budget rule — jobs are no longer silent no-ops, so this is defense-in-depth not correctness). Migration range `0244–0255` reserved (brief reserved 0241–0252 but `main` already shipped 0241/0242/0243). 14 brief items marked `[x]` in `tasks/todo.md` with closure citations. Sister branches `pre-prod-boundary-and-brief-api` and `pre-prod-workflow-and-delegation` own scoped-out paths (see §0.4 in the spec). **Next:** run `spec-reviewer` on the draft spec, then `architect` to decompose into chunks at `tasks/builds/pre-prod-tenancy/plan.md`. Stop at plan gate — operator switches model from Opus to Sonnet before execution per CLAUDE.md model-guidance rule.
+**Active spec:** docs/sub-account-optimiser-spec.md (F2 of the F1/F2/F3 sub-account feature wave; PR #250)
+**Active plan:** tasks/builds/subaccount-optimiser/plan.md
+**Active build slug:** subaccount-optimiser (currently on spec-authoring branch `claude/evaluate-new-features-waqfY`; F2 implementation moves to `claude/subaccount-optimiser` per spec metadata)
+**Status:** **REVIEWING** — chunk 1 (generic agent-output primitive) committed; PR #250 in ChatGPT PR review finalisation (2026-05-02, verdict APPROVED). Spec ready post-9-iteration review chain (`spec-reviewer` 4 iter + `chatgpt-spec-review` 5 rounds). Migration `0267` shipped (table + RLS + `subaccounts.optimiser_enabled`). Sister branches still pending: F1 `subaccount-artefacts` (migration `0266`) and F3 `baseline-capture` (migrations `0268-0270`). **Next after PR #250 merge:** invoke `architect` (Opus) to decompose remaining chunks at `tasks/builds/subaccount-optimiser/plan.md`.
 
-**Recently merged (on main):** pre-prod-boundary-and-brief-api (PR #234 — MERGED 2026-04-29), system-monitoring-coverage (PR #226 — MERGED 2026-04-28), pre-test-integration-harness (PR #227), dev-mission-control (PR #225), pre-test-backend-hardening (PR #223), pre-test-brief-and-ux (PR #222).
-**Last updated:** 2026-04-29
+**Just merged:** PR [#249](https://github.com/michaelhazza/automation-v1/pull/249) — lint-typecheck-post-merge-tasks (squash merge `9e751566`, merged 2026-05-01T09:33:13Z). Drives `npm run lint` and `npm run typecheck` to exit 0; wires `lint_and_typecheck` as a blocking unconditional CI gate. Closes PR #246 review findings (S1 IdempotencyContract four fields, S2 visibilityPredicatePure 'system' case, S3 SystemPrincipal test coverage, N1/N3/N4). Worker T8 `no-restricted-imports` rule ported from legacy `worker/.eslintrc.cjs` (deleted) into `eslint.config.js` flat config. McpServersPage sync button now surfaces failures via `toast.error`. **Pipeline:** spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED (1 strong + 4 non-blocking; S-1/N-5 resolved at finalisation, others backlogged) → dual-reviewer (Codex) APPROVED 0 findings → chatgpt-pr-review CLOSED at 3 rounds (1 implement / 12 reject / 3 defer / 1 no-op) → doc-sync sweep PASS (2 stale refs fixed in `docs/reporting-agent-handoff.md` and `docs/reporting-agent-paywall-workflow-spec.md`) → MERGED. **KNOWLEDGE.md additions (4 patterns):** ChatGPT diff-misreading rule (grep-verify duplicate claims); post-increment-on-dead-store is a no-op; chatgpt-pr-review close after 2 unproductive rounds; **Correction** — `gh pr edit --add-label ready-to-merge` must be paired with `ScheduleWakeup(90-120s)` per CLAUDE.md §12.
+
+**Recently merged (on main):** PR #248 (three-coordinator dev pipeline spec — 2026-05-01T07:07Z), PR #247 (deferred-items-pre-launch implementation plan — 2026-05-01T06:23Z), PR #246 (lint-typecheck-baseline — 2026-05-01T01:22Z), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
+**Last updated:** 2026-05-01
 
 ---
 

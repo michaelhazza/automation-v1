@@ -154,7 +154,7 @@ for (const file of files) {
   src = rewriteAssert(src, "notDeepStrictEqual", (a, b, msg) => b === null ? null : `${expectMsg(a, msg)}.not.toStrictEqual(${b})`);
   src = rewriteAssert(src, "notDeepEqual",    (a, b, msg) => b === null ? null : `${expectMsg(a, msg)}.not.toEqual(${b})`);
   src = rewriteAssert(src, "ok",              (a, _, msg) => `${expectMsg(a, msg)}.toBeTruthy()`);
-  src = rewriteAssert(src, "throws",          (a, b, msg) => {
+  src = rewriteAssert(src, "throws",          (a, b) => {
     if (b === null) return `expect(${a}).toThrow()`;
     // Validator functions can't be passed to .toThrow() — leave for manual fix
     if (/^\s*\(/.test(b) || /^\s*(async\s+)?function/.test(b)) return null;
@@ -164,7 +164,7 @@ for (const file of files) {
   src = rewriteAssert(src, "match",           (a, b) => b === null ? null : `expect(${a}).toMatch(${b})`);
   src = rewriteAssert(src, "notMatch",        (a, b) => b === null ? null : `expect(${a}).not.toMatch(${b})`);
   // assert.rejects — leave complex validator-function forms for manual review, handle simple ones
-  src = rewriteAssert(src, "rejects",         (a, b, msg) => {
+  src = rewriteAssert(src, "rejects",         (a, b) => {
     if (b === null) return `await expect(${a}).rejects.toThrow()`;
     // Validator functions can't be passed to .rejects.toThrow() — leave for manual fix
     if (/^\s*\(/.test(b) || /^\s*(async\s+)?function/.test(b)) return null;

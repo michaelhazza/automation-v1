@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-unused-vars */
 // H1 gate self-test fixture: deliberate non-null assertion on a derived field.
 // Reachable ONLY via the dedicated runner (`run-fixture-self-test.sh`), which
 // sets DERIVED_DATA_NULL_SAFETY_SCAN_DIR to this directory. The standard CI
