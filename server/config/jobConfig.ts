@@ -414,6 +414,21 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
   },
 
+  // ── Workflows V1 — stall-and-notify (Chunk 8) ───────────────────────
+  // Three delayed jobs scheduled at gate-open (24h / 72h / 7d). Each uses
+  // singletonKey = `stall-notify-${gateId}-${cadence}` for dedup so a
+  // duplicate enqueue for the same (gateId, cadence) is a no-op.
+  // The stale-fire guard inside the handler is the durable safety net after
+  // best-effort cancellation at gate-resolve.
+  'workflow-gate-stall-notify': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 120,
+    deadLetter: 'workflow-gate-stall-notify__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-${gateId}-${cadence}
+  },
+
   // Wall-clock heartbeat: fires every minute (pg-boss cron minimum), pauses
   // runs whose wall-clock cap has been exceeded between step boundaries.
   // Spec target was 30s; accepted 60s cadence pending a scheduling strategy

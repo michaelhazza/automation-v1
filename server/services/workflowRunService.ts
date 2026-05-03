@@ -42,6 +42,7 @@ import { WorkflowTemplateService } from './workflowTemplateService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { userInPool } from './workflowApproverPoolServicePure.js';
+import { WorkflowScheduleDispatchService } from './workflowScheduleDispatchService.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -144,6 +145,13 @@ export const WorkflowRunService = {
     /** Mark the run as visible in the sub-account portal (§9.4). Defaults to
      *  `true` when the template declares a `portalPresentation`. */
     isPortalVisible?: boolean;
+    /**
+     * Spec §3.1 + §5.4: when dispatching from a schedule with a pinned
+     * template version, pass the version ID here. The pinned version overrides
+     * the latest-published-version resolution. When the pinned version is not
+     * found, startRun throws `pinned_version_unavailable` (422).
+     */
+    pinnedTemplateVersionId?: string | null;
   }): Promise<{ runId: string; status: WorkflowRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -155,7 +163,29 @@ export const WorkflowRunService = {
       throw { statusCode: 404, message: 'Subaccount not found' };
     }
 
-    const { templateVersionId, definition, slug } = await this.resolveTemplateForRun(input);
+    // Spec §5.4: when a pinned template version is specified (from a schedule),
+    // use WorkflowScheduleDispatchService to honour the pin and load the exact
+    // version. Otherwise fall through to resolveTemplateForRun (latest published).
+    let templateVersionId: string;
+    let definition: WorkflowDefinition;
+    let slug: string;
+
+    if (input.pinnedTemplateVersionId) {
+      const picked = await WorkflowScheduleDispatchService.pickVersionForSchedule({
+        organisationId: input.organisationId,
+        pinnedTemplateVersionId: input.pinnedTemplateVersionId,
+        templateId: input.templateId,
+        systemTemplateSlug: input.systemTemplateSlug,
+      });
+      templateVersionId = picked.templateVersionId;
+      definition = rehydrateDefinition(picked.definitionJson);
+      slug = picked.slug;
+    } else {
+      const resolved = await this.resolveTemplateForRun(input);
+      templateVersionId = resolved.templateVersionId;
+      definition = resolved.definition;
+      slug = resolved.slug;
+    }
 
     // Build initial context.
     const startedAt = new Date();

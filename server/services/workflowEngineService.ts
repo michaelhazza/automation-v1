@@ -92,6 +92,8 @@ import { decideRunNextState, decideStepRetry } from './workflowRunPauseStopServi
 import { estimateStepCostCents } from '../lib/workflow/costEstimationDefaults.js';
 import { buildIdempotencyKey } from '../lib/workflow/idempotencyKey.js';
 import { WALL_CLOCK_HEARTBEAT_QUEUE, runWallClockHeartbeat } from '../jobs/workflowWallClockHeartbeatJob.js';
+import { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, runWorkflowGateStallNotify } from '../jobs/workflowGateStallNotifyJob.js';
+import type { StallNotifyPayload } from './workflowGateStallNotifyService.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -4095,6 +4097,21 @@ export const WorkflowEngineService = {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // Stall-and-notify worker — fires 24h / 72h / 7d after gate-open when
+    // the gate is still unresolved. Reads gate state via admin connection to
+    // bypass RLS, then notifies the requester via EmailService.
+    // Spec §5.3.
+    await createWorker<StallNotifyPayload>({
+      queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
+      boss: pgboss,
+      concurrency: 5,
+      // The payload carries organisationId; createWorker opens an org-scoped
+      // tx context for the notification send phase.
+      handler: async (job) => {
+        await runWorkflowGateStallNotify(job.data);
+      },
+    });
 
     logger.info('workflow_engine_workers_registered');
   },

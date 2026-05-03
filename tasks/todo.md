@@ -2579,3 +2579,12 @@ The spec-reviewer auto-decided the following directional findings during iterati
   - Suggested approach: cross-reference `WorkflowDefinition` step-type union; remove dead aliases or add a one-line comment naming why they exist.
 
 **What to validate:** if the codebase is ready to land a frontend testing posture for this feature specifically (justifiable because of the WebSocket-coordinated multi-pane UI), update spec-context.md first, then re-litigate.
+
+---
+
+## Deferred — Workflows V1 Chunk 8 wiring gap
+
+- [ ] Wire `pinnedTemplateVersionId` through the schedule-to-workflow-run dispatch path
+  - Today: `scheduledTasks.pinnedTemplateVersionId` column exists (migration 0268) and `WorkflowRunService.startRun({ pinnedTemplateVersionId })` consumes it correctly. However, `scheduledTaskService.fireOccurrence` only dispatches agent runs — it never calls `WorkflowRunService.startRun`. There is no workflow-run-from-schedule path in the codebase.
+  - Required: when the workflow-run-from-schedule dispatcher lands (a later chunk), it must read `scheduledTasks.pinnedTemplateVersionId` and pass it to `WorkflowRunService.startRun`. `WorkflowScheduleDispatchService.pickVersionForSchedule` is already wired to honour the pin.
+  - Audit this when the schedule-to-workflow-run path lands.

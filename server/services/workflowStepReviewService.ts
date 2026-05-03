@@ -86,6 +86,9 @@ export const WorkflowStepReviewService = {
       }
 
       // Open (or retrieve existing) gate — idempotent.
+      // taskId: workflowRuns has no taskId column yet (Chunk 1 omission);
+      // run.id is the stable navigation target for the notification surface.
+      // TODO: replace run.id with workflowRuns.taskId once that column lands.
       const gate = await WorkflowStepGateService.openGate(
         {
           workflowRunId: stepRun.runId,
@@ -94,6 +97,8 @@ export const WorkflowStepReviewService = {
           approverPoolSnapshot,
           isCriticalSynthesised: context?.isCriticalSynthesised ?? false,
           organisationId: run.organisationId,
+          taskId: run.id,
+          requesterUserId: run.startedByUserId ?? null,
         },
         tx
       );

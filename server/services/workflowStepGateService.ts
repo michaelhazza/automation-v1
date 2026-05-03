@@ -21,6 +21,7 @@ import type {
 } from '../db/schema/index.js';
 import type { SeenPayload, SeenConfidence } from '../../shared/types/workflowStepGate.js';
 import { logger } from '../lib/logger.js';
+import { WorkflowGateStallNotifyService } from './workflowGateStallNotifyService.js';
 
 export interface OpenGateInput {
   workflowRunId: string;
@@ -31,6 +32,20 @@ export interface OpenGateInput {
   approverPoolSnapshot?: string[] | null;
   isCriticalSynthesised?: boolean;
   organisationId: string;
+  /**
+   * Stable ID for the stall-notify payload. Until workflowRuns.taskId lands
+   * (a Chunk 1 omission), callers pass workflowRuns.id here — the gate's own
+   * run ID is a valid navigation target for the notification surface.
+   * TODO: replace with workflowRuns.taskId once that column lands.
+   */
+  taskId: string;
+  /**
+   * The user who started the run — used as the notification recipient for
+   * stall-and-notify cadences (spec §5.3). Sourced from
+   * workflowRuns.startedByUserId at the call site. Null for system-initiated
+   * runs (no user to notify); stall jobs are skipped when null.
+   */
+  requesterUserId: string | null;
 }
 
 export const WorkflowStepGateService = {
@@ -70,6 +85,31 @@ export const WorkflowStepGateService = {
 
     try {
       const [gate] = await tx.insert(workflowStepGates).values(values).returning();
+
+      // Spec §5.3: schedule stall-and-notify jobs after gate insert.
+      // Done outside the caller's transaction context (pg-boss is independent
+      // of the Postgres tx). Best-effort — errors are caught inside the
+      // service so a pg-boss hiccup never blocks gate-open.
+      // The in-handler stale-fire guard handles the case where the tx later
+      // rolls back (gate missing -> no-op) or the gate resolves before fire.
+      // requesterUserId is null for system-initiated runs; skip scheduling
+      // stall jobs when there is no user to notify.
+      if (input.requesterUserId !== null) {
+        WorkflowGateStallNotifyService.scheduleStallNotifications(
+          gate.id,
+          gate.createdAt,
+          input.taskId,
+          input.requesterUserId,
+          input.organisationId,
+        ).catch((err) => {
+          logger.error('workflow_step_gate_stall_schedule_failed', {
+            event: 'gate.stall_schedule_failed',
+            gateId: gate.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+
       return gate;
     } catch (err: unknown) {
       // 23505 = unique_violation — concurrent INSERT race on (workflowRunId, stepId)
@@ -113,6 +153,17 @@ export const WorkflowStepGateService = {
     // Enforce gate state machine: open → resolved. 'resolved' is terminal so
     // resolved→resolved (idempotent) is handled by the 0-rows-updated path below.
     assertValidGateTransition(gateId, 'open', 'resolved');
+
+    // Spec §5.3: cancel stall-notify jobs BEFORE setting resolved_at so that
+    // the cancel attempt runs against the still-open row state. Best-effort:
+    // the stale-fire guard in the handler is the durable safety net.
+    await WorkflowGateStallNotifyService.cancelStallNotifications(gateId).catch((err) => {
+      logger.error('workflow_step_gate_stall_cancel_failed', {
+        event: 'gate.stall_cancel_failed',
+        gateId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     const updated = await tx
       .update(workflowStepGates)
@@ -161,6 +212,11 @@ export const WorkflowStepGateService = {
   /**
    * Bulk-resolve all open gates for a run (orphaned-gate cascade).
    * Called from failRun / cancelRun / succeedRun.
+   *
+   * Order: cancel stall jobs FIRST, then UPDATE resolved_at. This minimises
+   * the window in which stale stall jobs fire. Cancel errors are caught per
+   * gate (best-effort); the stale-fire guard in the handler is the safety net
+   * for any cancel that fails.
    */
   async resolveOpenGatesForRun(
     workflowRunId: string,
@@ -168,6 +224,35 @@ export const WorkflowStepGateService = {
     organisationId: string,
     tx: OrgScopedTx
   ): Promise<{ resolved: number }> {
+    // Collect open gate IDs before the bulk UPDATE so we can cancel their
+    // stall-notify jobs. The SELECT and the UPDATE both target the same
+    // predicate, so IDs are consistent within this tx.
+    const openGates = await tx
+      .select({ id: workflowStepGates.id })
+      .from(workflowStepGates)
+      .where(
+        and(
+          eq(workflowStepGates.workflowRunId, workflowRunId),
+          eq(workflowStepGates.organisationId, organisationId),
+          isNull(workflowStepGates.resolvedAt)
+        )
+      );
+
+    // Cancel stall jobs before setting resolved_at so cancellation runs against
+    // still-open state. Best-effort per gate; bulk cascade must not block on cancel.
+    await Promise.all(
+      openGates.map(({ id }) =>
+        WorkflowGateStallNotifyService.cancelStallNotifications(id).catch((err) => {
+          logger.error('workflow_step_gate_stall_cancel_failed', {
+            event: 'gate.stall_cancel_failed',
+            gateId: id,
+            workflowRunId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+      )
+    );
+
     const result = await tx.execute(
       sql`
         UPDATE workflow_step_gates
