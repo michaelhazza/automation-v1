@@ -138,6 +138,7 @@ async function mintLocationToken(
 
   logger.info('ghl.token.mint', {
     event: 'ghl.token.mint',
+    provider: 'ghl',
     orgId: agencyConnection.organisationId,
     companyId,
     locationId,
@@ -199,6 +200,7 @@ async function refreshLocationToken(
     }
     logger.error('ghl.token.refresh_failure', {
       event: 'ghl.token.refresh_failure',
+      provider: 'ghl',
       orgId: agencyConnection.organisationId,
       companyId: agencyConnection.companyId,
       locationId,
@@ -230,6 +232,7 @@ async function refreshLocationToken(
 
   logger.info('ghl.token.refresh', {
     event: 'ghl.token.refresh',
+    provider: 'ghl',
     orgId: agencyConnection.organisationId,
     companyId,
     locationId,
@@ -262,6 +265,7 @@ export async function handleLocationToken401(
     if (e.statusCode === 401) {
       logger.error('ghl.token.invalid', {
         event: 'ghl.token.invalid',
+        provider: 'ghl',
         orgId: agencyConnection.organisationId,
         companyId: agencyConnection.companyId,
         locationId,

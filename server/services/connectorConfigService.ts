@@ -4,6 +4,7 @@ import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/i
 import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
 import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
 
 export function buildWorkspaceTenantConfig(
@@ -438,11 +439,31 @@ export const connectorConfigService = {
               .where(eq(connectorConfigs.id, configId));
           },
         );
+        logger.error('ghl.agency_token.revoked', {
+          event: 'ghl.agency_token.revoked',
+          provider: 'ghl',
+          orgId: config.organisationId,
+          companyId: config.companyId,
+          locationId: null,
+          configId,
+          result: 'failure',
+          error: { code: 'AGENCY_TOKEN_REVOKED', message: `permanent 401 from refresh; status flipped to disconnected` },
+        });
         throw Object.assign(new Error(`Agency token permanently revoked for config ${configId}`), {
           code: 'AGENCY_TOKEN_REVOKED',
           statusCode: 401,
         });
       }
+      logger.warn('ghl.agency_token.refresh_failure', {
+        event: 'ghl.agency_token.refresh_failure',
+        provider: 'ghl',
+        orgId: config.organisationId,
+        companyId: config.companyId,
+        locationId: null,
+        configId,
+        result: 'failure',
+        error: { code: 'AGENCY_TOKEN_REFRESH_FAILED', statusCode: response.status, message: text.slice(0, 200) },
+      });
       throw Object.assign(new Error(`Agency token refresh failed: ${response.status} ${text}`), {
         code: 'AGENCY_TOKEN_REFRESH_FAILED',
         statusCode: response.status,
@@ -469,5 +490,17 @@ export const connectorConfigService = {
           .where(eq(connectorConfigs.id, configId));
       },
     );
+
+    logger.info('ghl.agency_token.refresh', {
+      event: 'ghl.agency_token.refresh',
+      provider: 'ghl',
+      orgId: config.organisationId,
+      companyId: config.companyId,
+      locationId: null,
+      configId,
+      result: 'success',
+      tokenAgeMs: 0,
+      error: null,
+    });
   },
 };

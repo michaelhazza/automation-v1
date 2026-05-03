@@ -318,6 +318,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   ): void => {
     logger.warn('ghl.oauth.callback_failure', {
       event: 'ghl.oauth.callback_failure',
+      provider: 'ghl',
       orgId,
       companyId,
       locationId: null,
@@ -385,6 +386,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
 
   logger.info('ghl.oauth.callback_success', {
     event: 'ghl.oauth.callback_success',
+    provider: 'ghl',
     orgId: ghlOrgId,
     companyId: tokenData.companyId,
     locationId: null,
@@ -408,7 +410,15 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
       ]);
     }
   } catch (err) {
-    logger.warn('ghl.oauth.callback_enrol_failed', { orgId: ghlOrgId, error: String(err) });
+    logger.warn('ghl.oauth.callback_enrol_failed', {
+      event: 'ghl.oauth.callback_enrol_failed',
+      provider: 'ghl',
+      orgId: ghlOrgId,
+      companyId: tokenData.companyId,
+      locationId: null,
+      result: 'failure',
+      error: { message: String(err) },
+    });
   }
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);

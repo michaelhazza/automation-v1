@@ -143,6 +143,7 @@ export async function dispatchWebhookSideEffects(
   if (eventClass === 'install_company') {
     logger.info('ghl.webhook.install_company', {
       event: 'ghl.webhook.install_company',
+      provider: 'ghl',
       orgId: null, companyId: event.companyId, locationId: null,
       result: 'success', error: null,
     });
@@ -163,6 +164,7 @@ export async function dispatchWebhookSideEffects(
   if (eventClass === 'install_location_ignored') {
     logger.info('ghl.webhook.install_location_ignored', {
       event: 'ghl.webhook.install_location_ignored',
+      provider: 'ghl',
       orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
       result: 'success', error: null,
     });
@@ -172,6 +174,7 @@ export async function dispatchWebhookSideEffects(
   if (eventClass === 'uninstall') {
     logger.info('ghl.webhook.uninstall', {
       event: 'ghl.webhook.uninstall',
+      provider: 'ghl',
       orgId: null, companyId: event.companyId, locationId: null,
       result: 'success', error: null,
     });
@@ -191,7 +194,12 @@ export async function dispatchWebhookSideEffects(
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
-      logger.warn('ghl.webhook.uninstall.revoke_failed', { companyId: event.companyId, error: String(err) });
+      logger.warn('ghl.webhook.uninstall.revoke_failed', {
+        event: 'ghl.webhook.uninstall.revoke_failed',
+        provider: 'ghl',
+        companyId: event.companyId,
+        error: String(err),
+      });
     }
 
     // FORCE RLS on connector_configs and connector_location_tokens — the
@@ -219,6 +227,7 @@ export async function dispatchWebhookSideEffects(
 
     logger.info('ghl.webhook.uninstall.complete', {
       event: 'ghl.webhook.uninstall',
+      provider: 'ghl',
       orgId: connection.organisationId, companyId: event.companyId, locationId: null,
       result: 'success', error: null,
     });
@@ -228,6 +237,7 @@ export async function dispatchWebhookSideEffects(
   if (eventClass === 'location_create') {
     logger.info('ghl.webhook.location_create', {
       event: 'ghl.webhook.location_create',
+      provider: 'ghl',
       orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
       result: 'success', error: null,
     });
@@ -308,6 +318,7 @@ export async function dispatchWebhookSideEffects(
     // default { statusCode: 200 } and the mutation row is silently lost.
     logger.info('ghl.webhook.location_update', {
       event: 'ghl.webhook.location_update',
+      provider: 'ghl',
       orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
       result: 'success', error: null,
     });

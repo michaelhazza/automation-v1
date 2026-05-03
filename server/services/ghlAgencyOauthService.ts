@@ -54,7 +54,7 @@ export async function exchangeGhlAuthCode(
       },
     );
   } catch {
-    logger.warn('ghl.exchangeAuthCode.failed', { codePrefix: code.slice(0, 8) });
+    logger.warn('ghl.exchangeAuthCode.failed', { provider: 'ghl', codePrefix: code.slice(0, 8) });
     return null;
   }
 }
@@ -84,6 +84,7 @@ export async function enumerateAgencyLocations(
 
   logger.info('ghl.enumeration.start', {
     event: 'ghl.enumeration.start',
+    provider: 'ghl',
     orgId: agencyConnection.organisationId,
     companyId,
     locationId: null,
@@ -156,6 +157,7 @@ export async function enumerateAgencyLocations(
       if (loc.companyId && loc.companyId !== companyId) {
         logger.warn('ghl.enumeration.foreign_location_dropped', {
           event: 'ghl.enumeration.foreign_location_dropped',
+          provider: 'ghl',
           orgId: agencyConnection.organisationId,
           companyId,
           locationId: loc.id,
@@ -173,6 +175,7 @@ export async function enumerateAgencyLocations(
 
   logger.info('ghl.enumeration.end', {
     event: 'ghl.enumeration.end',
+    provider: 'ghl',
     orgId: agencyConnection.organisationId,
     companyId,
     locationId: null,
@@ -187,6 +190,7 @@ export async function enumerateAgencyLocations(
   if (truncated) {
     logger.warn('ghl.enumeration.truncated', {
       event: 'ghl.enumeration.truncated',
+      provider: 'ghl',
       orgId: agencyConnection.organisationId,
       companyId,
       processed: GHL_LOCATION_CAP,
@@ -258,12 +262,19 @@ export async function autoEnrolAgencyLocations(
     }
 
     if (!result) {
-      logger.warn('ghl.enumeration.slug_collision_unresolved', { orgId, locationId: loc.id });
+      logger.warn('ghl.enumeration.slug_collision_unresolved', {
+        event: 'ghl.enumeration.slug_collision_unresolved',
+        provider: 'ghl',
+        orgId,
+        companyId: agencyConnection.companyId,
+        locationId: loc.id,
+      });
       continue;
     }
 
     logger.info('ghl.enumeration.subaccount_upsert', {
       event: 'ghl.enumeration.subaccount_upsert',
+      provider: 'ghl',
       orgId,
       companyId: agencyConnection.companyId,
       locationId: loc.id,
@@ -296,6 +307,7 @@ export async function autoEnrolAgencyLocations(
       } catch (err) {
         logger.error('ghl.enumeration.onboarding_dispatch_failed', {
           event: 'ghl.enumeration.onboarding_dispatch_failed',
+          provider: 'ghl',
           orgId,
           subaccountId: result.id,
           locationId: loc.id,
@@ -307,8 +319,10 @@ export async function autoEnrolAgencyLocations(
 
   logger.info('ghl.enrol.complete', {
     event: 'ghl.enrol.complete',
+    provider: 'ghl',
     orgId,
     companyId: agencyConnection.companyId,
+    locationId: null,
     enrolled: locations.length,
     insertedCount,
     isFirstInstall: insertedCount > 0,
