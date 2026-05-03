@@ -169,12 +169,18 @@ import workspaceRouter from './routes/workspace.js';
 import workspaceMailRouter from './routes/workspaceMail.js';
 import workspaceCalendarRouter from './routes/workspaceCalendar.js';
 import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
+import stripeAgentWebhookRouter from './routes/webhooks/stripeAgentWebhook.js';
 // Suggested action chip dispatch
 import suggestedActionsRouter from './routes/suggestedActions.js';
 // Thread Context — per-conversation living doc (Chunk A)
 import conversationThreadContextRouter from './routes/conversationThreadContext.js';
 // Sub-Account Optimiser — generic agent-output primitive (Chunk 1, migration 0267)
 import agentRecommendationsRouter from './routes/agentRecommendations.js';
+// Agentic Commerce — spend ledger, budgets, policies, approval channels (Chunks 12, 13)
+import spendingBudgetsRouter from './routes/spendingBudgets.js';
+import spendingPoliciesRouter from './routes/spendingPolicies.js';
+import agentChargesRouter from './routes/agentCharges.js';
+import approvalChannelsRouter from './routes/approvalChannels.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -336,7 +342,8 @@ app.use(mcpRouter);
 app.use(agentInboxRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
+// ghl/teamwork/slack/stripe-agent webhook routers mounted before body parsing (need raw body for HMAC)
+app.use(stripeAgentWebhookRouter);
 app.use(subaccountTagsRouter);
 app.use(subaccountSkillsRouter);
 app.use(orgMemoryRouter);
@@ -387,6 +394,11 @@ app.use(suggestedActionsRouter);
 app.use(conversationThreadContextRouter);
 // Sub-Account Optimiser — generic agent-output primitive (Chunk 1)
 app.use(agentRecommendationsRouter);
+// Agentic Commerce — spend ledger + budgets + policies + approval channels
+app.use(spendingBudgetsRouter);
+app.use(spendingPoliciesRouter);
+app.use(agentChargesRouter);
+app.use(approvalChannelsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

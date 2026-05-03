@@ -2542,3 +2542,29 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **Add `grant_type` / token-source column to `connector_location_tokens` and `connector_configs`.** Currently both tables persist tokens without recording how the token was acquired (`agency_oauth_mint`, `location_oauth`, `direct_install`, `manual_paste`, `user_oauth`, future provider-specific grant types). When a second OAuth provider lands or when GHL adds a new grant flow, distinguishing source is a join-on-nothing problem. Cheap migration now (`token_source text`, default backfill `'agency_oauth_mint'` for existing GHL rows) saves a debugging session later when an operator needs to filter by source. **When required:** when the second OAuth provider lands. Source: chatgpt-pr-review PR #254 round 2 finding 6.
 
 - [ ] **Operator-facing kill switch UI / endpoint for `connector_configs.status='disconnected'`.** The status enum (`'active' | 'error' | 'disconnected'`) and short-circuiting at `findAgencyConnectionByCompanyId` + `connectorPollingTick` are already in place. What's missing is a one-click admin path: `POST /api/admin/connector-configs/:id/disable` that flips the status to `disconnected` and soft-deletes the location tokens (see related cascade item above). Useful in production incident response when a partner integration is misbehaving. **When required:** before the first production incident (operator response time gates this). Source: chatgpt-pr-review PR #254 round 2 finding 7.
+
+## Deferred from spec-conformance review — agentic-commerce (2026-05-03)
+
+**Captured:** 2026-05-03T14:12:21Z
+**Source log:** `tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T14-12-21Z.md`
+**Spec:** `tasks/builds/agentic-commerce/spec.md`
+
+- [ ] **Spend route permission guards do not match spec §11.3.** All four mounted spend routes (`spendingBudgets`, `spendingPolicies`, `agentCharges`, `approvalChannels`) use `requireOrgPermission(SETTINGS_VIEW)` or `requireOrgPermission(SETTINGS_EDIT)`. Spec §11.3 explicitly names `requirePermission('spend_approver')` for read paths and `requirePermission('admin')` for write paths. The `SPEND_APPROVER` permission key IS registered in `permissions.ts:88` and granted by default at budget creation, but no route enforces it.
+  - Spec section: §11.3 Route Guards
+  - Gap: implementation deviates from spec-named guards; SPEND_APPROVER grant is functionally inert because no route checks it
+  - Suggested approach: decide canonical "admin" check (mint `ORG_PERMISSIONS.ADMIN` or treat `SETTINGS_EDIT` as the admin gate), then update all 4 route files to use `requireOrgPermission(SPEND_APPROVER)` on read paths and the chosen admin gate on write paths
+
+- [ ] **`chargeRouterServicePure.ts` imports `canonicaliseJson` from impure `actionService.ts`.** Line 13: `import { canonicaliseJson } from './actionService.js';` — `actionService.ts` itself imports `db` (line 3) and DB schemas (line 4), transitively pulling them into the `*Pure.ts` file. Violates invariant 15 (pure/impure split) and the `verify-pure-helper-convention.sh` gate.
+  - Spec section: §10 Invariant 15 + §6.1 + Chunk 4
+  - Gap: pure module taints itself with DB-touching imports via transitive resolution
+  - Suggested approach: extract `canonicaliseJson` + `hashActionArgs` + `computeValidationDigest` to `shared/canonicalJson.ts` (depends only on `crypto`); have `actionService.ts` re-export for backward compatibility; update `chargeRouterServicePure.ts` import; re-run `verify-pure-helper-convention.sh`
+
+- [ ] **`app.spend_caller` GUC convention is unevenly applied.** `runPolicyGate` correctly sets `SET LOCAL app.spend_caller = 'charge_router'` inside its tx (line 310), but `executeApproved` runs OUTSIDE that tx (per invariant 35) and its UPDATE calls (lines 593, 643, 757) do NOT set the GUC. The trigger only requires caller identity for the `failed → succeeded` carve-out and non-status updates on `executed` rows, so functionally this works — but the migration header documents the convention as universal.
+  - Spec section: §5.1 trigger header / §10 invariants 7, 35
+  - Gap: convention documented in migration header is not enforced for executeApproved updates
+  - Suggested approach: either (a) tighten the trigger to require caller identity on every UPDATE and add `SET LOCAL` to every code path, or (b) relax the migration header text to scope the requirement only to gated transitions; pick one canonical posture
+
+- [ ] **`promote_spending_policy_to_live` HITL action bypasses `actionService.proposeAction`.** `spendingBudgetService.requestPromotion` (lines 484-516) inserts an `actions` row directly via Drizzle, bypassing registry validation. Works today because all required fields are hand-built into the INSERT, but it makes spend-promotion the only HITL action in the system not flowing through the canonical proposeAction surface — and `getActionDefinition('promote_spending_policy_to_live')` returns undefined because nothing registers it.
+  - Spec section: §14 Shadow-to-Live Promotion / Chunk 15
+  - Gap: HITL action path bypass; `actionType` not in `ACTION_REGISTRY`
+  - Suggested approach: add `promote_spending_policy_to_live` to `ACTION_REGISTRY` (`actionCategory: 'api'`, `defaultGateLevel: 'review'`, `directExternalSideEffect: false`, minimal Zod payload schema for `{ spendingBudgetId, requesterId }`); refactor `requestPromotion` to call `actionService.proposeAction({ actionType: 'promote_spending_policy_to_live', ... })`
