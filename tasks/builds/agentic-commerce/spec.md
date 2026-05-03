@@ -3,7 +3,7 @@
 **Build slug:** `agentic-commerce`
 **Branch:** `claude/agentic-commerce-spending`
 **Classification:** Major
-**Status:** Draft — awaiting spec-reviewer
+**Status:** Final — spec-reviewer APPROVED (5 Codex iterations) + chatgpt-spec-review APPROVED (5 rounds, 2026-05-03). Ready for architect.
 **Source documents:** `docs/agentic-commerce-brief.md` (v3), `docs/agentic-commerce-exploration-report.md`, `docs/agentic-commerce-brief-addendum.md` (v3)
 **Date:** 2026-05-03
 
