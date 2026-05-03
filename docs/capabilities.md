@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-01 (add Agent Workplace Identity section; doc-sync audit: add invoke_automation as eighth Workflow step type; add 14 v7.1 system-agent skills; remove retired update_financial_record skill)
+> **Last updated:** 2026-05-03 (GHL agency-level OAuth: agency token stored per org + GHL company, location tokens minted on demand; agency-scoped adapter methods added)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -950,7 +950,7 @@ Complete list of all 112 skills.
 | **Gmail** | OAuth2 | Send email, read inbox | Org or subaccount |
 | **Slack** | OAuth2 | Post messages, file uploads, thread conversations, HITL buttons (Block Kit), @mention agent dispatch, DM conversations | Org or subaccount |
 | **HubSpot** | OAuth2 | Contacts, deals, content; full CRM read/write | Org or subaccount |
-| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, funnels, calendars, users, location and business metadata; webhook ingestion (HMAC-SHA256) covering 10 event types — contact / opportunity / conversation create + update, plus INSTALL / UNINSTALL / LocationCreate / LocationUpdate for sub-account lifecycle tracking | Org (with concurrency cap) |
+| **Go High Level (GHL)** | OAuth2 | Contacts, opportunities, conversations, revenue, funnels, calendars, users, location and business metadata; webhook ingestion (HMAC-SHA256) covering 10 event types — contact / opportunity / conversation create + update, plus INSTALL / UNINSTALL / LocationCreate / LocationUpdate for sub-account lifecycle tracking; agency-level OAuth (one token per org + GHL company, location tokens minted on demand per sub-account) — pending Stage 6b sign-off | Org (agency-scoped) or sub-account (location-scoped) |
 | **GitHub** | GitHub App | Fine-grained per-repo access, webhook events (issues, PRs, pushes), task creation from events | Org or subaccount |
 | **Teamwork Desk** | OAuth2 | Project and task management | Org or subaccount |
 | **Stripe** | API adapter | Payment transactions and subscription data | Org |
@@ -1009,6 +1009,7 @@ Complete list of all 112 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-03 | GHL agency-level OAuth: agency token stored per org + GHL company (`connector_configs.token_scope='agency'`), location tokens minted on demand per sub-account and cached in `connector_location_tokens`. Nine adapter methods use location-scoped tokens; two (list-locations, get-location) use the agency token. Pending Stage 6b sign-off. | — |
 | 2026-05-01 | Skills Reference: add invoke_automation as the eighth Workflow step type (PR #186); add 14 new system-agent v7.1 skills across Admin Operations & Finance, CRM & Contact Management, and Analytics & Reporting categories; remove retired update_financial_record skill (PR #212/#216). | — |
 | 2026-04-24 | System Monitor (Phase 0 + 0.5): fingerprint-deduplicating incident pipeline that surfaces production failures — route errors, job DLQ landings, agent run failures, connector sync failures, skill terminal failures, LLM provider exhaustion — as actionable incidents on a sysadmin dashboard. Incidents deduplicate by SHA-256 fingerprint, auto-escalate severity on repeated occurrence, and support ack / resolve / suppress / escalate-to-agent lifecycle. Resolution links back to the agent task so operators see the full remediation chain. AlertFatigueGuard refactored to a shared base class so push-notification rate-limiting (Phase 0.75) uses the same per-run + per-day cap logic. Live nav badge + WebSocket push via a dedicated sysadmin room. Self-check job surfaces ingest pipeline degradation as a self-referential incident. | — |
 | 2026-04-23 | Paperclip Hierarchy: per-sub-account lead-agent guarantee (exactly one active lead at all times, atomic rotation, degraded-fallback + health signal if ever missing), scoped delegation enforcement (children / subtree / sub-account) at execution time, visible delegation graph per run (DAG view with direction + scope inline, up to 5 levels), starter team templates for one-step sub-account setup, and observable delegation ledger with idempotent writes. Three new workspace-health detectors (multiple leads, no lead, orphaned delegation skills) bring the detector total to 10. | — |
