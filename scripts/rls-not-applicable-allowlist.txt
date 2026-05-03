@@ -87,3 +87,4 @@ document_bundle_members  Scoped via document_bundles.organisation_id through an 
 reference_document_versions  organisation_id added via ALTER TABLE ADD COLUMN in migration 0229 (not in CREATE TABLE block); scoped to the parent reference_document via EXISTS policy.
 task_activities  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
 task_deliverables  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
+connector_location_tokens  Scoped via connector_configs.organisation_id through a JOIN policy in migration 0269; no direct organisation_id column on this cache table. [ref: migrations/0269_connector_location_tokens.sql]

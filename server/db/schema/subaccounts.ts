@@ -1,6 +1,8 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
+import { connectorConfigs } from './connectorConfigs.js';
 
 // Memory & Briefings spec — portal mode tier enum (migration 0131, §6.2)
 export type PortalMode = 'hidden' | 'transparency' | 'collaborative';
@@ -79,6 +81,8 @@ export const subaccounts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    connectorConfigId: uuid('connector_config_id').references((): AnyPgColumn => connectorConfigs.id),
+    externalId: text('external_id'),
   },
   (table) => ({
     orgIdx: index('subaccounts_org_idx').on(table.organisationId),

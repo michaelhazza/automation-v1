@@ -249,3 +249,6 @@ export * from './conversationThreadContext';
 
 // Sub-Account Optimiser — generic agent-output primitive (migration 0267)
 export * from './agentRecommendations';
+
+// GHL Agency OAuth — location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
