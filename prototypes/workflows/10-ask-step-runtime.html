@@ -1,0 +1,507 @@
+<!doctype html>
+<!--
+  Mock 10 · Ask step runtime experience
+  =======================================
+  Four states showing what happens at runtime when an Ask step queues:
+  the form card surfaces in the chat panel of the open task view, the
+  operator fills it in, submits, and the workflow continues.
+
+  States:
+    A. Form awaiting input (Task requester sees it directly in their task view)
+    B. Form mid-fill, validation showing for required field
+    C. Form submitted, collapsed to a "submitted by X at Y" receipt
+    D. Routing entry points for non-requester submitters (notifications,
+       sidebar count, email — all paths land on the same form card)
+
+  Brief §7.3. Companion to mock 09 (authoring side).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 10 — Ask step runtime</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; color:#0f172a; }
+
+  /* State switching */
+  input[name="state-switcher"] { display: none; }
+  .scn { display: none; }
+  #state-a:checked ~ .page .scn.sa,
+  #state-b:checked ~ .page .scn.sb,
+  #state-c:checked ~ .page .scn.sc,
+  #state-d:checked ~ .page .scn.sd { display: block; }
+
+  .state-btn { padding: 8px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600; color: #475569; background: white; border: 1px solid #e2e8f0; cursor: pointer; transition: all 100ms; }
+  .state-btn:hover { border-color: #cbd5e1; }
+  #state-a:checked ~ .page label[for="state-a"],
+  #state-b:checked ~ .page label[for="state-b"],
+  #state-c:checked ~ .page label[for="state-c"],
+  #state-d:checked ~ .page label[for="state-d"] { background: #4f46e5; color: white; border-color: #4f46e5; }
+
+  /* Form card */
+  .form-card { border: 1px solid #e2e8f0; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(15,23,42,0.04); }
+  .form-card.queued { border-color: #fde68a; background: #fffbeb; }
+  .form-card.submitted { border-color: #bbf7d0; background: #f0fdf4; }
+  .ff-label { display: block; font-size: 11.5px; font-weight: 600; color: #334155; margin-bottom: 3px; }
+  .ff-required { color: #dc2626; margin-left: 2px; }
+  .ff-help { font-size: 10.5px; color: #64748b; margin-top: 2px; }
+  .ff-input { width: 100%; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12.5px; outline: none; background: white; }
+  .ff-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.15); }
+  .ff-input.error { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,0.10); }
+  .ff-error { font-size: 10.5px; color: #dc2626; margin-top: 3px; display: flex; align-items: center; gap: 4px; }
+  .ff-radio-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  .ff-radio-row.selected { border-color: #4f46e5; background: #eef2ff; }
+  .ff-radio-row.selected .ff-radio-circle { background: #4f46e5; border-color: #4f46e5; }
+  .ff-radio-row.selected .ff-radio-circle::after { content: ''; display: block; width: 5px; height: 5px; background: white; border-radius: 50%; }
+  .ff-radio-circle { width: 13px; height: 13px; border: 2px solid #cbd5e1; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+
+  /* Submitted receipt row */
+  .receipt-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #d1fae5; font-size: 12px; }
+  .receipt-row:last-child { border-bottom: none; }
+  .receipt-key { color: #64748b; }
+  .receipt-value { color: #065f46; font-weight: 500; }
+
+  /* Notification panel for state D */
+  .notif-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; box-shadow: 0 4px 12px rgba(15,23,42,0.06); }
+  .notif-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; background: #dc2626; color: white; border-radius: 9999px; font-size: 10px; font-weight: 700; }
+  .sidebar-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px; font-size: 12.5px; color: #334155; cursor: pointer; }
+  .sidebar-row:hover { background: #f1f5f9; }
+  .sidebar-row.has-pending { background: #fffbeb; border: 1px solid #fde68a; font-weight: 600; }
+
+  /* Mini three-pane layout for the task view */
+  .mini-tp { display: flex; height: 540px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: white; }
+  .mini-chat { width: 38%; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; }
+  .mini-act { width: 24%; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; background: white; }
+  .mini-right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .pane-header { padding: 8px 14px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px; }
+  .pane-header .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 600; }
+
+  /* Activity events (mini, newest at bottom) */
+  .ad { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .ad-active { background: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.18); animation: pulse 1.6s ease-in-out infinite; }
+  .ad-done { background: #10b981; }
+  .ad-note { background: #94a3b8; }
+  .ad-pending { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.18); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+  /* Chat bubbles */
+  .chat-bubble { max-width: 92%; padding: 7px 11px; border-radius: 14px; font-size: 12px; line-height: 1.45; }
+  .chat-bubble.user { background: #4f46e5; color: white; border-bottom-right-radius: 5px; }
+  .chat-bubble.agent { background: #f1f5f9; color: #334155; border-bottom-left-radius: 5px; }
+
+  /* Thinking box */
+  .thinking-box { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: #f8fafc; border-top: 1px solid #e2e8f0; border-left: 3px solid #4f46e5; }
+  .thinking-pulse { width: 6px; height: 6px; border-radius: 50%; background: #4f46e5; animation: pulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+  .thinking-text { font-size: 12px; color: #334155; font-style: italic; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<input type="radio" name="state-switcher" id="state-a" checked>
+<input type="radio" name="state-switcher" id="state-b">
+<input type="radio" name="state-switcher" id="state-c">
+<input type="radio" name="state-switcher" id="state-d">
+
+<div class="page mx-auto max-w-[1280px] p-6">
+  <div class="flex justify-between items-baseline mb-3">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 10 · Ask step runtime experience</h1>
+    <a href="index.html" class="text-[12.5px] text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mb-4 leading-relaxed">
+    What happens at runtime when an Ask step queues. The form card surfaces in the chat panel of the open task view (same primitive as Approval cards). Click each state below to walk through awaiting → mid-fill → submitted → and how non-requester submitters reach the form. Brief §7.3.
+  </p>
+
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <label for="state-a" class="state-btn">A · Awaiting input</label>
+    <label for="state-b" class="state-btn">B · Validating</label>
+    <label for="state-c" class="state-btn">C · Submitted</label>
+    <label for="state-d" class="state-btn">D · Routed elsewhere</label>
+  </div>
+
+  <!-- States A, B, C share the same three-pane layout — task requester is the operator on the page. -->
+  <!-- State D shows the same task-view PLUS a notification surface above it. -->
+
+  <!-- Notification surface (state D only — appears above the task view) -->
+  <div class="scn sd mb-4">
+    <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Path 1 · Sidebar nav (always visible)</div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3 mb-3" style="max-width: 280px;">
+      <div class="space-y-1">
+        <div class="sidebar-row"><span>📋</span><span class="flex-1">Tasks</span></div>
+        <div class="sidebar-row has-pending">
+          <span>✋</span>
+          <span class="flex-1">Waiting on you</span>
+          <span class="notif-badge">3</span>
+        </div>
+        <div class="sidebar-row"><span>📂</span><span class="flex-1">Workflows</span></div>
+        <div class="sidebar-row"><span>🔌</span><span class="flex-1">Automations</span></div>
+      </div>
+      <div class="text-[10.5px] text-slate-500 mt-2 italic">"Waiting on you" surfaces both Approvals and Ask forms. Same primitive, same routing.</div>
+    </div>
+
+    <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Path 2 · "Waiting on you" page (when clicked from sidebar)</div>
+    <div class="bg-white border border-slate-200 rounded-lg p-4 mb-3" style="max-width: 720px;">
+      <div class="text-[13px] font-semibold text-slate-900 mb-2">Waiting on you · 3 items</div>
+      <div class="space-y-2">
+        <div class="border border-amber-200 bg-amber-50/50 rounded-md p-3 cursor-pointer hover:border-amber-300">
+          <div class="flex items-center gap-2 mb-1">
+            <span style="display:inline-block; padding:1px 6px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Ask</span>
+            <span class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</span>
+            <span class="ml-auto text-[10.5px] text-slate-500">2m ago · Mike H.'s task</span>
+          </div>
+          <div class="text-[11.5px] text-slate-600">Confirm this week's campaign target before we kick off the lead pull. Two fields.</div>
+        </div>
+        <div class="border border-orange-200 bg-orange-50/50 rounded-md p-3 cursor-pointer hover:border-orange-300">
+          <div class="flex items-center gap-2 mb-1">
+            <span style="display:inline-block; padding:1px 6px; border-radius:3px; background:#ffedd5; color:#9a3412; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Approval</span>
+            <span class="text-[12.5px] font-semibold text-slate-900">Marketing review</span>
+            <span class="ml-auto text-[10.5px] text-slate-500">8m ago · Daisy R.'s task</span>
+          </div>
+          <div class="text-[11.5px] text-slate-600">Drafted email body and recipient list ready for sign-off.</div>
+        </div>
+        <div class="border border-amber-200 bg-amber-50/50 rounded-md p-3 cursor-pointer hover:border-amber-300">
+          <div class="flex items-center gap-2 mb-1">
+            <span style="display:inline-block; padding:1px 6px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Ask</span>
+            <span class="text-[12.5px] font-semibold text-slate-900">Pick venue capacity</span>
+            <span class="ml-auto text-[10.5px] text-slate-500">26m ago · Daisy R.'s task</span>
+          </div>
+          <div class="text-[11.5px] text-slate-600">Confirm seat count before we draft the contract.</div>
+        </div>
+      </div>
+      <div class="text-[10.5px] text-slate-500 mt-3 italic">Same surface as the existing review queue. Click any item to land on the task view with the form (or Approval card) prominent in the chat pane.</div>
+    </div>
+
+    <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Path 3 · Email notification (optional, op-in per user)</div>
+    <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4" style="max-width: 480px;">
+      <div class="text-[10.5px] text-slate-500 mb-2">From: Automation OS &lt;notify@…&gt;</div>
+      <div class="text-[13px] font-semibold text-slate-900 mb-2">Mike's task is waiting on your input</div>
+      <div class="text-[12px] text-slate-700 mb-3">"Confirm campaign target" needs two fields filled in to continue. About 30 seconds of work.</div>
+      <button class="px-3 py-1.5 bg-indigo-600 text-white text-[11.5px] font-semibold rounded">Open task →</button>
+    </div>
+
+    <div class="text-[11px] text-slate-600 mb-3 leading-relaxed bg-slate-50 border border-slate-200 rounded p-3">
+      <strong>The key invariant.</strong> All three paths above land the user on the <em>same task view</em> with the <em>same form card</em> prominent in the chat panel. The form-card primitive is one component used identically whether you arrived as the task requester (form already in front of you), via sidebar count (clicked from nav), via the "Waiting on you" page (existing review queue surface), or via email (one click to open the task). No separate "fill out a form" surface exists outside the task view.
+    </div>
+
+    <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">→ Lands here (same task view as states A–C):</div>
+  </div>
+
+  <!-- Three-pane mini-task-view (states A, B, C, and the landing-target for D) -->
+  <div class="mini-tp">
+
+    <!-- Chat panel (varies most across states) -->
+    <div class="mini-chat">
+      <div class="pane-header">
+        <span class="label">Chat</span>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">conversation</span>
+      </div>
+      <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3.5 text-[12.5px] leading-relaxed">
+        <!-- Operator's prompt (always present) -->
+        <div class="flex justify-end">
+          <div class="chat-bubble user">Set up this week's lead re-engagement campaign. Confirm the target before pulling leads.</div>
+        </div>
+        <!-- Orchestrator narrative (always present) -->
+        <div class="flex gap-2">
+          <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+          <div class="flex-1">
+            <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span></div>
+            <div class="chat-bubble agent mt-1">Need a quick confirmation on the campaign target before I pull leads.</div>
+          </div>
+        </div>
+
+        <!-- State A: Form card awaiting input -->
+        <div class="scn sa">
+          <div class="form-card queued mt-3 p-4">
+            <div class="flex items-center gap-2 mb-1">
+              <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Ask</span>
+              <span class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</span>
+            </div>
+            <div class="text-[11.5px] text-slate-600 mb-3">Confirm this week's campaign target before we kick off the lead pull.</div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="ff-label">Audience segment<span class="ff-required">*</span></label>
+                <select class="ff-input">
+                  <option>Choose...</option>
+                  <option>High-fit accounts (Tier A)</option>
+                  <option>Mid-fit accounts (Tier B)</option>
+                  <option>Stale leads only (Tier C)</option>
+                </select>
+                <div class="ff-help">Pick the segment for this campaign run.</div>
+              </div>
+              <div>
+                <label class="ff-label">Tone<span class="ff-required">*</span></label>
+                <div class="space-y-1.5">
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Professional warm</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Friendly</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Direct</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+              <button class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded">Submit</button>
+              <button class="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded border border-slate-300">Skip this step</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- State B: Form mid-fill with validation -->
+        <div class="scn sb">
+          <div class="form-card queued mt-3 p-4">
+            <div class="flex items-center gap-2 mb-1">
+              <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Ask</span>
+              <span class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</span>
+            </div>
+            <div class="text-[11.5px] text-slate-600 mb-3">Confirm this week's campaign target before we kick off the lead pull.</div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="ff-label">Audience segment<span class="ff-required">*</span></label>
+                <select class="ff-input error">
+                  <option>Choose...</option>
+                  <option>High-fit accounts (Tier A)</option>
+                  <option>Mid-fit accounts (Tier B)</option>
+                  <option>Stale leads only (Tier C)</option>
+                </select>
+                <div class="ff-error"><span>⚠</span>Pick a segment to continue</div>
+              </div>
+              <div>
+                <label class="ff-label">Tone<span class="ff-required">*</span></label>
+                <div class="space-y-1.5">
+                  <label class="ff-radio-row selected"><span class="ff-radio-circle"></span>Professional warm</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Friendly</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Direct</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+              <button class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded">Submit</button>
+              <button class="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded border border-slate-300">Skip this step</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- State C: Submitted, collapsed receipt -->
+        <div class="scn sc">
+          <div class="form-card submitted mt-3 p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#d1fae5; color:#065f46; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">✓ Submitted</span>
+              <span class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</span>
+            </div>
+            <div class="text-[10.5px] text-slate-600 mb-3">Submitted by Mike H. · 2:14 pm</div>
+
+            <div>
+              <div class="receipt-row">
+                <span class="receipt-key">Audience segment</span>
+                <span class="receipt-value">High-fit accounts (Tier A)</span>
+              </div>
+              <div class="receipt-row">
+                <span class="receipt-key">Tone</span>
+                <span class="receipt-value">Professional warm</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Next step has resumed -->
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span></div>
+              <div class="chat-bubble agent mt-1">Got it. Pulling Tier A accounts now.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State D: same as A — landing target after notification click -->
+        <div class="scn sd">
+          <div class="form-card queued mt-3 p-4">
+            <div class="flex items-center gap-2 mb-1">
+              <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Ask</span>
+              <span class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</span>
+            </div>
+            <div class="text-[11.5px] text-slate-600 mb-3">Confirm this week's campaign target before we kick off the lead pull. Mike H. asked you (you're in the Marketing team).</div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="ff-label">Audience segment<span class="ff-required">*</span></label>
+                <select class="ff-input">
+                  <option>Choose...</option>
+                  <option>High-fit accounts (Tier A)</option>
+                  <option>Mid-fit accounts (Tier B)</option>
+                  <option>Stale leads only (Tier C)</option>
+                </select>
+              </div>
+              <div>
+                <label class="ff-label">Tone<span class="ff-required">*</span></label>
+                <div class="space-y-1.5">
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Professional warm</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Friendly</label>
+                  <label class="ff-radio-row"><span class="ff-radio-circle"></span>Direct</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+              <button class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-semibold rounded">Submit</button>
+              <button class="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[12px] font-medium rounded border border-slate-300">Skip this step</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thinking box -->
+      <div class="thinking-box">
+        <span class="thinking-pulse"></span>
+        <span class="thinking-text">
+          <span class="scn sa">Waiting for you to confirm the campaign target</span>
+          <span class="scn sb">Waiting for you to confirm the campaign target</span>
+          <span class="scn sc">Pulling Tier A accounts</span>
+          <span class="scn sd">Waiting on Marketing team to confirm the campaign target</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Activity panel (newest at bottom — v2) -->
+    <div class="mini-act">
+      <div class="pane-header">
+        <span class="label">Activity</span>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">live</span>
+      </div>
+      <div class="flex-1 overflow-y-auto px-3 py-3">
+
+        <!-- State A activity -->
+        <div class="scn sa space-y-2.5">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">10s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">8s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-pending"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Ask queued</span> for Mike H.</div></div>
+          </div>
+        </div>
+
+        <!-- State B activity (same as A — submission hasn't happened yet) -->
+        <div class="scn sb space-y-2.5">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">22s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">20s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-pending"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">12s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Ask queued</span> for Mike H.</div></div>
+          </div>
+        </div>
+
+        <!-- State C activity — submission happened, next step running -->
+        <div class="scn sc space-y-2.5">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">38s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">36s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">28s ago</div><div class="text-slate-700">Ask queued for Mike H.</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">4s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> submitted Ask ✓</div><div class="mt-1 text-[10.5px] text-slate-500">audience: Tier A · tone: warm</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-active"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Pulling Tier A accounts</span></div></div>
+          </div>
+        </div>
+
+        <!-- State D activity — Ask routed to a team -->
+        <div class="scn sd space-y-2.5">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">30s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">28s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-pending"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Ask queued</span> for Marketing team</div><div class="mt-1 text-[10.5px] text-slate-500">3 members notified</div></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Right pane (Plan tab) — same across all states; current step varies -->
+    <div class="mini-right">
+      <div class="pane-header">
+        <span class="text-[12px] font-semibold text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Plan</span>
+        <span class="text-[12px] text-slate-500 ml-3">Now</span>
+        <span class="text-[12px] text-slate-500 ml-3">Files</span>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5">
+        <div class="text-[12.5px] font-semibold text-slate-800 mb-3">The shape of this work</div>
+        <div class="mx-auto" style="max-width: 380px;">
+          <div class="flex items-center gap-2 mb-1.5 px-3 py-2 rounded-lg border" style="border-color: #4f46e5; background: #eef2ff;">
+            <div class="w-6 h-6 rounded bg-indigo-100 text-indigo-700 text-[11px] font-semibold flex items-center justify-center">1</div>
+            <div class="flex-1 text-[12px] font-medium text-slate-900">Confirm campaign target</div>
+            <span class="scn sa sb sd" style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fef3c7; color:#92400e; font-size:9.5px; font-weight:700; text-transform:uppercase;">Ask</span>
+            <span class="scn sa sb sd" style="font-size:9.5px; color:#4f46e5; font-weight:600;">awaiting</span>
+            <span class="scn sc" style="display:inline-block; padding:1px 5px; border-radius:3px; background:#d1fae5; color:#065f46; font-size:9.5px; font-weight:700; text-transform:uppercase;">✓ done</span>
+          </div>
+          <div class="w-px h-4 bg-slate-300 mx-auto"></div>
+          <div class="flex items-center gap-2 mb-1.5 px-3 py-2 rounded-lg border bg-white" style="border-color: #e2e8f0;">
+            <div class="w-6 h-6 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold flex items-center justify-center">2</div>
+            <div class="flex-1 text-[12px] font-medium text-slate-900">Find stale leads</div>
+            <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#ecfdf5; color:#065f46; font-size:9.5px; font-weight:700; text-transform:uppercase;">Action</span>
+            <span class="scn sc" style="font-size:9.5px; color:#3b82f6; font-weight:600;">working</span>
+          </div>
+          <div class="w-px h-4 bg-slate-300 mx-auto"></div>
+          <div class="flex items-center gap-2 mb-1.5 px-3 py-2 rounded-lg border bg-white" style="border-color: #e2e8f0; opacity: 0.55;">
+            <div class="w-6 h-6 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold flex items-center justify-center">3</div>
+            <div class="flex-1 text-[12px] font-medium text-slate-900">Classify by fit</div>
+            <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#eef2ff; color:#4338ca; font-size:9.5px; font-weight:700; text-transform:uppercase;">Agent</span>
+          </div>
+          <div class="w-px h-4 bg-slate-300 mx-auto"></div>
+          <div class="flex items-center gap-2 mb-1.5 px-3 py-2 rounded-lg border bg-white" style="border-color: #e2e8f0; opacity: 0.55;">
+            <div class="w-6 h-6 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold flex items-center justify-center">4</div>
+            <div class="flex-1 text-[12px] font-medium text-slate-900">Marketing review</div>
+            <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:#fff7ed; color:#9a3412; font-size:9.5px; font-weight:700; text-transform:uppercase;">Approval</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footnote per state -->
+  <div class="mt-5 p-4 bg-white border border-slate-200 rounded-lg text-[12px] leading-relaxed">
+    <div class="scn sa"><strong>State A · Awaiting input.</strong> The form card lands in the chat panel as a new message. Same card primitive used for Approvals, just with form fields instead of approve/reject. Fields are required-marked with the red asterisk; the Submit button stays enabled (validation runs on click and surfaces inline). The thinking box reads "Waiting for you to confirm the campaign target." Activity has a single Ask-queued event at the bottom (newest). Plan tab shows step 1 in indigo as the awaiting step.</div>
+    <div class="scn sb"><strong>State B · Validating.</strong> Operator clicked Submit without picking an audience segment; the field gets a red border and an inline error message ("Pick a segment to continue"). The Tone field is filled. Submit stays enabled — clicking it without fixing the error just re-shows the validation. No modal, no toast, no extra surface. Same shape as standard form validation across the web.</div>
+    <div class="scn sc"><strong>State C · Submitted.</strong> The form card collapses to a green-tinted receipt showing what was submitted, by whom, when. The orchestrator's next message lands in chat ("Got it. Pulling Tier A accounts now."). Activity shows the Ask-submitted event with the values, and the next step starting. Plan tab marks step 1 as ✓ done; step 2 (Find stale leads) is the new current step. The values are now bindings: <code class="text-[11px] bg-slate-100 px-1 rounded">steps.confirm_campaign_target.outputs.audience</code> = "Tier A".</div>
+    <div class="scn sd"><strong>State D · Routed elsewhere.</strong> The Ask was authored with "A team" routing (Marketing team). Mike (the requester) is not the submitter. A team member arrives at the form via one of three paths: sidebar nav with a count badge, a dedicated "Waiting on you" page, or an opt-in email notification. <em>All three paths land on the same task view with the same form card</em> — there is no separate forms surface. The form card text adapts slightly ("Mike H. asked you (you're in the Marketing team)") so the team member has context. The thinking box on the requester's view reads "Waiting on Marketing team to confirm" — same task, same surface, just different audience.</div>
+  </div>
+
+  <p class="mt-3 text-[11.5px] text-slate-500 leading-relaxed">
+    The form-card primitive is one component. Author defines the schema in the Studio inspector (mock 09); the renderer at runtime consumes it and produces the card in this chat panel. Submission persists values on the step run record, exposes them as bindings, and unblocks the workflow. Same lifecycle as Approval cards. See brief §7.3 for the engineering shape.
+  </p>
+</div>
+
+</body>
+</html>

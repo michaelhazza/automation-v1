@@ -214,7 +214,10 @@ Every non-trivial task follows this sequence:
 
 The local Claude Code session IS the developer. The agent fleet provides specialist support — architecture, independent review, intake, and pipeline orchestration. You are not a builder in this fleet; you are the builder.
 
-**Code intelligence artifacts (optional infra).** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture-shaped questions (what calls X, what depends on Y, where does the route for Z live) before grepping. They are produced by `scripts/build-code-graph.ts` (cold build via `npm run dev`, kept live by the watcher). If the cache is missing, run `npm run code-graph:rebuild` to populate it; otherwise fall back to grep. If the cache appears inconsistent with what you see in source, trust source.
+**Code intelligence artifacts (optional infra).** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture-shaped questions (what calls X, what depends on Y, where does the route for Z live) before grepping. They are produced by `scripts/build-code-graph.ts`. If the cache appears inconsistent with what you see in source, trust source. Refresh paths, in order of preference:
+- *Automatic.* The `code-graph-freshness-check` SessionStart hook (`.claude/hooks/code-graph-freshness-check.js`) detects a dead watcher at session start and rebuilds the cache plus respawns the watcher in-process. Steady-state cost is <200ms per session; a stale-cache session pays the rebuild cost (sub-second warm, up to ~30s if days behind) once.
+- *Live during dev.* `npm run dev` runs `predev` which builds the cache and spawns a singleton chokidar watcher that keeps shards atomically updated on every file save.
+- *Manual.* Run `npm run code-graph:rebuild` if the cache is missing, looks stale (mtime older than your last large edit), or contradicts source. Run `npm run code-graph:health` for the on-demand status report (KEEP / TUNE / ESCALATE / KILL). If the cache infrastructure is not present in this repo (target of an in-progress framework import), fall back to grep.
 
 Agents live in `.claude/agents/`. Read their definitions before invoking them.
 

@@ -949,6 +949,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0269_connector_location_tokens.sql',
     rationale: 'Per-agency-connection GHL location access tokens — direct credential leak risk; tenant-isolated via parent connector_configs.organisation_id JOIN policy (no direct organisation_id column).',
   },
+  // 0270 — Workflows V1: step gates + drafts
+  {
+    tableName: 'workflow_step_gates',
+    schemaFile: 'workflowStepGates.ts',
+    policyMigration: '0270_workflows_v1_additive_schema.sql',
+    rationale: 'Per-run gate records containing approver pool snapshots and seen payloads — cross-tenant leak exposes workflow execution state and approver identity.',
+  },
+  {
+    tableName: 'workflow_drafts',
+    schemaFile: 'workflowDrafts.ts',
+    policyMigration: '0270_workflows_v1_additive_schema.sql',
+    rationale: 'Orchestrator-authored workflow draft payloads — cross-tenant leak exposes workflow configuration and session state.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

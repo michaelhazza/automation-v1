@@ -9,11 +9,13 @@
  * external callers, and delegates to the engine for any state advance.
  */
 
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workflowRuns,
   workflowStepRuns,
+  workflowStepGates,
+  workflowStepReviews,
   workflowTemplateVersions,
   workflowTemplates,
   systemWorkflowTemplates,
@@ -33,7 +35,12 @@ import { logger } from '../lib/logger.js';
 import { WorkflowEngineService } from './workflowEngineService.js';
 import { resolveApprovalDispatchAction, type ApprovalDecision } from './resolveApprovalDispatchActionPure.js';
 import { WorkflowTemplateService } from './workflowTemplateService.js';
+import { WorkflowScheduleDispatchService } from './workflowScheduleDispatchService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { WorkflowApproverPoolService } from './workflowApproverPoolService.js';
+import { WorkflowStepGateService } from './workflowStepGateService.js';
+import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
+import type { PauseReason } from './workflowRunPauseStopServicePure.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -136,6 +143,13 @@ export const WorkflowRunService = {
     /** Mark the run as visible in the sub-account portal (§9.4). Defaults to
      *  `true` when the template declares a `portalPresentation`. */
     isPortalVisible?: boolean;
+    /**
+     * Spec §5.4: when dispatching from a schedule with a pinned template
+     * version, pass the version ID here. The pinned version overrides the
+     * latest-published-version resolution. When the pinned version is not
+     * found, startRun throws `pinned_version_unavailable` (422).
+     */
+    pinnedTemplateVersionId?: string | null;
   }): Promise<{ runId: string; status: WorkflowRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -147,7 +161,27 @@ export const WorkflowRunService = {
       throw { statusCode: 404, message: 'Subaccount not found' };
     }
 
-    const { templateVersionId, definition, slug } = await this.resolveTemplateForRun(input);
+    // Spec §5.4: when a pinned template version is specified (from a schedule),
+    // use WorkflowScheduleDispatchService to honour the pin and load the exact
+    // version. Otherwise fall through to resolveTemplateForRun (latest published).
+    let templateVersionId: string;
+    let definition: WorkflowDefinition;
+    let slug: string;
+
+    if (input.pinnedTemplateVersionId) {
+      const picked = await WorkflowScheduleDispatchService.pickVersionForSchedule({
+        organisationId: input.organisationId,
+        pinnedTemplateVersionId: input.pinnedTemplateVersionId,
+      });
+      templateVersionId = picked.templateVersionId;
+      definition = rehydrateDefinition(picked.definitionJson);
+      slug = picked.slug;
+    } else {
+      const resolved = await this.resolveTemplateForRun(input);
+      templateVersionId = resolved.templateVersionId;
+      definition = resolved.definition;
+      slug = resolved.slug;
+    }
 
     // Build initial context.
     const startedAt = new Date();
@@ -439,6 +473,34 @@ export const WorkflowRunService = {
       .orderBy(desc(workflowRuns.createdAt));
   },
 
+  // ─── Pause / Resume / Stop (pass-throughs to WorkflowRunPauseStopService) ──
+
+  async pauseRun(
+    runId: string,
+    organisationId: string,
+    userId: string,
+    reason: PauseReason,
+  ): Promise<{ paused: boolean; reason?: string }> {
+    return WorkflowRunPauseStopService.pauseRun(runId, organisationId, userId, reason);
+  },
+
+  async resumeRun(
+    runId: string,
+    organisationId: string,
+    userId: string,
+    opts?: { extendCostCents?: number; extendSeconds?: number },
+  ): Promise<{ resumed: boolean; reason?: string; extensionCount?: number }> {
+    return WorkflowRunPauseStopService.resumeRun(runId, organisationId, userId, opts);
+  },
+
+  async stopRun(
+    runId: string,
+    organisationId: string,
+    userId: string,
+  ): Promise<{ stopped: boolean; reason?: string; currentStatus?: string }> {
+    return WorkflowRunPauseStopService.stopRun(runId, organisationId, userId);
+  },
+
   /**
    * Cancel a run. Transitions to 'cancelling' first; the engine moves it to
    * 'cancelled' once in-flight steps settle.
@@ -457,11 +519,49 @@ export const WorkflowRunService = {
     ) {
       return; // already terminal — idempotent
     }
-    await db
-      .update(workflowRuns)
-      .set({ status: 'cancelling', updatedAt: new Date() })
-      .where(eq(workflowRuns.id, runId));
+
+    // Orphaned-gate cascade and status update in a single transaction so that
+    // a partial failure cannot leave gates resolved while the run retains its
+    // old status (or vice-versa).
+    await db.transaction(async (tx) => {
+      const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(runId, organisationId, tx);
+      if (resolved > 0) {
+        logger.info('workflow_run_gates_cascaded', { runId, resolved, trigger: 'cancelRun' });
+      }
+      await tx
+        .update(workflowRuns)
+        .set({ status: 'cancelling', updatedAt: new Date() })
+        .where(eq(workflowRuns.id, runId));
+    });
     await WorkflowEngineService.enqueueTick(runId);
+  },
+
+  /**
+   * Mark a run as failed. Cascades orphaned gates before the status update.
+   */
+  async failRun(
+    organisationId: string,
+    runId: string,
+    reason: string,
+    stepId: string | null,
+  ): Promise<void> {
+    await db.transaction(async (tx) => {
+      // Orphaned-gate cascade BEFORE status update (invariant)
+      const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(runId, organisationId, tx);
+      if (resolved > 0) {
+        logger.info('workflow_run_gates_cascaded', { runId, resolved, trigger: 'failRun' });
+      }
+      await tx
+        .update(workflowRuns)
+        .set({
+          status: 'failed',
+          error: reason,
+          failedDueToStepId: stepId,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
+    });
   },
 
   /**
@@ -487,10 +587,14 @@ export const WorkflowRunService = {
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
     if (!stepRun) throw { statusCode: 404, message: 'Step run not found' };
+
+    const gate = await WorkflowStepGateService.getOpenGate(runId, stepRun.stepId, organisationId);
+
     if (stepRun.status !== 'awaiting_input') {
       throw {
         statusCode: 409,
         message: `Step is in status '${stepRun.status}', not 'awaiting_input'`,
+        errorCode: 'already_submitted',
       };
     }
     if (expectedVersion !== undefined && stepRun.version !== expectedVersion) {
@@ -505,6 +609,18 @@ export const WorkflowRunService = {
       output: formData,
       via: 'user_input',
     });
+
+    if (gate) {
+      const resolutionReason = formData['_skip'] ? 'skipped' : 'submitted';
+      // NOTE: The engine call above runs in its own transaction. A crash between
+      // the engine call and this transaction leaves the step terminal with the
+      // gate open. The gate will be cleaned up by any subsequent cancelRun/failRun
+      // cascade. This is a known V1 atomicity gap that requires engine
+      // tx-parameter support to close fully.
+      await db.transaction(async (tx) => {
+        await WorkflowStepGateService.resolveGate(gate.id, resolutionReason, organisationId, tx);
+      });
+    }
   },
 
   /**
@@ -533,6 +649,61 @@ export const WorkflowRunService = {
   },
 
   /**
+   * Pool-membership guard (spec §18.1 pre-existing violation #1 fix).
+   *
+   * Finds the open gate for the given (runId, stepId) and throws 403 if the
+   * acting user is not in the approverPoolSnapshot. If no gate row exists yet
+   * (Chunk 4 creates the write path), returns without throwing for backward
+   * compatibility.
+   *
+   * This method uses `db` with an explicit `organisationId` filter so it is
+   * safe in the absence of an active org-scoped transaction (e.g. when called
+   * from a route before the service transaction is opened). The RLS context is
+   * set by the auth middleware's `withOrgTx` block that wraps the entire
+   * request; the `organisationId` filter is an additional application-layer
+   * guard consistent with the rest of this service.
+   */
+  async assertCallerInApproverPool(
+    orgId: string,
+    runId: string,
+    stepRunId: string,
+    userId: string
+  ): Promise<void> {
+    const [stepRun] = await db
+      .select({ runId: workflowStepRuns.runId, stepId: workflowStepRuns.stepId })
+      .from(workflowStepRuns)
+      .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
+
+    if (!stepRun) return; // step run not found — let decideApproval handle the 404
+
+    const [gate] = await db
+      .select({
+        approverPoolSnapshot: workflowStepGates.approverPoolSnapshot,
+      })
+      .from(workflowStepGates)
+      .where(
+        and(
+          eq(workflowStepGates.workflowRunId, stepRun.runId),
+          eq(workflowStepGates.stepId, stepRun.stepId),
+          eq(workflowStepGates.organisationId, orgId),
+          isNull(workflowStepGates.resolvedAt)
+        )
+      );
+
+    if (!gate) return; // no gate row yet (Chunk 4 creates write path) — allow
+
+    if (gate.approverPoolSnapshot !== null) {
+      if (!WorkflowApproverPoolService.userInPool(gate.approverPoolSnapshot, userId)) {
+        throw {
+          statusCode: 403,
+          message: 'You are not in the approver pool for this gate',
+          errorCode: 'not_in_approver_pool',
+        };
+      }
+    }
+  },
+
+  /**
    * Approve, reject, or edit-and-approve a step that is awaiting_approval.
    */
   async decideApproval(
@@ -542,8 +713,9 @@ export const WorkflowRunService = {
     decision: ApprovalDecision,
     editedOutput: Record<string, unknown> | undefined,
     userId: string,
-    expectedVersion?: number
-  ): Promise<{ stepRunStatus: 'completed' | 'failed'; newVersion: number }> {
+    expectedVersion?: number,
+    decisionReason?: string,
+  ): Promise<{ stepRunStatus: 'completed' | 'failed' | 'awaiting_approval'; newVersion: number }> {
     const [run] = await db
       .select()
       .from(workflowRuns)
@@ -569,9 +741,83 @@ export const WorkflowRunService = {
       };
     }
 
+    // Look up the open gate for pool enforcement and decision tracking.
+    const gate = await WorkflowStepGateService.getOpenGate(runId, stepRun.stepId, organisationId);
+
+    // Reinforce pool-membership check (route-level assertCallerInApproverPool
+    // already ran, but this is a defence-in-depth guard within the service).
+    if (gate && gate.approverPoolSnapshot !== null) {
+      if (!WorkflowApproverPoolService.userInPool(gate.approverPoolSnapshot, userId)) {
+        throw {
+          statusCode: 403,
+          message: 'You are not in the approver pool for this gate',
+          errorCode: 'not_in_approver_pool',
+        };
+      }
+    }
+
     if (decision === 'rejected') {
+      // Synthesised-gate rejection: stall rather than fail. The step remains in
+      // awaiting_approval and the stall-and-notify cadence (Chunk 8) handles escalation.
+      if (gate?.isCriticalSynthesised) {
+        logger.info('workflow_step_review_synthesised_gate_rejected_stalled', {
+          stepRunId,
+          gateId: gate.id,
+        });
+        return { stepRunStatus: 'awaiting_approval', newVersion: stepRun.version };
+      }
+
       await WorkflowEngineService.failStepRun(stepRunId, 'approval_rejected', userId);
+
+      if (gate) {
+        // NOTE: The engine call above runs in its own transaction. A crash between
+        // the engine call and this transaction leaves the step terminal with no
+        // review row and the gate open. The gate will be cleaned up by any
+        // subsequent cancelRun/failRun cascade. This is a known V1 atomicity gap
+        // that requires engine tx-parameter support to close fully.
+        await db.transaction(async (tx) => {
+          try {
+            await tx.insert(workflowStepReviews).values({
+              stepRunId: stepRun.id,
+              decision: 'rejected',
+              decidedByUserId: userId,
+              decidedAt: new Date(),
+              gateId: gate.id,
+              decisionReason: decisionReason ?? null,
+            });
+          } catch (err: unknown) {
+            if ((err as { code?: string })?.code === '23505') {
+              // Double-click / duplicate decision — idempotent hit.
+              return;
+            }
+            throw err;
+          }
+          await WorkflowStepGateService.resolveGate(gate.id, 'rejected', organisationId, tx);
+        });
+      }
+
       return { stepRunStatus: 'failed', newVersion: stepRun.version + 1 };
+    }
+
+    // Double-click guard for approved/edited decisions: check for existing review row before engine call.
+    if (gate) {
+      const [existingReview] = await db
+        .select({ id: workflowStepReviews.id })
+        .from(workflowStepReviews)
+        .where(eq(workflowStepReviews.gateId, gate.id));
+      if (existingReview) {
+        // Duplicate decision — re-load current step run status and return.
+        const [latest] = await db
+          .select({ status: workflowStepRuns.status, version: workflowStepRuns.version })
+          .from(workflowStepRuns)
+          .where(eq(workflowStepRuns.id, stepRunId));
+        // Return the actual step status from the DB — don't assume completed
+        const resolvedStatus = latest?.status ?? 'awaiting_approval';
+        return {
+          stepRunStatus: resolvedStatus as 'completed' | 'failed' | 'awaiting_approval',
+          newVersion: latest?.version ?? stepRun.version,
+        };
+      }
     }
 
     const action = resolveApprovalDispatchAction(stepRun, decision);
@@ -580,6 +826,34 @@ export const WorkflowRunService = {
     // with stored output — route to the dedicated resume path (C4a-REVIEWED-DISP).
     if (action === 'redispatch') {
       const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
+
+      if (gate) {
+        // NOTE: The engine call above runs in its own transaction. A crash between
+        // the engine call and this transaction leaves the step terminal with no
+        // review row and the gate open. The gate will be cleaned up by any
+        // subsequent cancelRun/failRun cascade. This is a known V1 atomicity gap
+        // that requires engine tx-parameter support to close fully.
+        await db.transaction(async (tx) => {
+          try {
+            await tx.insert(workflowStepReviews).values({
+              stepRunId: stepRun.id,
+              decision: decision,
+              decidedByUserId: userId,
+              decidedAt: new Date(),
+              gateId: gate.id,
+              decisionReason: decisionReason ?? null,
+            });
+          } catch (err: unknown) {
+            if ((err as { code?: string })?.code === '23505') {
+              // Duplicate insert — gate already resolved, proceed.
+              return;
+            }
+            throw err;
+          }
+          await WorkflowStepGateService.resolveGate(gate.id, 'approved', organisationId, tx);
+        });
+      }
+
       return { stepRunStatus: stepOutcome, newVersion: stepRun.version + 1 };
     }
 
@@ -593,6 +867,34 @@ export const WorkflowRunService = {
       via: 'approval',
       decidedByUserId: userId,
     });
+
+    if (gate) {
+      // NOTE: The engine call above runs in its own transaction. A crash between
+      // the engine call and this transaction leaves the step terminal with no
+      // review row and the gate open. The gate will be cleaned up by any
+      // subsequent cancelRun/failRun cascade. This is a known V1 atomicity gap
+      // that requires engine tx-parameter support to close fully.
+      await db.transaction(async (tx) => {
+        try {
+          await tx.insert(workflowStepReviews).values({
+            stepRunId: stepRun.id,
+            decision: decision,
+            decidedByUserId: userId,
+            decidedAt: new Date(),
+            gateId: gate.id,
+            decisionReason: decisionReason ?? null,
+          });
+        } catch (err: unknown) {
+          if ((err as { code?: string })?.code === '23505') {
+            // Duplicate insert — gate already resolved, proceed.
+            return;
+          }
+          throw err;
+        }
+        await WorkflowStepGateService.resolveGate(gate.id, 'approved', organisationId, tx);
+      });
+    }
+
     return { stepRunStatus: 'completed', newVersion: stepRun.version + 1 };
   },
 };
