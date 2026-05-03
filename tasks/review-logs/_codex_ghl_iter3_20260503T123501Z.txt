@@ -1,3 +1,32 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019debb0-bab3-74e1-900d-25be08209cf7
+--------
+user
+You are reviewing a draft engineering specification for "implementation readiness". This is the THIRD review pass — iterations 1 and 2 already addressed 38 prior findings (file inventory drift, scope-count statement, contradictions in scope/sub for fetchSubscription, idempotency posture, concurrency guards via DB upsert + xmax, RLS posture for new table, Contracts subsection, Deferred Items section, webhook→org mapping, location-token refresh shape, agency-token refresh ownership, 429 webhook 503-retry semantics, scope of new vs existing service files, etc.). Be rigorous on what remains — at this point the spec should be tight. Surface only what genuinely remains:
+
+1. Internal contradictions still present.
+2. Stale or retired language that the previous edits didn't catch.
+3. Load-bearing claims that still lack a backing mechanism.
+4. File / migration / column drift between prose and the file inventory.
+5. Schema overlaps or source-of-truth ambiguity.
+6. Sequencing bugs (Phase N depends on something built in Phase N+k).
+7. Invariants stated in one section but violated by another.
+8. Idempotency posture / retry classification / concurrency guard gaps in newly added prose.
+9. Any new ambiguities introduced by the iteration-2 edits.
+
+Be terse. If the spec looks clean and ready for implementation, say so explicitly — there is no value in inventing nits. For each genuine finding, state: section / line range, the issue (one sentence), and the smallest concrete fix.
+
+Pre-production codebase, no live agencies, rapid evolution, light testing posture (static gates + pure-function unit tests, no frontend / E2E / API contract tests), commit-and-revert rollouts (no feature flags or staged rollouts), prefer existing primitives. Findings arguing for adding feature flags, staged rollout, more test types, or new abstractions duplicating existing primitives will be rejected.
+
+----- BEGIN SPEC -----
 # GHL Module C — Agency-Level OAuth Flow
 
 | Field | Value |
@@ -106,7 +135,7 @@ payments/orders.readonly         ← NEW
 
 ### 5.4 Install / uninstall webhook → auto-enrol
 
-**Webhook → org mapping.** Every GHL webhook payload carries `companyId` (the GHL agency identifier). The router resolves `(companyId)` to `(orgId, connectorConfigId)` by looking up the agency-token row: `SELECT organisation_id, id FROM connector_configs WHERE connector_type='ghl' AND token_scope='agency' AND company_id=$1 AND status<>'disconnected'`. **Migration 0268 must add a global partial unique index `(connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected'`** — a single GHL agency belongs to a single Automation OS organisation; cross-org collision indicates a misconfiguration, not a legitimate install. The index makes that lookup O(1) and guarantees one match. If zero matches: HTTP 200 ack + log `webhook-orphan-companyId` (the install row hasn't landed yet — see the INSTALL race below). If a future tenant model needs the same GHL agency under multiple Automation OS orgs, the index becomes per-org and webhook routing acquires a disambiguation step — out of scope here.
+**Webhook → org mapping.** Every GHL webhook payload carries `companyId` (the GHL agency identifier). The router resolves `(companyId)` to `(orgId, connectorConfigId)` by looking up the agency-token row: `SELECT organisation_id, id FROM connector_configs WHERE provider='ghl' AND token_scope='agency' AND company_id=$1 AND deleted_at IS NULL`. The partial unique index from migration 0268 guarantees at most one match. If zero matches: HTTP 200 ack + log `webhook-orphan-companyId` (the install row hasn't landed yet — see the INSTALL race below).
 
 Existing mappers at `ghlWebhookMutationsPure.ts:143-170` write canonical mutation rows but stop there. Extend the post-webhook side-effect chain:
 
@@ -124,7 +153,7 @@ Existing mappers at `ghlWebhookMutationsPure.ts:143-170` write canonical mutatio
 - **`LocationCreate`** (a new sub-account was added inside an already-connected agency): map `companyId → (orgId, connectorConfigId)` per the lookup above; upsert one `subaccounts` row keyed on `(connector_config_id, external_id)` (same idempotency key as `autoEnrolAgencyLocations`); fire `autoStartOwedOnboardingWorkflows` only when the upsert actually inserted a row. Effectively a single-location version of the bulk enrolment in §6 Phase 3 — share the upsert primitive.
 - **`LocationUpdate`**: existing canonical-mutation row is sufficient; no new side effect required (subaccount metadata refresh happens via the next polling tick).
 
-**Webhook idempotency.** Dedupe key is `gohighlevel_webhook_id` (existing infra at `server/services/ghlWebhookMutationsService.ts`). The dedupe row is **committed only after side effects succeed** — failed-side-effect paths (anything that returns HTTP 503 per §6 Phase 3) leave the dedupe key absent so GHL's retry will re-process the same `webhookId`. The §6 Phase 3 upsert-with-xmax guarantee makes this safe (replays are no-ops). Events missing `webhookId` are rejected with **HTTP 400** (no dedupe key = no safe processing); GHL's webhook contract guarantees the field on real events, so absence indicates a malformed or replayed payload that should not be processed. Confirm against `ghlWebhookMutationsService.ts` during implementation that the existing dedupe path commits after side effects (current convention) — if it commits before, the order must be reversed in this build.
+**Webhook idempotency.** Dedupe key is `gohighlevel_webhook_id` (existing infra at `server/services/ghlWebhookMutationsService.ts`). Events missing `webhookId` are rejected with **HTTP 400** (no dedupe key = no safe processing); GHL's webhook contract guarantees the field on real events, so absence indicates a malformed or replayed payload that should not be processed.
 
 ### 5.5 Pagination for >100 sub-accounts
 
@@ -204,13 +233,9 @@ Fields not listed above are ignored. If a future GHL API change adds a required 
 
 ### Phase 2 — Agency OAuth callback + token persistence (~2 days)
 
-- [ ] New migration **0268** `connector_configs` columns: `token_scope text not null default 'agency'`, `company_id text`, `installed_at timestamptz`, `disconnected_at timestamptz`. Two partial unique indexes:
-  - `(organisation_id, connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected'` — one agency per org per connector type.
-  - `(connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected'` — **global**: a single GHL agency cannot be installed under two different Automation OS orgs simultaneously (see §5.4 webhook→org mapping). If a re-install happens after `UNINSTALL`, the prior row's `status='disconnected'` clears the index slot.
-  
-  (`agency_id` is NOT a separate column — `companyId` is the GHL agency identifier; if a domain alias is needed in TypeScript types, surface it at the API layer only. The existing `connectorConfigs.connectorType` column is reused — there is no separate `provider` column.)
+- [ ] New migration **0268** `connector_configs` columns: `token_scope text not null default 'agency'`, `company_id text`, `installed_at timestamptz`, `disconnected_at timestamptz`, partial unique index on `(organisation_id, provider, company_id) where token_scope='agency' and deleted_at is null`. (`agency_id` is NOT a separate column — `companyId` is the GHL agency identifier; if a domain alias is needed in TypeScript types, surface it at the API layer only.)
 - [ ] Rework `server/routes/ghl.ts`: keep `GET /api/ghl/oauth-url` as the **initiation** endpoint that issues the GHL install URL and stores the CSRF state nonce. Drop the in-file `GET /api/ghl/oauth/callback` stub — the **callback** is now the generic `${APP_BASE_URL}/api/oauth/callback` in `server/routes/oauthIntegrations.ts`, where the new `provider==='ghl'` branch verifies the state nonce and calls the private `exchangeGhlAuthCode(code, redirectUri)` helper (see §5.6). The state store can stay in-memory for now (current shape) or migrate to a shared store later — that's not in scope for this spec.
-- [ ] On callback success: `connectorConfigService.upsertAgencyConnection({ orgId, companyId, accessToken, refreshToken, expiresAt, scope })`. Upsert semantics: `INSERT ... ON CONFLICT (organisation_id, connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected' DO UPDATE SET access_token=EXCLUDED.access_token, refresh_token=EXCLUDED.refresh_token, expires_at=EXCLUDED.expires_at, scope=EXCLUDED.scope, installed_at=COALESCE(connector_configs.installed_at, EXCLUDED.installed_at), disconnected_at=NULL, status='active', updated_at=now()`. Re-installs are **idempotent** — caller receives **HTTP 200** with the existing-or-refreshed connection. **23505 mapping:** a unique-violation on the global index `(connector_type, company_id) WHERE ...` surfaces as **HTTP 409 `agency_already_installed_under_different_org`** with the conflicting `companyId` redacted in the user-facing response (operator gets the full detail in the log). A bubbled `23505` from the per-org index would indicate a logic bug (the upsert covers it) — never let it surface as a 500.
+- [ ] On callback success: `connectorConfigService.upsertAgencyConnection({ orgId, companyId, accessToken, refreshToken, expiresAt, scope })`. Upsert semantics: `INSERT ... ON CONFLICT (organisation_id, provider, company_id) WHERE token_scope='agency' DO UPDATE SET access_token=EXCLUDED.access_token, refresh_token=EXCLUDED.refresh_token, expires_at=EXCLUDED.expires_at, scope=EXCLUDED.scope, installed_at=COALESCE(connector_configs.installed_at, EXCLUDED.installed_at), disconnected_at=NULL, updated_at=now()`. Re-installs are **idempotent** — caller receives **HTTP 200** with the existing-or-refreshed connection. A bubbled `23505 unique_violation` would indicate a logic bug (the upsert covers it) — never let it surface as a 500.
 - [ ] Refresh-token loop: `connector_configs` rows with `token_scope='agency'` do not currently have a refresh job (the existing `connectionTokenService.refreshIfExpired` handles `IntegrationConnection`, not `ConnectorConfig`). Add the agency-token refresh path to `server/services/connectorConfigService.ts` (new method `refreshIfExpired(configId)`) and wire it into `server/jobs/connectorPollingTick.ts` so every poll tick refreshes near-expiry agency tokens before issuing API calls. Same `expires_at < now() + 5min` predicate as location tokens.
 - [ ] Unit tests: token exchange, expiry math, refresh path, CSRF state validation
 - [ ] Integration test (mocked GHL): full callback round-trip
@@ -218,7 +243,7 @@ Fields not listed above are ignored. If a future GHL API change adds a required 
 ### Phase 3 — Sub-account enumeration + auto-enrol (~1.5 days)
 
 - [ ] Helper `enumerateAgencyLocations(connection): Promise<Location[]>` — paginated `/locations/search?companyId=...&limit=100&skip=N`, returns flat list. **401 handling:** token-expiry path triggers a single refresh via the existing refresh-token loop and one retry; second 401 → typed `AGENCY_TOKEN_INVALID` error surfaced to caller. **429 handling:** wrap the call in `withBackoff` (existing primitive at `server/lib/withBackoff.ts`) with 3 retries and exponential backoff (1s / 2s / 4s); after exhaustion, surface a typed `AGENCY_RATE_LIMITED` error and let the caller decide:
-  - **Callback path** (synchronous OAuth callback): log + `notify_operator`, redirect the user back to onboarding with a "we will retry shortly" notice. Recovery happens via the redundant `INSTALL` webhook (§5.4) — that path will land within seconds-to-minutes and re-trigger `autoEnrolAgencyLocations` against the now-quiet rate limiter. If the webhook also fails repeatedly, the operator notification is the manual-recovery signal; we do NOT add a polling-tick enrolment retry in this build (would conflict with the existing `connectorPollingTick` responsibility, which is sync only — no enrolment).
+  - **Callback path** (synchronous OAuth callback): log + `notify_operator`, redirect the user back to onboarding with a "we will retry shortly" notice; the next polling tick or the redundant INSTALL webhook will re-attempt.
   - **Webhook path** (async, GHL-driven): respond **HTTP 503** so GHL re-delivers the webhook per its retry policy. (HTTP 200 ack tells GHL the event is durably handled; using it here would lose the work.) The GHL retry will hit the dedupe key (`gohighlevel_webhook_id`) — handlers must therefore be safe to invoke twice with the same key, which the §6 Phase 3 upsert-with-xmax already guarantees.
   
   **Truncation cap:** see §5.5 — stop at 1000, fire `notify_operator(reason='enumeration_truncated')`.
@@ -272,7 +297,7 @@ Two-stage execution per Phase 0 decision:
 
 | # | Description | Phase |
 |---|---|---|
-| 0268 | `connector_configs` extension: `token_scope`, `company_id`, `installed_at`, `disconnected_at`. Two partial unique indexes: `(organisation_id, connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected'` (per-org) and `(connector_type, company_id) WHERE token_scope='agency' AND status<>'disconnected'` (global — see §5.4). Also add `subaccounts` partial unique index `(connector_config_id, external_id) WHERE deleted_at IS NULL` if not already present (verify against current schema before drafting). | 2 |
+| 0268 | `connector_configs` extension: `token_scope`, `company_id`, `installed_at`, `disconnected_at`; partial unique index `(organisation_id, provider, company_id) WHERE token_scope='agency' AND deleted_at IS NULL`. Also add `subaccounts` partial unique index `(connector_config_id, external_id) WHERE deleted_at IS NULL` if not already present (verify against current schema before drafting). | 2 |
 | 0269 | `connector_location_tokens` table (incl. `deleted_at timestamptz`); partial unique index `(connector_config_id, location_id) WHERE deleted_at IS NULL`; secondary index on `expires_at WHERE deleted_at IS NULL`; RLS policy joining to `connector_configs` for org-scoped access. The `RLS_PROTECTED_TABLES` manifest entry in `server/config/rlsProtectedTables.ts` lands in the same commit as the migration (TypeScript code, not SQL). | 4 |
 
 ## 8. Files touched
@@ -282,11 +307,8 @@ Two-stage execution per Phase 0 decision:
 - `server/services/ghlAgencyOauthServicePure.ts` (pure: scope-list serialisation, OAuth-URL construction, token-expiry math, payload validation)
 - `server/services/locationTokenService.ts` (IO-having: cache lookup, mint, refresh, soft-delete on 401)
 - `server/services/locationTokenServicePure.ts` (pure: expiry-window math, race-loser detection, token-shape validation)
-- `server/services/__tests__/ghlAgencyOauthServicePure.test.ts` (pure-function unit tests)
-- `server/services/__tests__/locationTokenServicePure.test.ts` (pure-function unit tests)
-- `server/services/__tests__/ghlAgencyOauthService.test.ts` (in-process tests with mocked HTTP — callback round-trip per §6 Phase 2; enumerate-then-enrol with 250-fixture per §6 Phase 3)
-- `server/services/__tests__/locationTokenService.test.ts` (in-process tests with mocked HTTP — mint, refresh, soft-delete-on-401 per §6 Phase 4)
-- `server/services/__tests__/ghlWebhookMutationsService.test.ts` (in-process tests with mocked HTTP — INSTALL/UNINSTALL/LocationCreate side-effect chain per §6 Phase 5)
+- `server/services/__tests__/ghlAgencyOauthServicePure.test.ts`
+- `server/services/__tests__/locationTokenServicePure.test.ts`
 - `server/db/schema/connectorLocationTokens.ts`
 - `migrations/0268_connector_configs_agency_columns.sql` (+ `migrations/_down/0268_connector_configs_agency_columns.sql`)
 - `migrations/0269_connector_location_tokens.sql` (+ `migrations/_down/0269_connector_location_tokens.sql`)
@@ -349,3 +371,50 @@ Two-stage execution per Phase 0 decision:
 - **Custom per-location token rotation policy.** Out of scope; the helper in §5.2 implements GHL's default 24h-with-refresh. Custom rotation (e.g. force-refresh every hour for paranoid tenants) is deferred until a real customer requests it.
 - **Lifting the 1000-location enumeration cap.** Defensive cap in §5.5; no real agency we've spoken to is anywhere near 1000 locations. Lift the cap when the first agency hits the truncation `notify_operator` event.
 - **Persisted enumeration-status / truncation column on `subaccounts`.** Considered during review; the operator notification (§5.5) is the durable signal. Re-evaluate if downstream chains need to query truncation history without scanning logs.
+
+----- END SPEC -----
+
+codex
+I’m treating this as a spec consistency review, not a design expansion. I’m checking only for remaining load-bearing mismatches or contradictions introduced by the latest edits.
+codex
+Found 4 genuine readiness issues.
+
+1. **§5.4 Webhook → org mapping, lines ~118-121**  
+   Issue: The lookup maps `companyId → orgId`, but migration 0268’s unique index is `(organisation_id, provider, company_id)`, which does **not** guarantee one row per `companyId` across orgs.  
+   Smallest fix: either make agency `company_id` globally unique per provider with a partial unique index on `(provider, company_id) WHERE token_scope='agency' AND deleted_at IS NULL`, or explicitly define how webhook routing disambiguates multiple orgs for the same GHL agency.
+
+2. **§6 Phase 3 429 handling, lines ~244-252**  
+   Issue: The callback rate-limit path says “the next polling tick” will retry enrolment, but no phase defines a polling-tick retry for agency configs whose initial enumeration failed.  
+   Smallest fix: add an explicit retry mechanism using an existing primitive, e.g. `connectorPollingTick` detects connected GHL agency configs with missing/incomplete subaccount enrolment and calls `autoEnrolAgencyLocations`, or remove the claim and require manual/operator retry.
+
+3. **§6 Phase 3 / §5.4 webhook idempotency, lines ~249-252 and ~141-143**  
+   Issue: Returning HTTP 503 for webhook-side rate-limit exhaustion only works if the webhook dedupe record is not finalized before side effects succeed; otherwise GHL retry will hit the same `gohighlevel_webhook_id` and be skipped.  
+   Smallest fix: specify that webhook dedupe marks the event handled only after side effects complete, or stores failed/transient attempts in a retryable state that allows the same webhook ID to run again after a 503.
+
+4. **§8 Files touched vs §6 tests / §9 done definition, lines ~286-325 and ~333-335**  
+   Issue: The phases require mocked HTTP / integration-style tests, but the file inventory lists only the two pure test files.  
+   Smallest fix: add the concrete non-pure test files to §8, or state which existing test files will be extended for callback round-trip, enumerate-then-enrol, location-token HTTP, and webhook side-effect tests.
+
+Everything else looks internally consistent for implementation readiness.
+2026-05-03T02:36:08.190319Z ERROR codex_core::session: failed to record rollout items: thread 019debb0-bab3-74e1-900d-25be08209cf7 not found
+tokens used
+14,217
+Found 4 genuine readiness issues.
+
+1. **§5.4 Webhook → org mapping, lines ~118-121**  
+   Issue: The lookup maps `companyId → orgId`, but migration 0268’s unique index is `(organisation_id, provider, company_id)`, which does **not** guarantee one row per `companyId` across orgs.  
+   Smallest fix: either make agency `company_id` globally unique per provider with a partial unique index on `(provider, company_id) WHERE token_scope='agency' AND deleted_at IS NULL`, or explicitly define how webhook routing disambiguates multiple orgs for the same GHL agency.
+
+2. **§6 Phase 3 429 handling, lines ~244-252**  
+   Issue: The callback rate-limit path says “the next polling tick” will retry enrolment, but no phase defines a polling-tick retry for agency configs whose initial enumeration failed.  
+   Smallest fix: add an explicit retry mechanism using an existing primitive, e.g. `connectorPollingTick` detects connected GHL agency configs with missing/incomplete subaccount enrolment and calls `autoEnrolAgencyLocations`, or remove the claim and require manual/operator retry.
+
+3. **§6 Phase 3 / §5.4 webhook idempotency, lines ~249-252 and ~141-143**  
+   Issue: Returning HTTP 503 for webhook-side rate-limit exhaustion only works if the webhook dedupe record is not finalized before side effects succeed; otherwise GHL retry will hit the same `gohighlevel_webhook_id` and be skipped.  
+   Smallest fix: specify that webhook dedupe marks the event handled only after side effects complete, or stores failed/transient attempts in a retryable state that allows the same webhook ID to run again after a 503.
+
+4. **§8 Files touched vs §6 tests / §9 done definition, lines ~286-325 and ~333-335**  
+   Issue: The phases require mocked HTTP / integration-style tests, but the file inventory lists only the two pure test files.  
+   Smallest fix: add the concrete non-pure test files to §8, or state which existing test files will be extended for callback round-trip, enumerate-then-enrol, location-token HTTP, and webhook side-effect tests.
+
+Everything else looks internally consistent for implementation readiness.
