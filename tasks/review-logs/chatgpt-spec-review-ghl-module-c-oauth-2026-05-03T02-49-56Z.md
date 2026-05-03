@@ -33,24 +33,29 @@ Gaps / tweaks (high value fixes before build):
 
 | ID | Finding | Triage | Severity | Recommendation | Final Decision | Rationale |
 |----|---------|--------|----------|----------------|----------------|-----------|
-| F1 | OAuth state must carry orgId + CSRF nonce | technical | critical | apply | **ESCALATED — awaiting user** | Critical severity escalation carveout; missing orgId in callback breaks the whole install flow |
+| F1 | OAuth state must carry orgId + CSRF nonce | technical | critical | apply | user (apply) | Critical severity escalation; user approved as recommended — callback invariant added to Phase 2 |
 | F2 | Global index 409 conflict ops documentation | technical | medium | apply | auto (apply) | Internal ops procedure; no user-visible change; clean gap to fill |
-| F3 | Webhook dedupe ordering hard invariant | technical | high | apply | **ESCALATED — awaiting user** | High severity escalation carveout; silent dedupe on partial failure is a data correctness risk |
+| F3 | Webhook dedupe ordering hard invariant | technical | high | apply | user (apply) | High severity escalation; user approved as recommended — hard invariant replaces soft "confirm during implementation" note in §5.4 |
 | F4 | Location token refresh: persist returned scope | technical | low | apply (partial) | auto (apply) | Internal token management; "persist returned scope" is correct; assertion is deferred |
-| F5 | Mass enrolment back-pressure / queue invariant | technical | high | apply | **ESCALATED — awaiting user** | High severity escalation carveout; burst enrolment of 500 locations could flood the queue |
+| F5 | Mass enrolment back-pressure / queue invariant | technical | high | apply | user (apply) | High severity escalation; user approved as recommended — pg-boss queue invariant added to Phase 3 |
 | F6 | Retry classification table | technical | medium | apply | auto (apply) | Consolidates scattered retry logic; no user-visible change |
 | F7 | OAuth initiation endpoint response shape + state TTL | technical | medium | apply | auto (apply) | Internal contract gap; adds precision to Phase 2 |
 | F8 | Partial uninstall failure: idempotent cleanup | technical | medium | apply (partial) | auto (apply) | Valid resilience gap; background job suggestion deferred as YAGNI |
 | F9 | Adapter contract enforcement invariant | technical | medium | apply | auto (apply) | Adds invariant statement; implementation chooses enforcement mechanism |
 | F10 | Logging contract | technical | low | apply | auto (apply) | Adds minimal structure; no user-visible change |
 
-### Applied (auto-applied technical)
-- [auto] F2: Added 409 conflict ops resolution note to §5 / Phase 2
-- [auto] F4: Explicit "persist returned scope" on location token refresh in §5.2
-- [auto] F6: Added retry classification table to §5
-- [auto] F7: Added oauth-url response shape + state TTL contract to Phase 2
-- [auto] F8: Tightened UNINSTALL partial-failure idempotency note in §5.4
-- [auto] F9: Added adapter enforcement invariant to §5.2 / Phase 4
-- [auto] F10: Added structured logging contract section
+### Applied (auto-applied technical + user-approved)
+- [auto] F2: Added 409 conflict ops resolution note to Phase 2
+- [auto] F4: "persist returned scope" added to location token refresh update columns in §5.2
+- [auto] F6: Added §5.8 global retry classification table
+- [auto] F7: Added oauth-url response shape `{ url }`, state payload `{ orgId, nonce }`, state TTL = 10 min to Phase 2
+- [auto] F8: Partial-failure resilience note added to §5.4 UNINSTALL — orphan tokens are inactive; handler is replay-safe
+- [auto] F9: Adapter enforcement invariant added to Phase 4 task item
+- [auto] F10: Added §5.9 structured logging contract with mandatory event list
+- [user] F1: Callback invariant added to Phase 2 — orgId extracted from validated state; HTTP 400 on missing/expired/absent orgId; state is sole authoritative identity
+- [user] F3: Hard invariant replaces soft note in §5.4 — dedupe row MUST NOT be written before side effects commit
+- [user] F5: pg-boss queue invariant added to Phase 3 — autoStartOwedOnboardingWorkflows must enqueue via pg-boss, never inline
+
+Top themes: OAuth callback security hardening, webhook correctness, enrolment safety at scale.
 
 ---
