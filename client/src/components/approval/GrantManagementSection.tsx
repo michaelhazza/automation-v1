@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
 
 interface OrgChannel {
   id: string;
-  name: string;
   channelType: string;
 }
 
@@ -19,6 +18,18 @@ interface Grant {
   subaccountId: string;
   orgChannel: OrgChannel;
   subaccount: SubaccountOption;
+}
+
+// Channel-type display string. v1 only ships `in_app`; future channel types
+// (slack, email, telegram, sms) can extend this lookup. Falls back to the
+// raw channelType when an entry is missing so a server-added type that lacks
+// a client-side mapping renders safely instead of as `undefined`.
+const CHANNEL_TYPE_LABELS: Record<string, string> = {
+  in_app: 'In-app',
+};
+
+function humaniseChannelType(channelType: string): string {
+  return CHANNEL_TYPE_LABELS[channelType] ?? channelType;
 }
 
 interface GrantManagementSectionProps {
@@ -37,20 +48,37 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
   const [addForm, setAddForm] = useState({ orgChannelId: '', subaccountId: '' });
   const [adding, setAdding] = useState(false);
 
+  // Cancellation guard — only the latest load() generation may write state.
+  // Protects against the React stale-state race where:
+  //   1. orgId changes → load A starts
+  //   2. orgId changes again → load B starts
+  //   3. load B completes (correct data)
+  //   4. load A resolves with stale data → overwrites B
+  // Each load() ++'s the ref; only the call that matches the current ref at
+  // completion is allowed to write. Same guard covers mutation-triggered
+  // load() races (handleAdd / handleRevoke firing while a previous load is
+  // still in flight).
+  const loadGeneration = useRef(0);
+
   const load = async () => {
+    const myGeneration = ++loadGeneration.current;
     try {
       const [grantsRes, channelsRes, subRes] = await Promise.all([
         api.get(`/api/approval-channels/grants?orgId=${orgId}`),
         api.get(`/api/approval-channels?scope=org`),
         api.get('/api/subaccounts'),
       ]);
+      if (myGeneration !== loadGeneration.current) return;
       setGrants(grantsRes.data ?? []);
       setOrgChannels(channelsRes.data ?? []);
       setSubaccounts(subRes.data ?? []);
     } catch {
+      if (myGeneration !== loadGeneration.current) return;
       toast.error('Failed to load grant data');
     } finally {
-      setLoading(false);
+      if (myGeneration === loadGeneration.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -60,10 +88,12 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
     if (!addForm.orgChannelId || !addForm.subaccountId) return;
     setAdding(true);
     try {
-      await api.post('/api/approval-channels/grants', {
-        orgChannelId: addForm.orgChannelId,
-        subaccountId: addForm.subaccountId,
-      });
+      // Channel id is part of the URL path; only subaccount id goes in the
+      // body. Server route: POST /api/approval-channels/:channelId/grants.
+      await api.post(
+        `/api/approval-channels/${addForm.orgChannelId}/grants`,
+        { subaccountId: addForm.subaccountId },
+      );
       toast.success('Grant added');
       setAddForm({ orgChannelId: '', subaccountId: '' });
       await load();
@@ -74,9 +104,13 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
     }
   };
 
-  const handleRevoke = async (grantId: string) => {
+  const handleRevoke = async (grant: Grant) => {
     try {
-      await api.delete(`/api/approval-channels/grants/${grantId}`);
+      // Server route: DELETE /api/approval-channels/:channelId/grants/:grantId.
+      // Both ids come from the grant row.
+      await api.delete(
+        `/api/approval-channels/${grant.orgChannelId}/grants/${grant.id}`,
+      );
       toast.success('Grant revoked');
       // Server-authoritative reload — keeps the grants list in sync with the
       // backend after every mutation. Avoids divergence under concurrent
@@ -122,7 +156,7 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
           >
             <option value="">Select channel...</option>
             {orgChannels.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+              <option key={c.id} value={c.id}>{humaniseChannelType(c.channelType)}</option>
             ))}
           </select>
         </div>
@@ -170,11 +204,11 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
           <tbody>
             {grants.map(g => (
               <tr key={g.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 text-[12.5px] text-slate-700">{g.orgChannel.name}</td>
+                <td className="px-3 py-2 text-[12.5px] text-slate-700">{humaniseChannelType(g.orgChannel.channelType)}</td>
                 <td className="px-3 py-2 text-[12.5px] text-slate-700">{g.subaccount.name}</td>
                 <td className="px-3 py-2 text-right">
                   <button
-                    onClick={() => handleRevoke(g.id)}
+                    onClick={() => handleRevoke(g)}
                     className="text-[12px] text-red-600 hover:text-red-700 border-none bg-transparent cursor-pointer [font-family:inherit]"
                   >
                     Revoke

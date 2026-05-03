@@ -19,13 +19,14 @@
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'node:crypto';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, asc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { actions } from '../db/schema/index.js';
 import { spendingBudgetApprovers } from '../db/schema/spendingBudgetApprovers.js';
 import { orgSubaccountChannelGrants } from '../db/schema/orgSubaccountChannelGrants.js';
 import { subaccountApprovalChannels } from '../db/schema/subaccountApprovalChannels.js';
 import { orgApprovalChannels } from '../db/schema/orgApprovalChannels.js';
+import { subaccounts } from '../db/schema/subaccounts.js';
 import { resolveApproval as chargeRouterResolveApproval } from './chargeRouterService.js';
 import { promoteToLive } from './spendingBudgetService.js';
 import { auditService } from './auditService.js';
@@ -477,6 +478,57 @@ export async function revokeGrant(
     entityId: grantId,
     metadata: { grantId },
   });
+}
+
+/**
+ * List active grants for an org. Returns the grant row joined with its
+ * org channel and target sub-account so the client can render display
+ * strings without per-row follow-up fetches. Deterministic ORDER BY on
+ * `(orgApprovalChannels.channelType ASC, subaccounts.name ASC)` — the
+ * UI relies on stable ordering across mutations to avoid flicker, and
+ * `org_approval_channels` has no `name` column (channelType is the
+ * canonical identifier in v1; channels are grouped by type).
+ *
+ * Only `active = true` rows are returned. Revoked rows are preserved
+ * for audit but never surfaced to the management UI.
+ */
+export async function listGrants(organisationId: string): Promise<Array<{
+  id: string;
+  orgChannelId: string;
+  subaccountId: string;
+  orgChannel: { id: string; channelType: string };
+  subaccount: { id: string; name: string };
+}>> {
+  return getOrgScopedDb('approvalChannelService.listGrants')
+    .select({
+      id: orgSubaccountChannelGrants.id,
+      orgChannelId: orgSubaccountChannelGrants.orgChannelId,
+      subaccountId: orgSubaccountChannelGrants.subaccountId,
+      orgChannel: {
+        id: orgApprovalChannels.id,
+        channelType: orgApprovalChannels.channelType,
+      },
+      subaccount: {
+        id: subaccounts.id,
+        name: subaccounts.name,
+      },
+    })
+    .from(orgSubaccountChannelGrants)
+    .innerJoin(
+      orgApprovalChannels,
+      eq(orgApprovalChannels.id, orgSubaccountChannelGrants.orgChannelId),
+    )
+    .innerJoin(
+      subaccounts,
+      eq(subaccounts.id, orgSubaccountChannelGrants.subaccountId),
+    )
+    .where(
+      and(
+        eq(orgSubaccountChannelGrants.organisationId, organisationId),
+        eq(orgSubaccountChannelGrants.active, true),
+      ),
+    )
+    .orderBy(asc(orgApprovalChannels.channelType), asc(subaccounts.name));
 }
 
 // ---------------------------------------------------------------------------

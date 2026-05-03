@@ -50,30 +50,38 @@ function getExponent(currency: string): number {
  *
  * Returns deterministic strings regardless of locale so unit tests
  * produce consistent results across environments.
+ *
+ * Negative-sign placement follows financial-display convention:
+ *   - Prefix-symbol currencies: `-$5.00` (minus before the symbol)
+ *   - Postfix-symbol currencies: `-1.000 BD` (minus on the number)
+ *   - Unknown currencies:        `-100 XYZ`
  */
 export function formatSpendCardPure(input: FormatSpendCardInput): FormatSpendCardResult {
   const { amountMinor, currency, merchantId, merchantDescriptor } = input;
   const code = currency.toUpperCase();
   const exponent = getExponent(code);
   const divisor = Math.pow(10, exponent);
-  const value = amountMinor / divisor;
+  const isNegative = amountMinor < 0;
+  const absValue = Math.abs(amountMinor) / divisor;
+  const sign = isNegative ? '-' : '';
 
   let amountDisplay: string;
   const sym = CURRENCY_SYMBOL[code];
-  const formatted = value.toFixed(exponent);
+  const formattedAbs = absValue.toFixed(exponent);
 
   if (sym) {
     // Symbols that are not standard prefix ($, €, etc.) go after:
     // BHD → "1.000 BD", KWD → "1.000 KD"
     const postfixSymbols = new Set(['BD', 'KD', 'OMR', 'JD']);
     if (postfixSymbols.has(sym)) {
-      amountDisplay = `${formatted} ${sym}`;
+      amountDisplay = `${sign}${formattedAbs} ${sym}`;
     } else {
-      amountDisplay = `${sym}${formatted}`;
+      // Standard financial format: minus precedes the currency symbol.
+      amountDisplay = `${sign}${sym}${formattedAbs}`;
     }
   } else {
     // Unknown currency: render as "100 XYZ" rather than crashing
-    amountDisplay = `${formatted} ${code}`;
+    amountDisplay = `${sign}${formattedAbs} ${code}`;
   }
 
   const merchantDisplay = merchantId

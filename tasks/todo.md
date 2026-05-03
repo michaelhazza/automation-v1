@@ -2601,3 +2601,23 @@ ChatGPT Round 1 produced 8 findings. 5 auto-applied in-branch (1, 2, 4, 5, 7); t
 
 - [ ] **AC-CGPT-3** — `ConservativeDefaultsButton` `POST /spending-budgets/:id/conservative-defaults` lacks operator-visible safety guards. ChatGPT recommends one of: (a) a confirmation modal listing the fields about to be overwritten with the conservative defaults, (b) a diff preview (current → defaults) before commit, (c) idempotency indicator (e.g. button disabled when already at defaults). UX decision required — applying defaults to a freshly-created budget vs an in-use one have different risk profiles.
   - File: `client/src/components/spend/ConservativeDefaultsButton.tsx`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 2)
+
+**Captured:** 2026-05-03T23:24:25Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T23-24-25Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 2 produced 8 findings. 3 auto-applied in-branch (2, 4, 5); 1 was already done in Round 1 (1 — DB-level UNIQUE in migration 0275); 4 routed here as follow-ups. ChatGPT's Round 2 verdict was *Green with 2 minor caveats*; both caveats were resolved or already in place. A side-finding (frontend↔server route mismatch on `GrantManagementSection`) discovered during Round 2 work was also fixed in this round — see the review log for detail.
+
+- [ ] **AC-CGPT-R2-1** — `GrantManagementSection.handleAdd` and `handleRevoke` `await load()` after every mutation, blocking the UI until the full reload completes. ChatGPT Round 2 Finding 3 recommends fire-and-forget reload OR optimistic-with-background-sync to reduce perceived latency. Trade-off: this conflicts with the Round 1 server-authoritative-reload pattern that resolved the original mixed-update-strategy bug. Prefer to defer until the admin-config UI sees enough use to measure actual latency stacking. If applied: keep server-authoritative as the source of truth, but render an optimistic insert/remove immediately and reconcile on `load()` completion.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R2-2** — `formatSpendCardPure` does not insert thousands separators for large amounts. `999999.99` could read as `$999,999.99` for clearer comprehension. ChatGPT itself recommends keeping the pure function deterministic (no locale-dependent `Intl.NumberFormat`) and adding an optional formatter layer at the rendering tier instead. Two-tier: pure helper produces canonical `999999.99`, render layer optionally formats with `Intl.NumberFormat` for display.
+  - File: `client/src/components/spend/formatSpendCardPure.ts`
+
+- [ ] **AC-CGPT-R2-3** — `PendingApprovalCardLaneConfig.test.ts` hardcodes `expectedLanes = ['client', 'major', 'internal', 'spend']`. If the server adds a new lane, the test still passes (it only checks the hardcoded list is covered, not that the server's actual emit set is covered). Consider extracting the canonical lane set into a shared types file (`shared/types/pulseAttention.ts` or similar) and importing it into both server and test for true drift detection.
+  - File: `client/src/components/dashboard/__tests__/PendingApprovalCardLaneConfig.test.ts`
+
+- [ ] **AC-CGPT-R2-4** — `GrantManagementSection.load()` fires three parallel `api.get()` calls every time `orgId` changes. For large orgs with many channels and subaccounts, this can be slow. Consider: (a) caching org channels and subaccounts client-side (rare changes), (b) consolidating into a single `/api/approval-channels/grants/management-data` endpoint that returns all three, (c) prefetching at app load. Lower priority — admin-config UI traffic is low-volume.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`

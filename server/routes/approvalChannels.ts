@@ -14,6 +14,7 @@
 //   DELETE /api/approval-channels/:channelId
 //
 // Org-subaccount channel grants:
+//   GET    /api/approval-channels/grants          (list active grants for org)
 //   POST   /api/approval-channels/:channelId/grants
 //   DELETE /api/approval-channels/:channelId/grants/:grantId
 //
@@ -37,6 +38,7 @@ import {
   deleteOrgChannel,
   addGrant,
   revokeGrant,
+  listGrants,
 } from '../services/approvalChannelService.js';
 import { randomUUID } from 'node:crypto';
 
@@ -212,6 +214,20 @@ router.delete(
 // ===========================================================================
 // Org-subaccount channel grants
 // ===========================================================================
+
+// Listing route is registered BEFORE the parameterised `/:channelId/grants`
+// routes so Express matches the literal segment first. (Express matches in
+// declaration order — without this ordering, `:channelId` would consume the
+// literal `grants` token and the GET would 404.)
+router.get(
+  '/api/approval-channels/grants',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SPEND_APPROVER),
+  asyncHandler(async (req, res) => {
+    const grants = await listGrants(req.orgId!);
+    res.json(grants);
+  }),
+);
 
 router.post(
   '/api/approval-channels/:channelId/grants',

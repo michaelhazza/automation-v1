@@ -58,14 +58,24 @@ test('lowercase currency code is normalised', () => {
 // values, and the smallest-non-zero minor unit at each exponent.
 // ──────────────────────────────────────────────────────────────────────────
 
-test('USD: negative amount → -$5.00 (refund / dispute display)', () => {
+test('USD: negative amount → -$5.00 (financial-standard sign-before-symbol)', () => {
   const result = formatSpendCardPure({ amountMinor: -500, currency: 'USD', merchantId: null, merchantDescriptor: 'Refund' });
-  expect(result.amountDisplay).toBe('$-5.00');
+  expect(result.amountDisplay).toBe('-$5.00');
 });
 
-test('JPY: negative amount → ¥-100 (0 decimals, no fractional artifact)', () => {
+test('JPY: negative amount → -¥100 (0 decimals, sign-before-symbol)', () => {
   const result = formatSpendCardPure({ amountMinor: -100, currency: 'JPY', merchantId: null, merchantDescriptor: 'Refund' });
-  expect(result.amountDisplay).toBe('¥-100');
+  expect(result.amountDisplay).toBe('-¥100');
+});
+
+test('BHD: negative amount → -1.000 BD (postfix-symbol currency keeps minus on number)', () => {
+  const result = formatSpendCardPure({ amountMinor: -1000, currency: 'BHD', merchantId: null, merchantDescriptor: 'Refund' });
+  expect(result.amountDisplay).toBe('-1.000 BD');
+});
+
+test('Unknown currency: negative amount → -100 XYZ (no symbol, minus on number)', () => {
+  const result = formatSpendCardPure({ amountMinor: -10000, currency: 'XYZ', merchantId: null, merchantDescriptor: 'Refund' });
+  expect(result.amountDisplay).toBe('-100.00 XYZ');
 });
 
 test('USD: large amount → $999,999.99 equivalent renders as $999999.99', () => {
