@@ -59,7 +59,7 @@ The branch is in a state suitable for finalisation. All in-branch fixes are comm
 
 1. **S2 branch sync.** Merge `origin/main` into the branch. As of Phase 2 close, the branch was 0 commits behind `origin/main` at S0 (Phase 1 entry). Re-check at S2 — main may have advanced.
 2. **G4 regression guard.** Run the regression check.
-3. **PR open.** No PR exists. Phase 3 must open it (or, per the four-step plan agreed with the operator, the main session opens it before launching Phase 3 in a fresh session).
+3. **PR open.** PR #255 exists (https://github.com/michaelhazza/automation-v1/pull/255). Title and body were updated 2026-05-04 by the main session at Phase 3 entry; the original auto-created PR placeholder title ("claude/agentic commerce spending") and skeletal body (commit-list only) are no longer current.
 4. **chatgpt-pr-review.** Manual ChatGPT-web rounds.
 5. **Doc-sync sweep.** Per `docs/doc-sync.md`. Inline updates have already landed in `architecture.md` and `docs/capabilities.md`; the sweep should verify no other reference doc was invalidated by the schema rename, the new SPEND_APPROVER permission, the Stripe webhook handler, or the new state machine. Specifically check:
    - `architecture.md` § Key files per domain (new spend domain entry points)
@@ -108,6 +108,6 @@ Three sections in `tasks/todo.md` capture the agentic-commerce backlog. None of 
 
 ## Sequence to Phase 3
 
-1. Commit this handoff + bookkeeping + adversarial-reviewer fix (main session).
-2. Open the PR (main session, manual `gh pr create`).
-3. New session: `launch finalisation`.
+1. ~~Commit this handoff + bookkeeping + adversarial-reviewer fix (main session).~~ DONE — commit `581d22db`, pushed.
+2. ~~Open the PR (main session, manual `gh pr create`).~~ PR #255 already existed — title + body refreshed at Phase 3 entry.
+3. Launch finalisation-coordinator. Operator opted to resume in the same session rather than spawning a new one.
