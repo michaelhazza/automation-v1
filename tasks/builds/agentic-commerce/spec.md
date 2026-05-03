@@ -162,7 +162,7 @@ disputed → refunded            (chargeback resolved in customer's favour — S
 
 - `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded` are terminal. No further transitions. No automatic retry.
 - `failed` is terminal for the row. A retry is a new Charge row under the same `intent_id`.
-- `pending_approval` and `executed` are non-terminal. Both reserve their `amount_minor` against Spending Limits until reaching a terminal state.
+- All non-terminal states (`pending_approval`, `approved`, `executed`, `disputed`) reserve their `amount_minor` against Spending Limits until the row reaches a terminal state. Reserved capacity is consistent across §9.3 and §16.2 — anything not yet terminal counts.
 - An `approved` Charge that does not transition to `executed` or `shadow_settled` within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`.
 - A `pending_approval` Charge that receives no response within `approval_expires_at` is auto-marked `denied` with `reason = 'approval_expired'`.
 - When a Kill Switch fires, all `pending_approval` Charges for that scope are immediately auto-cancelled (transition to `denied` with `reason = 'kill_switch'`). In-flight `executed` Charges continue to their Stripe outcome.
@@ -516,7 +516,7 @@ New `spendsMoney: boolean` flag on `ActionDefinition` in `actionRegistry.ts`. Wh
 | `top_up_balance` | Prepaid-balance top-up (cash movement, distinct from ad-platform budget). |
 | `issue_refund` | Issues a refund against a prior charge. `charge_type: 'refund'`, `direction: 'inbound_refund'`. |
 
-Each skill is a thin shell over `chargeRouterService.proposeCharge`. Skills carry SKILL.md frontmatter and are registered in both `ACTION_REGISTRY` and `SKILL_HANDLERS`.
+Each skill is a thin shell over `chargeRouterService.proposeCharge`. Skills ship as `server/skills/<slug>.md` files with the standard skill-file frontmatter (matching the `add_deliverable.md` / `book_meeting.md` precedent) and are registered in both `ACTION_REGISTRY` and `SKILL_HANDLERS`.
 
 **Spend audit reason:** `reason: 'spend_block'` written on the security event in `proposeAction.ts` when a spend policy blocks an action. Distinct from `'policy_block'` for analytics and debugging.
 
@@ -527,11 +527,11 @@ Each skill is a thin shell over `chargeRouterService.proposeCharge`. Skills carr
 Workers carry no persistent SPT credentials and have no direct DB access to `integration_connections`. All spend is authorised by the main app. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns the SPT in the response payload as ephemeral, single-use material (see invariant 3). The round-trip mechanism:
 
 1. Worker decides to make a purchase (Playwright loop emits `spend_request` action in `iee_steps`).
-2. Worker writes a job to `agent-spend-request` queue: `{ ieeRunId, agentRunId, organisationId, subaccountId, agentId, intent, amountMinor, merchant, idempotencyKey, correlationId }`.
-3. Main app processes the job: `chargeRouterService.proposeCharge()` → `actionService.proposeAction()`. Writes response to `agent-spend-response` queue: `{ correlationId, decision: 'approved' | 'blocked' | 'denied' | 'pending_approval', chargeToken?, ledgerRowId, errorReason? }` (see §8.4 for the full contract; `blocked` and `denied` stay distinct on the wire per invariant 10).
-4. Worker picks up response by `correlationId`. Deadline: 30 seconds. If no response within 30s, the worker records the timeout locally (worker log + IEE step) and abandons the in-flight purchase attempt. The worker MUST NOT write to `agent_charges` directly — invariant 1 reserves all ledger writes for `chargeRouterService`. The main app's execution-window timeout job (see §4 rules; runs in `chargeRouterService`) reconciles the orphaned row to `failed` with `reason = 'roundtrip_timeout'` once the row's `expires_at` passes.
-5. Auto-approved charge: `chargeToken` (SPT) returned; worker fills the merchant's payment form and observes result.
-6. `pending_approval`: workflow pauses (same pause-resume mechanics as other HITL actions). Worker does not proceed until the approval resolves and the response queue delivers the outcome.
+2. Worker writes a job to `agent-spend-request` queue (full payload in §8.3).
+3. Main app processes the job: `chargeRouterService.proposeCharge()` → `actionService.proposeAction()`. Writes the **immediate decision** to `agent-spend-response` queue: `{ correlationId, decision: 'approved' | 'blocked' | 'denied' | 'pending_approval', chargeToken?, ledgerRowId, errorReason? }` (see §8.4 for the full contract; `blocked` and `denied` stay distinct on the wire per invariant 10). The main app emits this response synchronously from the job handler — it does NOT wait for HITL approval before responding.
+4. Worker picks up the immediate response by `correlationId`. Deadline: 30 seconds. If no response within 30s, the worker records the timeout locally (worker log + IEE step) and abandons the in-flight purchase attempt. The worker MUST NOT write to `agent_charges` directly — invariant 1 reserves all ledger writes for `chargeRouterService`. The main app's execution-window timeout job (see §4 rules; runs in `chargeRouterService`) reconciles the orphaned row to `failed` with `reason = 'roundtrip_timeout'` once the row's `expires_at` passes.
+5. Auto-approved charge (`decision: 'approved'`, live mode): `chargeToken` (SPT) returned; worker fills the merchant's payment form and observes result. The 30-second deadline applies only to the IMMEDIATE response, not to Stripe-side latency on the worker's subsequent Stripe call.
+6. Pending approval (`decision: 'pending_approval'`): the immediate response delivers `pending_approval` within 30 seconds and the worker / its enclosing workflow PAUSES. The eventual approve/deny outcome is delivered later via the workflow-resume channel (the same pause/resume mechanics that other HITL actions use), NOT via a long-deadlined `agent-spend-response` reply. The 30-second deadline is the immediate-decision deadline only; HITL approval resolution has no bounded wait.
 
 **RLS context:** `organisationId` and `subaccountId` carried in the queue payload. Established at the main-app boundary via `actionService.proposeAction`'s tenant args, not via DB GUCs (worker sets none).
 
@@ -567,24 +567,25 @@ The existing `integrationConnections` + `connectionTokenService` infrastructure 
 
 ### 7.5 Stripe Webhook Ingestion
 
-**Decision: new dedicated route `server/routes/webhooks/stripeAgentWebhook.ts` mounted at `/api/webhooks/stripe-agent`.**
+**Decision: new dedicated route `server/routes/webhooks/stripeAgentWebhook.ts` mounted at `/api/webhooks/stripe-agent/:connectionId`.**
 
-The existing Stripe data connector has no webhook handler — brief option (a) "modify existing" is inapplicable. The scoped path (`/stripe-agent` not `/stripe`) keeps it isolated from any future general-purpose Stripe handler.
+The existing Stripe data connector has no webhook handler — brief option (a) "modify existing" is inapplicable. The scoped path (`/stripe-agent` not `/stripe`) keeps it isolated from any future general-purpose Stripe handler. The `:connectionId` path parameter carries the `integration_connections.id` used to look up the per-connection `webhookSecret` BEFORE signature verification — Stripe is configured at SPT-issuance time with the per-connection webhook URL containing the connection ID.
 
 **Route responsibilities:**
 - `raw({ type: 'application/json' })` body parser registered before the global JSON parser to preserve raw body for HMAC.
-- Verify `stripe-signature` header against `integrationConnections.configJson.webhookSecret` for the matching sub-account connection.
+- Resolve `:connectionId` from the path; load the corresponding `integration_connections` row via `withAdminConnection` (no tenant context yet — verification happens before tenant resolution). 404 if no row, or if the row's `providerType !== 'stripe_agent'` or `connectionStatus = 'revoked'`.
+- Verify `stripe-signature` header against the loaded row's `configJson.webhookSecret`. Reject with HTTP 400 + `recordIncident` on signature failure.
+- Resolve the tenant context (`organisation_id`, `subaccount_id`) from the verified connection row.
 - Acknowledge with HTTP 200 immediately.
 - Deduplicate via `webhookDedupeStore` keyed on Stripe's event `id`.
-- Dispatch asynchronously to `stripeAgentWebhookService`.
-- Use `withAdminConnection` + resolve org from connection ID before service calls (precedent: `paymentReconciliationJob.ts`).
-- Record incident via `recordIncident` on verification failure.
+- Dispatch asynchronously to `stripeAgentWebhookService` with the resolved tenant context (precedent: `paymentReconciliationJob.ts` for the `withAdminConnection` + connection-driven tenant resolution shape).
 
 **`stripeAgentWebhookService` responsibilities:**
 - Transition `agent_charges` rows: `executed → succeeded`, `executed → failed`, `succeeded → refunded`, `succeeded → disputed`, `disputed → succeeded`, `disputed → refunded`.
-- On `succeeded`: trigger `agentSpendAggregateService.upsertAgentSpend(charge)` to add the charge to the relevant `agent_spend_*` rollups.
-- On `refunded` (either `succeeded → refunded` or `disputed → refunded`): trigger `agentSpendAggregateService.upsertAgentSpend(charge)` again, this time as a net-spend reduction. The aggregate write path consumes the charge's `direction`/`status` to know whether to add or subtract from the rollup totals (`'inbound_refund'` rows subtract; `succeeded` outbound rows add). This keeps `cost_aggregates` consistent with the §16.7 net-spend definition without requiring a periodic recompute.
-- On `disputed` and `disputed → succeeded`: aggregates remain unchanged. The original `succeeded → disputed` transition does not retroactively reverse the rollup; only a final `→ refunded` outcome reduces the aggregate.
+- On outbound `→ succeeded` (live charge confirmed): trigger `agentSpendAggregateService.upsertAgentSpend(charge)` to add the charge to the rollups.
+- On inbound-refund-row `→ succeeded` (operator-issued refund settles via `issue_refund`): trigger `agentSpendAggregateService.upsertAgentSpend(charge)`; the service's direction-aware path subtracts from the parent's rollup window (see §7.6).
+- On outbound `→ refunded` (dispute lost via webhook): trigger `agentSpendAggregateService.upsertAgentSpend(charge)`; the service subtracts from the rollup window. No separate inbound_refund row is created in this path (per §7.6 source-of-truth rule).
+- On `succeeded → disputed` and `disputed → succeeded`: aggregates remain unchanged. Only the final `→ refunded` outcome (whether dispute or operator-issued) ever reduces the aggregate.
 - Alert if `executed` row not found for a webhook event (reconciliation mismatch — critical alert).
 - Handle the case where a webhook arrives for a row the ledger considers `failed` (e.g. via timeout path): Stripe's determination takes precedence, update ledger.
 
@@ -599,7 +600,13 @@ The existing Stripe data connector has no webhook handler — brief option (a) "
 - `agent_spend_org` — monthly + daily rollups keyed by `organisationId`.
 - `agent_spend_run` — per-run total keyed by `agentRunId`.
 
-The upsert path mirrors `costAggregateService.upsertAggregates` but accepts a `Charge` input shape (not `LlmRequest`). For outbound `succeeded` rows it adds `amount_minor` to `totalCostCents` and increments `requestCount`. For `inbound_refund` charges that reach `succeeded` (i.e. a refund settled by Stripe) it subtracts the refund's `amount_minor` from the rollup of the parent charge's window so net-spend stays consistent with §16.7. For `succeeded → refunded` transitions on outbound charges (refunds issued via `issue_refund`), the same subtraction applies. `totalTokensIn/Out = 0`. Non-commingled because dashboards filter by `entityType`.
+The upsert path mirrors `costAggregateService.upsertAggregates` but accepts a `Charge` input shape (not `LlmRequest`). The aggregate write rules are mutually exclusive per charge row — there is exactly one source of truth for each refund event:
+
+- **Outbound `succeeded` charges:** add `amount_minor` to `totalCostCents`, increment `requestCount`. Source of truth: the row's own `succeeded` transition.
+- **Inbound-refund charges (operator-issued via `issue_refund`):** these are NEW rows with `direction = 'inbound_refund'`, `parent_charge_id` pointing at the original. When THIS row reaches `succeeded`, subtract its `amount_minor` from the original charge's rollup window (the parent row remains `succeeded` and its rollup row is unchanged by this refund). Source of truth: the inbound_refund row's own `succeeded` transition.
+- **Outbound `succeeded → refunded` transitions (dispute lost; Stripe webhook):** there is no separate inbound_refund row in this path. Subtract `amount_minor` from the rollup window when the original row transitions to `refunded`. Source of truth: the outbound row's `→ refunded` transition.
+
+Because operator refunds and dispute-loss refunds use disjoint rows / transitions, no double-subtract is possible. `totalTokensIn/Out = 0`. Non-commingled because dashboards filter by `entityType`.
 
 Dashboard query routes (`server/routes/agentCharges.ts`) expose the ledger directly; the aggregate surface provides the rollup numbers.
 
@@ -703,6 +710,7 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
   organisationId: string     // uuid
   subaccountId: string       // uuid
   agentId: string            // uuid
+  toolCallId: string         // uuid; this specific tool call within the run (carried so the main app can recompute the idempotency key)
   intent: string
   amountMinor: number        // positive integer
   currency: string           // ISO 4217
@@ -711,7 +719,8 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
     descriptor: string
   }
   chargeType: 'purchase' | 'subscription' | 'top_up' | 'invoice_payment'
-  idempotencyKey: string     // pre-built by worker using charge key shape from §9.1
+  args: Record<string, unknown>  // canonical args used for the idempotency key hash; main app rebuilds and verifies the key
+  idempotencyKey: string     // pre-built by worker using charge key shape from §9.1; main app recomputes from (skillRunId, toolCallId, intent, args) and rejects on mismatch
   correlationId: string      // uuid; used to match response
 }
 ```
@@ -745,10 +754,10 @@ This gives the run-timeline UI a "charge attempted → see ledger row" link with
   id: string
   spendingBudgetId: string
   mode: 'shadow' | 'live'
-  perTxnLimitMinor: number        // 0 = everything to HITL
-  dailyLimitMinor: number
-  monthlyLimitMinor: number
-  approvalThresholdMinor: number  // 0 = everything to HITL
+  perTxnLimitMinor: number        // 0 = unset (no per-txn cap)
+  dailyLimitMinor: number          // 0 = unset (no daily cap)
+  monthlyLimitMinor: number        // 0 = unset (no monthly cap)
+  approvalThresholdMinor: number  // 0 = every positive charge routes to HITL
   merchantAllowlist: Array<{
     id: string | null             // Stripe merchant ID (primary identifier)
     descriptor: string            // normalised fallback
@@ -792,7 +801,7 @@ Key stored as `UNIQUE NOT NULL` on `agent_charges.idempotency_key`. Insert via `
 
 `idempotencyStrategy: 'locked'` declared on all five new `ActionRegistry` entries (enforced by `verify-idempotency-strategy-declared.sh`).
 
-**Worker→app round-trip:** worker pre-builds the idempotency key using the same shape before emitting the pg-boss job. Main app receives the pre-built key and uses it for the charge row insert.
+**Worker→app round-trip:** worker pre-builds the idempotency key using the same shape before emitting the pg-boss job (the worker also runs `chargeRouterServicePure.buildChargeIdempotencyKey` since the pure layer is dependency-free). The `WorkerSpendRequest` carries `toolCallId`, `args`, and the pre-built `idempotencyKey`. The main app's job handler rebuilds the key from those fields via the same pure helper and rejects the request if the recomputed key does not match the supplied one (defends against a buggy worker emitting a malformed key). The verified key is then used for the charge row insert.
 
 **Shadow→live promotion:** policy-level flip only. Does not retroactively re-issue past shadow charges. Past shadow rows remain `shadow_settled`. Future charges on the same policy create new rows with `mode = 'live'` and new idempotency keys (because intent includes `charge:live:` prefix).
 
@@ -811,13 +820,13 @@ Key stored as `UNIQUE NOT NULL` on `agent_charges.idempotency_key`. Insert via `
 ### 9.3 Concurrency Guards
 
 **Concurrent charge attempts against the same Spending Policy limits:**
-- Spending Limits are evaluated against settled charges **plus all in-flight approved charges** (`pending_approval` + `executed`). In-flight charges reserve their `amount_minor` against limits.
+- Spending Limits are evaluated against settled outbound charges (net of inbound refunds, per §16.7) **plus all non-terminal charges** (`pending_approval`, `approved`, `executed`, `disputed`). Non-terminal charges reserve their `amount_minor` against limits until they reach a terminal state.
 - Guard: `chargeRouterServicePure.evaluatePolicy` reads all non-terminal charges for the budget and sums reserved capacity before accepting a new charge. Two concurrent charges that individually fit but collectively exceed the limit — the second is `blocked`.
 - Enforcement: advisory lock on `spending_budgets.id` during the propose+gate sequence (mirror of `acquireOrgComputeBudgetLock` pattern), released after the charge row is written.
 
 **Concurrent HITL approval responses:**
 - `UPDATE agent_charges SET status = 'approved', approved_at = NOW() WHERE id = $id AND status = 'pending_approval'` — optimistic predicate.
-- Zero rows updated = another response already won. Losing caller receives the current row, records its response as `superseded`, returns 200.
+- Zero rows updated = another response already won. Losing caller writes its response onto the corresponding `actions` row (using the existing `actions.responseStatus` / response metadata fields, with status set to `superseded`); the `agent_charges` row itself is not mutated by losing responses. Caller returns 200. SPT-reconnect-required workflow metadata (per §16.9) is similarly recorded on `actions` and `iee_steps`, never on `agent_charges` — the ledger row stays narrowly scoped to the charge state machine.
 
 **Policy revalidation on approval:**
 - When an approval response arrives for a `pending_approval` charge, `chargeRouterService` re-reads the current `spending_policies` row (checking `version` against `agent_charges.policy_version`).
@@ -863,7 +872,7 @@ These rules hold in every code path. Violations are blocking issues in adversari
 
 1. **Ledger row before charge.** `chargeRouterService` writes a `proposed` row in `agent_charges` before contacting Stripe or calling any external service. No code path reaches Stripe without a ledger row already written.
 2. **Policy check before execution.** No spend-enabled skill calls Stripe directly. All execution flows through `chargeRouterService.proposeCharge`.
-3. **Worker never charges directly.** IEE workers hold no persistent SPT credentials, have no DB access to `integration_connections`, and never authorise spend on their own. All spend is authorised by the main app via the pg-boss request-reply round-trip. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns an ephemeral SPT in the response payload (single-use, scoped to that one charge); the worker uses it inline and discards it. No SPT is logged, persisted, or reused on the worker side.
+3. **Worker never charges directly.** IEE workers hold no persistent SPT credentials, have no DB access to `integration_connections`, and never authorise spend on their own. All spend is authorised by the main app via the pg-boss request-reply round-trip. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns the SPT in the response payload bound to one `ledgerRowId`. The token is not server-mint-rotated per call (it is the SPT held in `integration_connections`); "single-use at the protocol level" means: (a) the `chargeToken` field is delivered exactly once per `correlationId`, (b) the worker's payment call carries the charge `idempotency_key` as Stripe's idempotency-key header so any re-use against the same merchant call collapses to the original outcome, and (c) the `agent_charges.idempotency_key` UNIQUE constraint blocks duplicate ledger rows. The worker MUST NOT log, persist, or reuse the token across charges; on receipt it uses the token inline and discards the variable. Stronger enforcement (server-minted single-use wrapper) is deferred — see §20.
 4. **Idempotency at DB level.** `agent_charges.idempotency_key` is UNIQUE. Duplicates resolve via `INSERT ... ON CONFLICT DO UPDATE`, not application-layer deduplication.
 5. **Tenant isolation.** RLS policies protect `spending_budgets`, `spending_policies`, and `agent_charges`. Cross-tenant SPT access is a critical incident.
 6. **Shadow charges write to the real ledger.** Shadow mode does not skip the Spend Ledger. Every shadow attempt gets a full `shadow_settled` row with policy decision, allowlist result, and Charge Intent recorded.
@@ -921,7 +930,7 @@ All new tables added to `server/config/rlsProtectedTables.ts`.
 | `PATCH /spending-budgets/:id/policy` | `authenticate` + `requirePermission('admin')` | |
 | `GET /agent-charges` | `authenticate` + `requirePermission('spend_approver')` | Ledger read |
 | `GET /agent-charges/:id` | `authenticate` + `requirePermission('spend_approver')` | |
-| `POST /webhooks/stripe-agent` | No auth — Stripe-signed. Signature verification is the auth. | `withAdminConnection` after verification |
+| `POST /webhooks/stripe-agent/:connectionId` | No auth — Stripe-signed. Signature verification is the auth. | Look up connection row by `:connectionId` via `withAdminConnection`, verify signature against that row's `configJson.webhookSecret`, then resolve tenant context from the verified row. |
 | `GET /approval-channels` | `authenticate` + scope-appropriate admin | |
 | `POST /approval-channels` | `authenticate` + scope-appropriate admin | |
 | All routes with `:subaccountId` | `resolveSubaccount(req.params.subaccountId, req.orgId!)` | Gate `verify-subaccount-resolution.sh` |
@@ -1054,13 +1063,13 @@ Retries are explicit: a `failed` Charge is terminal; a retry is a new Charge row
 
 ### 16.2 Concurrency and Reserved Capacity
 
-Spending Limits are enforced against settled charges plus all in-flight approved charges. An `approved` or `executed` Charge reserves its `amount_minor` against limits until a terminal state. Two concurrent charges that individually fit but collectively exceed a limit — the second is `blocked`. Evaluated at the Gate step, before HITL routing and before Stripe execution.
+Spending Limits are enforced against settled outbound charges (net of inbound refunds) plus all non-terminal charges (`pending_approval`, `approved`, `executed`, `disputed`). Each non-terminal Charge reserves its `amount_minor` against limits until the row reaches a terminal state. Two concurrent charges that individually fit but collectively exceed a limit — the second is `blocked`. Evaluated at the Gate step, before HITL routing and before Stripe execution.
 
 ### 16.3 Approval Expiry and Policy Revalidation
 
 Pending approvals expire after `spending_policies.approval_expires_hours` (default 24 hours). When an approval is acted on, the Charge Router re-checks the current `spending_policies` version before executing. If the policy has changed such that the charge would now be blocked (limit reduced, merchant removed, Kill Switch fired, version incremented), the Charge is auto-denied with `reason = 'policy_changed'`.
 
-Approval resolution is atomic: the first valid response wins via the optimistic predicate (see §9.3). Subsequent responses are recorded as `superseded`.
+Approval resolution is atomic: the first valid response wins via the optimistic predicate (see §9.3). Subsequent responses are recorded as `superseded` on the `actions` row only (per §9.3); `agent_charges` rows are not mutated by losing responses.
 
 ### 16.4 Merchant Identity
 
@@ -1175,7 +1184,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - `requiredIntegration: 'stripe_agent'`
 - `SPEND_ACTION_ALLOWED_SLUGS` constant
 - Five SKILL_HANDLERS entries in `skillExecutor.ts`
-- Five SKILL.md files
+- Five `server/skills/<slug>.md` files (one per skill, standard skill-file frontmatter — same convention as the existing `add_deliverable.md` / `book_meeting.md` files)
 
 ### Chunk 7 — Policy Engine Extension
 
@@ -1227,7 +1236,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - Alert emission for mismatch and delay
 - 30-minute reconciliation poll job
 
-### Chunk 13 — Cost Aggregation Parallel Writer
+### Chunk 13 — Cost Aggregation Parallel Writer + Budget/Channel Routes
 
 - `agentSpendAggregateService.ts`
 - New `entityType` values: `agent_spend_subaccount`, `agent_spend_org`, `agent_spend_run`
@@ -1237,6 +1246,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - `server/routes/spendingPolicies.ts` (CRUD on policy fields)
 - `server/routes/approvalChannels.ts` (channel + grant CRUD)
 - Net spend calculation (refunds included)
+- `spend_approver` default-grant logic in `spendingBudgetService.create()` — grants the permission to the relevant org / sub-account admin atomically with the budget insert. Ships in this chunk so budget creation is never available without default-grant logic (closes the §17 Chunk 16 sequencing gap Codex flagged).
 
 ### Chunk 14 — Admin UI
 
@@ -1259,8 +1269,9 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 
 - Conservative-defaults one-click template button
 - Per-org shadow retention configuration: `organisations.shadow_charge_retention_days integer NOT NULL DEFAULT 90` (added in Chunk 2's schema migration; admin UI surface lands in Chunk 16)
-- `spend_approver` default-grant logic on Spending Budget creation
 - SPT onboarding flow integration with existing `integrationConnections` OAuth UI
+
+(Note: `spend_approver` default-grant logic ships earlier in Chunk 13 alongside the budget-creation endpoint — see Chunk 13 for that line item.)
 
 ## 18. File Inventory
 
@@ -1314,12 +1325,13 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - Spend lane in `PendingApprovalCard` (may extend existing file)
 
 **pg-boss queue handlers (`server/jobs/`):**
-- Handler for `agent-spend-request` queue
-- Handler for `agent-spend-response` queue (worker reply)
+- Handler for `agent-spend-request` queue (main app consumes; worker produces)
 - Scheduled: execution window timeout job
 - Scheduled: approval expiry job
 - Scheduled: 30-minute reconciliation poll job
 - Scheduled: shadow charge retention purge job
+
+(Note: `agent-spend-response` is produced by the main app and consumed by the worker — no server-side handler is registered for it. The worker-side consumer lives in `worker/src/persistence/runs.ts`.)
 
 ### 18.2 Modified Files
 
@@ -1400,14 +1412,13 @@ runtime_tests: pure_function_only
 - **Spend velocity limits (max N charges per minute/hour).** `spending_policies.velocity_config` column is nullable and reserved. Not built in v1.
 - **Confidence gating.** Spending Policy may optionally gate on agent confidence score. `spending_policies.confidence_gate_config` column is nullable and reserved. Not built in v1.
 - **Charge provenance analytics.** `agent_charges.provenance` column exists in schema but is not populated or used in v1 logic.
-- **Auto-refund on workflow rollback.** Manual HITL resolution in v1. Auto-refund introduces its own failure modes. Deferred.
 - **Kill Switch re-enablement UI.** Not in v1. Re-enabling requires creating a new Spending Budget.
-- **Machine Payments Protocol (AI-to-AI commerce).** Explicitly deferred until v1 usage data is available.
-- **Sales Autopilot Playbook spending capability.** Deferred until this build is stable in production. Sales Autopilot is in active development.
 - **Aggregated cross-currency spend dashboard.** v1 shows each budget in its own currency. Cross-currency aggregation deferred.
 - **Org-exclusive approval channel mode** (org replaces sub-account channels entirely). Schema supports it; not exposed in v1 UI.
 - **`increase_budget` and `update_bid` skill retrofits.** These skills were identified as candidates for spend integration (see exploration report §8.10). Deferred to a follow-up after the core spending primitive ships.
-- **Customer-facing SPT issuance.** Operator-side spending only in v1.
+- **Server-minted single-use chargeToken wrapper.** v1 hands the SPT directly to the worker bound to a `ledgerRowId` and relies on Stripe's idempotency header + the `agent_charges.idempotency_key` UNIQUE constraint to prevent reuse (see invariant 3). A future hardening step replaces the raw SPT in the response with a server-minted single-use wrapper that expires after one redemption. Deferred until v1 produces evidence that the protocol-level controls are insufficient.
+
+(Items previously listed here that overlap with §21 Out of Scope — Machine Payments Protocol, Customer-facing SPT issuance, Auto-refund on workflow rollback, Sales Autopilot Playbook spending capability — have been moved to §21 only. They are durable product stances, not deferrals, per the brief addendum.)
 
 ## 21. Out of Scope
 
