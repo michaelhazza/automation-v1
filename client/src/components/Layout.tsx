@@ -77,7 +77,7 @@ const SEG: Record<string, string | null> = {
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
-  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Briefs',
+  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Briefs', tasks: 'Tasks',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
   'agent-templates': 'Subaccount Blueprints',
   'admin-settings': 'Settings',
@@ -754,8 +754,12 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Work" />
+              {/* Workflows V1 (Chunk 11) — Tasks list (open task view landing). Briefs rename deferred to Chunk 16. */}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
+                <NavItem to="/tasks" icon={<Icons.tasks />} label="Tasks" />
+              )}
+              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks (Board)" />
               )}
               {hasOrgPerm('org.automations.view') && (
                 <NavItem to="/automations" icon={<Icons.automations />} label="Automations" />

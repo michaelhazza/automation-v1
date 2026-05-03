@@ -26,6 +26,7 @@ import {
 
 export interface UseTaskEventStreamResult {
   events: TaskEvent[];
+  envelopes: TaskEventEnvelope[];
   degraded: boolean;
   gap: boolean;
 }
@@ -238,5 +239,5 @@ export function useTaskEventStream(
   // Extract plain TaskEvent objects from envelopes for consumers
   const events = applied.map((e) => e.payload);
 
-  return { events, degraded, gap };
+  return { events, envelopes: applied, degraded, gap };
 }
