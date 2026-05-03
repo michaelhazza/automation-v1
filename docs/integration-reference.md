@@ -472,9 +472,12 @@ required_scopes:
   - calendars.readonly
   - funnels.readonly
   - conversations.readonly
+  - conversations.write
   - conversations/message.readonly
   - businesses.readonly
   - saas/subscription.readonly
+  - companies.readonly
+  - payments/orders.readonly
 scope_behavior: |
   Expanded scopes (ClientPulse Phase 1, added 2026-04-18) apply to new OAuth
   authorisations only. Existing connections with the original 3-scope token
@@ -482,6 +485,13 @@ scope_behavior: |
   require the new scopes (funnels, calendars, users, locations, saas) gate
   themselves and mark observations `unavailable_missing_scope` when absent.
   Re-consent is surfaced via a pilot-stage banner (Phase 5 surface).
+  Module C (agency-level OAuth, spec: docs/ghl-module-c-oauth-spec.md): adds
+  companies.readonly (sub-account enumeration), conversations.write,
+  payments/orders.readonly. New installs use agency token (Company target,
+  userType=Company) with a separate per-location token cache
+  (connector_location_tokens table). Token model: one agency token per
+  (orgId, companyId) in connector_configs; location tokens minted on demand
+  via /oauth/locationToken and cached with 24h TTL + 5min refresh window.
 webhook_events:
   - ContactCreate
   - ContactUpdate
