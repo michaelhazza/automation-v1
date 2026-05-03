@@ -120,6 +120,8 @@ SpendingBudget      → SpendingBudgetApprovers  (one-to-many; explicit approver
 
 The Portfolio Health Agent holds a Spending Budget at the org level with a Spending Policy permitting retention gifts. Each gift Charge attributes to the recipient sub-account in `agent_charges.subaccount_id`. This solves the cross-sub-account spending need without breaking per-sub-account isolation.
 
+**SPT resolution for org-scoped budgets:** SPT connections are stored per-sub-account (`stripe_agent` rows in `integration_connections` are owned by a single sub-account, per §7.4). For an org-scoped budget spending into a recipient sub-account, the live execution path resolves the SPT from the recipient `agent_charges.subaccount_id`, NOT from any aggregated org-level token (no such token exists in the data model). If the recipient sub-account has no active `stripe_agent` connection, or the connection is `connectionStatus = 'revoked'`, the charge is `blocked` with `reason = 'spt_unavailable'`. Operators must onboard each sub-account that may receive cross-sub-account spend through the standard SPT onboarding flow (per §7.4) before the org-scoped budget can fund charges to that sub-account.
+
 ## 4. Charge Lifecycle State Machine
 
 ### States
@@ -160,10 +162,12 @@ disputed → refunded            (chargeback resolved in customer's favour — S
 
 ### Rules
 
-- `blocked`, `denied`, `failed`, `shadow_settled`, `refunded` are terminal. No further transitions. `succeeded` is **conditionally terminal** — it is terminal under normal flow (no further transitions for the vast majority of charges) but Stripe-webhook-driven transitions `succeeded → refunded` (dispute-loss refund settled) and `succeeded → disputed` (chargeback opened) are explicit allowed transitions per the state diagram above. These are the only paths out of `succeeded`. From the caller's perspective `succeeded` is reported as "settled, no further action expected" and downstream code treats it as terminal; the post-succeeded webhook transitions are observability-only state changes for the dispute / refund lifecycle.
+- Truly-terminal states (no transitions out): `blocked`, `denied`, `failed`, `shadow_settled`, `refunded`. No further transitions. No automatic retry.
+- `succeeded` is non-terminal at the state-machine level — Stripe-webhook-driven transitions `succeeded → refunded` (dispute-loss refund settled) and `succeeded → disputed` (chargeback opened) are real ledger transitions per the state diagram. From the caller's perspective `succeeded` is reported as "settled, no further immediate action expected" and skill-level callers treat it as a success outcome, but the row is not state-machine-terminal until it reaches `refunded`. `disputed` is non-terminal — it resolves to `succeeded` (chargeback denied) or `refunded` (chargeback granted) via webhook.
+- The §9.4 statement "every charge attempt produces exactly one terminal state transition" therefore means: every charge eventually reaches one of the truly-terminal states above. Some rows pass through `succeeded` and even `disputed` on their way; the terminal-event count is one per row, identified by the final status when no further transitions occur.
 - No automatic retry on any terminal state. **One narrow post-terminal exception:** an inbound Stripe webhook MAY override a row currently in `failed` if Stripe reports a `succeeded` outcome for that `provider_charge_id` (only possible when the row was failed via `roundtrip_timeout` or `execution_timeout` but the Stripe call actually succeeded). This `failed → succeeded` override is the ONLY permitted truly-post-terminal transition; it is whitelisted in `stateMachineGuards` and the DB trigger, gated on the inbound transition originating from `stripeAgentWebhookService` (server-side caller identity check). All other post-terminal transitions raise. See §8.6 precedence rule 4 and §9.4 post-terminal carve-out.
 - `failed` is terminal for the row. A retry is a new Charge row under the same `intent_id`.
-- All non-terminal states (`pending_approval`, `approved`, `executed`, `disputed`) reserve their `amount_minor` against Spending Limits until the row reaches a terminal state. Reserved capacity is consistent across §9.3 and §16.2 — anything not yet terminal counts.
+- Pre-execution non-terminal states (`pending_approval`, `approved`, `executed`) reserve their `amount_minor` against Spending Limits until the row settles. Once a row reaches `succeeded` it counts as settled outbound spend and stops being "reserved capacity"; subsequent transitions to `disputed` or `refunded` do not double-count. See §9.3 and §16.2 for the full accounting rule.
 - An `approved` Charge that does not transition to `executed` or `shadow_settled` within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`. The execution window is `EXECUTION_TIMEOUT_MINUTES` (a global constant in `server/config/spendConstants.ts`, default `30`). `expires_at` is set at the `proposed → approved` transition as `NOW() + EXECUTION_TIMEOUT_MINUTES`. The execution-window timeout job (registered in `server/jobs/`) scans `agent_charges WHERE status = 'approved' AND expires_at < NOW()` every minute and transitions matching rows to `failed`. The job does NOT touch `executed` rows — once a charge has been handed to Stripe (live + `main_app_stripe`) or to the worker (live + `worker_hosted_form`), webhook arrival or worker completion is the only path to a terminal state. Stale `executed` rows stuck without webhook confirmation are surfaced by §16.6's reconciliation-poll mechanism (warning alert), NOT the execution-timeout job.
 - A `pending_approval` Charge that receives no response within `approval_expires_at` is auto-marked `denied` with `reason = 'approval_expired'`.
 - When a Kill Switch fires, all `pending_approval` Charges for that scope are immediately auto-cancelled (transition to `denied` with `reason = 'kill_switch'`). In-flight `executed` Charges continue to their Stripe outcome.
@@ -856,8 +860,8 @@ Key stored as `UNIQUE NOT NULL` on `agent_charges.idempotency_key`. Insert via `
 ### 9.3 Concurrency Guards
 
 **Concurrent charge attempts against the same Spending Policy limits:**
-- Spending Limits are evaluated against settled outbound charges (net of inbound refunds, per §16.7) **plus all non-terminal charges** (`pending_approval`, `approved`, `executed`, `disputed`). Non-terminal charges reserve their `amount_minor` against limits until they reach a terminal state.
-- Guard: `chargeRouterServicePure.evaluatePolicy` reads all non-terminal charges for the budget and sums reserved capacity before accepting a new charge. Two concurrent charges that individually fit but collectively exceed the limit — the second is `blocked`.
+- Spending Limits are evaluated against (a) settled outbound rows — `succeeded` and `refunded`, net per §16.7 (refunds subtract) — PLUS (b) reserved capacity from in-flight pre-execution rows: `pending_approval`, `approved`, `executed`. `disputed` and `succeeded` rows are NOT double-counted: they are already in the settled bucket from their original `→ succeeded` transition. `shadow_settled` rows do not move money and do not contribute to limit math.
+- Guard: `chargeRouterServicePure.evaluatePolicy` reads (settled-net-of-refunds) + (sum of pending_approval/approved/executed) for the budget before accepting a new charge. Two concurrent charges that individually fit but collectively exceed the limit — the second is `blocked`.
 - Enforcement: advisory lock on `spending_budgets.id` during the propose+gate sequence (mirror of `acquireOrgComputeBudgetLock` pattern), released after the charge row is written.
 
 **Concurrent HITL approval responses:**
@@ -871,7 +875,7 @@ Key stored as `UNIQUE NOT NULL` on `agent_charges.idempotency_key`. Insert via `
 
 ### 9.4 Terminal Events
 
-Every charge attempt produces exactly one terminal state transition. Mutually exclusive terminal states: `blocked`, `denied`, `shadow_settled`, `succeeded`, `failed`, `refunded`.
+Every charge attempt eventually settles in exactly one truly-terminal state. Mutually exclusive truly-terminal states: `blocked`, `denied`, `shadow_settled`, `failed`, `refunded`. `succeeded` is non-terminal at the state-machine level (it can transition to `refunded` or `disputed` via Stripe webhook per §4); rows reported as `succeeded` are functionally settled for skill-level callers but may move on into the dispute / refund flow before reaching their truly-terminal state. `disputed` is also non-terminal and resolves to `succeeded` or `refunded`.
 
 The `spend.*` event labels below are **logical state-machine event names** used in audit reasoning, dashboards, and the charge `decision_path` JSON — they are NOT separate rows on `agent_execution_events`. The `agent_execution_events` table receives exactly one cross-reference event per charge attempt (a `skill.completed`-class event with `linkedEntityType: 'spend_ledger'`, `linkedEntityId: <agent_charges.id>`), per §7.9. Per-state-transition history lives on `agent_charges` itself (status column + `decision_path` JSON + the timestamp columns).
 
@@ -908,13 +912,13 @@ These rules hold in every code path. Violations are blocking issues in adversari
 
 1. **Ledger row before charge.** `chargeRouterService` writes a `proposed` row in `agent_charges` before contacting Stripe or calling any external service. No code path reaches Stripe without a ledger row already written.
 2. **Policy check before execution.** No spend-enabled skill calls Stripe directly. All execution flows through `chargeRouterService.proposeCharge`.
-3. **Worker never charges directly.** IEE workers hold no persistent SPT credentials, have no DB access to `integration_connections`, and never authorise spend on their own. All spend is authorised by the main app via the pg-boss request-reply round-trip. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns the SPT in the response payload bound to one `ledgerRowId`. The token is not server-mint-rotated per call (it is the SPT held in `integration_connections`); "single-use at the protocol level" means: (a) the `chargeToken` field is delivered exactly once per `correlationId`, (b) the worker's payment call carries the charge `idempotency_key` as Stripe's idempotency-key header so any re-use against the same merchant call collapses to the original outcome, and (c) the `agent_charges.idempotency_key` UNIQUE constraint blocks duplicate ledger rows. The worker MUST NOT log, persist, or reuse the token across charges; on receipt it uses the token inline and discards the variable. Stronger enforcement (server-minted single-use wrapper) is deferred — see §20.
+3. **Worker never charges directly.** IEE workers hold no persistent SPT credentials, have no DB access to `integration_connections`, and never authorise spend on their own. All spend is authorised by the main app via the pg-boss request-reply round-trip. When live-mode auto-approval requires the worker to fill a merchant-hosted payment form, the main app returns the SPT in the response payload alongside a `ledgerRowId`. The SPT is the raw Stripe SPT held in `integration_connections` — it is NOT cryptographically bound to that ledger row. The v1 enforcement is operational, not cryptographic: (a) the worker code MUST treat the SPT as ephemeral, MUST NOT log or persist it, and MUST drop the variable after the merchant call; (b) the worker's merchant-side call MUST carry the charge `idempotency_key` as Stripe's idempotency-key header so any duplicate redemption collapses to the original outcome; (c) the `agent_charges.idempotency_key` UNIQUE constraint blocks the main app from inserting a duplicate ledger row. A worker that violated (a) and persisted the token could in principle reuse it on a different charge — that risk is accepted in v1 and tracked as a hardening item in §20 ("Server-minted single-use chargeToken wrapper"). The phrase "single-use at the protocol level" describes the v1 operational discipline, not a server-side cryptographic enforcement.
 4. **Idempotency at DB level.** `agent_charges.idempotency_key` is UNIQUE. Duplicates resolve via `INSERT ... ON CONFLICT DO UPDATE`, not application-layer deduplication.
 5. **Tenant isolation.** RLS policies protect `spending_budgets`, `spending_policies`, and `agent_charges`. Cross-tenant SPT access is a critical incident.
 6. **Shadow charges write to the real ledger.** Shadow mode does not skip the Spend Ledger. Every shadow attempt gets a full `shadow_settled` row with policy decision, allowlist result, and Charge Intent recorded.
 7. **Kill Switch is synchronous.** A fired Kill Switch blocks new charges immediately. In-flight `executed` charges resolve normally. `pending_approval` charges are auto-cancelled. No retries permitted after kill.
 8. **`cost_aggregates` RLS before new dimensions.** The RLS retrofit on `cost_aggregates` ships in the same migration as the first new `entityType` values. No spend data lands in the table without RLS protection.
-9. **No silent drops.** Every proposed charge must reach a terminal state or an explicit intermediate state. Terminal states: `blocked`, `denied`, `failed`, `shadow_settled`, `succeeded`, `refunded`. Non-terminal charges (`pending_approval`, `executed`, `disputed`) hold their reserved amount against limits until they reach a terminal state. `disputed` is non-terminal — it resolves to `succeeded` or `refunded` per §4 once Stripe's chargeback flow concludes.
+9. **No silent drops.** Every proposed charge must reach a truly-terminal state or be in an explicit intermediate state. Truly-terminal states (no transitions out): `blocked`, `denied`, `failed`, `shadow_settled`, `refunded`. Non-terminal charges (`pending_approval`, `approved`, `executed`, `succeeded`, `disputed`) hold their reserved amount against limits until they reach a truly-terminal state. `succeeded` and `disputed` are non-terminal at the state-machine level — both can transition further per §4 — but `succeeded` is reported to skill-level callers as a success outcome.
 10. **Blocked vs denied.** `blocked` = system-enforced denial (policy, limits, Kill Switch, SPT failure). `denied` = human rejection via HITL. Distinct categories for analytics, debugging, and audit semantics.
 11. **Execution window.** An `approved` charge that does not transition within the execution window is auto-marked `failed` with `reason = 'execution_timeout'`. Prevents permanent reserved-capacity lock.
 12. **Approval window.** A `pending_approval` charge whose `approval_expires_at` passes without a response is auto-marked `denied` with `reason = 'approval_expired'`.
@@ -1115,7 +1119,7 @@ Retries are explicit: a `failed` Charge is terminal; a retry is a new Charge row
 
 ### 16.2 Concurrency and Reserved Capacity
 
-Spending Limits are enforced against settled outbound charges (net of inbound refunds) plus all non-terminal charges (`pending_approval`, `approved`, `executed`, `disputed`). Each non-terminal Charge reserves its `amount_minor` against limits until the row reaches a terminal state. Two concurrent charges that individually fit but collectively exceed a limit — the second is `blocked`. Evaluated at the Gate step, before HITL routing and before Stripe execution.
+Spending Limits are enforced against (a) settled outbound rows (`succeeded`, `refunded` — net per §16.7) PLUS (b) reserved capacity from in-flight pre-execution rows (`pending_approval`, `approved`, `executed`). `disputed` and `succeeded` rows are not double-counted (already in the settled bucket). `shadow_settled` rows do not move money. Two concurrent charges that individually fit but collectively exceed a limit — the second is `blocked`. Evaluated at the Gate step, before HITL routing and before Stripe execution.
 
 ### 16.3 Approval Expiry and Policy Revalidation
 
@@ -1296,7 +1300,7 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - New `entityType` values: `agent_spend_subaccount`, `agent_spend_org`, `agent_spend_run`
 - Comment-only migration for new values (precedent: `0186`)
 - Dashboard query routes: `server/routes/agentCharges.ts` (read-only ledger queries)
-- `server/routes/spendingBudgets.ts` (CRUD + promote-to-live)
+- `server/routes/spendingBudgets.ts` (CRUD only — the `POST /:id/promote-to-live` route shell ships in Chunk 13 but returns HTTP 501 with `reason: 'promotion_flow_pending'` until Chunk 15 lands the actual `promote_spending_policy_to_live` HITL action and policy-version flip; budget creators see this as "promote to live: not yet available" in the UI until then)
 - `server/routes/spendingPolicies.ts` (CRUD on policy fields)
 - `server/routes/approvalChannels.ts` (channel + grant CRUD)
 - Net spend calculation (refunds included)
@@ -1313,11 +1317,12 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 
 ### Chunk 15 — Shadow-to-Live Promotion Flow
 
+- Replaces the Chunk 13 stub: `POST /spending-budgets/:id/promote-to-live` now returns 200 and creates the HITL action.
 - HITL-gated promotion action (`promote_spending_policy_to_live`)
 - Policy version increment on promotion
 - Audit logging for promotion
 - Channel notification on promotion request
-- UI: "Promote to live" button + confirmation modal + approval state
+- UI: "Promote to live" button + confirmation modal + approval state (replaces the Chunk 13 "not yet available" stub UI)
 
 ### Chunk 16 — Default Templates and Onboarding
 
@@ -1412,10 +1417,10 @@ Heavy unit-test chunk. `chargeRouterServicePure.ts` only.
 - `server/services/agentExecutionEventService.ts` — accept `'spend_ledger'` linkedEntityType
 - `server/config/rlsProtectedTables.ts` — add 8 new table entries
 - `shared/types/agentExecutionLog.ts` — add `'spend_ledger'` to `LinkedEntityType`
-- `shared/iee/actionSchema.ts` — add `spend_request` action
+- `shared/iee/actionSchema.ts` — add `spend_request` AND `spend_completion` action types
 - `shared/stateMachineGuards.ts` — add `agent_charges` state machine
-- `worker/src/loop/executionLoop.ts` — spend-request emit branch
-- `worker/src/persistence/runs.ts` — `iee-spend-request` event helper
+- `worker/src/loop/executionLoop.ts` — spend-request emit branch AND spend-completion emit branch (after merchant form-fill on the worker_hosted_form path)
+- `worker/src/persistence/runs.ts` — `iee-spend-request` AND `iee-spend-completion` event helpers
 - `client/src/pages/ReviewQueuePage.tsx` — `renderSpendPayload` + ACTION_BADGE entries
 - `client/src/components/dashboard/PendingApprovalCard.tsx` — spend lane
 
