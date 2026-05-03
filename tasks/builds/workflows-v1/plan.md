@@ -288,9 +288,9 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 | 4 | Gate primitive (workflow_step_gates write path) + state machine | §3.3 (`workflow_step_gates`), §5.1.1 (Approval write contracts), §11.4.1 (Ask write contracts) | 1, 2 | ~2 days |
 | 5 | Approval routing, pool resolution, isCritical synthesis, decision API hardening | §5.1, §5.1.2 (`/refresh-pool`), §5.2 (isCritical), §5.4, plus the pre-existing-violation fix on the decision route | 4 | ~2 days |
 | 6 | Confidence chip + audit field write paths | §6.1, §6.2, §6.3, §6.4, §6.5 | 4 | ~1.5 days |
-| 7 | Cost / wall-clock runaway protection (pause/resume/stop) | §3.1 (`effective_*`, `extension_count`), §7 (full) | 1, 4 | ~2 days |
+| 7 | Cost / wall-clock runaway protection (pause/resume/stop) | §3.1 (`effective_*`, `extension_count`), §7 (full) | 1, 4, 9 | ~2 days |
 | 8 | Stall-and-notify (24h / 72h / 7d) + schedule version pinning | §5.3, §3.1 (`pinned_template_version_id`), §5.4 (schedule dispatch) | 4 | ~1.5 days |
-| 9 | Real-time WebSocket coordination (task rooms, replay, gap-detection) | §8 (full) | 3 | ~3 days |
+| 9 | Real-time WebSocket coordination (task rooms, replay, gap-detection, run.paused/resumed/stopped event taxonomy) | §8 (full) | 3 | ~3 days |
 | 10 | Permissions API (assignable users) + Teams CRUD UI | §14, §16.2 #31 | 1 | ~2 days |
 | 11 | Open task view UI (three-pane layout, Now/Plan/Files tabs, header) | §9 (full), §15 (Brief → Task UI) | 9, 10 | ~5 days |
 | 12 | Ask form runtime (form card primitive, submit/skip, autofill) | §3.2 (Ask params shape), §11 (full) | 4, 9, 11 | ~3 days |
@@ -308,7 +308,8 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 1 (schema)
 ├── 2 (validator)
 ├── 3 (per-task events)
-│   └── 9 (websocket)
+│   └── 9 (websocket — event taxonomy + transport)
+│       ├── 7 (pause/stop/resume — emits run.paused / run.resumed / run.stopped via 9)
 │       ├── 11 (open task UI)
 │       │   ├── 12 (Ask runtime)
 │       │   ├── 13 (Files + diff)
@@ -318,7 +319,7 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 ├── 4 (gates)
 │   ├── 5 (approvals)
 │   ├── 6 (confidence + audit)
-│   ├── 7 (pause/stop/resume)
+│   ├── 7 (pause/stop/resume — also depends on 9; see above)
 │   └── 8 (stall-and-notify + pinning)
 └── 10 (permissions + teams CRUD)
     ├── 11 (open task UI)
@@ -326,7 +327,7 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
         └── 14b (inspectors + draft hydration)
 ```
 
-**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 7, 8 can ship in parallel after 4 lands. Chunks 11, 14a require 9 and 10. Chunk 14b requires 14a. Chunks 12, 13 require 11. Chunk 15 requires 9 and 14b. Chunk 16 is post-everything.
+**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 8 can ship in parallel after 4 lands. Chunk 7 requires 4 AND 9 (it emits `run.paused` / `run.resumed` / `run.stopped` events through 9's WebSocket transport, so 9 must land first; 9 owns the event taxonomy and transport, 7 owns the emitting call sites). Chunks 11, 14a require 9 and 10. Chunk 14b requires 14a. Chunks 12, 13 require 11. Chunk 15 requires 9 and 14b. Chunk 16 is post-everything.
 
 ---
 
@@ -1046,7 +1047,7 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - **Resume correctness:** completed steps are never re-executed after resume; step CAS predicates make duplicate dispatches no-ops.
 - **Pre-step cost-cap check:** projected `accumulator + estimate` is evaluated BEFORE dispatch; one expensive step can no longer overshoot the cap by an unbounded amount.
 
-**Dependencies:** Chunks 1 (schema columns + status enum), 4 (gate primitive — Stop must resolve any open gates), 9 (event emission for `run.paused.*` / `run.resumed` / `run.stopped.by_user` — but the events themselves can land in this chunk; Chunk 9 owns the WebSocket transport).
+**Dependencies:** Chunks 1 (schema columns + status enum), 4 (gate primitive — Stop must resolve any open gates), 9 (event taxonomy + WebSocket transport for `run.paused.*` / `run.resumed` / `run.stopped.by_user`). Chunk 9 owns the event-kind definitions and the transport; Chunk 7 owns the emitting call sites and adds them as a consumer of Chunk 9's primitive. This resolves the prior "Chunk 7 ↔ 9 mutual dependency" inconsistency: 9 is upstream of 7, full stop.
 
 ---
 
@@ -1256,7 +1257,7 @@ The 7-day hot retention (Open Q4) is the V1 baseline. Long-running workflows and
 - Gap detection signals to the client when retention has expired the cursor.
 - Out-of-order arrival is buffered and reconciled.
 
-**Dependencies:** Chunks 1 (schema), 3 (per-task event log allocation), 7 (run.paused/resumed/stopped events sourced from this chunk's emitters).
+**Dependencies:** Chunks 1 (schema), 3 (per-task event log allocation). Chunk 9 does NOT depend on Chunk 7; Chunk 9 ships the event taxonomy and transport, Chunk 7 (downstream) emits `run.paused` / `run.resumed` / `run.stopped` events through this chunk's primitive. The chunk-overview table reflects 9 → 7, not 7 → 9.
 
 ---
 
@@ -1376,7 +1377,7 @@ The 7-day hot retention (Open Q4) is the V1 baseline. Long-running workflows and
 
 **Files to modify:**
 
-- `client/src/App.tsx` — register the new route `/tasks/:taskId` (and the redirect from `/briefs/:taskId` lands in Chunk 16).
+- `client/src/App.tsx` — register the new route `/admin/tasks/:taskId` (preserving the `/admin/` prefix used by the existing `/admin/briefs/:briefId` route at line 361). The redirect from `/admin/briefs/:briefId` to `/admin/tasks/:taskId` lands in Chunk 16.
 - `client/src/components/sidebar/*` — change "Briefs" to "Tasks" (rename in Chunk 16, but the tasks-list page lives here).
 
 **Contracts pinned in this chunk:**
@@ -1677,7 +1678,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 
 **Error handling:**
 
-- 410 draft consumed: render "This draft was already used or discarded — start fresh?".
+- 410 draft consumed: render "This draft was already used or discarded. Start fresh?".
 - Inspector validation errors: per-field inline (mirrors the Chunk 2 validator output shape).
 
 **Test considerations:**
@@ -1746,8 +1747,14 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
   },
   output:
     | { ok: true; task_id: string }
-    | { ok: false; error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid'; message: string };
+    | { ok: false; error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid' | 'max_workflow_depth_exceeded'; message: string };
 }
+
+// Workflow-depth guard (spec §13.4)
+// MAX_WORKFLOW_DEPTH = 3 (configurable per-org via existing limits-config).
+// Depth carried via principal context's workflow_run_depth integer; persisted on
+// workflow_runs.metadata.workflow_run_depth so the cap propagates transitively.
+// Top-level runs have depth = 1; child_depth = parent_depth + 1.
 
 // Recommendation card payload (rendered in the open task view's chat panel as a structured card)
 {
@@ -1768,6 +1775,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 **Error handling:**
 
 - `workflow.run.start` permission denial: structured error per output union.
+- `workflow.run.start` depth-cap exceeded: structured error `max_workflow_depth_exceeded`; emit `workflow.run_depth_exceeded` to agent execution log.
 - Cadence-detection failure: log; do not surface a recommendation. Fail-quiet.
 - Draft creation fails (RLS, FK, etc.): log; orchestrator continues without offering Studio handoff.
 
@@ -1776,6 +1784,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 - `orchestratorCadenceDetectionPure.test.ts` — every signal in §13.1; threshold tuning.
 - `orchestratorMilestoneEmitterPure.test.ts` — every milestone-vs-narration boundary.
 - `workflowRunStartSkillPure.test.ts` — inputs validation, version resolution.
+- `workflowRunStartDepthGuardPure.test.ts` — depth=0 → child=1 ok; depth=2 → child=3 ok; depth=3 → child=4 rejected with `max_workflow_depth_exceeded`; depth-cap configurable per-org.
 
 **Verification commands:**
 
@@ -1791,6 +1800,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 - Drafts persist with `(subaccount_id, session_id)` UNIQUE.
 - Milestone events emit per-agent; narration stays in activity (does not leak to chat).
 - `workflow.run.start` skill is reachable from any agent with run-permission on the target subaccount; both ACTION_REGISTRY and SKILL_HANDLERS registered.
+- `workflow.run.start` enforces `MAX_WORKFLOW_DEPTH` (default 3); depth-guard test passes; depth propagates via `workflow_runs.metadata.workflow_run_depth` and the principal context.
 
 **Dependencies:** Chunks 9 (`agent.milestone` + `chat.message` event kinds), 14b (`workflow_drafts` table + service).
 
@@ -1806,13 +1816,14 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 
 - `server/jobs/workflowDraftsCleanupJob.ts` — pg-boss cleanup. Runs daily. SQL: `DELETE FROM workflow_drafts WHERE consumed_at IS NULL AND created_at < now() - interval '7 days'`. Mirrors `priorityFeedCleanupJob.ts` shape.
 
-**Files to modify:**
+**Files to modify** (verified against `client/src/` at plan-gate time; see §15.4 of the spec for the full ground-truth list):
 
-- `client/src/components/sidebar/*` — "Briefs" → "Tasks" everywhere (one find-and-replace).
-- `client/src/pages/BriefsPage.tsx` → rename to `TasksPage.tsx`. Update internal references.
-- `client/src/pages/BriefDetailPage.tsx` → rename to (or merge into) `OpenTaskView.tsx` from Chunk 11. Update internal references.
-- `client/src/components/NewBriefModal.tsx` → rename to `NewTaskModal.tsx`. Update strings.
-- `client/src/App.tsx` — register `/tasks` routes; add redirect from `/briefs/:id` → `/tasks/:id` (preserves any existing `:id`). Existing `/briefs` nav links still work via the redirect.
+- `client/src/components/sidebar/*` — "Briefs" → "Tasks" in the nav entry label.
+- `client/src/pages/BriefDetailPage.tsx` → rename to `TaskDetailPage.tsx`, OR merge into `OpenTaskView.tsx` from Chunk 11 (architect picks). Note: `BriefsPage.tsx` does NOT exist — earlier plan revisions listed it in error.
+- `client/src/components/global-ask-bar/GlobalAskBar.tsx` + `GlobalAskBarPure.ts` — update operator-visible strings ("brief" → "task"). The "new task" entry-point lives in this global bar; there is no `NewBriefModal.tsx` (earlier plan revisions listed it in error).
+- `client/src/components/brief-artefacts/*` — internal directory name stays. Update user-visible strings inside ApprovalCard / StructuredResultCard / ErrorCard where they say "brief".
+- `client/src/components/TaskModal.tsx` — audit user-visible strings.
+- `client/src/App.tsx` line 361 — actual existing route is `<Route path="/admin/briefs/:briefId" element={<BriefDetailPage ... />} />`. Add `/admin/tasks/:taskId` as the new canonical route, keep `/admin/briefs/:briefId` as a 301 redirect. The `/admin/` prefix is preserved (earlier plan revisions wrote `/briefs/:id` → `/tasks/:id` which would not match the actual route).
 - `server/templates/email/*` — string-replace "brief" → "task" where user-facing. Internal column references (e.g., `tasks.brief` content column) stay.
 - i18n / translation files (if any) — update keys + values.
 - `server/index.ts` — register the cleanup job worker.
@@ -1821,7 +1832,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 
 **Contracts pinned in this chunk:**
 
-- Redirect: `GET /briefs/:id` → 301 to `/tasks/:id`. Server-side route or client-side React Router redirect — architect picks at chunk-time. Both work.
+- Redirect: `GET /admin/briefs/:briefId` → 301 to `/admin/tasks/:taskId` (`/admin/` prefix preserved per actual existing route at `App.tsx` line 361). Server-side route or client-side React Router redirect — architect picks at chunk-time. Both work.
 - Cleanup job: runs daily at 03:00 UTC (mirroring existing cleanup-job pattern). Reaps drafts older than 7 days with `consumed_at IS NULL`.
 
 **Error handling:**
@@ -1843,7 +1854,7 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 **Acceptance criteria:**
 
 - Sidebar / breadcrumb / page titles all say "Tasks" not "Briefs".
-- `/briefs/:id` redirects to `/tasks/:id`.
+- `/admin/briefs/:briefId` redirects to `/admin/tasks/:taskId`.
 - Email templates use "task" in user-facing copy.
 - Cleanup job reaps unconsumed drafts after 7 days.
 - `architecture.md` and `docs/capabilities.md` updated.

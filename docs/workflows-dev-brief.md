@@ -770,7 +770,7 @@ All mockups live in [`prototypes/workflows/`](../prototypes/workflows/index.html
 |---|---|---|---|
 | 04 | [Four A's per-step inspector showcase](../prototypes/workflows/04-four-as-step-types.html) | The visual language. Click each of the four state buttons to see how Agent / Action / Ask / Approval render in a workflow with the inspector showing fields specific to that step type. | §4.2, §7.3 |
 | 05 | [Studio — route editor](../prototypes/workflows/05-studio-route-editor.html) | Canvas-first authoring. The four A's, branching as inline chips, parallel rendered as fork, Approval-on-reject as a dashed back-arrow. Inspector slide-out for the selected step. Floating bottom action bar with `Publish vN`. Chat as a docked pill bottom-left. | §7 |
-| 07 | [Open task view — 3-panel master](../prototypes/workflows/07-open-task-three-panel.html) | The operator surface. 26% chat / 22% activity (collapsible) / 52% tabs. Tabs: Live (org chart) / Flow (planned route) / Files (top thumbnail strip + reader pane with portrait + landscape support, document toolbar with download + open-in-new-window). | §6, §9 |
+| 07 | [Open task view — 3-panel master](../prototypes/workflows/07-open-task-three-panel.html) | The operator surface. 26% chat / 22% activity (collapsible) / 52% tabs. Tabs: Now (org chart) / Plan (planned route) / Files (top thumbnail strip + reader pane with portrait + landscape support, document toolbar with download + open-in-new-window). The mockup file may still render the v1 labels "Live / Flow"; the tab names per §6.3 are Now / Plan. | §6, §9 |
 
 ### 14.2 Reference mockups (already in the repo, used for context)
 

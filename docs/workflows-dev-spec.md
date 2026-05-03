@@ -167,11 +167,13 @@ All deltas are **additive**. No existing column is dropped. Existing system temp
 | `workflow_step_reviews` | `gate_id` | `uuid` | required | FK → `workflow_step_gates.id` (new table, §3.3). One review row per decider; the gate-level snapshot lives on the gate row (one row) so multi-approver quorum doesn't fragment the snapshot. |
 | `workflow_step_reviews` | `decision_reason` | `text` | `null` | Optional free-text from the deciding approver. Per-decider, not per-gate. (brief §8.7) |
 | `workflow_template_versions` | `publish_notes` | `text` | `null` | Optional one-line "what changed in this version?" captured by the Studio Publish modal. Surfaces in version history + Plan tab caption. (brief §7.4) |
-| `workflows` (the workflow-template table) | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
-| `workflows` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
+| `workflow_templates` | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
+| `workflow_templates` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
 | `schedules` (existing) | `pinned_template_version_id` | `uuid` | `null` | When non-null, scheduled runs use this exact version regardless of newer published versions. When null, "next run uses newest" (brief §7.4). (spec-time decision #5) |
 | `agent_execution_events` (existing per `accepted_primitives`) | `task_id` | `uuid` | `null` | FK → `tasks.id`. Set on every event emitted within a task's lifecycle (workflow-fired or ad-hoc). Drives the §8 replay contract (per-task monotonic ordering). |
 | `agent_execution_events` | `task_sequence` | `bigint` | `null` | Per-task monotonic sequence allocated alongside the existing per-run sequence. Source of truth for `event_id` in §8.2; never gapped within a `task_id`. Atomic allocation extends the existing `agentExecutionEventService` per-run claim pattern to the per-task scope. |
+| `agent_execution_events` | `run_id` | `uuid` | (drop NOT NULL) | The existing schema declares `run_id` as `NOT NULL` with FK cascade to `agent_runs.id`. The §8 reconnect-with-replay contract requires task-scoped events that fire before any run exists (e.g., `task.created`, `task.routed`, `chat.message`, `agent.milestone` — see §8.2). Drop NOT NULL in this migration AND add a row-level CHECK: `CHECK (run_id IS NOT NULL OR task_id IS NOT NULL)` so every row remains anchored to either a run or a task. The pure-event mappers in `shared/types/agentExecutionLog.ts` already accept `runId: string \| null` per the discriminated union — no client change needed. |
+| `tasks` (existing) | `created_by_user_id` | `uuid` | `null` | FK → `users.id`. Identifies the human who initiated the task (when one exists; agent-initiated tasks have `NULL`). Required by §5.1 (`task_requester` approver kind), §5.3 (stall-and-notify cadence), §13.4 (`workflow.run.start` writes this on task creation). The pre-rename tasks table has `createdByAgentId` and `assignedAgentId` but no user pointer; this column adds the missing surface without affecting agent-initiated paths. NULL handling rules pinned in §5.1's `task_requester` row. |
 | `workflow_runs` (existing per-run table; architect verifies the exact name) | `effective_cost_ceiling_cents` | `integer` | (mirrors template `cost_ceiling_cents` at run start) | Per-run override. The Pause/Resume contract (§7.5) updates this on resume-with-extension; defaults to the template value when the run starts so the engine has one place to read the active cap. |
 | `workflow_runs` | `effective_wall_clock_cap_seconds` | `integer` | (mirrors template `wall_clock_cap_seconds` at run start) | Per-run override; same lifecycle as `effective_cost_ceiling_cents`. |
 | `workflow_runs` | `extension_count` | `integer` | `0` | Per-run counter incremented on each successful resume-with-extension (§7.5). Default cap is 2; once reached, the pause card disables the extension button and only Stop is offered. |
@@ -230,9 +232,10 @@ Two new tables: `workflow_drafts` (Studio-handoff path, §10.6, §13.2) and `wor
 | Table | Column | Type | Default | Purpose |
 |---|---|---|---|---|
 | `workflow_drafts` (NEW) | `id` | `uuid` (PK) | `gen_random_uuid()` | Surrogate key. |
+| `workflow_drafts` | `organisation_id` | `uuid` | required | Org tenant scope. RLS policy `app.organisation_id`-scoped per `architecture.md` § Canonical RLS session variables. |
+| `workflow_drafts` | `subaccount_id` | `uuid` | required | Sub-account tenant scope. **Authorisation contract (security-critical):** every read endpoint (`GET /api/workflow-drafts/:draftId`, `GET ...?fromDraft=:draftId` Studio hydration) MUST verify `subaccount_id = resolvedSubaccount.id` in the route handler — RLS only enforces org scope, so a same-org cross-subaccount read by ID would otherwise leak. New entry must be added to `RLS_PROTECTED_TABLES` (per `architecture.md` §1155). |
 | `workflow_drafts` | `session_id` | `text` | required | Chat session that produced the draft. Per-session, not per-user (§13.2). |
-| `workflow_drafts` | `subaccount_id` | `uuid` | required | Tenant scope. RLS-protected; new entry must be added to `RLS_PROTECTED_TABLES` (per `architecture.md` §1155). |
-| `workflow_drafts` | `payload` | `jsonb` | required | Draft step list + bindings + branches the orchestrator authored. |
+| `workflow_drafts` | `payload` | `jsonb` | required | Draft step list + bindings + branches the orchestrator authored. **Size cap: max 100 steps per draft** — enforced at orchestrator-write time and at `?fromDraft=` Studio-hydration time. Larger drafts are truncated with a Pause card surfaced asking the operator to split the workflow. |
 | `workflow_drafts` | `created_at` | `timestamptz` | `now()` | Set at draft creation. |
 | `workflow_drafts` | `updated_at` | `timestamptz` | `now()` | Updated when the orchestrator iterates on the same session. |
 | `workflow_drafts` | `consumed_at` | `timestamptz` | `null` | Set when the operator publishes (cleared/garbage-collected) or discards. Drafts older than the retention window with `consumed_at IS NULL` are reaped by the cleanup job (§16.3 item 35a). |
@@ -384,8 +387,8 @@ When an Approval step queues, the engine resolves the eligible-approvers pool fr
 | `kind` | Pool resolution |
 |---|---|
 | `specific_users` | The exact `userIds` array from the step. Validator confirms quorum ≤ length at publish (§4.6). |
-| `team` | All members of `teams.id = teamId` who are not soft-deleted (`deletedAt IS NULL`). Resolved at gate-creation time and snapshotted into `workflow_step_gates.approver_pool_snapshot` (§3.3) so later team-membership changes don't invalidate an in-flight approval. The only V1 path to re-resolve is `/refresh-pool` (§5.1.2). |
-| `task_requester` | `tasks.created_by_user_id`. Single user. |
+| `team` | All rows in `team_members` where `team_id = teamId` AND the parent `teams.deletedAt IS NULL` (the `teams` table carries the soft-delete tombstone; `team_members` does not — membership is removed by deleting the join row). Resolved at gate-creation time and snapshotted into `workflow_step_gates.approver_pool_snapshot` (§3.3) so later team-membership changes don't invalidate an in-flight approval. The only V1 path to re-resolve is `/refresh-pool` (§5.1.2). |
+| `task_requester` | `tasks.created_by_user_id` (column added by this spec — see §3.1). Single user. If the task was created by an agent with no user context, the field is `NULL`; in that case the validator rejects `kind: 'task_requester'` at publish-time on workflows whose triggering paths don't guarantee a user. The engine's runtime fallback when `created_by_user_id` is NULL on a published workflow that allows it is to stall the gate with `error: 'task_requester_unresolved'` and surface a Pause card requesting a manual approver assignment. |
 | `org_admin` | All users in the org with `org_admin` role. Resolved at gate-creation time. |
 
 When a user submits an approval decision, the engine:
@@ -407,6 +410,9 @@ Per spec-authoring-checklist §10. Each Approval decision write declares:
   - A decision arriving after the step has been transitioned externally (e.g., the run was Stopped via §7.3, the step was cancelled by a parent fan-out failure per §4.3, or the engine moved on for any reason): the predicate `WHERE status = 'review_required'` fails AND the step status is now a non-decision value (`cancelled`, `failed`, etc.). The API returns `409 { error: 'step_already_resolved', current_status }` instead of an idempotent-hit response. This prevents ghost-approval log entries with no real winning decision and gives the client a deterministic signal to remove the approval card from the UI. Distinction from the "race won by another decider" case above: that returns `200 { idempotent_hit: true, existing_review_id }` because there IS a winning decision to surface; this returns 409 because there isn't.
 - **Unique-constraint → HTTP mapping.** `23505 unique_violation` on `workflow_step_reviews` returns `200 { idempotent_hit: true, existing_review_id }`, never bubbles as 500.
 - **State machine closure.** Valid review-record transitions: `(none) → review_required → approved | rejected`. Forbidden: `approved/rejected → *` (terminal). Adding a new review status requires a spec amendment.
+- **Run-ownership FK check (security-critical).** Every gate-route handler — `POST /api/tasks/:taskId/gates/:gateId/decide`, `POST .../refresh-pool`, `POST .../submit` (Ask), `GET .../:gateId` — MUST verify `workflow_runs.organisation_id = req.orgId` AND `workflow_runs.subaccount_id = req.subaccountId` for the run referenced by `:gateId` (joined via `workflow_step_gates.workflow_run_id`) BEFORE calling any service-layer method. RLS on `workflow_step_gates` is `organisation_id`-scoped, but the WITH CHECK only validates that an inserted row's `organisation_id` matches the session var — it does NOT validate that the related run actually belongs to that org. Without the explicit FK ownership check at the route layer, a same-org cross-subaccount or even cross-org user with a valid session can supply a foreign `runId` and the service will operate on it. Reference `DEVELOPMENT_GUIDELINES.md §9` checklist item "Cross-entity ID verified." This check is part of the route's permission guard, not a side effect — failure returns `403 { error: 'gate_run_not_in_scope' }` (NOT 404, to avoid disclosing existence).
+
+> **Spec note on `review_required` vs `awaiting_approval`:** `review_required` is this spec's user-facing term for the step status. The codebase column value is `awaiting_approval`. All SQL predicates and `assertValidTransition` calls in the implementation use `awaiting_approval`. Pure mappers may translate to `review_required` at API-response boundaries if a public contract demands it, but every CAS predicate above runs against `awaiting_approval`. Implementers reading this section directly: assume the literal in code is `awaiting_approval`.
 
 #### 5.1.2 `/refresh-pool` admin endpoint
 
@@ -518,16 +524,23 @@ When an Approval gate queues, the engine snapshots the parameters and rendered p
 ```typescript
 seen_payload: {
   step_id: string,
-  step_type: 'agent' | 'action' | 'approval',
+  step_type: 'agent' | 'action' | 'approval',  // four-A's user-facing label per §4.1, NOT the engine's WorkflowStepType union (which is broader: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision' | 'action_call' | 'invoke_automation'). Derived at gate-open via the validator's user-facing mapper.
   step_name: string,
   rendered_inputs: object,        // resolved bindings, e.g., { audience: "Tier A", tone: "Professional warm" }
-  rendered_preview: string | null, // optional human-readable preview (e.g., the email body if this is a "send email" Action)
-  agent_reasoning: string | null,  // for Agent steps with branching: the reasoning trace summary
+  rendered_preview: string | null, // optional human-readable preview (e.g., the email body if this is a "send email" Action). PLAIN TEXT ONLY — see XSS-prevention contract below.
+  agent_reasoning: string | null,  // for Agent steps with branching: the reasoning trace summary. PLAIN TEXT ONLY.
   branch_decision: { ... } | null  // if upstream was a branched step, the resolved branch
 }
 ```
 
 This snapshot is **immutable**. If the engine queues an approval and then re-derives parameters later (e.g., the data shifted between approval and execution), the audit trail must reflect what the human authorised, not what later ran. The Plan tab caption and the audit drawer (Phase 2) render from `seen_payload`, never from current state.
+
+**XSS-prevention contract (security-critical).** `rendered_preview` and `agent_reasoning` carry LLM-generated content (e.g., email bodies, agent reasoning traces). LLM output can contain HTML, JavaScript, or markup that becomes script-execution if rendered as `innerHTML`. The contract is:
+
+- **Write-time:** the engine MUST strip HTML tags from `rendered_preview` and `agent_reasoning` before persisting the snapshot. Use a server-side sanitiser (e.g., DOMPurify in node mode, or an equivalent allowlist sanitiser available in the project). Newlines are preserved; markup is removed. The persisted value is plain text.
+- **Read-time:** the audit drawer / Plan tab caption / "view what she saw" modal in the open task view (§6.5, §11) MUST render `rendered_preview` and `agent_reasoning` via React `textContent` semantics (`<p>{value}</p>` or `<pre>{value}</pre>` — never `dangerouslySetInnerHTML`).
+- **Test gate:** Plan Chunk 6 acceptance criteria require a test that injects `<script>alert(1)</script>` into a synthesised `rendered_preview`, confirms it survives write-time sanitisation as escaped/stripped text, and confirms the read-time render produces `&lt;script&gt;` (or empty) in the DOM, never an executing script element.
+- **Defence-in-depth rationale:** sanitising at write-time alone is insufficient if a future surface accidentally renders the field as HTML; rendering as `textContent` alone is insufficient if a future export path emits the field into a document that does parse HTML. Both are required.
 
 ### 6.4 Failsafe: confidence is decoration, not authority (brief §8.6)
 
@@ -924,7 +937,7 @@ Field-key auto-derivation: lowercase, replace spaces with `_`, strip non-alphanu
 **Concurrent editing handling** (per spec-time decision #8):
 
 - Studio uses last-write-wins.
-- Before submit-to-publish, Studio fetches the current published version's `updated_at`. If it has changed since the user started editing (i.e., another user published in the interim), the Publish modal shows a warning: *"This template was updated by [user] [Xm ago]. You're publishing your version on top of theirs. Review changes?"* with a link to a quick diff (Phase 2) and Publish-anyway / Cancel buttons.
+- Before submit-to-publish, Studio captures the template's current `latest_version` integer (a counter on `workflow_templates` incremented atomically with each new `workflow_template_versions` row). On submit-to-publish, Studio sends `expected_latest_version: <captured value>`. The publish endpoint runs the version-write inside a transaction predicated on `WHERE latest_version = :expected_latest_version`; 0 rows updated → `409 { error: 'concurrent_publish', current_latest_version, last_published_by_user_id, last_published_at }`. The Publish modal shows the warning: *"This template was updated by [user] [Xm ago]. You're publishing your version on top of theirs. Review changes?"* with a link to a quick diff (Phase 2) and Publish-anyway / Cancel buttons. Choosing Publish-anyway re-submits with the new `latest_version` value, accepting overwrite. Rationale: `workflow_template_versions` rows are immutable (no `updated_at` column), so the freshness signal lives on the parent template's monotonic version counter.
 - No soft-locking, no presence indicators in V1.
 
 ### 10.6 Studio handoff with preview loaded (brief §7.5)
@@ -1137,7 +1150,7 @@ After any agent-driven file edit, the reader pane offers a small toggle:
 | `Latest` (default) | The new version, plain. |
 | `Show changes` | Inline strikethrough on removed text, indigo highlight on added text. Section-anchored (no full-document reflow). |
 
-A one-line caption above the diff: *"Edits requested by Mike at 2:14 pm — 'cut the pricing section to one paragraph' — applied as v3 by Head of Sales."*
+A one-line caption above the diff: *"Edits requested by Mike at 2:14 pm. 'Cut the pricing section to one paragraph'. Applied as v3 by Head of Sales."*
 
 **Per-hunk revert** affordance: each highlighted change has a small ↶ button that reverts that specific change (creates a new version, doesn't edit history). One click; no confirmation modal (the action creates a new version and is itself reversible).
 
@@ -1146,7 +1159,7 @@ A one-line caption above the diff: *"Edits requested by Mike at 2:14 pm — 'cut
 - **Hunk identity.** A hunk is identified by `(file_id, from_version, hunk_index)` where `from_version` is the version immediately prior to the version that introduced the hunk, and `hunk_index` is the position (0-based) of the hunk in the deterministic diff between `from_version` and `from_version + 1`. The diff algorithm is fixed (line-level for documents; row-level for spreadsheets) so the same `(from_version, hunk_index)` resolves to the same change set on every read.
 - **Endpoint.** `POST /api/tasks/:taskId/files/:fileId/revert-hunk` with body `{ from_version: integer, hunk_index: integer }`.
 - **Idempotency posture.** State-based (per spec-authoring-checklist §10.1). The server inspects the latest version's diff against `from_version`: if `hunk_index` is no longer present (already reverted, or superseded by a newer edit), the endpoint returns `200 { reverted: false, reason: 'already_absent' }` — the request is a no-op, not an error.
-- **Concurrency guard.** The server verifies the file's current version is exactly `from_version + 1` before applying the revert. If the file has been edited again since (current version > `from_version + 1`), the endpoint returns `409 { error: 'base_version_changed', current_version: N }` and the client surfaces "this draft has been edited again — refresh to see the latest". This protects against revert-against-stale-base.
+- **Concurrency guard.** The server verifies the file's current version is exactly `from_version + 1` before applying the revert. If the file has been edited again since (current version > `from_version + 1`), the endpoint returns `409 { error: 'base_version_changed', current_version: N }` and the client surfaces "This draft has been edited again. Refresh to see the latest." This protects against revert-against-stale-base.
 - **Result.** On success, the server creates `from_version + 2` (or `current_version + 1` if no concurrency conflict) with the targeted hunk reverted; emits `file.edited` event with `prior_version` and `new_version` ids; returns `200 { reverted: true, new_version: N }`.
 
 **Out of scope for V1:**
@@ -1268,19 +1281,29 @@ Lets any agent fire a saved workflow as a tool when the agent's intent matches a
   },
   output:
     | { ok: true, task_id: string }                  // a new Task row is created and the run begins under that task id
-    | { ok: false, error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid', message: string }
+    | { ok: false, error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid' | 'max_workflow_depth_exceeded', message: string }
 }
 ```
 
 **Permission guard.** The calling agent's principal-scoped context (per `architecture.md` § Principal-scoped RLS) must have run-permission on the template's sub-account. An org-level agent without sub-account scope cannot fire a sub-account-scoped workflow; sub-account agents can only fire workflows scoped to their sub-account. Permission is checked at the route layer and at the engine layer (defence in depth).
 
+**Workflow-depth guard (security-critical).** §4.5 prevents workflow-to-workflow nesting at the **template definition level**, but `workflow.run.start` runs at **agent runtime** outside the template validator's reach. Without a runtime cap, an agent inside Workflow A can invoke `workflow.run.start` to fire Workflow B; an agent inside B can fire C; recursion is unbounded — exhausting the pg-boss queue, DB connection pool, and the org's LLM budget. Per-run `cost_ceiling_cents` does not protect against this because each spawned run carries its own ceiling.
+
+The skill handler MUST enforce a depth cap analogous to the existing `MAX_HANDOFF_DEPTH`:
+
+- The principal context carries a `workflow_run_depth` integer (default 0 for non-workflow callers).
+- When an agent inside a `workflow_runs` lifecycle invokes `workflow.run.start`, the handler reads the parent run's depth from the context (or from `workflow_runs.metadata.workflow_run_depth` if not in context) and computes `child_depth = parent_depth + 1`.
+- If `child_depth > MAX_WORKFLOW_DEPTH` (default `3`; configurable per-org via existing limits-config), the handler returns `{ ok: false, error: 'max_workflow_depth_exceeded', message: 'workflow depth N exceeds the cap of 3 — this prevents recursive workflow chains from exhausting tenant resources' }` and emits `workflow.run_depth_exceeded` to the agent execution log for telemetry.
+- The new run's `metadata.workflow_run_depth` is set to `child_depth` so the cap propagates transitively.
+- Top-level workflow runs (fired from a chat brief, schedule, or non-workflow agent context) have `child_depth = 1`.
+
 **Version selection.** Default is the latest published version of the template. If `template_version_id` is provided and is a non-deleted version of the same template, that version fires. If the version doesn't exist or has been retracted, returns `template_not_published`.
 
-**Task creation semantics.** A new `tasks` row is created with `created_by_user_id = <the user whose session the agent is acting on>` (carried via the principal context) and `created_by_agent_id = <calling agent's id>`. The task is owned by the caller's sub-account.
+**Task creation semantics.** A new `tasks` row is created with `created_by_user_id = <the user whose session the agent is acting on>` (carried via the principal context; column added by §3.1; NULL when the calling agent has no user context per the §5.1 NULL-handling rules) and `created_by_agent_id = <calling agent's id>`. The task is owned by the caller's sub-account.
 
-**Failure modes.** Permission denial, missing template, missing version, type-check failure on `initial_inputs` against the template's first-step bindings. All return structured errors per the output union.
+**Failure modes.** Permission denial, missing template, missing version, type-check failure on `initial_inputs` against the template's first-step bindings, depth-cap exceeded. All return structured errors per the output union (with `max_workflow_depth_exceeded` added to the error enum).
 
-**Existing primitive vs new.** This is a new skill registered in the existing skill catalogue (`server/config/actionRegistry.ts` per `architecture.md`). No new service layer.
+**Existing primitive vs new.** This is a new skill registered in the existing skill catalogue (`server/config/actionRegistry.ts` per `architecture.md`). No new service layer. The depth check lives inside the skill handler (`SkillExecutionContext` is the natural place — same pattern as `MAX_HANDOFF_DEPTH`).
 
 ### 13.5 Files referenced
 
@@ -1369,8 +1392,20 @@ For the **"A team"** picker:
 When a non-requester submitter (specific person, team member, org admin) clicks through a notification to land on the task view:
 
 - **They see the whole task by default** (chat history, all files, activity log). They need context to answer the form correctly.
-- The task's existing visibility rules apply (which sub-account the task belongs to, who has read access). If the submitter doesn't have base task-read permission, they don't see the form either.
-- A future V2 may add a "restricted view" mode for sensitive workflows (HR, billing, legal) — workflow author opts in at publish; submitter sees only the form card and the prompt. **Out of scope for V1.**
+
+**Authorisation contract (security-critical).** The cross-subaccount Ask routing path (§14.6) intentionally grants task read access to users who would otherwise 403 based on their subaccount membership. The route's permission check MUST be:
+
+> "The calling user has base task-read permission on the task's subaccount, **OR** the calling user's ID appears in the `approver_pool_snapshot` of at least one OPEN gate (`workflow_step_gates.resolved_at IS NULL`) on this task."
+
+This is the minimum-grant rule that makes the cross-subaccount path work without widening the surface to "any user with any historical pool membership." Specifically:
+
+- A user whose ID appears only in a RESOLVED gate's snapshot does NOT get task read access. The grant disappears when the gate resolves.
+- A user invited to one open Ask sees the whole task while that gate is open. When they submit, the gate resolves; if they have no other open-gate membership, they lose task read access on the next request.
+- The task's open-gate count is the authoritative grant; it changes as gates open and close.
+
+The route handler implements this as: `getTaskById(taskId)` joined with a check for either (a) caller in the task's subaccount memberships (existing path), or (b) `EXISTS (SELECT 1 FROM workflow_step_gates WHERE workflow_run_id IN (SELECT id FROM workflow_runs WHERE task_id = :taskId) AND resolved_at IS NULL AND approver_pool_snapshot @> jsonb_build_array(:userId))`. The query runs inside `withOrgTx` so RLS still enforces the `organisation_id` boundary — cross-org Ask routing remains forbidden by RLS even if the workflow author tried to author it.
+
+- A future V2 may add a "restricted view" mode for sensitive workflows (HR, billing, legal) — workflow author opts in at publish; submitter sees only the form card and the prompt. **Out of scope for V1.** V1 grants full task view per the rule above; V2 narrows the grant.
 
 ### 14.5 Pause / Stop button visibility (§7.3)
 
@@ -1429,23 +1464,31 @@ Retire **Brief** as a UI noun. Every user-visible string that refers to a "brief
 - The `tasks` table.
 - The `tasks.brief` text column (it's a content column, not a noun for the surface).
 - Engine-internal references to brief content (the column name + its content).
-- Existing routes (`/briefs/:id` redirects to `/tasks/:id` for backward compat; new route is canonical).
+- Existing routes — the actual route is `/admin/briefs/:briefId` (not `/briefs/:id`); it redirects to `/admin/tasks/:taskId` for backward compat. The `/admin/` prefix is preserved.
 
 ### 15.4 Files referenced
 
+The actual surface (verified against `client/src/`) is broader than a two-file rename. The following is the ground-truth file list at spec-time; architect reverifies at chunk-time before starting:
+
 | File | Change |
 |---|---|
-| `client/src/components/sidebar/*` | Update nav entry label + icon (if changing). |
-| `client/src/pages/BriefsPage.tsx` | Rename to `TasksPage.tsx`; update internal references. |
-| `client/src/pages/BriefDetailPage.tsx` (or equivalent) | Rename to `OpenTaskView.tsx` (also the new three-pane layout from §9 — the rename and refactor land in the same PR). |
-| `client/src/components/NewBriefModal.tsx` | Rename to `NewTaskModal.tsx`; update strings. |
-| `App.tsx` route definitions | Add `/tasks` routes; add redirect from `/briefs` to `/tasks` (preserve any existing :id). |
-| Server email templates | String-replace "brief" → "task" where user-facing. |
+| `client/src/components/sidebar/*` | Update nav entry label "Briefs" → "Tasks". |
+| `client/src/pages/BriefDetailPage.tsx` | Rename to `TaskDetailPage.tsx` (or merge into `OpenTaskView.tsx` from Chunk 11 — architect picks at chunk-time). Update the route's symbol name in `App.tsx`. |
+| `client/src/components/global-ask-bar/GlobalAskBar.tsx` + `GlobalAskBarPure.ts` | The "new brief" entry-point lives in this global bar (there is NO `NewBriefModal.tsx` file). Update operator-visible strings (placeholder text, button labels, success copy). |
+| `client/src/components/brief-artefacts/*` | Internal directory naming stays as-is in V1 — the directory holds artefact-card components (ApprovalCard / StructuredResultCard / ErrorCard) that are an internal architectural concept, not a user-visible label. Operator-visible copy inside these components is updated where it says "brief". |
+| `client/src/lib/briefArtefactLifecyclePure.ts` + tests | Internal name; not user-visible. Stays as-is. |
+| `client/src/components/TaskModal.tsx` | Already named correctly. Audit user-visible strings for any "brief" → "task" updates. |
+| `client/src/App.tsx` | The actual existing route is `<Route path="/admin/briefs/:briefId" element={<BriefDetailPage ... />} />` (line 361). Add `/admin/tasks/:taskId` as the new canonical route, keep `/admin/briefs/:briefId` as a 301 redirect to the new path. |
+| Server email templates (`server/templates/email/*`) | String-replace user-visible "brief" → "task". |
 | i18n / translation files (if any) | Update keys + values. |
+
+**Files NOT in scope** (despite the original spec listing them — they don't exist in the codebase):
+- `client/src/pages/BriefsPage.tsx` — does not exist; only `BriefDetailPage.tsx` does.
+- `client/src/components/NewBriefModal.tsx` — does not exist; the entry-point is `GlobalAskBar.tsx`.
 
 ### 15.5 Effort
 
-~½ day for the find-and-replace + nav update + one redirect rule. Smallest item in the build punch list.
+~1 day (revised from ~½ day) once the actual surface was verified against `client/src/`. Still the smallest item in the build punch list, but the artefact-cards directory + GlobalAskBar updates add roughly ½ day over the original "two-file rename" estimate.
 
 ---
 

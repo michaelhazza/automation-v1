@@ -2545,3 +2545,91 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **P2.5 — Extract `resolveDefault<T>(mod): T` helper for dynamic-import default-export pattern.** Centralises the `(mod as any).default ?? (mod as any).x` workaround currently duplicated across `cron-parser` (`server/services/__tests__/scheduleCalendarParity.test.ts`), `rrule` (used in scheduling helpers), and `pdf-parse` (used in document ingestion). Only 3 callsites today. [user] — premature abstraction at current callsite count; revisit if a 4th case appears.
 - [ ] **P2.1 (R3) — CI enforcement check for `eslint-disable` requiring `// reason:` on the preceding line.** Add a CI step (script under `scripts/` or `.github/workflows/`) that walks line pairs across the codebase and fails the build when an `eslint-disable` directive is not preceded by a `// reason:` comment line. Naive `grep -v` matches reason anywhere on the same line; the correct check needs an awk/script that handles preceding-line semantics and skips block-comment regions. Belongs in its own focused PR with test coverage of the script itself. [user] — out of scope for the lint-cleanup PR; requires its own design + tests.
 - [ ] **P2.4 (R3) — Add "React effect dependency policy" section to `CONTRIBUTING.md`.** Document the target pattern (`useCallback` or `useRef`-stabilised inline function) for `useEffect` bodies that close over component state, alongside the existing lint-suppression policy. Coupling: write this when the React effect refactor (R1 P2.1) lands so the doc describes the post-refactor pattern, not the current inline-async pattern. [user] — defer until the refactor PR ships so the policy and the code agree from day one.
+
+---
+
+## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
+
+Source logs:
+- `tasks/review-logs/pr-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+- `tasks/review-logs/adversarial-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+
+Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blocking findings (B1–B5) and CRITICAL/HIGH adversarial findings (F1, F2, F5, F6, F8) plus strong pr-reviewer findings (S1–S6) have been applied in-spec / in-plan in the same session. Remaining items below are non-blocking improvements and lower-severity adversarial concerns deferred to either the workflows-v1 implementation (where they land in the relevant chunk's acceptance criteria) or to a follow-up V2 spec.
+
+### W1-N1 — Spec §3.1 `agent_execution_events` invariant duplicates §8.1
+
+**Source:** pr-reviewer N1.
+**Action:** condense §3.1 row to a one-line cross-reference to §8.1 (which has the canonical allocation invariant in full). Cleanup, not load-bearing.
+**Owner:** spec polish; can fold into Chunk 1 PR or a docs-sync follow-up.
+
+### W1-N2 — Plan Chunk 0 spike effort accounting
+
+**Source:** pr-reviewer N2.
+**Action:** clarify that the 2-day spike is on top of the ~40-day baseline, not inside it. Plan reads ambiguous; the operator should know the spike is a sunk cost on top.
+**Owner:** plan polish; can fold into the next plan revision.
+
+### W1-N3 — Spec §16.5 effort estimate (~59d) vs plan's revised baseline (~40d)
+
+**Source:** pr-reviewer N3.
+**Action:** spec §16.5 still cites ~59 engineer-days; plan's primitive-reuse re-baseline is ~40d. Either update spec §16.5 or add a one-line "plan-gate re-baseline: ~40 engineer-days (see plan.md line 303)" so future spec readers know the spec figure is stale.
+**Owner:** spec polish.
+
+### W1-N4 — Plan §Risks markdown anchor links
+
+**Source:** pr-reviewer N4.
+**Action:** for the most consequential risks, add `(Chunk N)` anchor links in the mitigation cells. Low-effort navigation improvement.
+**Owner:** plan polish.
+
+### W1-F3 — `assignable-users` email enumeration mitigation
+
+**Source:** adversarial-reviewer F3 (MEDIUM).
+**Action:** consider redacting email for users not in caller's subaccount membership; OR rate-limiting the endpoint (max 10 unique subaccount-IDs per minute per org admin); OR requiring an explicit "I want to assign across subaccounts" admin permission. V1 may ship as-is if the operator accepts the tradeoff (org admins are relatively trusted), but it should be a deliberate trade-off, not an oversight.
+**Owner:** Chunk 10 acceptance criteria — operator decides ship-as-is vs. add mitigation.
+
+### W1-F4 — Approver-pool snapshot UUID normalisation
+
+**Source:** adversarial-reviewer F4 (LOW, worth-confirming).
+**Action:** spec §5.1 should pin the `ApproverPoolSnapshot` normalisation contract — UUIDs lowercase, branded type, parsed at write-time. Without this, a `userInPool` equality check could fail for a legitimate approver if the snapshot captured uppercase UUIDs or surrogate IDs.
+**Owner:** Chunk 4 acceptance criteria + spec §5.1 polish.
+
+### W1-F7 — Stall-and-notify cancellation race verification
+
+**Source:** adversarial-reviewer F7 (LOW, worth-confirming).
+**Action:** verify at Chunk 8 implementation time that the `expectedCreatedAt` stale-fire guard correctly handles the race where the pg-boss job starts executing between `resolved_at` SET and the job-cancel call. Spec analysis suggests it does; confirm with a unit test.
+**Owner:** Chunk 8 implementation + test author.
+
+### W1-F9 — Cadence-detection NLP heuristic gameability note
+
+**Source:** adversarial-reviewer F9 (LOW).
+**Action:** add a one-line note in spec §13.1 that the cadence-detection heuristic is advisory only — any draft created from it goes through the standard publish flow with full validation, so user-tuned prompts can't bypass authorisation. Documentation only; no code change.
+**Owner:** spec polish.
+
+### W1-F10 — Aggregate cost cap across `workflow.run.start`-spawned children (V2)
+
+**Source:** adversarial-reviewer F10 (MEDIUM).
+**Action:** V1 acceptable as-is now that F6's depth cap (max 3) is in place (3 levels × ~10 children per level × $5 = $150 worst-case). V2 should add an aggregate "lineage cost" cap across a parent run and all `workflow.run.start`-spawned descendants. Track in workflows V2 spec.
+**Owner:** workflows V2 spec.
+
+### W1-F11 — `approval.queued` event approver-pool ID broadcast
+
+**Source:** adversarial-reviewer F11 (LOW).
+**Action:** verify at Chunk 9 implementation time whether the client resolves approver-pool IDs to display names. If yes, consider broadcasting only a hash + count rather than the full ID list, OR scope the broadcast to subscribers who are themselves in the pool.
+**Owner:** Chunk 9 implementation + Chunk 11 (open task UI) consumer review.
+
+### W1-spec19 — Confidence-chip cut-points decision before launch
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** spec §19.1 #A (confidence-chip cut-points) is left to architect after collecting 100 internal cards. Track as a release blocker in spec §19; if never formally decided, `workflowConfidenceCopyMap.ts` ships with placeholder values producing misleading confidence in production.
+**Owner:** architect post-Chunk-6.
+
+### W1-pre-existing-1 — Pool-membership CI gap documentation
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** add a note to `DEVELOPMENT_GUIDELINES.md` that `verify-rls-coverage.sh` does NOT catch pool-membership / authz checks (it's RLS-coverage only). Manual reviewer is the only gate today; improving CI coverage of authz patterns is a separate codebase-audit follow-up.
+**Owner:** DEVELOPMENT_GUIDELINES.md docs-sync follow-up.
+
+### W1-approval-pool-refresh — `approval.pool_refreshed` event payload
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** confirm at Chunk 5 implementation time that the Approval card re-fetches the gate's authoritative pool snapshot after a `pool_refreshed` event (not just the `new_pool_size`). If the client renders pool members anywhere, stale display is possible without the re-fetch.
+**Owner:** Chunk 5 + Chunk 11 consumer review.
