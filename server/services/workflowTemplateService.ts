@@ -357,12 +357,17 @@ export const WorkflowTemplateService = {
    * Publishes a new version of an org template. Re-runs the validator
    * against the supplied definition with strict version monotonicity, then
    * appends a new immutable workflow_template_versions row.
+   *
+   * `publishNotes` is persisted to workflow_template_versions.publish_notes
+   * (column added in migration 0268 / Chunk 1). Pass undefined to leave it
+   * NULL for the new version row.
    */
   async publishOrgTemplate(
     organisationId: string,
     templateId: string,
     def: WorkflowDefinition,
-    userId: string
+    userId: string,
+    publishNotes?: string
   ): Promise<{ version: number }> {
     const template = await this.getOrgTemplate(organisationId, templateId);
     if (!template) {
@@ -402,6 +407,7 @@ export const WorkflowTemplateService = {
         version: def.version,
         definitionJson: serialiseDefinition(def),
         publishedByUserId: userId,
+        publishNotes: publishNotes ?? null,
       });
       await tx
         .update(workflowTemplates)

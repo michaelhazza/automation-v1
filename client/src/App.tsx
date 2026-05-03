@@ -70,6 +70,8 @@ const WorkflowsLibraryPage = lazy(() => import('./pages/WorkflowsLibraryPage'));
 const WorkflowRunDetailPage = lazy(() => import('./pages/WorkflowRunDetailPage'));
 const WorkflowRunPage = lazy(() => import('./pages/subaccount/WorkflowRunPage'));
 const WorkflowStudioPage = lazy(() => import('./pages/WorkflowStudioPage'));
+// Workflows V1 — Studio canvas (Chunk 14a)
+const StudioPage = lazy(() => import('./pages/StudioPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -356,6 +358,9 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
+            {/* Workflows V1 — Studio canvas (Chunk 14a). Admin/power-user only; not in operator nav. */}
+            <Route path="/admin/workflows/new" element={<StudioPage user={user!} />} />
+            <Route path="/admin/workflows/:id/edit" element={<StudioPage user={user!} />} />
             {/* Configuration Assistant */}
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
