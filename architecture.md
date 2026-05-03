@@ -1121,6 +1121,48 @@ Flow:
 
 ---
 
+## GHL Agency OAuth Integration
+
+Spec: `docs/ghl-module-c-oauth-spec.md`. Branch: `ghl-agency-oauth`.
+
+GoHighLevel installs at the **agency** level, not per-location. One agency-level access/refresh token mints short-lived **location** tokens on demand for sub-accounts. Routes: `server/routes/ghl.ts` (OAuth init/callback) + `server/routes/webhooks/ghlWebhook.ts` (lifecycle + entity events).
+
+### Token model (two tiers)
+
+- **Agency token** — stored on `connector_configs` with `token_scope='agency'`. Columns: `access_token`, `refresh_token`, `expires_at`, `scope`, `company_id`, `installed_at`, `disconnected_at`. Refreshed by `connectorPollingTick` 5-minute pre-expiry sweep (`refreshAgencyTokenIfExpired`). On permanent 401 → `status='disconnected'`, `disconnected_at=now()`.
+- **Location token** — stored on `connector_location_tokens` (FORCE RLS via parent connector_config's organisation_id). Minted on demand by `getLocationToken(agencyConnection, locationId)` in `server/services/locationTokenService.ts`. DB unique partial index `(connector_config_id, location_id) WHERE deleted_at IS NULL` is the authoritative race guard; in-process Map is a single-instance perf optimisation only. On 401 → soft-delete row + remint via `handleLocationToken401`.
+
+### Disconnected circuit breaker
+
+Every entry point that could touch a token must filter out `status='disconnected'`:
+- `connectorPollingTick` agency-refresh sweep — `ne(status, 'disconnected')` in WHERE
+- `findAgencyConnectionByCompanyId` (webhook side-effects entry point) — `ne(status, 'disconnected')` in WHERE
+- Location-token mint depends on agency `accessToken`, which the refresh sweep won't have rotated for a disconnected connector — indirect guard
+
+UNINSTALL webhook flips agency status to `disconnected` AND mass-soft-deletes child location-token rows in one org-scoped transaction.
+
+### Webhook security model
+
+- `/api/webhooks/ghl` is **unauthenticated** — GHL cannot provide JWT tokens.
+- HMAC-SHA256 signature verification against `GHL_WEBHOOK_SIGNING_SECRET` (env). Production: secret missing → 503 fail-closed. Dev/test: warn-and-pass.
+- Signature header tolerates both `sha256=<hex>` (GitHub-style) and bare hex (`server/adapters/ghlAdapter.ts:verifySignature`).
+- §5.4 hard ordering invariant for lifecycle events (INSTALL/UNINSTALL/LocationCreate/LocationUpdate): side effects FIRST, then dedupe mark, then 200. A 503 from dispatch must leave the dedupe store unmarked so GHL re-delivers on retry.
+
+### Cross-org webhook routing under FORCE RLS
+
+`recordGhlMutation`, `findAgencyConnectionByCompanyId`, and `connectorPollingTick`'s agency sweep all use `withAdminConnection` + `SET LOCAL ROLE admin_role` — the unauthenticated webhook route has no `app.organisation_id` GUC on its pooled `db` handle. Application-layer scoping is preserved by explicit `companyId` / `organisationId` / `subaccountId` filters in the WHERE clause and in the row being written. Pattern lives in `server/lib/adminDbConnection.ts`.
+
+### Observability
+
+12 lifecycle log sites carry consistent fields: `event`, `provider:'ghl'`, `orgId`, `companyId`, `locationId` (where applicable), `result`, `error`. Trace chain install → mint → refresh → failure → disconnected is filterable end-to-end via `provider:'ghl'`.
+
+### Env vars
+
+- `OAUTH_GHL_CLIENT_ID` / `OAUTH_GHL_CLIENT_SECRET` — agency OAuth credentials
+- `GHL_WEBHOOK_SIGNING_SECRET` — HMAC secret for inbound webhook signature verification
+
+---
+
 ## Board Config Hierarchy
 
 ```

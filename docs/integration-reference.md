@@ -472,9 +472,12 @@ required_scopes:
   - calendars.readonly
   - funnels.readonly
   - conversations.readonly
+  - conversations.write
   - conversations/message.readonly
   - businesses.readonly
   - saas/subscription.readonly
+  - companies.readonly
+  - payments/orders.readonly
 scope_behavior: |
   Expanded scopes (ClientPulse Phase 1, added 2026-04-18) apply to new OAuth
   authorisations only. Existing connections with the original 3-scope token
@@ -482,6 +485,13 @@ scope_behavior: |
   require the new scopes (funnels, calendars, users, locations, saas) gate
   themselves and mark observations `unavailable_missing_scope` when absent.
   Re-consent is surfaced via a pilot-stage banner (Phase 5 surface).
+  Module C (agency-level OAuth, spec: docs/ghl-module-c-oauth-spec.md): adds
+  companies.readonly (sub-account enumeration), conversations.write,
+  payments/orders.readonly. New installs use agency token (Company target,
+  userType=Company) with a separate per-location token cache
+  (connector_location_tokens table). Token model: one agency token per
+  (orgId, companyId) in connector_configs; location tokens minted on demand
+  via /oauth/locationToken and cached with 24h TTL + 5min refresh window.
 webhook_events:
   - ContactCreate
   - ContactUpdate
@@ -511,7 +521,7 @@ known_gaps:
 client_specific_patterns:
   - Subaccount IDs per agency client
 implemented_since: "2026-02-20"
-last_verified: "2026-04-19"
+last_verified: "2026-05-03"
 owner: platform-team
 ```
 
@@ -706,3 +716,41 @@ implemented_since: "2026-04-30"
 last_verified: "2026-05-01"
 owner: platform-team
 ```
+
+---
+
+## GHL Agency vs Location Token Model
+
+GHL Module C introduces a two-tier token architecture that distinguishes agency-level operations from sub-account (location) operations.
+
+### Agency token
+
+- One token per `(orgId, ghlCompanyId)` pair, stored in `connector_configs` with `token_scope = 'agency'`.
+- Obtained via the standard OAuth flow using `userType=Company` in the initial authorization request, which targets the GHL Company (agency) level rather than a specific Location.
+- Used for operations that act on the agency itself: listing all sub-account locations (`GET /locations/search`) and fetching a single location's metadata.
+- Refreshed in place; invalid tokens are not soft-deleted — they surface as auth errors and trigger a reconnect prompt.
+
+### Location token
+
+- One token per `(orgId, locationId)`, stored in `connector_location_tokens` with a 24-hour TTL and a 5-minute proactive refresh window.
+- Minted on demand by calling `POST /oauth/locationToken` with the agency token, then cached.
+- Used for all sub-account-scoped adapter operations: contacts, opportunities, conversations, calendars, funnels, users, revenue, businesses, and sub-account metadata reads.
+- On a 401 response from GHL, the cached entry is soft-deleted (`deleted_at` set) so the next call triggers a fresh mint rather than a retry storm.
+
+### `getLocationToken` helper pattern
+
+The `getLocationToken` function in `locationTokenService` implements a four-step pattern for every location-scoped adapter call:
+
+1. **Cache hit** — return the valid cached token if `expires_at > now + 5 min`.
+2. **Mint** — call `POST /oauth/locationToken` if no valid cache entry exists; insert the result.
+3. **Refresh** — call `POST /oauth/locationToken` to renew if within the 5-minute refresh window.
+4. **401 soft-delete** — on a downstream 401, mark the cached token `deleted_at = now` so the next call re-mints cleanly.
+
+### Adapter method token routing
+
+| Token type | Methods |
+|------------|---------|
+| Agency token | `listLocations`, `getLocation` |
+| Location token | `getContacts`, `getOpportunities`, `getConversations`, `getCalendars`, `getFunnels`, `getUsers`, `getRevenue`, `getBusinesses`, `getLocationMetadata` |
+
+Nine adapter methods use location-scoped tokens; two use the agency token directly.
