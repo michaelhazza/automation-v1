@@ -75,6 +75,9 @@ export const WorkflowStepReviewService = {
       );
     }
 
+    // Deferred emit for approval.queued (B3 deferred-emit pattern).
+    let openGateEmit: (() => Promise<void>) | undefined;
+
     await db.transaction(async (tx) => {
       // Re-load the run inside the transaction for consistent gate creation.
       const [run] = await tx
@@ -86,9 +89,8 @@ export const WorkflowStepReviewService = {
       }
 
       // Open (or retrieve existing) gate — idempotent.
-      // taskId: workflowRuns has no taskId column yet (Chunk 1 omission);
-      // run.id is the stable navigation target for the notification surface.
-      // TODO: replace run.id with workflowRuns.taskId once that column lands.
+      // Pass real taskId when available (landed via migration 0269 / F1);
+      // fall back to run.id so stall notifications have a valid navigation target.
       const gate = await WorkflowStepGateService.openGate(
         {
           workflowRunId: stepRun.runId,
@@ -97,11 +99,13 @@ export const WorkflowStepReviewService = {
           approverPoolSnapshot,
           isCriticalSynthesised: context?.isCriticalSynthesised ?? false,
           organisationId: run.organisationId,
-          taskId: run.id,
+          taskId: (run as { taskId?: string | null }).taskId ?? run.id,
           requesterUserId: run.startedByUserId ?? null,
         },
         tx
       );
+      // Stash for post-commit emit (B3 deferred-emit pattern).
+      openGateEmit = gate.emitAfterCommit;
 
       // If the gate was already open (pre-existing), check for an existing
       // pending review — if found, the whole operation is idempotent.
@@ -173,6 +177,9 @@ export const WorkflowStepReviewService = {
         approverGroupKind: context?.approverGroup?.kind ?? null,
       });
     });
+
+    // Emit deferred approval.queued task event after tx commits (B3 deferred-emit pattern).
+    if (openGateEmit) await openGateEmit();
 
     // Emit WS events outside the transaction (best-effort).
     const [run] = await db

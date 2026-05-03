@@ -12,6 +12,8 @@ import { db } from '../db/index.js';
 import { executions, agentRuns, agentConversations, subaccounts, workflowRuns } from '../db/schema/index.js';
 import { orgUserRoles, permissionSetItems, systemAgents } from '../db/schema/index.js';
 import { resolveAgentRunVisibility } from '../lib/agentRunVisibility.js';
+import { handleJoinTask, handleLeaveTask } from './taskRoom.js';
+import type { AuthSocket } from './taskRoom.js';
 
 // UUID format check — reject malformed IDs early
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -204,6 +206,21 @@ export function handleConnection(socket: Socket): void {
 
   socket.on('leave:system-llm-inflight', () => {
     socket.leave('system:llm-inflight');
+  });
+
+  // ── Join a task room (visibility-checked) ───────────────────────────
+  // Spec: docs/workflows-dev-spec.md §8. Visibility stub in taskRoom.ts;
+  // Chunk 10 will replace with full permission helper.
+  socket.on('join:task', async (taskId: unknown) => {
+    if (!isValidUUID(taskId)) return;
+    await handleJoinTask(socket as AuthSocket, taskId);
+  });
+
+  socket.on('leave:task', (taskId: unknown) => {
+    if (!isValidUUID(taskId)) return;
+    handleLeaveTask(socket as AuthSocket, taskId).catch(() => {
+      // leave is best-effort
+    });
   });
 
   // ── Join a workflow run room (validated against org ownership) ──────

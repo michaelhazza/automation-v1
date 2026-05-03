@@ -2588,3 +2588,18 @@ The spec-reviewer auto-decided the following directional findings during iterati
   - Today: `scheduledTasks.pinnedTemplateVersionId` column exists (migration 0268) and `WorkflowRunService.startRun({ pinnedTemplateVersionId })` consumes it correctly. However, `scheduledTaskService.fireOccurrence` only dispatches agent runs — it never calls `WorkflowRunService.startRun`. There is no workflow-run-from-schedule path in the codebase.
   - Required: when the workflow-run-from-schedule dispatcher lands (a later chunk), it must read `scheduledTasks.pinnedTemplateVersionId` and pass it to `WorkflowRunService.startRun`. `WorkflowScheduleDispatchService.pickVersionForSchedule` is already wired to honour the pin.
   - Audit this when the schedule-to-workflow-run path lands.
+
+## Deferred — Workflows V1 Chunk 9 task-event emission (Ask gate path)
+
+- [ ] Wire `ask.queued`, `ask.submitted`, `ask.skipped` task events when Chunk 12 lands
+  - Ask gate path lands in Chunk 12 (Ask form runtime). Event emission code is ready
+    in `workflowStepGateService.ts` (stub comment) but the callsites that create `gate_kind='ask'`
+    gates do not yet exist.
+  - When Chunk 12 wires Ask step dispatch: (1) call `openGate` with `gateKind: 'ask'` + pass
+    `agentRunId` context; (2) emit `ask.queued` via `TaskEventService.appendAndEmit` with
+    `{ gateId, stepId, submitterPool, schema, prompt }` payload; (3) emit `ask.submitted`
+    on form submit; (4) emit `ask.skipped` on skip (when `params.allowSkip === true`).
+  - Note: `TaskEventService.appendAndEmit` requires a valid `agent_runs.id` FK for `runId`.
+    Thread `agentRunId` through to the gate open path or resolve via the most recent
+    agent run for the workflow step.
+  - File stubs: `server/services/workflowStepGateService.ts` (openGate comment ~line 90).

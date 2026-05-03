@@ -152,6 +152,13 @@ export const WorkflowRunService = {
      * found, startRun throws `pinned_version_unavailable` (422).
      */
     pinnedTemplateVersionId?: string | null;
+    /**
+     * Workflows V1 §8 — task context for event emission. When the run is
+     * spawned from a task (e.g. via an orchestrator), pass the task ID here.
+     * Drives task-scoped event emission to the activity feed.
+     * Null/omitted for system-initiated or direct-API runs.
+     */
+    taskId?: string | null;
   }): Promise<{ runId: string; status: WorkflowRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -261,6 +268,7 @@ export const WorkflowRunService = {
           contextJson: effectiveContext as unknown as Record<string, unknown>,
           contextSizeBytes: contextBytes,
           startedByUserId: input.startedByUserId,
+          taskId: input.taskId ?? null,
           startedAt,
           isOnboardingRun: input.isOnboardingRun ?? false,
           isPortalVisible,
@@ -557,6 +565,9 @@ export const WorkflowRunService = {
 
     // Single transaction: gate lookup, pool check, optimistic step UPDATE,
     // and gate resolution.
+    // Deferred emit for approval.decided (B3 deferred-emit pattern): captured
+    // inside the tx and invoked after commit to avoid phantom events.
+    let gateResolveEmit: (() => Promise<void>) | undefined;
     await db.transaction(async (tx) => {
       // Gate lookup inside the transaction.
       const [openGate] = await tx
@@ -618,9 +629,14 @@ export const WorkflowRunService = {
 
       // Resolve the gate if one was open.
       if (openGate) {
-        await WorkflowStepGateService.resolveGate(openGate.id, 'submitted', organisationId, tx);
+        const resolveResult = await WorkflowStepGateService.resolveGate(openGate.id, 'submitted', organisationId, tx);
+        // Stash for post-commit emit (B3 deferred-emit pattern).
+        gateResolveEmit = resolveResult.emitAfterCommit;
       }
     });
+
+    // Emit deferred task event after tx commits (B3 deferred-emit pattern).
+    if (gateResolveEmit) await gateResolveEmit();
 
     // Engine re-tick outside the transaction (consistent with other paths).
     await WorkflowEngineService.enqueueTick(runId);
@@ -752,6 +768,8 @@ export const WorkflowRunService = {
     let existingReviewId: string | null = null;
     let finalStepStatus: 'completed' | 'failed' = 'completed';
     let shouldRedispatch = false;
+    // Deferred emit for approval.decided (B3 deferred-emit pattern).
+    let approvalDecidedEmit: (() => Promise<void>) | undefined;
 
     await db.transaction(async (tx: OrgScopedTx) => {
       // 1. Idempotency: INSERT review row (gate FK) with ON CONFLICT DO NOTHING.
@@ -785,7 +803,9 @@ export const WorkflowRunService = {
       // 2. Resolve the gate (if one exists).
       if (gate) {
         const gateResolution = decision === 'rejected' ? 'rejected' : 'approved';
-        await WorkflowStepGateService.resolveGate(gate.id, gateResolution, organisationId, tx);
+        const resolveResult = await WorkflowStepGateService.resolveGate(gate.id, gateResolution, organisationId, tx);
+        // Stash for post-commit emit (B3 deferred-emit pattern).
+        approvalDecidedEmit = resolveResult.emitAfterCommit;
       }
 
       // 3. Update step status directly — minimal columns only.
@@ -868,6 +888,9 @@ export const WorkflowRunService = {
     }
 
     // ── Post-transaction side effects ────────────────────────────────────────
+    // Emit deferred task event after tx commits (B3 deferred-emit pattern).
+    if (approvalDecidedEmit) await approvalDecidedEmit();
+
     if (shouldRedispatch) {
       const { stepOutcome } = await WorkflowEngineService.resumeInvokeAutomationStep(stepRunId);
       finalStepStatus = stepOutcome;

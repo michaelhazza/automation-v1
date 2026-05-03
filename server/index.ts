@@ -74,6 +74,7 @@ import workflowTemplatesRouter from './routes/workflowTemplates.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import workflowStudioRouter from './routes/workflowStudio.js';
 import workflowGatesRouter from './routes/workflowGates.js';
+import taskEventStreamRouter from './routes/taskEventStream.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
 import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
@@ -319,6 +320,7 @@ app.use(webLoginConnectionsRouter);
 app.use(workflowTemplatesRouter);
 app.use(workflowRunsRouter);
 app.use(workflowGatesRouter);
+app.use(taskEventStreamRouter);
 app.use(workflowStudioRouter);
 app.use(subaccountOnboardingRouter);
 app.use(automationConnectionMappingsRouter);

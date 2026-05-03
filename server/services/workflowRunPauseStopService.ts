@@ -19,6 +19,7 @@ import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import type { PauseReason } from './workflowRunPauseStopServicePure.js';
 import { shouldIncrementExtensionCount } from './workflowRunPauseStopServicePure.js';
 import { MAX_EXTENSIONS_PER_RUN } from '../config/limits.js';
+import { TaskEventService } from './taskEventService.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,32 @@ export const WorkflowRunPauseStopService = {
         organisationId,
         reason,
       });
+
+      // Task-scoped run.paused.by_user event. Load taskId from the run.
+      // runId is null because this call site has no agent_run context
+      // (it's a user-triggered workflow-run pause). Migration 0270 made
+      // agent_execution_events.run_id nullable for exactly this case.
+      db.select({ taskId: workflowRuns.taskId })
+        .from(workflowRuns)
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)))
+        .limit(1)
+        .then(([row]) => {
+          if (!row?.taskId) return;
+          TaskEventService.appendAndEmit({
+            taskId: row.taskId,
+            runId: null,
+            organisationId,
+            eventOrigin: 'user',
+            event: { kind: 'run.paused.by_user', payload: { actorId: _userId } },
+          }).catch((err) => {
+            logger.warn('task_event_pause_emit_failed', {
+              event: 'task_event.pause_emit_failed',
+              runId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        })
+        .catch(() => { /* best-effort */ });
     }
 
     return result;
@@ -242,6 +269,38 @@ export const WorkflowRunPauseStopService = {
       extendSeconds: opts.extendSeconds,
     });
 
+    // Task-scoped run.resumed event. runId is null because this call site has no
+    // agent_run context (user-triggered resume). Migration 0270 made
+    // agent_execution_events.run_id nullable for exactly this case.
+    db.select({ taskId: workflowRuns.taskId })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, runId))
+      .limit(1)
+      .then(([row]) => {
+        if (!row?.taskId) return;
+        TaskEventService.appendAndEmit({
+          taskId: row.taskId,
+          runId: null,
+          organisationId,
+          eventOrigin: 'user',
+          event: {
+            kind: 'run.resumed',
+            payload: {
+              actorId: _userId,
+              ...(opts.extendCostCents !== undefined && { extensionCostCents: opts.extendCostCents }),
+              ...(opts.extendSeconds !== undefined && { extensionSeconds: opts.extendSeconds }),
+            },
+          },
+        }).catch((err) => {
+          logger.warn('task_event_resume_emit_failed', {
+            event: 'task_event.resume_emit_failed',
+            runId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      })
+      .catch(() => { /* best-effort */ });
+
     // Enqueue a tick to restart execution after the transaction has committed.
     // Lazy-imported: workflowEngineService.ts imports WorkflowRunPauseStopService
     // at module load, so a top-level import here would form an ESM cycle and TDZ
@@ -343,6 +402,31 @@ export const WorkflowRunPauseStopService = {
         runId,
         organisationId,
       });
+
+      // Task-scoped run.stopped.by_user event. runId is null because this call site
+      // has no agent_run context (user-triggered stop). Migration 0270 made
+      // agent_execution_events.run_id nullable for exactly this case.
+      db.select({ taskId: workflowRuns.taskId })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, runId))
+        .limit(1)
+        .then(([row]) => {
+          if (!row?.taskId) return;
+          TaskEventService.appendAndEmit({
+            taskId: row.taskId,
+            runId: null,
+            organisationId,
+            eventOrigin: 'user',
+            event: { kind: 'run.stopped.by_user', payload: { actorId: _userId } },
+          }).catch((err) => {
+            logger.warn('task_event_stop_emit_failed', {
+              event: 'task_event.stop_emit_failed',
+              runId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        })
+        .catch(() => { /* best-effort */ });
     }
 
     return result;

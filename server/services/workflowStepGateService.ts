@@ -12,7 +12,7 @@ import { eq, and, isNull, sql } from 'drizzle-orm';
 import { assertValidGateTransition } from '../../shared/stateMachineGuards.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type { OrgScopedTx } from '../db/index.js';
-import { workflowStepGates, workflowStepRuns } from '../db/schema/index.js';
+import { workflowStepGates, workflowStepRuns, workflowRuns } from '../db/schema/index.js';
 import type {
   WorkflowStepGate,
   WorkflowStepGateKind,
@@ -22,6 +22,7 @@ import type {
 import type { SeenPayload, SeenConfidence } from '../../shared/types/workflowStepGate.js';
 import { logger } from '../lib/logger.js';
 import { WorkflowGateStallNotifyService } from './workflowGateStallNotifyService.js';
+import { TaskEventService } from './taskEventService.js';
 
 export interface OpenGateInput {
   workflowRunId: string;
@@ -33,10 +34,9 @@ export interface OpenGateInput {
   isCriticalSynthesised?: boolean;
   organisationId: string;
   /**
-   * Stable ID for the stall-notify payload. Until workflowRuns.taskId lands
-   * (a Chunk 1 omission), callers pass workflowRuns.id here — the gate's own
-   * run ID is a valid navigation target for the notification surface.
-   * TODO: replace with workflowRuns.taskId once that column lands.
+   * Stable ID for the stall-notify payload. Pass `run.taskId ?? run.id`
+   * (migration 0269 adds taskId; run.id is the fallback for runs without
+   * task context). The gate's own run ID is always a valid navigation target.
    */
   taskId: string;
   /**
@@ -55,7 +55,10 @@ export const WorkflowStepGateService = {
    * Idempotent: if an open gate already exists, returns it without inserting.
    * Handles concurrent INSERT races via 23505 unique-constraint catch + re-read.
    */
-  async openGate(input: OpenGateInput, tx: OrgScopedTx): Promise<WorkflowStepGate> {
+  async openGate(input: OpenGateInput, tx: OrgScopedTx): Promise<WorkflowStepGate & { emitAfterCommit: () => Promise<void> }> {
+    // A no-op emit closure for the idempotent-hit and race paths (gate already exists).
+    const noopEmit = async (): Promise<void> => { /* gate already existed — no new emit */ };
+
     // Pre-check: is there already an open gate for this (run, step)?
     const existing = await tx
       .select()
@@ -69,7 +72,7 @@ export const WorkflowStepGateService = {
         )
       );
     if (existing.length > 0) {
-      return existing[0];
+      return { ...existing[0], emitAfterCommit: noopEmit };
     }
 
     const values: NewWorkflowStepGate = {
@@ -86,6 +89,37 @@ export const WorkflowStepGateService = {
     try {
       const [gate] = await tx.insert(workflowStepGates).values(values).returning();
 
+      // Task-scoped approval.queued event (B3 fix).
+      // openGate runs inside the caller's tx; emit is deferred until after commit
+      // via the B1 deferred-emit pattern. We capture the necessary data from
+      // `input` and `gate` here (inside the tx) and close over them in the emit fn.
+      // ask.queued: Ask gate path lands in Chunk 12 — event emission ready then.
+      const emitApprovalQueued = async (): Promise<void> => {
+        if (!input.taskId) return;
+        await TaskEventService.appendAndEmit({
+          taskId: input.taskId,
+          runId: null, // no agent_run context at gate-open time (orchestrator path)
+          organisationId: input.organisationId,
+          eventOrigin: 'gate',
+          event: {
+            kind: 'approval.queued',
+            payload: {
+              gateId: gate.id,
+              stepId: input.stepId,
+              approverPool: input.approverPoolSnapshot ?? [],
+              seenPayload: input.seenPayload ?? {} as SeenPayload,
+              seenConfidence: input.seenConfidence ?? {} as SeenConfidence,
+            },
+          },
+        // appendAndEmit without tx — will commit its own tx and emit immediately.
+        }).catch((err) => {
+          logger.warn('task_event_approval_queued_emit_failed', {
+            event: 'task_event.approval_queued_emit_failed',
+            gateId: gate.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      };
       // Spec §5.3: schedule stall-and-notify jobs after gate insert.
       // Done outside the caller's transaction context (pg-boss is independent
       // of the Postgres tx). Best-effort — errors are caught inside the
@@ -110,7 +144,7 @@ export const WorkflowStepGateService = {
         });
       }
 
-      return gate;
+      return { ...gate, emitAfterCommit: emitApprovalQueued };
     } catch (err: unknown) {
       // 23505 = unique_violation — concurrent INSERT race on (workflowRunId, stepId)
       const pgCode = (err as { code?: string }).code;
@@ -133,7 +167,8 @@ export const WorkflowStepGateService = {
         if (!winner) {
           throw err; // Something very wrong — rethrow original
         }
-        return winner;
+        // Race: another inserter won; no new emit from us (they handle it).
+        return { ...winner, emitAfterCommit: noopEmit };
       }
       throw err;
     }
@@ -149,7 +184,7 @@ export const WorkflowStepGateService = {
     resolutionReason: WorkflowStepGateResolutionReason,
     organisationId: string,
     tx: OrgScopedTx
-  ): Promise<void> {
+  ): Promise<{ emitAfterCommit: () => Promise<void> }> {
     // Enforce gate state machine: open → resolved. 'resolved' is terminal so
     // resolved→resolved (idempotent) is handled by the 0-rows-updated path below.
     assertValidGateTransition(gateId, 'open', 'resolved');
@@ -177,6 +212,8 @@ export const WorkflowStepGateService = {
       )
       .returning({ id: workflowStepGates.id });
 
+    const noopEmit = async (): Promise<void> => { /* no new emit needed */ };
+
     if (updated.length === 0) {
       // Gate was already resolved — look up and compare
       const [existing] = await tx
@@ -192,11 +229,11 @@ export const WorkflowStepGateService = {
           )
         );
 
-      if (!existing) return; // Gate doesn't exist — no-op
+      if (!existing) return { emitAfterCommit: noopEmit }; // Gate doesn't exist — no-op
 
       if (existing.resolutionReason === resolutionReason) {
         // Same reason — idempotent
-        return;
+        return { emitAfterCommit: noopEmit };
       }
 
       // Different reason — first committer won; log warning but don't throw
@@ -206,7 +243,55 @@ export const WorkflowStepGateService = {
         attemptedReason: resolutionReason,
         message: 'Gate already resolved with a different reason — first committer wins',
       });
+      return { emitAfterCommit: noopEmit };
     }
+
+    // Task-scoped approval.decided event (B3 fix).
+    // Look up the gate row (inside tx) to get workflowRunId, then look up the run
+    // to get taskId. Emit is deferred until after the caller's tx commits.
+    const [gateRow] = await tx
+      .select({ workflowRunId: workflowStepGates.workflowRunId })
+      .from(workflowStepGates)
+      .where(eq(workflowStepGates.id, gateId));
+
+    const taskIdForEmit = gateRow
+      ? await (async () => {
+          const [runRow] = await tx
+            .select({ taskId: workflowRuns.taskId })
+            .from(workflowRuns)
+            .where(eq(workflowRuns.id, gateRow.workflowRunId));
+          return (runRow as { taskId?: string | null } | undefined)?.taskId ?? null;
+        })()
+      : null;
+
+    const emitApprovalDecided = async (): Promise<void> => {
+      if (!taskIdForEmit) return;
+      // Only emit for approval gates (resolutionReason is 'approved' or 'rejected').
+      // 'submitted' is an ask-gate path; 'run_terminated' is a cascade.
+      if (resolutionReason !== 'approved' && resolutionReason !== 'rejected') return;
+      await TaskEventService.appendAndEmit({
+        taskId: taskIdForEmit,
+        runId: null, // no agent_run context at gate-resolve time
+        organisationId,
+        eventOrigin: 'gate',
+        event: {
+          kind: 'approval.decided',
+          payload: {
+            gateId,
+            decidedBy: 'system', // actual decidedBy is not threaded to resolveGate; Chunk 10 can refine
+            decision: resolutionReason as 'approved' | 'rejected',
+          },
+        },
+      }).catch((err) => {
+        logger.warn('task_event_approval_decided_emit_failed', {
+          event: 'task_event.approval_decided_emit_failed',
+          gateId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    };
+
+    return { emitAfterCommit: emitApprovalDecided };
   },
 
   /**

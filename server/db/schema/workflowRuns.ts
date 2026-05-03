@@ -16,6 +16,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { workflowTemplateVersions } from './workflowTemplates';
+import { tasks } from './tasks';
 
 // ---------------------------------------------------------------------------
 // Workflow Runs — execution instances against a single subaccount
@@ -70,6 +71,9 @@ export const workflowRuns = pgTable(
     parentRunId: uuid('parent_run_id').references((): any => workflowRuns.id),
     targetSubaccountId: uuid('target_subaccount_id').references(() => subaccounts.id),
     startedByUserId: uuid('started_by_user_id').references(() => users.id),
+    // Workflows V1 — task context (migration 0269). Nullable: set when the run
+    // is spawned from a task. Drives task-scoped event emission (§8).
+    taskId: uuid('task_id').references(() => tasks.id),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
@@ -102,6 +106,9 @@ export const workflowRuns = pgTable(
       .on(table.id)
       .where(sql`${table.status} = 'paused'`),
     statusUpdatedIdx: index('workflow_runs_status_updated_idx').on(table.status, table.updatedAt),
+    taskIdIdx: index('workflow_runs_task_id_idx')
+      .on(table.taskId)
+      .where(sql`${table.taskId} IS NOT NULL`),
   })
 );
 

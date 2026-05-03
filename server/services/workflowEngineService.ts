@@ -94,6 +94,7 @@ import { buildIdempotencyKey } from '../lib/workflow/idempotencyKey.js';
 import { WALL_CLOCK_HEARTBEAT_QUEUE, runWallClockHeartbeat } from '../jobs/workflowWallClockHeartbeatJob.js';
 import { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, runWorkflowGateStallNotify } from '../jobs/workflowGateStallNotifyJob.js';
 import type { StallNotifyPayload } from './workflowGateStallNotifyService.js';
+import { TaskEventService } from './taskEventService.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -646,6 +647,57 @@ function shouldSuppressWebSocket(runMode: string | null | undefined): boolean {
   return runMode === 'background';
 }
 
+// ─── Task-event emission helper ──────────────────────────────────────────────
+
+/**
+ * Best-effort wrapper around TaskEventService.appendAndEmit.
+ *
+ * `run` is the workflow run context. `taskId` is sourced from run.taskId
+ * (migration 0269 adds taskId to workflow_runs; null until that column is set).
+ * When taskId is null, the emission is a no-op.
+ *
+ * `agentRunId` is nullable since migration 0270 made agent_execution_events.run_id
+ * nullable. Pass null for orchestrator-emitted events (e.g. step.queued) that
+ * have no agent run yet; pass the agentRunId for events emitted after an agent
+ * run is created (step.started, step.completed, step.failed).
+ *
+ * Errors are caught and logged; this must never block or throw in the
+ * engine tick loop.
+ */
+async function emitTaskEventForRun(
+  run: WorkflowRun,
+  event: import('../../shared/types/taskEvent.js').TaskEvent,
+  agentRunId?: string | null,
+): Promise<void> {
+  const taskId: string | null = (run as { taskId?: string | null }).taskId ?? null;
+  if (!taskId) return; // no task context — skip until run.taskId is populated (Chunk 1)
+
+  // runId is nullable (migration 0270): pass agentRunId when available so the
+  // row gets a run_id FK; pass null for orchestrator-emitted events without an
+  // agent run (e.g. step.queued). The DB check constraint is satisfied by
+  // task_id being set.
+  try {
+    const result = await TaskEventService.appendAndEmit({
+      taskId,
+      runId: agentRunId ?? null,
+      organisationId: run.organisationId,
+      eventOrigin: 'engine',
+      event,
+    });
+    // No caller tx here — emit is already invoked inside appendAndEmit.
+    // The result.emit function is a no-op for the tx-less path, but we call
+    // it defensively so callers following the B1 pattern always close the loop.
+    void result;
+  } catch (err) {
+    logger.warn('task_event_engine_emit_failed', {
+      event: 'task_event.engine_emit_failed',
+      runId: run.id,
+      kind: (event as { kind?: unknown }).kind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 /**
  * Creates pending step runs for a new Workflow run. Used by bulk fan-out
  * to initialise child runs with the same step structure as the parent.
@@ -1186,6 +1238,17 @@ export const WorkflowEngineService = {
     if (!sr) {
       throw new Error(`internal: no pending step run row for ${step.id}`);
     }
+
+    // Task-scoped step.queued event (Chunk 9). No-op until run.taskId is populated (Chunk 1).
+    // No agentRunId at dispatch time — orchestrator-emitted event, pass null per B2 fix.
+    void emitTaskEventForRun(run, {
+      kind: 'step.queued',
+      payload: {
+        stepId: step.id,
+        stepType: step.type,
+        params: (step.params ?? {}) as Record<string, unknown>,
+      },
+    }, null);
 
     // Resolve inputs (Phase 1: pass-through; full templating reuse landed
     // for prompt step types in step 6).
@@ -2227,6 +2290,20 @@ export const WorkflowEngineService = {
       });
       return;
     }
+
+    // Task-scoped event (Chunk 9). No-op until run.taskId is populated (Chunk 1).
+    // No agentRunId in failStepRunInternal scope — pass null per B2 fix.
+    if (parentRun) {
+      void emitTaskEventForRun(parentRun, {
+        kind: 'step.failed',
+        payload: {
+          stepId: sr.stepId,
+          errorClass: 'WorkflowStepError',
+          errorMessage: reason,
+        },
+      }, null);
+    }
+
     await this.enqueueTick(sr.runId);
   },
 
@@ -3135,6 +3212,17 @@ export const WorkflowEngineService = {
       via,
     });
 
+    // Task-scoped event (Chunk 9). No-op until run.taskId is populated (Chunk 1).
+    // No agentRunId in completeStepRunInternal scope — pass null per B2 fix.
+    void emitTaskEventForRun(run, {
+      kind: 'step.completed',
+      payload: {
+        stepId: sr.stepId,
+        outputs: output,
+        fileRefs: [],
+      },
+    }, null);
+
     // §G8 / §7.4 — `user_input` steps with a `referenceBinding` write the
     // bound form field to a Reference note on the sub-account. The binding
     // fires after the step is persisted but before the re-tick, so the
@@ -3313,6 +3401,25 @@ export const WorkflowEngineService = {
         agentRunId,
       });
       return;
+    }
+
+    // Task-scoped step.started event (F2). Emitted here — the earliest point
+    // where agentRunId is available as a valid FK for agent_execution_events.
+    // The step was already marked 'running' at dispatch; this event confirms
+    // the agent actually executed. agentRunId required for FK integrity.
+    {
+      const [parentRun] = await db
+        .select()
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, sr.runId))
+        .limit(1);
+      if (parentRun) {
+        void emitTaskEventForRun(
+          parentRun,
+          { kind: 'step.started', payload: { stepId: sr.stepId } },
+          agentRunId,
+        );
+      }
     }
 
     // Route decision steps through their dedicated completion handler.
@@ -3835,6 +3942,24 @@ export const WorkflowEngineService = {
       skippedStepIds: [...skipSet],
       rationale,
     });
+
+    // Task-scoped step.branch_decided event (F2). Payload: the chosen branch
+    // id as resolvedValue; targetStep is the first step in the chosen branch
+    // (downstream from the decision step). agentRunId is the agent run that
+    // produced the decision output — passed so run_id FK is set on the row.
+    void emitTaskEventForRun(
+      run,
+      {
+        kind: 'step.branch_decided',
+        payload: {
+          stepId: step.id,
+          field: 'chosenBranchId',
+          resolvedValue: chosenBranchId,
+          targetStep: chosenBranchId,
+        },
+      },
+      agentRunId,
+    );
 
     await this.enqueueTick(run.id);
   },

@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 import { getIO } from './index.js';
+import type { TaskEventEnvelope } from '../../shared/types/taskEvent.js';
 
 // ─── Observability counters ───────────────────────────────────────────────────
 
@@ -133,6 +134,47 @@ export function emitSubaccountUpdate(
   data: Record<string, unknown>
 ): void {
   emitToRoom(`subaccount:${subaccountId}`, event, subaccountId, data);
+}
+
+// ─── Task execution events ─────────────────────────────────────────────────
+// Spec: docs/workflows-dev-spec.md §8. Per-task room. The envelope is
+// pre-assembled by taskEventService so we emit it verbatim (same pattern
+// as emitAgentExecutionEvent). Room name: `task:${taskId}`.
+
+// S1: Per-process server-side dedup for emitTaskEvent. A retried appendAndEmit
+// (e.g. after a transient DB error that still committed the row) could call
+// emitTaskEvent twice with the same deterministic eventId. The client deduplicates
+// via eventId, but a server-side check avoids the unnecessary WS traffic.
+// LRU: evict entries beyond MAX_SEEN_EVENTS or older than TTL_MS (60s).
+const SEEN_EVENT_TTL_MS = 60_000;
+const SEEN_EVENT_MAX = 2_000;
+const seenTaskEventIds = new Map<string, number>(); // eventId -> timestamp
+
+function isAlreadyEmittedTaskEvent(eventId: string): boolean {
+  const now = Date.now();
+  // Evict expired entries when map is large (amortised O(1) per call).
+  if (seenTaskEventIds.size >= SEEN_EVENT_MAX) {
+    for (const [id, ts] of seenTaskEventIds) {
+      if (now - ts > SEEN_EVENT_TTL_MS) {
+        seenTaskEventIds.delete(id);
+      }
+      // Stop after clearing enough room.
+      if (seenTaskEventIds.size < SEEN_EVENT_MAX) break;
+    }
+  }
+  if (seenTaskEventIds.has(eventId)) return true;
+  seenTaskEventIds.set(eventId, now);
+  return false;
+}
+
+export function emitTaskEvent(envelope: TaskEventEnvelope): void {
+  const io = getIO();
+  if (!io) return;
+  // S1: server-side dedup — skip if this eventId was recently emitted.
+  if (isAlreadyEmittedTaskEvent(envelope.eventId)) return;
+  io.to(`task:${envelope.entityId}`).emit(envelope.type, envelope);
+  totalEventsEmitted++;
+  logStats();
 }
 
 // ─── Workflow run events ──────────────────────────────────────────────────────

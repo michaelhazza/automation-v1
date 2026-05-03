@@ -19,6 +19,7 @@ import type { WorkflowRun } from '../db/schema/index.js';
 import type { WorkflowDefinition } from '../lib/workflow/types.js';
 import { WorkflowApproverPoolService } from './workflowApproverPoolService.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
+import { TaskEventService } from './taskEventService.js';
 import type { ApproverGroup } from '../../shared/types/workflowStepGate.js';
 import { logger } from '../lib/logger.js';
 
@@ -160,6 +161,40 @@ export const WorkflowGateRefreshPoolService = {
       runId: run.id,
       poolSize: newSnapshot.length,
     });
+
+    // Task-scoped approval.pool_refreshed event. runId is null because this call
+    // site has no agent_run context (the gate row's run_id is a workflow_run, not
+    // an agent_run). Migration 0270 made agent_execution_events.run_id nullable
+    // for exactly this case.
+    const runTaskId = (run as { taskId?: string | null }).taskId ?? null;
+    if (runTaskId) {
+      const quorumRequired = (Array.isArray(gate.approverPoolSnapshot)
+        ? (gate.approverPoolSnapshot as string[]).length
+        : 0);
+      const stillBelowQuorum = newSnapshot.length < quorumRequired;
+      TaskEventService.appendAndEmit({
+        taskId: runTaskId,
+        runId: null,
+        organisationId,
+        eventOrigin: 'gate',
+        event: {
+          kind: 'approval.pool_refreshed',
+          payload: {
+            gateId,
+            actorId: _callerUserId,
+            newPoolSize: newSnapshot.length,
+            stillBelowQuorum,
+          },
+        },
+      }).catch((err) => {
+        logger.warn('task_event_gate_pool_refreshed_emit_failed', {
+          event: 'task_event.gate_pool_refreshed_emit_failed',
+          gateId,
+          runId: run.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
 
     return { refreshed: true, pool_size: newSnapshot.length };
   },
