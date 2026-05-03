@@ -19,13 +19,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none yet — Phase 1 input package on branch `claude/agentic-commerce-spending`:
-- `docs/agentic-commerce-brief.md` (v2, strategic frame)
-- `docs/agentic-commerce-exploration-report.md` (codebase reconnaissance)
-- `docs/agentic-commerce-brief-addendum.md` (v3, stakeholder-resolved decisions; authoritative on conflicts)
-**Active plan:** `tasks/builds/agentic-commerce/plan.md` (TBD — produced by spec-coordinator → architect)
+**Active spec:** `tasks/builds/agentic-commerce/spec.md` — chatgpt-spec-review APPROVED (5 rounds, 2026-05-03). Ready for architect → implementation plan.
+**Active plan:** `tasks/builds/agentic-commerce/plan.md` (TBD — architect next)
 **Active build slug:** `agentic-commerce`
-**Status:** **PLANNING** — Phase 1 spec-coordinator running against the three-document input package on branch `claude/agentic-commerce-spending`. Build is the Stripe SPT-backed agent spending primitive (Spending Budgets, shadow mode, charge router, append-only ledger via DB triggers, three-table approval-channel model with subaccount-as-first-class-tenant tenet). Major task. Mandatory pipeline: spec-coordinator → architect → chunked build → full review pass → finalisation-coordinator. Estimated 4 weeks single-builder, 2.5-3 weeks with chunks 4-5 + 13-14 parallelised.
+**Status:** **PLANNING** — spec locked. Branch `claude/agentic-commerce-spending`. Build is the Stripe SPT-backed agent spending primitive (Spending Budgets, shadow mode, charge router, append-only ledger, three-table approval-channel model). Major task. Next step: invoke `architect` (Opus) to decompose spec into implementation chunks. Mandatory pipeline: architect → chunked build → spec-conformance → pr-reviewer → adversarial-reviewer → finalisation-coordinator.
+
+**Just merged:** GHL Module C — Agency OAuth (PR #254, merged 2026-05-03). Two-tier token model, FORCE-RLS `connector_location_tokens` (migration 0269), agency columns on `connector_configs` (migration 0268), webhook lifecycle dispatcher with HMAC + ordering invariant, disconnected-state circuit breaker.
 
 **Just merged:** `subaccount-optimiser` (PR #250, merge `028a9c10`) and PR #251 follow-up (`a460af16`). The lock previously held by `subaccount-optimiser` was stale; released 2026-05-03 to make room for `agentic-commerce`.
 
