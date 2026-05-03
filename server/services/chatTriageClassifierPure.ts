@@ -1,4 +1,4 @@
-import type { FastPathDecision, FastPathRoute, BriefUiContext, FileEditIntent } from '../../shared/types/briefFastPath.js';
+import type { FastPathDecision, FastPathRoute, BriefUiContext, FileEditIntent, MakeWorkflowIntent } from '../../shared/types/briefFastPath.js';
 
 export interface ChatTriageInput {
   text: string;
@@ -70,6 +70,37 @@ export function detectFileEditIntent(text: string): FileEditIntent | null {
   for (const re of FILE_EDIT_PATTERNS) {
     if (re.test(text)) {
       return { kind: 'file_edit_intent', fileRef: extractFileRef(text) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Make-workflow intent patterns.
+ *
+ * Detect messages like:
+ *   "Make this a workflow"
+ *   "Save as a workflow"
+ *   "Make this recurring"
+ *   "Automate this"
+ */
+const MAKE_WORKFLOW_PATTERNS: RegExp[] = [
+  /\bmake\s+this\s+a\s+workflow\b/i,
+  /\bsave\s+(?:this\s+)?as\s+(?:a\s+)?workflow\b/i,
+  /\bmake\s+this\s+recurring\b/i,
+  /\bautomate\s+this\b/i,
+  /\bset\s+(?:this\s+)?up\s+as\s+(?:a\s+)?workflow\b/i,
+  /\brun\s+this\s+automatically\b/i,
+];
+
+/**
+ * Detect make-workflow intent in a message.
+ * Returns a MakeWorkflowIntent when detected, otherwise null.
+ */
+export function detectMakeWorkflowIntent(text: string): MakeWorkflowIntent | null {
+  for (const re of MAKE_WORKFLOW_PATTERNS) {
+    if (re.test(text)) {
+      return { kind: 'make_workflow_intent' };
     }
   }
   return null;
@@ -160,7 +191,21 @@ export function classifyChatIntentPure(input: ChatTriageInput): FastPathDecision
   const scope = detectScope(trimmed, uiContext, config);
   const write = hasWriteIntent(trimmed, config.writeIntentKeywords);
 
-  // Rule 4: write-intent → needs_orchestrator, flag for second-look
+  // Rule 4: make-workflow intent — checked before generic write-intent so it
+  // gets a dedicated signal rather than being absorbed into the generic path.
+  const makeWorkflowIntent = detectMakeWorkflowIntent(trimmed) ?? undefined;
+  if (makeWorkflowIntent) {
+    return {
+      route: 'needs_orchestrator',
+      scope,
+      confidence: 0.95,
+      tier: 1,
+      secondLookTriggered: false,
+      makeWorkflowIntent,
+    };
+  }
+
+  // Rule 5: write-intent → needs_orchestrator, flag for second-look
   if (write) {
     const isRiskyRoute = config.riskySecondLookRoutes.includes('needs_orchestrator');
     const fileEditIntent = detectFileEditIntent(trimmed) ?? undefined;
@@ -175,7 +220,7 @@ export function classifyChatIntentPure(input: ChatTriageInput): FastPathDecision
     };
   }
 
-  // Rule 5: check for file-edit intent even without generic write keywords
+  // Rule 6: check for file-edit intent even without generic write keywords
   const fileEditIntent = detectFileEditIntent(trimmed) ?? undefined;
   if (fileEditIntent) {
     const isRiskyRoute = config.riskySecondLookRoutes.includes('needs_orchestrator');
@@ -189,7 +234,7 @@ export function classifyChatIntentPure(input: ChatTriageInput): FastPathDecision
     };
   }
 
-  // Rule 6: default read-intent → needs_orchestrator
+  // Rule 7: default read-intent → needs_orchestrator
   return {
     route: 'needs_orchestrator',
     scope,

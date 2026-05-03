@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, conversations } from '../db/schema/index.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
@@ -6,6 +6,10 @@ import { taskService } from '../services/taskService.js';
 import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
 import { logger } from '../lib/logger.js';
+import { detectCadenceSignals, CADENCE_RECOMMEND_THRESHOLD } from '../services/orchestratorCadenceDetectionPure.js';
+import { TaskEventService } from '../services/taskEventService.js';
+import { WorkflowDraftService } from '../services/workflowDraftService.js';
+import { emitMilestone } from '../services/agentMilestoneEmitter.js';
 
 // ---------------------------------------------------------------------------
 // orchestratorFromTaskJob
@@ -261,6 +265,25 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     });
 
     logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: resolvedRoot.subaccountAgentId, scope, fallback: resolvedRoot.fallback });
+
+    // 6. Post-dispatch: cadence-signal detection and milestone emission.
+    //    These run after the primary dispatch completes so they never block
+    //    the orchestrator run itself. Failures are caught and logged — the
+    //    orchestrator flow must not fail because of these optional features.
+    try {
+      await postDispatchCadenceAndMilestone({
+        task,
+        taskId,
+        organisationId,
+        resolvedRoot,
+      });
+    } catch (postErr) {
+      logger.warn('orchestratorFromTask.post_dispatch_failed', {
+        taskId,
+        organisationId,
+        error: postErr instanceof Error ? postErr.message : String(postErr),
+      });
+    }
   } catch (err) {
     logger.error('orchestratorFromTask.dispatch_failed', {
       taskId,
@@ -268,5 +291,134 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
       error: err instanceof Error ? err.message : String(err),
     });
     throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Post-dispatch: cadence detection, recommendation card, draft creation,
+// and work-completion milestone emission.
+//
+// Spec §13.1 — cadence signals detected after task completion (not mid-flight).
+// Spec §13 — milestone emissions per-agent on work-completion path.
+// ---------------------------------------------------------------------------
+
+interface PostDispatchInput {
+  task: {
+    id: string;
+    description: string | null;
+    title: string | null;
+    subaccountId: string | null;
+    organisationId: string;
+  };
+  taskId: string;
+  organisationId: string;
+  resolvedRoot: {
+    agentId: string;
+    subaccountId: string | null;
+  };
+}
+
+async function postDispatchCadenceAndMilestone(input: PostDispatchInput): Promise<void> {
+  const { task, taskId, organisationId, resolvedRoot } = input;
+  const promptText = [task.title, task.description].filter(Boolean).join(' ');
+
+  // 6a. Count prior runs for this org with a similar prompt heuristic.
+  //     V1: count tasks in the same org (not per-user, not semantic) as a
+  //     lightweight proxy for prior run frequency. A richer signal can be
+  //     wired here in V2 without changing the pure detection function.
+  const [{ value: priorRunCount }] = await db
+    .select({ value: count() })
+    .from(tasks)
+    .where(and(
+      eq(tasks.organisationId, organisationId),
+      isNull(tasks.deletedAt),
+    ));
+
+  const cadenceResult = detectCadenceSignals({
+    promptText,
+    priorRunCount: Number(priorRunCount ?? 0),
+  });
+
+  logger.info('orchestratorFromTask.cadence_detection', {
+    taskId,
+    score: cadenceResult.score,
+    signals: cadenceResult.signals.map((s) => s.name),
+  });
+
+  // 6b. Emit a recommendation card if score crosses the threshold.
+  if (cadenceResult.score >= CADENCE_RECOMMEND_THRESHOLD) {
+    try {
+      const { emit } = await TaskEventService.appendAndEmit({
+        taskId,
+        runId: null,
+        organisationId,
+        eventOrigin: 'orchestrator',
+        event: {
+          kind: 'chat.message',
+          payload: {
+            authorKind: 'agent',
+            authorId: resolvedRoot.agentId,
+            body: 'This looks like something you would want to run on a schedule. Save it as a scheduled Workflow?',
+            cardKind: 'workflow_recommendation',
+            cardActions: [
+              { id: 'accept', label: 'Yes, set up' },
+              { id: 'decline', label: 'No thanks' },
+            ],
+          } as unknown as { authorKind: 'agent'; authorId: string; body: string },
+        },
+      });
+      await emit();
+      logger.info('orchestratorFromTask.recommendation_card_emitted', { taskId, score: cadenceResult.score });
+    } catch (emitErr) {
+      logger.warn('orchestratorFromTask.recommendation_card_emit_failed', {
+        taskId,
+        error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+      });
+    }
+  }
+
+  // 6c. If an explicit workflow signal is present, create a draft.
+  //     Explicit signal means score === 1.0 and the signal name is
+  //     'explicit_workflow_intent'. We create a stub draft so Studio can
+  //     hydrate it — steps are left empty here (the orchestrator run populates
+  //     them via separate step-completion hooks in V2).
+  const hasExplicitSignal = cadenceResult.signals.some(
+    (s) => s.name === 'explicit_workflow_intent',
+  );
+  if (hasExplicitSignal && task.subaccountId) {
+    try {
+      await WorkflowDraftService.create({
+        payload: [],  // Empty stub — Studio hydration fills steps (Chunk 14b)
+        sessionId: taskId,  // Use taskId as session proxy for (subaccount, session) unique
+        subaccountId: task.subaccountId,
+        organisationId,
+        draftSource: 'orchestrator',
+      });
+      logger.info('orchestratorFromTask.draft_created', { taskId });
+    } catch (draftErr) {
+      // Duplicate (subaccount, session) is expected on retries — log at debug.
+      logger.info('orchestratorFromTask.draft_create_skipped', {
+        taskId,
+        reason: draftErr instanceof Error ? draftErr.message : String(draftErr),
+      });
+    }
+  }
+
+  // 6d. Emit a work-completion milestone for the orchestrator agent.
+  //     This is the demonstration call site; a sweep TODO covers all call
+  //     sites across other agents. See tasks/todo.md.
+  try {
+    const { emit } = await emitMilestone({
+      taskId,
+      organisationId,
+      agentId: resolvedRoot.agentId,
+      summary: 'Orchestrator dispatched task for processing',
+    });
+    await emit();
+  } catch (milestoneErr) {
+    logger.warn('orchestratorFromTask.milestone_emit_failed', {
+      taskId,
+      error: milestoneErr instanceof Error ? milestoneErr.message : String(milestoneErr),
+    });
   }
 }

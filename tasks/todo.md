@@ -2651,3 +2651,14 @@ The spec-reviewer auto-decided the following directional findings during iterati
 ### Chunk 13 — Deferred: chat-triage classifier LLM prompt update for file_edit_intent
 
 - [ ] The tier-2 LLM prompt in `chatTriageClassifier.ts` (classifyWithLlm) does not yet describe `file_edit_intent` to the LLM or use it in its classification output. The tier-1 heuristic in `chatTriageClassifierPure.ts` (`detectFileEditIntent`) supplies this signal from heuristic patterns. A follow-up should update the LLM system prompt to instruct the model to surface `file_edit_intent` in its JSON response when it detects a file-edit message that passes tier-1 confidence threshold.
+
+### Chunk 15 — Deferred: agent.milestone sweep across all call sites
+
+- [ ] `emitMilestone()` in `server/services/agentMilestoneEmitter.ts` is wired into ONE demonstration call site: the `postDispatchCadenceAndMilestone()` helper in `server/jobs/orchestratorFromTaskJob.ts` (work-completion milestone for the orchestrator agent).
+  - The spec (§13) says "identify the call sites at chunk-time" — a sweep should wire `emitMilestone()` into every agent sub-task completion, delegation-closed, and significant skill execution path across the skill executor and delegation flow.
+  - Candidate call sites: (a) `agentExecutionService` on delegation close (after `agent.delegation.closed` event), (b) `skillExecutor` handlers for `file.created` / `file.edited` output paths, (c) `workflowEngineService` on `step.completed` for human-visible milestones.
+  - Suggested approach: audit each `TaskEventService.appendAndEmit` call site that emits `agent.delegation.closed`, `file.created`, or `file.edited`; wrap with a parallel `emitMilestone()` call post-commit.
+
+### Chunk 15 — Deferred: chat-triage LLM tier-2 prompt update for make_workflow_intent
+
+- [ ] The tier-2 LLM prompt in `chatTriageClassifier.ts` (`classifyWithLlm`) does not describe `make_workflow_intent` to the LLM. The tier-1 heuristic in `chatTriageClassifierPure.ts` (`detectMakeWorkflowIntent`) supplies this signal from pattern matching. A follow-up should update the tier-2 LLM system prompt to instruct the model to return `make_workflow_intent` in its JSON response when it detects explicit workflow-automation intent.

@@ -1991,6 +1991,36 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }),
     );
   },
+
+  // ── Workflow orchestration ────────────────────────────────────────────────
+
+  /**
+   * workflow.run.start — start a workflow run from a published template.
+   *
+   * Spec: docs/workflows-dev-spec.md §13 (workflow.run.start skill).
+   * Registered in actionRegistry.ts under 'workflow.run.start'.
+   *
+   * Requires WORKFLOW_RUNS_START on the caller's subaccount. The handler
+   * resolves the template version, validates inputs, creates a task row, and
+   * delegates to WorkflowRunService.startRun.
+   */
+  'workflow.run.start': async (input, context) => {
+    requireSubaccountContext(context, 'workflow.run.start');
+    return executeWithActionAudit('workflow.run.start', input, context, async () => {
+      const { startWorkflowRunFromSkill } = await import('./workflowRunStartSkillService.js');
+      const result = await startWorkflowRunFromSkill({
+        skill: {
+          workflow_template_id: input['workflow_template_id'] as string,
+          template_version_id: input['template_version_id'] as string | undefined,
+          initial_inputs: (input['initial_inputs'] as Record<string, unknown>) ?? {},
+        },
+        callerUserId: context.userId ?? '',
+        callerOrganisationId: context.organisationId,
+        callerSubaccountId: context.subaccountId!,
+      });
+      return result;
+    });
+  },
 };
 
 export const skillExecutor = {

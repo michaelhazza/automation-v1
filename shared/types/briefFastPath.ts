@@ -26,6 +26,22 @@ export interface FileEditIntent {
   fileRef?: string;
 }
 
+/**
+ * Make-workflow intent signal.
+ *
+ * Present when the classifier detects the operator explicitly asking to save
+ * the current task as a recurring workflow (e.g. "make this a workflow",
+ * "save as workflow", "automate this").
+ *
+ * The orchestrator reads this field to create a workflow draft and emit a
+ * recommendation card. Spec: docs/workflows-dev-spec.md §13.
+ */
+export interface MakeWorkflowIntent {
+  kind: 'make_workflow_intent';
+  /** Source task ID, if extractable from context. */
+  sourceTaskId?: string;
+}
+
 export interface FastPathDecision {
   route: FastPathRoute;
   scope: BriefScope;
@@ -36,6 +52,8 @@ export interface FastPathDecision {
   reasoning?: string;
   /** Set when the message is identified as a conversational file-edit request. */
   fileEditIntent?: FileEditIntent;
+  /** Set when the operator explicitly asks to make the current task a workflow. */
+  makeWorkflowIntent?: MakeWorkflowIntent;
 }
 
 /**

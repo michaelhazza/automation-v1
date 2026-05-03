@@ -2994,6 +2994,66 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Workflow orchestration ────────────────────────────────────────────────
+
+  /**
+   * workflow.run.start — start a workflow run from a template.
+   *
+   * Callable by any agent with WORKFLOW_RUNS_START permission on the target
+   * subaccount. The skill resolves the latest published version (or a pinned
+   * version), validates initial_inputs against the template's input schema,
+   * creates a task row, and delegates to WorkflowRunService.startRun.
+   *
+   * Idempotency key: workflow_template_id + caller userId + hash of
+   * normalised initial_inputs — ensures double-submission is deduplicated.
+   *
+   * Spec: docs/workflows-dev-spec.md §13 (workflow.run.start skill)
+   */
+  'workflow.run.start': {
+    actionType: 'workflow.run.start',
+    description:
+      'Start a workflow run from a published template. Resolves the latest published version ' +
+      '(or a pinned version), validates initial_inputs against the template input schema, ' +
+      'creates a task, and enqueues the first workflow step. Requires WORKFLOW_RUNS_START ' +
+      'permission on the target subaccount.',
+    actionCategory: 'worker',
+    topics: ['workflow', 'automation'],
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['workflow_template_id', 'template_version_id', 'initial_inputs'],
+    parameterSchema: z.object({
+      workflow_template_id: z.string().uuid().describe('ID of the workflow template to run'),
+      template_version_id: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Pin to a specific published version. Defaults to the latest published version when omitted.'),
+      initial_inputs: z
+        .record(z.unknown())
+        .describe('Key-value map of initial inputs matching the template input schema'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['network_error', 'timeout'],
+      doNotRetryOn: ['permission_denied', 'template_not_found', 'template_not_published', 'inputs_invalid'],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    idempotencyStrategy: 'keyed_write',
+    scopeRequirements: {
+      requiresUserContext: false,
+    },
+  },
 };
 
 /**
