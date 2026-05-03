@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -77,6 +78,11 @@ export const tasks = pgTable(
     goalIdx: index('tasks_goal_idx').on(table.goalId),
     // M-4: index for sub-task queries
     parentTaskIdx: index('tasks_parent_task_id_idx').on(table.parentTaskId),
+    // Workflows V1 (migration 0270) — sequence counter never goes negative
+    nextEventSeqNonneg: check(
+      'tasks_next_event_seq_nonneg',
+      sql`${table.nextEventSeq} >= 0`,
+    ),
   })
 );
 

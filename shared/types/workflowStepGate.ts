@@ -37,6 +37,5 @@ export interface WorkflowStepGate {
   createdAt: Date;
   resolvedAt: Date | null;
   resolutionReason: GateResolutionReason | null;
-  supersededByGateId: string | null;
   organisationId: string;
 }

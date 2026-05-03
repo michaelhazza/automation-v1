@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { agentRuns } from './agentRuns';
 import { organisations } from './organisations';
@@ -79,6 +79,13 @@ export const agentExecutionEvents = pgTable(
     runTaskSeqIdx: index('agent_execution_events_run_task_seq_idx')
       .on(table.runId, table.taskSequence)
       .where(sql`${table.taskId} IS NOT NULL`),
+    // Workflows V1 (migration 0270) — event_origin must be a known value
+    // (NULL allowed for legacy events written before the column existed
+    // and for non-task events that have no origin context).
+    eventOriginEnum: check(
+      'agent_execution_events_event_origin_enum',
+      sql`${table.eventOrigin} IS NULL OR ${table.eventOrigin} IN ('engine', 'gate', 'user', 'orchestrator')`,
+    ),
   }),
 );
 

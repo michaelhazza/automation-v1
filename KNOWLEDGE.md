@@ -1861,3 +1861,22 @@ The cheapest leverage on a multi-provider integration surface is making logs fil
 ### [2026-05-03] Pattern — ChatGPT "ship with confidence" + "do NOT run another round" is the terminal close signal, regardless of remaining checklist size
 
 ChatGPT review loops do not have a deterministic stop condition; the model will happily produce another checklist round if asked. The reliable terminal signal is when ChatGPT itself opens a round with both "you're basically there / ship with confidence" framing AND closes with explicit "Do NOT run another PR review loop / past diminishing returns" instruction. When both phrases co-occur, treat as CLOSED — even if the round opens with a 6-item or 7-item checklist (those checklists are operational verification items the operator runs against staging, not blockers for code change). PR #254 round 3 opened with "ship with confidence" and a 6-item checklist; treating it as a verification + cleanup pass (rather than another find-bugs round) yielded 1 surgical fix (silent-failure logs) + 1 documentation deliverable (pre-prod validation procedure) + 0 architectural changes — and respecting the close signal saved a round-4 hallucination spiral. **Rule:** detect the dual signal in the FIRST paragraph of any ChatGPT review response; when present, the next round is a cleanup pass not a triage pass, and there will be no round-after-next regardless of model output. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 3 close.
+
+### [2026-05-04] Rule — Do not introduce "future-use" schema columns without active invariants
+
+During workflows-v1, `workflow_step_gates.superseded_by_gate_id` was introduced as a future seam (unused in V1). Review flagged it as a lifecycle inconsistency against the enforced unique index, despite no runtime usage.
+
+**Lesson:** Unused schema fields are not neutral. They:
+- Increase cognitive load during review
+- Invite incorrect invariant assumptions
+- Create apparent contradictions with enforced constraints
+
+**Rule:** Only introduce schema fields when:
+1. The behaviour is implemented, AND
+2. The invariants governing that field are defined
+
+If future behaviour is anticipated:
+- Document it in the spec
+- Add the column in the migration that introduces the behaviour
+
+Avoid pre-emptive schema seams.

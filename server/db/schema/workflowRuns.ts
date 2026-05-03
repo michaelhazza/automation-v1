@@ -10,6 +10,7 @@
   timestamp,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
@@ -104,6 +105,11 @@ export const workflowRuns = pgTable(
       .on(table.id)
       .where(sql`${table.status} = 'paused'`),
     statusUpdatedIdx: index('workflow_runs_status_updated_idx').on(table.status, table.updatedAt),
+    // Workflows V1 (migration 0270) — accumulator never goes negative
+    costAccumulatorNonneg: check(
+      'workflow_runs_cost_accumulator_nonneg',
+      sql`${table.costAccumulatorCents} >= 0`,
+    ),
   })
 );
 

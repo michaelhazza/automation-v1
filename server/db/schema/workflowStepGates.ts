@@ -34,7 +34,6 @@ export const workflowStepGates = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     resolutionReason: text('resolution_reason').$type<GateResolutionReason | null>(),
-    supersededByGateId: uuid('superseded_by_gate_id').references((): any => workflowStepGates.id),
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),

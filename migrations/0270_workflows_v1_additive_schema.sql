@@ -28,6 +28,10 @@ ALTER TABLE workflow_runs
   ADD COLUMN IF NOT EXISTS cost_accumulator_cents integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS degradation_reason text;
 
+ALTER TABLE workflow_runs
+  ADD CONSTRAINT workflow_runs_cost_accumulator_nonneg
+  CHECK (cost_accumulator_cents >= 0);
+
 CREATE INDEX IF NOT EXISTS workflow_runs_status_paused_idx
   ON workflow_runs (id)
   WHERE status = 'paused';
@@ -51,6 +55,10 @@ ALTER TABLE agent_execution_events
   ADD COLUMN IF NOT EXISTS event_subsequence integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS event_schema_version integer NOT NULL DEFAULT 1;
 
+ALTER TABLE agent_execution_events
+  ADD CONSTRAINT agent_execution_events_event_origin_enum
+  CHECK (event_origin IS NULL OR event_origin IN ('engine', 'gate', 'user', 'orchestrator'));
+
 CREATE UNIQUE INDEX IF NOT EXISTS agent_execution_events_task_seq_idx
   ON agent_execution_events (task_id, task_sequence, event_subsequence)
   WHERE task_id IS NOT NULL;
@@ -62,6 +70,10 @@ CREATE INDEX IF NOT EXISTS agent_execution_events_run_task_seq_idx
 -- ── tasks ──
 ALTER TABLE tasks
   ADD COLUMN IF NOT EXISTS next_event_seq integer NOT NULL DEFAULT 0;
+
+ALTER TABLE tasks
+  ADD CONSTRAINT tasks_next_event_seq_nonneg
+  CHECK (next_event_seq >= 0);
 
 -- ── workflow_step_gates (new) ──
 CREATE TABLE IF NOT EXISTS workflow_step_gates (
@@ -76,7 +88,6 @@ CREATE TABLE IF NOT EXISTS workflow_step_gates (
   created_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz,
   resolution_reason text,
-  superseded_by_gate_id uuid REFERENCES workflow_step_gates(id),
   organisation_id uuid NOT NULL REFERENCES organisations(id)
 );
 
