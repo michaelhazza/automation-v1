@@ -19,6 +19,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
+**Also MERGE_READY:** GHL Module C — Agency OAuth (PR #254 — branch `ghl-agency-oauth`, build_slug `ghl-module-c-oauth`, status MERGE_READY). Spec: `docs/ghl-module-c-oauth-spec.md`. Plan: `tasks/builds/ghl-module-c-oauth/plan.md`. Two-tier token model (agency token mints location tokens on demand), FORCE-RLS `connector_location_tokens` table (migration 0269), agency columns on `connector_configs` (migration 0268), webhook lifecycle dispatcher with HMAC + §5.4 ordering invariant, disconnected-state circuit breaker across all token entry points. Full review pipeline outcome: `spec-conformance` CONFORMANT_AFTER_FIXES → `pr-reviewer` CHANGES_REQUESTED → fixed in-branch → `adversarial-reviewer` HOLES_FOUND → fixed in-branch → `dual-reviewer` (Codex CLI) 3 iterations all clean → `chatgpt-pr-review` CLOSED at 3 rounds (R1: 0 implements / 5 rejects / 3 defers; R2: 1 implement observability / 4 rejects / 3 defers; R3: 1 implement silent-failure logs / 5 PASS verifications + 1 doc deliverable). 3 KNOWLEDGE.md patterns added (ChatGPT diff-misreading verification, observability-as-leverage, ChatGPT terminal close signal). Doc-sync sweep: `architecture.md` updated (new GHL Agency OAuth Integration section); `docs/capabilities.md` and `docs/integration-reference.md` already updated 2026-05-03. **Last updated:** 2026-05-03. **Next:** await CI; merge via GitHub UI; set status to `MERGED` after merge.
+
+---
+
 **Active spec:** docs/sub-account-optimiser-spec.md (F2 of the F1/F2/F3 sub-account feature wave; PR #250)
 **Active plan:** tasks/builds/subaccount-optimiser/plan.md
 **Active build slug:** subaccount-optimiser (currently on spec-authoring branch `claude/evaluate-new-features-waqfY`; F2 implementation moves to `claude/subaccount-optimiser` per spec metadata)

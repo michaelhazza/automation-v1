@@ -30,7 +30,8 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), asyncHandler
 
   try {
     event = JSON.parse(rawBody.toString('utf-8'));
-  } catch {
+  } catch (err) {
+    console.warn('[GHL Webhook] Invalid JSON body, rejecting:', err instanceof Error ? err.message : String(err));
     res.status(400).json({ error: 'Invalid JSON' });
     return;
   }
@@ -85,7 +86,8 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), asyncHandler
         locationId: event.locationId as string | undefined,
         installType: event.installType as string | undefined,
       });
-    } catch {
+    } catch (err) {
+      console.error(`[GHL Webhook] Side-effect dispatch failed for ${eventType} (companyId=${companyId}, webhookId=${webhookId}):`, err instanceof Error ? err.message : String(err));
       res.status(503).json({ error: 'Side effect dispatch failed' });
       return;
     }

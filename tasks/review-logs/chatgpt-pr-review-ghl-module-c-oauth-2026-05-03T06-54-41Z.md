@@ -97,3 +97,49 @@
 - **Round 2 close. ChatGPT review loop closed.** ChatGPT explicitly recommended not running another round and offered an operational checklist as a final pass. The checklist verified: 4 invariants already hold, 1 small observability gap closed, 3 forward-looking items routed to backlog. The PR is merge-ready from both code-correctness and operational-readiness standpoints. Resume the finalisation-coordinator flow at Step 7 (doc-sync sweep) when the operator confirms.
 
 ---
+
+## Round 3 — 2026-05-03T (verification + cleanup pass)
+
+### ChatGPT verdict (verbatim — high level)
+- "You're basically there. This is already at a 'ship with confidence' level."
+- Closing instruction: "Do NOT run another PR review loop / You're past diminishing returns."
+- Six-item pre-ship checklist covering: disconnected-state circuit breaker, forced-failure manual sim, log usability, silent-failure scan, migration rollback sanity, backlog trigger conditions.
+- This is a verification + cleanup pass, not a code-change round. Treated accordingly.
+
+### Per-checklist triage
+
+| # | Item | Verified against HEAD | Decision | Evidence |
+|---|------|------------------------|----------|----------|
+| 1 | Disconnected state audit at every entry point | PASS | **No code change** | Polling tick: `server/jobs/connectorPollingTick.ts:28` `ne(status, 'disconnected')`. Webhook side-effects (install/uninstall/location-create/location-update): all routed via `findAgencyConnectionByCompanyId` at `server/services/connectorConfigService.ts:377` which filters `ne(status, 'disconnected')`. Adapter token resolution: location tokens are soft-deleted on UNINSTALL (`server/services/ghlWebhookMutationsService.ts:217-225`), and the agency-token refresh sweep skips disconnected configs, so the location-token mint path cannot resurrect a disconnected connector. Circuit holds. |
+| 2 | Forced-failure manual sim | Documented | **Wrote procedure** | Appended `## Pre-Prod Validation` to `tasks/builds/ghl-module-c-oauth/progress.md` — 5-step staging procedure (invalidate refresh token, force expiry, observe single-attempt + disconnect-transition logs, confirm circuit-breaker holds against subsequent operations). |
+| 3 | Log usability — install → mint → refresh → failure trace | PASS | **No code change** | All 12 lifecycle log sites (4 webhook events × 3 service files) carry `provider:'ghl'`, `orgId`, `companyId`, and `locationId` where applicable. `disconnected_transition` semantics surface as `ghl.agency_token.revoked` event (`server/services/connectorConfigService.ts:442`) with `status flipped to disconnected` message. 3 AM trace chain is fully filterable. |
+| 4 | Silent failure scan | 2 gaps found, both fixed | **Code change applied** | `server/routes/webhooks/ghlWebhook.ts:33` invalid-JSON catch had no log → added `console.warn` with err.message. Line 88 dispatch-failure catch was bare → added `console.error` with eventType + companyId + webhookId + err.message. Other catches in webhook/polling/adapter paths verified — all log via `console.error`, `recordIncident`, `classifyAdapterError`, or return classified results the caller logs. |
+| 5 | Migration rollback sanity | PASS | **No code change** | Migrations 0268 (`connector_configs` agency columns) and 0269 (`connector_location_tokens` table + RLS) use bare DDL without `IF NOT EXISTS` guards. Acceptable: Postgres DDL is transactional, so partial apply is impossible — the migration either succeeds atomically or rolls back atomically. `_down/` companion files exist for explicit rollback. Loud failure mode (Drizzle's migration runner reports + halts) is the default. |
+| 6 | Backlog trigger conditions | 3 items missing explicit triggers | **Tasks updated** | Round 2 deferrals (cascade location-token soft-delete, `token_source` column, kill switch) now each have a "When required:" line citing the trigger ChatGPT named: high-churn orgs / second OAuth provider lands / before first production incident respectively. Round 1 deferrals (mint lock, retry centralisation, slug UUID third tier) already convey their triggers in the existing prose. |
+
+### Decisions summary
+- 4 invariants verified PASS, no code change.
+- 1 surgical fix applied: 2 silent catch blocks in `ghlWebhook.ts` now emit `console.warn` / `console.error` with structured context.
+- 1 documentation deliverable: Pre-Prod Validation procedure appended to `progress.md`.
+- 3 backlog items updated with explicit trigger lines in `tasks/todo.md`.
+
+### Files changed this round
+- `server/routes/webhooks/ghlWebhook.ts` — added `console.warn` to invalid-JSON catch (line 33-37); added `console.error` with eventType/companyId/webhookId context to dispatch-failure catch (line 88-92).
+- `tasks/builds/ghl-module-c-oauth/progress.md` — appended `## Pre-Prod Validation` section with 5-step forced-failure procedure.
+- `tasks/todo.md` — appended `**When required:**` trigger lines to the three Round 2 deferred items.
+
+### Gates
+- `npm run lint` → 0 errors, 714 pre-existing warnings (none introduced this round).
+- `npm run typecheck` → clean (both `tsconfig.json` and `server/tsconfig.json`).
+
+### Commit
+- pending — to be created at end of Round 3.
+
+### Recommendation
+- **Round 3 close. ChatGPT PR review loop CLOSED.** Per ChatGPT's explicit "Do NOT run another PR review loop / You're past diminishing returns" instruction, no Round 4 will be run. The checklist surfaced one real surgical fix (2 silent catch blocks) and one documentation deliverable (pre-prod validation procedure); all other items verified PASS without change. The PR is merge-ready. Proceeding immediately to finalisation-coordinator Steps 7-12.
+
+---
+
+## Loop Status: CLOSED at Round 3 (2026-05-03)
+
+Total rounds: 3. Total code changes implemented across all rounds: 1 (Round 2 observability) + 1 (Round 3 silent-failure logs) = 2 surgical commits. Total findings deferred to backlog: 6 items. Loop terminated by ChatGPT's explicit "Do NOT run another PR review loop" instruction in Round 3 opening.
