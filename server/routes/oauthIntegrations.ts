@@ -16,6 +16,7 @@ import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '.
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
+import { logger } from '../lib/logger.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const router = Router();
@@ -299,5 +300,95 @@ router.get(
     return res.redirect(`${appBase}${redirectBase}?connected=${provider}`);
   }),
 );
+
+// ── NEW standalone handler — GHL agency OAuth only ────────────────────────
+// Separate route from /api/integrations/oauth2/callback.
+// GHL state = raw nonce (ghlOAuthStateStore); no JWT verification here.
+router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
+  const appBase = env.APP_BASE_URL;
+  const { code, state } = req.query as Record<string, string | undefined>;
+
+  if (!code || !state) {
+    return res.redirect(`${appBase}/onboarding?error=invalid_callback`);
+  }
+
+  const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
+  const ghlOrgId = consumeGhlOAuthState(state);
+  if (!ghlOrgId) {
+    return res.redirect(`${appBase}/onboarding?error=invalid_state`);
+  }
+
+  const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
+  const redirectUri = `${callbackBase}/api/oauth/callback`;
+
+  const { exchangeGhlAuthCode } = await import('../services/ghlAgencyOauthService.js');
+  const tokenData = await exchangeGhlAuthCode(code, redirectUri);
+  if (!tokenData) {
+    return res.redirect(`${appBase}/onboarding?error=token_exchange_failed`);
+  }
+
+  const { validateAgencyTokenResponse, computeAgencyTokenExpiresAt, parseGhlScope } =
+    await import('../services/ghlAgencyOauthServicePure.js');
+
+  try {
+    validateAgencyTokenResponse(tokenData);
+  } catch {
+    return res.redirect(`${appBase}/onboarding?error=token_validation_failed`);
+  }
+
+  const claimedAt = new Date();
+  const expiresAt = computeAgencyTokenExpiresAt(claimedAt, tokenData.expires_in);
+  const scope = parseGhlScope(tokenData.scope).join(' ');
+
+  const { connectorConfigService } = await import('../services/connectorConfigService.js');
+  let connection;
+  try {
+    connection = await connectorConfigService.upsertAgencyConnection({
+      orgId: ghlOrgId,
+      companyId: tokenData.companyId,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresAt,
+      scope,
+    });
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number };
+    if (e.statusCode === 409) {
+      return res.redirect(`${appBase}/onboarding?error=agency_already_installed`);
+    }
+    return res.redirect(`${appBase}/onboarding?error=storage_failed`);
+  }
+
+  logger.info('ghl.oauth.callback_success', {
+    event: 'ghl.oauth.callback_success',
+    orgId: ghlOrgId,
+    companyId: tokenData.companyId,
+    locationId: null,
+    result: 'success',
+    error: null,
+  });
+
+  // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
+  // even if enumeration fails. Hard timeout: 15s. autoEnrolAgencyLocations is added
+  // in Task 9; imported via unknown cast to avoid a typecheck error before that chunk lands.
+  try {
+    const svc = await import('../services/ghlAgencyOauthService.js') as unknown as {
+      autoEnrolAgencyLocations?: (orgId: string, connection: unknown, label: string) => Promise<void>;
+    };
+    if (typeof svc.autoEnrolAgencyLocations === 'function') {
+      await Promise.race([
+        svc.autoEnrolAgencyLocations(ghlOrgId, connection, `oauth_callback:${connection.id}`),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
+        ),
+      ]);
+    }
+  } catch (err) {
+    logger.warn('ghl.oauth.callback_enrol_failed', { orgId: ghlOrgId, error: String(err) });
+  }
+
+  return res.redirect(`${appBase}/onboarding?connected=ghl`);
+}));
+// ── End GHL agency callback ───────────────────────────────────────────────
 
 export default router;
