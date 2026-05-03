@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -7,9 +8,11 @@ import {
   GHL_LOCATION_CAP,
   checkTruncation,
   type GhlLocation,
+  generateSubaccountSlug,
 } from './ghlAgencyOauthServicePure.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { connectorConfigService } from './connectorConfigService.js';
+import { db } from '../db/index.js';
 
 export async function exchangeGhlAuthCode(
   code: string,
@@ -173,4 +176,98 @@ export async function enumerateAgencyLocations(
   }
 
   return all;
+}
+
+/**
+ * Upsert one subaccount row per GHL location.
+ * Idempotency: INSERT ... ON CONFLICT DO UPDATE RETURNING (xmax = 0) AS inserted.
+ * autoStartOwedOnboardingWorkflows fires ONLY when inserted = true (first creation).
+ */
+export async function autoEnrolAgencyLocations(
+  orgId: string,
+  agencyConnection: { id: string; companyId: string | null; organisationId: string; accessToken?: string | null },
+  correlationId?: string,
+): Promise<{ enrolled: number; insertedCount: number }> {
+  const effectiveCorrelationId = correlationId ?? agencyConnection.id;
+  const locations = await enumerateAgencyLocations(agencyConnection, effectiveCorrelationId);
+  let insertedCount = 0;
+
+  for (const loc of locations) {
+    const baseSlug = generateSubaccountSlug(loc.name, loc.id);
+
+    let result: { id: string; inserted: boolean } | undefined;
+    for (const slug of [baseSlug, `${baseSlug}-${loc.id.slice(-4)}`]) {
+      try {
+        const rows = await db.execute<{ id: string; inserted: boolean }>(sql`
+          INSERT INTO subaccounts (
+            id, organisation_id, name, slug, status,
+            connector_config_id, external_id, created_at, updated_at
+          ) VALUES (
+            gen_random_uuid(), ${orgId}, ${loc.name}, ${slug}, 'active',
+            ${agencyConnection.id}, ${loc.id}, now(), now()
+          )
+          ON CONFLICT (connector_config_id, external_id)
+            WHERE deleted_at IS NULL
+              AND connector_config_id IS NOT NULL
+              AND external_id IS NOT NULL
+          DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+          RETURNING id, (xmax = 0) AS inserted
+        `);
+        result = rows[0];
+        break;
+      } catch (err) {
+        const pg = err as { code?: string; constraint?: string };
+        if (pg.code === '23505' && pg.constraint?.includes('slug')) continue;
+        throw err;
+      }
+    }
+
+    if (!result) {
+      logger.warn('ghl.enumeration.slug_collision_unresolved', { orgId, locationId: loc.id });
+      continue;
+    }
+
+    logger.info('ghl.enumeration.subaccount_upsert', {
+      event: 'ghl.enumeration.subaccount_upsert',
+      orgId,
+      companyId: agencyConnection.companyId,
+      locationId: loc.id,
+      result: 'success',
+      inserted: result.inserted,
+      error: null,
+    });
+
+    if (result.inserted) {
+      insertedCount++;
+      // TODO: refactor to pg-boss dispatch — currently inline (spec §6 Phase 3 notes this should be async)
+      try {
+        const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
+        await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
+          organisationId: orgId,
+          subaccountId: result.id,
+          startedByUserId: 'system',
+        });
+      } catch (err) {
+        logger.error('ghl.enumeration.onboarding_dispatch_failed', {
+          event: 'ghl.enumeration.onboarding_dispatch_failed',
+          orgId,
+          subaccountId: result.id,
+          locationId: loc.id,
+          error: { code: 'ONBOARDING_DISPATCH_FAILED', message: String(err) },
+        });
+      }
+    }
+  }
+
+  logger.info('ghl.enrol.complete', {
+    event: 'ghl.enrol.complete',
+    orgId,
+    companyId: agencyConnection.companyId,
+    enrolled: locations.length,
+    insertedCount,
+    isFirstInstall: insertedCount > 0,
+    correlationId: effectiveCorrelationId,
+  });
+
+  return { enrolled: locations.length, insertedCount };
 }

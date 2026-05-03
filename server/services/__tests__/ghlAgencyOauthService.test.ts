@@ -3,7 +3,7 @@
  * Run: npx vitest run server/services/__tests__/ghlAgencyOauthService.test.ts
  */
 import { test, expect } from 'vitest';
-import { validateAgencyTokenResponse, computeAgencyTokenExpiresAt, computePaginationPages, checkTruncation } from '../ghlAgencyOauthServicePure.js';
+import { validateAgencyTokenResponse, computeAgencyTokenExpiresAt, computePaginationPages, checkTruncation, buildSubaccountUpsertKey } from '../ghlAgencyOauthServicePure.js';
 
 // ── Callback flow pure logic: token parsing + validation ──────────────────
 
@@ -67,4 +67,18 @@ test('checkTruncation: 1000 locations → truncated', () => {
 
 test('checkTruncation: 999 locations → not truncated', () => {
   expect(checkTruncation(999)).toBe(false);
+});
+
+// ── buildSubaccountUpsertKey ──────────────────────────────────────────────
+
+test('buildSubaccountUpsertKey: deterministic from (connectorConfigId, locationId)', () => {
+  const key1 = buildSubaccountUpsertKey('cfg-1', 'loc-abc');
+  const key2 = buildSubaccountUpsertKey('cfg-1', 'loc-abc');
+  expect(key1).toBe(key2);
+});
+
+test('buildSubaccountUpsertKey: different for different locationIds', () => {
+  const key1 = buildSubaccountUpsertKey('cfg-1', 'loc-abc');
+  const key2 = buildSubaccountUpsertKey('cfg-1', 'loc-def');
+  expect(key1).not.toBe(key2);
 });
