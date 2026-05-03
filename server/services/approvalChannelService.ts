@@ -354,23 +354,71 @@ export async function removeApprover(
 // org_subaccount_channel_grants CRUD
 // ---------------------------------------------------------------------------
 
+/**
+ * Idempotent — re-granting the same (orgChannelId, subaccountId) pair returns
+ * the existing active grant id rather than inserting a duplicate. Protects
+ * against double-clicks, retries, and network replays. Backed by the partial
+ * UNIQUE index `org_subaccount_channel_grants_active_unique` (migration 0275).
+ *
+ * Flow:
+ *   1. Fast path — SELECT for an active grant on the pair; if found, return its id.
+ *   2. Slow path — INSERT a new active row.
+ *   3. Race path — if the INSERT raises a unique-violation (PG 23505) because
+ *      a concurrent caller inserted between our SELECT and INSERT, re-SELECT
+ *      and return that grant's id.
+ */
 export async function addGrant(
   orgChannelId: string,
   subaccountId: string,
   organisationId: string,
   grantedByUserId: string,
 ): Promise<{ grantId: string }> {
+  const tx = getOrgScopedDb('approvalChannelService.addGrant');
+
+  const findActiveGrantId = async (): Promise<string | null> => {
+    const [row] = await tx
+      .select({ id: orgSubaccountChannelGrants.id })
+      .from(orgSubaccountChannelGrants)
+      .where(
+        and(
+          eq(orgSubaccountChannelGrants.orgChannelId, orgChannelId),
+          eq(orgSubaccountChannelGrants.subaccountId, subaccountId),
+          eq(orgSubaccountChannelGrants.organisationId, organisationId),
+          eq(orgSubaccountChannelGrants.active, true),
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  };
+
+  const existingId = await findActiveGrantId();
+  if (existingId) {
+    return { grantId: existingId };
+  }
+
   const id = randomUUID();
 
-  await getOrgScopedDb('approvalChannelService.addGrant').insert(orgSubaccountChannelGrants).values({
-    id,
-    organisationId,
-    subaccountId,
-    orgChannelId,
-    grantedByUserId,
-    active: true,
-    createdAt: new Date(),
-  });
+  try {
+    await tx.insert(orgSubaccountChannelGrants).values({
+      id,
+      organisationId,
+      subaccountId,
+      orgChannelId,
+      grantedByUserId,
+      active: true,
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    const isUniqueViolation =
+      err instanceof Error && /duplicate key|unique constraint|23505/.test(err.message);
+    if (!isUniqueViolation) throw err;
+
+    const raceWinnerId = await findActiveGrantId();
+    if (raceWinnerId) {
+      return { grantId: raceWinnerId };
+    }
+    throw err;
+  }
 
   await auditService.log({
     organisationId,

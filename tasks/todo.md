@@ -2606,3 +2606,20 @@ One blocker fixed in branch (Finding 2.2 — webhook `connectionStatus` allowlis
 
 - [ ] **AC-ADV-11** — `PATCH /api/spending-budgets/:id` accepts `disabledAt` from the request body as a string and converts via `new Date(disabledAt)` without validation. A malformed string yields `Invalid Date` which Drizzle serialises as `NaN`, producing an obscure DB error rather than a clean 400. Validate via Zod/zod-derived schema like the other PATCH handlers in the diff.
   - File: `server/routes/spendingBudgets.ts`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 1)
+
+**Captured:** 2026-05-03T22:41:01Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T22-41-01Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 1 produced 8 findings. 5 auto-applied in-branch (1, 2, 4, 5, 7); the 3 below routed here as follow-up items. ChatGPT's Round 1 final verdict was *Yellow → close to green*.
+
+- [ ] **AC-CGPT-1** — Missing retry / error model on `GrantManagementSection.load()` failures. Today the catch only fires a `toast.error` and leaves the UI in a hard-failed state (no retry button, no degraded view, no exponential-backoff). UX decision: pick one of (a) explicit "Retry" button on the failed-load state, (b) auto-retry with backoff up to N attempts, (c) degraded-view fallback rendering empty grants list with a banner. Apply project-wide as a pattern if (a) or (b) is chosen.
+  - File: `client/src/components/approval/GrantManagementSection.tsx:40-55`
+
+- [ ] **AC-CGPT-2** — `groupByIntent` time-semantics in `client/src/components/spend/RetryGroupingPure.ts` and related grouping helpers assume `createdAt: string` is always ISO-8601 with no timezone drift. The codebase invariant is "server-generated timestamps only" (Drizzle `.defaultNow()` + `withTimezone: true`), but the client has no explicit parse step. Consider one of: (a) explicit `Date.parse(createdAt)` + invariant-violation `console.warn` on `NaN`, (b) extract a `compareCreatedAt(a, b)` comparator helper, (c) document the invariant as a JSDoc on `groupByIntent` and call it day. Lower priority — current behaviour is correct in practice.
+  - File: `client/src/components/spend/RetryGroupingPure.ts`
+
+- [ ] **AC-CGPT-3** — `ConservativeDefaultsButton` `POST /spending-budgets/:id/conservative-defaults` lacks operator-visible safety guards. ChatGPT recommends one of: (a) a confirmation modal listing the fields about to be overwritten with the conservative defaults, (b) a diff preview (current → defaults) before commit, (c) idempotency indicator (e.g. button disabled when already at defaults). UX decision required — applying defaults to a freshly-created budget vs an in-use one have different risk profiles.
+  - File: `client/src/components/spend/ConservativeDefaultsButton.tsx`

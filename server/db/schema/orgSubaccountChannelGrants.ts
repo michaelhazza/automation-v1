@@ -1,4 +1,5 @@
-import { pgTable, uuid, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { orgApprovalChannels } from './orgApprovalChannels';
@@ -38,6 +39,12 @@ export const orgSubaccountChannelGrants = pgTable(
     subaccountIdx: index('org_subaccount_channel_grants_subaccount_idx')
       .on(table.subaccountId, table.organisationId),
     channelIdx: index('org_subaccount_channel_grants_channel_idx').on(table.orgChannelId),
+    // Partial UNIQUE — at most one active grant per (orgChannelId, subaccountId)
+    // pair. Revoked rows are preserved (audit trail) and not blocked by the
+    // constraint. Migration: 0275_grants_active_unique.sql.
+    activeUnique: uniqueIndex('org_subaccount_channel_grants_active_unique')
+      .on(table.orgChannelId, table.subaccountId)
+      .where(sql`${table.active} = TRUE`),
   }),
 );
 

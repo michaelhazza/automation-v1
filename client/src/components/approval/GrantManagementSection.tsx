@@ -66,7 +66,7 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
       });
       toast.success('Grant added');
       setAddForm({ orgChannelId: '', subaccountId: '' });
-      load();
+      await load();
     } catch {
       toast.error('Failed to add grant');
     } finally {
@@ -78,11 +78,25 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
     try {
       await api.delete(`/api/approval-channels/grants/${grantId}`);
       toast.success('Grant revoked');
-      setGrants(prev => prev.filter(g => g.id !== grantId));
+      // Server-authoritative reload — keeps the grants list in sync with the
+      // backend after every mutation. Avoids divergence under concurrent
+      // updates / failed background refreshes.
+      await load();
     } catch {
       toast.error('Failed to revoke grant');
     }
   };
+
+  // Subaccounts that already have an active grant on the currently-selected
+  // org channel. Hidden from the subaccount picker so the user cannot submit
+  // a duplicate (which the partial UNIQUE index in migration 0275 would
+  // otherwise reject as a unique violation).
+  const grantedSubaccountIdsForChannel: ReadonlySet<string> = new Set(
+    addForm.orgChannelId
+      ? grants.filter(g => g.orgChannelId === addForm.orgChannelId).map(g => g.subaccountId)
+      : [],
+  );
+  const availableSubaccounts = subaccounts.filter(s => !grantedSubaccountIdsForChannel.has(s.id));
 
   if (loading) {
     return <div className="text-[13px] text-slate-400 py-4">Loading...</div>;
@@ -118,9 +132,16 @@ export default function GrantManagementSection({ orgId }: GrantManagementSection
             value={addForm.subaccountId}
             onChange={e => setAddForm(p => ({ ...p, subaccountId: e.target.value }))}
             className="border border-slate-200 rounded-md px-2.5 py-1.5 text-[12.5px] bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            disabled={!addForm.orgChannelId}
           >
-            <option value="">Select sub-account...</option>
-            {subaccounts.map(s => (
+            <option value="">
+              {!addForm.orgChannelId
+                ? 'Select channel first...'
+                : availableSubaccounts.length === 0
+                  ? 'All sub-accounts already granted'
+                  : 'Select sub-account...'}
+            </option>
+            {availableSubaccounts.map(s => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
