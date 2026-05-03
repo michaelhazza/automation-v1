@@ -4,6 +4,10 @@
 // The discriminated union in this file is the central registry of event
 // types. Adding a new event type has a checklist in spec §5.3a — follow it.
 
+// Import and re-export EventOrigin for use within this file and by callers.
+import type { EventOrigin } from './workflowStepGate.js';
+export type { EventOrigin };
+
 // ---------------------------------------------------------------------------
 // Source-service tag
 // ---------------------------------------------------------------------------
@@ -303,6 +307,12 @@ export interface AgentExecutionEvent {
   linkedEntity: LinkedEntity | null;
   /** WIRE-ONLY — computed fresh on every read. See spec §4.1a. */
   permissionMask: PermissionMask;
+  // Workflows V1 — per-task event log fields
+  taskId: string | null;
+  taskSequence: number | null;
+  eventOrigin: EventOrigin | null;
+  eventSubsequence: number;
+  eventSchemaVersion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,6 +397,8 @@ export interface AgentExecutionEventPage {
   events: AgentExecutionEvent[];
   hasMore: boolean;
   highestSequenceNumber: number;
+  /** Highest taskSequence in the page. null when the page contains no task-scoped events. */
+  highestTaskSequence: number | null;
 }
 
 // ---------------------------------------------------------------------------

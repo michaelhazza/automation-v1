@@ -28,8 +28,23 @@ const CHANNEL_TYPE_LABELS: Record<string, string> = {
   in_app: 'In-app',
 };
 
+// Session-local memo of unknown types we've already warned about. Keeps
+// the warn signal surfacing once-per-type-per-session rather than spamming
+// on every render. Codebase pattern: log the unexpected, don't silently
+// accept (chatgpt-pr-review Round 3 Finding 3).
+const warnedUnknownChannelTypes = new Set<string>();
+
 function humaniseChannelType(channelType: string): string {
-  return CHANNEL_TYPE_LABELS[channelType] ?? channelType;
+  const label = CHANNEL_TYPE_LABELS[channelType];
+  if (label !== undefined) return label;
+
+  if (!warnedUnknownChannelTypes.has(channelType)) {
+    warnedUnknownChannelTypes.add(channelType);
+    console.warn(
+      `[GrantManagementSection] unknown channelType '${channelType}' — add an entry to CHANNEL_TYPE_LABELS to humanise the display string.`,
+    );
+  }
+  return channelType;
 }
 
 interface GrantManagementSectionProps {

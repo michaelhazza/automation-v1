@@ -255,7 +255,14 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_EDIT),
   asyncHandler(async (req, res) => {
-    await revokeGrant(req.params.grantId, req.orgId!, req.user!.id);
+    // Pass channelId to revokeGrant so it can enforce that grantId belongs
+    // to the URL-supplied channel — defense-in-depth beyond org-wide auth.
+    await revokeGrant(
+      req.params.grantId,
+      req.orgId!,
+      req.user!.id,
+      req.params.channelId,
+    );
     res.status(204).end();
   }),
 );

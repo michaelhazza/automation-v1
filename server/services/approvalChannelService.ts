@@ -434,14 +434,28 @@ export async function addGrant(
   return { grantId: id };
 }
 
+/**
+ * Revoke a grant. If `expectedOrgChannelId` is supplied, the grant's actual
+ * `orgChannelId` MUST match — protects against URL-vs-row drift where a
+ * caller sends `DELETE /api/approval-channels/X/grants/Y` but `Y` belongs
+ * to channel `Z`. Org-isolation is the primary defence (RLS + the
+ * `organisationId` filter below) but this cross-check tightens the contract
+ * beyond org-wide auth — flagged independently by both adversarial-reviewer
+ * (Finding 2.1) and chatgpt-pr-review Round 3 (Finding 2).
+ */
 export async function revokeGrant(
   grantId: string,
   organisationId: string,
   revokedByUserId: string,
+  expectedOrgChannelId?: string,
 ): Promise<void> {
   const tx = getOrgScopedDb('approvalChannelService.revokeGrant');
   const [current] = await tx
-    .select({ id: orgSubaccountChannelGrants.id, active: orgSubaccountChannelGrants.active })
+    .select({
+      id: orgSubaccountChannelGrants.id,
+      active: orgSubaccountChannelGrants.active,
+      orgChannelId: orgSubaccountChannelGrants.orgChannelId,
+    })
     .from(orgSubaccountChannelGrants)
     .where(
       and(
@@ -453,6 +467,13 @@ export async function revokeGrant(
 
   if (!current) {
     throw Object.assign(new Error('Grant not found'), { statusCode: 404 });
+  }
+
+  if (expectedOrgChannelId !== undefined && current.orgChannelId !== expectedOrgChannelId) {
+    throw Object.assign(
+      new Error('Grant does not belong to the supplied channel'),
+      { statusCode: 404 },
+    );
   }
 
   const transition = validateGrantTransition(

@@ -252,3 +252,7 @@ export * from './agentRecommendations';
 
 // GHL Agency OAuth — location token cache (migration 0269)
 export * from './connectorLocationTokens.js';
+
+// Workflows V1 — step gates + drafts (migration 0270)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';

@@ -1748,6 +1748,26 @@ In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy in
 
 When a UI action binds a new credential to a resource (e.g. rebinding a broken Drive reference to a new connection), calling a lightweight access-check endpoint on connection select — rather than waiting for the full submit — surfaces failures at decision time instead of after the user commits. `ExternalDocumentRebindModal` now calls `verifyAccess(connId, fileId)` on the connection `<select>` onChange, shows an inline error, and disables the confirm button until access is confirmed. **Rule:** for any "bind credential to resource" flow, add a verify-before-confirm step using any existing lightweight probe endpoint; post-submit failures confuse users because the error arrives after they have mentally moved on. Source: ChatGPT PR #242 review Round 2 F4.
 
+### [2026-05-02] Correction — "Newest at bottom" is event order, not container alignment
+
+When designing a chronological event log that should show newest-at-bottom (matching chat conventions: terminal output, build logs, Slack), the events should flow from the top of the container downward in natural document order. Do NOT use `flex-col justify-end` to pin a short list to the bottom of the panel — that creates ugly empty space above and only "looks right" by accident when the list grows enough to overflow. **Rule:** for activity-style streams that should anchor to bottom on overflow, use a top-anchored container with `overflow-y-auto` and oldest-events-first ordering; auto-scroll-to-bottom logic handles the "show newest" requirement when events arrive. Discovered while building `prototypes/workflows/07-open-task-three-panel.html`, `08-task-progression-states.html`, `10-ask-step-runtime.html` — all three had the same wrong pattern.
+
+### [2026-05-02] Pattern — Timestamps on activity events need an "ago" suffix
+
+In an activity log where each event has a relative-time stamp, bare numbers like `38s` or `4m` are ambiguous: they read like task duration, not "time since this event." Append `ago` so the meaning is explicit: `38s ago`, `4m ago`, `1d 3h ago`. Exception: `just now` stays as-is (no `ago`). **Rule:** any relative-time label on activity-style streams uses `Xs ago` / `Xm ago` / `Xh ago` / `Xd Yh ago` format. Surfaced during workflows mockup review.
+
+### [2026-05-02] Pattern — Engine writes use state-based CAS predicates as the canonical idempotency mechanism
+
+The workflow engine's V1 execution model (declared in `docs/workflows-dev-spec.md` §4.0) is **at-least-once dispatch with idempotent handlers**. The dominant idempotency mechanism is state-based concurrency control: every state-transition write uses an `UPDATE ... WHERE status = X` predicate; 0 rows updated means "another writer already won" and the API resolves the call as either an idempotent-hit (200) or an external-transition rejection (409). The unique-constraint pattern (e.g. `UNIQUE (gate_id, deciding_user_id)` per spec §5.1.1) is used as a secondary mechanism where multi-writer per-step deduplication is required. **Why not exactly-once via global idempotency keys:** distributed exactly-once is a known impossibility outside a single transactional context; a `(run_id, task_id, step_id, attempt)` key would be redundant with the per-endpoint state-based posture and would not solve the underlying determinism problem. **Rule:** every new engine endpoint MUST declare its idempotency posture inline per `docs/spec-authoring-checklist.md` §10, and MUST verify a re-execution does not double-count or double-write. Any handler that wraps an external API call without a deduplicating key MUST surface that constraint upstream rather than silently retry.
+
+### [2026-05-02] Gotcha — Idempotent endpoint responses must distinguish race-won-by-decider from external-transition
+
+When a CAS predicate fails (`UPDATE ... WHERE status = X` returns 0 rows), the API has to determine WHY it failed before responding. Two distinct cases need different responses: (a) **race won by another decider** — the row's current status IS the next valid terminal state (e.g. `approved` or `rejected`); the API returns `200 { idempotent_hit: true, existing_review_id }` because there is a real winning decision to surface to the losing caller; (b) **external transition** — the row's current status is NOT a decision-style terminal (e.g. the run was Stopped, the parent fan-out cancelled the step); the API returns `409 { error: 'step_already_resolved', current_status }` because there is no winning decision to surface and the client needs a deterministic signal to remove the UI. Returning the same 200-idempotent-hit response for both cases creates **ghost-log entries** — approval rows recorded with no real effect, and stuck UI cards that never collapse. Codified in `docs/workflows-dev-spec.md` §5.1.1; the rule applies to every endpoint that uses a state-based CAS predicate against a row that can transition externally (Stop, fan-out cancel, timeout, admin override). Discovered during ChatGPT spec review of workflows-dev-spec, F12 round 2.
+
+### [2026-05-02] Pattern — Gate-snapshot model isolates in-flight gates from live state changes
+
+`workflow_step_gates` (per `docs/workflows-dev-spec.md` §3.3) holds a frozen `approver_pool_snapshot` (and `seen_payload`, `seen_confidence`) at gate-open time. Every gate decision evaluates membership against the snapshot column, **never against live `teams` / `team_members` / org state**. The single mutation path is the explicit `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` admin endpoint (spec §5.1.2), which overwrites the snapshot in a guarded `UPDATE ... WHERE resolved_at IS NULL` predicate and emits an `approval.pool_refreshed` event so all open clients update their cards. **Asymmetry between gate kinds on refresh:** Approval gates preserve decisions already recorded against the prior snapshot (`No effect on existing reviews`); Ask gates evaluate eligibility against the current snapshot at submit time, so a user removed by `/refresh-pool` between gate-open and submit gets a 403. **Rule:** any gate-style HITL primitive in this codebase MUST use the snapshot-at-open + explicit-refresh-endpoint pattern rather than reading live state at decision time. Live reads create non-deterministic decision behaviour when org membership changes mid-flight (e.g. employee leaves a team while their approval is queued).
+
 ### [2026-05-01] Pattern — Implementation spec hard stop conditions must use explicit "stop" language, not implied success
 
 When a sequencing spec has a task boundary where proceeding on failure causes wasted work (e.g. applying `!` assertions to test files while production type errors remain), the verification step must use explicit "If non-zero, stop — do not proceed to Task N" language. An implied success condition ("must return 0 lines") is insufficient — implementers in execution mode continue past soft failures. The Task 2.4 → Task 3 boundary in `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` was the canonical example: 127 test-file `!` fixes applied on top of unfixed production errors = wasted session. The corrective pattern: hard stop at each major task boundary where downstream work is invalidated by upstream failure, plus a Task-N pre-condition that re-states the same check as an entry gate.
@@ -1910,3 +1930,22 @@ When a state-machine row's *initial* values must be derived from policy/budget/c
 2. **Insert-then-snapshot (pattern):** INSERT the row in `proposed` state with placeholder values, acquire `pg_advisory_xact_lock(budget_id)`, SELECT current capacity (which now includes this in-flight row), evaluate policy, UPDATE the row to `approved | denied | pending_approval` with the resolved snapshot of `spending_policy_id`, `policy_version`, `mode`, etc. The trigger that protects post-insert immutability of these snapshot fields carves out the `proposed → X` transition (any other UPDATE that touches the snapshot fields raises an error).
 
 Why pattern 2 wins: capacity computation sees the in-flight row, so two concurrent proposals against the same budget serialise correctly under the advisory lock. The trigger carve-out is the cost — a single well-named exception path — and it pays for itself by making the snapshot fields immutable everywhere else. Documented as the resolution to a code-vs-trigger contradiction at `tasks/builds/agentic-commerce/spec.md §305-307`. Generalises to any state-machine row whose initial state requires lock-protected reads on related tables (budget reservations, capacity grants, queue admission, license counter consumption). **Rule:** if you find yourself reaching for "lock the parent, read capacity, insert child", invert the order — insert child in placeholder state, lock parent inside the same transaction, snapshot derived values onto the child via UPDATE before COMMIT.
+
+### [2026-05-04] Rule — Do not introduce "future-use" schema columns without active invariants
+
+During workflows-v1, `workflow_step_gates.superseded_by_gate_id` was introduced as a future seam (unused in V1). Review flagged it as a lifecycle inconsistency against the enforced unique index, despite no runtime usage.
+
+**Lesson:** Unused schema fields are not neutral. They:
+- Increase cognitive load during review
+- Invite incorrect invariant assumptions
+- Create apparent contradictions with enforced constraints
+
+**Rule:** Only introduce schema fields when:
+1. The behaviour is implemented, AND
+2. The invariants governing that field are defined
+
+If future behaviour is anticipated:
+- Document it in the spec
+- Add the column in the migration that introduces the behaviour
+
+Avoid pre-emptive schema seams.

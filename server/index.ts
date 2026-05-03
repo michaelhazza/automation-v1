@@ -73,6 +73,7 @@ import webLoginConnectionsRouter from './routes/webLoginConnections.js';
 import workflowTemplatesRouter from './routes/workflowTemplates.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import workflowStudioRouter from './routes/workflowStudio.js';
+import workflowGatesRouter from './routes/workflowGates.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
 import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
@@ -324,6 +325,7 @@ app.use(webLoginConnectionsRouter);
 app.use(workflowTemplatesRouter);
 app.use(workflowRunsRouter);
 app.use(workflowStudioRouter);
+app.use(workflowGatesRouter);
 app.use(subaccountOnboardingRouter);
 app.use(automationConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
@@ -573,6 +575,21 @@ async function start() {
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {
       console.error('[boot] failed to register iee-run-completed handler', err);
+    }
+  }
+  // Workflow gate stall-notification worker (Workflows V1 §5.3)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const pgboss = await getPgBoss();
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { createWorker } = await import('./lib/createWorker.js');
+      await createWorker({
+        queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
+        boss: pgboss,
+        handler: workflowGateStallNotifyHandler,
+      });
+    } catch (err) {
+      console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
     }
   }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.

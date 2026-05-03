@@ -1,0 +1,377 @@
+<!doctype html>
+<!--
+  Workflow Studio · 02 — Canvas-first authoring with chat as a power tool
+  ======================================================================
+  Counter-design to mock 01.
+
+  Critique of 01:
+    - Three permanent panes (chat / canvas / inspector) — too much surface
+    - Top bar had 4 primary actions — frontend principles say one
+    - Cost + side-effect badge on every card — KPI-board chrome
+    - 6-metric validation summary across the top — dashboard noise
+    - Felt like Zapier with a chat overlay
+
+  Hypothesis tested here:
+    - Canvas is the primary surface. The shape of the workflow is what the
+      user is checking, so it gets the whole screen.
+    - Direct manipulation handles 80% of edits (rename, swap, delete,
+      reorder, change approver, change condition).
+    - Chat is a docked power tool — collapsed by default, opens on demand
+      for "build me X from scratch" or "add an approval before every
+      irreversible step".
+    - Each step card carries the minimum surface to spot a structural
+      mistake: icon, name, one-line action. Cost rolls up; only
+      irreversible steps wear a flag, because that's the only class with
+      a safety implication worth glanceability.
+    - Validation surfaces as a tiny dot on the affected step + a single
+      chip in the bottom bar. No multi-metric strip.
+    - Inspector is a slide-out (overlay), not a third permanent column.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workflow Studio — canvas-first</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#fafafa; color:#1e293b; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .icn-skill   { background:#eef2ff; color:#4338ca; }
+  .icn-agent   { background:#faf5ff; color:#6b21a8; }
+  .icn-wait    { background:#f1f5f9; color:#475569; }
+  .icn-approve { background:#fff7ed; color:#9a3412; }
+  .icn-extern  { background:#ecfdf5; color:#047857; }
+
+  .connector { width: 1.5px; background: #d1d5db; margin: 0 auto; }
+
+  /* Insert affordance — visible on row hover */
+  .insert-row { height: 18px; position: relative; display: flex; justify-content: center; align-items: center; }
+  .insert-row .plus {
+    width: 22px; height: 22px; border-radius: 999px;
+    background: white; border: 1.5px dashed #cbd5e1; color: #94a3b8;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0; transition: opacity .12s ease;
+  }
+  .insert-row:hover .plus { opacity: 1; }
+  .insert-row.is-hovered .plus { opacity: 1; border-color:#6366f1; color:#6366f1; background:#eef2ff; }
+
+  /* Step card */
+  .step-card {
+    width: 380px; background:white; border:1px solid #e5e7eb; border-radius:10px;
+    padding: 12px 14px; display:flex; align-items:center; gap:12px;
+    cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .step-card:hover { border-color:#cbd5e1; box-shadow: 0 2px 6px rgba(15,23,42,0.04); }
+  .step-card.selected { border-color:#6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+  .icn-wrap { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative; }
+  .flag-dot { position:absolute; top:-3px; right:-3px; width:10px; height:10px; border-radius:999px; border:2px solid white; }
+  .flag-dot.warn { background:#f59e0b; }
+  .flag-dot.danger { background:#dc2626; }
+
+  /* Bottom action bar — centered on the canvas area, not the viewport,
+     so the inspector (when open) doesn't push it off-axis */
+  .bottom-bar {
+    position: fixed; bottom: 18px;
+    left: calc((100vw - 360px) / 2); transform: translateX(-50%);
+    background:white; border:1px solid #e5e7eb; border-radius: 999px;
+    padding: 6px 6px 6px 18px; display:flex; align-items:center; gap:14px;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+    font-size: 12.5px; z-index: 30;
+  }
+  .bottom-bar .save { padding: 8px 16px; border-radius:999px; background:#4f46e5; color:white; font-weight:600; font-size:12.5px; }
+  .bottom-bar .save:hover { background:#4338ca; }
+
+  /* Floating chat pill — bottom-left so the inspector slide-out (right side)
+     never covers it. Visible at all times as the discoverable entry point
+     to the Studio agent for big restructures. */
+  .chat-pill {
+    position: fixed; left: 22px; bottom: 22px;
+    background: #1e293b; color: white; border-radius: 999px;
+    padding: 10px 16px 10px 12px; display:flex; align-items:center; gap:8px;
+    box-shadow: 0 12px 30px rgba(15,23,42,0.18); cursor: pointer;
+    font-size: 12.5px; font-weight: 500; z-index: 30;
+  }
+  .chat-pill:hover { background: #0f172a; }
+  .chat-pill .kbd {
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85);
+    border-radius: 4px; padding: 1px 5px; font-size: 10.5px; font-weight: 500;
+    margin-left: 2px;
+  }
+
+  /* Inspector slide-out */
+  .inspector {
+    position: fixed; top: 96px; right: 0; bottom: 0; width: 360px;
+    background: white; border-left: 1px solid #e5e7eb;
+    box-shadow: -8px 0 24px rgba(15,23,42,0.04);
+    display: flex; flex-direction: column;
+    z-index: 20;
+  }
+
+  .field-edit {
+    border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; font-size:13px;
+    width:100%; background:white; outline:none;
+  }
+  .field-edit:focus { border-color:#6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+
+  .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+</style>
+</head>
+<body class="min-h-screen pb-32">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <a class="text-slate-600 hover:text-slate-900 cursor-pointer">Workflows</a>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Studio</span>
+  <div class="ml-auto text-[12px] text-slate-500">acme-org · sysadmin</div>
+</div>
+
+<!-- Page header — name + status only, no actions -->
+<div class="bg-white border-b border-slate-200 px-6 py-4">
+  <div class="max-w-[820px] mx-auto flex items-center gap-3">
+    <h1 class="text-[18px] font-semibold text-slate-900">Weekly Lead Re-engagement</h1>
+    <span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-amber-100 text-amber-800 uppercase tracking-wide">Draft</span>
+    <span class="text-[12px] text-slate-500 ml-auto">Forked from <span class="text-slate-700">system/lead-reengagement v3</span> · saved 14s ago</span>
+  </div>
+</div>
+
+<!-- Canvas — the whole screen -->
+<div class="max-w-[820px] mx-auto px-6 py-10">
+
+  <!-- Step 1 -->
+  <div class="flex justify-center">
+    <div class="step-card">
+      <div class="icn-wrap icn-skill">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-[14px] font-medium text-slate-900 truncate">Find stale leads</div>
+        <div class="text-[12px] text-slate-500 truncate">Search GHL contacts not contacted in 30 days</div>
+      </div>
+      <div class="text-[10.5px] text-slate-400 num">1</div>
+    </div>
+  </div>
+
+  <div class="connector" style="height:24px;"></div>
+  <div class="insert-row"><button class="plus"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button></div>
+  <div class="connector" style="height:24px;"></div>
+
+  <!-- Step 2 -->
+  <div class="flex justify-center">
+    <div class="step-card">
+      <div class="icn-wrap icn-agent">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-[14px] font-medium text-slate-900 truncate">Classify by fit</div>
+        <div class="text-[12px] text-slate-500 truncate">Copywriter agent · sets <code class="text-[11px] bg-slate-100 px-1 rounded">tier</code> = hot or cold</div>
+      </div>
+      <div class="text-[10.5px] text-slate-400 num">2</div>
+    </div>
+  </div>
+
+  <div class="connector" style="height:24px;"></div>
+  <div class="insert-row"><button class="plus"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button></div>
+  <div class="connector" style="height:24px;"></div>
+
+  <!-- Inline branch label — minimal -->
+  <div class="text-center text-[12px] text-slate-500 mb-2">If <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded font-medium text-slate-700">tier</code> is</div>
+
+  <!-- Branch row: two cards with branch labels -->
+  <div class="grid grid-cols-2 gap-6">
+    <div class="flex flex-col items-center gap-3">
+      <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">hot</span>
+      <div class="step-card" style="width: 320px;">
+        <div class="icn-wrap icn-agent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[13.5px] font-medium text-slate-900 truncate">Draft personal email</div>
+          <div class="text-[11.5px] text-slate-500 truncate">Copywriter agent</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">3</div>
+      </div>
+    </div>
+
+    <div class="flex flex-col items-center gap-3">
+      <span class="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold">cold</span>
+      <div class="step-card" style="width: 320px;">
+        <div class="icn-wrap icn-skill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[13.5px] font-medium text-slate-900 truncate">Add to nurture list</div>
+          <div class="text-[11.5px] text-slate-500 truncate">Tag in GHL</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">4</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hot path continues; cold path ends -->
+  <div class="grid grid-cols-2 gap-6 mt-1">
+    <div class="flex flex-col items-center">
+      <div class="connector" style="height:24px;"></div>
+    </div>
+    <div class="flex justify-center">
+      <span class="text-[11px] text-slate-400 italic mt-2">— ends —</span>
+    </div>
+  </div>
+
+  <!-- Step 5 (selected — approval) — simplified card, only shows warning dot -->
+  <div class="grid grid-cols-2 gap-6">
+    <div class="flex flex-col items-center">
+      <div class="step-card selected" style="width: 320px;">
+        <div class="icn-wrap icn-approve">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="flag-dot warn" title="Needs configuration"></span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[13.5px] font-medium text-slate-900 truncate">Approval before send</div>
+          <div class="text-[11.5px] text-slate-500 truncate">Pause for a human review</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">5</div>
+      </div>
+    </div>
+    <div></div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-6">
+    <div class="flex flex-col items-center">
+      <div class="connector" style="height:24px;"></div>
+    </div>
+    <div></div>
+  </div>
+
+  <!-- Step 6 — Mailchimp send (irreversible flag — the only one in the flow) -->
+  <div class="grid grid-cols-2 gap-6">
+    <div class="flex flex-col items-center">
+      <div class="step-card" style="width: 320px;">
+        <div class="icn-wrap icn-extern">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <span class="flag-dot danger" title="Irreversible — sends real email"></span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[13.5px] font-medium text-slate-900 truncate">Send via Mailchimp</div>
+          <div class="text-[11.5px] text-slate-500 truncate">Automation · campaigns/send</div>
+        </div>
+        <div class="text-[10.5px] text-slate-400 num">6</div>
+      </div>
+    </div>
+    <div></div>
+  </div>
+
+  <!-- End -->
+  <div class="grid grid-cols-2 gap-6 mt-2">
+    <div class="flex flex-col items-center">
+      <span class="text-[11px] text-slate-400 italic">— ends —</span>
+    </div>
+    <div></div>
+  </div>
+
+  <!-- Hint at the bottom — keeps the chat affordance discoverable without dominating -->
+  <div class="text-center mt-12 text-[12px] text-slate-400">
+    Click any step to edit · click <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border border-slate-300 align-middle mx-0.5"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span> to insert · ask the Studio for big changes
+  </div>
+
+</div>
+
+<!-- Bottom action bar — single source of state and the one primary action -->
+<div class="bottom-bar">
+  <div class="flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+    <span class="text-slate-700">1 issue</span>
+  </div>
+  <div class="w-px h-4 bg-slate-200"></div>
+  <div class="text-slate-600 num">~$0.084 / run</div>
+  <div class="w-px h-4 bg-slate-200"></div>
+  <button class="save">Publish v4</button>
+</div>
+
+<!-- Floating chat pill — discoverable, not dominant.
+     Bottom-left so it's never covered by the right-side inspector. -->
+<div class="chat-pill">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  Ask Studio
+  <span class="kbd">⌘ K</span>
+</div>
+
+<!-- Inspector slide-out — anchored to step 5 -->
+<div class="inspector">
+  <div class="px-5 py-3.5 border-b border-slate-200 flex items-start justify-between">
+    <div>
+      <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 5</div>
+      <div class="text-[15px] font-semibold text-slate-900 mt-0.5">Approval before send</div>
+    </div>
+    <button class="text-slate-400 hover:text-slate-700 -mr-1 mt-0.5">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto scroll px-5 py-4 space-y-4">
+
+    <!-- Inline name editor -->
+    <div>
+      <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Name</label>
+      <input class="field-edit" value="Approval before send" />
+    </div>
+
+    <!-- Approver -->
+    <div>
+      <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Who approves</label>
+      <div class="field-edit flex items-center justify-between cursor-pointer text-slate-500">
+        <span>Choose a person or group…</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="text-[11.5px] text-amber-700 mt-1.5 flex items-center gap-1.5">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Without an approver the run will sit idle waiting.
+      </div>
+    </div>
+
+    <!-- On reject -->
+    <div>
+      <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">If rejected</label>
+      <div class="field-edit flex items-center justify-between cursor-pointer">
+        <span class="text-slate-800">Skip the send step</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+    </div>
+
+    <!-- What approver sees — collapsible advanced -->
+    <details class="border-t border-slate-100 pt-3">
+      <summary class="text-[12px] font-medium text-slate-600 cursor-pointer hover:text-slate-900 select-none">Advanced — what the approver sees, raw definition</summary>
+      <div class="mt-3 space-y-3">
+        <div>
+          <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Approver will see</div>
+          <ul class="text-[12.5px] text-slate-700 space-y-1 pl-4 list-disc">
+            <li>Email body from step 3</li>
+            <li>Recipient count + sample of 5</li>
+          </ul>
+        </div>
+        <pre class="text-[10.5px] leading-snug bg-slate-900 text-slate-100 rounded p-2.5 overflow-x-auto"><code>{
+  "id": "approval_before_send",
+  "type": "approval",
+  "dependsOn": ["draft_personal_email"],
+  "onReject": "skip:send_via_mailchimp"
+}</code></pre>
+      </div>
+    </details>
+
+  </div>
+
+  <div class="px-5 py-3 border-t border-slate-200 flex items-center justify-between">
+    <button class="text-[12px] text-red-600 hover:text-red-800 font-medium">Remove step</button>
+    <button class="text-[12px] text-slate-600 hover:text-slate-900 font-medium">Test in isolation</button>
+  </div>
+</div>
+
+</body>
+</html>

@@ -29,7 +29,7 @@
 
 import { TERMINAL_RUN_STATUSES, AGENT_RUN_STATUS } from './runStatus.js';
 
-export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run';
+export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run' | 'workflow_step_gate';
 
 const AGENT_RUN_TERMINAL: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 const AGENT_RUN_KNOWN: ReadonlySet<string> = new Set(Object.values(AGENT_RUN_STATUS));
@@ -44,6 +44,7 @@ const WORKFLOW_RUN_TERMINAL: ReadonlySet<string> = new Set([
 const WORKFLOW_RUN_KNOWN: ReadonlySet<string> = new Set([
   'pending',
   'running',
+  'paused',
   'awaiting_input',
   'awaiting_approval',
   'completed',
@@ -71,6 +72,11 @@ const WORKFLOW_STEP_KNOWN: ReadonlySet<string> = new Set([
   'invalidated',
 ]);
 
+// Gate state machine uses 'open' and 'resolved' as logical states,
+// tracked by resolved_at IS NULL (open) vs IS NOT NULL (resolved).
+const WORKFLOW_STEP_GATE_TERMINAL: ReadonlySet<string> = new Set(['resolved']);
+const WORKFLOW_STEP_GATE_KNOWN: ReadonlySet<string> = new Set(['open', 'resolved']);
+
 interface KindSets {
   terminal: ReadonlySet<string>;
   known: ReadonlySet<string>;
@@ -84,6 +90,8 @@ function setsForKind(kind: StateMachineKind): KindSets {
       return { terminal: WORKFLOW_RUN_TERMINAL, known: WORKFLOW_RUN_KNOWN };
     case 'workflow_step_run':
       return { terminal: WORKFLOW_STEP_TERMINAL, known: WORKFLOW_STEP_KNOWN };
+    case 'workflow_step_gate':
+      return { terminal: WORKFLOW_STEP_GATE_TERMINAL, known: WORKFLOW_STEP_GATE_KNOWN };
   }
 }
 

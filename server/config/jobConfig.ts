@@ -401,6 +401,19 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const,
   },
 
+  // ── Workflows V1 — gate stall notifications (spec §5.3) ─────────
+  // Three delayed jobs per gate (24h, 72h, 7d). singletonKey deduplicates
+  // re-enqueues for the same gate+cadence. stale-fire guard in the handler
+  // provides durable safety even if cancel races.
+  'workflow-gate-stall-notify': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'workflow-gate-stall-notify__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-{gateId}-{cadence}
+  },
+
   // ── Workflows engine (multi-step automation, migration 0076) ────
   // Spec: tasks/workflows-spec.md §5.6 (concurrency) + §5.7 (watchdog).
   // Tick jobs are enqueued with singletonKey: runId so multiple step
