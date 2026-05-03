@@ -35,6 +35,7 @@ export * from './subaccountAgents';
 export * from './tasks';
 export * from './taskActivities';
 export * from './taskDeliverables';
+export * from './taskDeliverableVersions';
 export * from './workspaceMemories';
 export * from './workspaceEntities';
 export * from './agentBriefings';

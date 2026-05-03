@@ -13,6 +13,19 @@ export interface BriefUiContext {
   userPermissions: Set<string>;
 }
 
+/**
+ * File-edit intent signal.
+ *
+ * Present when the classifier detects a conversational edit request targeting
+ * a specific file (e.g. "Edit file X to ...", "Change Y in file Z").
+ * The agent loop reads this field to short-circuit to file-edit mode.
+ */
+export interface FileEditIntent {
+  kind: 'file_edit_intent';
+  /** Extracted file name or reference from the message, if identifiable. */
+  fileRef?: string;
+}
+
 export interface FastPathDecision {
   route: FastPathRoute;
   scope: BriefScope;
@@ -21,6 +34,8 @@ export interface FastPathDecision {
   secondLookTriggered: boolean;
   keywords?: string[];
   reasoning?: string;
+  /** Set when the message is identified as a conversational file-edit request. */
+  fileEditIntent?: FileEditIntent;
 }
 
 /**

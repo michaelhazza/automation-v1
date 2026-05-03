@@ -2638,3 +2638,16 @@ The spec-reviewer auto-decided the following directional findings during iterati
   - Today: visibility's "requester sees their own task" rule maps to `workflowRuns.startedByUserId`. Tasks not originating from a workflow run (manual tasks, agent-created tasks) have null `requesterUserId` — no user matches the requester rule.
   - Spec §14.5 references `task.requesterUserId` as a first-class concept.
   - Suggested approach: add `tasks.createdByUserId uuid REFERENCES users(id)` in a follow-up migration. Backfill from `workflowRuns.startedByUserId` for existing rows where applicable.
+
+### Chunk 13 — Deferred: file.created / file.edited event emission in write paths
+
+- [ ] Wire `taskEventService.appendAndEmit` for `file.created` (new deliverable) and `file.edited` (new version) in the agent execution write path.
+  - Today: `file.created` and `file.edited` events are defined in `shared/types/taskEvent.ts` and validated in `taskEventValidator.ts`, but no write path in `server/services/agentExecutionService.ts` or `server/services/taskService.ts` emits them.
+  - The `fileRevertHunkService.ts` correctly emits `file.edited` on revert.
+  - Missing: (a) `file.created` when the agent first creates a deliverable, (b) `file.edited` when the agent writes a new version via the agent loop.
+  - Also missing: writing an initial `task_deliverable_versions` row (version 1) when a deliverable is first created — the diff/revert flow depends on version rows existing.
+  - Suggested approach: in `taskService.addDeliverable` (or the agent execution path that creates deliverables), insert a version-1 row in `task_deliverable_versions` and emit `file.created`. In the agent file-edit path (once it reads `fileEditIntent` from the triage classifier), write a new version row and emit `file.edited`.
+
+### Chunk 13 — Deferred: chat-triage classifier LLM prompt update for file_edit_intent
+
+- [ ] The tier-2 LLM prompt in `chatTriageClassifier.ts` (classifyWithLlm) does not yet describe `file_edit_intent` to the LLM or use it in its classification output. The tier-1 heuristic in `chatTriageClassifierPure.ts` (`detectFileEditIntent`) supplies this signal from heuristic patterns. A follow-up should update the LLM system prompt to instruct the model to surface `file_edit_intent` in its JSON response when it detects a file-edit message that passes tier-1 confidence threshold.

@@ -15,6 +15,7 @@ type Tab = 'now' | 'plan' | 'files';
 
 interface RightPaneTabsProps {
   projection: TaskProjection;
+  taskId: string;
 }
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -23,7 +24,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'files', label: 'Files' },
 ];
 
-export default function RightPaneTabs({ projection }: RightPaneTabsProps) {
+export default function RightPaneTabs({ projection, taskId }: RightPaneTabsProps) {
   // Default: Plan (decision #7)
   const [activeTab, setActiveTab] = useState<Tab>('plan');
 
@@ -59,7 +60,7 @@ export default function RightPaneTabs({ projection }: RightPaneTabsProps) {
           />
         )}
         {activeTab === 'files' && (
-          <FilesTab />
+          <FilesTab taskId={taskId} />
         )}
       </div>
     </div>

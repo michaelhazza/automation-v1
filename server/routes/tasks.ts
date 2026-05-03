@@ -159,6 +159,32 @@ router.get(
   })
 );
 
+// Task-scoped deliverables endpoint (no subaccountId in path — used by FilesTab)
+router.get(
+  '/api/tasks/:taskId/deliverables',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  asyncHandler(async (req, res) => {
+    const deliverables = await taskService.listDeliverables(req.params.taskId, req.orgId!);
+    res.json(deliverables);
+  })
+);
+
+router.get(
+  '/api/tasks/:taskId/deliverables/:delivId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  asyncHandler(async (req, res) => {
+    const deliverables = await taskService.listDeliverables(req.params.taskId, req.orgId!);
+    const deliverable = deliverables.find((d) => d.id === req.params.delivId);
+    if (!deliverable) {
+      res.status(404).json({ error: 'Deliverable not found' });
+      return;
+    }
+    res.json(deliverable);
+  })
+);
+
 router.post(
   '/api/subaccounts/:subaccountId/tasks/:itemId/deliverables',
   authenticate,

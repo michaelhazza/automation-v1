@@ -148,7 +148,7 @@ export default function OpenTaskView({ user }: OpenTaskViewProps) {
 
         {/* Right pane — 52% expanded / ~74% when activity collapsed */}
         <div className="flex-1 min-w-0 flex flex-col border-l border-slate-700/40">
-          <RightPaneTabs projection={projection} />
+          <RightPaneTabs projection={projection} taskId={taskId ?? ''} />
         </div>
       </div>
     </div>

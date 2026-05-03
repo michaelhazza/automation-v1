@@ -182,6 +182,9 @@ import assignableUsersRouter from './routes/assignableUsers.js';
 import teamsRouter from './routes/teams.js';
 // Workflows V1 Chunk 12 — Ask form submit / skip
 import asksRouter from './routes/asks.js';
+// Workflows V1 Chunk 13 — File diff + hunk revert
+import fileDiffRouter from './routes/fileDiff.js';
+import fileRevertRouter from './routes/fileRevert.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -401,6 +404,9 @@ app.use(assignableUsersRouter);
 app.use(teamsRouter);
 // Workflows V1 Chunk 12 — Ask form submit / skip
 app.use(asksRouter);
+// Workflows V1 Chunk 13 — File diff + hunk revert
+app.use(fileDiffRouter);
+app.use(fileRevertRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
