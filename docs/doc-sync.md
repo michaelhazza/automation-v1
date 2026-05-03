@@ -20,8 +20,13 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | Any change touching build discipline, conventions, agent fleet, review pipeline, locked rules (RLS, service-tier, gates, migrations, §8 development discipline). Also triggered by `[missing-doc] > 2`. |
 | `CONTRIBUTING.md` | Any change to lint-suppression policy, `// reason:` comment format, acceptable / forbidden disable patterns, or addition of new contributor-facing conventions. |
 | `docs/frontend-design-principles.md` | Any new UI pattern, hard rule, or worked example introduced this session. |
-| `KNOWLEDGE.md` | Patterns and corrections — always check. |
-| `docs/spec-context.md` | **Spec-review sessions only.** Any framing-assumption change implied by the spec under review. |
+| `KNOWLEDGE.md` | Patterns and corrections — always check. **Note:** architectural decisions go to `docs/decisions/` (ADRs), not KNOWLEDGE.md. |
+| `docs/spec-context.md` | **Spec-review sessions only.** Any framing-assumption change implied by the spec under review. Bump `last_reviewed_at` when you confirm framing is still current — the staleness gate in `spec-reviewer` blocks at 120 days. |
+| `docs/decisions/` | When the session locks a durable architectural choice (chose X over Y, set a policy, locked a contract). Author a new ADR using `_template.md`; update `decisions/README.md` index. |
+| `docs/context-packs/` | When a context pack's referenced section anchor changes in `architecture.md`, or when a new mode is needed. Re-run anchor regeneration if section names changed. |
+| `references/test-gate-policy.md` | When the test-gate posture changes (a new umbrella command becomes forbidden, a new local check becomes allowed). |
+| `references/spec-review-directional-signals.md` | When `spec-reviewer` surfaces the same scope/sequencing/posture call >2 times — add a signal so the classifier catches it. |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | Every framework-level change ships with a version bump and changelog entry. Repo-specific changes (your own architecture.md edits, your own agent additions) DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only. |
 
 ---
 

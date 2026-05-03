@@ -1,18 +1,40 @@
 # Project Knowledge Base
 
-Append-only register of patterns, decisions, and gotchas discovered during development.
+Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
 Read this at the start of every session. Never edit or remove existing entries — only append.
+
+> **Architecture decisions live in [`docs/decisions/`](./docs/decisions/), not here** (convention introduced 2026-05-03). KNOWLEDGE.md captures the "watch out for this" stream — observations, gotchas, learned conventions, user corrections. ADRs capture the "we chose X over Y because Z" stream — durable architectural choices with rationale and trade-offs. When in doubt, write a KNOWLEDGE entry first; promote to ADR if the decision keeps coming up.
+>
+> Entries before 2026-05-03 mix both streams (the convention didn't exist yet). They stay in place — splitting historical entries adds noise without adding signal. New entries follow the split.
+
+## Size-bound policy
+
+KNOWLEDGE.md is append-only and grows. At year 1, a healthy KNOWLEDGE.md is ~1,500–2,500 lines. Beyond ~3,000 it becomes noise — future sessions skim past entries that don't match their domain.
+
+Two safety valves:
+
+1. **Quarterly grouping pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. The originals stay; the summary becomes the entry future sessions read first. Never edit existing entries.
+2. **Promote to ADR / architecture.md when an entry keeps being cited.** If a Pattern entry has been quoted in 3+ specs or review logs, promote it: write an ADR or extend `architecture.md`, then leave a final entry pointing future readers to the new home.
+
+The file's value is in retrieval, not preservation. If retrieval slows down, the file is too big.
 
 ---
 
 ## How to Use
 
-### When to write (proactively, not just on failure)
+### When to write a KNOWLEDGE entry (proactively, not just on failure)
 - You discover a non-obvious codebase pattern
-- You make an architectural decision during implementation
 - You find a gotcha that would trip up a future session
 - You learn something about how a library/tool behaves in this project
 - The user corrects you (always capture the correction)
+- You learn a convention not documented elsewhere
+
+### When to write an ADR instead (`docs/decisions/`)
+- You make an architectural decision (chose X over Y) and the rationale matters for future sessions
+- You lock in a contract or invariant the system depends on
+- You set a policy (rate-limit, retention, security) that needs to be defended later
+
+See [`docs/decisions/README.md`](./docs/decisions/README.md) for the ADR convention and template.
 
 ### Entry format
 
@@ -22,12 +44,13 @@ Read this at the start of every session. Never edit or remove existing entries �
 [1-3 sentences. Be specific. Include file paths and function names where relevant.]
 ```
 
-### Categories
+### Categories (post-split)
 - **Pattern** — how something works in this codebase
-- **Decision** — why we chose X over Y
 - **Gotcha** — non-obvious trap or edge case
 - **Correction** — user corrected a wrong assumption
 - **Convention** — team/project convention not documented elsewhere
+
+The historical **Decision** category is retired for new entries — write an ADR instead. Existing Decision entries stay in place; future readers should treat them as observations rather than authoritative ADRs.
 
 ---
 

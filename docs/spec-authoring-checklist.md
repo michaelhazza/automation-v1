@@ -23,6 +23,7 @@ Use it when drafting any **Significant** or **Major** spec (per the task classif
 8. Self-consistency pass (last step before review)
 9. Testing posture sanity check
 10. Execution-safety contracts (new writes and state machines)
+11. Spec frontmatter (status header convention)
 
 Appendix — Pre-review checklist summary
 
@@ -354,6 +355,50 @@ A spec that describes behaviour without pinning valid transitions and forbidden 
 
 ---
 
+## Section 11 — Spec frontmatter (status header convention)
+
+Every non-trivial spec opens with a small frontmatter block so future archive sweeps can identify shipped/superseded specs without re-reading them.
+
+### The required fields
+
+```markdown
+**Status:** draft | reviewing | accepted | shipped | superseded by <path-or-ADR>
+**Spec date:** YYYY-MM-DD
+**Last updated:** YYYY-MM-DD
+**Author:** <handle>
+**Build slug:** <slug> (or `n/a` for ADR-shaped specs without a build slug)
+```
+
+Status values:
+
+- `draft` — being written; not yet sent to `spec-reviewer`.
+- `reviewing` — sent to `spec-reviewer` / `chatgpt-spec-review`; not yet final.
+- `accepted` — approved for build; either in flight or queued.
+- `shipped` — feature has merged to main; spec is historical reference.
+- `superseded by <path-or-ADR>` — replaced by a later spec or ADR. Include the path or ADR number so readers can find the successor.
+
+### Why this matters
+
+The 2026-05-03 docs/ archive triage found 84 specs in `docs/` and only 4 with explicit retirement markers. Without a uniform `Status:` header, the operator can't run a reliable archive sweep — every candidate has to be read end-to-end to judge whether it's still authoritative. With the header, archive becomes a one-line grep: "show me every spec with `Status: shipped` older than 90 days" → operator confirms successor links → archive.
+
+### Maintenance rule
+
+Update `Last updated:` whenever you edit the spec. Update `Status:` when the spec moves through its lifecycle:
+- Sent to spec-reviewer → `Status: reviewing`
+- Spec-reviewer returns READY_FOR_BUILD and operator accepts → `Status: accepted`
+- Feature merges to main → `Status: shipped` (sweeper-friendly)
+- Replaced by a successor → `Status: superseded by <path>`
+
+### Reviewer signal this prevents
+
+"Spec at `docs/<old-spec>.md` is still cited from architecture.md but the feature it specs has shipped and the implementation has drifted." With a `Status: shipped` marker on the old spec, the doc-sync sweep at finalisation flags the architecture.md citation for redirect to the implementation file, not the spec.
+
+### Backfill
+
+Existing specs without this frontmatter are NOT required to be updated retroactively — that's a separate, opt-in pass. New specs from 2026-05-03 forward MUST carry the frontmatter.
+
+---
+
 ## Appendix — Pre-review checklist summary
 
 Before invoking `spec-reviewer` on a draft spec, answer yes to all of the following:
@@ -373,6 +418,7 @@ Before invoking `spec-reviewer` on a draft spec, answer yes to all of the follow
 - [ ] **[Section 10]** Every cross-flow chain has a declared terminal event + post-terminal prohibition
 - [ ] **[Section 10]** Every DB unique constraint has a named HTTP mapping (no bubbled 500s from `23505`)
 - [ ] **[Section 10]** If a state machine is introduced or modified: valid transitions, forbidden transitions, and status-set closure are declared
+- [ ] **[Section 11]** Spec opens with `Status:` / `Spec date:` / `Last updated:` / `Author:` / `Build slug:` frontmatter
 
 If every box is checked, the spec is ready for `spec-reviewer`. If any box is unchecked and you're intentionally leaving it so (e.g. deferring the contract to implementation), mark the deviation inline in the spec's framing section — don't leave it implicit.
 

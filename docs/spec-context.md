@@ -8,7 +8,17 @@ This file is the ground-truth framing reference for the `spec-reviewer` agent. E
 
 ## Framing statements
 
-Current as of 2026-04-16. Update the date whenever any of the statements below change.
+```yaml
+# Staleness metadata — used by spec-reviewer's pre-loop context check.
+# Update last_reviewed_at when the framing block below is verified or modified.
+# stale_after_days = 60: spec-reviewer warns when last_reviewed_at is older.
+# stale_blocks_at_days = 120: spec-reviewer refuses to start until reviewed.
+last_reviewed_at: 2026-04-16
+stale_after_days: 60
+stale_blocks_at_days: 120
+```
+
+Current as of 2026-04-16. Update the date whenever any of the statements below change AND when the framing is verified to still apply (even if no statement changed). The staleness check above turns "I'll re-check this someday" into "the agent stops me at 4 months."
 
 ```yaml
 # Deployment context
