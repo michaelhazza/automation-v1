@@ -146,7 +146,25 @@ export async function enumerateAgencyLocations(
       runId: agencyConnection.id,
     });
 
-    all.push(...page);
+    // Cross-tenant isolation: GHL's /locations/search is queried with a
+    // companyId filter, but defence-in-depth requires that we never trust
+    // the upstream payload's companyId. Drop any location whose companyId
+    // doesn't match the agency connection — without this guard, a GHL
+    // server-side bug or token-routing change could enroll another
+    // company's locations as subaccounts of the wrong org.
+    for (const loc of page) {
+      if (loc.companyId && loc.companyId !== companyId) {
+        logger.warn('ghl.enumeration.foreign_location_dropped', {
+          event: 'ghl.enumeration.foreign_location_dropped',
+          orgId: agencyConnection.organisationId,
+          companyId,
+          locationId: loc.id,
+          foreignCompanyId: loc.companyId,
+        });
+        continue;
+      }
+      all.push(loc);
+    }
     if (page.length < GHL_PAGINATION_LIMIT) break;
     skip += GHL_PAGINATION_LIMIT;
   }
@@ -192,28 +210,45 @@ export async function autoEnrolAgencyLocations(
   const locations = await enumerateAgencyLocations(agencyConnection, effectiveCorrelationId);
   let insertedCount = 0;
 
+  // FORCE RLS on subaccounts — both the OAuth callback and INSTALL_company
+  // webhook reach this function from unauthenticated handlers. Each subaccount
+  // upsert runs in a per-row org-scoped transaction
+  // (set_config('app.organisation_id', orgId, true) on `tx`) so that:
+  //   1. the subaccounts INSERT passes the WITH CHECK clause — the INSERT is
+  //      issued via tx.execute(...) on the SAME connection where set_config
+  //      ran, so the GUC applies
+  //   2. the slug-collision retry loop preserves the per-row tx boundary —
+  //      a 23505 from one slug attempt rolls back only that row's tx, not
+  //      the whole enrolment
+  //
+  // The autoStartOwedOnboardingWorkflows call below runs OUTSIDE this tx and
+  // uses module-level `db`, so its queries do NOT inherit the GUC. See the
+  // KNOWN-BROKEN comment at the call site.
   for (const loc of locations) {
     const baseSlug = generateSubaccountSlug(loc.name, loc.id);
 
     let result: { id: string; inserted: boolean } | undefined;
     for (const slug of [baseSlug, `${baseSlug}-${loc.id.slice(-4)}`]) {
       try {
-        const rows = await db.execute<{ id: string; inserted: boolean }>(sql`
-          INSERT INTO subaccounts (
-            id, organisation_id, name, slug, status,
-            connector_config_id, external_id, created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), ${orgId}, ${loc.name}, ${slug}, 'active',
-            ${agencyConnection.id}, ${loc.id}, now(), now()
-          )
-          ON CONFLICT (connector_config_id, external_id)
-            WHERE deleted_at IS NULL
-              AND connector_config_id IS NOT NULL
-              AND external_id IS NOT NULL
-          DO UPDATE SET name = EXCLUDED.name, updated_at = now()
-          RETURNING id, (xmax = 0) AS inserted
-        `);
-        result = rows[0];
+        result = await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+          const rows = await tx.execute<{ id: string; inserted: boolean }>(sql`
+            INSERT INTO subaccounts (
+              id, organisation_id, name, slug, status,
+              connector_config_id, external_id, created_at, updated_at
+            ) VALUES (
+              gen_random_uuid(), ${orgId}, ${loc.name}, ${slug}, 'active',
+              ${agencyConnection.id}, ${loc.id}, now(), now()
+            )
+            ON CONFLICT (connector_config_id, external_id)
+              WHERE deleted_at IS NULL
+                AND connector_config_id IS NOT NULL
+                AND external_id IS NOT NULL
+            DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+            RETURNING id, (xmax = 0) AS inserted
+          `);
+          return rows[0];
+        });
         break;
       } catch (err) {
         const pg = err as { code?: string; constraint?: string };
@@ -240,6 +275,17 @@ export async function autoEnrolAgencyLocations(
     if (result.inserted) {
       insertedCount++;
       // TODO: refactor to pg-boss dispatch — currently inline (spec §6 Phase 3 notes this should be async)
+      // KNOWN-BROKEN from this unauthenticated webhook/OAuth-callback path:
+      // subaccountOnboardingService uses the module-level `db` handle internally
+      // and queries org-scoped FORCE-RLS tables (org_subscriptions, workflow_runs,
+      // workflow_templates). Without an app.organisation_id GUC bound to the pool
+      // connection it picks up, those queries return zero rows and the auto-start
+      // silently no-ops. The previous attempt to wrap this in
+      // `db.transaction(async (tx) => set_config; ...)` did NOT scope the inner
+      // queries — `tx` and the module-level `db` use different pool connections.
+      // Calling it bare so the failure mode is honest; deferred to tasks/todo.md
+      // "GHL unauthenticated auto-start onboarding" (architectural refactor of
+      // subaccountOnboardingService to be admin-bypass-capable).
       try {
         const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
         await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({

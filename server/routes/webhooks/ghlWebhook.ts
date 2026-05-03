@@ -10,6 +10,7 @@ import { recordGhlMutation, dispatchWebhookSideEffects } from '../../services/gh
 import type { GhlEventEnvelope } from '../../services/ghlWebhookMutationsPure.js';
 import { recordIncident } from '../../services/incidentIngestor.js';
 import { env } from '../../lib/env.js';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -22,7 +23,7 @@ const router = Router();
  * Uses raw body parser to capture the original bytes for HMAC verification.
  * The JSON body is parsed separately after signature validation.
  */
-router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, res) => {
+router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
   // req.body is a Buffer when using raw() parser
   const rawBody = req.body as Buffer;
   let event: Record<string, unknown>;
@@ -46,7 +47,10 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
   if (eventType && webhookId && companyId && lifecycleTypes.has(eventType)) {
     // Verify HMAC signature for agency lifecycle events before any side effects.
     // Uses the app-level GHL webhook signing secret (GHL_WEBHOOK_SIGNING_SECRET).
-    // When unset, signature verification is skipped with a warning (dev/test only).
+    // In production the secret is mandatory — a missing secret is fail-closed
+    // (503), not warn-and-pass. Dev/test/integration environments may run
+    // without the secret and emit a warning, since they may not be fronted by
+    // a real GHL webhook source.
     const lifecycleSigningSecret = env.GHL_WEBHOOK_SIGNING_SECRET;
     if (lifecycleSigningSecret) {
       const signature = req.headers['x-ghl-signature'] as string | undefined;
@@ -61,14 +65,18 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }
+    } else if (env.NODE_ENV === 'production') {
+      console.error('[GHL Webhook] GHL_WEBHOOK_SIGNING_SECRET missing in production — rejecting lifecycle event');
+      res.status(503).json({ error: 'Webhook signing not configured' });
+      return;
     } else {
-      console.warn('[GHL Webhook] GHL_WEBHOOK_SIGNING_SECRET not configured — processing lifecycle event without HMAC verification');
+      console.warn('[GHL Webhook] GHL_WEBHOOK_SIGNING_SECRET not configured — processing lifecycle event without HMAC verification (non-production)');
     }
 
     // §5.4 hard invariant: side effects FIRST, dedupe mark only on success.
     // Do not call isDuplicate before dispatch — a 503 must leave the dedupe store
     // unmarked so GHL will re-deliver on retry.
-    let dispatchResult: { statusCode: 200 | 503 };
+    let dispatchResult: Awaited<ReturnType<typeof dispatchWebhookSideEffects>>;
     try {
       dispatchResult = await dispatchWebhookSideEffects({
         type: eventType,
@@ -85,6 +93,34 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
     if (dispatchResult.statusCode === 503) {
       res.status(503).json({ error: 'Upstream unavailable — retry' });
       return;
+    }
+
+    // Canonical mutation row for Staff Activity Pulse (§2.0b). Only fires when
+    // the dispatcher could resolve the organisation. For lifecycle events
+    // without a subaccount mapping (INSTALL/UNINSTALL on the agency itself),
+    // the writer returns `skipped_no_subaccount` — see follow-up in
+    // tasks/todo.md to extend the canonical table for agency-scope rows.
+    //
+    // recordGhlMutation never throws — it returns { status: 'error', error }
+    // on DB failure. We must inspect the result and log explicitly; otherwise
+    // a silent error path would leave the webhook 200-acked + dedupe-marked
+    // with the row permanently lost. Matches the result-inspection pattern at
+    // the location-scoped recordGhlMutation call later in this handler.
+    if (dispatchResult.organisationId) {
+      const lifecycleMutationResult = await recordGhlMutation({
+        organisationId: dispatchResult.organisationId,
+        subaccountId: dispatchResult.subaccountId ?? null,
+        event: event as GhlEventEnvelope,
+      });
+      if (lifecycleMutationResult.status === 'error') {
+        console.warn(
+          `[GHL Webhook] Lifecycle mutation write failed for ${eventType} (${companyId}): ${lifecycleMutationResult.error}`,
+        );
+      } else if (lifecycleMutationResult.status === 'skipped_no_subaccount') {
+        console.warn(
+          `[GHL Webhook] Lifecycle event ${eventType} (${companyId}) has no subaccount mapping — skipping mutation ${lifecycleMutationResult.mutationType}`,
+        );
+      }
     }
 
     // Side effects succeeded — mark dedupe, then ack
@@ -254,6 +290,6 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
   } catch (err) {
     console.error(`[GHL Webhook] Error processing event for account ${locationId}:`, err instanceof Error ? err.message : err);
   }
-});
+}));
 
 export default router;

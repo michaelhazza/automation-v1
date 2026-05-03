@@ -11,13 +11,14 @@
 
 import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import {
   canonicalSubaccountMutations,
   assertCanonicalUniqueness,
   type ExternalUserKind,
   type NewCanonicalSubaccountMutation,
 } from '../db/schema/clientPulseCanonicalTables.js';
-import { connectorConfigs, connectorLocationTokens } from '../db/schema/index.js';
+import { connectorConfigs, connectorLocationTokens, subaccounts } from '../db/schema/index.js';
 import { orgConfigService } from './orgConfigService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -78,17 +79,31 @@ export async function recordGhlMutation(input: RecordGhlMutationInput): Promise<
   };
 
   try {
-    await db
-      .insert(canonicalSubaccountMutations)
-      .values(row)
-      .onConflictDoNothing({
-        target: [
-          canonicalSubaccountMutations.organisationId,
-          canonicalSubaccountMutations.subaccountId,
-          canonicalSubaccountMutations.providerType,
-          canonicalSubaccountMutations.externalId,
-        ],
-      });
+    // canonical_subaccount_mutations has FORCE ROW LEVEL SECURITY. recordGhlMutation
+    // is called from the unauthenticated GHL webhook route which has no
+    // app.organisation_id GUC set on the pooled `db` handle, so the WITH CHECK
+    // clause would reject every insert. Use withAdminConnection + SET LOCAL ROLE
+    // admin_role to bypass RLS — application-layer scoping is preserved by the
+    // organisationId/subaccountId columns explicitly written into the row, and
+    // the upstream caller (ghlWebhook route) has already validated the org via
+    // findAgencyConnectionByCompanyId or canonicalAccounts→connectorConfigs lookup.
+    await withAdminConnection(
+      { source: 'ghl_webhook_record_mutation', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        await adminDb
+          .insert(canonicalSubaccountMutations)
+          .values(row)
+          .onConflictDoNothing({
+            target: [
+              canonicalSubaccountMutations.organisationId,
+              canonicalSubaccountMutations.subaccountId,
+              canonicalSubaccountMutations.providerType,
+              canonicalSubaccountMutations.externalId,
+            ],
+          });
+      },
+    );
     return { status: 'written', mutationType: normalised.mutationType };
   } catch (err) {
     return {
@@ -106,10 +121,23 @@ export async function recordGhlMutation(input: RecordGhlMutationInput): Promise<
  * Call this BEFORE writing the dedupe row (per §5.4 hard invariant).
  * If this returns 503 or throws, the route must respond 503 and NOT write the dedupe row.
  * Only on 200: write the dedupe row, then respond 200.
+ *
+ * On 200, the optional `organisationId` and `subaccountId` fields are populated
+ * when the side-effect path could resolve them. The route uses these to write
+ * the canonical mutation row (Staff Activity Pulse §2.0b). For agency-level
+ * lifecycle events (INSTALL/UNINSTALL), only `organisationId` is returned —
+ * `subaccountId` remains undefined and the mutation writer will record a
+ * `skipped_no_subaccount` outcome (see follow-up in tasks/todo.md).
  */
+export interface DispatchResult {
+  statusCode: 200 | 503;
+  organisationId?: string;
+  subaccountId?: string;
+}
+
 export async function dispatchWebhookSideEffects(
   event: WebhookEnvelopeMinimal & { webhookId: string; companyId: string },
-): Promise<{ statusCode: 200 | 503 }> {
+): Promise<DispatchResult> {
   const eventClass = classifyWebhookEvent(event);
 
   if (eventClass === 'install_company') {
@@ -129,7 +157,7 @@ export async function dispatchWebhookSideEffects(
         return { statusCode: 503 };
       }
     }
-    return { statusCode: 200 };
+    return { statusCode: 200, organisationId: connection.organisationId };
   }
 
   if (eventClass === 'install_location_ignored') {
@@ -166,27 +194,35 @@ export async function dispatchWebhookSideEffects(
       logger.warn('ghl.webhook.uninstall.revoke_failed', { companyId: event.companyId, error: String(err) });
     }
 
-    await db
-      .update(connectorConfigs)
-      .set({ status: 'disconnected', disconnectedAt: new Date(), updatedAt: new Date() })
-      .where(eq(connectorConfigs.id, connection.id));
+    // FORCE RLS on connector_configs and connector_location_tokens — the
+    // unauthenticated webhook route has no app.organisation_id set on the
+    // pooled `db` handle. Open an org-scoped transaction with set_config so
+    // both UPDATEs land. connection.organisationId is already validated via
+    // the upstream findAgencyConnectionByCompanyId lookup.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${connection.organisationId}, true)`);
+      await tx
+        .update(connectorConfigs)
+        .set({ status: 'disconnected', disconnectedAt: new Date(), updatedAt: new Date() })
+        .where(eq(connectorConfigs.id, connection.id));
 
-    await db
-      .update(connectorLocationTokens)
-      .set({ deletedAt: new Date() })
-      .where(
-        and(
-          eq(connectorLocationTokens.connectorConfigId, connection.id),
-          isNull(connectorLocationTokens.deletedAt),
-        ),
-      );
+      await tx
+        .update(connectorLocationTokens)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(connectorLocationTokens.connectorConfigId, connection.id),
+            isNull(connectorLocationTokens.deletedAt),
+          ),
+        );
+    });
 
     logger.info('ghl.webhook.uninstall.complete', {
       event: 'ghl.webhook.uninstall',
       orgId: connection.organisationId, companyId: event.companyId, locationId: null,
       result: 'success', error: null,
     });
-    return { statusCode: 200 };
+    return { statusCode: 200, organisationId: connection.organisationId };
   }
 
   if (eventClass === 'location_create') {
@@ -203,18 +239,30 @@ export async function dispatchWebhookSideEffects(
     const { generateSubaccountSlug } = await import('./ghlAgencyOauthServicePure.js');
     const baseSlug = generateSubaccountSlug(locName, locId);
 
+    // FORCE RLS on subaccounts — wrap each slug attempt in its OWN org-scoped
+    // transaction so a 23505 slug-collision on the first attempt aborts only
+    // that tx, not the whole enrolment. (A single shared tx would leave Postgres
+    // in "current transaction is aborted" state, blocking the fallback retry.)
+    // The INSERT uses tx.execute(...) on the same connection where set_config
+    // ran, so the GUC applies. Note: any subsequent service call using the
+    // module-level `db` handle does NOT inherit this GUC (different pool
+    // connections); see the autoStart comment below. Mirrors the per-row tx
+    // pattern in ghlAgencyOauthService.autoEnrolAgencyLocations.
     let result: { id: string; inserted: boolean } | undefined;
     for (const slug of [baseSlug, `${baseSlug}-${locId.slice(-4)}`]) {
       try {
-        const [row] = await db.execute<{ id: string; inserted: boolean }>(sql`
-          INSERT INTO subaccounts (id, organisation_id, name, slug, status, connector_config_id, external_id, created_at, updated_at)
-          VALUES (gen_random_uuid(), ${connection.organisationId}, ${locName}, ${slug}, 'active', ${connection.id}, ${locId}, now(), now())
-          ON CONFLICT (connector_config_id, external_id)
-            WHERE deleted_at IS NULL AND connector_config_id IS NOT NULL AND external_id IS NOT NULL
-          DO UPDATE SET name = EXCLUDED.name, updated_at = now()
-          RETURNING id, (xmax = 0) AS inserted
-        `);
-        result = row;
+        result = await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT set_config('app.organisation_id', ${connection.organisationId}, true)`);
+          const rows = await tx.execute<{ id: string; inserted: boolean }>(sql`
+            INSERT INTO subaccounts (id, organisation_id, name, slug, status, connector_config_id, external_id, created_at, updated_at)
+            VALUES (gen_random_uuid(), ${connection.organisationId}, ${locName}, ${slug}, 'active', ${connection.id}, ${locId}, now(), now())
+            ON CONFLICT (connector_config_id, external_id)
+              WHERE deleted_at IS NULL AND connector_config_id IS NOT NULL AND external_id IS NOT NULL
+            DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+            RETURNING id, (xmax = 0) AS inserted
+          `);
+          return rows[0];
+        });
         break;
       } catch (err) {
         const pg = err as { code?: string; constraint?: string };
@@ -224,6 +272,16 @@ export async function dispatchWebhookSideEffects(
     }
 
     if (result?.inserted) {
+      // KNOWN-BROKEN from this unauthenticated webhook path: subaccountOnboardingService
+      // uses the module-level `db` handle internally and queries org-scoped FORCE-RLS
+      // tables (org_subscriptions, workflow_runs, workflow_templates). Without an
+      // app.organisation_id GUC bound to the pool connection it picks up, those
+      // queries return zero rows and the auto-start silently no-ops. The previous
+      // attempt to wrap this in `db.transaction(async (tx) => set_config; ...)` did
+      // NOT scope the inner queries — `tx` and the module-level `db` use different
+      // pool connections. Calling it bare so the failure mode is honest; deferred
+      // to tasks/todo.md "GHL unauthenticated auto-start onboarding" (architectural
+      // refactor of subaccountOnboardingService to be admin-bypass-capable).
       try {
         const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
         await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
@@ -231,10 +289,60 @@ export async function dispatchWebhookSideEffects(
           subaccountId: result.id,
           startedByUserId: 'system',
         });
-      } catch { /* non-fatal */ }
+      } catch { /* non-fatal — auto-start currently a no-op from webhook path, see comment above */ }
     }
 
-    return { statusCode: 200 };
+    return {
+      statusCode: 200,
+      organisationId: connection.organisationId,
+      subaccountId: result?.id,
+    };
+  }
+
+  if (eventClass === 'location_update') {
+    // Per spec §5.4 LocationUpdate: existing canonical-mutation row is sufficient;
+    // no new side effect required (subaccount metadata refresh happens via the
+    // next polling tick). The ONLY work here is to surface enough context to
+    // the route's recordGhlMutation call so the `location_updated` row is
+    // actually written. Without this case, dispatch falls through to the
+    // default { statusCode: 200 } and the mutation row is silently lost.
+    logger.info('ghl.webhook.location_update', {
+      event: 'ghl.webhook.location_update',
+      orgId: null, companyId: event.companyId, locationId: event.locationId ?? null,
+      result: 'success', error: null,
+    });
+    const connection = await connectorConfigService.findAgencyConnectionByCompanyId(event.companyId);
+    if (!connection || !event.locationId) return { statusCode: 200 };
+
+    // Look up the subaccount mapped to this location. subaccounts has FORCE RLS;
+    // unauthenticated webhook context has no app.organisation_id GUC, so use
+    // admin bypass — companyId-scoped via the resolved connection above.
+    const locId = event.locationId;
+    const sub = await withAdminConnection(
+      { source: 'ghl_webhook_location_update_lookup', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select({ id: subaccounts.id })
+          .from(subaccounts)
+          .where(
+            and(
+              eq(subaccounts.organisationId, connection.organisationId),
+              eq(subaccounts.connectorConfigId, connection.id),
+              eq(subaccounts.externalId, locId),
+              isNull(subaccounts.deletedAt),
+            ),
+          )
+          .limit(1);
+        return row ?? null;
+      },
+    );
+
+    return {
+      statusCode: 200,
+      organisationId: connection.organisationId,
+      subaccountId: sub?.id,
+    };
   }
 
   return { statusCode: 200 };
@@ -260,18 +368,29 @@ async function resolveExternalUserKind(input: ResolveUserKindInput): Promise<Ext
   const lookbackDays = Math.max(...(config.lookbackWindowsDays ?? [30]));
   const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
-  const rows = await db
-    .select({
-      userId: canonicalSubaccountMutations.externalUserId,
-    })
-    .from(canonicalSubaccountMutations)
-    .where(
-      and(
-        eq(canonicalSubaccountMutations.organisationId, input.organisationId),
-        eq(canonicalSubaccountMutations.subaccountId, input.subaccountId),
-        gte(canonicalSubaccountMutations.occurredAt, since),
-      ),
-    );
+  // canonical_subaccount_mutations has FORCE RLS. Reading from an unauthenticated
+  // webhook context returns zero rows on the pooled `db` handle (no app.organisation_id
+  // set), which would silently mis-classify every user as 'unknown'. Bypass via
+  // admin_role; the explicit organisationId + subaccountId equality filters preserve
+  // application-layer scoping.
+  const rows = await withAdminConnection(
+    { source: 'ghl_webhook_resolve_user_kind', skipAudit: true },
+    async (adminDb) => {
+      await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+      return adminDb
+        .select({
+          userId: canonicalSubaccountMutations.externalUserId,
+        })
+        .from(canonicalSubaccountMutations)
+        .where(
+          and(
+            eq(canonicalSubaccountMutations.organisationId, input.organisationId),
+            eq(canonicalSubaccountMutations.subaccountId, input.subaccountId),
+            gte(canonicalSubaccountMutations.occurredAt, since),
+          ),
+        );
+    },
+  );
 
   const userCounts = new Map<string, number>();
   let totalCount = 0;
