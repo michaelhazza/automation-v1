@@ -16,7 +16,9 @@ import MilestoneCard from './MilestoneCard.js';
 import ApprovalCard from './ApprovalCard.js';
 import PauseCard from './PauseCard.js';
 import api from '../../lib/api.js';
+import AskFormCard from './AskFormCard.js';
 import type { TaskEvent } from '../../../../shared/types/taskEvent.js';
+import type { AskFormSchema } from '../../../../shared/types/askForm.js';
 
 interface ChatPaneProps {
   taskId: string;
@@ -29,7 +31,7 @@ type ChatItem =
   | { type: 'message'; id: string; authorKind: 'user' | 'agent'; authorId: string; body: string; timestamp: string }
   | { type: 'milestone'; agentId: string; summary: string; linkRef?: { kind: string; id: string; label: string }; timestamp: string; key: string }
   | { type: 'approval'; gateId: string; stepId: string; seenConfidence: import('../../../../shared/types/taskEvent.js').SeenConfidence; approverPool: string[]; key: string }
-  | { type: 'ask'; gateId: string; prompt: string; key: string }
+  | { type: 'ask'; gateId: string; stepId: string; schema: AskFormSchema; submitterPool: string[]; key: string }
   | { type: 'pause'; reason: 'cost_ceiling' | 'wall_clock' | 'by_user'; key: string };
 
 function buildChatItems(
@@ -80,13 +82,24 @@ function buildChatItems(
         });
       }
     } else if (entry.kind === 'ask.queued') {
-      const p = entry.payload as { gateId: string; prompt: string };
+      const p = entry.payload as {
+        gateId: string;
+        stepId: string;
+        submitterPool: string[];
+        schema: AskFormSchema;
+        prompt: string;
+      };
       const stillOpen = projection.openCards.some((c) => c.kind === 'ask' && c.gateId === p.gateId);
       if (stillOpen) {
+        const schema: AskFormSchema = p.schema
+          ? { ...p.schema, prompt: p.schema.prompt || p.prompt }
+          : { prompt: p.prompt, fields: [], allowSkip: false };
         items.push({
           type: 'ask',
           gateId: p.gateId,
-          prompt: p.prompt,
+          stepId: p.stepId,
+          schema,
+          submitterPool: p.submitterPool ?? [],
           key: `ask-${p.gateId}`,
         });
       }
@@ -206,13 +219,16 @@ export default function ChatPane({ taskId, projection, currentUserId }: ChatPane
             }
 
             if (item.type === 'ask') {
-              // Placeholder — full Ask form card in Chunk 12
               return (
-                <div key={item.key} className="mx-4 my-2 rounded-lg border border-slate-600 bg-slate-800/60 px-4 py-3">
-                  <p className="text-[13.5px] font-medium text-slate-200 mb-1">Input required</p>
-                  <p className="text-[13px] text-slate-400">{item.prompt}</p>
-                  <p className="text-[11px] text-slate-600 mt-2">Ask form: full implementation in Chunk 12.</p>
-                </div>
+                <AskFormCard
+                  key={item.key}
+                  taskId={taskId}
+                  gateId={item.gateId}
+                  stepId={item.stepId}
+                  schema={item.schema}
+                  submitterPool={item.submitterPool}
+                  currentUserId={currentUserId}
+                />
               );
             }
 

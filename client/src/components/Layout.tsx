@@ -263,6 +263,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
+  const [pendingAskCount, setPendingAskCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
 
@@ -397,6 +398,12 @@ export default function Layout({ user, children }: LayoutProps) {
     api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to fetch review queue count:', err));
   }, [activeClientId]);
 
+  // Pending Ask gates badge — initial load
+  useEffect(() => {
+    if (!activeClientId) { setPendingAskCount(0); return; }
+    api.get(`/api/subaccounts/${activeClientId}/ask-gates/count`).then(({ data }) => setPendingAskCount(data.count ?? 0)).catch(() => setPendingAskCount(0));
+  }, [activeClientId]);
+
   // Incident badge — system admin only, initial load
   useEffect(() => {
     if (!isSystemAdmin) return;
@@ -413,6 +420,7 @@ export default function Layout({ user, children }: LayoutProps) {
   const resyncBadges = useCallback(() => {
     if (!activeClientId) return;
     api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to resync review count:', err));
+    api.get(`/api/subaccounts/${activeClientId}/ask-gates/count`).then(({ data }) => setPendingAskCount(data.count ?? 0)).catch(() => setPendingAskCount(0));
     api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch((err) => console.error('[Layout] Failed to resync live status:', err));
     api.get(`/api/subaccounts/${activeClientId}/usage/summary`)
       .then(({ data }) => {
@@ -755,8 +763,9 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Work" />
               {/* Workflows V1 (Chunk 11) — Tasks list (open task view landing). Briefs rename deferred to Chunk 16. */}
+              {/* Chunk 12: badge shows count of pending Ask gates awaiting input from user. */}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to="/tasks" icon={<Icons.tasks />} label="Tasks" />
+                <NavItem to="/tasks" icon={<Icons.tasks />} label="Tasks" badge={pendingAskCount > 0 ? pendingAskCount : undefined} />
               )}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks (Board)" />

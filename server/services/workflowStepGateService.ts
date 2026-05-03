@@ -89,13 +89,47 @@ export const WorkflowStepGateService = {
     try {
       const [gate] = await tx.insert(workflowStepGates).values(values).returning();
 
-      // Task-scoped approval.queued event (B3 fix).
+      // Task-scoped approval.queued / ask.queued event (B3 fix + Chunk 12).
       // openGate runs inside the caller's tx; emit is deferred until after commit
       // via the B1 deferred-emit pattern. We capture the necessary data from
       // `input` and `gate` here (inside the tx) and close over them in the emit fn.
-      // ask.queued: Ask gate path lands in Chunk 12 — event emission ready then.
       const emitApprovalQueued = async (): Promise<void> => {
         if (!input.taskId) return;
+
+        if (input.gateKind === 'ask') {
+          // Extract schema and prompt from the seen_payload extras if provided.
+          // The caller (workflowEngineService ask-step path) should pass these
+          // via seenPayload as extended fields. Fall back to empty defaults so the
+          // event is always valid.
+          const sp = input.seenPayload as (SeenPayload & {
+            schema?: import('../../shared/types/taskEvent.js').AskFormSchema;
+            prompt?: string;
+          }) | null;
+          await TaskEventService.appendAndEmit({
+            taskId: input.taskId,
+            runId: null,
+            organisationId: input.organisationId,
+            eventOrigin: 'gate',
+            event: {
+              kind: 'ask.queued',
+              payload: {
+                gateId: gate.id,
+                stepId: input.stepId,
+                submitterPool: input.approverPoolSnapshot ?? [],
+                schema: sp?.schema ?? { fields: [] },
+                prompt: sp?.prompt ?? '',
+              },
+            },
+          }).catch((err) => {
+            logger.warn('task_event_ask_queued_emit_failed', {
+              event: 'task_event.ask_queued_emit_failed',
+              gateId: gate.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+          return;
+        }
+
         await TaskEventService.appendAndEmit({
           taskId: input.taskId,
           runId: null, // no agent_run context at gate-open time (orchestrator path)

@@ -2623,6 +2623,15 @@ The spec-reviewer auto-decided the following directional findings during iterati
   - Convention drift: other admin pages use react-query. Manual state is functional but makes cache invalidation ad-hoc.
   - Suggested approach: `useQuery` for teams list + members-per-team, `useMutation` for create / edit / delete / add-member / remove-member. Low priority; non-breaking.
 
+### Chunk 12 — TODO: Extend ReviewQueuePage / add dedicated WaitingOnYou page for Ask gates
+
+- [ ] Add a "Pending Inputs" tab (or dedicated page) that surfaces open Ask gates for the current user
+  - Spec §11 says routing surfaces should include a "Waiting on you" page extended for Asks alongside Approvals.
+  - Today: the `ReviewQueuePage` (`/admin/subaccounts/:id/review-queue`) handles legacy action review items only.
+  - No dedicated workflow approval/ask queue page exists.
+  - Suggested approach: create `client/src/pages/WorkflowPendingGatesPage.tsx` that queries open ask gates where the current user is in the submitter pool. Route it at `/admin/subaccounts/:id/pending-inputs`. Add a sidebar nav entry alongside Tasks.
+  - The sidebar badge (`pendingAskCount`) is already wired (Chunk 12). The list page is the remaining surface.
+
 ### Concern #1 — Orphan tasks (no createdByUserId on tasks table)
 
 - [ ] Tasks table lacks `createdByUserId` / `requesterUserId` column

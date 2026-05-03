@@ -180,6 +180,8 @@ import agentRecommendationsRouter from './routes/agentRecommendations.js';
 // Workflows V1 Chunk 10 — assignable-users picker pool + teams CRUD
 import assignableUsersRouter from './routes/assignableUsers.js';
 import teamsRouter from './routes/teams.js';
+// Workflows V1 Chunk 12 — Ask form submit / skip
+import asksRouter from './routes/asks.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -397,6 +399,8 @@ app.use(agentRecommendationsRouter);
 // Workflows V1 Chunk 10 — assignable-users picker pool + teams CRUD
 app.use(assignableUsersRouter);
 app.use(teamsRouter);
+// Workflows V1 Chunk 12 — Ask form submit / skip
+app.use(asksRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
