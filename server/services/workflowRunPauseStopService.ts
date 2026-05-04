@@ -17,6 +17,7 @@ import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { getStepCostEstimate } from '../lib/workflow/costEstimationDefaults.js';
 import type { PauseReason } from './workflowRunPauseStopServicePure.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
 
 const TERMINAL_STATUSES = [
   'completed',
@@ -75,8 +76,18 @@ export const WorkflowRunPauseStopService = {
       actorId: userId,
     });
 
-    // TODO Chunk 9: replace with emitTaskEvent(...)
     emitWorkflowRunUpdate(runId, 'Workflow:run:paused', { reason, actorId: userId });
+
+    // Chunk 9: emit to task event stream.
+    const pausedRun = updated[0];
+    if (pausedRun.taskId) {
+      const taskEvent = reason === 'by_user'
+        ? { kind: 'run.paused.by_user' as const, payload: { actorId: userId } }
+        : reason === 'cost_ceiling'
+        ? { kind: 'run.paused.cost_ceiling' as const, payload: { capValue: pausedRun.effectiveCostCeilingCents ?? 0, currentCost: pausedRun.costAccumulatorCents } }
+        : { kind: 'run.paused.wall_clock' as const, payload: { capValue: pausedRun.effectiveWallClockCapSeconds ?? 0, currentElapsed: 0 } };
+      void appendAndEmitTaskEvent(pausedRun.taskId, Date.now(), 0, 'user', taskEvent);
+    }
 
     return { paused: true };
   },
@@ -219,12 +230,23 @@ export const WorkflowRunPauseStopService = {
       extensionCount: finalRun.extensionCount,
     });
 
-    // TODO Chunk 9: replace with emitTaskEvent(...)
     emitWorkflowRunUpdate(runId, 'Workflow:run:resumed', {
       actorId: userId,
       extendCostCents: opts?.extendCostCents ?? null,
       extendSeconds: opts?.extendSeconds ?? null,
     });
+
+    // Chunk 9: emit to task event stream.
+    if (finalRun.taskId) {
+      void appendAndEmitTaskEvent(finalRun.taskId, Date.now(), 0, 'user', {
+        kind: 'run.resumed',
+        payload: {
+          actorId: userId,
+          extensionCostCents: opts?.extendCostCents,
+          extensionSeconds: opts?.extendSeconds,
+        },
+      });
+    }
 
     return { resumed: true, extensionCount: finalRun.extensionCount };
   },
@@ -307,8 +329,16 @@ export const WorkflowRunPauseStopService = {
       actorId: userId,
     });
 
-    // TODO Chunk 9: replace with emitTaskEvent(...)
     emitWorkflowRunUpdate(runId, 'Workflow:run:stopped', { actorId: userId });
+
+    // Chunk 9: emit to task event stream.
+    const stoppedRun = stoppedRows[0];
+    if (stoppedRun.taskId) {
+      void appendAndEmitTaskEvent(stoppedRun.taskId, Date.now(), 0, 'user', {
+        kind: 'run.stopped.by_user',
+        payload: { actorId: userId },
+      });
+    }
 
     return { stopped: true };
   },

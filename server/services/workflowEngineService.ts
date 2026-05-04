@@ -65,6 +65,7 @@ import {
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
 import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -1605,6 +1606,20 @@ export const WorkflowEngineService = {
               'Workflow:step:awaiting_approval',
               { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
             );
+            // Chunk 9: also emit step.awaiting_approval to the task event stream.
+            // Sequence allocation is WS-only here (no DB write); the sequence is
+            // not globally allocated — a proper transactional allocation will be
+            // wired in a future chunk when the engine's tick path gains task-seq
+            // integration.
+            if (run.taskId) {
+              void appendAndEmitTaskEvent(
+                run.taskId,
+                Date.now(), // temporary — not a DB-allocated sequence; used only for WS eventId uniqueness
+                0,
+                'engine',
+                { kind: 'step.awaiting_approval', payload: { stepId: step.id, reviewKind, actionId: result.actionId } },
+              );
+            }
             return;
           }
           if (result.status === 'failed') {
