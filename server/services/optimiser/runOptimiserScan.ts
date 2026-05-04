@@ -55,8 +55,8 @@ import type { OrgScopedTx } from '../../db/index.js';
 // ---------------------------------------------------------------------------
 // Invariant 25: named constants — NEVER inline these literals
 // ---------------------------------------------------------------------------
-const TOTAL_CATEGORIES = 8;
-const SCAN_FAILURE_CIRCUIT_BREAKER_THRESHOLD = 0.5;
+export const TOTAL_CATEGORIES = 8;
+export const SCAN_FAILURE_CIRCUIT_BREAKER_THRESHOLD = 0.5;
 
 export interface OptimiserRunSummary {
   subaccountId: string;

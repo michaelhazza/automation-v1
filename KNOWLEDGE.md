@@ -1811,3 +1811,21 @@ When LLM-rendered copy is cached (e.g. operator-facing summary text generated fr
 ### [2026-05-02] Pattern — Static-analysis single-writer test enforces the architectural invariant at test time
 
 A single-writer invariant ("exactly one file performs INSERT/UPDATE on table X") is normally enforced architecturally (call sites route through one service) and at runtime (`pg_advisory_xact_lock` prevents races between *concurrent* writers). Both layers leave a gap: a future contributor can copy a `db.insert(table)` into a different file, and the architectural invariant silently breaks — runtime locks won't catch it because the second writer just queues behind the first; tests pass; the behaviour stays correct on the happy path but the cooldown / cap / eviction logic now bypasses the canonical service. **Rule:** for any single-writer table, ship a static-analysis test (`*.singleWriter.test.ts`) that walks `server/**/*.ts` and greps for `INSERT INTO <table>` / `UPDATE <table>` SQL patterns and `db.insert(<schema>)` / `db.update(<schema>)` Drizzle patterns, asserting exactly one source file matches. Run as a normal unit test (no DB needed) so it surfaces in PR review locally. Pattern shipped in `agent_recommendations` (PR #250, chunk 1) — see `server/services/__tests__/agentRecommendations.singleWriter.test.ts`. Combine with: (a) `pg_advisory_xact_lock` for concurrent-writer races, (b) "Suppression is success" return-value rule for coordination losers (architecture.md § *Home dashboard live reactivity*), (c) this static check for new-writer-introduction. The three layers together make the invariant impossible to violate quietly.
+
+### [2026-05-04] Pattern — Shared register-X-schedule function for backfill + create-hook
+
+When two code paths (backfill script and a route hook) both need to register the same pg-boss schedule for a system agent, extract a single `registerXSchedule(entityId)` function that owns both the `INSERT ... ON CONFLICT DO NOTHING` for the entity-agent row and the `updateSchedule` call. Duplicating logic in two writers creates divergence risk (e.g., stagger formula changes only applied in one place).
+
+Applied in: `agentScheduleService.registerOptimiserSchedule` (Chunk 6, stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — Materialised view emptiness signals partial-mode, not failure
+
+When a cross-tenant aggregate materialised view is empty (e.g., on first deploy or before the nightly refresh runs), the consuming scan category should return an empty result and emit `optimiser.scan.partial` rather than throwing an error. The orchestrator continues with the other 7 categories. This avoids a "cold start" failure that would block recommendations for all categories just because the peer-baseline view has not been populated yet.
+
+Applied in: skillLatency category, `peerMediansViewIsPopulated()` check in runOptimiserScan (stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — median_version snapshot determinism for materialised views
+
+When a scan reads a materialised view for baselines, read `SELECT MAX(median_version)` once before the scan loop and thread it into every JOIN as `AND view.median_version = $expectedVersion`. This guards against a concurrent REFRESH bumping the version mid-scan and producing mixed-version evidence. If no rows match after the version check, emit partial-mode — same path as empty view.
+
+Applied in: runOptimiserScan + skillLatency query (stream-2-optimiser-finish, invariant 32).

@@ -410,6 +410,10 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
 
+### Sub-account Optimiser
+
+The Sub-account Optimiser is the first consumer of the agent recommendations primitive. It runs a daily scan per subaccount at 06:00 local time (staggered by hash to distribute load) and surfaces findings across eight categories: agent over-budget, playbook escalation rate, slow skills compared to peer benchmarks, inactive workflows, repeat escalation phrases, low memory citation efficiency, routing uncertainty, and poor LLM cache reuse. Operator-facing copy is plain English; no internal category slugs appear in the dashboard.
+
 ### Activity & Analytics
 
 Unified operational view across all activity types with advanced filtering and real-time updates.

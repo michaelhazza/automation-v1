@@ -37,6 +37,33 @@ Phase numbers below match `plan.md` 1:1. Per spec §9, the previous standalone "
 
 4. The `limit=0` case in `listRecommendations` short-circuits to `SELECT COUNT(*)` only, skipping the row fetch entirely. This is the Sidebar badge path — returning a count without loading 100 rows.
 
+## Stream 2 Closeout (2026-05-04)
+
+### Status: COMPLETE
+
+### Phases completed (Stream 2)
+- Phase 2 — Migration 0268: peer-medians materialised view + system_agents seed (Chunk 1)
+- Phase 2 — Peer-medians nightly refresh job (Chunk 2)
+- Phase 2 — 7 non-peer query modules + evaluators (Chunk 3)
+- Phase 2 — skillLatency + skillSlow (peer-dependent) (Chunk 4)
+- Phase 3 — Orchestration: runOptimiserScan, renderRecommendation, AGENTS.md, 8 scan skills (Chunk 5)
+- Phase 3 — Scheduling: registerOptimiserSchedule, backfill script, subaccount-create hook (Chunk 6)
+- Phase 4 — Dashboard wiring + zero-state non-mount (Chunk 7)
+- Phase 4 — Verification matrix + doc updates (Chunk 8)
+
+### Decisions made in Stream 2
+- median_version carried inside evidence JSONB — no second migration required
+- escalationRate groups by workflow_name (not ID) — flow_runs has no stable FK to a workflows table
+- routingUncertainty resolves agent_id via fast_path_decisions.briefId to tasks.assignedAgentId
+- Materialised view emptiness signals partial-mode (not failure) per invariant 22
+- Integration tests deferred to CI gate — local session runs pure/mock tests only
+
+### Cost measurement
+- Integration cost gate (<$0.02/subaccount/day) deferred to CI with live DB + LLM access
+- renderRecommendation.ts logs optimiser.render.tokens_used on every call for observability
+
+---
+
 ## Blockers
 
 (none)
