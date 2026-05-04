@@ -1,43 +1,33 @@
-// ---------------------------------------------------------------------------
-// BaselineArtefactsStatusBadge — compact inline status dot for a baseline artefact.
-// Spec: F1 §4B. Inline state indicator; not a dashboard.
-// ---------------------------------------------------------------------------
+import type { ArtefactStatus } from '../../../../shared/constants/baselineArtefacts';
 
-export interface BaselineArtefactsStatusBadgeProps {
-  status: 'not_started' | 'in_progress' | 'completed' | 'skipped';
-  slug?: string;
-}
-
-const DOT_CLASSES: Record<string, string> = {
-  completed:   'w-2.5 h-2.5 rounded-full bg-emerald-500',
-  in_progress: 'w-2.5 h-2.5 rounded-full bg-amber-400',
-  not_started: 'w-2.5 h-2.5 rounded-full bg-slate-300',
-  skipped:     'w-2.5 h-2.5 rounded-full bg-slate-300 border border-dashed border-slate-400',
+const STATUS_DOT: Record<ArtefactStatus, string> = {
+  not_started: 'bg-slate-200',
+  in_progress:  'bg-amber-400',
+  completed:    'bg-emerald-500',
+  skipped:      'bg-slate-400',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  completed:   'Completed',
-  in_progress: 'In progress',
+const STATUS_LABEL: Record<ArtefactStatus, string> = {
   not_started: 'Not started',
-  skipped:     'Skipped',
+  in_progress:  'In progress',
+  completed:    'Completed',
+  skipped:      'Skipped',
 };
 
 export default function BaselineArtefactsStatusBadge({
   status,
-  slug,
-}: BaselineArtefactsStatusBadgeProps) {
-  const dotCls = DOT_CLASSES[status] ?? DOT_CLASSES.not_started;
-  const label = STATUS_LABELS[status] ?? status;
-  const title = slug ? `${slug}: ${label}` : label;
-
+  slug: _slug,
+}: {
+  status: ArtefactStatus;
+  slug: string;
+}) {
   return (
     <span
       className="inline-flex items-center gap-1.5"
-      title={title}
-      aria-label={label}
+      title={STATUS_LABEL[status]}
     >
-      <span className={dotCls} />
-      <span className="text-[12px] text-slate-500">{label}</span>
+      <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[status]}`} />
+      <span className="text-[11px] text-slate-500">{STATUS_LABEL[status]}</span>
     </span>
   );
 }
