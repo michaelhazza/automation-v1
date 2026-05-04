@@ -8,6 +8,7 @@
 **Scope:** F1 sub-stream A only — Phases 0-5 of the spec (caller-confirmed; F3 is sub-stream B and not yet started)
 **Changed-code set:** 23 files (12 modified + 11 untracked, after excluding spec/progress/todo/review-logs)
 **Run at:** 2026-05-04T13:04:44Z
+**Commit at finish:** `56f8f653` (log only; the `EditArtefactDrawer.tsx` mechanical-fix edit was left unstaged in the worktree because the file was untracked at run start, and committing it alone would split the F1 file out of the developer's pending bulk commit. The fix is in place in the working tree and will land with the next F1 commit.)
 
 ---
 
