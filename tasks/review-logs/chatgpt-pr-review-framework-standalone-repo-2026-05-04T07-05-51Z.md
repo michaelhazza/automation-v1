@@ -143,3 +143,25 @@ ChatGPT closed the loop on its own ("I'd close the ChatGPT loop"). One nit accep
 3. Manifest schema validation in sync.js (F6)
 4. Sync engine observability — dry-run summary / JSON report (F7)
 
+---
+
+## Final Summary
+
+**Doc-sync sweep verdicts** (per `docs/doc-sync.md` Investigation procedure — finalisation-coordinator pass, 2026-05-04):
+
+- KNOWLEDGE.md updated: yes (5 entries) — Version authority for parallel framework artefacts, chatgpt-pr-review re-flagging applied fix in next round, TDD on adversarial findings, adversarial-reviewer escalates pr-reviewer nits, defence-in-depth path-containment assertion. Appended by finalisation-coordinator (sub-agent did not extract patterns; cross-check filled the gap).
+- architecture.md updated: n/a — checked `setup/portable`, `sync.js`, `manifest.json`, `FRAMEWORK_VERSION`, `AutomationOS`, `assertWithinRoot`, `lastSubstitutionHash`, `--adopt`, `--check`, `--dry-run`, `--strict`, `--doctor`, `portable_framework_tests` against `architecture.md`; zero matches. The build is internal-framework scope (no service boundary, route, RLS, schema, agent-fleet, or key-files-per-domain change).
+- capabilities.md updated: n/a — no add / remove / rename of product capability, agency capability, skill, or integration in this PR.
+- integration-reference.md updated: n/a — no integration behaviour change, new scope, new skill, changed status, new write capability, new OAuth provider, new MCP preset, new capability slug, or new alias.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes — `CLAUDE.md` § *Framework version* rewritten to surface the canonical-vs-deployment distinction (root file is a deployment marker; `setup/portable/.claude/CHANGELOG.md` is the source of truth). `DEVELOPMENT_GUIDELINES.md` checked clean — no build-discipline / convention / RLS / migration rules touched.
+- frontend-design-principles.md updated: n/a — no UI patterns introduced.
+- CONTRIBUTING.md updated: n/a — no change to lint-suppression policy or contributor-conventions.
+- references/test-gate-policy.md updated: no — checked the new `npm run test:portable-framework` script against the forbidden list; not an umbrella command, not a whole-repo scanner — scoped runner for the 113 tests authored in this build, consistent with the "Targeted execution of unit tests authored for THIS change" allowed pattern. Policy doc remains accurate.
+- references/spec-review-directional-signals.md updated: n/a — not a spec-review session.
+- spec-context.md updated: n/a — not a spec-review session.
+- docs/decisions/ updated: no — version-authority pattern documented in KNOWLEDGE.md (per `decisions/README.md` rule "KNOWLEDGE first, ADR if the decision keeps coming up"). Promote to ADR if cited in future builds.
+- docs/context-packs/ updated: n/a — `architecture.md` section anchors unchanged.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: yes — `setup/portable/.claude/FRAMEWORK_VERSION` advanced to 2.2.0 in Phase 2; `setup/portable/.claude/CHANGELOG.md` 2.2.0 entry extended at finalisation to record the chatgpt-pr-review hardening additions (`FORBIDDEN_STRINGS` AutomationOS + case variants, `assertZipBinaryAvailable` preflight, `test:portable-framework` script + `portable_framework_tests` CI gate, two `AutomationOS` leak fixes, version-authority cross-reference). Root `.claude/FRAMEWORK_VERSION` deliberately stays at 2.1.0 per the canonical-vs-deployment rule (root is a deployment marker; advances at Phase C self-adoption).
+
+**Verdict counts:** 5 yes, 1 no (substantiated), 7 n/a (substantiated). Total 13 verdicts — equal to the 13 registered docs in `docs/doc-sync.md`. Sweep complete; no blockers.
+

@@ -342,7 +342,12 @@ Never silently delete an agent — debugging "what happened to that agent we use
 
 ### Framework version
 
-`.claude/FRAMEWORK_VERSION` declares the framework version this repo is on. `.claude/CHANGELOG.md` records every change. When propagating this framework to other repos, both files travel with it; future updates compare versions and produce a delta. See `.claude/CHANGELOG.md` § *Upgrade protocol*.
+Two `FRAMEWORK_VERSION` files exist in this repo and they answer different questions — they are NOT competing authorities:
+
+- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` + `setup/portable/.claude/CHANGELOG.md`. The framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. `setup/portable/.claude/CHANGELOG.md` is the source of truth.
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`. Records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. May lag canonical transiently while portable advances ahead of self-adoption.
+
+When propagating this framework to other repos, the canonical pair travels via the sync engine (`node setup/portable/sync.js --adopt`); future updates compare canonical versions and produce a delta. See `setup/portable/.claude/CHANGELOG.md` § *Upgrade protocol* and `.claude/CHANGELOG.md` § *Version authority — single source of truth*.
 
 ---
 

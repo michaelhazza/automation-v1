@@ -95,3 +95,44 @@ The spec lives on `claude/evaluate-summonaikit-B89k3`. The implementation branch
 **Tier 2 deferred** to `tasks/todo.md` under two new sections — pr-reviewer S4/S5/N2-N7 + adversarial symlink-follow / shell-metacharacter / `--force` UX / state schema validation.
 
 **Changed-file count:** ~24 files in working tree at handoff (16 modified + 8 untracked) — committed in four-commit grouping per `handoff-phase2.md` lines 139–151. Final branch HEAD recorded after Phase 3 launch.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #257
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-framework-standalone-repo-2026-05-04T07-05-51Z.md`
+**spec_deviations reviewed:** yes (both pre-approved at plan-review: `sync.js` JS-with-JSDoc not TS; `lastSubstitutionHash` additive optional state field)
+
+**Doc-sync sweep verdicts (per `docs/doc-sync.md`):**
+
+| Doc | Verdict |
+|-----|---------|
+| KNOWLEDGE.md | yes (5 entries) |
+| architecture.md | n/a — checked sync.js / setup/portable / FRAMEWORK_VERSION / portable_framework_tests / AutomationOS / assertWithinRoot; zero matches; build is internal-framework scope |
+| docs/capabilities.md | n/a — no add/remove/rename of capability, skill, integration |
+| docs/integration-reference.md | n/a — no integration behaviour change |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | yes — `CLAUDE.md` § *Framework version* rewritten to surface canonical-vs-deployment distinction; DEVELOPMENT_GUIDELINES.md checked clean |
+| CONTRIBUTING.md | n/a — no lint-suppression / contributor-conventions change |
+| docs/frontend-design-principles.md | n/a — no UI patterns introduced |
+| docs/spec-context.md | n/a — not a spec-review session |
+| docs/decisions/ | no — version-authority pattern documented in KNOWLEDGE.md per `decisions/README.md` "KNOWLEDGE first, ADR if cited later" rule; promote later if recurring |
+| docs/context-packs/ | n/a — `architecture.md` section anchors unchanged |
+| references/test-gate-policy.md | no — checked `test:portable-framework` against forbidden list; not umbrella, not whole-repo scanner; consistent with "Targeted execution of unit tests authored for THIS change" allowed pattern |
+| references/spec-review-directional-signals.md | n/a — not a spec-reviewer session |
+| .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md | yes — portable advanced to 2.2.0 in Phase 2; portable CHANGELOG 2.2.0 entry extended at finalisation to record chatgpt-pr-review hardening additions; root deliberately stays at 2.1.0 (deployment marker) |
+
+13 verdicts / 13 registered docs. 5 yes, 2 no (substantiated), 6 n/a (substantiated). Sweep complete.
+
+**KNOWLEDGE.md entries added:** 5
+1. Version authority for parallel framework artefacts (source canonical, deployment marker)
+2. chatgpt-pr-review re-flagging applied fix in next round (distinct from existing re-raise / FP-rate entries)
+3. TDD on adversarial-reviewer findings (write failing test from trace before fixing)
+4. adversarial-reviewer escalates pr-reviewer nits (run adversarial outside auto-trigger surface for filesystem-write-from-external-data diffs)
+5. Defence-in-depth path-containment (assert at expand time AND at write time)
+
+**tasks/todo.md items removed:** 0 (build added 4 new deferred sections; no prior items closed by this build)
+
+**ready-to-merge label applied at:** 2026-05-04T09:02:33Z
+
+**Pre-merge condition:** wait for `portable_framework_tests` CI job (gate added in Round 2 commit `7540ed08`) plus the standard CI gates to pass on commit `b2fc8823` (or whatever the post-Phase-3 HEAD becomes). After CI green, merge via the GitHub UI; then set `tasks/current-focus.md` to `MERGED` (or `NONE`).
