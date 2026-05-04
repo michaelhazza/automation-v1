@@ -8,26 +8,12 @@
  *   npx tsx server/services/__tests__/beliefConflictServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   computeConflictResolution,
   type ConflictResolutionDecision,
 } from '../../services/beliefConflictServicePure.js';
 import { CONFLICT_CONFIDENCE_GAP } from '../../config/limits.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -60,7 +46,7 @@ test('new belief clearly better → auto_supersede_existing', () => {
     existingConfidence: 0.5,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'auto_supersede_existing', 'action');
+  expect(decision.action, 'action').toBe('auto_supersede_existing');
   assertApprox(decision.confidenceGap, 0.4, 0.001, 'gap');
 });
 
@@ -70,7 +56,7 @@ test('existing belief clearly better → auto_supersede_new', () => {
     existingConfidence: 0.9,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'auto_supersede_new', 'action');
+  expect(decision.action, 'action').toBe('auto_supersede_new');
   assertApprox(decision.confidenceGap, 0.4, 0.001, 'gap');
 });
 
@@ -82,7 +68,7 @@ test('gap exactly above threshold → auto_supersede_existing', () => {
     existingConfidence: 0.5,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'auto_supersede_existing', 'just-above-threshold → auto');
+  expect(decision.action, 'just-above-threshold → auto').toBe('auto_supersede_existing');
 });
 
 // ---------------------------------------------------------------------------
@@ -95,7 +81,7 @@ test('gap exactly at threshold → queue_for_review', () => {
     existingConfidence: 0.5,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'queue_for_review', 'gap === threshold → review');
+  expect(decision.action, 'gap === threshold → review').toBe('queue_for_review');
 });
 
 test('gap slightly below threshold → queue_for_review', () => {
@@ -104,7 +90,7 @@ test('gap slightly below threshold → queue_for_review', () => {
     existingConfidence: 0.5,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'queue_for_review', 'just below → review');
+  expect(decision.action, 'just below → review').toBe('queue_for_review');
 });
 
 test('equal confidence (gap 0) → queue_for_review', () => {
@@ -113,7 +99,7 @@ test('equal confidence (gap 0) → queue_for_review', () => {
     existingConfidence: 0.7,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'queue_for_review', 'equal → review');
+  expect(decision.action, 'equal → review').toBe('queue_for_review');
   assertApprox(decision.confidenceGap, 0, 0.001, 'gap = 0');
 });
 
@@ -123,7 +109,7 @@ test('both at 1.0 → queue_for_review', () => {
     existingConfidence: 1.0,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'queue_for_review', 'both 1.0 → review');
+  expect(decision.action, 'both 1.0 → review').toBe('queue_for_review');
 });
 
 test('both at 0.0 → queue_for_review', () => {
@@ -132,7 +118,7 @@ test('both at 0.0 → queue_for_review', () => {
     existingConfidence: 0.0,
     gapThreshold: CONFLICT_CONFIDENCE_GAP,
   });
-  assertEqual(decision.action, 'queue_for_review', 'both 0.0 → review');
+  expect(decision.action, 'both 0.0 → review').toBe('queue_for_review');
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +144,4 @@ test('confidenceGap matches |new - existing| regardless of direction', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

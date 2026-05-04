@@ -51,9 +51,9 @@ while IFS= read -r test_file; do
   [ -z "$test_file" ] && continue
   FILES_SCANNED=$((FILES_SCANNED + 1))
 
-  # File-level suppression on the first line.
-  first_line=$(sed -n '1p' "$test_file" 2>/dev/null || echo "")
-  if echo "$first_line" | grep -qE "guard-ignore-file:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
+  # File-level suppression on any of the first 10 lines (allows stacking
+  # multiple guard-ignore-file directives, e.g. test-quality + pure-helper).
+  if head -10 "$test_file" | grep -qE "guard-ignore-file:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
     continue
   fi
 

@@ -1,4 +1,4 @@
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, sql, isNull, or, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -98,6 +98,21 @@ export const integrationConnectionService = {
     return conn ?? null;
   },
 
+  // Look up a connection by ID within an org, regardless of subaccount scope.
+  // Returns subaccount-scoped or org-level rows. Routes that accept either
+  // scope (e.g. Google Drive attach/picker) should use this and then enforce
+  // the subaccount-membership check themselves.
+  async getConnectionWithToken(id: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return conn ?? null;
+  },
+
   async createOrgConnection(organisationId: string, data: {
     providerType: string;
     authType: string;
@@ -191,6 +206,65 @@ export const integrationConnectionService = {
         eq(integrationConnections.organisationId, organisationId),
       ));
     return true;
+  },
+
+  /**
+   * Revoke all connections of the given providerType for a sub-account.
+   * Idempotent — if all matching connections are already revoked, returns
+   * { alreadyRevoked: true } rather than throwing.
+   *
+   * Sets connectionStatus = 'revoked' and nulls both accessToken and
+   * refreshToken on every matching row. Audit-logged via configHistoryService.
+   *
+   * Used by sptVaultService for SPT kill-switch (providerType = 'stripe_agent').
+   */
+  async revokeSubaccountConnection(
+    subaccountId: string,
+    organisationId: string,
+    providerType: string,
+  ): Promise<{ alreadyRevoked: boolean }> {
+    const rows = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+        eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+      ));
+
+    if (rows.length === 0) {
+      return { alreadyRevoked: true };
+    }
+
+    const allAlreadyRevoked = rows.every((r) => r.connectionStatus === 'revoked');
+    if (allAlreadyRevoked) {
+      // Audit-log even on idempotent calls so every revoke attempt is visible
+      for (const row of rows) {
+        await configHistoryService.recordHistory({
+          entityType: 'integration_connection', entityId: row.id, organisationId,
+          snapshot: { ...sanitizeConnection(row), revokeNote: 'already_revoked' } as unknown as Record<string, unknown>,
+          changedBy: null, changeSource: 'api',
+        });
+      }
+      return { alreadyRevoked: true };
+    }
+
+    for (const row of rows) {
+      await configHistoryService.recordHistory({
+        entityType: 'integration_connection', entityId: row.id, organisationId,
+        snapshot: sanitizeConnection(row) as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
+    await db.update(integrationConnections)
+      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
+      .where(and(
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+        eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+      ));
+
+    return { alreadyRevoked: false };
   },
   /**
    * Get a decrypted, valid connection for a subaccount + provider.
@@ -383,6 +457,49 @@ export const integrationConnectionService = {
         }
       }
     }
+  },
+
+  /**
+   * Returns the first active connection for the given provider in this
+   * org/subaccount scope. Returns null (never throws) if none exists.
+   * Checks both subaccount-specific AND org-level (subaccountId IS NULL)
+   * connections per the connection-resolution contract.
+   * Used by integrationBlockService to decide whether to block a tool call.
+   * Assumes at most one "effective" active connection per provider per scope.
+   * If multiple exist, latest updatedAt wins (deterministic but not DB-enforced).
+   */
+  async findActiveConnection(params: {
+    organisationId: string;
+    subaccountId: string | null;
+    providerType: string;
+  }): Promise<IntegrationConnection | null> {
+    const { organisationId, subaccountId, providerType } = params;
+
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, organisationId),
+          eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+          eq(integrationConnections.connectionStatus, 'active'),
+          eq(integrationConnections.oauthStatus, 'active'),
+          subaccountId
+            ? or(
+                eq(integrationConnections.subaccountId, subaccountId),
+                isNull(integrationConnections.subaccountId),
+              )
+            : isNull(integrationConnections.subaccountId),
+        ),
+      )
+      .orderBy(
+        desc(integrationConnections.updatedAt),
+        desc(integrationConnections.createdAt),
+        desc(integrationConnections.id),
+      )
+      .limit(1);
+
+    return conn ?? null;
   },
 };
 

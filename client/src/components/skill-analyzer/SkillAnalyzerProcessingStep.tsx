@@ -125,6 +125,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
       cancelled = true;
       clearInterval(interval);
     };
+  // reason: `onComplete` is intentionally omitted — it is a callback prop that changes on every parent render; including it would restart the poll unnecessarily.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, pollVersion]);
 

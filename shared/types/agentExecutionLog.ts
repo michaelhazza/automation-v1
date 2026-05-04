@@ -4,6 +4,10 @@
 // The discriminated union in this file is the central registry of event
 // types. Adding a new event type has a checklist in spec §5.3a — follow it.
 
+// Import and re-export EventOrigin for use within this file and by callers.
+import type { EventOrigin } from './workflowStepGate.js';
+export type { EventOrigin };
+
 // ---------------------------------------------------------------------------
 // Source-service tag
 // ---------------------------------------------------------------------------
@@ -32,7 +36,8 @@ export type LinkedEntityType =
   | 'prompt'
   | 'agent'
   | 'llm_request'
-  | 'action';
+  | 'action'
+  | 'spend_ledger';
 
 export interface LinkedEntity {
   type: LinkedEntityType;
@@ -76,7 +81,9 @@ export type AgentExecutionEventType =
   | 'clarification.requested'
   | 'run.event_limit_reached'
   | 'run.completed'
-  | 'tool.error';
+  | 'tool.error'
+  | 'run.terminal.summary_missing'
+  | 'run.terminal.extracted_with_errorMessage';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -193,6 +200,8 @@ export type AgentExecutionEventPayload =
       tokensOut: number;
       costWithMarginCents: number;
       durationMs: number;
+      payloadInsertStatus: 'ok' | 'failed';
+      payloadRowId: string | null;
     }
   | {
       eventType: 'handoff.decided';
@@ -232,6 +241,18 @@ export type AgentExecutionEventPayload =
         message: string;
         context: Record<string, unknown>;
       };
+    }
+  | {
+      /** H3: emitted when a run completes without a summary (side-channel; does not demote runResultStatus). */
+      eventType: 'run.terminal.summary_missing';
+      critical: false;
+      runResultStatus: string;
+    }
+  | {
+      /** HERMES-S1: emitted when errorMessage is threaded into extractRunInsights for a failed run. */
+      eventType: 'run.terminal.extracted_with_errorMessage';
+      critical: false;
+      errorMessageLength: number;
     };
 
 // ---------------------------------------------------------------------------
@@ -260,6 +281,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'run.event_limit_reached': true,
   'run.completed': true,
   'tool.error': false,
+  'run.terminal.summary_missing': false,
+  'run.terminal.extracted_with_errorMessage': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {
@@ -284,6 +307,12 @@ export interface AgentExecutionEvent {
   linkedEntity: LinkedEntity | null;
   /** WIRE-ONLY — computed fresh on every read. See spec §4.1a. */
   permissionMask: PermissionMask;
+  // Workflows V1 — per-task event log fields
+  taskId: string | null;
+  taskSequence: number | null;
+  eventOrigin: EventOrigin | null;
+  eventSubsequence: number;
+  eventSchemaVersion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +372,17 @@ export interface AgentRunLlmPayload {
   systemPrompt: string;
   messages: unknown[];
   toolDefinitions: unknown[];
-  response: Record<string, unknown>;
+  /**
+   * Provider response payload. `null` only on the failure path when no usable
+   * provider output exists (provider rejected before stream open, network
+   * error before any bytes arrived, response un-parseable). Partial responses
+   * (streaming interrupted mid-completion, usage-without-content content-
+   * policy refusals) are persisted as a non-null structurally-valid value.
+   * Spec `2026-04-28-pre-test-integration-harness-spec.md` §1.5 Option A;
+   * column made nullable by migration 0241. Consumers MUST narrow on null
+   * before reading nested fields.
+   */
+  response: Record<string, unknown> | null;
   redactedFields: PayloadRedaction[];
   modifications: PayloadModification[];
   totalSizeBytes: number;
@@ -358,6 +397,8 @@ export interface AgentExecutionEventPage {
   events: AgentExecutionEvent[];
   hasMore: boolean;
   highestSequenceNumber: number;
+  /** Highest taskSequence in the page. null when the page contains no task-scoped events. */
+  highestTaskSequence: number | null;
 }
 
 // ---------------------------------------------------------------------------

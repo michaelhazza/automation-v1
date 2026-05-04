@@ -312,7 +312,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
 
   // Hybrid RRF query with candidate pool cap
   // Use try/finally so the timeout is always reset even if the query throws.
-  let rrfRows: HybridResult[] = [];
+  let rrfRows: HybridResult[];
   try {
     const rows = await db.execute<{
       id: string; content: string; rrf_score: number;

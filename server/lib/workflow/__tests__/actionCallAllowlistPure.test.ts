@@ -6,6 +6,7 @@
  * spec docs/onboarding-workflows-spec.md §4.3.
  */
 
+import { expect, test } from 'vitest';
 import {
   ACTION_CALL_ALLOWED_SLUGS,
   SINGLETON_RESOURCE_ACTIONS,
@@ -15,132 +16,70 @@ import {
   isReadOnlyAction,
 } from '../actionCallAllowlist.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 // ── Shape ──────────────────────────────────────────────────────────────────
 
-test('allowlist covers the full 32-slug set (28 base + 2 Phase G + 2 Memory & Briefings Phase 3)', () => {
+test('allowlist covers the full 37-slug set (28 base + 2 Phase G + 2 Memory & Briefings Phase 3 + 5 spend)', () => {
   // Spec §4.3 — the closed set for v1. 28 pre-existing config_* slugs plus
   // two Phase G additions (portal + email digest) plus two Memory &
   // Briefings Phase 3 additions (`config_weekly_digest_gather` and
-  // `config_deliver_workflow_output`). Every expansion requires editing
+  // `config_deliver_workflow_output`) plus five Agentic Commerce spend skills
+  // (pay_invoice, purchase_resource, subscribe_to_service, top_up_balance,
+  // issue_refund). Every expansion requires editing
   // actionCallAllowlist.ts AND bumping this number — that's the friction.
-  assert(
-    ACTION_CALL_ALLOWED_SLUGS.size === 32,
-    `expected exactly 32 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`,
-  );
+  expect(ACTION_CALL_ALLOWED_SLUGS.size === 37, `expected exactly 37 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`).toBeTruthy();
 });
 
 test('read-only set is a subset of the allowlist', () => {
   for (const slug of READ_ONLY_ACTIONS) {
-    assert(
-      ACTION_CALL_ALLOWED_SLUGS.has(slug),
-      `read-only slug '${slug}' missing from allowlist`,
-    );
+    expect(ACTION_CALL_ALLOWED_SLUGS.has(slug), `read-only slug '${slug}' missing from allowlist`).toBeTruthy();
   }
 });
 
 test('singleton-resource set is a subset of the allowlist', () => {
   for (const slug of SINGLETON_RESOURCE_ACTIONS) {
-    assert(
-      ACTION_CALL_ALLOWED_SLUGS.has(slug),
-      `singleton slug '${slug}' missing from allowlist`,
-    );
+    expect(ACTION_CALL_ALLOWED_SLUGS.has(slug), `singleton slug '${slug}' missing from allowlist`).toBeTruthy();
   }
 });
 
 test('singleton and read-only sets do not overlap', () => {
   for (const slug of SINGLETON_RESOURCE_ACTIONS) {
-    assert(
-      !READ_ONLY_ACTIONS.has(slug),
-      `slug '${slug}' is both singleton and read-only — contradiction`,
-    );
+    expect(!READ_ONLY_ACTIONS.has(slug), `slug '${slug}' is both singleton and read-only — contradiction`).toBeTruthy();
   }
 });
 
 // ── Predicates ─────────────────────────────────────────────────────────────
 
 test('isActionCallSlugAllowed returns true for known mutation slug', () => {
-  assert(
-    isActionCallSlugAllowed('config_create_agent'),
-    'config_create_agent should be allowed',
-  );
+  expect(isActionCallSlugAllowed('config_create_agent'), 'config_create_agent should be allowed').toBeTruthy();
 });
 
 test('isActionCallSlugAllowed returns true for known read slug', () => {
-  assert(
-    isActionCallSlugAllowed('config_list_agents'),
-    'config_list_agents should be allowed',
-  );
+  expect(isActionCallSlugAllowed('config_list_agents'), 'config_list_agents should be allowed').toBeTruthy();
 });
 
 test('isActionCallSlugAllowed returns true for Phase G portal slug', () => {
-  assert(
-    isActionCallSlugAllowed('config_publish_workflow_output_to_portal'),
-    'phase G portal slug should be allowed',
-  );
+  expect(isActionCallSlugAllowed('config_publish_workflow_output_to_portal'), 'phase G portal slug should be allowed').toBeTruthy();
 });
 
 test('isActionCallSlugAllowed returns true for Phase G email slug', () => {
-  assert(
-    isActionCallSlugAllowed('config_send_workflow_email_digest'),
-    'phase G email slug should be allowed',
-  );
+  expect(isActionCallSlugAllowed('config_send_workflow_email_digest'), 'phase G email slug should be allowed').toBeTruthy();
 });
 
 test('isActionCallSlugAllowed rejects non-config skills', () => {
-  assert(
-    !isActionCallSlugAllowed('send_email'),
-    "'send_email' is a Configuration Assistant skill only from LLM paths, not action_call",
-  );
-  assert(
-    !isActionCallSlugAllowed('create_task'),
-    "'create_task' is not in the action_call closed set",
-  );
+  expect(!isActionCallSlugAllowed('send_email'), "'send_email' is a Configuration Assistant skill only from LLM paths, not action_call").toBeTruthy();
+  expect(!isActionCallSlugAllowed('create_task'), "'create_task' is not in the action_call closed set").toBeTruthy();
 });
 
 test('isActionCallSlugAllowed rejects arbitrary / unknown slugs', () => {
-  assert(!isActionCallSlugAllowed(''), 'empty string should not be allowed');
-  assert(
-    !isActionCallSlugAllowed('config_drop_table'),
-    'fictional destructive slug should not be allowed',
-  );
-  assert(
-    !isActionCallSlugAllowed('CONFIG_CREATE_AGENT'),
-    'case-sensitive rejection — slugs are lower_snake_case only',
-  );
+  expect(!isActionCallSlugAllowed(''), 'empty string should not be allowed').toBeTruthy();
+  expect(!isActionCallSlugAllowed('config_drop_table'), 'fictional destructive slug should not be allowed').toBeTruthy();
+  expect(!isActionCallSlugAllowed('CONFIG_CREATE_AGENT'), 'case-sensitive rejection — slugs are lower_snake_case only').toBeTruthy();
 });
 
 test('isSingletonResourceAction is true only for config_create_scheduled_task', () => {
-  assert(
-    isSingletonResourceAction('config_create_scheduled_task'),
-    'scheduled-task creation is a singleton',
-  );
-  assert(
-    !isSingletonResourceAction('config_create_agent'),
-    'agent creation is NOT a singleton (multiple agents allowed per org)',
-  );
-  assert(
-    !isSingletonResourceAction('config_list_agents'),
-    'read operations are never singleton',
-  );
+  expect(isSingletonResourceAction('config_create_scheduled_task'), 'scheduled-task creation is a singleton').toBeTruthy();
+  expect(!isSingletonResourceAction('config_create_agent'), 'agent creation is NOT a singleton (multiple agents allowed per org)').toBeTruthy();
+  expect(!isSingletonResourceAction('config_list_agents'), 'read operations are never singleton').toBeTruthy();
 });
 
 test('isReadOnlyAction is true for all list/get/preview/health/history slugs', () => {
@@ -159,7 +98,7 @@ test('isReadOnlyAction is true for all list/get/preview/health/history slugs', (
     'config_view_history',
   ];
   for (const slug of expected) {
-    assert(isReadOnlyAction(slug), `${slug} should be read-only`);
+    expect(isReadOnlyAction(slug), `${slug} should be read-only`).toBeTruthy();
   }
 });
 
@@ -175,11 +114,23 @@ test('isReadOnlyAction is false for mutations', () => {
     'config_restore_version',
   ];
   for (const slug of mutations) {
-    assert(!isReadOnlyAction(slug), `${slug} is a mutation, not read-only`);
+    expect(!isReadOnlyAction(slug), `${slug} is a mutation, not read-only`).toBeTruthy();
   }
 });
 
-// ── Summary ────────────────────────────────────────────────────────────────
+// ── Spend skills (Agentic Commerce Chunk 6) ───────────────────────────────
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+test('spend slugs are allowed in action_call steps', () => {
+  const spendSlugs = [
+    'pay_invoice',
+    'purchase_resource',
+    'subscribe_to_service',
+    'top_up_balance',
+    'issue_refund',
+  ];
+  for (const slug of spendSlugs) {
+    expect(isActionCallSlugAllowed(slug), `spend slug '${slug}' must be on the allowlist`).toBeTruthy();
+  }
+});
+
+// ── Summary ────────────────────────────────────────────────────────────────

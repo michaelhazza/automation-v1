@@ -20,6 +20,7 @@
  *   npx tsx server/lib/__tests__/rlsBoundaryGuard.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   RlsBoundaryUnregistered,
   RlsBoundaryAdminWriteToProtectedTable,
@@ -30,50 +31,23 @@ import {
   __resetAllowlistForTests,
 } from '../rlsBoundaryGuard.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 // Lenient ctor type — we only care about `instanceof` checks and the `name` property.
 type ErrorCtor = abstract new (...args: never[]) => Error;
 
-function assertThrows(fn: () => unknown, ctor: ErrorCtor, msg: string): void {
-  try {
-    fn();
-  } catch (err) {
-    if (err instanceof ctor) return;
-    throw new Error(`${msg}: expected ${ctor.name}, got ${err instanceof Error ? err.constructor.name : typeof err}`);
-  }
-  throw new Error(`${msg}: expected ${ctor.name}, but no error was thrown`);
-}
+// ── Local helper: assertThrows ─────────────────────────────────────────────
 
-function assertEqual(a: unknown, b: unknown, msg: string): void {
-  if (a !== b) {
-    throw new Error(`${msg}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
-
-function assertDeepEqual(a: unknown, b: unknown, msg: string): void {
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    throw new Error(`${msg}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+function assertThrows(fn: () => unknown, Ctor: abstract new (...args: never[]) => Error, _label: string): void {
+  let thrown: unknown;
+  try { fn(); } catch (e) { thrown = e; }
+  if (!(thrown instanceof Ctor)) {
+    throw new Error(`Expected ${Ctor.name} to be thrown, got: ${thrown}`);
   }
 }
 
 // ── Force NODE_ENV != 'production' for the dev-mode test cases ─────────────
 
 const originalNodeEnv = process.env.NODE_ENV;
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV ??= 'test';
 
 // Pin a known allowlist set for deterministic tests. `tasks` and other
 // rlsProtectedTables entries come from the actual registry import — the
@@ -171,8 +145,8 @@ test('case 1: org-scoped write to registered table succeeds', () => {
   const guarded = wrapStubOrgScoped(handle, 'test-case-1');
   // Should not throw.
   guarded.insert(tasksTable);
-  assertEqual(calls.length, 1, 'insert was forwarded');
-  assertEqual(calls[0].tableName, 'tasks', 'tableName forwarded unchanged');
+  expect(calls.length, 'insert was forwarded').toBe(1);
+  expect(calls[0].tableName, 'tableName forwarded unchanged').toBe('tasks');
 });
 
 // ── Case 2: getOrgScopedDb-style write to unregistered table throws ────────
@@ -193,8 +167,8 @@ test('case 3: org-scoped write to allowlisted table succeeds', () => {
   const { handle, calls } = makeStubHandle();
   const guarded = wrapStubOrgScoped(handle, 'test-case-3');
   guarded.insert(allowlistedTable);
-  assertEqual(calls.length, 1, 'insert was forwarded');
-  assertEqual(calls[0].tableName, 'legacy_audit_replica', 'allowlisted table name forwarded');
+  expect(calls.length, 'insert was forwarded').toBe(1);
+  expect(calls[0].tableName, 'allowlisted table name forwarded').toBe('legacy_audit_replica');
 });
 
 // ── Case 4: admin write to registered table, allowRlsBypass=false throws ───
@@ -215,8 +189,8 @@ test('case 5: admin write to registered table with allowRlsBypass=true succeeds'
   const { handle, calls } = makeStubHandle();
   const guarded = wrapStubAdmin(handle, 'test-case-5', true);
   guarded.insert(tasksTable);
-  assertEqual(calls.length, 1, 'insert was forwarded');
-  assertEqual(calls[0].tableName, 'tasks', 'tableName forwarded under admin bypass');
+  expect(calls.length, 'insert was forwarded').toBe(1);
+  expect(calls[0].tableName, 'tableName forwarded under admin bypass').toBe('tasks');
 });
 
 // ── Case 6: Proxy preserves chained-builder return shape ───────────────────
@@ -230,11 +204,11 @@ test('case 6: Proxy preserves return shape — chained .insert(t).values(r).retu
   const rawResult = await raw.insert(tasksTable).values({ a: 1 }).returning();
   const guardedResult = await guarded.insert(tasksTable).values({ a: 1 }).returning();
 
-  assertDeepEqual(rawResult, guardedResult, 'chained .returning() result shape matches raw handle');
+  expect(rawResult, 'chained .returning() result shape matches raw handle').toStrictEqual(guardedResult);
 
   // Non-write methods pass through untouched.
-  assertEqual(guarded.select(), 'select-passthrough', 'select untouched');
-  assertEqual(guarded.other, 42, 'arbitrary props untouched');
+  expect(guarded.select(), 'select untouched').toBe('select-passthrough');
+  expect(guarded.other, 'arbitrary props untouched').toBe(42);
 });
 
 // ── Case 7: Y5 — unresolvable table name throws in dev/test ───────────────
@@ -282,7 +256,7 @@ test('production mode: wrapWithBoundary returns the handle unchanged (no proxy o
     const { handle } = makeStubHandle();
     const guarded = wrapStubAdmin(handle, 'prod-no-proxy', false);
     // Identity equality — same reference, no Proxy wrapper.
-    assertEqual(guarded, handle, 'handle returned unchanged in production');
+    expect(guarded, 'handle returned unchanged in production').toEqual(handle);
     // And admin write to a protected table does NOT throw.
     guarded.insert(tasksTable);
   } finally {
@@ -302,7 +276,7 @@ test('production mode: wrapWithBoundary bypasses the hardened branch (returns ra
     // dev-time hardening (case 7 above) is what surfaces the gap before it
     // ships. Anything beyond identity here is a function of the underlying
     // handle's behaviour, not the guard's.
-    assertEqual(guarded, handle, 'handle returned unchanged in production');
+    expect(guarded, 'handle returned unchanged in production').toEqual(handle);
   } finally {
     process.env.NODE_ENV = prevEnv;
   }
@@ -332,8 +306,3 @@ test('assertRlsAwareWrite: unregistered table throws', () => {
 process.env.NODE_ENV = originalNodeEnv;
 
 // ── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

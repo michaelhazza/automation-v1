@@ -64,22 +64,36 @@ import {
   DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
-import { emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
+import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import { createWorker } from '../lib/createWorker.js';
 import type { WorkflowRunMode } from '../db/schema/workflowRuns.js';
 import { WorkflowStepReviewService } from './workflowStepReviewService.js';
+import { WorkflowStepGateService } from './workflowStepGateService.js';
 import {
   executeActionCall,
   resolveConfigurationAssistantAgentId,
   ActionTimeoutError,
 } from './workflowActionCallExecutor.js';
+import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
 import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types.js';
 import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { taskService } from './taskService.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
+import {
+  assertValidTransition,
+  InvalidTransitionError,
+} from '../../shared/stateMachineGuards.js';
+import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
+import { decideRunNextState } from './workflowRunPauseStopServicePure.js';
+import { getStepCostEstimate } from '../lib/workflow/costEstimationDefaults.js';
+import { WorkflowRunCostLedgerService } from './workflowRunCostLedgerService.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -114,6 +128,23 @@ function requireSubaccountId(run: WorkflowRun): string {
     );
   }
   return run.subaccountId;
+}
+
+// C4b-INVAL-RACE: re-read step run after external I/O to discard late writes
+// to invalidated steps. Returns the work result unchanged if the step is still
+// live; returns { discarded: true, reason: 'invalidated' } if a concurrent
+// edit invalidated the step while external I/O was in flight.
+async function withInvalidationGuard<T>(
+  stepRunId: string,
+  externalWork: () => Promise<T>,
+): Promise<T | { discarded: true; reason: 'invalidated' }> {
+  const result = await externalWork();
+  const [sr] = await db.select({ status: workflowStepRuns.status })
+    .from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId)).limit(1);
+  if (sr?.status === 'invalidated') {
+    return { discarded: true, reason: 'invalidated' };
+  }
+  return result;
 }
 
 function rehydrateDefinition(stored: Record<string, unknown>): WorkflowDefinition {
@@ -742,6 +773,11 @@ export const WorkflowEngineService = {
         await emitWorkflowEvent(runId, run.subaccountId, 'Workflow:run:status', {
           status: 'cancelled',
         });
+        emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+          source: 'workflow_run',
+          runId,
+          status: 'cancelled',
+        });
       }
       return;
     }
@@ -857,6 +893,14 @@ export const WorkflowEngineService = {
           totalSteps: def.steps.length,
         }, { suppressWebSocket: shouldSuppressWebSocket(run.runMode) });
 
+        if (['completed', 'completed_with_errors'].includes(finalStatus)) {
+          emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+            source: 'workflow_run',
+            runId,
+            status: finalStatus,
+          });
+        }
+
         // Sprint 4 P3.1: if this is a bulk child, re-tick the parent
         if (run.parentRunId) {
           await this.enqueueTick(run.parentRunId);
@@ -865,6 +909,20 @@ export const WorkflowEngineService = {
       }
 
       // Not terminal — propagate the awaiting/running status.
+      // Log when the run cannot complete and no step is actively running or awaiting input.
+      if (!anyRunning && !anyAwaiting) {
+        const blockingStep = liveStepRuns.find(
+          (s) => s.status !== 'completed' && s.status !== 'skipped'
+        );
+        if (blockingStep) {
+          logger.info('run_completion_blocked_by_open_step', {
+            runId,
+            organisationId: run.organisationId,
+            blockingStepId: blockingStep.stepId,
+            blockingStepStatus: blockingStep.status,
+          });
+        }
+      }
       let aggregate: WorkflowRun['status'] = run.status;
       if (anyRunning) aggregate = 'running';
       else if (anyAwaiting) {
@@ -898,7 +956,90 @@ export const WorkflowEngineService = {
       });
     }
 
+    // §7 between-step runaway check — fires before dispatching any next step.
+    // Reads DB-clock elapsed time to avoid drift from Node.js process clock.
+    if (toDispatch.length > 0) {
+      const capCheckResult = await db.execute(
+        sql`SELECT cost_accumulator_cents,
+                   EXTRACT(EPOCH FROM (now() - started_at))::integer AS elapsed_seconds
+            FROM workflow_runs
+            WHERE id = ${runId}`,
+      );
+      const capRow = (capCheckResult as unknown as { rows?: Array<{ cost_accumulator_cents: number; elapsed_seconds: number }> }).rows?.[0];
+      if (capRow) {
+        const capDecision = decideRunNextState({
+          currentStatus: 'running',
+          currentCostCents: capRow.cost_accumulator_cents,
+          currentElapsedSeconds: capRow.elapsed_seconds,
+          effectiveCostCeilingCents: run.effectiveCostCeilingCents,
+          effectiveWallClockCapSeconds: run.effectiveWallClockCapSeconds,
+        });
+        if (capDecision.shouldPause) {
+          // System-initiated pause — use 'system' as actor userId.
+          await WorkflowRunPauseStopService.pauseRun(
+            runId,
+            run.organisationId,
+            'system',
+            capDecision.reason as 'cost_ceiling' | 'wall_clock',
+          );
+          logger.info('workflow_engine_between_step_pause', {
+            runId,
+            reason: capDecision.reason,
+            costCents: capRow.cost_accumulator_cents,
+            elapsedSeconds: capRow.elapsed_seconds,
+          });
+          return; // Do not dispatch next step.
+        }
+      }
+    }
+
     for (const step of toDispatch) {
+      // Pre-dispatch: re-read run status to catch external pause/cancel/fail.
+      const [freshRun] = await db
+        .select({ status: workflowRuns.status })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.id, runId));
+      if (
+        freshRun &&
+        (freshRun.status === 'cancelled' ||
+          freshRun.status === 'failed' ||
+          freshRun.status === 'paused')
+      ) {
+        logger.info('workflow_engine_dispatch_aborted', {
+          runId,
+          stepId: step.id,
+          status: freshRun.status,
+        });
+        return; // Abort dispatch; do not process remaining steps.
+      }
+
+      // Pre-step cost-cap check.
+      if (run.effectiveCostCeilingCents !== null) {
+        const costEstimate = (step.params?.estimatedCostCents as number | undefined) ?? getStepCostEstimate(step.type ?? '');
+        const latestCostResult = await db.execute(
+          sql`SELECT cost_accumulator_cents FROM workflow_runs WHERE id = ${runId}`,
+        );
+        const latestCostRow = (latestCostResult as unknown as { rows?: Array<{ cost_accumulator_cents: number }> }).rows?.[0];
+        const latestCost = latestCostRow?.cost_accumulator_cents ?? 0;
+        if (latestCost + costEstimate >= run.effectiveCostCeilingCents) {
+          await WorkflowRunPauseStopService.pauseRun(
+            runId,
+            run.organisationId,
+            'system',
+            'cost_ceiling',
+          );
+          logger.info('workflow_engine_pre_step_pause', {
+            runId,
+            stepId: step.id,
+            stepType: step.type,
+            costEstimate,
+            latestCost,
+            ceiling: run.effectiveCostCeilingCents,
+          });
+          return; // Do not dispatch this or subsequent steps.
+        }
+      }
+
       try {
         await this.dispatchStep(run, def, step, liveStepRuns);
       } catch (err) {
@@ -910,16 +1051,41 @@ export const WorkflowEngineService = {
         // Mark the step run as failed and re-tick to evaluate failure policy.
         const sr = liveStepRuns.find((s) => s.stepId === step.id);
         if (sr) {
-          await db
-            .update(workflowStepRuns)
-            .set({
-              status: 'failed',
-              error: err instanceof Error ? err.message : String(err),
-              completedAt: new Date(),
-              version: sr.version + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(workflowStepRuns.id, sr.id));
+          // Defence-in-depth: skip the failure write if the row is already
+          // terminal. Logged + observable; we do not propagate the violation
+          // because the outer block is itself an error handler — re-throwing
+          // would brick the tick and prevent re-evaluation.
+          try {
+            assertValidTransition({
+              kind: 'workflow_step_run',
+              recordId: sr.id,
+              from: sr.status,
+              to: 'failed',
+            });
+            await db
+              .update(workflowStepRuns)
+              .set({
+                status: 'failed',
+                error: err instanceof Error ? err.message : String(err),
+                completedAt: new Date(),
+                version: sr.version + 1,
+                updatedAt: new Date(),
+              })
+              .where(eq(workflowStepRuns.id, sr.id));
+          } catch (assertErr) {
+            if (assertErr instanceof InvalidTransitionError) {
+              logger.warn('workflow_step_invalid_transition_skipped', {
+                event: 'state_machine.invalid_transition',
+                kind: assertErr.kind,
+                recordId: assertErr.recordId,
+                from: assertErr.from,
+                to: assertErr.to,
+                via: 'dispatch_error_path',
+              });
+            } else {
+              throw assertErr;
+            }
+          }
         }
         await this.enqueueTick(runId);
       }
@@ -971,9 +1137,82 @@ export const WorkflowEngineService = {
     ) {
       await WorkflowStepReviewService.requireApproval(sr, {
         reviewKind: 'supervised_mode',
+        organisationId: run.organisationId,
+        // B1 fix (spec §6.3): forward step + run context so the gate row
+        // gets seen_payload + seen_confidence at open time.
+        stepDefinition: {
+          id: step.id,
+          type: step.type,
+          name: step.name,
+          params: step.params as Record<string, unknown> | undefined,
+          isCritical: step.params?.is_critical === true,
+          sideEffectClass: typeof step.params?.side_effect_class === 'string'
+            ? step.params.side_effect_class
+            : undefined,
+        },
+        templateVersionId: run.templateVersionId,
+        subaccountId: run.subaccountId,
       });
       // Step is now awaiting_approval; tick will re-check on next pass
       return;
+    }
+
+    // ── Workflows V1: isCritical synthesis gate ────────────────────────────
+    // When a step declares `params.is_critical: true` and is one of the
+    // side-effecting step types, synthesise an Approval gate before dispatch.
+    // Guard: if a gate is already open for this step (re-entrant tick or race),
+    // skip synthesis to avoid double-gating.
+    const IS_CRITICAL_STEP_TYPES = [
+      'agent_call', 'prompt', 'action_call', 'invoke_automation',
+      'agent', 'action',
+    ] as const;
+
+    if (
+      sr.status === 'pending' &&
+      (step.params?.is_critical === true) &&
+      (IS_CRITICAL_STEP_TYPES as readonly string[]).includes(step.type)
+    ) {
+      // Re-entrant guard: check if a gate is already open for this step.
+      const existingGate = await WorkflowStepGateService.getOpenGate(
+        sr.runId,
+        sr.stepId,
+        run.organisationId,
+      );
+      if (!existingGate) {
+        // "No double-gate" rule: check if the immediately preceding step was
+        // an Approval-type step. If so, skip synthesis.
+        const prevStepIds = step.dependsOn ?? [];
+        const prevIsApproval = prevStepIds.some((prevId) => {
+          const prevDef = def.steps.find((s) => s.id === prevId);
+          return prevDef?.type === 'approval';
+        });
+
+        if (!prevIsApproval) {
+          await WorkflowStepReviewService.requireApproval(sr, {
+            reviewKind: 'is_critical_synthesised',
+            organisationId: run.organisationId,
+            approverGroup: { kind: 'task_requester', quorum: 1 },
+            isCriticalSynthesised: true,
+            // B1 fix (spec §6.3): forward step + run context so the
+            // synthesised gate row gets seen_payload + seen_confidence.
+            stepDefinition: {
+              id: step.id,
+              type: step.type,
+              name: step.name,
+              params: step.params as Record<string, unknown> | undefined,
+              isCritical: true,
+              sideEffectClass: typeof step.params?.side_effect_class === 'string'
+                ? step.params.side_effect_class
+                : undefined,
+            },
+            templateVersionId: run.templateVersionId,
+            subaccountId: run.subaccountId,
+          });
+
+          // Step is now awaiting_approval; tick will re-check on next pass
+          return;
+        }
+      }
     }
 
     switch (step.type) {
@@ -1323,7 +1562,7 @@ export const WorkflowEngineService = {
 
         // Execute synchronously via the action pipeline.
         try {
-          const result = await executeActionCall({
+          const guardedResult = await withInvalidationGuard(sr.id, () => executeActionCall({
             organisationId: run.organisationId,
             subaccountId: requireSubaccountId(run),
             agentId: configAgentId,
@@ -1333,7 +1572,16 @@ export const WorkflowEngineService = {
             actionInputs: dispatchedActionInputs,
             idempotencyKey,
             timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
-          });
+          }));
+          if ('discarded' in guardedResult) {
+            logger.info('workflow_step_action_call_invalidation_discarded', {
+              event: 'step.dispatch.invalidation_discarded',
+              runId: run.id, stepRunId: sr.id, stepId: step.id,
+              status: 'success', discarded: true,
+            });
+            return;
+          }
+          const result = guardedResult;
 
           if (result.status === 'blocked') {
             await this.failStepRunInternal(
@@ -1343,6 +1591,9 @@ export const WorkflowEngineService = {
             return;
           }
           if (result.status === 'pending_approval') {
+            const reviewKind = (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(actionStep.actionSlug ?? '')
+              ? 'spend_approval'
+              : 'action_call_approval';
             await db
               .update(workflowStepRuns)
               .set({
@@ -1354,8 +1605,20 @@ export const WorkflowEngineService = {
               run.id,
               run.subaccountId,
               'Workflow:step:awaiting_approval',
-              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId },
+              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
             );
+            // Chunk 9: also emit step.awaiting_approval to the task event stream.
+            if (run.taskId) {
+              void appendAndEmitTaskEvent(
+                {
+                  taskId: run.taskId,
+                  organisationId: run.organisationId,
+                  subaccountId: run.subaccountId,
+                },
+                'engine',
+                { kind: 'step.awaiting_approval', payload: { stepId: step.id, reviewKind, actionId: result.actionId } },
+              );
+            }
             return;
           }
           if (result.status === 'failed') {
@@ -1483,7 +1746,7 @@ export const WorkflowEngineService = {
             options?: Record<string, unknown>
           ) => Promise<string | null>;
         };
-        await pgboss.send(
+        const agentSendResult = await withInvalidationGuard(sr.id, () => pgboss.send(
           AGENT_STEP_QUEUE,
           {
             WorkflowStepRunId: sr.id,
@@ -1502,7 +1765,15 @@ export const WorkflowEngineService = {
             singletonKey: `Workflow-step:${sr.id}:${sr.attempt}`,
             useSingletonQueue: true,
           }
-        );
+        ));
+        if (typeof agentSendResult === 'object' && agentSendResult !== null && 'discarded' in agentSendResult) {
+          logger.info('workflow_step_agent_dispatch_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
 
         logger.info('workflow_agent_step_dispatched', {
           event: 'step.dispatched',
@@ -1529,13 +1800,22 @@ export const WorkflowEngineService = {
           .set({ status: 'running', startedAt: new Date(), version: sr.version + 1, updatedAt: new Date() })
           .where(eq(workflowStepRuns.id, sr.id));
 
-        const result = await invokeAutomationStep({
+        const invokeGuardResult = await withInvalidationGuard(sr.id, () => invokeAutomationStep({
           step: autoStep,
           runId: run.id,
           stepRunId: sr.id,
           run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
           templateCtx: ctx as unknown as Record<string, unknown>,
-        });
+        }));
+        if ('discarded' in invokeGuardResult) {
+          logger.info('workflow_step_invoke_automation_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
+        const result = invokeGuardResult;
 
         if (result.status === 'ok') {
           const output = result.output ?? {};
@@ -1544,7 +1824,23 @@ export const WorkflowEngineService = {
         }
 
         if (result.status === 'review_required') {
-          await WorkflowStepReviewService.requireApproval(sr, { reviewKind: 'invoke_automation_gate' });
+          await WorkflowStepReviewService.requireApproval(sr, {
+            reviewKind: 'invoke_automation_gate',
+            organisationId: run.organisationId,
+            // B1 fix (spec §6.3): forward step + run context.
+            stepDefinition: {
+              id: step.id,
+              type: step.type,
+              name: step.name,
+              params: step.params as Record<string, unknown> | undefined,
+              isCritical: step.params?.is_critical === true,
+              sideEffectClass: typeof step.params?.side_effect_class === 'string'
+                ? step.params.side_effect_class
+                : undefined,
+            },
+            templateVersionId: run.templateVersionId,
+            subaccountId: run.subaccountId,
+          });
           return;
         }
 
@@ -1650,6 +1946,157 @@ export const WorkflowEngineService = {
     const row = rows[0];
     if (!row || row.outputJson === null || !row.outputHash) return null;
     return { attempt: row.attempt, output: row.outputJson, outputHash: row.outputHash };
+  },
+
+  // ─── C4a-REVIEWED-DISP: resume an invoke_automation step after user approval ─
+
+  /**
+   * Resumes an `invoke_automation` step that was held at `review_required`.
+   * Guard: `UPDATE WHERE status = 'review_required' RETURNING *` — if zero
+   * rows returned, a concurrent approval already won; return `alreadyResumed: true`.
+   * Per pre-launch-hardening-spec §4.4 (Option A) and §4.5.2.
+   */
+  async resumeInvokeAutomationStep(
+    stepRunId: string,
+  ): Promise<{ alreadyResumed: boolean; stepOutcome: 'completed' | 'failed' }> {
+    // Optimistic transition: awaiting_approval → running (the guard IS the lock)
+    const [updated] = await db
+      .update(workflowStepRuns)
+      .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(workflowStepRuns.id, stepRunId),
+        eq(workflowStepRuns.status, 'awaiting_approval'),
+      ))
+      .returning();
+
+    if (!updated) {
+      logger.info('step.resume.guard_blocked', {
+        event: 'step.resume.guard_blocked',
+        stepRunId,
+        status: 'success',
+        alreadyResumed: true,
+      });
+      // Another concurrent winner already owns this step; treat as completed from our perspective.
+      return { alreadyResumed: true, stepOutcome: 'completed' };
+    }
+
+    const sr = updated;
+    logger.info('step.resume.started', {
+      event: 'step.resume.started',
+      stepRunId,
+      runId: sr.runId,
+      automationId: sr.stepId,
+      dispatch_source: 'approval_resume',
+    });
+
+    // Load the workflow run and its definition
+    const [run] = await db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, sr.runId))
+      .limit(1);
+    if (!run) {
+      await this.failStepRunInternal(sr, 'resume_run_not_found');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const definition = await loadDefinitionForRun(run);
+    if (!definition) {
+      await this.failStepRunInternal(sr, 'resume_definition_not_found');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const step = findStepInDefinition(definition, sr.stepId) as InvokeAutomationStep | undefined;
+    if (!step || step.type !== 'invoke_automation') {
+      await this.failStepRunInternal(sr, 'resume_step_not_invoke_automation');
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    const startMs = Date.now();
+    const ctx = run.contextJson as unknown as RunContext;
+
+    const invokeGuardResult = await withInvalidationGuard(sr.id, () =>
+      invokeAutomationStep({
+        step,
+        runId: run.id,
+        stepRunId: sr.id,
+        run: { organisationId: run.organisationId, subaccountId: run.subaccountId },
+        templateCtx: ctx as unknown as Record<string, unknown>,
+        // Approved upstream — bypass the gate so the resume path dispatches
+        // instead of re-emitting review_required and falling through to error.
+        bypassGate: true,
+      }),
+    );
+
+    if ('discarded' in invokeGuardResult) {
+      logger.info('step.resume.invalidation_discarded', {
+        event: 'step.resume.invalidation_discarded',
+        stepRunId,
+        runId: run.id,
+        status: 'success',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    }
+
+    const result = invokeGuardResult;
+    const latencyMs = Date.now() - startMs;
+
+    if (result.status === 'ok') {
+      const output = result.output ?? {};
+      await this.completeStepRunInternal(sr, output, hashValue(output), 'invoke_automation');
+      logger.info('step.resume.completed', {
+        event: 'step.resume.completed',
+        stepRunId,
+        runId: run.id,
+        executionStatus: 'completed',
+        latencyMs,
+        status: 'success',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    }
+
+    // Defensive: review_required must never reach the resume path —
+    // resumeInvokeAutomationStep passes bypassGate: true to invokeAutomationStep
+    // exactly so this branch never fires. If it does, fail loudly so the bug
+    // is observable rather than silently dispatching nothing.
+    if (result.status === 'review_required') {
+      const reason = 'resume_review_required_after_bypass: gate returned review despite bypass';
+      logger.error('step.resume.review_required_unexpected', {
+        event: 'step.resume.review_required_unexpected',
+        stepRunId,
+        runId: run.id,
+        latencyMs,
+        status: 'failed',
+      });
+      await this.failStepRunInternal(sr, reason);
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
+
+    // error — respect failurePolicy: 'continue' as in the primary dispatch path
+    const errorReason = `invoke_automation_error: ${result.error?.code ?? 'unknown'}: ${result.error?.message ?? ''}`;
+    if (step.failurePolicy === 'continue') {
+      await this.completeStepRunInternal(sr, { error: result.error }, hashValue(result.error), 'invoke_automation_continue');
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'completed' };
+    } else {
+      await this.failStepRunInternal(sr, errorReason);
+      logger.error('step.resume.failed', {
+        event: 'step.resume.failed',
+        stepRunId,
+        runId: run.id,
+        error: errorReason,
+        latencyMs,
+        status: 'failed',
+      });
+      return { alreadyResumed: false, stepOutcome: 'failed' };
+    }
   },
 
   async failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
@@ -2100,9 +2547,13 @@ export const WorkflowEngineService = {
       if (created >= slotsAvailable) break; // respect concurrency cap
 
       try {
-        const [childRun] = await db
-          .insert(workflowRuns)
-          .values({
+        const childTask = await taskService.createTask(run.organisationId, targetId, {
+          title: `Workflow run`,
+          status: 'inbox',
+        }, run.startedByUserId ?? undefined);
+        const childRun = await insertRunRowWithUniqueGuard(
+          db,
+          {
             organisationId: run.organisationId,
             subaccountId: targetId,
             templateVersionId: run.templateVersionId,
@@ -2112,8 +2563,10 @@ export const WorkflowEngineService = {
             parentRunId: run.id,
             targetSubaccountId: targetId,
             startedByUserId: run.startedByUserId,
-          })
-          .returning();
+            taskId: childTask.id,
+          },
+          childTask.id,
+        );
 
         if (childRun) {
           // Create step runs for the child
@@ -2339,11 +2792,19 @@ export const WorkflowEngineService = {
       },
     };
 
+    // Replay creates a new task linked to the replayed run.
+    const replayTask = await taskService.createTask(
+      organisationId,
+      source.subaccountId ?? organisationId,
+      { title: `Workflow run`, status: 'inbox' },
+      userId,
+    );
+
     let runId!: string;
     await db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(workflowRuns)
-        .values({
+      const created = await insertRunRowWithUniqueGuard(
+        tx as unknown as typeof db,
+        {
           organisationId,
           subaccountId: source.subaccountId,
           // Carry forward the scope so org-scope replays don't violate the
@@ -2356,9 +2817,11 @@ export const WorkflowEngineService = {
           contextSizeBytes: Buffer.byteLength(JSON.stringify(replayContext), 'utf8'),
           replayMode: true,
           startedByUserId: userId,
+          taskId: replayTask.id,
           startedAt,
-        })
-        .returning();
+        },
+        replayTask.id,
+      );
       runId = created.id;
       // Patch runId into _meta
       await tx.execute(
@@ -2467,6 +2930,12 @@ export const WorkflowEngineService = {
     } catch (err) {
       logger.error('workflow_context_overflow', { runId: run.id, bytes: nextBytes });
       const failedAt = new Date();
+      assertValidTransition({
+        kind: 'workflow_run',
+        recordId: run.id,
+        from: run.status,
+        to: 'failed',
+      });
       await db
         .update(workflowRuns)
         .set({
@@ -2489,8 +2958,22 @@ export const WorkflowEngineService = {
         startedAt: run.startedAt,
         completedAt: failedAt,
       });
+      emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+        source: 'workflow_run',
+        runId: run.id,
+        status: 'failed',
+      });
       return;
     }
+
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'completed',
+    });
+
+    const costDelta = getStepCostEstimate(sr.stepType ?? '');
 
     await db.transaction(async (tx) => {
       await tx
@@ -2513,6 +2996,8 @@ export const WorkflowEngineService = {
           updatedAt: new Date(),
         })
         .where(eq(workflowRuns.id, run.id));
+
+      await WorkflowRunCostLedgerService.incrementAccumulator(run.id, costDelta, tx);
     });
 
     logger.info('workflow_step_completed', {
@@ -2632,6 +3117,12 @@ export const WorkflowEngineService = {
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.id, stepRunId));
     if (!sr) return;
+    assertValidTransition({
+      kind: 'workflow_step_run',
+      recordId: sr.id,
+      from: sr.status,
+      to: 'failed',
+    });
     await db
       .update(workflowStepRuns)
       .set({
@@ -2902,6 +3393,11 @@ export const WorkflowEngineService = {
             startedAt: run.startedAt,
             completedAt: failedAt,
           });
+          emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+            source: 'workflow_run',
+            runId: run.id,
+            status: 'failed',
+          });
           return;
         }
         const outputHash = hashValue(stepOutput);
@@ -2997,7 +3493,27 @@ export const WorkflowEngineService = {
 
       await WorkflowStepReviewService.requireApproval(sr, {
         reviewKind: 'decision_confidence_escalation',
-      } as Parameters<typeof WorkflowStepReviewService.requireApproval>[1]);
+        organisationId: run.organisationId,
+        // B1 fix (spec §6.3): forward step + run context.
+        stepDefinition: {
+          id: step.id,
+          type: step.type,
+          name: step.name,
+          params: step.params as Record<string, unknown> | undefined,
+          isCritical: step.params?.is_critical === true,
+          sideEffectClass: typeof step.params?.side_effect_class === 'string'
+            ? step.params.side_effect_class
+            : undefined,
+        },
+        templateVersionId: run.templateVersionId,
+        subaccountId: run.subaccountId,
+        // Decision-step rationale supplied as agentReasoning so it lands
+        // in seen_payload at gate-open.
+        agentReasoning: typeof rationale === 'string' ? rationale : null,
+        upstreamConfidence: typeof confidence === 'number'
+          ? (confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low')
+          : null,
+      });
 
       logger.info('workflow_decision_low_confidence_escalated', {
         event: 'decision.low_confidence_escalation',
@@ -3062,6 +3578,11 @@ export const WorkflowEngineService = {
         runStatus: 'failed',
         startedAt: run.startedAt,
         completedAt: failedAt,
+      });
+      emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+        source: 'workflow_run',
+        runId: run.id,
+        status: 'failed',
       });
       return;
     }
@@ -3201,57 +3722,56 @@ export const WorkflowEngineService = {
    * from server/index.ts in step 6).
    */
   async registerWorkers(): Promise<void> {
-    const pgboss = (await getPgBoss()) as unknown as {
-      work: (
-        name: string,
-        opts: Record<string, unknown>,
-        handler: (job: { id: string; data: unknown }) => Promise<void>
-      ) => Promise<void>;
-      schedule: (name: string, cron: string, data?: object, opts?: object) => Promise<void>;
-    };
+    const pgboss = await getPgBoss();
 
-    await pgboss.work(
-      TICK_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
+    await createWorker<{ runId: string }>({
+      queue: TICK_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      resolveOrgContext: () => null,  // tick reads org from workflow_runs row
+      handler: async (job) => {
         const data = job.data as { runId: string };
         await this.tick(data.runId);
-      }
-    );
+      },
+    });
 
-    await pgboss.work(
-      WATCHDOG_QUEUE,
-      { teamSize: 1, teamConcurrency: 1 },
-      async () => {
+    await createWorker<Record<string, never>>({
+      queue: WATCHDOG_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      resolveOrgContext: () => null,  // cross-org sweep, no single tenant
+      handler: async () => {
         await this.watchdogSweep();
-      }
-    );
+      },
+    });
 
     // Workflow-agent-step worker — runs the actual agent for prompt /
     // agent_call step types. Dynamic-imported to avoid pulling
     // agentExecutionService into the engine module's eager graph.
-    await pgboss.work(
-      AGENT_STEP_QUEUE,
-      { teamSize: 4, teamConcurrency: 1 },
-      async (job) => {
-        const data = job.data as {
-          WorkflowStepRunId: string;
-          WorkflowRunId: string;
-          organisationId: string;
-          subaccountId: string;
-          agentId: string;
-          stepId: string;
-          attempt: number;
-          renderedPrompt: string | null;
-          resolvedAgentInputs: Record<string, unknown>;
-          sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
-          // Decision-step-specific fields (absent for non-decision steps).
-          systemPromptAddendum?: string;
-          allowedToolSlugs?: string[];
-          timeoutSeconds?: number;
-          isDecisionRun?: boolean;
-          triggerContext?: Record<string, unknown>;
-        };
+    await createWorker<{
+      WorkflowStepRunId: string;
+      WorkflowRunId: string;
+      organisationId: string;
+      subaccountId: string;
+      agentId: string;
+      stepId: string;
+      attempt: number;
+      renderedPrompt: string | null;
+      resolvedAgentInputs: Record<string, unknown>;
+      sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
+      // Decision-step-specific fields (absent for non-decision steps).
+      systemPromptAddendum?: string;
+      allowedToolSlugs?: string[];
+      timeoutSeconds?: number;
+      isDecisionRun?: boolean;
+      triggerContext?: Record<string, unknown>;
+    }>({
+      queue: AGENT_STEP_QUEUE,
+      boss: pgboss,
+      concurrency: 4,
+      // payload carries organisationId — default resolver applies
+      handler: async (job) => {
+        const data = job.data;
 
         // Re-verify the step run is still live before doing anything.
         // If it was invalidated between enqueue and worker pickup, drop.
@@ -3370,8 +3890,8 @@ export const WorkflowEngineService = {
           }
           throw err; // bubble for queue retry
         }
-      }
-    );
+      },
+    });
 
     // Cron schedule the watchdog every minute.
     try {

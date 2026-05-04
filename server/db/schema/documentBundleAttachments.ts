@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, varchar, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -31,6 +31,8 @@ export const documentBundleAttachments = pgTable(
 
     attachedByUserId: uuid('attached_by_user_id').references(() => users.id),
 
+    fetchFailurePolicy: varchar('fetch_failure_policy', { length: 32 }).notNull().default('tolerant'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -45,3 +47,6 @@ export const documentBundleAttachments = pgTable(
 
 export type DocumentBundleAttachment = typeof documentBundleAttachments.$inferSelect;
 export type NewDocumentBundleAttachment = typeof documentBundleAttachments.$inferInsert;
+
+export const FETCH_FAILURE_POLICIES = ['tolerant', 'strict', 'best_effort'] as const;
+export type FetchFailurePolicy = (typeof FETCH_FAILURE_POLICIES)[number];

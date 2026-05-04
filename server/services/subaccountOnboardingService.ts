@@ -27,6 +27,7 @@ import {
 } from '../db/schema/index.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
 import { WorkflowRunService } from './workflowRunService.js';
+import { taskService } from './taskService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
 
 export interface OwedOnboardingWorkflow {
@@ -208,6 +209,12 @@ class SubaccountOnboardingService {
         ),
       );
 
+    const onboardingTask = await taskService.createTask(params.organisationId, params.subaccountId, {
+      title: `Workflow run`,
+      status: 'inbox',
+      brief: JSON.stringify(params.initialInput ?? {}),
+    }, params.startedByUserId);
+
     let startInput: Parameters<typeof WorkflowRunService.startRun>[0];
     if (orgTemplate) {
       startInput = {
@@ -216,6 +223,7 @@ class SubaccountOnboardingService {
         templateId: orgTemplate.id,
         initialInput: params.initialInput ?? {},
         startedByUserId: params.startedByUserId,
+        taskId: onboardingTask.id,
         runMode: params.runMode ?? 'supervised',
         isOnboardingRun: true,
       };
@@ -237,6 +245,7 @@ class SubaccountOnboardingService {
         systemTemplateSlug: params.slug,
         initialInput: params.initialInput ?? {},
         startedByUserId: params.startedByUserId,
+        taskId: onboardingTask.id,
         runMode: params.runMode ?? 'supervised',
         isOnboardingRun: true,
       };

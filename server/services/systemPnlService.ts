@@ -701,11 +701,11 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
     `);
 
     const r = rows[0];
-    const totalCalls     = r ? Number((r as Record<string, unknown>).total_calls)      || 0 : 0;
-    const escalatedCalls = r ? Number((r as Record<string, unknown>).escalated_calls)  || 0 : 0;
-    const avgCostCents   = r ? (Number((r as Record<string, unknown>).avg_cost_cents)  || null) : null;
-    const totalCostCents = r ? Number((r as Record<string, unknown>).total_cost_cents) || 0 : 0;
-    const avgLatencyMs   = r ? (Number((r as Record<string, unknown>).avg_latency_ms)  || null) : null;
+    const totalCalls     = r ? Number(r.total_calls)      || 0 : 0;
+    const escalatedCalls = r ? Number(r.escalated_calls)  || 0 : 0;
+    const avgCostCents   = r ? (Number(r.avg_cost_cents)  || null) : null;
+    const totalCostCents = r ? Number(r.total_cost_cents) || 0 : 0;
+    const avgLatencyMs   = r ? (Number(r.avg_latency_ms)  || null) : null;
 
     return {
       totalStage3Calls:    totalCalls,
@@ -723,6 +723,7 @@ export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
 
 const INFLIGHT_HISTORY_HARD_CAP = 1_000;
 
+// @rls-allowlist-bypass: llm_inflight_history listInflightHistory [ref: spec §3.3.1]
 export async function listInflightHistory(filters: {
   from?: Date | null;
   to?: Date | null;

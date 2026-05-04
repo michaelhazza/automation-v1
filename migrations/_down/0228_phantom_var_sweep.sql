@@ -1,0 +1,4 @@
+-- _down/0228_phantom_var_sweep.sql
+--
+-- This migration is idempotent; rolling back to pre-0228 state means the
+-- policies are as migration 0213 left them. No action required.

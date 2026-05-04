@@ -4,7 +4,7 @@
 # by an RLS policy. Each entry is a table name followed by a one-line rationale
 # explaining why RLS does not apply.
 #
-# Format:  <table_name>  <one-line rationale>
+# Format:  <table_name>  <one-line rationale> [ref: <invariant-id-or-spec-section>]
 # Comment lines start with `#`.
 #
 # This file is consumed by:
@@ -17,5 +17,75 @@
 # applicable (system-admin tables, read replicas, intentionally cross-tenant
 # audit ledgers).
 #
-# (Currently empty — every tenant table on `main` is registered in
-# rlsProtectedTables.ts. Add new entries below as needed.)
+# Entry-format rules (enforced by reviewers, not the gate script):
+#   1. The rationale MUST be a single, complete sentence — no stub words.
+#   2. The rationale MUST end with `[ref: <id>]` citing one of:
+#        - an invariant ID from `docs/pre-launch-hardening-invariants.md`
+#          (e.g. `[ref: invariant-1.8]`)
+#        - a spec section anchor (e.g. `[ref: cached-context-spec-§8.6]`)
+#        - a migration filename for table-creation justifications
+#          (e.g. `[ref: migrations/0231_…sql]`)
+#   3. Reviewers reject any entry that says "see PR" or "ask <person>" — the
+#      reference must point at a durable, version-controlled source so the
+#      next reviewer can audit the entry without git archaeology.
+#   4. Functions that query an allow-listed table MUST carry a function-level
+#      annotation in the source so the RLS bypass is visible at the call
+#      site, not just at the table-listing site. Required form:
+#
+#        // @rls-allowlist-bypass: <table_name> <function_name> [ref: <invariant-id-or-spec-§>]
+#        async function fooJob() { ... }
+#
+#      The `<function_name>` MUST match the immediately-following function
+#      declaration's name verbatim. Binding the annotation to a specific
+#      function name (rather than just the file) prevents silent drift —
+#      if a developer renames or moves the annotated function, the
+#      annotation no longer matches its function and reviewers can grep
+#      for orphaned annotations:
+#
+#        # list every annotation
+#        grep -nE "@rls-allowlist-bypass" server/
+#        # spot-check: does the line immediately after each annotation
+#        # declare a function whose name matches the third token?
+#
+#      Without function-name binding, an allow-listed file could quietly
+#      grow new bypass call sites because the file itself is "covered" —
+#      this rule closes that gap.
+#
+#      Annotation enforcement is grep-based; no CI gate is added (a new
+#      gate is a new primitive — see DEVELOPMENT_GUIDELINES § 8.4 — and
+#      the grep is sufficient at the current call-volume).
+#
+# Rationale (why the format rules exist): allow-lists tend to become dumping
+# grounds for exceptions. Forcing every entry to cite an invariant or spec
+# section, and forcing every CALLER of an allow-listed table to annotate
+# its bypass intent at the function level, keeps the file scoped to
+# documented carve-outs and prevents both (a) a later "just add it to the
+# list" reflex AND (b) scope creep inside a file that is already on the
+# list, which would otherwise let unrelated cross-tenant logic drift in
+# under cover of a legitimate bypass.
+#
+# (Add new entries below in alphabetical order by table name.)
+
+llm_inflight_history  Reads are system-admin only and intentionally cross-tenant (same posture as llm_requests_archive); the table is a short-TTL forensic ledger of in-flight add/remove events, not per-org ownership data.  [ref: spec §3.3.1]
+permission_groups  Table was created with organisation_id in migration 0000 but dropped entirely in migration 0005 — it does not exist at runtime and cannot receive an RLS policy.
+playbook_runs  Table was renamed to workflow_runs in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_runs in migration 0245.
+playbook_templates  Table was renamed to workflow_templates in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_templates in migration 0245.
+process_categories  Intermediate rename of task_categories (renamed task_categories→process_categories in 0010, then process_categories→automation_categories in 0220); the CREATE TABLE is in migration 0000 as task_categories. RLS policy lives on automation_categories in migration 0245.
+process_connection_mappings  Table was renamed to automation_connection_mappings in migration 0220; the CREATE TABLE (with organisation_id) is in migration 0018 under the old name. RLS policy lives on automation_connection_mappings in migration 0245.
+processes  Intermediate rename of tasks (renamed tasks→processes in 0010, then processes→automations in 0220); the CREATE TABLE is in migration 0000 as tasks. RLS policy deferred with automations.
+rate_limit_buckets  System-wide rate-limit infrastructure; keys are opaque caller-defined strings, rows are not tenant-private. [ref: docs/superpowers/specs/2026-04-29-pre-prod-boundary-and-brief-api-spec.md#8]
+system_incident_suppressions  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table holds cross-tenant named mute rules with nullable organisation_id (NULL = suppress everywhere), not per-org ownership data.  [ref: spec §3.3.1]
+system_incidents  BYPASSES RLS — every reader MUST be sysadmin-gated at the route/service layer; the table is a cross-tenant incident sink with nullable organisation_id (NULL = system-level incident), not per-org ownership data.  [ref: spec §3.3.1]
+task_categories  Table was renamed to process_categories (migration 0010) then to automation_categories (migration 0220); the CREATE TABLE (with organisation_id) is in migration 0000 under the old name. RLS policy lives on automation_categories in migration 0245.
+workspace_items  Table was renamed to tasks in migration 0010; the CREATE TABLE (with organisation_id) is in migration 0008 under the old name. RLS policy lives on tasks in migration 0245.
+
+# check2-exempt: join tables registered in rlsProtectedTables.ts that are
+# scoped via a parent table (no direct organisation_id column). These tables
+# have RLS policies that join to the parent to enforce org isolation, so they
+# legitimately have no CREATE TABLE ... organisation_id in any migration.
+document_bundle_members  Scoped via document_bundles.organisation_id through an EXISTS policy; no direct organisation_id column on the join table.
+reference_document_versions  organisation_id added via ALTER TABLE ADD COLUMN in migration 0229 (not in CREATE TABLE block); scoped to the parent reference_document via EXISTS policy.
+task_activities  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
+task_deliverables  organisation_id added via ALTER TABLE ADD COLUMN in migration 0091 (not in CREATE TABLE block); org isolation enforced by policy in 0091.
+connector_location_tokens  Scoped via connector_configs.organisation_id through a JOIN policy in migration 0269; no direct organisation_id column on this cache table. [ref: migrations/0269_connector_location_tokens.sql]
+cost_aggregates  organisation_id added via ALTER TABLE ADD COLUMN in migration 0272 (the original CREATE TABLE in migration 0024 had no tenant column — pre-multi-tenant aggregate); RLS policy lives on cost_aggregates in 0272. [ref: migrations/0272_cost_aggregates_rls_and_spend_dims.sql]

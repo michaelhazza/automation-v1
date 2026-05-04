@@ -1,10 +1,18 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
+import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
 import { logger } from '../lib/logger.js';
+
+// ─── Soft-delete defence-in-depth ──────────────────────────────────────────
+function assertNotSoftDeleted(record: { deletedAt: Date | null }, label: string): void {
+  if (record.deletedAt !== null) {
+    throw new Error(`soft_deleted_${label}_leak`);
+  }
+}
 
 // ─── Last-root invariant ────────────────────────────────────────────────────
 // Invariant: every subaccount that has ever had a root agent must always have
@@ -55,12 +63,26 @@ export const subaccountAgentService = {
         agentDescription: agents.description,
         agentIcon: agents.icon,
         agentStatus: agents.status,
+        workspaceIdentityStatus: workspaceIdentities.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-      .where(and(eq(subaccountAgents.organisationId, organisationId), eq(subaccountAgents.subaccountId, subaccountId)));
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .leftJoin(
+        workspaceIdentities,
+        and(
+          eq(workspaceIdentities.actorId, agents.workspaceActorId),
+          isNull(workspaceIdentities.archivedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
 
-    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({
+    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, workspaceIdentityStatus }) => ({
       id: link.id,
       agentId: link.agentId,
       subaccountId: link.subaccountId,
@@ -71,6 +93,11 @@ export const subaccountAgentService = {
       agentTitle: link.agentTitle,
       appliedTemplateId: link.appliedTemplateId,
       appliedTemplateVersion: link.appliedTemplateVersion,
+      // Heartbeat
+      heartbeatEnabled: link.heartbeatEnabled,
+      heartbeatIntervalHours: link.heartbeatIntervalHours,
+      heartbeatOffsetHours: link.heartbeatOffsetHours,
+      heartbeatOffsetMinutes: link.heartbeatOffsetMinutes,
       // Schedule & config
       scheduleCron: link.scheduleCron,
       scheduleEnabled: link.scheduleEnabled,
@@ -84,6 +111,7 @@ export const subaccountAgentService = {
       nextRunAt: link.nextRunAt,
       createdAt: link.createdAt,
       updatedAt: link.updatedAt,
+      workspaceIdentityStatus: workspaceIdentityStatus ?? null,
       agent: {
         id: link.agentId,
         name: agentName,
@@ -211,9 +239,11 @@ export const subaccountAgentService = {
         agentModelProvider: agents.modelProvider,
         agentModelId: agents.modelId,
         agentDefaultSkillSlugs: agents.defaultSkillSlugs,
+        agentWorkspaceActorId: agents.workspaceActorId,
+        agentDeletedAt: agents.deletedAt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.id, linkId),
@@ -224,8 +254,9 @@ export const subaccountAgentService = {
       .limit(1);
 
     if (!row) throw { statusCode: 404, message: 'Agent link not found' };
+    assertNotSoftDeleted({ deletedAt: row.agentDeletedAt }, 'agent');
 
-    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs } = row;
+    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs, agentWorkspaceActorId } = row;
     return {
       id: link.id,
       agentId: link.agentId,
@@ -267,6 +298,7 @@ export const subaccountAgentService = {
         modelProvider: agentModelProvider,
         modelId: agentModelId,
         defaultSkillSlugs: (agentDefaultSkillSlugs ?? []) as string[],
+        workspaceActorId: agentWorkspaceActorId ?? null,
       },
     };
   },
@@ -376,7 +408,7 @@ export const subaccountAgentService = {
         agentMasterPrompt: agents.masterPrompt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(and(
         eq(subaccountAgents.organisationId, organisationId),
         eq(subaccountAgents.subaccountId, subaccountId)
@@ -485,7 +517,7 @@ export const subaccountAgentService = {
     const [row] = await db
       .select({ systemAgentSlug: systemAgents.slug })
       .from(agents)
-      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+      .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
     return row?.systemAgentSlug ?? null;
   },

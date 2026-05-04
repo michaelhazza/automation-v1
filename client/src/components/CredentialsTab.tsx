@@ -30,15 +30,17 @@ const PROVIDER_LABELS: Record<string, string> = {
   teamwork: 'Teamwork',
   web_login: 'Web Login',
   custom: 'Custom',
+  google_drive: 'Google Drive',
 };
 
 /** OAuth providers available for connection — matches server/config/oauthProviders.ts */
-const OAUTH_PROVIDER_OPTIONS: { key: string; label: string; description: string }[] = [
-  { key: 'slack', label: 'Slack', description: 'Team messaging and notifications' },
-  { key: 'gmail', label: 'Gmail', description: 'Send and read emails' },
-  { key: 'hubspot', label: 'HubSpot', description: 'CRM contacts and deals' },
-  { key: 'ghl', label: 'GoHighLevel', description: 'Contacts and opportunities' },
-  { key: 'teamwork', label: 'Teamwork', description: 'Project management' },
+const OAUTH_PROVIDER_OPTIONS: { key: string; label: string; description: string; category?: 'file_store' | 'action' }[] = [
+  { key: 'google_drive', label: 'Google Drive', description: 'Attach Drive files as live document references', category: 'file_store' },
+  { key: 'slack', label: 'Slack', description: 'Team messaging and notifications', category: 'action' },
+  { key: 'gmail', label: 'Gmail', description: 'Send and read emails', category: 'action' },
+  { key: 'hubspot', label: 'HubSpot', description: 'CRM contacts and deals', category: 'action' },
+  { key: 'ghl', label: 'GoHighLevel', description: 'Contacts and opportunities', category: 'action' },
+  { key: 'teamwork', label: 'Teamwork', description: 'Project management', category: 'action' },
 ];
 
 const STATUS_STYLES: Record<string, string> = {
@@ -88,6 +90,16 @@ export default function CredentialsTab({ subaccountId }: Props) {
   // Provider dropdown
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const providerMenuRef = useRef<HTMLDivElement>(null);
+
+  const storageKey = `cred:gdrive-info-dismissed:${subaccountId ?? 'org'}`;
+  const [infoBoxDismissed, setInfoBoxDismissed] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem(storageKey) === '1'
+  );
+  const dismissInfoBox = () => {
+    localStorage.setItem(storageKey, '1');
+    setInfoBoxDismissed(true);
+  };
+  const hasGoogleDriveConnection = connections.some(c => c.providerType === 'google_drive' && c.connectionStatus === 'active');
 
   // Slack channel config modal
   const [slackConfigConn, setSlackConfigConn] = useState<Connection | null>(null);
@@ -355,22 +367,28 @@ export default function CredentialsTab({ subaccountId }: Props) {
           <div className="relative" ref={providerMenuRef}>
             <button
               onClick={() => setShowProviderMenu(v => !v)}
-              className="text-sm px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+              className="btn btn-sm btn-primary"
             >
               + Add Connection
             </button>
             {showProviderMenu && (
               <div className="absolute right-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1">
-                {OAUTH_PROVIDER_OPTIONS.map(p => (
-                  <button
-                    key={p.key}
-                    onClick={() => connectProvider(p.key)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors"
-                  >
-                    <span className="text-sm font-medium text-slate-800">{p.label}</span>
-                    <span className="block text-xs text-slate-400">{p.description}</span>
-                  </button>
-                ))}
+                {OAUTH_PROVIDER_OPTIONS.map((p, idx) => {
+                  const prev = OAUTH_PROVIDER_OPTIONS[idx - 1];
+                  const showDivider = idx > 0 && p.category === 'action' && prev?.category === 'file_store';
+                  return (
+                    <div key={p.key}>
+                      {showDivider && <div className="border-t border-slate-200 my-1" />}
+                      <button
+                        onClick={() => connectProvider(p.key)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="text-sm font-medium text-slate-800">{p.label}</span>
+                        <span className="block text-xs text-slate-400">{p.description}</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -417,6 +435,30 @@ export default function CredentialsTab({ subaccountId }: Props) {
         )}
       </section>
 
+      {hasGoogleDriveConnection && !infoBoxDismissed && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm text-blue-900">
+              <p className="font-semibold">Shared across this subaccount.</p>
+              <p className="mt-1">
+                Any admin can attach Drive files using this connection. The connection
+                is not tied to your personal account, so it survives if you leave the
+                team. Agents access files on behalf of this connection, not their own
+                identity.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="text-blue-600 hover:text-blue-800"
+              onClick={dismissInfoBox}
+            >
+              x
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Web Login Credentials */}
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -426,7 +468,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
           </div>
           <button
             onClick={openAddWebLogin}
-            className="text-sm px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+            className="btn btn-sm btn-primary"
           >
             + Add Login
           </button>
@@ -505,11 +547,11 @@ export default function CredentialsTab({ subaccountId }: Props) {
             />
           )}
           <div className="flex justify-end gap-2">
-            <button onClick={() => setSlackConfigConn(null)} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+            <button onClick={() => setSlackConfigConn(null)} className="btn btn-sm btn-ghost">Cancel</button>
             <button
               onClick={saveSlackChannel}
               disabled={savingChannel}
-              className="px-3 py-1.5 text-sm bg-slate-800 text-white rounded-md hover:bg-slate-700 disabled:opacity-50"
+              className="btn btn-sm btn-primary"
             >
               {savingChannel ? 'Saving…' : 'Save'}
             </button>
@@ -558,14 +600,14 @@ export default function CredentialsTab({ subaccountId }: Props) {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setTestModal(null)}
-                className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800"
+                className="btn btn-sm btn-ghost"
               >
                 Cancel
               </button>
               <button
                 onClick={fireTestConnection}
                 disabled={testFiring || !selectedTestAgentId || testAgents.length === 0}
-                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                className="btn btn-sm btn-primary"
               >
                 {testFiring ? 'Starting…' : 'Start test'}
               </button>
@@ -622,11 +664,11 @@ export default function CredentialsTab({ subaccountId }: Props) {
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setWebLoginModal(null)} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button onClick={() => setWebLoginModal(null)} className="btn btn-sm btn-ghost">Cancel</button>
               <button
                 onClick={saveWebLogin}
                 disabled={webLoginSaving || !webLoginForm.loginUrl || !webLoginForm.username || (!webLoginModal.conn && !webLoginForm.password)}
-                className="px-3 py-1.5 text-sm bg-slate-800 text-white rounded-md hover:bg-slate-700 disabled:opacity-50"
+                className="btn btn-sm btn-primary"
               >
                 {webLoginSaving ? 'Saving…' : 'Save'}
               </button>

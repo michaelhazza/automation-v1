@@ -56,12 +56,12 @@ export * from './automationConnectionMappings';
 export * from './projects';
 export * from './llmPricing';
 export * from './orgMarginConfigs';
-export * from './orgBudgets';
+export * from './orgComputeBudgets';
 export * from './llmRequests';
 export * from './llmRequestsArchive';
 export * from './llmInflightHistory';
 export * from './costAggregates';
-export * from './budgetReservations';
+export * from './computeReservations';
 export * from './hierarchyTemplates';
 export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
@@ -234,3 +234,25 @@ export * from './delegationOutcomes.js';
 export * from './systemIncidents.js';
 export * from './systemIncidentEvents.js';
 export * from './systemIncidentSuppressions.js';
+export * from './systemMonitorHeuristicFires.js';
+export * from './systemMonitorBaselines.js';
+
+// Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
+export * from './rateLimitBuckets';
+
+// Live External Document References — document cache + fetch audit log (migration 0262)
+export * from './documentCache';
+export * from './documentFetchEvents';
+
+// Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
+export * from './conversationThreadContext';
+
+// Sub-Account Optimiser — generic agent-output primitive (migration 0267)
+export * from './agentRecommendations';
+
+// GHL Agency OAuth — location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
+
+// Workflows V1 — step gates + drafts (migration 0270)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';

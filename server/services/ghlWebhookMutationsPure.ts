@@ -229,6 +229,44 @@ export function classifyUserKindByVolume(input: VolumeClassifierInput): External
   return share > threshold ? 'automation' : 'staff';
 }
 
+// ── Lifecycle event classification (§5.4) ────────────────────────────────
+
+export type WebhookEventClass =
+  | 'install_company'
+  | 'install_location_ignored'
+  | 'uninstall'
+  | 'location_create'
+  | 'location_update'
+  | 'other';
+
+export interface WebhookEnvelopeMinimal {
+  type: string;
+  webhookId?: string;
+  companyId?: string;
+  locationId?: string;
+  installType?: string;
+}
+
+/**
+ * Classifies a GHL webhook event and validates that webhookId is present.
+ * Throws if webhookId is missing — no safe dedupe key = no processing.
+ */
+export function classifyWebhookEvent(event: WebhookEnvelopeMinimal): WebhookEventClass {
+  if (!event.webhookId) {
+    throw Object.assign(
+      new Error('GHL webhook missing webhookId — cannot safely process without dedupe key'),
+      { statusCode: 400, code: 'WEBHOOK_MISSING_ID' },
+    );
+  }
+  if (event.type === 'INSTALL') {
+    return event.installType === 'Company' ? 'install_company' : 'install_location_ignored';
+  }
+  if (event.type === 'UNINSTALL') return 'uninstall';
+  if (event.type === 'LocationCreate') return 'location_create';
+  if (event.type === 'LocationUpdate') return 'location_update';
+  return 'other';
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function asObj(value: unknown): Record<string, unknown> {

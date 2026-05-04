@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -7,6 +7,19 @@ import TestPanel from '../components/runs/TestPanel';
 import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
+import { IdentityCard } from '../components/workspace/IdentityCard';
+import type { IdentityCardAction } from '../components/workspace/IdentityCard';
+import AgentActivityTab from '../components/agent/AgentActivityTab';
+import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDialog';
+import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
+import {
+  getAgentIdentity,
+  suspendAgentIdentity,
+  resumeAgentIdentity,
+  revokeAgentIdentity,
+  archiveAgentIdentity,
+  toggleAgentEmailSending,
+} from '../lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -42,10 +55,19 @@ interface LinkDetail {
     modelProvider: string;
     modelId: string;
     defaultSkillSlugs: string[];
+    workspaceActorId: string | null;
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity';
+
+interface AgentIdentity {
+  identityId: string;
+  emailAddress: string;
+  emailSendingEnabled: boolean;
+  status: string;
+  displayName: string;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,12 +90,46 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function SubaccountAgentEditPage({ user: _user }: { user: User }) {
   const { subaccountId, linkId } = useParams<{ subaccountId: string; linkId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [link, setLink] = useState<LinkDetail | null>(null);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('skills');
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'skills';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+
+  // Identity tab state
+  const [identity, setIdentity] = useState<AgentIdentity | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [identityPending, setIdentityPending] = useState<IdentityCardAction | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  function extractApiError(e: unknown, fallback: string): string {
+    const err = e as { response?: { data?: { error?: { message?: string } | string; message?: string } }; message?: string };
+    const apiErr = err.response?.data?.error;
+    return (typeof apiErr === 'string' ? apiErr : apiErr?.message)
+      ?? err.response?.data?.message
+      ?? err.message
+      ?? fallback;
+  }
+
+  async function runIdentityAction(action: IdentityCardAction, fn: () => Promise<unknown>) {
+    if (!link) return;
+    setIdentityPending(action);
+    setIdentityError(null);
+    try {
+      await fn();
+      const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+      setIdentity(updated);
+    } catch (e: unknown) {
+      setIdentityError(extractApiError(e, 'Action failed'));
+    } finally {
+      setIdentityPending(null);
+    }
+  }
 
   // Per-section form state
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
@@ -125,6 +181,15 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     }
     load();
   }, [subaccountId, linkId]);
+
+  useEffect(() => {
+    if (activeTab !== 'identity' || !link) return;
+    setIdentityLoading(true);
+    getAgentIdentity(link.agentId)
+      .then((data: AgentIdentity) => setIdentity(data))
+      .catch(() => setIdentity(null))
+      .finally(() => setIdentityLoading(false));
+  }, [activeTab, link]);
 
   async function patch(tab: Tab, payload: Record<string, unknown>) {
     setSaving(tab);
@@ -180,6 +245,8 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'budget', label: 'Budget' },
     { id: 'scheduling', label: 'Scheduling' },
     { id: 'beliefs', label: 'Beliefs' },
+    { id: 'identity', label: 'Identity' },
+    { id: 'activity', label: 'Activity' },
   ];
 
   return (
@@ -271,7 +338,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveSkills}
               disabled={saving === 'skills'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'skills' ? 'Saving…' : 'Save Skills'}
             </button>
@@ -300,7 +367,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveInstructions}
               disabled={saving === 'instructions'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'instructions' ? 'Saving…' : 'Save Instructions'}
             </button>
@@ -363,7 +430,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveBudget}
               disabled={saving === 'budget'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'budget' ? 'Saving…' : 'Save Budget'}
             </button>
@@ -463,7 +530,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveScheduling}
               disabled={saving === 'scheduling'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'scheduling' ? 'Saving…' : 'Save Scheduling'}
             </button>
@@ -475,6 +542,70 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       {/* ── Beliefs tab ── */}
       {activeTab === 'beliefs' && subaccountId && linkId && (
         <BeliefsTab subaccountId={subaccountId} linkId={linkId} />
+      )}
+
+      {/* ── Identity tab ── */}
+      {activeTab === 'identity' && (
+        <>
+          {identityLoading && <div className="text-[13px] text-slate-400">Loading…</div>}
+          {!identityLoading && !identity && (
+            <div className="text-[13px] text-slate-500">
+              This agent has not been onboarded to the workplace yet.
+            </div>
+          )}
+          {!identityLoading && identity && link && (
+            <>
+              <IdentityCard
+                identity={{ ...identity, id: identity.identityId }}
+                actor={{ displayName: link.agent.name, agentRole: null }}
+                pendingAction={identityPending}
+                actionError={identityError}
+                onSuspend={() => { setIdentityError(null); setSuspendOpen(true); }}
+                onResume={() => runIdentityAction('resume', () => resumeAgentIdentity(link.agentId))}
+                onRevoke={() => { setIdentityError(null); setRevokeOpen(true); }}
+                onArchive={() => runIdentityAction('archive', () => archiveAgentIdentity(link.agentId))}
+                onToggleEmail={(enabled) => runIdentityAction('toggleEmail', () => toggleAgentEmailSending(link.agentId, enabled))}
+              />
+              <SuspendIdentityDialog
+                open={suspendOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setSuspendOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+              <RevokeIdentityDialog
+                open={revokeOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setRevokeOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+            </>
+          )}
+        </>
+      )}
+      {/* ── Activity tab ── */}
+      {activeTab === 'activity' && (
+        link?.agent.workspaceActorId && subaccountId
+          ? (
+            <AgentActivityTab
+              agentId={link.agentId}
+              actorId={link.agent.workspaceActorId}
+              subaccountId={subaccountId}
+              agentName={link.agent.name}
+            />
+          )
+          : (
+            <div className="text-[13px] text-slate-500">
+              This agent has no workspace identity.
+            </div>
+          )
       )}
     </div>{/* end main content */}
 
@@ -630,8 +761,8 @@ function BeliefsTab({ subaccountId, linkId }: { subaccountId: string; linkId: st
             </div>
             <div className="text-[12px] text-slate-500">Saving sets source to "User Override" with confidence 1.0</div>
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setEditBelief(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg">Cancel</button>
-              <button type="button" onClick={handleEdit} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save Override</button>
+              <button type="button" onClick={() => setEditBelief(null)} className="btn btn-sm btn-secondary">Cancel</button>
+              <button type="button" onClick={handleEdit} className="btn btn-sm btn-primary">Save Override</button>
             </div>
           </div>
         </Modal>

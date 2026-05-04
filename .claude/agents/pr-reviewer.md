@@ -32,7 +32,7 @@ Organise findings into three tiers. Be specific — point to file paths and line
 
 ### Strong Recommendations (should fix)
 
-- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement
+- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement. The implementer authors and runs ONLY the new test file locally (`npx tsx <path-to-test>`); the broader suite runs in CI on the PR — never ask the implementer to run `npm test` or any test-gate command.
 - Opportunities where a simpler approach exists — with concrete suggestion
 - Performance issues that will matter at scale — with evidence, not speculation
 
@@ -90,11 +90,40 @@ Wrap your complete review in a single fenced markdown block tagged `pr-review-lo
 
 Why: the caller is instructed to extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md` BEFORE fixing any issues, so the review trail persists on disk — same pattern as `review-logs/spec-review-log-*`. This feeds future pattern mining across many reviews.
 
+### Verdict line format (mandatory)
+
+The Verdict line MUST appear within the first 30 lines of the persisted log and MUST match:
+
+```
+**Verdict:** APPROVED
+```
+
+or
+
+```
+**Verdict:** CHANGES_REQUESTED
+```
+
+or
+
+```
+**Verdict:** NEEDS_DISCUSSION
+```
+
+Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUESTED (3 blocking, 2 strong)`). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Do not deviate from the enum — non-conforming verdicts render as "unknown" in the dashboard.
+
+- `APPROVED` — zero Blocking issues; Strong recommendations may exist but are not gating.
+- `CHANGES_REQUESTED` — at least one Blocking issue.
+- `NEEDS_DISCUSSION` — review surfaced a question that needs the user's input before a verdict can be assigned (e.g. an architectural concern with multiple viable resolutions).
+
 ---
 
 ## Rules
 
+- The author must run `npm run lint && npm run typecheck` before marking done.
+  Flag any new lint errors or typecheck failures in changed files as blocking issues.
 - Zero blocking issues means say so explicitly — "No blocking issues found."
 - Don't nitpick style unless it violates a documented convention
 - When flagging missing tests, write the test description in Given/When/Then so it's immediately actionable
 - You have read-only tools. You review, you do not fix. Return your findings and let the main session implement.
+- **Test gates are CI-only — never recommend running them locally.** Do not ask the implementer to run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` as part of resolving a finding. Continuous integration runs the complete suite as a pre-merge gate. If you flag a missing test, the implementer authors it and runs only that single file (`npx tsx <path-to-test>`) — CI runs everything else. See `CLAUDE.md` § *Test gates are CI-only — never run locally*.

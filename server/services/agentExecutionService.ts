@@ -3,6 +3,7 @@ import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { describeTransition } from '../../shared/stateMachineGuards.js';
 import {
   agents,
   subaccounts,
@@ -94,6 +95,16 @@ import {
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 // Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
 import { validateArtefactForPersistence } from './briefArtefactValidator.js';
+// Integration block service — pauses runs waiting for OAuth connections
+import { checkRequiredIntegration } from './integrationBlockService.js';
+import { agentMessages } from '../db/schema/index.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
+import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
+import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
+import { spendingBudgets } from '../db/schema/spendingBudgets.js';
+import { spendingPolicies } from '../db/schema/spendingPolicies.js';
+import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -177,6 +188,9 @@ export interface AgentRunRequest {
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
   parentRunId?: string;
+  /** WB-1: for handoff runs, the canonical handoff-edge pointer. Set alongside
+   *  parentRunId (both equal the source run's id for a handoff run). */
+  handoffSourceRunId?: string;
   isSubAgent?: boolean;
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
@@ -257,6 +271,14 @@ export interface AgentRunRequest {
    */
   delegationScope?: DelegationScope;
   delegationDirection?: DelegationDirection;
+  /**
+   * When the run is triggered from a conversation context (e.g. chat panel
+   * test-run), the caller passes the conversationId here so that integration
+   * card messages can be persisted to agent_messages.
+   */
+  conversationId?: string;
+  /** Workflow nesting depth — propagated from parent run via workflow.run.start skill. Top-level orchestrator runs set this to 1. */
+  workflowRunDepth?: number;
 }
 
 export interface AgentRunResult {
@@ -267,7 +289,9 @@ export interface AgentRunResult {
   // iee-run-completed event handler. Callers that need a terminal result
   // must subscribe to WebSocket `agent:run:completed` or poll the agent
   // run status until it leaves 'delegated'.
-  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'blocked_awaiting_integration' — run is paused waiting for the user to
+  // connect an OAuth integration. Not terminal; completedAt is NOT written.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'blocked_awaiting_integration';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -400,6 +424,7 @@ export const agentExecutionService = {
         taskId: request.taskId ?? null,
         handoffDepth: request.handoffDepth ?? 0,
         parentRunId: request.parentRunId ?? null,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         workflowStepRunId: request.workflowStepRunId ?? null,
@@ -605,6 +630,9 @@ export const agentExecutionService = {
         subaccountAgentId: request.subaccountAgentId ?? null,
         taskId: request.taskId ?? null,
         triggerContext: request.triggerContext,
+        subaccountId: request.subaccountId ?? null,
+        runId: run.id,
+        tokenBudget,
       });
 
       // Only eager sources flagged includedInPrompt: true are rendered into
@@ -788,9 +816,64 @@ export const agentExecutionService = {
         effectiveMasterPrompt,
         dataSourceContents,
         orgProcesses,
+        undefined,
+        runContextData.externalDocumentBlocks,
       );
 
-      const systemPromptParts = [basePrompt];
+      // ── Thread context injection (A-D1) ─────────────────────────────────────
+      // Prepended first — before external docs, memory blocks, and all other
+      // augmentation. Spec §2.2 ordering invariant. Fail-open: a build error
+      // skips injection rather than aborting the run.
+      let effectiveBasePrompt = basePrompt;
+      const THREAD_CTX_TIMEOUT = Symbol('timeout');
+      const runConvId =
+        request.conversationId ??
+        (request.triggerContext?.conversationId as string | undefined) ??
+        undefined;
+      if (runConvId) {
+        const _threadCtxStart = Date.now();
+        let threadCtx: ThreadContextReadModel | null = null;
+        try {
+          let _threadCtxTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+          const ctxResult = await Promise.race<ThreadContextReadModel | typeof THREAD_CTX_TIMEOUT>([
+            buildThreadContextReadModel(runConvId, request.organisationId),
+            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) => {
+              _threadCtxTimeoutHandle = setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500);
+            }),
+          ]);
+          if (_threadCtxTimeoutHandle !== undefined) clearTimeout(_threadCtxTimeoutHandle);
+          if (ctxResult === THREAD_CTX_TIMEOUT) {
+            logger.warn('thread_ctx.timeout', { runId: run.id });
+          } else {
+            threadCtx = ctxResult;
+          }
+        } catch (err) {
+          logger.warn('thread_ctx.build_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        logger.debug('thread_ctx.build_ms', { ms: Date.now() - _threadCtxStart, runId: run.id });
+        if (threadCtx && typeof threadCtx.version === 'number') {
+          const threadBlock = formatThreadContextBlock(threadCtx);
+          if (threadBlock) {
+            effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
+            // Persist version for drift detection — fire-and-forget, best-effort
+            void db
+              .update(agentRuns)
+              .set({
+                runMetadata: {
+                  ...(run.runMetadata ?? {}),
+                  threadContextVersionAtStart: threadCtx.version,
+                },
+              })
+              .where(eq(agentRuns.id, run.id))
+              .catch(() => {});
+          }
+        }
+      }
+
+      const systemPromptParts = [effectiveBasePrompt];
 
       // Layer 1b: System skill instructions
       if (systemSkillInstructions.length > 0) {
@@ -1354,14 +1437,30 @@ export const agentExecutionService = {
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
       let finalStatus = (loopResult.finalStatus ?? 'completed') as
-        'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+        'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'cancelled';
+
+      if (loopResult.finalStatus === 'blocked_awaiting_integration') {
+        // Run is paused — do NOT write completedAt or trigger finalisation.
+        // The blocked state has already been persisted inside the loop.
+        return {
+          runId: run.id,
+          status: 'blocked_awaiting_integration' as AgentRunResult['status'],
+          summary: null,
+          totalToolCalls: loopResult.totalToolCalls,
+          totalTokens: loopResult.totalTokens,
+          durationMs,
+          tasksCreated: loopResult.tasksCreated,
+          tasksUpdated: loopResult.tasksUpdated,
+          deliverablesCreated: loopResult.deliverablesCreated,
+        };
+      }
 
       // Pre-fetch runMetadata once — consumed by both the Reporting Agent
       // finalize hook and Phase B's runResultStatus derivation (which reads
       // `hadUncertainty` from runMetadata, where the clarification-timeout
       // job writes it).
       const [preFinalizeRow] = await db
-        .select({ runMetadata: agentRuns.runMetadata })
+        .select({ runMetadata: agentRuns.runMetadata, errorMessage: agentRuns.errorMessage })
         .from(agentRuns)
         .where(eq(agentRuns.id, run.id))
         .limit(1);
@@ -1403,14 +1502,28 @@ export const agentExecutionService = {
         /* hasError — only affects the 'completed' branch of computeRunResultStatus;
            ignored for all other terminal statuses which return directly */ finalStatus !== 'completed',
         hadUncertainty,
-        hasSummary,
       );
+      // H3: hasSummary is no longer passed to computeRunResultStatus. Summary absence
+      // is surfaced via the summaryMissing side-channel below, not via 'partial' status.
 
       // Write-once guard (§6.3.1): add `AND run_result_status IS NULL` so
       // a second attempt at the same terminal write becomes a zero-row
       // UPDATE rather than an overwrite. `.returning()` lets us detect
       // that and log rather than silently drift from the first writer's
       // value.
+      //
+      // Round-3 review note: this terminal write does not yet flow through
+      // `assertValidTransition`. The `runResultStatus IS NULL` predicate
+      // already guards against overwriting a terminal row, but we log the
+      // transition with `guarded: false` so operators can quantify the
+      // unguarded-by-assert surface area against the F6 follow-up spec.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: finalStatus,
+        site: 'agentExecutionService.finishLoop_normal',
+        guarded: false,
+      }));
       const terminalUpdate = await db.update(agentRuns).set({
         status: finalStatus,
         runResultStatus: derivedRunResultStatus,
@@ -1435,6 +1548,23 @@ export const agentExecutionService = {
           attemptedStatus: derivedRunResultStatus,
           writeSite: 'finishLoop_normal',
         });
+      } else {
+        // F22 — meaningful-run tracking hook for the non-IEE finalization path.
+        // The IEE path calls this from `agentRunFinalizationService.finaliseAgentRunFromIeeRun`;
+        // without this call, ordinary API/triggered runs never advance
+        // `subaccount_agents.last_meaningful_tick_at` /
+        // `ticks_since_last_meaningful_run`, which leaves the heartbeat
+        // streak detector blind to the primary execution path. Best-effort —
+        // a tracking-update failure must not flip a successful run to failed.
+        try {
+          const { updateMeaningfulRunTracking } = await import('./agentRunFinalizationService.js');
+          await updateMeaningfulRunTracking(run.id, finalStatus);
+        } catch (err) {
+          logger.warn('agentExecutionService.meaningful_hook_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Live Agent Execution Log — critical terminal bookend (spec §5.3).
@@ -1471,6 +1601,22 @@ export const agentExecutionService = {
           eventCount,
         },
       });
+
+      // H3: summaryMissing side-channel — emit only when hasSummary is false so
+      // consumers can correlate without demoting runResultStatus to 'partial'.
+      if (!hasSummary) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'run.terminal.summary_missing',
+            critical: false,
+            runResultStatus: derivedRunResultStatus ?? 'partial',
+          },
+        });
+      }
 
       // Surface terminal failures as system incidents for operator visibility.
       if (finalStatus === 'failed' || finalStatus === 'timeout' || finalStatus === 'loop_detected') {
@@ -1646,17 +1792,28 @@ export const agentExecutionService = {
           // primary agent-run completion path always passes a non-null
           // `runResultStatus` here (when derivedRunResultStatus is null
           // the run is not terminal and this branch is unreachable).
+          // HERMES-S1: thread errorMessage from the pre-finalize DB read so
+          // failed-without-throw runs surface the error to extractRunInsights.
+          const threadedErrorMessage = derivedRunResultStatus === 'failed'
+            ? (preFinalizeRow?.errorMessage ?? null)
+            : null;
+          if (threadedErrorMessage !== null) {
+            tryEmitAgentEvent({
+              runId: run.id,
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              sourceService: 'agentExecutionService',
+              payload: {
+                eventType: 'run.terminal.extracted_with_errorMessage',
+                critical: false,
+                errorMessageLength: threadedErrorMessage.length,
+              },
+            });
+          }
           const extractionOutcome = {
             runResultStatus: (derivedRunResultStatus ?? 'partial') as 'success' | 'partial' | 'failed',
-            // trajectoryPassed is always null in Phase B — no per-run
-            // verdict is persisted today. Reserved forward-compat slot.
             trajectoryPassed: null as boolean | null,
-            // Best-effort errorMessage for the short-summary guard.
-            // The normal terminal path does not set errorMessage on the
-            // run row here (only the catch path does); pass null. A
-            // future refactor could surface loopResult.errorMessage if
-            // the loop ever captures one without throwing.
-            errorMessage: null as string | null,
+            errorMessage: threadedErrorMessage,
           };
           await workspaceMemoryService.extractRunInsights(
             run.id,
@@ -1761,8 +1918,16 @@ export const agentExecutionService = {
         'failed',
         /* hasError */ true,
         /* hadUncertainty */ false,
-        /* hasSummary */ false,
       );
+      // Round-3 review note: catch-block terminal write logged with
+      // `guarded: false` for the same reason as `finishLoop_normal` above.
+      logger.info('state_transition', describeTransition({
+        kind: 'agent_run',
+        recordId: run.id,
+        to: 'failed',
+        site: 'agentExecutionService.finishLoop_catch',
+        guarded: false,
+      }));
       const catchUpdate = await db.update(agentRuns).set({
         status: 'failed',
         runResultStatus: catchRunResultStatus,
@@ -2141,11 +2306,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     timeoutMs,
     taskId: request.taskId,
     isTestRun: request.isTestRun ?? false,
+    conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? undefined,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
     readDataSourceCallCount: 0,
     hierarchy: hierarchyContext,
+    workflowRunDepth: request.workflowRunDepth,
   };
 
   // Throttle trace events to prevent event floods (max 2/sec)
@@ -2248,9 +2415,52 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           const planSummary = plan.actions
             .map((a, i) => `${i + 1}. ${a.tool}${a.reason ? ` — ${a.reason}` : ''}`)
             .join('\n');
+
+          // Chunk 7: advisory spend-policy preview (fail-open, never blocks)
+          let spendPreviewNote = '';
+          try {
+            const spendActions = plan.actions.filter((a) =>
+              (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(a.tool),
+            );
+            if (spendActions.length > 0 && request.subaccountId) {
+              const [budgetRow] = await db
+                .select({ policy: spendingPolicies })
+                .from(spendingBudgets)
+                .innerJoin(spendingPolicies, eq(spendingPolicies.spendingBudgetId, spendingBudgets.id))
+                .where(
+                  and(
+                    eq(spendingBudgets.organisationId, request.organisationId),
+                    eq(spendingBudgets.subaccountId, request.subaccountId),
+                  ),
+                )
+                .limit(1);
+
+              if (budgetRow) {
+                const parsedPlan = {
+                  steps: spendActions.map((a) => ({
+                    amountMinor: 1,
+                    currency: 'USD',
+                    merchant: { id: null, descriptor: '' },
+                    intent: a.reason ?? a.tool,
+                  })),
+                };
+                const previews = previewSpendForPlan(parsedPlan, budgetRow.policy as unknown as SpendingPolicy);
+                const nonAuto = previews.filter((p) => p.verdict !== 'would_auto');
+                if (nonAuto.length > 0) {
+                  const notes = nonAuto
+                    .map((p) => `  step ${p.stepIndex + 1} (${spendActions[p.stepIndex]?.tool ?? '?'}): ${p.verdict}`)
+                    .join('\n');
+                  spendPreviewNote = `\nSpend policy advisory:\n${notes}`;
+                }
+              }
+            }
+          } catch (previewErr) {
+            console.warn('[P4.3] Spend preview failed (non-blocking):', previewErr);
+          }
+
           messages.push({
             role: 'user',
-            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}\n</system-reminder>`,
+            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}${spendPreviewNote}\n</system-reminder>`,
           });
 
           // Track token usage from the planning call
@@ -2268,6 +2478,27 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     mwCtx.iteration = iteration;
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
+
+    // ── User-triggered cancel observation ──────────────────────────────
+    // agentRunCancelService flips agent_runs.status to 'cancelling' when a
+    // user cancels an in-flight non-IEE run. This per-iteration PK read is
+    // the cheapest place to observe that — runs at most MAX_LOOP_ITERATIONS
+    // times per run and is dwarfed by the LLM call that follows. IEE-
+    // delegated runs are stopped via the worker's per-step ownership check
+    // (worker/src/persistence/runs.ts::assertWorkerOwnership), so this guard
+    // is for the in-process API path only.
+    {
+      const [cancelObserved] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      if (cancelObserved?.status === 'cancelling') {
+        finalStatus = 'cancelled';
+        emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
+        break outerLoop;
+      }
+    }
 
     // ── Heartbeat: update lastActivityAt for stale run detection ──────
     // Throttle to every 3rd iteration to avoid DB write pressure
@@ -2574,6 +2805,140 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       }
 
       if (skipTool) continue;
+
+      // ── Integration block check ───────────────────────────────────────────
+      // Determine if this tool requires an OAuth integration that is not yet
+      // connected. In v1 checkRequiredIntegration always returns shouldBlock:false;
+      // the full block path is wired and ready to activate when ACTION_REGISTRY
+      // entries begin declaring requiredIntegration fields.
+      {
+        // Read current runMetadata for block-sequence tracking
+        const [runMeta] = await db
+          .select({ runMetadata: agentRuns.runMetadata })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, runId))
+          .limit(1);
+        const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
+        const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
+
+        let blockDecision: Awaited<ReturnType<typeof checkRequiredIntegration>>;
+        try {
+          blockDecision = await checkRequiredIntegration(
+            toolCall.name,
+            toolCall.input as Record<string, unknown>,
+            {
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+              runId,
+              agentId: request.agentId,
+              currentBlockSequence: newBlockSeq,
+            },
+          );
+        } catch (err: any) {
+          if (err?.errorCode === 'TOOL_NOT_RESUMABLE') {
+            // Cancel the run — this tool cannot be safely paused mid-execution.
+            await db.update(agentRuns).set({
+              status: 'cancelled',
+              runResultStatus: 'failed',
+              runMetadata: {
+                ...currentRunMeta,
+                cancelReason: 'tool_not_resumable',
+              },
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(agentRuns.id, runId));
+
+            logger.error('tool_not_resumable', {
+              runId,
+              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+              blockedReason: 'integration_required',
+              toolName: toolCall.name,
+              action: 'tool_not_resumable',
+            });
+
+            finalStatus = 'failed';
+            emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+            break outerLoop;
+          }
+          throw err;
+        }
+
+        if (blockDecision.shouldBlock) {
+          const plaintext = blockDecision.plaintext;
+          const tokenHash = blockDecision.tokenHash;
+          const appBase = process.env.APP_BASE_URL ?? '';
+          const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+          const cardContent = {
+            ...blockDecision.card,
+            actionUrl,
+            resumeToken: plaintext,
+            expiresAt: blockDecision.expiresAt.toISOString(),
+            schemaVersion: 1 as const,
+          };
+
+          // Persist blocked state on run
+          await db.update(agentRuns).set({
+            blockedReason: 'integration_required',
+            blockedExpiresAt: blockDecision.expiresAt,
+            integrationResumeToken: tokenHash,
+            integrationDedupKey: blockDecision.integrationDedupKey,
+            runMetadata: {
+              ...currentRunMeta,
+              currentBlockSequence: newBlockSeq,
+              blockedToolCall: {
+                toolName: toolCall.name,
+                toolArgs: toolCall.input,
+                dedupKey: blockDecision.integrationDedupKey,
+              },
+            },
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.info('run_blocked', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            integrationId: blockDecision.integrationId,
+            blockSequence: newBlockSeq,
+            action: 'run_blocked',
+          });
+
+          // Persist the integration card as an assistant message in the conversation.
+          // Skip insert if conversationId is empty — guard prevents a DB error when no conversation is associated.
+          const _integrationConvId =
+            request.conversationId ??
+            (request.triggerContext?.conversationId as string | undefined) ??
+            '';
+          if (_integrationConvId) {
+            await db.insert(agentMessages).values({
+              conversationId: _integrationConvId,
+              role: 'assistant',
+              content: `Integration required: ${cardContent.integrationId}`,
+              meta: cardContent as any,
+              createdAt: new Date(),
+            });
+            logger.info('integration_card_emitted', {
+              runId,
+              conversationId: _integrationConvId,
+              integrationId: cardContent.integrationId,
+              blockSequence: cardContent.blockSequence,
+              action: 'integration_card_emitted',
+            });
+          }
+
+          // Break out of the agent loop — run stays in 'running' status
+          // with blocked_reason set. The expiry sweep will cancel it if
+          // the user never connects.
+          finalStatus = 'blocked_awaiting_integration';
+          // Note: emitLoopTermination only accepts its fixed union — use
+          // the closest structural match and log the actual reason separately.
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+      }
 
       totalToolCalls++;
       const toolStart = Date.now();
@@ -2962,13 +3327,12 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       agentDescription: agents.description,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 

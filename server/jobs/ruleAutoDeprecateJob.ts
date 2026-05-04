@@ -1,37 +1,73 @@
 /**
  * ruleAutoDeprecateJob (queue: maintenance:rule-auto-deprecate)
  *
- * Concurrency model: GLOBAL pg advisory lock (single runner)
+ * Concurrency model: GLOBAL pg advisory lock (single runner — Pattern B)
  *   Justification:   nightly cadence, low frequency, no per-org parallelism
  *                    requirement. A single runner sweep across all orgs is
  *                    cheaper to reason about than per-org locks for a job
- *                    that fires once a day. (Per the spec's per-org default,
- *                    the global scope is documented here as the explicit
- *                    exception, not implicit.)
+ *                    that fires once a day.
  *   Mechanism:       pg_advisory_xact_lock(hashtext('ruleAutoDeprecateJob')::bigint)
- *                    inside a top-level transaction. The lock is released
- *                    when the transaction commits or rolls back. A second
- *                    invocation that arrives while the first runner holds
- *                    the lock will block until the first commits, then
- *                    re-iterate orgs and find the per-row WHERE
- *                    `deprecated_at IS NULL` predicate filters everything
- *                    out, returning a structured no-op.
+ *                    acquired inside the OUTER admin tx that wraps the entire
+ *                    sweep — enumeration AND per-org mutation. The lock is
+ *                    released when the outer tx commits or rolls back. A
+ *                    second invocation arriving while the first runner holds
+ *                    the lock blocks until the first commits, then re-iterates
+ *                    orgs and finds the per-row `WHERE deprecated_at IS NULL`
+ *                    predicate filters everything out, returning a structured
+ *                    no-op.
  *   Key/lock space:  global (one shared key). Trades cross-org parallelism
- *                    for simplicity at this cadence.
+ *                    for full-sweep race protection.
  *
- * Idempotency model: idempotent-by-construction + WHERE deprecated_at IS NULL predicate
- *   Mechanism:       (a) `applyBlockQualityDecay` reads `deprecated_at IS NULL`
- *                    rows only and writes deprecated_at exactly once per row,
- *                    so re-running on the same state is a no-op for already
- *                    deprecated rows; (b) the decay step applies the same
- *                    delta given the same input within a clock tick — within
- *                    a single tick the function is mathematically idempotent.
- *   Failure mode:    a per-org failure logs and continues to the next org
- *                    rather than aborting the sweep. A mid-execution crash
- *                    rolls back the pending decay write for the in-flight
- *                    org via the wrapping transaction; the next nightly run
- *                    picks up where it left off via the `deprecated_at IS NULL`
- *                    predicate.
+ *   ⚠ This is Pattern B, NOT Pattern A. The lock MUST span mutation, not just
+ *     enumeration. The job's mutation phase is NOT idempotent — any concurrent
+ *     execution without the advisory lock results in cumulative decay and
+ *     premature deprecation. applyDecayForOrg's decay step subtracts
+ *     BLOCK_DECAY_RATE from quality_score on every invocation against rows
+ *     where deprecated_at IS NULL — overlapping runners that read the same
+ *     row from independent transactions would double-decay the value.
+ *     Holding the lock across the full sweep eliminates the race.
+ *
+ * Idempotency model: lock-serialised + `WHERE deprecated_at IS NULL` predicate
+ *   Mechanism:       the global advisory lock guarantees only one sweep can
+ *                    proceed at a time. Within that sweep, rows are read once
+ *                    and updated once. A subsequent sweep observes already-
+ *                    deprecated rows excluded by the predicate, so re-running
+ *                    is a structured no-op.
+ *   Failure mode:    a per-org failure rolls back that org's SAVEPOINT only;
+ *                    siblings remain committed when the outer tx commits.
+ *                    The sweep continues to the next org.
+ *
+ * Execution contract:
+ *   - One outer `withAdminConnection` tx for the entire sweep.
+ *   - `SET LOCAL ROLE admin_role` + `pg_advisory_xact_lock` acquired at the top.
+ *   - Org enumeration runs inside the outer tx, while the lock is held.
+ *   - Per-org work runs as SAVEPOINT subtransactions inside the outer tx
+ *     (matches DEVELOPMENT_GUIDELINES.md §2 prescription for global-lock
+ *     maintenance jobs). A per-org failure ROLLBACK TO SAVEPOINT restores
+ *     that org's writes; siblings persist.
+ *   - applyDecayForOrg's `WHERE organisation_id = ${organisationId}::uuid`
+ *     filter on every UPDATE provides explicit org scoping — RLS is bypassed
+ *     under admin_role, defense-in-depth comes from the explicit predicate.
+ *   - Sequential per-org processing; no parallel fan-out in v1.
+ *   - Terminal event emitted with outcome counters regardless of mixed results.
+ *
+ * Bounded-runtime contract:
+ *   The advisory lock is held for the duration of the entire sweep. The job
+ *   MUST therefore remain bounded:
+ *     (a) `SELECT id FROM organisations LIMIT 500` — hard cap on the number
+ *         of orgs processed per invocation. If org count exceeds 500, the
+ *         tail will not be processed this tick and will pick up the next.
+ *     (b) per-org work is bounded by row count of `memory_blocks WHERE
+ *         deprecated_at IS NULL` for that org — an O(N) sequential pass
+ *         through that filtered set with PK-targeted UPDATEs.
+ *   If either bound is loosened (e.g. removing the org LIMIT, fan-out to
+ *   parallel workers, retry inside the loop), the lock-held duration grows
+ *   correspondingly and the next scheduled tick will block until the
+ *   previous completes. Future scaling step: chunk the org list and use
+ *   per-org locks instead of one global lock — but that requires every
+ *   per-org tx to be its own atomic decay+deprecate unit and the decay
+ *   step must become idempotent (e.g. via a `last_decayed_at` predicate)
+ *   to survive concurrent same-org runners.
  *
  * __testHooks production safety: hook is undefined by default; the call site
  * uses the canonical `if (!__testHooks.<name>) return;` short-circuit so an
@@ -40,21 +76,28 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { organisations } from '../db/schema/index.js';
-import { applyBlockQualityDecay } from '../services/memoryEntryQualityService.js';
+import type { OrgScopedTx } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
 
-const JOB_NAME = 'ruleAutoDeprecateJob' as const;
+const SOURCE = 'rule-auto-deprecate' as const;
+
+// Decay constants — kept in sync with memoryEntryQualityService.ts.
+const BLOCK_DECAY_RATE = 0.02;
+const BLOCK_AUTO_DEPRECATE_THRESHOLD = 0.15;
+const BLOCK_AUTO_DEPRECATE_DAYS = 14;
 
 export type RuleAutoDeprecateResult =
-  | { status: 'noop'; reason: 'no_rows_to_claim'; jobName: typeof JOB_NAME }
+  | { status: 'noop'; reason: 'no_rows_to_claim'; jobRunId: string; durationMs: number }
   | {
-      status: 'ok';
-      jobName: typeof JOB_NAME;
+      status: 'success' | 'partial' | 'failed';
+      jobRunId: string;
       totalDecayed: number;
       totalAutoDeprecated: number;
-      orgsProcessed: number;
+      orgsAttempted: number;
+      orgsSucceeded: number;
+      orgsFailed: number;
+      durationMs: number;
     };
 
 /**
@@ -63,55 +106,214 @@ export type RuleAutoDeprecateResult =
  */
 export const __testHooks: { pauseBetweenClaimAndCommit?: () => Promise<void> } = {};
 
+/** Pure helper: classify a memory block for decay/auto-deprecation. */
+export function classifyMemoryBlock(
+  qualityScore: number,
+  daysSinceUpdate: number,
+): 'auto_deprecate' | 'decay' | 'no_change' {
+  const newScore = Math.max(0, qualityScore - BLOCK_DECAY_RATE);
+  if (newScore < BLOCK_AUTO_DEPRECATE_THRESHOLD && daysSinceUpdate >= BLOCK_AUTO_DEPRECATE_DAYS) {
+    return 'auto_deprecate';
+  }
+  if (newScore !== qualityScore) {
+    return 'decay';
+  }
+  return 'no_change';
+}
+
+/** Per-org decay sweep using the provided admin tx (mirrors memoryDedupJob pattern). */
+async function applyDecayForOrg(
+  tx: OrgScopedTx,
+  organisationId: string,
+): Promise<{ decayed: number; autoDeprecated: number }> {
+  const now = new Date();
+  let decayed = 0;
+  let autoDeprecated = 0;
+
+  const rows = (await tx.execute(sql`
+    SELECT id, quality_score, updated_at
+    FROM memory_blocks
+    WHERE organisation_id = ${organisationId}::uuid
+      AND deleted_at IS NULL
+      AND deprecated_at IS NULL
+  `)) as unknown as Array<{
+    id: string;
+    quality_score: string | null;
+    updated_at: Date;
+  }>;
+
+  for (const row of rows) {
+    const currentScore = Number(row.quality_score ?? 0.5);
+    const daysSinceUpdate =
+      (now.getTime() - new Date(row.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+
+    const action = classifyMemoryBlock(currentScore, daysSinceUpdate);
+
+    if (action === 'auto_deprecate') {
+      await tx.execute(sql`
+        UPDATE memory_blocks
+        SET deprecated_at = ${now}, deprecation_reason = 'low_quality', updated_at = ${now}
+        WHERE id = ${row.id}::uuid AND organisation_id = ${organisationId}::uuid
+      `);
+      autoDeprecated++;
+    } else if (action === 'decay') {
+      const newScore = Math.max(0, currentScore - BLOCK_DECAY_RATE);
+      await tx.execute(sql`
+        UPDATE memory_blocks
+        SET quality_score = ${String(newScore.toFixed(2))}
+        WHERE id = ${row.id}::uuid AND organisation_id = ${organisationId}::uuid
+      `);
+      decayed++;
+    }
+  }
+
+  return { decayed, autoDeprecated };
+}
+
 export async function runRuleAutoDeprecate(): Promise<RuleAutoDeprecateResult> {
-  return db.transaction(async (tx) => {
-    // Global advisory lock. Acquired before reading the org list so a sibling
-    // runner waits here rather than racing into the per-org loop. Released
-    // automatically when this transaction commits or rolls back.
-    const lockKey = 'ruleAutoDeprecateJob';
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+  const jobRunId = crypto.randomUUID();
+  const startedAt = Date.now();
 
-    // Race-window control seam (test-only). Canonical guarded short-circuit
-    // so production with the hook unset is identical to a job with no hook.
-    if (__testHooks.pauseBetweenClaimAndCommit) {
-      await __testHooks.pauseBetweenClaimAndCommit();
-    }
+  logger.info(`${SOURCE}.started`, { jobRunId, scheduledAt: new Date().toISOString() });
 
-    const allOrgs = await tx
-      .select({ id: organisations.id })
-      .from(organisations)
-      .limit(500);
+  let totalDecayed = 0;
+  let totalAutoDeprecated = 0;
+  let orgsAttempted = 0;
+  let orgsSucceeded = 0;
+  let orgsFailed = 0;
+  let orgsCount = 0;
 
-    if (allOrgs.length === 0) {
-      logger.info('job_noop', { jobName: JOB_NAME, reason: 'no_rows_to_claim' });
-      return { status: 'noop', reason: 'no_rows_to_claim', jobName: JOB_NAME };
-    }
+  try {
+    await withAdminConnection(
+      {
+        source: SOURCE,
+        reason: 'Nightly cross-org memory_blocks quality decay sweep (lock spans full sweep)',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-    let totalDecayed = 0;
-    let totalAutoDeprecated = 0;
+        // Global advisory lock — Pattern B: held across BOTH enumeration AND
+        // per-org mutation. Released automatically when this outer tx
+        // commits or rolls back. A second invocation that arrives while
+        // this lock is held blocks until commit, then re-iterates orgs and
+        // finds already-deprecated rows filtered by `deprecated_at IS NULL`.
+        const lockKey = 'ruleAutoDeprecateJob';
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 
-    for (const org of allOrgs) {
-      try {
-        const summary = await applyBlockQualityDecay(org.id);
-        totalDecayed += summary.decayed;
-        totalAutoDeprecated += summary.autoDeprecated;
-      } catch (err) {
-        logger.error('ruleAutoDeprecateJob: org failed', { err, organisationId: org.id });
-      }
-    }
+        if (__testHooks.pauseBetweenClaimAndCommit) {
+          await __testHooks.pauseBetweenClaimAndCommit();
+        }
 
-    logger.info('ruleAutoDeprecateJob: complete', {
-      totalDecayed,
-      totalAutoDeprecated,
-      orgsProcessed: allOrgs.length,
-    });
+        const orgs = (await tx.execute(
+          sql`SELECT id FROM organisations LIMIT 500`,
+        )) as unknown as Array<{ id: string }>;
 
-    return {
-      status: 'ok',
-      jobName: JOB_NAME,
-      totalDecayed,
-      totalAutoDeprecated,
-      orgsProcessed: allOrgs.length,
+        orgsCount = orgs.length;
+        if (orgs.length === 0) return;
+
+        // Per-org work as SAVEPOINT subtransactions inside the lock-holding
+        // outer admin tx (mirrors DEVELOPMENT_GUIDELINES.md §2 prescription
+        // for global-lock maintenance jobs). A per-org failure rolls back
+        // to its savepoint; siblings remain committed when the outer tx
+        // commits. RLS is bypassed under admin_role — applyDecayForOrg's
+        // explicit `WHERE organisation_id = ...` predicate is the org scope
+        // boundary.
+        for (let i = 0; i < orgs.length; i++) {
+          const org = orgs[i];
+          // Savepoint name is a static prefix + a sequential index we control,
+          // so no SQL injection surface — `sql.raw` is safe here.
+          const savepoint = `org_${i}`;
+          orgsAttempted++;
+          logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
+          const orgStart = Date.now();
+
+          try {
+            await tx.execute(sql.raw(`SAVEPOINT ${savepoint}`));
+            const { decayed, autoDeprecated } = await applyDecayForOrg(tx, org.id);
+            await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+
+            totalDecayed += decayed;
+            totalAutoDeprecated += autoDeprecated;
+            orgsSucceeded++;
+            logger.info(`${SOURCE}.org_completed`, {
+              jobRunId,
+              orgId: org.id,
+              rowsAffected: decayed + autoDeprecated,
+              durationMs: Date.now() - orgStart,
+              status: 'success',
+            });
+          } catch (err) {
+            try {
+              await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+            } catch (rollbackErr) {
+              logger.warn(`${SOURCE}.savepoint_cleanup_failed`, {
+                jobRunId,
+                orgId: org.id,
+                savepoint,
+                error:
+                  rollbackErr instanceof Error
+                    ? rollbackErr.message
+                    : String(rollbackErr),
+              });
+            }
+            orgsFailed++;
+            logger.error(`${SOURCE}.org_failed`, {
+              jobRunId,
+              orgId: org.id,
+              error: err instanceof Error ? err.message : String(err),
+              errorClass: err instanceof Error ? 'tx_failure' : 'unknown',
+              status: 'failed',
+            });
+          }
+        }
+      },
+    );
+  } catch (err) {
+    const failedResult: RuleAutoDeprecateResult = {
+      status: 'failed',
+      jobRunId,
+      totalDecayed: 0,
+      totalAutoDeprecated: 0,
+      orgsAttempted: 0,
+      orgsSucceeded: 0,
+      orgsFailed: 0,
+      durationMs: Date.now() - startedAt,
     };
-  });
+    logger.error(`${SOURCE}.completed`, {
+      ...failedResult,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return failedResult;
+  }
+
+  if (orgsCount === 0) {
+    const noopResult: RuleAutoDeprecateResult = {
+      status: 'noop',
+      reason: 'no_rows_to_claim',
+      jobRunId,
+      durationMs: Date.now() - startedAt,
+    };
+    logger.info(`${SOURCE}.completed`, noopResult);
+    return noopResult;
+  }
+
+  const status: 'success' | 'partial' | 'failed' =
+    orgsFailed === 0 ? 'success'
+    : orgsSucceeded === 0 ? 'failed'
+    : 'partial';
+
+  const result: RuleAutoDeprecateResult = {
+    status,
+    jobRunId,
+    totalDecayed,
+    totalAutoDeprecated,
+    orgsAttempted,
+    orgsSucceeded,
+    orgsFailed,
+    durationMs: Date.now() - startedAt,
+  };
+
+  logger.info(`${SOURCE}.completed`, result);
+  return result;
 }

@@ -27,6 +27,7 @@ import {
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
 import { WorkflowRunService } from '../services/workflowRunService.js';
+import { taskService } from '../services/taskService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 
@@ -660,12 +661,18 @@ router.post(
 
     let startResult: { runId: string; status: string };
     if (orgVer) {
+      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
+        title: `Workflow run`,
+        status: 'inbox',
+        brief: JSON.stringify({}),
+      }, req.user!.id);
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
         templateId: orgVer.templateId,
         initialInput: {},
         startedByUserId: req.user!.id,
+        taskId: task.id,
         runMode: 'auto',
         isPortalVisible: true,
       });
@@ -674,12 +681,18 @@ router.post(
         res.status(422).json({ error: 'Cannot replay: workflowSlug not set on source run' });
         return;
       }
+      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
+        title: `System workflow run`,
+        status: 'inbox',
+        brief: JSON.stringify({}),
+      }, req.user!.id);
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
         systemTemplateSlug: sourceRun.workflowSlug,
         initialInput: {},
         startedByUserId: req.user!.id,
+        taskId: task.id,
         runMode: 'auto',
         isPortalVisible: true,
       });

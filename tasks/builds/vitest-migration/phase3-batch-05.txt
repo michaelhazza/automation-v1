@@ -1,0 +1,10 @@
+server/services/__tests__/agentActivityService.test.ts
+server/services/__tests__/agentBeliefServicePure.test.ts
+server/services/__tests__/agentExecution.smoke.test.ts
+server/services/__tests__/agentExecutionService.middlewareContext.test.ts
+server/services/__tests__/agentExecutionService.phase.test.ts
+server/services/__tests__/agentExecutionService.validateToolCalls.test.ts
+server/services/__tests__/agentExecutionServicePure.checkpoint.test.ts
+server/services/__tests__/agentExecutionServicePure.plan.test.ts
+server/services/__tests__/agentExecutionServicePure.runResultStatus.test.ts
+server/services/__tests__/agentExecutionServicePure.toolIntent.test.ts

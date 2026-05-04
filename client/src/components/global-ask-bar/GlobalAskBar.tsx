@@ -1,80 +1,145 @@
-import { useState, useRef } from 'react';
+// client/src/components/global-ask-bar/GlobalAskBar.tsx
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api.js';
-import { isValidBriefText } from './GlobalAskBarPure.js';
-import type { FastPathDecision } from '../../../../shared/types/briefFastPath.js';
+import { isValidBriefText, type ScopeCandidate, type SessionMessageResponse } from './GlobalAskBarPure.js';
+import { getActiveOrgId, getActiveOrgName, getActiveClientId, getActiveClientName, setActiveOrg, setActiveClient, removeActiveClient } from '../../lib/auth.js';
 
-interface CreateBriefResponse {
-  briefId: string;
-  conversationId: string;
-  fastPathDecision: FastPathDecision;
-}
+type DisambiguationState = {
+  candidates: ScopeCandidate[];
+  question: string;
+  remainder: string | null;
+};
 
 interface GlobalAskBarProps {
-  currentSubaccountId?: string;
   placeholder?: string;
 }
 
-export function GlobalAskBar({ currentSubaccountId, placeholder = 'Ask anything…' }: GlobalAskBarProps) {
+export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
+  const navigate = useNavigate();
   const [text, setText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [disambiguation, setDisambiguation] = useState<DisambiguationState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
 
-  const canSubmit = isValidBriefText(text) && !isSubmitting;
+  const handleResponse = (data: SessionMessageResponse) => {
+    if (data.type === 'error') {
+      setError(data.message);
+      return;
+    }
+    if (data.type === 'disambiguation') {
+      setDisambiguation({ candidates: data.candidates, question: data.question, remainder: data.remainder });
+      return;
+    }
+    // context_switch and brief_created both carry resolved context — apply it.
+    // organisationId is the source of truth; organisationName may be omitted when
+    // the server already knows context did not change (path-C brief_created).
+    // Falling back to the stored name keeps the id update deterministic instead
+    // of silently skipping it on a missing name and leaving the next request
+    // pinned to the old org.
+    //
+    // Subaccount clearing is unconditional on response.subaccountId === null —
+    // server response is authoritative, so a same-org context switch (or stale
+    // subaccount drop) that returns no subaccount must clear localStorage too.
+    // Gating on orgChanged left a stale subaccount visible when the user moved
+    // back to org-level inside their existing org.
+    if (data.organisationId) {
+      setActiveOrg(data.organisationId, data.organisationName ?? getActiveOrgName() ?? '');
+      if (!data.subaccountId) {
+        removeActiveClient();
+      }
+    }
+    // Mirror the org pattern: subaccountId is source of truth, name falls back to
+    // the stored value so a path-C brief_created (which currently returns
+    // subaccountName=null even when subaccountId is preserved) does not silently
+    // skip the update and leave a stale id/name pair in localStorage.
+    if (data.subaccountId) {
+      setActiveClient(data.subaccountId, data.subaccountName ?? getActiveClientName() ?? '');
+    }
+    setText('');
+    setDisambiguation(null);
+    setError(null);
+    if (data.type === 'brief_created') {
+      navigate(`/admin/tasks/${data.briefId}`);
+    }
+  };
 
-  const handleSubmit = async (e: { preventDefault: () => void }): Promise<void> => {
-    e.preventDefault();
-    if (!canSubmit) return;
-
+  const post = async (payload: Record<string, unknown>) => {
     setIsSubmitting(true);
     setError(null);
-
     try {
-      const { data } = await api.post<CreateBriefResponse>('/api/briefs', {
-        text: text.trim(),
-        source: 'global_ask_bar',
-        subaccountId: currentSubaccountId,
-        uiContext: {
-          surface: 'global_ask_bar',
-          currentSubaccountId,
+      const { data } = await api.post<SessionMessageResponse>('/api/session/message', {
+        sessionContext: {
+          activeOrganisationId: getActiveOrgId(),
+          activeSubaccountId: getActiveClientId(),
         },
+        ...payload,
       });
-
-      setText('');
-      navigate(`/admin/briefs/${data.briefId}`);
+      handleResponse(data);
     } catch {
-      setError('Failed to submit. Please try again.');
+      setError('Something went wrong. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isValidBriefText(text) || isSubmitting) return;
+    void post({ text: text.trim() });
+  };
+
+  const handleCandidateSelect = (candidate: ScopeCandidate) => {
+    void post({
+      selectedCandidateId: candidate.id,
+      selectedCandidateName: candidate.name,
+      selectedCandidateType: candidate.type,
+      pendingRemainder: disambiguation?.remainder ?? null,
+    });
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 w-full max-w-xl">
-      <div className="relative flex-1">
+    <div className="w-full">
+      <form onSubmit={handleSubmit} className="flex items-center gap-2">
         <input
-          ref={inputRef}
           type="text"
           value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder={placeholder}
+          onChange={(e) => { setText(e.target.value); setDisambiguation(null); setError(null); }}
+          placeholder={placeholder ?? 'Ask anything…'}
           disabled={isSubmitting}
-          className="w-full pl-3 pr-10 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-60 bg-white"
+          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
         />
-        {isSubmitting && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">…</span>
-        )}
-      </div>
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-      >
-        Ask
-      </button>
-      {error && <span className="text-xs text-red-600 ml-1">{error}</span>}
-    </form>
+        <button
+          type="submit"
+          disabled={!isValidBriefText(text) || isSubmitting}
+          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40"
+        >
+          {isSubmitting ? '…' : 'Send'}
+        </button>
+      </form>
+
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+
+      {disambiguation && (
+        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p className="text-sm text-gray-700 mb-2">{disambiguation.question}</p>
+          <div className="flex flex-wrap gap-2">
+            {disambiguation.candidates.map((c) => (
+              <button
+                key={`${c.type}:${c.id}`}
+                onClick={() => handleCandidateSelect(c)}
+                disabled={isSubmitting}
+                className="px-3 py-1.5 text-sm rounded-md border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50 disabled:opacity-40"
+              >
+                {c.name}
+                <span className="ml-1.5 text-xs text-gray-400">
+                  ({c.type === 'org' ? 'org' : `subaccount${c.orgName ? ` — ${c.orgName}` : ''}`})
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

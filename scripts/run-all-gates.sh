@@ -67,6 +67,7 @@ run_gate "$SCRIPT_DIR/verify-input-validation.sh"
 
 # ── Sprint 1 (P0.1 + P0.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-pure-helper-convention.sh"
+run_gate "$SCRIPT_DIR/verify-test-quality.sh"
 run_gate "$SCRIPT_DIR/verify-idempotency-strategy-declared.sh"
 run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 
@@ -74,6 +75,7 @@ run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"
 run_gate "$SCRIPT_DIR/verify-rls-session-var-canon.sh"
+run_gate "$SCRIPT_DIR/verify-rls-protected-tables.sh"
 run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 
 # ── Sprint 3 (P2.1 + P2.2 + P2.3) gates from docs/improvements-roadmap-spec.md ──

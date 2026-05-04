@@ -6,27 +6,9 @@
  * docs/improvements-roadmap-spec.md.
  */
 
+import { expect, test } from 'vitest';
 import { assertScope, assertScopeSingle } from '../scopeAssertion.js';
 import { FailureError } from '../../../shared/iee/failure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertThrowsFailure(
   fn: () => unknown,
@@ -62,7 +44,7 @@ const SUB_Y = '11111111-1111-1111-1111-1111111111bb';
 // ── Happy paths ────────────────────────────────────────────────────
 test('empty array passes', () => {
   const out = assertScope([], { organisationId: ORG_A }, 'test.empty');
-  assert(Array.isArray(out) && out.length === 0, 'returned empty array');
+  expect(Array.isArray(out) && out.length === 0, 'returned empty array').toBeTruthy();
 });
 
 test('all items match org-only expectation', () => {
@@ -71,14 +53,14 @@ test('all items match org-only expectation', () => {
     { organisationId: ORG_A, name: 'two' },
   ];
   const out = assertScope(items, { organisationId: ORG_A }, 'test.orgOnly');
-  assert(out === items, 'returns the same array reference');
-  assert(out.length === 2, 'length preserved');
+  expect(out === items, 'returns the same array reference').toBeTruthy();
+  expect(out.length === 2, 'length preserved').toBeTruthy();
 });
 
 test('returns the same array reference (no copy)', () => {
   const items = [{ organisationId: ORG_A }];
   const out = assertScope(items, { organisationId: ORG_A }, 'test.refEq');
-  assert(out === items, 'same reference');
+  expect(out === items, 'same reference').toBeTruthy();
 });
 
 test('subaccount expectation (string) matches items', () => {
@@ -91,7 +73,7 @@ test('subaccount expectation (string) matches items', () => {
     { organisationId: ORG_A, subaccountId: SUB_X },
     'test.subaccountMatch',
   );
-  assert(out.length === 2, 'length preserved');
+  expect(out.length === 2, 'length preserved').toBeTruthy();
 });
 
 test('subaccount expectation null matches null items (org-level)', () => {
@@ -104,7 +86,7 @@ test('subaccount expectation null matches null items (org-level)', () => {
     { organisationId: ORG_A, subaccountId: null },
     'test.orgLevel',
   );
-  assert(out.length === 2, 'length preserved');
+  expect(out.length === 2, 'length preserved').toBeTruthy();
 });
 
 test('subaccount expectation undefined ignores item subaccount', () => {
@@ -114,7 +96,7 @@ test('subaccount expectation undefined ignores item subaccount', () => {
     { organisationId: ORG_A, subaccountId: null },
   ];
   const out = assertScope(items, { organisationId: ORG_A }, 'test.subaccountIgnored');
-  assert(out.length === 3, 'all items kept');
+  expect(out.length === 3, 'all items kept').toBeTruthy();
 });
 
 // ── Org mismatch ────────────────────────────────────────────────────
@@ -128,19 +110,10 @@ test('organisation mismatch throws scope_violation', () => {
     'scope_violation',
     'org mismatch',
   );
-  assert(err.failure.failureDetail.includes('test.orgLeak'), 'source appears in detail');
-  assert(
-    err.failure.failureDetail.includes('organisationId mismatch'),
-    'detail mentions orgId mismatch',
-  );
-  assert(
-    err.failure.metadata?.actual === ORG_B,
-    'metadata carries the leaked orgId',
-  );
-  assert(
-    err.failure.metadata?.expected === ORG_A,
-    'metadata carries the expected orgId',
-  );
+  expect(err.failure.failureDetail.includes('test.orgLeak'), 'source appears in detail').toBeTruthy();
+  expect(err.failure.failureDetail.includes('organisationId mismatch'), 'detail mentions orgId mismatch').toBeTruthy();
+  expect(err.failure.metadata?.actual === ORG_B, 'metadata carries the leaked orgId').toBeTruthy();
+  expect(err.failure.metadata?.expected === ORG_A, 'metadata carries the expected orgId').toBeTruthy();
 });
 
 // ── Subaccount mismatch ─────────────────────────────────────────────
@@ -154,10 +127,7 @@ test('subaccount mismatch throws scope_violation (string vs different string)', 
     'scope_violation',
     'subaccount mismatch',
   );
-  assert(
-    err.failure.failureDetail.includes('subaccountId mismatch'),
-    'detail mentions subaccount mismatch',
-  );
+  expect(err.failure.failureDetail.includes('subaccountId mismatch'), 'detail mentions subaccount mismatch').toBeTruthy();
 });
 
 test('subaccount expected null but item has a subaccount throws', () => {
@@ -214,18 +184,18 @@ test('non-object item throws internal_error', () => {
 // ── assertScopeSingle ───────────────────────────────────────────────
 test('assertScopeSingle returns null for null input', () => {
   const out = assertScopeSingle(null, { organisationId: ORG_A }, 'test.singleNull');
-  assert(out === null, 'null passthrough');
+  expect(out === null, 'null passthrough').toBeTruthy();
 });
 
 test('assertScopeSingle returns null for undefined input', () => {
   const out = assertScopeSingle(undefined, { organisationId: ORG_A }, 'test.singleUndef');
-  assert(out === null, 'undefined passthrough');
+  expect(out === null, 'undefined passthrough').toBeTruthy();
 });
 
 test('assertScopeSingle returns matching item', () => {
   const item = { organisationId: ORG_A, name: 'ok' };
   const out = assertScopeSingle(item, { organisationId: ORG_A }, 'test.singleMatch');
-  assert(out === item, 'returns the input item');
+  expect(out === item, 'returns the input item').toBeTruthy();
 });
 
 test('assertScopeSingle throws on mismatch', () => {
@@ -237,7 +207,4 @@ test('assertScopeSingle throws on mismatch', () => {
   );
 });
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-console.log('');
-if (failed > 0) process.exit(1);
+console.log('');console.log('');

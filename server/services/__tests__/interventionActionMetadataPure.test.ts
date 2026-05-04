@@ -6,29 +6,11 @@
  *   npx tsx server/services/__tests__/interventionActionMetadataPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   interventionActionMetadataSchema,
   validateInterventionActionMetadata,
 } from '../interventionActionMetadata.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 const validScenarioMeta = {
   triggerTemplateSlug: 'check_in',
@@ -55,12 +37,12 @@ const validOperatorMeta = {
 
 test('scenario_detector meta validates', () => {
   const out = validateInterventionActionMetadata(validScenarioMeta);
-  assert(out.recommendedBy === 'scenario_detector', 'recommendedBy preserved');
+  expect(out.recommendedBy === 'scenario_detector', 'recommendedBy preserved').toBeTruthy();
 });
 
 test('operator_manual meta validates', () => {
   const out = validateInterventionActionMetadata(validOperatorMeta);
-  assert(out.recommendedBy === 'operator_manual', 'recommendedBy preserved');
+  expect(out.recommendedBy === 'operator_manual', 'recommendedBy preserved').toBeTruthy();
 });
 
 // ── superRefine: scenario_detector requires churnAssessmentId ─────────────
@@ -75,9 +57,9 @@ test('scenario_detector without churnAssessmentId rejected', () => {
   } catch (err) {
     threw = true;
     const e = err as { errorCode?: string };
-    assert(e.errorCode === 'INVALID_METADATA', 'errorCode');
+    expect(e.errorCode === 'INVALID_METADATA', 'errorCode').toBeTruthy();
   }
-  assert(threw, 'expected throw');
+  expect(threw, 'expected throw').toBeTruthy();
 });
 
 // ── superRefine: operator_manual requires operatorRationale ──────────────
@@ -92,7 +74,7 @@ test('operator_manual without operatorRationale rejected', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'expected throw');
+  expect(threw, 'expected throw').toBeTruthy();
 });
 
 // ── Band enum ─────────────────────────────────────────────────────────────
@@ -107,7 +89,7 @@ test('invalid band rejected', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'invalid band should throw');
+  expect(threw, 'invalid band should throw').toBeTruthy();
 });
 
 test('all four valid bands accepted', () => {
@@ -116,7 +98,7 @@ test('all four valid bands accepted', () => {
       ...validScenarioMeta,
       bandAtProposal: band,
     });
-    assert(out.bandAtProposal === band, `band=${band}`);
+    expect(out.bandAtProposal === band, `band=${band}`).toBeTruthy();
   }
 });
 
@@ -132,7 +114,7 @@ test('healthScoreAtProposal out of range rejected', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'score > 100 should throw');
+  expect(threw, 'score > 100 should throw').toBeTruthy();
 });
 
 test('healthScoreAtProposal null accepted', () => {
@@ -140,7 +122,7 @@ test('healthScoreAtProposal null accepted', () => {
     ...validScenarioMeta,
     healthScoreAtProposal: null,
   });
-  assert(out.healthScoreAtProposal === null, 'null preserved');
+  expect(out.healthScoreAtProposal === null, 'null preserved').toBeTruthy();
 });
 
 // ── Unknown recommendedBy ────────────────────────────────────────────────
@@ -155,14 +137,10 @@ test('unknown recommendedBy rejected', () => {
   } catch {
     threw = true;
   }
-  assert(threw, 'unknown recommendedBy should throw');
+  expect(threw, 'unknown recommendedBy should throw').toBeTruthy();
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
-
 // Keep the schema export in use — prevents unused-import warnings if the
 // caller-side tests are ever removed.
 void interventionActionMetadataSchema;

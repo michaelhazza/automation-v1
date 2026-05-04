@@ -2,13 +2,16 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
+import { getConversationCost } from '../services/conversationCostService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateMultipart, validateBody } from '../middleware/validate.js';
 import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 
 const router = Router();
@@ -84,13 +87,36 @@ router.post('/api/agents/:id/data-sources/upload', authenticate, requireOrgPermi
 }));
 
 router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(createDataSourceBody, 'warn'), asyncHandler(async (req, res) => {
-  const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes } = req.body;
-  if (!name || !sourceType || !sourcePath) {
-    res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+  const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, connectionId } = req.body;
+  if (!name || !sourceType) {
+    res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });
+    return;
+  }
+  if (sourceType === 'google_drive') {
+    if (!connectionId) {
+      res.status(400).json({ error: 'Validation failed', details: 'connectionId is required for google_drive sources' });
+      return;
+    }
+    const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
+    // Spec §5.3 — Drive connections are subaccount-scoped (also accept org-level rows).
+    const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
+    if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
+      res.status(422).json({ error: 'invalid_connection_id' });
+      return;
+    }
+    // Subaccount scope guard — this is an org-level route (no subaccount in URL).
+    // Only org-level connections (subaccountId = null) may be attached here;
+    // subaccount-scoped connections cannot be validated without a subaccount context.
+    if (conn.subaccountId) {
+      res.status(422).json({ error: 'invalid_connection_id' });
+      return;
+    }
+  } else if (!sourcePath) {
+    res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
     return;
   }
   const result = await agentService.addDataSource(req.params.id, req.orgId!, {
-    name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes,
+    name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, connectionId,
   });
   res.status(201).json(result);
 }));
@@ -164,11 +190,17 @@ router.post('/api/agents/:id/test-run',
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    checkTestRunRateLimit(req.user!.id);
-    const { prompt, inputJson, idempotencyKey } = req.body as {
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+      res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
+      return;
+    }
+    const { prompt, inputJson, idempotencyKey, conversationId: fromConvId } = req.body as {
       prompt?: string;
       inputJson?: Record<string, unknown>;
       idempotencyKey?: string;
+      conversationId?: string;
     };
 
     // Resolve the org subaccount and the agent link within it.
@@ -208,10 +240,23 @@ router.post('/api/agents/:id/test-run',
       triggerContext,
       idempotencyKey: currentKey,
       idempotencyCandidateKeys: [currentKey, previousKey],
+      conversationId: fromConvId,  // optional; enables integration card messages in the conversation
     });
     res.status(201).json(result);
   })
 );
+
+// ── Conversation cost meter ────────────────────────────────────────────────
+
+router.get('/api/agents/:id/conversations/:convId/cost', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT), asyncHandler(async (req, res) => {
+  const result = await getConversationCost({
+    conversationId: req.params.convId,
+    agentId: req.params.id,
+    userId: req.user!.id,
+    organisationId: req.orgId!,
+  });
+  res.json(result);
+}));
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
@@ -230,6 +275,22 @@ router.post('/api/agents/:id/conversations/:convId/messages', authenticate, requ
     attachments,
   });
   res.json(result);
+}));
+
+// ── Slack channel count ────────────────────────────────────────────────────
+
+router.get('/api/agents/:id/slack-channel-count', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+  const { db } = await import('../db/index.js');
+  const { slackConversations } = await import('../db/schema/index.js');
+  const { sql, eq, and } = await import('drizzle-orm');
+  const [row] = await db
+    .select({ count: sql<number>`COUNT(DISTINCT ${slackConversations.channelId})` })
+    .from(slackConversations)
+    .where(and(
+      eq(slackConversations.agentId, req.params.id),
+      eq(slackConversations.organisationId, req.orgId!),
+    ));
+  res.json({ count: Number(row?.count ?? 0) });
 }));
 
 export default router;

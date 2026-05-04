@@ -85,7 +85,7 @@ export const FALLBACK_WARN_CODES = {
 export type WarnSink = (code: string, context: Record<string, unknown>) => void;
 
 const defaultWarnSink: WarnSink = (code, ctx) => {
-  // eslint-disable-next-line no-console
+   
   console.warn(`[eventRowPure] ${code}`, ctx);
 };
 

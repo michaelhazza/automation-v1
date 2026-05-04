@@ -2,18 +2,22 @@ import type { PulseItem } from '../../hooks/usePulseAttention';
 
 // ── Lane config ────────────────────────────────────────────────────────────────
 
-interface LaneConfig {
+export interface LaneConfig {
   badgeText: string;
   dotClass: string;
 }
 
-const LANE_CONFIG: Record<string, LaneConfig> = {
+export const LANE_CONFIG: Record<string, LaneConfig> = {
   client: { badgeText: 'ClientPulse', dotClass: 'bg-rose-700' },
   major: { badgeText: 'Config change', dotClass: 'bg-amber-500' },
   internal: { badgeText: 'Agent clarification', dotClass: 'bg-slate-500' },
+  spend: { badgeText: 'Spend', dotClass: 'bg-emerald-600' },
 };
 
-function getLaneConfig(lane: string): LaneConfig {
+// Exported so the unknown-lane fallback can be unit-tested. Any new lane
+// added to the system without a matching entry here falls back to the raw
+// lane string + a neutral slate dot, rather than crashing or rendering blank.
+export function getLaneConfig(lane: string): LaneConfig {
   return LANE_CONFIG[lane] ?? { badgeText: lane, dotClass: 'bg-slate-300' };
 }
 

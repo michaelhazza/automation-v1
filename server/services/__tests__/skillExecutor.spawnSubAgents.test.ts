@@ -7,27 +7,13 @@
  *   npx tsx server/services/__tests__/skillExecutor.spawnSubAgents.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   classifySpawnTargets,
   resolveWriteSkillScope,
   evaluateSpawnPreconditions,
 } from '../skillExecutorDelegationPure.js';
 import type { HierarchyContext } from '../../../shared/types/delegation.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -70,8 +56,8 @@ test('all targets in children scope → all accepted', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result.accepted, ['sa-child-1', 'sa-child-2'], 'accepted');
-  assertEqual(result.rejected, [], 'rejected');
+  expect(result.accepted, 'accepted').toEqual(['sa-child-1', 'sa-child-2']);
+  expect(result.rejected, 'rejected').toEqual([]);
 });
 
 test('one out-of-scope target in children scope → rejected list contains it', () => {
@@ -81,8 +67,8 @@ test('one out-of-scope target in children scope → rejected list contains it', 
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result.accepted, ['sa-child-1'], 'accepted');
-  assertEqual(result.rejected, ['sa-outsider'], 'rejected');
+  expect(result.accepted, 'accepted').toEqual(['sa-child-1']);
+  expect(result.rejected, 'rejected').toEqual(['sa-outsider']);
 });
 
 test('descendants scope includes grandchildren', () => {
@@ -92,8 +78,8 @@ test('descendants scope includes grandchildren', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result.accepted, ['sa-child-1', 'sa-grandchild-1'], 'accepted');
-  assertEqual(result.rejected, [], 'rejected');
+  expect(result.accepted, 'accepted').toEqual(['sa-child-1', 'sa-grandchild-1']);
+  expect(result.rejected, 'rejected').toEqual([]);
 });
 
 test('all accepted when scope=descendants and all are descendants', () => {
@@ -103,8 +89,8 @@ test('all accepted when scope=descendants and all are descendants', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result.accepted, ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'], 'accepted');
-  assertEqual(result.rejected, [], 'rejected');
+  expect(result.accepted, 'accepted').toEqual(['sa-child-1', 'sa-child-2', 'sa-grandchild-1']);
+  expect(result.rejected, 'rejected').toEqual([]);
 });
 
 test('grandchild rejected in children scope (not a direct child)', () => {
@@ -114,8 +100,8 @@ test('grandchild rejected in children scope (not a direct child)', () => {
     childIds: ['sa-child-1', 'sa-child-2'],
     descendantIds: ['sa-child-1', 'sa-child-2', 'sa-grandchild-1'],
   });
-  assertEqual(result.accepted, [], 'accepted');
-  assertEqual(result.rejected, ['sa-grandchild-1'], 'rejected');
+  expect(result.accepted, 'accepted').toEqual([]);
+  expect(result.rejected, 'rejected').toEqual(['sa-grandchild-1']);
 });
 
 // ---------------------------------------------------------------------------
@@ -131,7 +117,7 @@ test('explicit "children" override when hierarchy has no children → returns "c
     rawScope: 'children',
     hierarchy: hierarchyNoChildren,
   });
-  assertEqual(result, 'children', 'scope');
+  expect(result, 'scope').toBe('children');
 });
 
 test('adaptive default with children → "children"', () => {
@@ -139,7 +125,7 @@ test('adaptive default with children → "children"', () => {
     rawScope: undefined,
     hierarchy: baseHierarchy,
   });
-  assertEqual(result, 'children', 'scope');
+  expect(result, 'scope').toBe('children');
 });
 
 test('adaptive default without children → "subaccount"', () => {
@@ -147,7 +133,7 @@ test('adaptive default without children → "subaccount"', () => {
     rawScope: undefined,
     hierarchy: hierarchyNoChildren,
   });
-  assertEqual(result, 'subaccount', 'scope');
+  expect(result, 'scope').toBe('subaccount');
 });
 
 test('explicit "descendants" → "descendants"', () => {
@@ -155,7 +141,7 @@ test('explicit "descendants" → "descendants"', () => {
     rawScope: 'descendants',
     hierarchy: baseHierarchy,
   });
-  assertEqual(result, 'descendants', 'scope');
+  expect(result, 'scope').toBe('descendants');
 });
 
 test('explicit "subaccount" → "subaccount"', () => {
@@ -163,7 +149,7 @@ test('explicit "subaccount" → "subaccount"', () => {
     rawScope: 'subaccount',
     hierarchy: baseHierarchy,
   });
-  assertEqual(result, 'subaccount', 'scope');
+  expect(result, 'scope').toBe('subaccount');
 });
 
 test('null rawScope adaptive with children → "children"', () => {
@@ -171,7 +157,7 @@ test('null rawScope adaptive with children → "children"', () => {
     rawScope: null,
     hierarchy: baseHierarchy,
   });
-  assertEqual(result, 'children', 'scope');
+  expect(result, 'scope').toBe('children');
 });
 
 test('unknown string rawScope falls through to adaptive default', () => {
@@ -179,7 +165,7 @@ test('unknown string rawScope falls through to adaptive default', () => {
     rawScope: 'bogus',
     hierarchy: hierarchyNoChildren,
   });
-  assertEqual(result, 'subaccount', 'scope');
+  expect(result, 'scope').toBe('subaccount');
 });
 
 // ---------------------------------------------------------------------------
@@ -205,7 +191,7 @@ test('hierarchy missing → hierarchy_context_missing', () => {
     maxHandoffDepth: 5,
     effectiveScope: 'children',
   });
-  assertEqual(result, { ok: false, errorCode: 'hierarchy_context_missing' }, 'result');
+  expect(result, 'result').toEqual({ ok: false, errorCode: 'hierarchy_context_missing' });
 });
 
 test('depth at limit → max_handoff_depth_exceeded', () => {
@@ -215,7 +201,7 @@ test('depth at limit → max_handoff_depth_exceeded', () => {
     maxHandoffDepth: 5,
     effectiveScope: 'children',
   });
-  assertEqual(result, { ok: false, errorCode: 'max_handoff_depth_exceeded' }, 'result');
+  expect(result, 'result').toEqual({ ok: false, errorCode: 'max_handoff_depth_exceeded' });
 });
 
 test('depth below limit → ok', () => {
@@ -225,7 +211,7 @@ test('depth below limit → ok', () => {
     maxHandoffDepth: 5,
     effectiveScope: 'children',
   });
-  assertEqual(result, { ok: true, effectiveScope: 'children' }, 'result');
+  expect(result, 'result').toEqual({ ok: true, effectiveScope: 'children' });
 });
 
 test('subaccount scope → cross_subtree_not_permitted', () => {
@@ -235,7 +221,7 @@ test('subaccount scope → cross_subtree_not_permitted', () => {
     maxHandoffDepth: 5,
     effectiveScope: 'subaccount',
   });
-  assertEqual(result, { ok: false, errorCode: 'cross_subtree_not_permitted' }, 'result');
+  expect(result, 'result').toEqual({ ok: false, errorCode: 'cross_subtree_not_permitted' });
 });
 
 test('adaptive default for leaf caller (no children) resolves subaccount → evaluateSpawnPreconditions rejects', () => {
@@ -248,7 +234,7 @@ test('adaptive default for leaf caller (no children) resolves subaccount → eva
     depth: 0,
   };
   const resolved = resolveWriteSkillScope({ rawScope: undefined, hierarchy: leafHierarchy });
-  assertEqual(resolved, 'subaccount', 'resolved scope');
+  expect(resolved, 'resolved scope').toBe('subaccount');
 
   // Then evaluateSpawnPreconditions must reject that resolved scope
   const result = evaluateSpawnPreconditions({
@@ -257,7 +243,7 @@ test('adaptive default for leaf caller (no children) resolves subaccount → eva
     maxHandoffDepth: 5,
     effectiveScope: resolved,
   });
-  assertEqual(result, { ok: false, errorCode: 'cross_subtree_not_permitted' }, 'precondition result');
+  expect(result, 'precondition result').toEqual({ ok: false, errorCode: 'cross_subtree_not_permitted' });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,7 +258,6 @@ test('INV-3 swallow-regression: void fire-and-forget pattern does not propagate 
   // Documents the call-site pattern: void <asyncFn>() means even if the fn throws/rejects,
   // the caller is unaffected. This guards against accidentally adding `await` to outcome writes
   // or removing the `void` keyword.
-  let afterWriteReached = false;
   const failingWrite = async (): Promise<void> => {
     throw new Error('simulated delegation_outcome_write_failed');
   };
@@ -281,8 +266,8 @@ test('INV-3 swallow-regression: void fire-and-forget pattern does not propagate 
   // the critical assertion is that afterWriteReached is set synchronously before the
   // promise settles, proving that void does not suspend the caller.
   void failingWrite().catch(() => {});
-  afterWriteReached = true;
-  assertEqual(afterWriteReached, true, 'code after void call must execute regardless of outcome write failure');
+  const afterWriteReached = true;
+  expect(afterWriteReached, 'code after void call must execute regardless of outcome write failure').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -290,7 +275,4 @@ test('INV-3 swallow-regression: void fire-and-forget pattern does not propagate 
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log('');
-
-if (failed > 0) process.exit(1);

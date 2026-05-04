@@ -12,27 +12,9 @@
  * tool error and the run continues.
  */
 
+import { expect, test } from 'vitest';
 import { executeWithRetry } from '../errorHandling.js';
 import { FailureError, failure, isFailureError } from '../../../../shared/iee/failure.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 async function main() {
   console.log('executeWithRetry — FailureError propagation');
@@ -48,9 +30,9 @@ async function main() {
     } catch (err) {
       caught = err;
     }
-    assert(caught !== undefined, 'executeWithRetry should have thrown');
-    assert(isFailureError(caught), 'caught error should still be a FailureError');
-    assert(caught === fe, 'should be the exact same FailureError instance');
+    expect(caught !== undefined, 'executeWithRetry should have thrown').toBeTruthy();
+    expect(isFailureError(caught), 'caught error should still be a FailureError').toBeTruthy();
+    expect(caught === fe, 'should be the exact same FailureError instance').toBeTruthy();
   });
 
   await test('ordinary (non-fail_run) FailureError is classified, not re-thrown', async () => {
@@ -59,7 +41,7 @@ async function main() {
     // should go through classifyError and return as { error } for the LLM.
     const fe = new FailureError(failure('auth_failure', 'slack_not_configured', { toolSlug: 'send_to_slack' }));
     const result = await executeWithRetry(async () => { throw fe; }, { delayMs: 0 });
-    assert('error' in result, 'ordinary FailureError should be classified, not thrown');
+    expect('error' in result, 'ordinary FailureError should be classified, not thrown').toBeTruthy();
   });
 
   await test('FailureError propagates on first attempt without retry delay', async () => {
@@ -73,9 +55,9 @@ async function main() {
       caught = err;
     }
     const elapsed = Date.now() - start;
-    assert(isFailureError(caught), 'should propagate as FailureError');
-    assert(attempts === 1, `should not retry — got ${attempts} attempts`);
-    assert(elapsed < 1000, `should not wait for retry delay — took ${elapsed}ms`);
+    expect(isFailureError(caught), 'should propagate as FailureError').toBeTruthy();
+    expect(attempts === 1, `should not retry — got ${attempts} attempts`).toBeTruthy();
+    expect(elapsed < 1000, `should not wait for retry delay — took ${elapsed}ms`).toBeTruthy();
   });
 
   await test('non-FailureError still goes through classify + retry path', async () => {
@@ -84,15 +66,11 @@ async function main() {
       async () => { attempts++; throw new Error('boom'); },
       { delayMs: 0 },
     );
-    assert('error' in result, 'plain Error should be classified, not thrown');
-    assert(attempts >= 1, 'handler should have been called');
+    expect('error' in result, 'plain Error should be classified, not thrown').toBeTruthy();
+    expect(attempts >= 1, 'handler should have been called').toBeTruthy();
   });
-
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
 }
 
 main().catch((err) => {
   console.error(err);
-  process.exit(1);
 });

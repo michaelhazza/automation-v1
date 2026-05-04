@@ -76,8 +76,8 @@ export default function FireAutomationEditor({ subaccountId, onCancel, onSubmit 
             <button
               key={opt}
               onClick={() => setSchedule(opt)}
-              className={`px-3 py-1.5 rounded-md text-[12px] font-semibold border ${
-                schedule === opt ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+              className={`btn btn-sm ${
+                schedule === opt ? 'btn-primary' : 'btn-secondary'
               }`}
             >
               {opt === 'immediate' ? 'Immediately on approval' : opt === 'delay_24h' ? 'Delay 24h' : 'Scheduled'}
@@ -96,7 +96,7 @@ export default function FireAutomationEditor({ subaccountId, onCancel, onSubmit 
         />
       </div>
       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-        <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-[12px] font-semibold text-slate-600 hover:bg-slate-100">Back</button>
+        <button onClick={onCancel} className="btn btn-sm btn-ghost">Back</button>
         <button
           disabled={!canSubmit}
           onClick={async () => {
@@ -104,7 +104,7 @@ export default function FireAutomationEditor({ subaccountId, onCancel, onSubmit 
             onSubmit({ automationId: automationId.trim(), contactId: contactId.trim() }, rationale.trim(), { scheduleHint: schedule });
             setSubmitting(false);
           }}
-          className="px-4 py-1.5 rounded-md text-[12px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-300"
+          className="btn btn-sm btn-primary disabled:bg-slate-300"
         >
           Queue for review
         </button>

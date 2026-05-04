@@ -3,6 +3,7 @@
  * Runnable via: npx tsx server/services/__tests__/skillAnalyzerServicePureV6.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   classifyDemotedFields,
   parseDemotedFieldStatuses,
@@ -14,25 +15,6 @@ import {
 } from '../skillAnalyzerServicePure.js';
 import type { MergeWarning } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -350,12 +332,12 @@ test('validateMergeOutput: marks TABLE_ROWS_DROPPED as restructured when data is
   );
 
   const tableDrop = warnings.find(w => w.code === 'TABLE_ROWS_DROPPED');
-  assert(tableDrop !== undefined, 'should emit a TABLE_ROWS_DROPPED warning');
-  assert(/restructured/i.test(tableDrop!.message), 'message should mention restructured');
+  expect(tableDrop !== undefined, 'should emit a TABLE_ROWS_DROPPED warning').toBeTruthy();
+  expect(/restructured/i.test(tableDrop!.message), 'message should mention restructured').toBeTruthy();
   if (tableDrop!.detail) {
     try {
       const parsed = JSON.parse(tableDrop!.detail) as { restructured?: boolean };
-      assert(parsed.restructured === true, 'detail.restructured should be true');
+      expect(parsed.restructured === true, 'detail.restructured should be true').toBeTruthy();
     } catch {
       throw new Error('detail should parse as JSON when restructured');
     }
@@ -399,8 +381,8 @@ This skill handles customer support tickets and routes them to agents based on u
   );
 
   const tableDrop = warnings.find(w => w.code === 'TABLE_ROWS_DROPPED');
-  assert(tableDrop !== undefined, 'should emit a TABLE_ROWS_DROPPED warning');
-  assert(!/restructured/i.test(tableDrop!.message), 'message should NOT mention restructured');
+  expect(tableDrop !== undefined, 'should emit a TABLE_ROWS_DROPPED warning').toBeTruthy();
+  expect(!/restructured/i.test(tableDrop!.message), 'message should NOT mention restructured').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -434,8 +416,8 @@ test('system prompt includes Rule 6 (artifact-type divergence)', () => {
     SAMPLE_LIBRARY,
     'ambiguous',
   );
-  assert(/Artifact-type divergence/i.test(system), 'Rule 6 missing from system prompt');
-  assert(/prefer DISTINCT/i.test(system), 'Rule 6 should direct toward DISTINCT');
+  expect(/Artifact-type divergence/i.test(system), 'Rule 6 missing from system prompt').toBeTruthy();
+  expect(/prefer DISTINCT/i.test(system), 'Rule 6 should direct toward DISTINCT').toBeTruthy();
 });
 
 test('system prompt includes Rule 7 (author cross-reference)', () => {
@@ -444,7 +426,7 @@ test('system prompt includes Rule 7 (author cross-reference)', () => {
     SAMPLE_LIBRARY,
     'ambiguous',
   );
-  assert(/Author cross-reference is intent/i.test(system), 'Rule 7 missing from system prompt');
+  expect(/Author cross-reference is intent/i.test(system), 'Rule 7 missing from system prompt').toBeTruthy();
 });
 
 test('system prompt includes Example 5 (DISTINCT despite vocabulary overlap)', () => {
@@ -453,7 +435,7 @@ test('system prompt includes Example 5 (DISTINCT despite vocabulary overlap)', (
     SAMPLE_LIBRARY,
     'ambiguous',
   );
-  assert(/Example 5: DISTINCT despite high vocabulary overlap/i.test(system), 'Example 5 missing');
+  expect(/Example 5: DISTINCT despite high vocabulary overlap/i.test(system), 'Example 5 missing').toBeTruthy();
 });
 
 test('buildClassifyPromptWithMerge: appends cross-ref hint when description references library by name', () => {
@@ -461,9 +443,9 @@ test('buildClassifyPromptWithMerge: appends cross-ref hint when description refe
     'Strategy for free interactive tools. For downloadable content lead magnets, see Create Lead Magnet.',
   );
   const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
-  assert(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing');
-  assert(/Create Lead Magnet/.test(userMessage), 'library name should appear in hint');
-  assert(/strongly prefer DISTINCT/i.test(userMessage), 'hint should push toward DISTINCT');
+  expect(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing').toBeTruthy();
+  expect(/Create Lead Magnet/.test(userMessage), 'library name should appear in hint').toBeTruthy();
+  expect(/strongly prefer DISTINCT/i.test(userMessage), 'hint should push toward DISTINCT').toBeTruthy();
 });
 
 test('buildClassifyPromptWithMerge: appends cross-ref hint when description references library by slug (hyphenated)', () => {
@@ -473,19 +455,19 @@ test('buildClassifyPromptWithMerge: appends cross-ref hint when description refe
     'Free-tool playbook. For ebook/checklist work, use create-lead-magnet.',
   );
   const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
-  assert(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing for slug match');
+  expect(/Author-intent signal/i.test(userMessage), 'cross-ref hint missing for slug match').toBeTruthy();
 });
 
 test('buildClassifyPromptWithMerge: NO cross-ref hint when description does not reference the library', () => {
   const candidate = makeCandidate('Strategy for free interactive tools as growth levers.');
   const { userMessage } = buildClassifyPromptWithMerge(candidate, SAMPLE_LIBRARY, 'ambiguous');
-  assert(!/Author-intent signal/i.test(userMessage), 'should not surface hint without cross-ref');
+  expect(!/Author-intent signal/i.test(userMessage), 'should not surface hint without cross-ref').toBeTruthy();
 });
 
 test('buildClassificationPrompt (legacy path) also surfaces cross-ref hint', () => {
   const candidate = makeCandidate('For downloadable content lead magnets, see Create Lead Magnet.');
   const { userMessage } = buildClassificationPrompt(candidate, SAMPLE_LIBRARY, 'ambiguous');
-  assert(/Author-intent signal/i.test(userMessage), 'legacy path should mirror the hint');
+  expect(/Author-intent signal/i.test(userMessage), 'legacy path should mirror the hint').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -498,8 +480,8 @@ test('system prompt includes Rule 6a (superset-by-union anti-pattern)', () => {
     SAMPLE_LIBRARY,
     'ambiguous',
   );
-  assert(/superset-by-union/i.test(system), 'Rule 6a missing — should mention superset-by-union');
-  assert(/discriminator enum/i.test(system), 'Rule 6a should warn about discriminator enums');
+  expect(/superset-by-union/i.test(system), 'Rule 6a missing — should mention superset-by-union').toBeTruthy();
+  expect(/discriminator enum/i.test(system), 'Rule 6a should warn about discriminator enums').toBeTruthy();
 });
 
 test('system prompt includes Examples 7 + 8 for Rule 6a', () => {
@@ -508,58 +490,56 @@ test('system prompt includes Examples 7 + 8 for Rule 6a', () => {
     SAMPLE_LIBRARY,
     'ambiguous',
   );
-  assert(/Example 7: DISTINCT — superset-by-union anti-pattern/i.test(system), 'Example 7 missing');
-  assert(/Example 8: DISTINCT — superset-by-union with task enum/i.test(system), 'Example 8 missing');
+  expect(/Example 7: DISTINCT — superset-by-union anti-pattern/i.test(system), 'Example 7 missing').toBeTruthy();
+  expect(/Example 8: DISTINCT — superset-by-union with task enum/i.test(system), 'Example 8 missing').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches "neither fully replaces the other"', () => {
-  assert(rationaleArguesAgainstMerge('Both skills overlap. Neither fully replaces the other.'), 'should fire');
-  assert(rationaleArguesAgainstMerge('Neither skill replaces the other.'), 'variant should fire');
+  expect(rationaleArguesAgainstMerge('Both skills overlap. Neither fully replaces the other.'), 'should fire').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('Neither skill replaces the other.'), 'variant should fire').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches "produce different artifacts" variants', () => {
-  assert(rationaleArguesAgainstMerge('They produce different artifacts.'), 'plain form');
-  assert(rationaleArguesAgainstMerge('They produce different artifact types.'), 'with adjective');
-  assert(rationaleArguesAgainstMerge('Generate distinct outputs.'), 'distinct outputs variant');
-  assert(rationaleArguesAgainstMerge('Returns different deliverables.'), 'returns variant');
+  expect(rationaleArguesAgainstMerge('They produce different artifacts.'), 'plain form').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('They produce different artifact types.'), 'with adjective').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('Generate distinct outputs.'), 'distinct outputs variant').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('Returns different deliverables.'), 'returns variant').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches "fundamentally different (artifact|workflow|...)"', () => {
-  assert(rationaleArguesAgainstMerge('They have fundamentally different purposes.'), 'purposes');
-  assert(rationaleArguesAgainstMerge('Fundamentally different artifacts produced.'), 'artifacts');
-  assert(rationaleArguesAgainstMerge('fundamentally different workflows'), 'workflows');
-  assert(rationaleArguesAgainstMerge('completely different artifact types'), 'completely different');
+  expect(rationaleArguesAgainstMerge('They have fundamentally different purposes.'), 'purposes').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('Fundamentally different artifacts produced.'), 'artifacts').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('fundamentally different workflows'), 'workflows').toBeTruthy();
+  expect(rationaleArguesAgainstMerge('completely different artifact types'), 'completely different').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches "differ significantly in scope and artifact type"', () => {
   // From actual cold-email rationale verbatim.
   const real = 'They differ significantly in scope and artifact type. The existing skill is a tool.';
-  assert(rationaleArguesAgainstMerge(real), 'real rationale should fire');
+  expect(rationaleArguesAgainstMerge(real), 'real rationale should fire').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: does NOT fire on benign rationales', () => {
-  assert(!rationaleArguesAgainstMerge('Both skills produce ad copy variants for similar platforms.'), 'similar topic');
-  assert(!rationaleArguesAgainstMerge('The merge combines both into one cleaner output.'), 'merge-positive');
-  assert(!rationaleArguesAgainstMerge('They are different skills serving similar purposes.'), 'different/similar');
-  assert(!rationaleArguesAgainstMerge('Slightly different approaches.'), 'too generic to fire');
-  assert(!rationaleArguesAgainstMerge(null), 'null safe');
-  assert(!rationaleArguesAgainstMerge(''), 'empty safe');
-  assert(!rationaleArguesAgainstMerge(undefined), 'undefined safe');
+  expect(!rationaleArguesAgainstMerge('Both skills produce ad copy variants for similar platforms.'), 'similar topic').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge('The merge combines both into one cleaner output.'), 'merge-positive').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge('They are different skills serving similar purposes.'), 'different/similar').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge('Slightly different approaches.'), 'too generic to fire').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge(null), 'null safe').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge(''), 'empty safe').toBeTruthy();
+  expect(!rationaleArguesAgainstMerge(undefined), 'undefined safe').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches the actual v7-A email-sequence rationale', () => {
   // Pulled verbatim from DB (job_id of the v7-A run).
   const real = "produces strategy documents and full copy frameworks rather than a parameterized draft for a specific contact. Neither fully replaces the other";
-  assert(rationaleArguesAgainstMerge(real), 'real email-sequence rationale should fire');
+  expect(rationaleArguesAgainstMerge(real), 'real email-sequence rationale should fire').toBeTruthy();
 });
 
 test('rationaleArguesAgainstMerge: catches the actual v7-A cold-email rationale', () => {
   const real = "they differ significantly in scope and artifact type. The existing skill (draft_sequence) is a structured tool";
-  assert(rationaleArguesAgainstMerge(real), 'real cold-email rationale should fire');
+  expect(rationaleArguesAgainstMerge(real), 'real cold-email rationale should fire').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

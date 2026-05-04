@@ -12,13 +12,15 @@
  * Runnable via:
  *   npx tsx server/services/__tests__/onboardingStateServicePure.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
 // onboardingStateService transitively pulls in server/lib/env.ts which validates
 // required env vars via zod. Seed placeholders before any dynamic import so the
 // zod parse does not throw. This test is purely structural — it never touches the
 // DB, signs a JWT, or sends email.
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
@@ -33,35 +35,8 @@ const {
 // Lightweight test runner (matches project tsx convention)
 // ---------------------------------------------------------------------------
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function syncTest(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string): void {
-  if (!condition) throw new Error(label);
+  test(name, fn);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
@@ -154,27 +129,27 @@ console.log('onboardingStateServicePure — mapRunStatusToOnboardingStatus');
 console.log('');
 
 syncTest('completed maps to completed', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('completed'), 'completed', 'completed');
+  expect(mapRunStatusToOnboardingStatus('completed'), 'completed').toBe('completed');
 });
 
 syncTest('completed_with_errors maps to completed', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('completed_with_errors'), 'completed', 'completed_with_errors');
+  expect(mapRunStatusToOnboardingStatus('completed_with_errors'), 'completed_with_errors').toBe('completed');
 });
 
 syncTest('failed maps to failed', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('failed'), 'failed', 'failed');
+  expect(mapRunStatusToOnboardingStatus('failed'), 'failed').toBe('failed');
 });
 
 syncTest('cancelled maps to failed', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('cancelled'), 'failed', 'cancelled');
+  expect(mapRunStatusToOnboardingStatus('cancelled'), 'cancelled').toBe('failed');
 });
 
 syncTest('running maps to in_progress', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('running'), 'in_progress', 'running');
+  expect(mapRunStatusToOnboardingStatus('running'), 'running').toBe('in_progress');
 });
 
 syncTest('pending maps to in_progress', () => {
-  assertEqual(mapRunStatusToOnboardingStatus('pending'), 'in_progress', 'pending');
+  expect(mapRunStatusToOnboardingStatus('pending'), 'pending').toBe('in_progress');
 });
 
 // ---------------------------------------------------------------------------
@@ -185,49 +160,49 @@ console.log('');
 console.log('onboardingStateServicePure — upsertSubaccountOnboardingState');
 console.log('');
 
-await test('uses org-scoped tx (insert called) for a valid onboarding run', async () => {
+test('uses org-scoped tx (insert called) for a valid onboarding run', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams()),
   );
-  assert(tx.calls.length >= 1, 'expected at least one insert call on the fake tx');
-  assertEqual(tx.calls[0].method, 'insert', 'first call should be insert');
+  expect(tx.calls.length >= 1, 'expected at least one insert call on the fake tx').toBeTruthy();
+  expect(tx.calls[0].method, 'first call should be insert').toBe('insert');
 });
 
-await test('returns early (no tx call) when isOnboardingRun is false', async () => {
+test('returns early (no tx call) when isOnboardingRun is false', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ isOnboardingRun: false })),
   );
-  assertEqual(tx.calls.length, 0, 'no db call expected when not an onboarding run');
+  expect(tx.calls.length, 'no db call expected when not an onboarding run').toBe(0);
 });
 
-await test('returns early (no tx call) when workflowSlug is null', async () => {
+test('returns early (no tx call) when workflowSlug is null', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ workflowSlug: null })),
   );
-  assertEqual(tx.calls.length, 0, 'no db call expected when workflowSlug is null');
+  expect(tx.calls.length, 'no db call expected when workflowSlug is null').toBe(0);
 });
 
-await test('returns early (no tx call) when subaccountId is null', async () => {
+test('returns early (no tx call) when subaccountId is null', async () => {
   const tx = makeFakeTx();
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams({ subaccountId: null })),
   );
-  assertEqual(tx.calls.length, 0, 'no db call expected when subaccountId is null');
+  expect(tx.calls.length, 'no db call expected when subaccountId is null').toBe(0);
 });
 
-await test('swallows db errors and resolves (bookkeeping must not block execution)', async () => {
+test('swallows db errors and resolves (bookkeeping must not block execution)', async () => {
   const tx = makeFakeTx({ shouldThrow: true });
   // Should not throw — failures are logged and swallowed
   await withFakeTx(tx, () =>
     upsertSubaccountOnboardingState(makeParams()),
   );
-  assert(true, 'no exception propagated');
+  expect(true, 'no exception propagated').toBeTruthy();
 });
 
-await test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
+test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
   // Contract: onboarding-state persistence is bookkeeping — when callers reach
   // the service without an active org-scoped tx, getOrgScopedDb throws
   // missing_org_context, but that throw must be swallowed inside the try/catch
@@ -240,12 +215,9 @@ await test('resolves without throwing when called outside withOrgTx (bookkeeping
     threw = true;
     thrown = err;
   }
-  assert(
-    !threw,
-    `expected upsertSubaccountOnboardingState to resolve without throwing when called outside withOrgTx, but it threw: ${
+  expect(!threw, `expected upsertSubaccountOnboardingState to resolve without throwing when called outside withOrgTx, but it threw: ${
       thrown instanceof Error ? thrown.message : String(thrown)
-    }`,
-  );
+    }`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -253,6 +225,4 @@ await test('resolves without throwing when called outside withOrgTx (bookkeeping
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`  ${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

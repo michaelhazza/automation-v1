@@ -61,6 +61,7 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 import { recordIncident } from './incidentIngestor.js';
+import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
 
 registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
@@ -169,6 +170,19 @@ export interface SkillExecutionContext {
   mcpCallCount?: number;
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
+  /**
+   * Depth of the current workflow run chain. 1 = top-level. Incremented on
+   * each workflow.run.start call. MAX_WORKFLOW_DEPTH = 3.
+   * Absent for non-workflow runs (orchestrator job, direct agent invocations).
+   */
+  workflowRunDepth?: number;
+  /**
+   * The conversation this run is associated with, when known. Populated from
+   * AgentRunRequest.conversationId so that worker skills that need to write
+   * conversation-scoped data (e.g. update_thread_context) can resolve the
+   * correct conversation without a DB lookup.
+   */
+  conversationId?: string;
   /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
@@ -601,6 +615,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
+  },
+  'workflow.run.start': async (input, context) => {
+    const { handleWorkflowRunStartSkill } = await import('./workflowRunStartSkillService.js');
+    return handleWorkflowRunStartSkill(input, context);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
@@ -1823,6 +1841,193 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       success: true,
       result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
     };
+  },
+
+  // ── System Monitoring Agent skills ──────────────────────────────────
+  read_agent_run: async (input, context) => {
+    const { executeReadAgentRun } = await import('./systemMonitor/skills/readAgentRun.js');
+    return executeReadAgentRun(input, context);
+  },
+  read_baseline: async (input, context) => {
+    const { executeReadBaseline } = await import('./systemMonitor/skills/readBaseline.js');
+    return executeReadBaseline(input, context);
+  },
+  read_connector_state: async (input, context) => {
+    const { executeReadConnectorState } = await import('./systemMonitor/skills/readConnectorState.js');
+    return executeReadConnectorState(input, context);
+  },
+  read_dlq_recent: async (input, context) => {
+    const { executeReadDlqRecent } = await import('./systemMonitor/skills/readDlqRecent.js');
+    return executeReadDlqRecent(input, context);
+  },
+  read_heuristic_fires: async (input, context) => {
+    const { executeReadHeuristicFires } = await import('./systemMonitor/skills/readHeuristicFires.js');
+    return executeReadHeuristicFires(input, context);
+  },
+  read_incident: async (input, context) => {
+    const { executeReadIncident } = await import('./systemMonitor/skills/readIncident.js');
+    return executeReadIncident(input, context);
+  },
+  read_logs_for_correlation_id: async (input, context) => {
+    const { executeReadLogsForCorrelationId } = await import('./systemMonitor/skills/readLogsForCorrelationId.js');
+    return executeReadLogsForCorrelationId(input, context);
+  },
+  read_recent_runs_for_agent: async (input, context) => {
+    const { executeReadRecentRunsForAgent } = await import('./systemMonitor/skills/readRecentRunsForAgent.js');
+    return executeReadRecentRunsForAgent(input, context);
+  },
+  read_skill_execution: async (input, context) => {
+    const { executeReadSkillExecution } = await import('./systemMonitor/skills/readSkillExecution.js');
+    return executeReadSkillExecution(input, context);
+  },
+  write_diagnosis: async (input, context) => {
+    const { executeWriteDiagnosis } = await import('./systemMonitor/skills/writeDiagnosis.js');
+    return executeWriteDiagnosis(input, context);
+  },
+  write_event: async (input, context) => {
+    const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
+    return executeWriteEvent(input, context);
+  },
+
+  // ── Sub-Account Optimiser: generic agent-output primitive (Chunk 1) ────────
+  // output.recommend — any agent with this skill can surface operator-facing
+  // recommendations via the generic agent_recommendations primitive.
+  // Spec: docs/sub-account-optimiser-spec.md §6.2
+  'output.recommend': async (input, context) => {
+    // Requires an agent execution context — non-agent callers are rejected.
+    if (!context.agentId) {
+      return {
+        success: false,
+        error: 'output.recommend requires an agent execution context (agentId missing)',
+      };
+    }
+
+    const {
+      scope_type,
+      scope_id,
+      category,
+      severity,
+      title,
+      body,
+      evidence,
+      action_hint,
+      dedupe_key,
+    } = input as Record<string, unknown>;
+
+    // Validate required fields
+    if (!scope_type || (scope_type !== 'org' && scope_type !== 'subaccount')) {
+      return { success: false, error: 'scope_type must be "org" or "subaccount"' };
+    }
+    if (!scope_id || typeof scope_id !== 'string') {
+      return { success: false, error: 'scope_id must be a valid UUID string' };
+    }
+    // Basic UUID validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(scope_id)) {
+      return { success: false, error: 'scope_id must be a valid UUID' };
+    }
+    if (!severity || !['info', 'warn', 'critical'].includes(severity as string)) {
+      return { success: false, error: 'severity must be "info", "warn", or "critical"' };
+    }
+    if (!category || typeof category !== 'string') {
+      return { success: false, error: 'category is required' };
+    }
+    // Validate three-segment format
+    const categoryParts = (category as string).split('.');
+    if (categoryParts.length < 3) {
+      return {
+        success: false,
+        error: 'category must follow <agent_namespace>.<area>.<finding> format (three segments)',
+      };
+    }
+    if (!title || typeof title !== 'string') {
+      return { success: false, error: 'title is required' };
+    }
+    if (!body || typeof body !== 'string') {
+      return { success: false, error: 'body is required' };
+    }
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+      return { success: false, error: 'evidence must be a plain object' };
+    }
+    if (!dedupe_key || typeof dedupe_key !== 'string') {
+      return { success: false, error: 'dedupe_key is required' };
+    }
+    // Validate action_hint: null/omitted accepted; non-null must match scheme://path format
+    if (action_hint !== undefined && action_hint !== null) {
+      if (typeof action_hint !== 'string' || action_hint === '') {
+        return { success: false, error: 'action_hint must be null/omitted or a non-empty URI string' };
+      }
+      const actionHintRegex = /^[a-z][a-z0-9-]*:\/\/[^\s]+$/;
+      if (!actionHintRegex.test(action_hint as string)) {
+        return {
+          success: false,
+          error: 'action_hint must match pattern ^[a-z][a-z0-9-]*://[^\\s]+$ (e.g. configuration-assistant://agent/id?focus=budget)',
+        };
+      }
+    }
+
+    const { upsertRecommendation } = await import('./agentRecommendationsService.js');
+    const result = await upsertRecommendation(
+      {
+        organisationId: context.organisationId,
+        agentId: context.agentId,
+      },
+      {
+        scope_type: scope_type as 'org' | 'subaccount',
+        scope_id: scope_id as string,
+        category: category as string,
+        severity: severity as 'info' | 'warn' | 'critical',
+        title: title as string,
+        body: body as string,
+        evidence: evidence as Record<string, unknown>,
+        action_hint: (action_hint as string | null | undefined) ?? null,
+        dedupe_key: dedupe_key as string,
+      },
+    );
+    return { success: true, ...result };
+  },
+
+  // ── Thread context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: async (input, context) => {
+    if (!context.conversationId) {
+      return { success: false, error: 'update_thread_context requires a conversation context — this run has no associated conversation.' };
+    }
+    return executeWithActionAudit('update_thread_context', input, context, () =>
+      updateThreadContextHandler(input, {
+        conversationId: context.conversationId!,
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+      }),
+    );
+  },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
+  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
+  // input, resolves spending context, normalises merchant (invariant 21), and
+  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
+  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: async (input, context) => {
+    const { executePayInvoice } = await import('./spendSkillHandlers.js');
+    return executePayInvoice(input, context);
+  },
+  purchase_resource: async (input, context) => {
+    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
+    return executePurchaseResource(input, context);
+  },
+  subscribe_to_service: async (input, context) => {
+    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
+    return executeSubscribeToService(input, context);
+  },
+  top_up_balance: async (input, context) => {
+    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
+    return executeTopUpBalance(input, context);
+  },
+  issue_refund: async (input, context) => {
+    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
+    return executeIssueRefund(input, context);
   },
 };
 
@@ -3326,14 +3531,13 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       sa: subaccountAgents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, req.subaccountId),
         eq(subaccountAgents.agentId, req.agentId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 
@@ -3540,14 +3744,13 @@ async function executeReassignTask(
     const [saLinkRow] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, agentId),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -3790,14 +3993,13 @@ async function executeSpawnSubAgents(
     const [saLink] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, st.assigned_agent_id),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -4426,7 +4628,7 @@ async function executeMonitorWebpage(
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
-  let baselineContentHash = '';
+  let baselineContentHash: string;
   let baselineExtractedData: Record<string, unknown> | null = null;
 
   if (fields) {

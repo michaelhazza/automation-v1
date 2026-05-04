@@ -2,7 +2,7 @@
 name: Config Link Agent
 description: Link an org agent to a subaccount, creating the subaccount-agent relationship.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

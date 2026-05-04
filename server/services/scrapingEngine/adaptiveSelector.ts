@@ -237,12 +237,9 @@ export function scoreSimilarity(
 
   const pathScore = longestCommonSubsequenceRatio(stored.domPath, candidate.domPath);
 
-  let parentScore = 0.0;
-  if (stored.parentTag === '' && candidate.parentTag === '') {
-    parentScore = 1.0;
-  } else {
-    parentScore = stored.parentTag === candidate.parentTag ? 1.0 : 0.0;
-  }
+  const parentScore = (stored.parentTag === '' && candidate.parentTag === '')
+    ? 1.0
+    : (stored.parentTag === candidate.parentTag ? 1.0 : 0.0);
 
   const sibScore = jaccardSets(stored.siblingTags, candidate.siblingTags);
   const childScore = jaccardSets(stored.childTags, candidate.childTags);

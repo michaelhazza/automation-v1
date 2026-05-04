@@ -49,12 +49,21 @@ export function computeDurationSinceRunStartMs(
 // Envelope / eventId builder
 // ---------------------------------------------------------------------------
 
-/** `${runId}:${sequenceNumber}:${eventType}` — see spec §5.10. */
+/**
+ * Builds a stable deduplication id for an event.
+ *
+ * Per-run events:  `${runId}:${sequenceNumber}:${eventType}` — see spec §5.10.
+ * Per-task events: `task:${taskId}:${taskSequence}:${eventSubsequence}:${eventType}`
+ */
 export function buildEventId(
   runId: string,
   sequenceNumber: number,
   eventType: AgentExecutionEventType,
+  taskContext?: { taskId: string; taskSequence: number; eventSubsequence: number },
 ): string {
+  if (taskContext) {
+    return `task:${taskContext.taskId}:${taskContext.taskSequence}:${taskContext.eventSubsequence}:${eventType}`;
+  }
   return `${runId}:${sequenceNumber}:${eventType}`;
 }
 
@@ -72,6 +81,7 @@ const LINKED_ENTITY_TYPES: ReadonlyArray<LinkedEntityType> = [
   'agent',
   'llm_request',
   'action',
+  'spend_ledger',
 ];
 
 export function isValidLinkedEntityType(value: unknown): value is LinkedEntityType {
@@ -349,6 +359,14 @@ export function validateEventPayload(
       }
       return { ok: true };
     }
+
+    case 'run.terminal.summary_missing':
+      if (!isStr(p.runResultStatus)) return { ok: false, reason: 'run.terminal.summary_missing_missing_fields' };
+      return { ok: true };
+
+    case 'run.terminal.extracted_with_errorMessage':
+      if (!isNonNegInt(p.errorMessageLength)) return { ok: false, reason: 'run.terminal.extracted_with_errorMessage_missing_fields' };
+      return { ok: true };
 
     default: {
       // Exhaustiveness check — if a new event type is added to the union

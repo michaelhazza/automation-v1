@@ -6,26 +6,8 @@
  *   npx tsx server/services/workspaceHealth/detectors/__tests__/subaccountNoRoot.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { findSubaccountsWithNoRoot } from '../subaccountNoRootPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 function assertEqual<T>(actual: T, expected: T, msg?: string) {
   const a = JSON.stringify(actual);
@@ -37,20 +19,20 @@ function assertEqual<T>(actual: T, expected: T, msg?: string) {
 
 test('all subaccounts have roots → empty', () => {
   const result = findSubaccountsWithNoRoot(['sa-1', 'sa-2'], ['sa-1', 'sa-2']);
-  assertEqual(result, []);
+  expect(result).toEqual([]);
 });
 
 test('one subaccount with root, one without → one returned', () => {
   const result = findSubaccountsWithNoRoot(['sa-1', 'sa-2'], ['sa-1']);
-  assertEqual(result.length, 1);
-  assert(result[0] === 'sa-2', 'wrong subaccountId returned');
+  expect(result.length).toBe(1);
+  expect(result[0] === 'sa-2', 'wrong subaccountId returned').toBeTruthy();
 });
 
 test('multiple subaccounts, none with roots → all returned', () => {
   const all = ['sa-a', 'sa-b', 'sa-c'];
   const result = findSubaccountsWithNoRoot(all, []);
-  assertEqual(result.length, 3);
-  assert(all.every((id) => result.includes(id)), 'not all subaccountIds returned');
+  expect(result.length).toBe(3);
+  expect(all.every((id) => result.includes(id)), 'not all subaccountIds returned').toBeTruthy();
 });
 
 test('inactive roots do not count (pure input: empty subaccountsWithRoot)', () => {
@@ -58,16 +40,14 @@ test('inactive roots do not count (pure input: empty subaccountsWithRoot)', () =
   // Simulated here by passing an empty subaccountsWithRoot even though there
   // is a "root" that would count if it were active.
   const result = findSubaccountsWithNoRoot(['sa-1'], []);
-  assertEqual(result, ['sa-1']);
+  expect(result).toEqual(['sa-1']);
 });
 
 test('no subaccounts → empty', () => {
   const result = findSubaccountsWithNoRoot([], []);
-  assertEqual(result, []);
+  expect(result).toEqual([]);
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`[subaccountNoRoot] ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

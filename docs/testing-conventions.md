@@ -65,67 +65,74 @@ server/services/__tests__/runContextLoader.test.ts
 
 The test imports from the pure module only. It does not import from the impure module, does not set up a database, does not read environment variables.
 
-**3. Use the lightweight assertion harness.**
+**3. Use Vitest.**
 
-No framework. No Jest. No Vitest. Just a small `test()`/`assert()` helper at the top of each test file and a summary at the bottom.
+The single permitted runner is **Vitest 2.x**. Import `test` and `expect` from `vitest`. No handwritten harness, no `node:test`, no `node:assert`.
 
 ```ts
-/**
- * Runnable via: npx tsx server/services/__tests__/runContextLoader.test.ts
- */
-
+import { test, expect } from 'vitest';
 import { processContextPool } from '../runContextLoaderPure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
-
-function assertEqual<T>(actual: T, expected: T, label: string) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
-// Tests go here
 test('processes an empty pool', () => {
   const result = processContextPool([], { maxTokens: 1000 });
-  assertEqual(result.eager.length, 0, 'no eager sources');
+  expect(result.eager.length).toBe(0);
 });
-
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
 ```
 
-**Canonical templates:** look at these two files for the exact pattern to match:
-- `server/lib/playbook/__tests__/playbook.test.ts`
-- `server/services/__tests__/runContextLoader.test.ts`
+Run a single test file during development:
+
+```bash
+npx vitest run server/services/__tests__/runContextLoader.test.ts
+```
+
+**Forbidden patterns** — enforced by `scripts/verify-test-quality.sh`:
+- `function asyncTest(...)` — handwritten harness
+- `import test from 'node:test'` — node:test runner
+- `import assert from 'node:assert'` — node:assert API (use `expect()` instead)
+- `let passed = 0`, `let failed = 0`, `passed++`, `failed++` — counter boilerplate
+- `pendingTests`, `Promise.all(pendingTests)` — module-load test queues
+- `process.exit` / `process.exitCode` in test files — use `test.skip` / `test.skipIf` / `throw`
+- `*.test.ts` outside `**/__tests__/**/` — Vitest's discovery glob will not pick it up
+- A test file with zero `test()` / `describe()` / `it()` blocks — silently runs no tests
+
+### Skip-gates (integration / DB-backed tests)
+
+```ts
+const SKIP = process.env.NODE_ENV !== 'integration';
+describe.skipIf(SKIP)('DB-backed feature', () => {
+  test('inserts a row', async () => {
+    const { db } = await import('../../db/index.js');
+    // ...
+  });
+});
+```
+
+Integration tests self-skip when `NODE_ENV=test` (the CI default). They only run when `NODE_ENV=integration`.
+
+### Module-load side effects (I-7b)
+
+Test files MUST NOT mutate shared state at import time. No top-level registry registration, no top-level singleton init, no top-level network setup. Setup belongs in `beforeAll` / `beforeEach` or inside the `test()` body.
+
+### Env mutation (I-8b)
+
+Tests that mutate `process.env` MUST restore it:
+
+```ts
+let envSnapshot: typeof process.env;
+beforeEach(() => { envSnapshot = { ...process.env }; });
+afterEach(() => { process.env = envSnapshot; });
+```
 
 ---
 
 ## Test discovery
 
-`scripts/run-all-unit-tests.sh` discovers every `**/__tests__/*.test.ts` file under the repo (excluding `node_modules` and `dist`) and runs each one via `tsx`. A file is automatically included the moment it lands — no registration step.
+Vitest discovers every `**/__tests__/*.test.ts` file automatically (per `vitest.config.ts`). A file is included the moment it lands — no registration step. The discovery glob is the only allowed location: `verify-test-quality.sh` rejects any `*.test.ts` outside `**/__tests__/**/`.
 
 To run a single test file during development:
 
 ```bash
-npx tsx server/services/__tests__/runContextLoader.test.ts
+npx vitest run server/services/__tests__/runContextLoader.test.ts
 ```
 
 To run the whole unit layer:

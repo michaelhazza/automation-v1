@@ -32,6 +32,103 @@
 
 export type PolicyGateDecision = 'auto' | 'review' | 'block';
 
+// ---------------------------------------------------------------------------
+// SpendDecision — policy-engine layer spend gate result (Chunk 7)
+// ---------------------------------------------------------------------------
+
+export interface SpendDecision {
+  evaluated: boolean;
+  outcome: 'auto' | 'review' | 'block';
+  reason: string | null;
+}
+
+/**
+ * Minimal spending policy shape needed by `evaluateSpendPolicy`.
+ * Mirrors the keys consumed from `chargeRouterServicePure.SpendingPolicy`
+ * without importing that module (pure/no-I/O boundary).
+ */
+export interface SpendPolicyRules {
+  mode: 'shadow' | 'live';
+  perTxnLimitMinor: number;
+  dailyLimitMinor: number;
+  monthlyLimitMinor: number;
+  approvalThresholdMinor: number;
+  merchantAllowlist: Array<{
+    id: string | null;
+    descriptor: string;
+    source: 'stripe_id' | 'descriptor';
+  }>;
+}
+
+export interface SpendPolicyRequest {
+  amountMinor: number;
+  currency: string;
+  merchant: { id: string | null; descriptor: string };
+  mode: 'shadow' | 'live';
+  killSwitchActive: boolean;
+  budgetDisabledAt: Date | null;
+}
+
+/**
+ * Evaluates whether a proposed spend action should be auto-approved,
+ * routed to HITL review, or blocked — at the policy-engine gate level.
+ *
+ * Gate order mirrors chargeRouterServicePure.evaluatePolicy:
+ *   1. Kill switch / budget disabled
+ *   2. Merchant allowlist
+ *   3. Per-transaction limit
+ *   4. Approval threshold
+ *
+ * Daily/monthly limits are NOT checked here because the policy engine
+ * does not have visibility into running totals — that is the charge
+ * router's responsibility. The gate result here drives `resolveGateLevel`.
+ *
+ * Throws if `policyRules` is not a plain object (malformed policy).
+ * Caller (`resolveGateLevel`) catches and maps to outcome 'block' with
+ * reason 'spend_decision_error'.
+ */
+export function evaluateSpendPolicy(
+  policyRules: SpendPolicyRules,
+  request: SpendPolicyRequest,
+): SpendDecision {
+  if (!policyRules || typeof policyRules !== 'object' || Array.isArray(policyRules)) {
+    throw new Error('[policyEngineServicePure] evaluateSpendPolicy: malformed policyRules');
+  }
+
+  // Gate 1: Kill switch / budget disabled
+  if (request.killSwitchActive || request.budgetDisabledAt !== null) {
+    return { evaluated: true, outcome: 'block', reason: 'spend_block:kill_switch' };
+  }
+
+  // Gate 2: Merchant allowlist
+  // An empty allowlist blocks everything (fail-closed per spec §4).
+  const allowlist = policyRules.merchantAllowlist;
+  if (!Array.isArray(allowlist) || allowlist.length === 0) {
+    return { evaluated: true, outcome: 'block', reason: 'spend_block:allowlist' };
+  }
+  const onAllowlist = allowlist.some((entry) => {
+    if (entry.source === 'stripe_id' && entry.id !== null) {
+      return entry.id === request.merchant.id;
+    }
+    return entry.descriptor.toLocaleUpperCase('en-US') === request.merchant.descriptor.toLocaleUpperCase('en-US');
+  });
+  if (!onAllowlist) {
+    return { evaluated: true, outcome: 'block', reason: 'spend_block:allowlist' };
+  }
+
+  // Gate 3: Per-transaction limit (0 = unset)
+  if (policyRules.perTxnLimitMinor > 0 && request.amountMinor > policyRules.perTxnLimitMinor) {
+    return { evaluated: true, outcome: 'block', reason: 'spend_block:per_txn_exceeded' };
+  }
+
+  // Gate 4: Approval threshold — above threshold routes to HITL review
+  if (request.amountMinor > policyRules.approvalThresholdMinor) {
+    return { evaluated: true, outcome: 'review', reason: 'spend_review:threshold' };
+  }
+
+  return { evaluated: true, outcome: 'auto', reason: null };
+}
+
 /**
  * Minimal context needed for confidence gating and guidance selection.
  * A subset of `PolicyContext` from policyEngineService.ts — we depend

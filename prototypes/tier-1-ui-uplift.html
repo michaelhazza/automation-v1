@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tier 1 UI Uplift — Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --indigo-50: #eef2ff;
+    --indigo-100: #e0e7ff;
+    --indigo-200: #c7d2fe;
+    --indigo-400: #818cf8;
+    --indigo-500: #6366f1;
+    --indigo-600: #4f46e5;
+    --indigo-700: #4338ca;
+    --violet-50: #f5f3ff;
+    --violet-200: #ddd6fe;
+    --violet-500: #8b5cf6;
+    --slate-50: #f8fafc;
+    --slate-100: #f1f5f9;
+    --slate-200: #e2e8f0;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+    --emerald-50: #ecfdf5;
+    --emerald-500: #10b981;
+    --emerald-600: #059669;
+    --amber-50: #fffbeb;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+    --red-50: #fef2f2;
+    --red-500: #ef4444;
+    --sky-50: #f0f9ff;
+    --sky-400: #38bdf8;
+    --border: #e8ecf0;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+  }
+
+  html { font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; color: var(--slate-800); background: #f4f6fb; -webkit-font-smoothing: antialiased; }
+
+  /* ── MOCKUP SHELL ──────────────────────────────────────────── */
+  .shell { display: flex; min-height: 100vh; }
+
+  .nav {
+    width: 220px; min-height: 100vh; background: var(--slate-900); padding: 20px 0;
+    position: sticky; top: 0; flex-shrink: 0;
+  }
+  .nav-title { color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 20px 16px; opacity: 0.4; }
+  .nav a {
+    display: block; padding: 9px 20px; color: var(--slate-400); font-size: 13px; text-decoration: none;
+    border-left: 2px solid transparent; transition: all 0.15s;
+  }
+  .nav a:hover { color: var(--slate-200); background: rgba(255,255,255,0.04); }
+  .nav a.active { color: #a5b4fc; background: rgba(99,102,241,0.14); border-left-color: var(--indigo-500); }
+  .nav-section { margin-top: 24px; }
+
+  .content { flex: 1; padding: 40px 48px; max-width: 1200px; }
+
+  .page-header { margin-bottom: 40px; }
+  .page-header h1 { font-size: 22px; font-weight: 700; color: var(--slate-900); }
+  .page-header p { margin-top: 6px; font-size: 13.5px; color: var(--slate-500); }
+
+  .item-section { margin-bottom: 72px; }
+  .item-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .item-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); border-radius: 5px; padding: 3px 8px; margin-bottom: 8px; }
+  .item-header h2 { font-size: 17px; font-weight: 700; color: var(--slate-900); }
+  .item-header p { margin-top: 5px; font-size: 13px; color: var(--slate-500); max-width: 640px; }
+
+  .mockup-row { display: flex; gap: 24px; flex-wrap: wrap; }
+  .mockup-frame { background: white; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm); }
+  .mockup-label { font-size: 11px; font-weight: 600; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+
+  /* ── SHARED APP CHROME ──────────────────────────────────────── */
+  .chat-header {
+    background: white; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 20px; flex-shrink: 0;
+  }
+  .back-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--indigo-500); background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 6px; padding: 4px 10px; text-decoration: none; }
+  .agent-name { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .status-dot { width: 7px; height: 7px; background: var(--emerald-500); border-radius: 50%; flex-shrink: 0; }
+  .status-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--emerald-600); background: var(--emerald-50); border: 1px solid #a7f3d0; border-radius: 20px; padding: 3px 9px; }
+  .model-tag { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--slate-500); }
+  .hdr-spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; border-radius: 8px; padding: 7px 16px; cursor: pointer; border: none; transition: all 0.15s; text-decoration: none; }
+  .btn-sm { font-size: 12px; padding: 5px 12px; border-radius: 6px; }
+  .btn-xs { font-size: 11.5px; padding: 3px 10px; border-radius: 5px; }
+  .btn-primary { background: var(--indigo-600); color: white; }
+  .btn-primary:hover { background: var(--indigo-700); }
+  .btn-secondary { background: white; color: var(--slate-700); border: 1px solid var(--slate-300); }
+  .btn-ghost { background: transparent; color: var(--slate-600); }
+  .btn-ghost:hover { background: var(--slate-100); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; border-radius: 20px; padding: 2px 9px; }
+  .badge-active { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .badge-setup { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
+  .badge-soon { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); }
+  .badge-indigo { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+
+  /* ── ITEM B: COST METER ──────────────────────────────────────── */
+  .cost-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--slate-600);
+    background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 20px;
+    padding: 4px 12px; cursor: pointer; transition: all 0.15s;
+  }
+  .cost-pill:hover { background: var(--indigo-50); border-color: var(--indigo-200); color: var(--indigo-600); }
+  .cost-sep { color: var(--slate-300); }
+  .cost-tokens { color: var(--slate-500); }
+  .cost-usd { color: var(--indigo-600); font-weight: 600; }
+
+  .cost-dropdown {
+    position: absolute; top: calc(100% + 8px); right: 0; width: 280px;
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow-md); z-index: 10; overflow: hidden;
+  }
+  .cost-dropdown-header { padding: 12px 14px; border-bottom: 1px solid var(--slate-100); }
+  .cost-dropdown-header .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
+  .cost-total-row { display: flex; align-items: baseline; gap: 8px; }
+  .cost-total-usd { font-size: 20px; font-weight: 700; color: var(--slate-900); font-family: 'JetBrains Mono', monospace; }
+  .cost-total-tokens { font-size: 12px; color: var(--slate-500); font-family: 'JetBrains Mono', monospace; }
+  .cost-model-row { display: flex; align-items: center; padding: 9px 14px; gap: 10px; border-bottom: 1px solid var(--slate-100); }
+  .cost-model-row:last-child { border-bottom: none; }
+  .cost-model-name { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--slate-700); flex: 1; }
+  .cost-model-tokens { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--slate-400); }
+  .cost-model-usd { font-size: 12px; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--slate-700); }
+  .cost-bar-wrap { height: 3px; background: var(--slate-100); border-radius: 2px; margin: 0 14px 12px; overflow: hidden; }
+  .cost-bar-fill { height: 100%; background: linear-gradient(90deg, var(--indigo-500), var(--violet-500)); border-radius: 2px; }
+
+  /* ── ITEM A: THREAD CONTEXT PANEL ───────────────────────────── */
+  .right-pane { width: 300px; border-left: 1px solid var(--slate-200); background: white; display: flex; flex-direction: column; }
+  .pane-tabs { display: flex; border-bottom: 1px solid var(--slate-200); padding: 0 4px; }
+  .pane-tab { font-size: 12px; font-weight: 500; color: var(--slate-400); padding: 10px 12px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; }
+  .pane-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); }
+  .pane-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+  .ctx-section { margin-bottom: 20px; }
+  .ctx-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .ctx-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--slate-400); }
+  .ctx-section-count { font-size: 10.5px; font-weight: 500; color: var(--slate-400); background: var(--slate-100); border-radius: 10px; padding: 1px 7px; }
+
+  .ctx-task { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 6px; margin-bottom: 3px; }
+  .ctx-task:hover { background: var(--slate-50); }
+  .ctx-task-check { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--slate-300); flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center; }
+  .ctx-task-check.done { background: var(--emerald-500); border-color: var(--emerald-500); }
+  .ctx-task-check.in-progress { background: var(--indigo-500); border-color: var(--indigo-500); }
+  .ctx-task-check svg { width: 9px; height: 9px; }
+  .ctx-task-label { font-size: 12.5px; color: var(--slate-700); line-height: 1.4; }
+  .ctx-task-label.done { text-decoration: line-through; color: var(--slate-400); }
+  .ctx-task-label.in-progress { color: var(--indigo-700); }
+  .ctx-task-status { font-size: 10px; font-weight: 500; margin-top: 1px; }
+  .ctx-task-status.in-progress { color: var(--indigo-500); }
+
+  .ctx-decision { padding: 7px 9px; border-left: 2px solid var(--indigo-200); background: var(--indigo-50); border-radius: 0 6px 6px 0; margin-bottom: 6px; }
+  .ctx-decision-text { font-size: 12px; color: var(--indigo-800); font-weight: 500; line-height: 1.4; }
+  .ctx-decision-rationale { font-size: 11px; color: var(--indigo-400); margin-top: 2px; line-height: 1.3; }
+
+  .ctx-approach { font-size: 12px; color: var(--slate-600); line-height: 1.6; background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 6px; padding: 10px; }
+
+  .ctx-live-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 500; color: var(--emerald-600); }
+  .ctx-live-dot { width: 6px; height: 6px; background: var(--emerald-500); border-radius: 50%; animation: pulse-dot 1.5s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.85); } }
+
+  /* ── ITEM C: SUGGESTED CHIPS ─────────────────────────────────── */
+  .chips-area { padding: 8px 16px 4px; display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; padding: 6px 13px; border-radius: 20px; cursor: pointer; border: none; transition: all 0.15s; }
+  .chip-prompt { background: white; color: var(--slate-700); border: 1.5px solid var(--slate-200); }
+  .chip-prompt:hover { border-color: var(--indigo-400); color: var(--indigo-600); background: var(--indigo-50); }
+  .chip-system { background: var(--indigo-50); color: var(--indigo-700); border: 1.5px solid var(--indigo-200); }
+  .chip-system:hover { background: var(--indigo-100); border-color: var(--indigo-400); }
+  .chip-icon { width: 13px; height: 13px; opacity: 0.7; }
+
+  /* ── CHAT MESSAGES (shared) ──────────────────────────────────── */
+  .messages-area { flex: 1; overflow-y: auto; padding: 20px 20px 8px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 70%; }
+  .msg-user { align-self: flex-end; }
+  .msg-assistant { align-self: flex-start; }
+  .msg-bubble { padding: 10px 14px; font-size: 13.5px; line-height: 1.55; }
+  .msg-bubble-user { background: var(--indigo-600); color: white; border-radius: 18px 18px 4px 18px; }
+  .msg-bubble-assistant { background: white; color: var(--slate-800); border-radius: 18px 18px 18px 4px; border: 1px solid var(--slate-200); box-shadow: var(--shadow-sm); }
+  .msg-meta { font-size: 10.5px; color: var(--slate-400); margin-top: 4px; padding: 0 2px; }
+  .msg-user .msg-meta { text-align: right; }
+
+  .exec-badge {
+    align-self: flex-start; display: inline-flex; align-items: center; gap: 7px;
+    background: linear-gradient(135deg, var(--sky-50), var(--violet-50));
+    border: 1px solid var(--indigo-200); border-radius: 8px;
+    padding: 6px 12px; font-size: 11.5px; font-weight: 600; color: var(--indigo-700);
+  }
+  .exec-spinner { width: 12px; height: 12px; border: 1.5px solid var(--indigo-200); border-top-color: var(--indigo-500); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .composer-wrap { padding: 12px 16px; border-top: 1px solid var(--slate-100); }
+  .composer { background: var(--slate-50); border: 1.5px solid var(--slate-200); border-radius: 16px; display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; }
+  .composer textarea { flex: 1; background: transparent; border: none; outline: none; font-size: 13.5px; color: var(--slate-800); resize: none; font-family: inherit; }
+  .composer textarea::placeholder { color: var(--slate-400); }
+  .composer-send { width: 34px; height: 34px; background: var(--indigo-600); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; flex-shrink: 0; }
+
+  /* ── ITEM D: INVOCATIONS CARD ────────────────────────────────── */
+  .section-card { background: white; border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 20px; }
+  .section-card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--slate-100); }
+  .section-card-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); }
+  .section-card-body { padding: 18px 20px; }
+
+  .invocations-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .inv-tile {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 16px 12px; border: 1px solid var(--slate-200); border-radius: 10px;
+    cursor: pointer; transition: all 0.15s; text-align: center;
+  }
+  .inv-tile:hover { border-color: var(--indigo-300); background: var(--indigo-50); }
+  .inv-tile.soon { opacity: 0.5; cursor: not-allowed; }
+  .inv-tile.soon:hover { border-color: var(--slate-200); background: transparent; }
+  .inv-tile-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .inv-tile-icon svg { width: 20px; height: 20px; }
+  .inv-icon-sched { background: var(--indigo-50); color: var(--indigo-500); }
+  .inv-icon-webhook { background: var(--violet-50); color: var(--violet-500); }
+  .inv-icon-slack { background: #4a154b22; color: #4a154b; }
+  .inv-icon-email { background: var(--sky-50); color: var(--sky-400); }
+  .inv-icon-sms { background: var(--emerald-50); color: var(--emerald-500); }
+  .inv-icon-mcp { background: var(--amber-50); color: var(--amber-500); }
+  .inv-tile-label { font-size: 12px; font-weight: 600; color: var(--slate-700); }
+  .inv-tile-badge { }
+
+  /* Active expanded invocation */
+  .inv-expanded { border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+  .inv-expanded-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; }
+  .inv-expanded-header:hover { background: var(--slate-50); }
+  .inv-expanded-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .inv-expanded-icon svg { width: 16px; height: 16px; }
+  .inv-expanded-name { font-size: 13px; font-weight: 600; color: var(--slate-800); flex: 1; }
+  .inv-expanded-chevron { color: var(--slate-400); transition: transform 0.15s; }
+  .inv-expanded-chevron.open { transform: rotate(180deg); }
+  .inv-expanded-body { padding: 12px 14px; border-top: 1px solid var(--slate-100); background: var(--slate-50); }
+  .inv-field-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
+  .inv-field-label { color: var(--slate-500); width: 100px; flex-shrink: 0; }
+  .inv-field-value { color: var(--slate-800); font-weight: 500; }
+
+  /* ── ITEM E: INTEGRATION CARD ────────────────────────────────── */
+  .integration-card {
+    border: 1px solid var(--slate-200); border-radius: 12px; overflow: hidden;
+    background: white; box-shadow: var(--shadow-sm); max-width: 340px;
+  }
+  .integration-card-header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+    background: linear-gradient(135deg, #fdfcff, var(--indigo-50));
+    border-bottom: 1px solid var(--indigo-100);
+  }
+  .integration-icon { width: 40px; height: 40px; border-radius: 10px; background: white; border: 1px solid var(--slate-200); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); flex-shrink: 0; }
+  .integration-name { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+  .integration-desc { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+  .integration-card-body { padding: 14px 16px; }
+  .integration-reason { font-size: 12.5px; color: var(--slate-600); line-height: 1.5; margin-bottom: 14px; }
+  .integration-actions { display: flex; gap: 8px; align-items: center; }
+  .integration-ttl { font-size: 11px; color: var(--slate-400); margin-top: 10px; }
+
+  .integration-card.expired { opacity: 0.7; }
+  .integration-card.expired .integration-card-header { background: var(--slate-50); filter: grayscale(0.5); }
+  .integration-expired-banner { background: var(--amber-50); border-top: 1px solid #fde68a; padding: 8px 14px; font-size: 11.5px; color: var(--amber-600); display: flex; align-items: center; gap: 6px; }
+
+  /* ── NOTE / ANNOTATION ─────────────────────────────────────────── */
+  .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #92400e; margin-top: 16px; line-height: 1.5; }
+  .note strong { font-weight: 600; }
+
+  .states-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .state-col { }
+  .state-col .mockup-label { margin-bottom: 8px; }
+
+  /* Full chat mockup for B */
+  .chat-mock { width: 820px; display: flex; flex-direction: column; height: 520px; }
+  .chat-mock-body { display: flex; flex: 1; min-height: 0; }
+  .chat-main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* Annotation dots */
+  .annot { position: relative; display: inline-block; }
+  .annot-dot {
+    position: absolute; width: 18px; height: 18px; background: #ef4444; color: white;
+    border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center;
+    justify-content: center; top: -9px; right: -9px; z-index: 5; pointer-events: none;
+  }
+
+  /* Icon SVGs helper */
+  svg { flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-title">Tier 1 UI Uplift</div>
+    <a href="#item-b" class="active">B — Cost Meter</a>
+    <a href="#item-c">C — Action Chips</a>
+    <a href="#item-a">A — Thread Context</a>
+    <a href="#item-d">D — Invocations Card</a>
+    <a href="#item-e">E — Integration Card</a>
+  </nav>
+
+  <!-- Content -->
+  <main class="content">
+    <div class="page-header">
+      <h1>Tier 1 UI Uplift — Design Mockups</h1>
+      <p>High-fidelity mockups for items A–E, matching the existing design system. Iterate here before writing specs.</p>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         ITEM B — COST METER
+    ═══════════════════════════════════════════════════════════════ -->
+    <section class="item-section" id="item-b">
+      <div class="item-header">
+        <div class="item-tag">Item B</div>
+        <h2>Per-thread cost &amp; token meter</h2>
+        <p>Shown in the chat header next to the model ID. Collapses to a compact pill; expands to model breakdown on click.</p>
+      </div>
+
+      <div class="mockup-row" style="flex-direction:column;">
+
+        <!-- Full header mockup -->
+        <div>
+          <div class="mockup-label">Collapsed state (default)</div>
+          <div class="mockup-frame" style="width:820px;">
+            <div class="chat-header">
+              <a class="back-link" href="#">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Agents
+              </a>
+              <span class="agent-name">Content Writer</span>
+              <span class="status-badge"><span class="status-dot"></span>Ready</span>
+              <span class="hdr-spacer"></span>
+              <!-- NEW: cost pill sits between model tag and manage button -->
+              <span class="model-tag">claude-opus-4-7</span>
+              <div style="position:relative;" class="annot">
+                <div class="annot-dot">B</div>
+                <button class="cost-pill">
+                  <span class="cost-tokens">164.5k</span>
+                  <span class="cost-sep">·</span>
+                  <span class="cost-usd">$4.07</span>
+                </button>
+              </div>
+              <button class="btn btn-sm btn-secondary">Manage</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Expanded dropdown -->
+        <div style="margin-top:24px;">
+          <div class="mockup-label">Expanded breakdown (click on pill)</div>
+          <div class="mockup-frame" style="width:820px; position:relative;">
+            <div class="chat-header">
+              <a class="back-link" href="#">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Agents
+              </a>
+              <span class="agent-name">Content Writer</span>
+              <span class="status-badge"><span class="status-dot"></span>Ready</span>
+              <span class="hdr-spacer"></span>
+              <span class="model-tag">claude-opus-4-7</span>
+              <div style="position:relative;">
+                <button class="cost-pill" style="border-color:var(--indigo-400);background:var(--indigo-50);color:var(--indigo-600);">
+                  <span style="color:var(--indigo-500);">164.5k</span>
+                  <span class="cost-sep">·</span>
+                  <span class="cost-usd">$4.07</span>
+                </button>
+                <div class="cost-dropdown">
+                  <div class="cost-dropdown-header">
+                    <div class="label">This conversation</div>
+                    <div class="cost-total-row">
+                      <span class="cost-total-usd">$4.07</span>
+                      <span class="cost-total-tokens">164.5k tokens · 3 runs</span>
+                    </div>
+                  </div>
+                  <div class="cost-model-row">
+                    <span class="cost-model-name">claude-opus-4-7</span>
+                    <span class="cost-model-tokens">142.1k</span>
+                    <span class="cost-model-usd">$3.55</span>
+                  </div>
+                  <div class="cost-bar-wrap"><div class="cost-bar-fill" style="width:87%;"></div></div>
+                  <div class="cost-model-row">
+                    <span class="cost-model-name">claude-sonnet-4-6</span>
+                    <span class="cost-model-tokens">22.4k</span>
+                    <span class="cost-model-usd">$0.52</span>
+                  </div>
+                  <div class="cost-bar-wrap"><div class="cost-bar-fill" style="width:13%; background:linear-gradient(90deg,var(--violet-500),var(--sky-400));"></div></div>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-secondary">Manage</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="note">
+          <strong>Design decisions to confirm:</strong>
+          Combined tokens (in + out) shown as a single number. Cost updates on each new assistant message — no manual refresh.
+          Model tag stays separate from the pill so it's still scannable at a glance.
+          Pill is monospace for digit alignment. Breakdown shows proportional bars.
+          Token count format: raw below 1k, "k" suffix after, "M" after 1M.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         ITEM C — SUGGESTED ACTION CHIPS
+    ═══════════════════════════════════════════════════════════════ -->
+    <section class="item-section" id="item-c">
+      <div class="item-header">
+        <div class="item-tag">Item C</div>
+        <h2>Suggested next-action chips</h2>
+        <p>Appear below the last assistant message, above the composer. Prompt chips pre-fill the textarea; system chips trigger actions directly.</p>
+      </div>
+
+      <div class="mockup-row" style="flex-direction:column;">
+        <div class="mockup-label">In chat context (prompt chips + system chip)</div>
+        <div class="mockup-frame" style="width:620px;">
+
+          <div class="messages-area" style="height:260px; padding:16px 20px 0;">
+            <!-- user message -->
+            <div class="msg msg-user">
+              <div class="msg-bubble msg-bubble-user">Write a weekly newsletter outline for our SaaS product.</div>
+              <div class="msg-meta">You · 2:14pm</div>
+            </div>
+            <!-- assistant message -->
+            <div class="msg msg-assistant" style="max-width:80%;">
+              <div class="msg-bubble msg-bubble-assistant">
+                Here's a 5-section outline for your newsletter:<br><br>
+                <strong>1. Product Highlight</strong> — Feature spotlight or changelog item.<br>
+                <strong>2. Customer Story</strong> — One-line win from a real user.<br>
+                <strong>3. Tip of the Week</strong> — A workflow or shortcut your power users love.<br>
+                <strong>4. From the Blog</strong> — Link to your most recent post.<br>
+                <strong>5. What's Coming</strong> — Teaser for the next sprint.
+              </div>
+              <div class="msg-meta">Content Writer · 2:15pm</div>
+            </div>
+          </div>
+
+          <!-- Chips — annotated -->
+          <div class="annot" style="display:block;">
+            <div class="annot-dot" style="top:6px;left:-9px;">C</div>
+            <div class="chips-area">
+              <!-- Prompt chips -->
+              <button class="chip chip-prompt">
+                <svg class="chip-icon" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Write section 1 in full
+              </button>
+              <button class="chip chip-prompt">
+                <svg class="chip-icon" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Tighten the voice rules
+              </button>
+              <button class="chip chip-prompt">
+                <svg class="chip-icon" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Generate a second batch
+              </button>
+              <!-- System chip -->
+              <button class="chip chip-system">
+                <svg class="chip-icon" viewBox="0 0 14 14" fill="none"><path d="M7 2v4m0 0l-2-2m2 2l2-2M3 8.5a3.5 3.5 0 107 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Save as agent skill
+              </button>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <textarea rows="1" placeholder="Message Content Writer…"></textarea>
+              <button class="composer-send">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14 2L2 8l5 2m7-8L9 14l-2-4m7-8L7 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:24px;">
+          <div class="mockup-label">No chips (most turns — agent decides)</div>
+          <div class="mockup-frame" style="width:620px;">
+            <div class="messages-area" style="height:120px; padding:16px 20px 0;">
+              <div class="msg msg-assistant" style="max-width:80%;">
+                <div class="msg-bubble msg-bubble-assistant">
+                  The migration script finished successfully — 1,432 rows updated, 0 errors. Your database is ready for the next phase.
+                </div>
+                <div class="msg-meta">DevOps Agent · 3:02pm</div>
+              </div>
+            </div>
+            <!-- No chips — just composer -->
+            <div class="composer-wrap">
+              <div class="composer">
+                <textarea rows="1" placeholder="Message DevOps Agent…"></textarea>
+                <button class="composer-send">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14 2L2 8l5 2m7-8L9 14l-2-4m7-8L7 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note">
+          <strong>Design decisions to confirm:</strong>
+          Prompt chips (white/slate) vs system chips (indigo tinted) are visually distinct.
+          Chips only appear on the most recent assistant message, disappear when the user sends a new message.
+          Max 4 chips. If the agent emits 0 (no <code>suggestedActions</code>), the chip row is absent entirely — no empty space.
+          System chips that fail permission checks render as disabled (greyed out, not clickable).
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         ITEM A — THREAD CONTEXT PANEL
+    ═══════════════════════════════════════════════════════════════ -->
+    <section class="item-section" id="item-a">
+      <div class="item-header">
+        <div class="item-tag">Item A</div>
+        <h2>Thread Context panel</h2>
+        <p>New tab in the existing right pane (beside "Hierarchy"). Shows the agent's working decisions, approach, and task checklist. Read-only for v1.</p>
+      </div>
+
+      <div class="mockup-row">
+
+        <!-- Full right pane mockup -->
+        <div>
+          <div class="mockup-label">Right pane — Context tab</div>
+          <div class="mockup-frame" style="width:300px; height:580px; display:flex; flex-direction:column;">
+
+            <div class="pane-tabs">
+              <div class="pane-tab">Hierarchy</div>
+              <div class="pane-tab active annot" style="position:relative;">
+                <div class="annot-dot" style="top:-4px;right:-4px;">A</div>
+                Context
+              </div>
+              <div style="flex:1; display:flex; align-items:center; justify-content:flex-end; padding-right:10px;">
+                <span class="ctx-live-badge">
+                  <span class="ctx-live-dot"></span>
+                  Live
+                </span>
+              </div>
+            </div>
+
+            <div class="pane-body">
+
+              <!-- Tasks -->
+              <div class="ctx-section">
+                <div class="ctx-section-header">
+                  <span class="ctx-section-title">Tasks</span>
+                  <span class="ctx-section-count">3 open · 4 done</span>
+                </div>
+
+                <!-- Done tasks -->
+                <div class="ctx-task">
+                  <div class="ctx-task-check done">
+                    <svg viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <span class="ctx-task-label done">Audit existing content pillars</span>
+                </div>
+                <div class="ctx-task">
+                  <div class="ctx-task-check done">
+                    <svg viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <span class="ctx-task-label done">Define newsletter voice guidelines</span>
+                </div>
+                <div class="ctx-task">
+                  <div class="ctx-task-check done">
+                    <svg viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <span class="ctx-task-label done">Draft outline for Issue #1</span>
+                </div>
+                <div class="ctx-task">
+                  <div class="ctx-task-check done">
+                    <svg viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <span class="ctx-task-label done">Review and incorporate feedback</span>
+                </div>
+
+                <!-- In progress -->
+                <div class="ctx-task">
+                  <div class="ctx-task-check in-progress">
+                    <svg viewBox="0 0 9 9" fill="none"><circle cx="4.5" cy="4.5" r="2" fill="white"/></svg>
+                  </div>
+                  <div>
+                    <div class="ctx-task-label in-progress">Write full body copy for Issue #2</div>
+                    <div class="ctx-task-status in-progress">In progress</div>
+                  </div>
+                </div>
+
+                <!-- Pending -->
+                <div class="ctx-task">
+                  <div class="ctx-task-check"></div>
+                  <span class="ctx-task-label">Schedule send via Mailchimp</span>
+                </div>
+                <div class="ctx-task">
+                  <div class="ctx-task-check"></div>
+                  <span class="ctx-task-label">Set up Issue #3 outline</span>
+                </div>
+
+              </div>
+
+              <!-- Approach -->
+              <div class="ctx-section">
+                <div class="ctx-section-header">
+                  <span class="ctx-section-title">Approach</span>
+                </div>
+                <div class="ctx-approach">
+                  Producing a bi-weekly newsletter for a B2B SaaS audience. Each issue follows the 5-section template. Tone: direct, warm, no jargon. Target read time: under 3 minutes. Working from the company's existing blog posts as source material.
+                </div>
+              </div>
+
+              <!-- Decisions -->
+              <div class="ctx-section">
+                <div class="ctx-section-header">
+                  <span class="ctx-section-title">Decisions</span>
+                  <span class="ctx-section-count">3</span>
+                </div>
+
+                <div class="ctx-decision">
+                  <div class="ctx-decision-text">Use bi-weekly cadence</div>
+                  <div class="ctx-decision-rationale">Weekly was too frequent for the team's content output</div>
+                </div>
+                <div class="ctx-decision">
+                  <div class="ctx-decision-text">Lead with customer story, not product</div>
+                  <div class="ctx-decision-rationale">Opens rate data shows story-first performs better</div>
+                </div>
+                <div class="ctx-decision">
+                  <div class="ctx-decision-text">Plain text format preferred over HTML</div>
+                  <div class="ctx-decision-rationale">Audience responds better to personal, undesigned emails</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Context + Hierarchy comparison -->
+        <div>
+          <div class="mockup-label">Right pane — Hierarchy tab (existing, for comparison)</div>
+          <div class="mockup-frame" style="width:300px; height:580px; display:flex; flex-direction:column; opacity:0.75;">
+            <div class="pane-tabs">
+              <div class="pane-tab active">Hierarchy</div>
+              <div class="pane-tab">Context</div>
+            </div>
+            <div class="pane-body" style="padding:12px;">
+              <div style="font-size:11px;color:var(--slate-400);text-align:center;padding:40px 0;">
+                Existing hierarchy / trace view<br>(unchanged)
+              </div>
+              <!-- Faux trace entries -->
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+                <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:7px;padding:8px 10px;">
+                  <div style="font-size:11px;font-weight:600;color:var(--slate-700);">Run #3 · completed</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">4 tool calls · 12.4k tokens · 0:42</div>
+                </div>
+                <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:7px;padding:8px 10px;">
+                  <div style="font-size:11px;font-weight:600;color:var(--slate-700);">Run #2 · completed</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">2 tool calls · 8.1k tokens · 0:28</div>
+                </div>
+                <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:7px;padding:8px 10px;">
+                  <div style="font-size:11px;font-weight:600;color:var(--slate-700);">Run #1 · completed</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">1 tool call · 5.2k tokens · 0:15</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="note" style="max-width:640px; margin-top:16px;">
+        <strong>Design decisions to confirm:</strong>
+        "Context" or "Working Doc" as tab label? "Context" is shorter, maps to the code name.
+        Live badge (green dot) appears when a run is currently active, disappears otherwise.
+        Completed tasks always show before pending so progress is visible at a glance — newest done at top, or oldest-done at top?
+        Should the "in progress" task pulsate/animate while a run is active?
+        Read-only for v1 confirmed. No edit controls rendered.
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         ITEM D — INVOCATIONS CARD
+    ═══════════════════════════════════════════════════════════════ -->
+    <section class="item-section" id="item-d">
+      <div class="item-header">
+        <div class="item-tag">Item D</div>
+        <h2>Invocations card</h2>
+        <p>Replaces the scattered trigger sections on AdminAgentEditPage with a single unified card. Each channel shows status and expands inline.</p>
+      </div>
+
+      <div class="mockup-row" style="flex-direction:column; max-width:680px;">
+
+        <!-- Tile grid view -->
+        <div>
+          <div class="mockup-label">Collapsed tile grid (default)</div>
+          <div class="mockup-frame annot">
+            <div class="annot-dot">D</div>
+            <div class="section-card" style="margin-bottom:0; border:none; border-radius:0; box-shadow:none;">
+              <div class="section-card-header">
+                <div>
+                  <div class="section-card-title">Invocations</div>
+                  <div style="font-size:12px; color:var(--slate-400); margin-top:2px;">Ways this agent can be started or reached</div>
+                </div>
+              </div>
+              <div class="section-card-body">
+                <div class="invocations-grid">
+                  <!-- Scheduled — active -->
+                  <div class="inv-tile">
+                    <div class="inv-tile-icon inv-icon-sched">
+                      <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </div>
+                    <div class="inv-tile-label">Scheduled</div>
+                    <span class="badge badge-active">Every 6h</span>
+                  </div>
+
+                  <!-- Webhook — active -->
+                  <div class="inv-tile">
+                    <div class="inv-tile-icon inv-icon-webhook">
+                      <svg viewBox="0 0 20 20" fill="none"><path d="M4 10c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M16 10c0 3.3-2.7 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg>
+                    </div>
+                    <div class="inv-tile-label">Webhook</div>
+                    <span class="badge badge-active">Active</span>
+                  </div>
+
+                  <!-- Slack — active with count -->
+                  <div class="inv-tile">
+                    <div class="inv-tile-icon inv-icon-slack">
+                      <!-- Slack logo-ish -->
+                      <svg viewBox="0 0 20 20" fill="none"><rect x="6" y="3" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="11" y="9" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="3" y="11" width="8" height="3" rx="1.5" fill="currentColor"/><rect x="9" y="6" width="8" height="3" rx="1.5" fill="currentColor"/></svg>
+                    </div>
+                    <div class="inv-tile-label">Slack</div>
+                    <span class="badge badge-active">3 channels</span>
+                  </div>
+
+                  <!-- Email — setup needed -->
+                  <div class="inv-tile">
+                    <div class="inv-tile-icon inv-icon-email">
+                      <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 7l8 5 8-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </div>
+                    <div class="inv-tile-label">Email</div>
+                    <span class="badge badge-setup">Setup</span>
+                  </div>
+
+                  <!-- SMS — coming soon -->
+                  <div class="inv-tile soon">
+                    <div class="inv-tile-icon inv-icon-sms">
+                      <svg viewBox="0 0 20 20" fill="none"><path d="M4 4h12a2 2 0 012 2v7a2 2 0 01-2 2H8l-4 3V6a2 2 0 012-2z" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </div>
+                    <div class="inv-tile-label">SMS</div>
+                    <span class="badge badge-soon">Soon</span>
+                  </div>
+
+                  <!-- MCP Server — coming soon -->
+                  <div class="inv-tile soon">
+                    <div class="inv-tile-icon inv-icon-mcp">
+                      <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 10h4M10 8v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </div>
+                    <div class="inv-tile-label">MCP Server</div>
+                    <span class="badge badge-soon">Soon</span>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Expanded row view (one channel open) -->
+        <div style="margin-top:28px;">
+          <div class="mockup-label">Expanded — Scheduled channel open</div>
+          <div class="mockup-frame">
+            <div class="section-card" style="margin-bottom:0; border:none; border-radius:0; box-shadow:none;">
+              <div class="section-card-header">
+                <div>
+                  <div class="section-card-title">Invocations</div>
+                  <div style="font-size:12px; color:var(--slate-400); margin-top:2px;">Ways this agent can be started or reached</div>
+                </div>
+              </div>
+              <div class="section-card-body" style="padding:14px 18px; display:flex;flex-direction:column;gap:8px;">
+
+                <!-- Scheduled expanded -->
+                <div class="inv-expanded">
+                  <div class="inv-expanded-header">
+                    <div class="inv-expanded-icon inv-icon-sched">
+                      <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </div>
+                    <span class="inv-expanded-name">Scheduled</span>
+                    <span class="badge badge-active">Every 6h</span>
+                    <svg class="inv-expanded-chevron open" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </div>
+                  <div class="inv-expanded-body">
+                    <div class="inv-field-row">
+                      <span class="inv-field-label">Frequency</span>
+                      <span class="inv-field-value">Every 6 hours</span>
+                    </div>
+                    <div class="inv-field-row">
+                      <span class="inv-field-label">Next run</span>
+                      <span class="inv-field-value">Today at 4:00 PM</span>
+                    </div>
+                    <div class="inv-field-row" style="margin-bottom:0;">
+                      <span class="inv-field-label">Prompt</span>
+                      <span class="inv-field-value" style="color:var(--slate-500);">"Check for new leads and draft follow-ups"</span>
+                    </div>
+                    <div style="margin-top:12px; display:flex; gap:8px;">
+                      <button class="btn btn-sm btn-secondary">Edit schedule</button>
+                      <button class="btn btn-sm btn-ghost" style="color:var(--red-500);">Disable</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Webhook collapsed -->
+                <div class="inv-expanded">
+                  <div class="inv-expanded-header">
+                    <div class="inv-expanded-icon inv-icon-webhook">
+                      <svg viewBox="0 0 20 20" fill="none"><path d="M4 10c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M16 10c0 3.3-2.7 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg>
+                    </div>
+                    <span class="inv-expanded-name">Webhook</span>
+                    <span class="badge badge-active">Active</span>
+                    <svg class="inv-expanded-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </div>
+                </div>
+
+                <!-- Slack collapsed -->
+                <div class="inv-expanded">
+                  <div class="inv-expanded-header">
+                    <div class="inv-expanded-icon inv-icon-slack">
+                      <svg viewBox="0 0 20 20" fill="none"><rect x="6" y="3" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="11" y="9" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="3" y="11" width="8" height="3" rx="1.5" fill="currentColor"/><rect x="9" y="6" width="8" height="3" rx="1.5" fill="currentColor"/></svg>
+                    </div>
+                    <span class="inv-expanded-name">Slack</span>
+                    <span class="badge badge-active">3 channels</span>
+                    <svg class="inv-expanded-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </div>
+                </div>
+
+                <!-- Email setup -->
+                <div class="inv-expanded">
+                  <div class="inv-expanded-header">
+                    <div class="inv-expanded-icon inv-icon-email">
+                      <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 7l8 5 8-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    </div>
+                    <span class="inv-expanded-name">Email</span>
+                    <span class="badge badge-setup">Setup required</span>
+                    <svg class="inv-expanded-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note">
+          <strong>Design decisions to confirm:</strong>
+          Tile grid vs accordion list — mockup shows both options. Lean: start collapsed as tiles, click opens in-place accordion (no modal).
+          "Active count" for Slack: channel count confirmed. Recent activity shown in expanded view.
+          SMS and MCP tiles are visible but greyed/disabled — clicking does nothing (no "notify me" CTA for v1).
+          Does the Invocations card replace existing sections entirely, or do existing sections remain below as a legacy fallback? Lean: replace.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         ITEM E — INLINE INTEGRATION CARD
+    ═══════════════════════════════════════════════════════════════ -->
+    <section class="item-section" id="item-e">
+      <div class="item-header">
+        <div class="item-tag">Item E</div>
+        <h2>Inline integration-setup card</h2>
+        <p>Rendered in the chat thread when the agent needs a missing integration. Three states: active (connect now), dismissed, expired.</p>
+      </div>
+
+      <div class="states-row">
+
+        <!-- State 1: Active -->
+        <div class="state-col">
+          <div class="mockup-label">State 1 — Active (connect required)</div>
+          <div class="mockup-frame" style="width:400px; padding:16px;">
+            <!-- Faux assistant message leading in -->
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-start;">
+              <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));flex-shrink:0;"></div>
+              <div class="msg-bubble msg-bubble-assistant" style="border-radius:18px 18px 18px 4px;font-size:13px;">
+                To fetch your Notion workspace data, I'll need you to connect your Notion account first.
+              </div>
+            </div>
+
+            <!-- Integration card — annotated -->
+            <div class="annot" style="display:block;padding-left:36px;">
+              <div class="annot-dot" style="top:-4px;left:28px;">E</div>
+              <div class="integration-card">
+                <div class="integration-card-header">
+                  <div class="integration-icon">
+                    <!-- Notion N -->
+                    <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><rect width="22" height="22" rx="5" fill="white"/><text x="5" y="16" font-size="14" font-weight="700" font-family="serif" fill="#1a1a1a">N</text></svg>
+                  </div>
+                  <div>
+                    <div class="integration-name">Notion</div>
+                    <div class="integration-desc">Workspace access needed</div>
+                  </div>
+                </div>
+                <div class="integration-card-body">
+                  <div class="integration-reason">
+                    I need read access to your Notion workspace to find the project docs you mentioned.
+                  </div>
+                  <div class="integration-actions">
+                    <button class="btn btn-primary btn-sm">
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v5.5H12M6.5 1L2 5.5" stroke="white" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      Connect Notion
+                    </button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--slate-400);">Dismiss</button>
+                  </div>
+                  <div class="integration-ttl">Expires in 23h 58m</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 2: Dismissed (collapsed) -->
+        <div class="state-col">
+          <div class="mockup-label">State 2 — Dismissed (user clicked dismiss)</div>
+          <div class="mockup-frame" style="width:400px; padding:16px;">
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-start;">
+              <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));flex-shrink:0;"></div>
+              <div class="msg-bubble msg-bubble-assistant" style="border-radius:18px 18px 18px 4px;font-size:13px;">
+                To fetch your Notion workspace data, I'll need you to connect your Notion account first.
+              </div>
+            </div>
+            <div style="padding-left:36px;">
+              <div style="display:flex;align-items:center;gap:10px;background:var(--slate-50);border:1px dashed var(--slate-200);border-radius:10px;padding:10px 14px;">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="3" stroke="var(--slate-300)" stroke-width="1.5"/></svg>
+                <span style="font-size:12px;color:var(--slate-400);flex:1;">Notion connection dismissed</span>
+                <button class="btn btn-xs btn-secondary">Connect</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 3: Expired -->
+        <div class="state-col">
+          <div class="mockup-label">State 3 — Expired (TTL elapsed)</div>
+          <div class="mockup-frame" style="width:400px; padding:16px;">
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-start;">
+              <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));flex-shrink:0;"></div>
+              <div class="msg-bubble msg-bubble-assistant" style="border-radius:18px 18px 18px 4px;font-size:13px;">
+                To fetch your Notion workspace data, I'll need you to connect your Notion account first.
+              </div>
+            </div>
+            <div style="padding-left:36px;">
+              <div class="integration-card expired">
+                <div class="integration-card-header" style="opacity:0.6;">
+                  <div class="integration-icon">
+                    <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><rect width="22" height="22" rx="5" fill="white"/><text x="5" y="16" font-size="14" font-weight="700" font-family="serif" fill="#1a1a1a">N</text></svg>
+                  </div>
+                  <div>
+                    <div class="integration-name">Notion</div>
+                    <div class="integration-desc">Connection expired</div>
+                  </div>
+                </div>
+                <div class="integration-expired-banner">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 4v3M6.5 9v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                  This connection request expired.
+                  <button class="btn btn-xs" style="background:white;border:1px solid #fde68a;color:var(--amber-600);margin-left:auto;">Try again</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Connected state — run resumes -->
+      <div style="margin-top:28px;">
+        <div class="mockup-label">State 4 — Connected (OAuth complete, run resumed)</div>
+        <div class="mockup-frame" style="width:400px; padding:16px;">
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-start;">
+            <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));flex-shrink:0;"></div>
+            <div class="msg-bubble msg-bubble-assistant" style="border-radius:18px 18px 18px 4px;font-size:13px;">
+              To fetch your Notion workspace data, I'll need you to connect your Notion account first.
+            </div>
+          </div>
+          <div style="padding-left:36px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:10px;padding:10px 14px;">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" fill="var(--emerald-500)"/><path d="M5 8l2 2 4-4" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="font-size:12px;color:var(--emerald-600);font-weight:500;">Notion connected — resuming…</span>
+            </div>
+          </div>
+          <!-- Next assistant message appears -->
+          <div style="display:flex;gap:8px;align-items:flex-start;">
+            <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));flex-shrink:0;"></div>
+            <div>
+              <div class="exec-badge" style="margin-bottom:8px;">
+                <div class="exec-spinner"></div>
+                Fetching Notion pages…
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note" style="max-width:760px;">
+        <strong>Design decisions to confirm:</strong>
+        Card width: 340px max-width, aligned with the assistant message column (not full-width).
+        "Dismiss" collapses the card to a minimal 1-line stub — the run stays blocked until expiry or user reconnects via "Connect" in the stub.
+        "Try again" on the expired state creates a new run, not a resume of the old one.
+        OAuth popup vs. same-tab redirect? Lean: popup, with <code>postMessage</code> back on success.
+        Should the TTL countdown be live (ticking) or static on render?
+        Multiple integration blocks in one run: each generates its own card in sequence — no batching.
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // Smooth nav highlighting
+  const sections = document.querySelectorAll('.item-section');
+  const navLinks = document.querySelectorAll('.nav a');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    sections.forEach(s => { if (window.scrollY >= s.offsetTop - 120) current = '#' + s.id; });
+    navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === current); });
+  });
+  // Nav clicks
+  navLinks.forEach(a => a.addEventListener('click', () => {
+    navLinks.forEach(l => l.classList.remove('active'));
+    a.classList.add('active');
+  }));
+</script>
+</body>
+</html>

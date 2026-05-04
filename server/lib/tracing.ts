@@ -131,6 +131,9 @@ export const TERMINATION_REASONS = [
   'timeout',
   'budget_exceeded',
   'pre_loop_exit',
+  // User-triggered cancel observed at the top of an outer-loop iteration
+  // (server/services/agentRunCancelService.ts).
+  'user_cancelled',
 ] as const;
 
 export type TerminationReason = (typeof TERMINATION_REASONS)[number];

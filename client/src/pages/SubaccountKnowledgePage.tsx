@@ -148,12 +148,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
   useEffect(() => {
     if (!subaccountId) return;
     load();
+    // reason: `load` is an inline async function that closes over state setters; only subaccountId is the intended trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
   useEffect(() => {
     if (!subaccountId || tab !== 'insights') return;
     loadInsights();
+    // reason: `loadInsights` is an inline async function that closes over state setters; only the filter keys are the intended triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId, tab, insightFilters]);
 
@@ -408,7 +410,7 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           {tab === 'references' && (
             <button
               onClick={() => openEditReference('new')}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               + New Reference
             </button>
@@ -416,7 +418,7 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           {tab === 'blocks' && (
             <button
               onClick={() => openEditBlock('new')}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               + New Memory Block
             </button>
@@ -581,14 +583,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
             <div className="flex justify-end gap-2 mt-2">
               <button
                 onClick={() => setPromoteFrom(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePromote}
                 disabled={!promoteLabel.trim() || !promoteContent.trim() || promoting}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 {promoting ? 'Promoting…' : 'Promote'}
               </button>
@@ -624,14 +626,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setEditRef(null);
                   setEditRefContent('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveReference}
                 disabled={!editRefContent.replace(/<[^>]+>/g, '').trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Save
               </button>
@@ -668,14 +670,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setRenameRef(null);
                   setRenameTitle('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRenameReference}
                 disabled={!renameTitle.trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Rename
               </button>
@@ -728,14 +730,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setEditBlockLabel('');
                   setEditBlockContent('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveBlock}
                 disabled={!editBlockLabel.trim() || !editBlockContent.trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Save
               </button>
@@ -845,25 +847,25 @@ function ReferencesTable({
                 <div className="flex gap-1.5 flex-wrap">
                   <button
                     onClick={() => onPromote(item)}
-                    className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-50"
                   >
                     Promote
                   </button>
                   <button
                     onClick={() => onEdit(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onRename(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Rename
                   </button>
                   <button
                     onClick={() => onArchive(item.id)}
-                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded text-[12px] text-amber-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-amber-700 hover:bg-amber-50"
                   >
                     Archive
                   </button>
@@ -999,7 +1001,7 @@ function InsightsTable({
               <td className="px-3 py-3">
                 <button
                   onClick={() => onPromote(item.id)}
-                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors"
+                  className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-50"
                 >
                   Promote
                 </button>
@@ -1061,13 +1063,13 @@ function BlocksTable({
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => onEdit(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onDemote(item.id)}
-                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded text-[12px] text-amber-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-amber-700 hover:bg-amber-50"
                   >
                     Demote
                   </button>

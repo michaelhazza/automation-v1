@@ -10,12 +10,15 @@
   timestamp,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { workflowTemplateVersions } from './workflowTemplates';
+import { tasks } from './tasks';
+import type { GateResolutionReason } from '../../../shared/types/workflowStepGate.js';
 
 // ---------------------------------------------------------------------------
 // Workflow Runs — execution instances against a single subaccount
@@ -26,6 +29,7 @@ export type WorkflowRunMode = 'auto' | 'supervised' | 'background' | 'bulk';
 export type WorkflowRunStatus =
   | 'pending'
   | 'running'
+  | 'paused'
   | 'awaiting_input'
   | 'awaiting_approval'
   | 'completed'
@@ -57,6 +61,9 @@ export const workflowRuns = pgTable(
       .references(() => workflowTemplateVersions.id),
     // Sprint 4 P3.1 — execution mode: auto (default), supervised, background, bulk
     runMode: text('run_mode').notNull().default('auto').$type<WorkflowRunMode>(),
+    // F6 — Riley safety posture (explore = review all side-effecting steps;
+    // execute = auto-dispatch). Orthogonal to run_mode.
+    safetyMode: text('safety_mode').notNull().default('explore').$type<'explore' | 'execute'>(),
     status: text('status').notNull().default('pending').$type<WorkflowRunStatus>(),
     contextJson: jsonb('context_json').notNull().default({}).$type<Record<string, unknown>>(),
     contextSizeBytes: integer('context_size_bytes').notNull().default(0),
@@ -66,10 +73,17 @@ export const workflowRuns = pgTable(
     parentRunId: uuid('parent_run_id').references((): any => workflowRuns.id),
     targetSubaccountId: uuid('target_subaccount_id').references(() => subaccounts.id),
     startedByUserId: uuid('started_by_user_id').references(() => users.id),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
     failedDueToStepId: text('failed_due_to_step_id'),
+    // Workflows V1 — cost/time ceiling (migration 0270, spec §3.1)
+    effectiveCostCeilingCents: integer('effective_cost_ceiling_cents'),
+    effectiveWallClockCapSeconds: integer('effective_wall_clock_cap_seconds'),
+    extensionCount: integer('extension_count').notNull().default(0),
+    costAccumulatorCents: integer('cost_accumulator_cents').notNull().default(0),
+    degradationReason: text('degradation_reason'),
     // Phase E — onboarding-Workflows-spec §9.2 / §9.3 / §9.4.
     // Drives the portal card visibility toggle and the admin Onboarding tab.
     isPortalVisible: boolean('is_portal_visible').notNull().default(false),
@@ -88,6 +102,21 @@ export const workflowRuns = pgTable(
       table.status
     ),
     templateVersionIdx: index('workflow_runs_template_version_idx').on(table.templateVersionId),
+    // Workflows V1 (migration 0270)
+    statusPausedIdx: index('workflow_runs_status_paused_idx')
+      .on(table.id)
+      .where(sql`${table.status} = 'paused'`),
+    statusUpdatedIdx: index('workflow_runs_status_updated_idx').on(table.status, table.updatedAt),
+    // Workflows V1 (migration 0270) — accumulator never goes negative
+    costAccumulatorNonneg: check(
+      'workflow_runs_cost_accumulator_nonneg',
+      sql`${table.costAccumulatorCents} >= 0`,
+    ),
+    // Workflows V1 Phase 2 (migration 0276) — task FK indexes
+    taskIdIdx: index('workflow_runs_task_id_idx').on(table.taskId),
+    oneActivePerTaskIdx: uniqueIndex('workflow_runs_one_active_per_task_idx')
+      .on(table.taskId)
+      .where(sql`${table.status} NOT IN ('completed', 'completed_with_errors', 'failed', 'cancelled', 'partial')`),
   })
 );
 
@@ -112,6 +141,11 @@ export type WorkflowRunEventSequence = typeof workflowRunEventSequences.$inferSe
 // ---------------------------------------------------------------------------
 
 export type WorkflowStepType =
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask'
+  // Engine / legacy names — used in system templates and pre-V1 forks.
   | 'prompt'
   | 'agent_call'
   | 'user_input'
@@ -193,9 +227,17 @@ export const workflowStepReviews = pgTable(
     decidedByUserId: uuid('decided_by_user_id').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // Workflows V1 (migration 0270)
+    gateId: uuid('gate_id'),
+    decisionReason: text('decision_reason'),
+    resolutionReason: text('resolution_reason').$type<GateResolutionReason | null>(),
   },
   (table) => ({
     stepRunIdx: index('workflow_step_reviews_step_run_idx').on(table.stepRunId),
+    // Unique: one decision per (gate, deciding user) for non-null deciders
+    gateUserUniqIdx: uniqueIndex('workflow_step_reviews_gate_user_uniq_idx')
+      .on(table.gateId, table.decidedByUserId)
+      .where(sql`${table.decidedByUserId} IS NOT NULL`),
   })
 );
 

@@ -17,10 +17,11 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 - [The primary rule](#the-primary-rule)
 - [Pre-design checklist](#pre-design-checklist)
 - [What to ship by default](#what-to-ship-by-default)
+- [Visuals as simplicity](#visuals-as-simplicity)
 - [What to defer by default](#what-to-defer-by-default)
 - [Complexity budget per screen](#complexity-budget-per-screen)
 - [Progressive disclosure patterns](#progressive-disclosure-patterns)
-- [Worked example — cached-context infrastructure](#worked-example--cached-context-infrastructure)
+- [Worked examples](#worked-examples) → see [`frontend-design-examples.md`](./frontend-design-examples.md)
 - [Re-check before delivery](#re-check-before-delivery)
 - [When to break these rules](#when-to-break-these-rules)
 
@@ -136,46 +137,15 @@ Pick the lowest-weight pattern that works. Do not mix three patterns on one scre
 
 ---
 
-## Worked example — cached-context infrastructure
+## Worked examples
 
-The cached-context spec exposes these backend capabilities: reference document CRUD, document bundle CRUD, bundle resolution snapshots, prefix-hash identity, cache read/write attribution, three-way run-outcome classification, bundle utilization per model tier, per-tenant cache-cost rollups, HITL budget-breach block payload.
+Three worked examples — drawn from origin-project features — live in [`frontend-design-examples.md`](./frontend-design-examples.md):
 
-### What the v1 UI should ship
+- **Cached-context infrastructure** — backend exposes 9 capabilities; UI ships 3 screens + 2 inline signals. The bulk of the deferred-by-default rule.
+- **ClientPulse health monitoring** — analytical complexity in the backend does not imply analytical complexity in the UI. One drilldown, one modal, one settings page.
+- **Tier-1 agent chat uplift** — backend richness (cost attribution, suggested actions, OCC versioning) maps to the smallest possible UI signals: a number, a chip row, a text field, a card.
 
-The primary user task is **attach documents to automations**. That's the whole feature from the user's POV. Everything else is invisible infrastructure.
-
-- **Documents page** — a simple list of uploaded reference documents (name, size, updated). One primary action: upload. Standard primitive.
-- **Bundle creation** — name + add documents. One primary action: save. Standard primitive.
-- **Bundle attachment control** — reused inline on agent / task / scheduled-task config pages. One drop-down or multi-select. One primary action: attach. Shows currently attached bundles as chips with a remove (x).
-- **One inline signal on the bundle list row** — a dot/label: `healthy` / `near cap` / `at cap`. Drives user attention to trim when needed. No tier-by-tier breakdown visible by default.
-- **One inline signal on the task / scheduled-task row** — last run outcome (`completed` / `degraded` / `failed`) as a dot. Runs live in the existing run log.
-
-That's it. Three new screens (documents, bundle detail, bundle attachment control) + two inline signals on existing pages. No new dashboards, no new explorers, no charts, no tiles.
-
-### What the v1 UI should NOT ship
-
-- Bundle utilization dashboard with green/amber/red radial rings per tier.
-- Scheduled-task detail with 7-day run-calendar, detailed run table, sidebar bundle utilization.
-- Run-detail page exposing prefix hashes, components JSON, snapshot integrity checks, cache-read-vs-write tokens, cost-saved counterfactual.
-- Usage Explorer with per-bundle hit-rate trend lines, cost-split donut, bundle ranking, per-tenant breakdown.
-- Any comparison view of Sonnet vs Opus vs Haiku.
-- Any exposure of `prefix_hash`, `bundleSnapshotId`, `idempotencyKey`, or other internal identifiers to the primary user.
-
-All of these represent real backend signals that can and should be computed. They surface (if at all) on an admin-only observability page gated behind an explicit role, never on the primary user journey. Most will be deferred out of v1 entirely — **shipping them is optional; the feature works without them**.
-
-### The mockups in `prototypes/cached-context/`
-
-The five mockups in [`prototypes/cached-context/`](../prototypes/cached-context/) were generated before this doc existed. They violate rules 1, 2, 3, 4 — most of them represent "what the backend could surface if we exposed every column", not "what the user needs to complete the task".
-
-- **`mockup-budget-breach-block.html`** — valid. Renders the `HitlBudgetBlockPayload` shape the spec commits to (§4.5). Safety-critical screen that legitimately has to surface WHY a run is blocked. Keep.
-- **`mockup-pack-utilization.html`** — reduce to a single inline badge on the bundle list row. The tier-by-tier radial dashboard is the anti-pattern. (Historical filename; this mockup was deleted in the UX revision.)
-- **`mockup-scheduled-task-with-pack.html`** — replace with an inline attachment control on the existing scheduled-task config page. Run-history lives in the run log, not here.
-- **`mockup-run-detail-cached.html`** — delete from v1. Runs open the existing run-detail page. Prefix-hash / cache attribution surfaces there as a collapsed "Advanced" section, not as its own screen.
-- **`mockup-usage-explorer-packs.html`** — delete from v1. The observability story is a valid admin concern but not a v1 deliverable.
-
-Build the replacement v1 mockup set focused on the attach workflow before implementation begins.
-
----
+Read for method, not content. If you're adapting this framework to a new project, replace these with worked examples from your own product.
 
 ## Re-check before delivery
 

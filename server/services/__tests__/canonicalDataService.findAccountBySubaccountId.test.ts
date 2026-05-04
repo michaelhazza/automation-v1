@@ -1,4 +1,5 @@
 // guard-ignore-file: pure-helper-convention reason="Inline mock simulation — DB module replaced with in-memory stub; no .js extension on import due to tsx convention"
+import { expect, test } from 'vitest';
 /**
  * canonicalDataService.findAccountBySubaccountId unit tests — runnable via:
  *   npx tsx --test server/services/__tests__/canonicalDataService.findAccountBySubaccountId.test.ts
@@ -12,9 +13,6 @@
  * WHERE predicates and (b) .limit(1) is called — without requiring a real
  * Postgres connection.
  */
-
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
 
 // ---------------------------------------------------------------------------
 // Minimal stub types matching the Drizzle column shape
@@ -171,9 +169,9 @@ test('findAccountBySubaccountId issues a SELECT with WHERE on both organisationI
     c => c.column === 'subaccountId' && c.value === 'sub-x',
   );
 
-  assert.ok(hasOrgCondition, 'WHERE must include organisationId predicate');
-  assert.ok(hasSubaccountCondition, 'WHERE must include subaccountId predicate');
-  assert.strictEqual(log.conditions.length, 2, 'Exactly 2 WHERE conditions (no extra predicates)');
+  expect(hasOrgCondition).toBeTruthy();
+  expect(hasSubaccountCondition).toBeTruthy();
+  expect(log.conditions.length, 'Exactly 2 WHERE conditions (no extra predicates)').toBe(2);
 });
 
 test('findAccountBySubaccountId calls .limit(1)', async () => {
@@ -182,8 +180,8 @@ test('findAccountBySubaccountId calls .limit(1)', async () => {
 
   await findAccountBySubaccountIdPure(stub, eq, and, canonicalAccounts, 'org-a', 'sub-x');
 
-  assert.ok(log.limitCalled, '.limit() must be called');
-  assert.strictEqual(log.limitValue, 1, '.limit() must be called with 1');
+  expect(log.limitCalled).toBeTruthy();
+  expect(log.limitValue, '.limit() must be called with 1').toBe(1);
 });
 
 test('findAccountBySubaccountId returns the matching row when found', async () => {
@@ -192,9 +190,9 @@ test('findAccountBySubaccountId returns the matching row when found', async () =
 
   const result = await findAccountBySubaccountIdPure(stub, eq, and, canonicalAccounts, 'org-a', 'sub-x');
 
-  assert.ok(result !== null, 'Should return a row when a match exists');
-  assert.strictEqual(result!.id, 'acc-1');
-  assert.strictEqual(result!.displayName, 'Alpha');
+  expect(result !== null).toBeTruthy();
+  expect(result!.id).toBe('acc-1');
+  expect(result!.displayName).toBe('Alpha');
 });
 
 test('findAccountBySubaccountId returns null when no row found', async () => {
@@ -203,7 +201,7 @@ test('findAccountBySubaccountId returns null when no row found', async () => {
 
   const result = await findAccountBySubaccountIdPure(stub, eq, and, canonicalAccounts, 'org-a', 'sub-nonexistent');
 
-  assert.strictEqual(result, null, 'Should return null when no match exists');
+  expect(result, 'Should return null when no match exists').toBe(null);
 });
 
 test('findAccountBySubaccountId scopes by organisationId (does not return same subaccountId from different org)', async () => {
@@ -213,7 +211,7 @@ test('findAccountBySubaccountId scopes by organisationId (does not return same s
   // sub-x exists in both org-a (acc-1) and org-b (acc-3); must return only org-a's
   const result = await findAccountBySubaccountIdPure(stub, eq, and, canonicalAccounts, 'org-a', 'sub-x');
 
-  assert.ok(result !== null);
-  assert.strictEqual(result!.organisationId, 'org-a', 'Must only return row matching the given orgId');
-  assert.notEqual(result!.id, 'acc-3', 'Must not return row from a different org');
+  expect(result !== null).toBeTruthy();
+  expect(result!.organisationId, 'Must only return row matching the given orgId').toBe('org-a');
+  expect(result!.id, 'Must not return row from a different org').not.toBe('acc-3');
 });

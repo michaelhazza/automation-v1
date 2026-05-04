@@ -80,6 +80,28 @@ migration safety: no data to migrate, dev environment only
 
 If the file does not exist, add a deferred item to `tasks/todo.md`: "spec-context.md is missing — create it with the framing assumptions for this project before the next spec-review run." Proceed using the baked-in framing assumptions at the top of this document as the ground truth.
 
+#### Staleness gate (mandatory)
+
+`docs/spec-context.md` declares its own staleness policy in a YAML block at the top:
+
+```yaml
+last_reviewed_at: YYYY-MM-DD
+stale_after_days: 60
+stale_blocks_at_days: 120
+```
+
+Before iteration 1, parse those three values and compute `age_days = today - last_reviewed_at`:
+
+- `age_days < stale_after_days` → green. Proceed.
+- `stale_after_days ≤ age_days < stale_blocks_at_days` → yellow. Print one warning line:
+  `[spec-reviewer] WARN: spec-context.md is <N> days old (warn at <stale_after_days>, block at <stale_blocks_at_days>). Update docs/spec-context.md and bump last_reviewed_at when convenient.`
+  Append a deferred item to `tasks/todo.md` under `## Deferred — spec-context staleness` (dedupe on existing entry by date). Proceed.
+- `age_days ≥ stale_blocks_at_days` → red. STOP. Do not start iteration 1. Print:
+  `[spec-reviewer] BLOCKED: spec-context.md is <N> days old (block threshold <stale_blocks_at_days>). The framing assumptions powering directional classification are no longer trustworthy. Update docs/spec-context.md and bump last_reviewed_at, then re-run.`
+  Exit. Do not log a deferred item — the operator has been told what to do directly.
+
+If the YAML block is missing or malformed (e.g. an old spec-context.md predates the staleness convention), treat as yellow: warn once, proceed, log a deferred item asking the operator to add the staleness header.
+
 ### Step B — Cross-reference spec against context
 
 Read the first 200 lines of the spec under review (the framing section, headline findings, implementation philosophy, verdict legend — whatever the spec uses for framing). Compare its claims against the spec-context file:
@@ -181,75 +203,11 @@ Mechanical findings are auto-applied during Step 6 without human input.
 
 #### Bucket 2 — Directional
 
-A finding is directional if ANY of the following are true. This list is hardcoded — if a finding matches any item here, it is directional REGARDLESS of how small the change seems or how obviously correct Codex's recommendation looks. You do not get to override this list based on your own judgment.
+A finding is directional if ANY signal in [`references/spec-review-directional-signals.md`](../../references/spec-review-directional-signals.md) matches. The signal list is hardcoded — if a finding matches any item there, it is directional REGARDLESS of how small the change seems or how obviously correct Codex's recommendation looks. You do not get to override the list based on your own judgment.
 
-**Scope signals:**
-- "Add this item to the roadmap"
-- "Remove this item from the roadmap"
-- "This should be Phase N" (where N differs from the current phase)
-- "Defer this until later"
-- "Bring this forward to an earlier phase"
-- "Split this item into two"
-- "Combine these two items into one"
+The list covers eight categories: scope, sequencing, testing posture, rollout posture, production caution, architecture, cross-cutting, and framing. Read the reference file before classifying.
 
-**Sequencing signals:**
-- "Ship this in a different sprint"
-- "This blocks that" (introducing a new dependency edge)
-- "Swap the order of these two items"
-- "This should come after / before [other item]"
-
-**Testing posture signals:**
-- "Add more tests" beyond the pure-function + static-gate + 3-integration-test envelope
-- "Add fewer tests" below the envelope
-- "Introduce a test framework" (vitest, jest, playwright for the app itself, supertest, MSW, etc.)
-- "Add composition tests for middleware"
-- "Add performance baselines"
-- "Add migration safety tests"
-- "Add chaos / resilience tests beyond the existing round-trip"
-- "Add adversarial security tests beyond what static gates catch"
-- "Add frontend unit tests"
-- "Add E2E tests of the Automation OS app"
-
-**Rollout posture signals:**
-- "Feature-flag this"
-- "Stage the rollout"
-- "Verify in staging between steps"
-- "Add a canary deploy"
-- "Add a kill switch"
-- "Roll out one tenant at a time"
-
-**Production-caution signals:**
-- "Add monitoring for X" (production observability that isn't already there)
-- "Add compliance reporting for Y"
-- "Add retention / audit requirements beyond what the spec already has"
-- "Add rate limiting to X" (where X is not already rate-limited)
-- "Add circuit breaking to X"
-- "Add multi-region / HA considerations"
-
-**Architecture signals:**
-- "Introduce a new abstraction / service / pattern"
-- "This should be its own service"
-- "This belongs in a different layer"
-- "Split this service into two"
-- "Merge these services"
-- "Change the interface of X"
-- "Deprecate primitive Y and replace with Z"
-
-**Cross-cutting signals:**
-- "This affects every item in the spec"
-- "Add a new cross-cutting contract"
-- "Change the Implementation philosophy section"
-- "Change the Execution model section"
-- "Change the verdict legend"
-- "Add a new phase / sprint"
-
-**Framing signals:**
-- "The spec assumes pre-production but the reality is X"
-- "The stage of the app is no longer rapid evolution"
-- "The testing posture needs to change because [...]"
-- Anything that would invalidate one of the baked-in framing assumptions at the top of this document
-
-If a finding matches any of the above, it is directional. Full stop. Apply the autonomous decision criteria in Step 7 and move on to the next finding.
+If a finding matches any signal in the reference file, it is directional. Full stop. Apply the autonomous decision criteria in Step 7 and move on to the next finding.
 
 #### Bucket 3 — Ambiguous
 
@@ -477,6 +435,7 @@ When the loop exits for any reason, write a consolidated final report to `tasks/
 **Spec-context commit:** `<hash>`
 **Iterations run:** N of MAX_ITERATIONS
 **Exit condition:** iteration-cap | two-consecutive-mechanical-only | codex-found-nothing | zero-acceptance-drought
+**Verdict:** READY_FOR_BUILD | NEEDS_REVISION
 
 ---
 
@@ -525,6 +484,8 @@ This spec is now mechanically tight against the rubric and against Codex's best-
 **Recommended next step:** read the spec's framing sections (first ~200 lines) one more time, confirm the headline findings match your current intent, and then start implementation.
 ```
 
+The Verdict line MUST be one of `READY_FOR_BUILD` (no AUTO-DECIDED items remain unresolved AND no NEEDS_REVISION findings) or `NEEDS_REVISION` (any unresolved items, capped iterations with open issues, or framing-mismatch HITL pause). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Trailing prose is allowed (e.g. `**Verdict:** READY_FOR_BUILD (3 iterations, 5 mechanical fixes applied)`).
+
 ### Auto-commit-and-push the final report
 
 After writing the final report, commit and push it. Same CLAUDE.md override as Step 8b — review agents auto-push within their own flows.
@@ -567,3 +528,4 @@ If the final report write did not produce any new changes (e.g. the run aborted 
 - Your scratch files (`tasks/review-logs/spec-review-*`) are informational and can be cleaned up after the loop exits. The final report (`tasks/review-logs/spec-review-final-*`) is the permanent record.
 - You do not touch the spec-context file. Updating `spec-context.md` is the human's job. If you think it needs to change, add it to `tasks/todo.md` as a deferred item.
 - The bias is toward conservative judgment — prefer the spec as-is when uncertain, prefer simplicity, prefer existing patterns. AUTO-DECIDED items are routed to `tasks/todo.md` for deferred human review, never left unresolved or used as a reason to block.
+- **Test gates are CI-only — never recommend running them and never write them into a spec's verification section.** If Codex flags a missing "run all gates" / "execute the full test suite" / "confirm CI-equivalent local verification" requirement in the spec under review, classify the finding as directional and reject it with the assumption "test gates are CI-only per CLAUDE.md § *Test gates are CI-only — never run locally*; specs must NOT instruct implementers to run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh`. Continuous integration runs the complete suite as a pre-merge gate. The spec may name targeted unit tests an implementer should author; running the broader suite is CI's job, not the spec's." Apply this same reasoning when running your own rubric pass — flag any spec that mandates local gate runs as a mechanical fix to remove that mandate.

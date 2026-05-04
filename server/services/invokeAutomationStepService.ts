@@ -7,8 +7,9 @@
 import { db } from '../db/index.js';
 import { automations } from '../db/schema/automations.js';
 import { automationEngines } from '../db/schema/automationEngines.js';
-import { automationConnectionMappings } from '../db/schema/automationConnectionMappings.js';
-import { eq, and, isNull, or, inArray } from 'drizzle-orm';
+import { eq, and, isNull, or } from 'drizzle-orm';
+import { automationConnectionMappingService } from './automationConnectionMappingService.js';
+import { resolveRequiredConnections } from './resolveRequiredConnectionsPure.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { logger } from '../lib/logger.js';
 import { createEvent } from '../lib/tracing.js';
@@ -70,12 +71,35 @@ export interface InvokeAutomationParams {
   stepRunId: string;
   run: RunScope;
   templateCtx: TemplateCtx;
+  /**
+   * When true, the gate check is skipped. Set by `resumeInvokeAutomationStep`
+   * after an `awaiting_approval` step has been explicitly approved — the
+   * approval is the gate clearance, so re-running `resolveGateLevel` here
+   * would incorrectly hold the step at `review_required` again. Default
+   * false; the primary dispatch path keeps gate enforcement intact.
+   */
+  bypassGate?: boolean;
+}
+
+// W1-43: pure assertion — automation must have exactly one outbound webhook.
+// Returns null when valid; returns an AutomationStepError when violated.
+function assertSingleWebhook(automation: { id: string; webhookPath: string | null }): AutomationStepError | null {
+  const webhookFields = [automation.webhookPath].filter((v) => v != null && v !== '');
+  if (webhookFields.length !== 1) {
+    return {
+      code: 'automation_composition_invalid',
+      type: 'execution',
+      message: `Automation '${automation.id}' must have exactly one outbound webhook; found ${webhookFields.length}.`,
+      retryable: false,
+    };
+  }
+  return null;
 }
 
 export async function invokeAutomationStep(
   params: InvokeAutomationParams,
 ): Promise<InvokeAutomationResult> {
-  const { step, runId, stepRunId, run, templateCtx } = params;
+  const { step, runId, stepRunId, run, templateCtx, bypassGate } = params;
 
   const baseEventPayload = {
     runId,
@@ -123,33 +147,42 @@ export async function invokeAutomationStep(
     return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
-  // Required-connection check (§5.8) — only when run is subaccount-scoped
+  // §1.2 REQ W1-44: pre-dispatch connection resolution — verify every required
+  // connection slot is mapped for the calling subaccount BEFORE firing the webhook.
+  // Only evaluated when the run is subaccount-scoped (org-level runs have no subaccount
+  // connection mappings to check).
+  // listMappings is called per-dispatch. This is intentionally non-cached — if this
+  // becomes hot, introduce caching via a separate spec.
   if (run.subaccountId) {
     const requiredKeys = (automation.requiredConnections ?? [])
       .filter((c) => c.required)
       .map((c) => c.key);
 
     if (requiredKeys.length > 0) {
-      const mappings = await db
-        .select({ connectionKey: automationConnectionMappings.connectionKey })
-        .from(automationConnectionMappings)
-        .where(
-          and(
-            eq(automationConnectionMappings.processId, automation.id),
-            eq(automationConnectionMappings.subaccountId, run.subaccountId),
-            inArray(automationConnectionMappings.connectionKey, requiredKeys),
-          ),
-        );
-
-      const foundKeys = new Set(mappings.map((m) => m.connectionKey));
-      const missingKeys = requiredKeys.filter((k) => !foundKeys.has(k));
-
-      if (missingKeys.length > 0) {
+      const rawMappings = await automationConnectionMappingService.listMappings(
+        run.organisationId,
+        run.subaccountId,
+        automation.id,
+      );
+      const resolution = resolveRequiredConnections({
+        automation: { requiredConnections: requiredKeys },
+        subaccountId: run.subaccountId,
+        mappings: rawMappings.map((m) => ({
+          connectionKey: m.connectionKey,
+          connectionId: m.connectionId,
+        })),
+      });
+      if (!resolution.ok) {
         const error: AutomationStepError = {
           code: 'automation_missing_connection',
-          type: 'execution',
-          message: `Automation '${step.automationId}' requires connections that are not configured: ${missingKeys.join(', ')}.`,
+          type: 'configuration',
+          message: `Automation '${automation.id}' is missing required connections: ${resolution.missing.join(', ')}`,
           retryable: false,
+          status: 'missing_connection',
+          context: {
+            automationId: automation.id,
+            missingKeys: resolution.missing,
+          },
         };
         createEvent('workflow.step.automation.completed', {
           ...baseEventPayload, status: 'missing_connection', retryAttempt: 1, latencyMs: 0, error,
@@ -157,6 +190,18 @@ export async function invokeAutomationStep(
         return { status: 'error', error, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
       }
     }
+  }
+
+  // W1-43: defence-in-depth single-webhook assertion before engine load.
+  // Schema enforces single-webhook via the webhookPath text column, but a
+  // mutated or migrated row could violate the contract via a non-schema path.
+  const webhookErr = assertSingleWebhook(automation);
+  if (webhookErr) {
+    createEvent('workflow.step.automation.completed', {
+      ...baseEventPayload, status: 'automation_composition_invalid',
+      retryAttempt: 1, latencyMs: 0, error: webhookErr,
+    });
+    return { status: 'error', error: webhookErr, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
   // Load engine — scoped to automation's org (or system), soft-delete guarded
@@ -207,8 +252,10 @@ export async function invokeAutomationStep(
 
   const gateLevel = resolveGateLevel(step, automation);
 
-  // Gate check — if review required, return without dispatching
-  if (gateLevel === 'review') {
+  // Gate check — if review required, return without dispatching. Skipped when
+  // bypassGate is set: the resume path enters here after explicit approval,
+  // and re-running the gate would loop back to review_required forever.
+  if (gateLevel === 'review' && !bypassGate) {
     return { status: 'review_required', gateLevel, retryAttempt: 1 };
   }
 

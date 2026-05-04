@@ -5,25 +5,11 @@
  *   npx tsx server/services/__tests__/toolCallsLogProjectionServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   projectToolCallsLog,
   type ProjectionMessageRow,
 } from '../toolCallsLogProjectionServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -39,7 +25,7 @@ console.log('');
 
 test('empty input returns an empty array', () => {
   const out = projectToolCallsLog([]);
-  assertEqual(out, [], 'empty');
+  expect(out, 'empty').toEqual([]);
 });
 
 test('single tool_use + matching tool_result', () => {
@@ -59,13 +45,13 @@ test('single tool_use + matching tool_result', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 1, 'one entry');
-  assertEqual(out[0].tool, 'search', 'tool name');
-  assertEqual(out[0].input, { query: 'x' }, 'tool input');
-  assertEqual(out[0].output, 'ok', 'tool output (string)');
-  assertEqual(out[0].iteration, 0, 'iteration 0');
-  assertEqual(out[0].durationMs, 0, 'lossy durationMs');
-  assertEqual(out[0].retried, false, 'lossy retried');
+  expect(out.length, 'one entry').toBe(1);
+  expect(out[0].tool, 'tool name').toBe('search');
+  expect(out[0].input, 'tool input').toEqual({ query: 'x' });
+  expect(out[0].output, 'tool output (string)').toBe('ok');
+  expect(out[0].iteration, 'iteration 0').toBe(0);
+  expect(out[0].durationMs, 'lossy durationMs').toBe(0);
+  expect(out[0].retried, 'lossy retried').toBe(false);
 });
 
 test('serialises an object tool_result content to JSON', () => {
@@ -88,7 +74,7 @@ test('serialises an object tool_result content to JSON', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out[0].output, '{"success":true,"bytes":42}', 'json output');
+  expect(out[0].output, 'json output').toBe('{"success":true,"bytes":42}');
 });
 
 test('multiple tool_use blocks in one assistant message pair with separate results', () => {
@@ -111,14 +97,14 @@ test('multiple tool_use blocks in one assistant message pair with separate resul
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 2, 'two entries');
-  assertEqual(out[0].tool, 'search', 'first tool');
-  assertEqual(out[0].output, 'r1', 'first output');
-  assertEqual(out[1].tool, 'fetch', 'second tool');
-  assertEqual(out[1].output, 'r2', 'second output');
+  expect(out.length, 'two entries').toBe(2);
+  expect(out[0].tool, 'first tool').toBe('search');
+  expect(out[0].output, 'first output').toBe('r1');
+  expect(out[1].tool, 'second tool').toBe('fetch');
+  expect(out[1].output, 'second output').toBe('r2');
   // Both came from the same assistant message, so both share iteration 0.
-  assertEqual(out[0].iteration, 0, 'first iteration');
-  assertEqual(out[1].iteration, 0, 'second iteration');
+  expect(out[0].iteration, 'first iteration').toBe(0);
+  expect(out[1].iteration, 'second iteration').toBe(0);
 });
 
 test('iteration index advances across assistant messages', () => {
@@ -145,8 +131,8 @@ test('iteration index advances across assistant messages', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out[0].iteration, 0, 'first iteration');
-  assertEqual(out[1].iteration, 1, 'second iteration');
+  expect(out[0].iteration, 'first iteration').toBe(0);
+  expect(out[1].iteration, 'second iteration').toBe(1);
 });
 
 test('unmatched tool_use still produces a log entry with empty output', () => {
@@ -159,9 +145,9 @@ test('unmatched tool_use still produces a log entry with empty output', () => {
     // No tool_result for tu_skip — simulates a skip-before-execute path.
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 1, 'still one entry');
-  assertEqual(out[0].tool, 'search', 'tool name preserved');
-  assertEqual(out[0].output, '', 'empty output');
+  expect(out.length, 'still one entry').toBe(1);
+  expect(out[0].tool, 'tool name preserved').toBe('search');
+  expect(out[0].output, 'empty output').toBe('');
 });
 
 test('sorts rows by sequenceNumber before projecting', () => {
@@ -188,11 +174,11 @@ test('sorts rows by sequenceNumber before projecting', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 2, 'two entries after sort');
-  assertEqual(out[0].tool, 'search', 'first after sort');
-  assertEqual(out[1].tool, 'write', 'second after sort');
-  assertEqual(out[0].iteration, 0, 'iteration from sorted order');
-  assertEqual(out[1].iteration, 1, 'next iteration from sorted order');
+  expect(out.length, 'two entries after sort').toBe(2);
+  expect(out[0].tool, 'first after sort').toBe('search');
+  expect(out[1].tool, 'second after sort').toBe('write');
+  expect(out[0].iteration, 'iteration from sorted order').toBe(0);
+  expect(out[1].iteration, 'next iteration from sorted order').toBe(1);
 });
 
 test('ignores plain-text assistant and system messages', () => {
@@ -215,10 +201,10 @@ test('ignores plain-text assistant and system messages', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 1, 'only the tool_use assistant message produces an entry');
+  expect(out.length, 'only the tool_use assistant message produces an entry').toBe(1);
   // The text-only assistant at seq=1 still counts as an assistant message,
   // bumping the iteration index — so the tool_use at seq=2 reports iteration 1.
-  assertEqual(out[0].iteration, 1, 'iteration reflects assistant message index');
+  expect(out[0].iteration, 'iteration reflects assistant message index').toBe(1);
 });
 
 test('ignores malformed tool_use blocks without throwing', () => {
@@ -242,11 +228,9 @@ test('ignores malformed tool_use blocks without throwing', () => {
     },
   ];
   const out = projectToolCallsLog(messages);
-  assertEqual(out.length, 1, 'malformed block skipped');
-  assertEqual(out[0].tool, 'write', 'good block projected');
+  expect(out.length, 'malformed block skipped').toBe(1);
+  expect(out[0].tool, 'good block projected').toBe('write');
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

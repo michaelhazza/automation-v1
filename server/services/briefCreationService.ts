@@ -1,32 +1,53 @@
 import { db } from '../db/index.js';
 import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, desc, lt, or } from 'drizzle-orm';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
-import { findOrCreateBriefConversation } from './briefConversationService.js';
-import { writeConversationMessage } from './briefConversationWriter.js';
-import { classifyChatIntent, DEFAULT_CHAT_TRIAGE_CONFIG } from './chatTriageClassifier.js';
-import { generateSimpleReply } from './briefSimpleReplyGeneratorPure.js';
-import { logFastPathDecision } from './fastPathDecisionLogger.js';
+import type { CursorPosition } from './briefArtefactCursorPure.js';
+import { computeNextCursor } from './briefArtefactPaginationPure.js';
 import { logger } from '../lib/logger.js';
+import { findOrCreateBriefConversation } from './briefConversationService.js';
+import { logFastPathDecision } from './fastPathDecisionLogger.js';
+import { handleBriefMessage } from './briefMessageHandlerPure.js';
+import { classifyChatIntent, DEFAULT_CHAT_TRIAGE_CONFIG } from './chatTriageClassifier.js';
 
 export async function createBrief(input: {
   organisationId: string;
   subaccountId?: string;
   submittedByUserId: string;
   text: string;
-  source: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+  source: 'global_ask_bar' | 'slash_remember' | 'programmatic' | 'new_brief_modal';
   uiContext: BriefUiContext;
+  explicitTitle?: string;
+  explicitDescription?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
 }): Promise<{ briefId: string; fastPathDecision: FastPathDecision; conversationId: string }> {
-  const triageInput = {
-    text: input.text,
+  // Classify BEFORE persisting the brief. classifyChatIntent can throw (LLM
+  // outage, classifier internal error); running it first means a failure
+  // never leaves an orphaned task / conversation in the DB. Phase 6 of the
+  // pre-launch hardening sprint moved this call inside handleBriefMessage,
+  // which inverted the ordering — restore the pre-Phase-6 invariant here.
+
+  // When an explicit title is supplied (New Brief modal), use it as-is.
+  // Otherwise derive from text with truncation.
+  const title = input.explicitTitle
+    ? input.explicitTitle
+    : input.text.length > 100
+    ? input.text.slice(0, 97) + '…'
+    : input.text;
+
+  // classifyChatIntent always receives the full free-text prompt.
+  // For modal submissions combine title + description so the classifier
+  // sees complete intent, not just the short title.
+  const classifyText = input.explicitTitle
+    ? [input.explicitTitle, input.explicitDescription].filter(Boolean).join('\n\n')
+    : input.text;
+
+  const fastPathDecision = await classifyChatIntent({
+    text: classifyText,
     uiContext: input.uiContext,
     config: DEFAULT_CHAT_TRIAGE_CONFIG,
-  };
-
-  const fastPathDecision = await classifyChatIntent(triageInput);
-
-  const title = input.text.length > 100 ? input.text.slice(0, 97) + '…' : input.text;
+  });
 
   const [task] = await db
     .insert(tasks)
@@ -34,9 +55,9 @@ export async function createBrief(input: {
       organisationId: input.organisationId,
       subaccountId: input.subaccountId ?? null,
       title,
-      description: input.text,
+      description: input.explicitDescription ?? input.text,
       status: 'inbox',
-      priority: 'normal' as const,
+      priority: (input.priority ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent',
       position: 0,
     })
     .returning();
@@ -51,44 +72,26 @@ export async function createBrief(input: {
     createdByUserId: input.submittedByUserId,
   });
 
+  // Pass the precomputed decision so handleBriefMessage skips its own
+  // classify call — keeps the dispatch logic in one place without
+  // double-charging the classifier.
+  await handleBriefMessage({
+    conversationId: conversation.id,
+    briefId,
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    text: classifyText,          // ← was input.text
+    uiContext: input.uiContext,
+    isFollowUp: false,
+    prefetchedDecision: fastPathDecision,
+  });
+
   // Shadow-eval logging — best-effort, never blocks
   void logFastPathDecision(fastPathDecision, {
     briefId,
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
   });
-
-  if (fastPathDecision.route === 'simple_reply' || fastPathDecision.route === 'cheap_answer') {
-    // Inline response — no Orchestrator needed
-    const artefact = generateSimpleReply(fastPathDecision, triageInput);
-    await writeConversationMessage({
-      conversationId: conversation.id,
-      briefId,
-      organisationId: input.organisationId,
-      subaccountId: input.subaccountId,
-      role: 'assistant',
-      content: '',
-      artefacts: [artefact],
-    });
-  } else {
-    // needs_orchestrator or needs_clarification → dispatch Orchestrator non-blocking
-    import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
-      enqueueOrchestratorRoutingIfEligible({
-        id: briefId,
-        organisationId: input.organisationId,
-        status: 'inbox',
-        assignedAgentId: null,
-        isSubTask: false,
-        createdByAgentId: null,
-        description: input.text,
-      }, { scope: fastPathDecision.scope }),
-    ).catch((err: unknown) => {
-      logger.error('briefCreationService.orchestrator_enqueue_failed', {
-        briefId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  }
 
   return { briefId, fastPathDecision, conversationId: conversation.id };
 }
@@ -133,6 +136,75 @@ export async function getBriefMeta(
 export async function getBriefArtefacts(
   briefId: string,
   organisationId: string,
+  opts?: { limit?: number; cursor?: CursorPosition | null },
+): Promise<{ items: BriefChatArtefact[]; nextCursor: string | null }> {
+  const requestedLimit = Math.trunc(opts?.limit ?? 50);
+  const clampedLimit = Math.max(1, Math.min(requestedLimit, 200));
+  if (requestedLimit !== clampedLimit) {
+    logger.info('brief_artefacts.limit_clamped', { briefId, requested: opts?.limit, applied: clampedLimit });
+  }
+  const cursor = opts?.cursor ?? null;
+
+  const [conv] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(
+      eq(conversations.scopeType, 'brief'),
+      eq(conversations.scopeId, briefId),
+      eq(conversations.organisationId, organisationId),
+    ))
+    .limit(1);
+
+  if (!conv) return { items: [], nextCursor: null };
+
+  const cursorCondition = cursor
+    ? or(
+        lt(conversationMessages.createdAt, new Date(cursor.ts)),
+        and(
+          eq(conversationMessages.createdAt, new Date(cursor.ts)),
+          lt(conversationMessages.id, cursor.msgId),
+        ),
+      )
+    : undefined;
+
+  const rows = await db
+    .select({
+      id: conversationMessages.id,
+      createdAt: conversationMessages.createdAt,
+      artefacts: conversationMessages.artefacts,
+    })
+    .from(conversationMessages)
+    .where(and(
+      eq(conversationMessages.conversationId, conv.id),
+      eq(conversationMessages.organisationId, organisationId),
+      cursorCondition,
+    ))
+    .orderBy(
+      desc(conversationMessages.createdAt),
+      desc(conversationMessages.id),
+    )
+    .limit(clampedLimit + 1);
+
+  const { items: pageRows, nextCursor } = computeNextCursor(rows, clampedLimit);
+
+  // Reverse to ASC (oldest-first within page) for chat-timeline display.
+  // The DESC query selected the correct page boundary; reversal ensures each
+  // page response is in chronological order so the client can prepend older
+  // pages to the front of the array without disrupting display order.
+  const reversedRows = [...pageRows].reverse();
+
+  const items: BriefChatArtefact[] = [];
+  for (const row of reversedRows) {
+    if (Array.isArray(row.artefacts)) {
+      items.push(...(row.artefacts as BriefChatArtefact[]));
+    }
+  }
+  return { items, nextCursor };
+}
+
+export async function getAllBriefArtefacts(
+  briefId: string,
+  organisationId: string,
 ): Promise<BriefChatArtefact[]> {
   const [conv] = await db
     .select({ id: conversations.id })
@@ -149,7 +221,10 @@ export async function getBriefArtefacts(
   const messages = await db
     .select({ artefacts: conversationMessages.artefacts })
     .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, conv.id))
+    .where(and(
+      eq(conversationMessages.conversationId, conv.id),
+      eq(conversationMessages.organisationId, organisationId),
+    ))
     .orderBy(asc(conversationMessages.createdAt));
 
   const all: BriefChatArtefact[] = [];

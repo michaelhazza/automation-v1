@@ -31,7 +31,7 @@ async function getConfigAgentId(orgId: string): Promise<string | null> {
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
     .where(and(eq(agents.organisationId, orgId), eq(systemAgents.slug, 'configuration-assistant')));
   return rows[0]?.agentId ?? null;
 }
@@ -450,7 +450,7 @@ export async function executeConfigUpdateDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -474,7 +474,7 @@ export async function executeConfigRemoveDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -662,7 +662,7 @@ export async function executeConfigListDataSources(
           loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
         })
         .from(agentDataSources)
-        .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+        .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
         .where(and(eq(agentDataSources.agentId, String(input.agentId)), eq(agents.organisationId, context.organisationId)));
     } else if (input.subaccountAgentId) {
       // Org-scoped: subaccountAgentService.getLinkById verifies org ownership
@@ -674,8 +674,8 @@ export async function executeConfigListDataSources(
           loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
         })
         .from(agentDataSources)
-        .innerJoin(subaccountAgents, eq(agentDataSources.subaccountAgentId, subaccountAgents.id))
-        .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+        .innerJoin(subaccountAgents, and(eq(agentDataSources.subaccountAgentId, subaccountAgents.id), eq(subaccountAgents.isActive, true)))
+        .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
         .where(and(eq(agentDataSources.subaccountAgentId, String(input.subaccountAgentId)), eq(agents.organisationId, context.organisationId)));
     } else {
       return { success: false, error: 'One of agentId or subaccountAgentId is required' };

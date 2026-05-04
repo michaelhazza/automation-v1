@@ -25,30 +25,13 @@
  *   npx tsx server/services/__tests__/scheduleCalendarParity.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   projectCronOccurrences,
   computeNextHeartbeatAt,
   projectHeartbeatOccurrences,
 } from '../scheduleCalendarServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -59,7 +42,7 @@ const BASE = { subaccountId: 'sa-1', subaccountName: 'sa', scopeTag: 'subaccount
 
 console.log('\nscheduleCalendarParity — Cron parity with cron-parser\n');
 
-await test('projectCronOccurrences: matches cron-parser output exactly (UTC)', async () => {
+test('projectCronOccurrences: matches cron-parser output exactly (UTC)', async () => {
   const expression = '*/15 * * * *'; // every 15 min
   const tz = 'UTC';
   const start = Date.UTC(2026, 6, 1, 0, 0, 0);
@@ -74,6 +57,7 @@ await test('projectCronOccurrences: matches cron-parser output exactly (UTC)', a
   // Golden reference: call cron-parser directly with the same args the
   // pure layer uses. If this drifts, the pure layer is out of parity.
   const cronParser = await import('cron-parser');
+  // reason: cron-parser has inconsistent ESM/CJS exports; `any` is required to probe the export shape at runtime (mirrors scheduleCalendarServicePure.ts).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parse = (cronParser as any).default?.parseExpression ?? (cronParser as any).parseExpression;
   const iter = parse(expression, {
@@ -88,15 +72,11 @@ await test('projectCronOccurrences: matches cron-parser output exactly (UTC)', a
     golden.push(d.toISOString());
   }
 
-  assertEqual(projected.length, golden.length, 'count');
-  assertEqual(
-    projected.map((o) => o.scheduledAt.toISOString()),
-    golden,
-    'timestamps'
-  );
+  expect(projected.length, 'count').toEqual(golden.length);
+  expect(projected.map((o) => o.scheduledAt.toISOString()), 'timestamps').toEqual(golden);
 });
 
-await test('projectCronOccurrences: matches cron-parser across DST boundary (America/New_York)', async () => {
+test('projectCronOccurrences: matches cron-parser across DST boundary (America/New_York)', async () => {
   const expression = '0 10 * * *';
   const tz = 'America/New_York';
   // Window spans the 2026-03-08 spring-forward boundary.
@@ -110,6 +90,7 @@ await test('projectCronOccurrences: matches cron-parser across DST boundary (Ame
   );
 
   const cronParser = await import('cron-parser');
+  // reason: cron-parser has inconsistent ESM/CJS exports; `any` is required to probe the export shape at runtime (mirrors scheduleCalendarServicePure.ts).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parse = (cronParser as any).default?.parseExpression ?? (cronParser as any).parseExpression;
   const iter = parse(expression, {
@@ -124,39 +105,35 @@ await test('projectCronOccurrences: matches cron-parser across DST boundary (Ame
     golden.push(d.toISOString());
   }
 
-  assertEqual(
-    projected.map((o) => o.scheduledAt.toISOString()),
-    golden,
-    'timestamps across DST match cron-parser exactly'
-  );
+  expect(projected.map((o) => o.scheduledAt.toISOString()), 'timestamps across DST match cron-parser exactly').toEqual(golden);
   // Sanity: post-DST fire is one UTC hour earlier than pre-DST fire
   // because NY moves from UTC-5 to UTC-4.
   const preDst = projected.find((o) => o.scheduledAt.getUTCDate() === 7);
   const postDst = projected.find((o) => o.scheduledAt.getUTCDate() === 9);
-  assert(!!preDst && !!postDst, 'pre + post DST fires present');
-  assertEqual(preDst!.scheduledAt.getUTCHours(), 15, 'pre-DST 10:00 NY = 15:00 UTC');
-  assertEqual(postDst!.scheduledAt.getUTCHours(), 14, 'post-DST 10:00 NY = 14:00 UTC');
+  expect(!!preDst && !!postDst, 'pre + post DST fires present').toBeTruthy();
+  expect(preDst!.scheduledAt.getUTCHours(), 'pre-DST 10:00 NY = 15:00 UTC').toBe(15);
+  expect(postDst!.scheduledAt.getUTCHours(), 'post-DST 10:00 NY = 14:00 UTC').toBe(14);
 });
 
 console.log('\nscheduleCalendarParity — Heartbeat contract parity\n');
 
-await test('computeNextHeartbeatAt: next fire is strictly after afterMs', () => {
+test('computeNextHeartbeatAt: next fire is strictly after afterMs', () => {
   // Contract: returns smallest k*interval+offset > afterMs for integer k >= 0.
   const interval = 3;
   const offH = 1;
   const offM = 30;
   for (const seed of [0, 1, 1000, 7 * 60 * 60 * 1000, 86_400_000]) {
     const next = computeNextHeartbeatAt(seed, interval, offH, offM);
-    assert(next > seed, `next (${next}) > seed (${seed})`);
+    expect(next > seed, `next (${next}) > seed (${seed})`).toBeTruthy();
     // Lattice check: (next - offset) must be a positive multiple of interval.
     const offsetMs = (offH * 60 + offM) * 60 * 1000;
     const intervalMs = interval * 60 * 60 * 1000;
     const k = (next - offsetMs) / intervalMs;
-    assert(Number.isInteger(k) && k >= 0, `k (${k}) is a non-negative integer`);
+    expect(Number.isInteger(k) && k >= 0, `k (${k}) is a non-negative integer`).toBeTruthy();
   }
 });
 
-await test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces constant UTC interval', () => {
+test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces constant UTC interval', () => {
   // Cross the 2026-03-08 NY spring-forward boundary with a 1h heartbeat.
   // Heartbeat contract (§3.9): constant UTC interval, DST-invariant.
   const boundary = Date.UTC(2026, 2, 8, 6, 0, 0); // 06:00 UTC = 01:00 EST
@@ -164,12 +141,12 @@ await test('computeNextHeartbeatAt: UTC-anchored — DST boundary produces const
   const next2 = computeNextHeartbeatAt(next1, 1, 0, 0);
   const next3 = computeNextHeartbeatAt(next2, 1, 0, 0);
   const HOUR = 60 * 60 * 1000;
-  assertEqual(next1 - boundary, HOUR, 'first interval');
-  assertEqual(next2 - next1, HOUR, 'second interval (spans DST)');
-  assertEqual(next3 - next2, HOUR, 'third interval');
+  expect(next1 - boundary, 'first interval').toEqual(HOUR);
+  expect(next2 - next1, 'second interval (spans DST)').toEqual(HOUR);
+  expect(next3 - next2, 'third interval').toEqual(HOUR);
 });
 
-await test('projectHeartbeatOccurrences: projection cadence is uniform across DST', () => {
+test('projectHeartbeatOccurrences: projection cadence is uniform across DST', () => {
   // Project across a DST boundary and assert uniform interval spacing.
   const start = Date.UTC(2026, 2, 7, 0, 0, 0);
   const end = Date.UTC(2026, 2, 10, 0, 0, 0); // 3 days
@@ -186,17 +163,15 @@ await test('projectHeartbeatOccurrences: projection cadence is uniform across DS
     end
   );
   // 3 days × 24 = 72 hours; 72 / 6 = 12 → 12 fires (inclusive-start, exclusive-end).
-  assertEqual(out.length, 12, 'count');
+  expect(out.length, 'count').toBe(12);
   const SIX_HOURS = 6 * 60 * 60 * 1000;
   for (let i = 1; i < out.length; i++) {
     const delta = out[i].scheduledAt.getTime() - out[i - 1].scheduledAt.getTime();
-    assertEqual(delta, SIX_HOURS, `interval between fire ${i - 1} and ${i}`);
+    expect(delta, `interval between fire ${i - 1} and ${i}`).toEqual(SIX_HOURS);
   }
 });
 
 console.log('');
-console.log(`  ${passed + failed} tests: ${passed} passed, ${failed} failed`);
-
 // ---------------------------------------------------------------------------
 // Parity gap — heartbeat dispatcher not yet wired.
 // ---------------------------------------------------------------------------
@@ -213,5 +188,3 @@ console.log(`  ${passed + failed} tests: ${passed} passed, ${failed} failed`);
 // one window, and asserts projected ≡ actual ± 60s tolerance. Marking this
 // explicitly instead of silently skipping so future sessions can't miss it.
 // ---------------------------------------------------------------------------
-
-if (failed > 0) process.exit(1);

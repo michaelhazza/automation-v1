@@ -8,6 +8,8 @@
  *   npx tsx server/services/__tests__/memoryBlockVersionServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {}; // module scope
 
 // The impure memoryBlockVersionService imports drizzle-orm, which the pure
@@ -22,29 +24,10 @@ function getCanonicalPath(blockName: string): string | null {
   return PROTECTED_BLOCK_CANONICAL_PATHS[blockName] ?? null;
 }
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
 }
 
 console.log('');
@@ -59,17 +42,17 @@ console.log('getCanonicalPath:');
 
 test('config-agent-guidelines resolves to docs path', () => {
   const p = getCanonicalPath('config-agent-guidelines');
-  assertTrue(p !== null, 'resolved');
-  assertTrue(p!.endsWith('.md'), 'is a markdown file');
-  assertTrue(p!.includes('agents'), 'under docs/agents/');
+  expect(p !== null, 'resolved').toBe(true);
+  expect(p!.endsWith('.md'), 'is a markdown file').toBe(true);
+  expect(p!.includes('agents'), 'under docs/agents/').toBe(true);
 });
 
 test('non-protected block returns null', () => {
-  assertEqual(getCanonicalPath('some-other-block'), null, 'null');
+  expect(getCanonicalPath('some-other-block'), 'null').toBe(null);
 });
 
 test('empty name returns null', () => {
-  assertEqual(getCanonicalPath(''), null, 'null');
+  expect(getCanonicalPath(''), 'null').toBe(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -99,32 +82,30 @@ console.log('simpleUnifiedDiff:');
 
 test('identical inputs → no change markers', () => {
   const result = simpleUnifiedDiff('foo\nbar', 'foo\nbar');
-  assertTrue(!result.includes('- '), 'no removals');
-  assertTrue(!result.includes('+ '), 'no additions');
+  expect(!result.includes('- '), 'no removals').toBe(true);
+  expect(!result.includes('+ '), 'no additions').toBe(true);
 });
 
 test('single line diff shows -/+', () => {
   const result = simpleUnifiedDiff('foo\nbar', 'foo\nbaz');
-  assertTrue(result.includes('- bar'), 'has removal');
-  assertTrue(result.includes('+ baz'), 'has addition');
+  expect(result.includes('- bar'), 'has removal').toBe(true);
+  expect(result.includes('+ baz'), 'has addition').toBe(true);
 });
 
 test('addition at end', () => {
   const result = simpleUnifiedDiff('foo', 'foo\nbar');
-  assertTrue(result.includes('+ bar'), 'added line');
+  expect(result.includes('+ bar'), 'added line').toBe(true);
 });
 
 test('removal at end', () => {
   const result = simpleUnifiedDiff('foo\nbar', 'foo');
-  assertTrue(result.includes('- bar'), 'removed line');
+  expect(result.includes('- bar'), 'removed line').toBe(true);
 });
 
 test('empty → content', () => {
   const result = simpleUnifiedDiff('', 'new line');
-  assertTrue(result.includes('+ new line'), 'added');
+  expect(result.includes('+ new line'), 'added').toBe(true);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

@@ -1,0 +1,10 @@
+server/services/__tests__/clarificationServicePure.test.ts
+server/services/__tests__/clientPulseHighRiskPure.test.ts
+server/services/__tests__/clientPulseIngestionPure.test.ts
+server/services/__tests__/clientPulseInterventionProposerPure.test.ts
+server/services/__tests__/computeMeaningfulOutputPure.test.ts
+server/services/__tests__/computeRunResultStatusPure.test.ts
+server/services/__tests__/computeStaffActivityPulsePure.test.ts
+server/services/__tests__/configAgentGuidelinesInjection.test.ts
+server/services/__tests__/configDocumentParserServicePure.test.ts
+server/services/__tests__/configHistoryServicePure.test.ts

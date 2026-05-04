@@ -16,23 +16,8 @@
  *   npx tsx server/routes/__tests__/reviewItems.test.ts
  */
 
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { checkIdempotency } from '../../services/reviewServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('reviewItems route — idempotent-replay contract (spec §6.2.1)');
@@ -56,16 +41,14 @@ test('already-approved item: checkIdempotency returns idempotent (not proceed)',
   // 'idempotent' means the service returns wasIdempotent=true and the
   // route falls through to res.json() with HTTP 200.
   const outcome = checkIdempotency('approved', 'approve');
-  assert.equal(outcome, 'idempotent',
-    'Double-approve must resolve as idempotent — if this fails the route would ' +
-    'proceed to the write path and may re-emit audit rows or trigger 412.');
+  expect(outcome).toBe('idempotent');
 });
 
 test('completed item (post-execution): checkIdempotency returns idempotent (not proceed)', () => {
   // Items move to "completed" after execution. A late retry must also
   // be treated as idempotent, not re-processed.
   const outcome = checkIdempotency('completed', 'approve');
-  assert.equal(outcome, 'idempotent');
+  expect(outcome).toBe('idempotent');
 });
 
 test('already-approved item: wasIdempotent=true suppresses audit path', () => {
@@ -79,8 +62,7 @@ test('already-approved item: wasIdempotent=true suppresses audit path', () => {
     auditRecordCalled = true;
   }
 
-  assert.equal(auditRecordCalled, false,
-    'Audit record must not be called when wasIdempotent=true');
+  expect(auditRecordCalled).toBe(false);
 });
 
 test('pending item: wasIdempotent=false triggers audit path', () => {
@@ -92,25 +74,22 @@ test('pending item: wasIdempotent=false triggers audit path', () => {
     auditRecordCalled = true;
   }
 
-  assert.equal(auditRecordCalled, true,
-    'Audit record must be called when wasIdempotent=false (real transition)');
+  expect(auditRecordCalled).toBe(true);
 });
 
 test('already-rejected item + approve: checkIdempotency returns conflict (409)', () => {
   // Cross-terminal conflict must never be treated as idempotent.
   const outcome = checkIdempotency('rejected', 'approve');
-  assert.equal(outcome, 'conflict');
+  expect(outcome).toBe('conflict');
 });
 
 test('already-rejected item + reject: checkIdempotency returns idempotent (200)', () => {
   // Double-reject is also idempotent — same behaviour as double-approve.
   const outcome = checkIdempotency('rejected', 'reject');
-  assert.equal(outcome, 'idempotent');
+  expect(outcome).toBe('idempotent');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

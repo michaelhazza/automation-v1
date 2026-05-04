@@ -80,6 +80,12 @@ export const ORG_PERMISSIONS = {
   // ── GEO audits (Generative Engine Optimisation) ─────────────────────────
   GEO_AUDIT_VIEW: 'org.geo_audit.view',
   GEO_AUDIT_RUN: 'org.geo_audit.run',
+  // ── Agentic Commerce — spend approval (spec §11.1) ───────────────────────
+  // spend_approver default-grant: when a SpendingBudget is created,
+  // spendingBudgetService.create() runs atomically to grant spend_approver to
+  // all current org-admin (org-scoped budget) or subaccount-admin users
+  // (subaccount-scoped budget). Implementation: spendingBudgetService.ts.
+  SPEND_APPROVER: 'spend_approver',
   // ── Universal Brief (Phase 2) ────────────────────────────────────────────
   BRIEFS_READ: 'org.briefs.read',
   BRIEFS_WRITE: 'org.briefs.write',
@@ -88,6 +94,8 @@ export const ORG_PERMISSIONS = {
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
   // ── Observability (delegation outcomes; paperclip-hierarchy spec) ───────────
   ORG_OBSERVABILITY_VIEW: 'org.observability.view',
+  // ── Teams ─────────────────────────────────────────────────────────────────
+  TEAMS_MANAGE: 'org.teams.manage',
   // ── Cached Context Infrastructure ────────────────────────────────────────
   REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
   REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
@@ -158,6 +166,14 @@ export const SUBACCOUNT_PERMISSIONS = {
   // of docs/routines-response-dev-spec.md §3.4). Grants client users the
   // "Upcoming Work" card path without granting general workspace.view.
   SCHEDULE_VIEW_CALENDAR: 'subaccount.schedule.view_calendar',
+  // Workspace identity (agents-as-employees; migration 0257)
+  WORKSPACE_CONNECTOR_MANAGE: 'subaccount.workspace.manage_connector',
+  AGENTS_ONBOARD: 'subaccount.agents.onboard',
+  AGENTS_MANAGE_LIFECYCLE: 'subaccount.agents.manage_lifecycle',
+  AGENTS_TOGGLE_EMAIL: 'subaccount.agents.toggle_email',
+  AGENTS_VIEW_MAILBOX: 'subaccount.agents.view_mailbox',
+  AGENTS_VIEW_CALENDAR: 'subaccount.agents.view_calendar',
+  AGENTS_VIEW_ACTIVITY: 'subaccount.agents.view_activity',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -188,6 +204,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.USERS_INVITE, description: 'Invite users to org',          groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_EDIT,   description: 'Edit org users',               groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_DELETE, description: 'Delete org users',             groupName: 'org.users' },
+  // org.teams
+  { key: ORG_PERMISSIONS.TEAMS_MANAGE, description: 'Create, edit, and delete teams and manage team membership', groupName: 'org.teams' },
   // org.engines
   { key: ORG_PERMISSIONS.ENGINES_VIEW,   description: 'View workflow engines',       groupName: 'org.engines' },
   { key: ORG_PERMISSIONS.ENGINES_MANAGE, description: 'Create/edit/delete engines',  groupName: 'org.engines' },
@@ -296,6 +314,25 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.ORG_OBSERVABILITY_VIEW,
     description: 'View delegation outcomes and observability data',
     groupName: 'org.observability' },
+  // spend_approver (Agentic Commerce §11.1) — org-scoped; default-granted by budget creation (Chunk 13)
+  { key: ORG_PERMISSIONS.SPEND_APPROVER,
+    description: 'Approve or deny agent spending actions against a Spending Budget',
+    groupName: 'org.spend' },
+  // org.billing + subaccount.billing (IEE — Integrated Execution Environment; rev 6 §11.5.3)
+  { key: ORG_PERMISSIONS.IEE_USAGE_VIEW,
+    description: 'View IEE usage and billing data at the org level',
+    groupName: 'org.billing' },
+  { key: SUBACCOUNT_PERMISSIONS.IEE_USAGE_VIEW,
+    description: 'View IEE usage and billing data for this subaccount',
+    groupName: 'subaccount.billing' },
+  // subaccount.workspace + subaccount.agents (agents-as-employees; migration 0257)
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_CONNECTOR_MANAGE, description: 'Configure and manage the subaccount workspace connector',  groupName: 'subaccount.workspace' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_ONBOARD,             description: 'Onboard an agent to the workplace (provision identity)',    groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_MANAGE_LIFECYCLE,    description: 'Suspend, resume, or revoke an agent identity',             groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_TOGGLE_EMAIL,        description: 'Enable or disable outbound email sending for an agent',     groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_MAILBOX,        description: "View an agent's mailbox",                                   groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_CALENDAR,       description: "View an agent's calendar",                                  groupName: 'subaccount.agents' },
+  { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_ACTIVITY,       description: "View an agent's activity feed",                             groupName: 'subaccount.agents' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

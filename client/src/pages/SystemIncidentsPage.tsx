@@ -215,7 +215,7 @@ function IncidentDetailDrawer({
               <button
                 onClick={ack}
                 disabled={submitting}
-                className="px-3 py-1.5 text-[12px] font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                className="btn btn-sm btn-primary"
               >
                 Acknowledge
               </button>
@@ -223,14 +223,14 @@ function IncidentDetailDrawer({
             {incident.status !== 'resolved' && (
               <button
                 onClick={() => setShowResolve(true)}
-                className="px-3 py-1.5 text-[12px] font-medium bg-green-600 text-white rounded-md hover:bg-green-700"
+                className="btn btn-sm btn-success"
               >
                 Resolve
               </button>
             )}
             <button
               onClick={() => setShowSuppress(true)}
-              className="px-3 py-1.5 text-[12px] font-medium bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300"
+              className="btn btn-sm btn-secondary"
             >
               Suppress
             </button>
@@ -273,8 +273,8 @@ function IncidentDetailDrawer({
               className="w-full text-[13px] border border-slate-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowResolve(false)} className="px-3 py-1.5 text-[13px] text-slate-600 hover:text-slate-900">Cancel</button>
-              <button onClick={resolve} disabled={submitting} className="px-3 py-1.5 text-[13px] font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50">
+              <button onClick={() => setShowResolve(false)} className="btn btn-sm btn-ghost">Cancel</button>
+              <button onClick={resolve} disabled={submitting} className="btn btn-sm btn-success">
                 {submitting ? 'Resolving...' : 'Resolve'}
               </button>
             </div>
@@ -307,8 +307,8 @@ function IncidentDetailDrawer({
               </select>
             </div>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowSuppress(false)} className="px-3 py-1.5 text-[13px] text-slate-600 hover:text-slate-900">Cancel</button>
-              <button onClick={suppress} disabled={submitting} className="px-3 py-1.5 text-[13px] font-medium bg-slate-700 text-white rounded-md hover:bg-slate-900 disabled:opacity-50">
+              <button onClick={() => setShowSuppress(false)} className="btn btn-sm btn-ghost">Cancel</button>
+              <button onClick={suppress} disabled={submitting} className="btn btn-sm btn-secondary">
                 {submitting ? 'Suppressing...' : 'Suppress'}
               </button>
             </div>
@@ -365,16 +365,18 @@ export default function SystemIncidentsPage() {
 
   const sorted = [...incidents].sort((a, b) => {
     if (!sortCol) return 0;
-    let av: string | number = '';
-    let bv: string | number = '';
-    if (sortCol === 'severity') { av = SEVERITY_ORDER[a.severity] ?? 0; bv = SEVERITY_ORDER[b.severity] ?? 0; }
-    else if (sortCol === 'status') { av = STATUS_ORDER[a.status] ?? 0; bv = STATUS_ORDER[b.status] ?? 0; }
-    else if (sortCol === 'occurrenceCount') { av = a.occurrenceCount; bv = b.occurrenceCount; }
-    else if (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') {
-      av = new Date(a[sortCol]).getTime();
-      bv = new Date(b[sortCol]).getTime();
-    }
-    else { av = (a[sortCol] as string) ?? ''; bv = (b[sortCol] as string) ?? ''; }
+    const av: string | number =
+      sortCol === 'severity' ? (SEVERITY_ORDER[a.severity] ?? 0) :
+      sortCol === 'status' ? (STATUS_ORDER[a.status] ?? 0) :
+      sortCol === 'occurrenceCount' ? a.occurrenceCount :
+      (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') ? new Date(a[sortCol]).getTime() :
+      ((a[sortCol] as string) ?? '');
+    const bv: string | number =
+      sortCol === 'severity' ? (SEVERITY_ORDER[b.severity] ?? 0) :
+      sortCol === 'status' ? (STATUS_ORDER[b.status] ?? 0) :
+      sortCol === 'occurrenceCount' ? b.occurrenceCount :
+      (sortCol === 'firstSeenAt' || sortCol === 'lastSeenAt') ? new Date(b[sortCol]).getTime() :
+      ((b[sortCol] as string) ?? '');
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return sortDir === 'asc' ? cmp : -cmp;
   }).filter((i) => {
@@ -404,12 +406,12 @@ export default function SystemIncidentsPage() {
           {hasAnyFilter && (
             <button
               onClick={() => { setStatusFilter(new Set(['open', 'investigating', 'remediating', 'escalated'])); setSeverityFilter(new Set()); setSourceFilter(new Set()); }}
-              className="text-[12px] text-indigo-600 hover:text-indigo-800 font-medium"
+              className="btn btn-sm btn-ghost"
             >
               Clear all
             </button>
           )}
-          <button onClick={fetchIncidents} className="px-3 py-1.5 text-[12px] font-medium bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200">
+          <button onClick={fetchIncidents} className="btn btn-sm btn-secondary">
             Refresh
           </button>
         </div>

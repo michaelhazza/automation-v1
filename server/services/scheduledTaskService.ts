@@ -1,4 +1,4 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   scheduledTasks,
@@ -468,7 +468,7 @@ export const scheduledTaskService = {
         agentName: agents.name,
       })
       .from(scheduledTasks)
-      .leftJoin(agents, eq(agents.id, scheduledTasks.assignedAgentId))
+      .leftJoin(agents, and(eq(agents.id, scheduledTasks.assignedAgentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(scheduledTasks.organisationId, organisationId),
@@ -490,7 +490,7 @@ export const scheduledTaskService = {
         agentName: agents.name,
       })
       .from(scheduledTasks)
-      .leftJoin(agents, eq(agents.id, scheduledTasks.assignedAgentId))
+      .leftJoin(agents, and(eq(agents.id, scheduledTasks.assignedAgentId), isNull(agents.deletedAt)))
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
 
     if (!st) throw { statusCode: 404, message: 'Scheduled task not found' };
@@ -598,6 +598,13 @@ export const scheduledTaskService = {
   },
 
   // ─── Fire Occurrence ───────────────────────────────────────────────────────
+  //
+  // Spec §5.4 — scheduled→workflow dispatch: when a scheduled task fires a
+  // workflow run (Chunk 15 scope), read `st.pinnedTemplateVersionId` from the
+  // scheduled task row and pass it as `pinnedTemplateVersionId` to
+  // WorkflowRunService.startRun. startRun honours the pin via
+  // WorkflowScheduleDispatchService.pickVersionForSchedule and throws
+  // `pinned_version_unavailable` (422) when the pinned version no longer exists.
 
   async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
     const [st] = await db

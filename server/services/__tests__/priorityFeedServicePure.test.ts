@@ -5,28 +5,8 @@
  *   npx tsx server/services/__tests__/priorityFeedServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { scoreEntry, rankFeed, type FeedEntry } from '../priorityFeedServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertClose(actual: number, expected: number, tolerance: number, label: string) {
-  if (Math.abs(actual - expected) > tolerance) {
-    throw new Error(`${label} — expected ~${expected}, got ${actual}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -47,7 +27,7 @@ test('critical item at t=0, same subaccount → score = 1.0', () => {
     source: 'health_finding', id: '1', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 0, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 1.0, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(1.0, 4);
 });
 
 test('warning item at t=0, same subaccount → score = 0.6', () => {
@@ -55,7 +35,7 @@ test('warning item at t=0, same subaccount → score = 0.6', () => {
     source: 'review_item', id: '2', subaccountId: 'sub-1',
     severity: 'warning', ageHours: 0, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 0.6, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.6, 4);
 });
 
 test('info item at t=0, same subaccount → score = 0.3', () => {
@@ -63,7 +43,7 @@ test('info item at t=0, same subaccount → score = 0.3', () => {
     source: 'task', id: '3', subaccountId: 'sub-1',
     severity: 'info', ageHours: 0, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 0.3, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.3, 4);
 });
 
 test('critical item at 7 days (168h), same subaccount → score = 2.0', () => {
@@ -71,7 +51,7 @@ test('critical item at 7 days (168h), same subaccount → score = 2.0', () => {
     source: 'health_finding', id: '4', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 168, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 2.0, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4);
 });
 
 test('age factor caps at 2.0 beyond 7 days', () => {
@@ -79,7 +59,7 @@ test('age factor caps at 2.0 beyond 7 days', () => {
     source: 'health_finding', id: '5', subaccountId: 'sub-1',
     severity: 'critical', ageHours: 500, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 2.0, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(2.0, 4);
 });
 
 test('cross-subaccount → 0.1 relevance', () => {
@@ -88,7 +68,7 @@ test('cross-subaccount → 0.1 relevance', () => {
     severity: 'critical', ageHours: 0, assignedSubaccountId: 'sub-2',
     metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 0.1, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.1, 4);
 });
 
 test('org-wide (no assignedSubaccountId) → 0.5 relevance', () => {
@@ -96,13 +76,13 @@ test('org-wide (no assignedSubaccountId) → 0.5 relevance', () => {
     source: 'health_finding', id: '7', subaccountId: 'sub-2',
     severity: 'critical', ageHours: 0, metadata: {},
   };
-  assertClose(scoreEntry(entry, caller), 0.5, 0.001, 'score');
+  expect(scoreEntry(entry, caller)).toBeCloseTo(0.5, 4);
 });
 
 // ── rankFeed ────────────────────────────────────────────────
 
 test('empty feed returns empty', () => {
-  assertEqual(rankFeed([], caller), [], 'empty');
+  expect(rankFeed([], caller), 'empty').toEqual([]);
 });
 
 test('rankFeed sorts by score descending', () => {
@@ -112,7 +92,7 @@ test('rankFeed sorts by score descending', () => {
     { source: 'review_item', id: 'c', subaccountId: 'sub-1', severity: 'warning', ageHours: 24, metadata: {} },
   ];
   const ranked = rankFeed(entries, caller);
-  assertEqual(ranked.map((e) => e.id), ['b', 'c', 'a'], 'order');
+  expect(ranked.map((e) => e.id), 'order').toEqual(['b', 'c', 'a']);
 });
 
 test('rankFeed with mixed subaccounts ranks same-subaccount higher', () => {
@@ -122,10 +102,8 @@ test('rankFeed with mixed subaccounts ranks same-subaccount higher', () => {
   ];
   const ranked = rankFeed(entries, caller);
   // warning(0.6) * same-sub(1.0) = 0.6 > critical(1.0) * cross-sub(0.1) = 0.1
-  assertEqual(ranked.map((e) => e.id), ['y', 'x'], 'order');
+  expect(ranked.map((e) => e.id), 'order').toEqual(['y', 'x']);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

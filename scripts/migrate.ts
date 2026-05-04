@@ -48,6 +48,13 @@ async function ensureMigrationsTable(client: PoolClient): Promise<void> {
   `);
 }
 
+// Bootstrap extensions required by migration files. Migration 0018 uses
+// gen_random_bytes() (pgcrypto). pgcrypto isn't created by any migration, so
+// fresh databases fail at 0018 without it. Idempotent — safe to re-run.
+async function ensureExtensions(client: PoolClient): Promise<void> {
+  await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+}
+
 async function getAppliedFilenames(client: PoolClient): Promise<Set<string>> {
   const { rows } = await client.query<{ filename: string }>(
     'SELECT filename FROM schema_migrations'
@@ -84,6 +91,7 @@ async function main(): Promise<void> {
 
   try {
     await client.query('SELECT pg_advisory_lock($1)', [ADVISORY_LOCK_KEY]);
+    await ensureExtensions(client);
     await ensureMigrationsTable(client);
 
     const files = listMigrationFiles();

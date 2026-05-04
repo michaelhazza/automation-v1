@@ -135,7 +135,7 @@ export async function backfillOrgUserRoles(): Promise<void> {
       and(
         isNull(users.deletedAt),
         isNotNull(users.role),
-        ne(users.role, 'system_admin' as 'system_admin'),
+        ne(users.role, 'system_admin' as const),
         isNull(orgUserRoles.id)
       )
     );

@@ -16,6 +16,7 @@
  *   npx tsx server/config/__tests__/actionSlugAliasesPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   ACTION_REGISTRY,
   ACTION_SLUG_ALIASES,
@@ -23,57 +24,32 @@ import {
   __resetActionSlugAliasLogOnceForTests,
 } from '../actionRegistry.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 console.log('actionSlugAliasesPure');
 
 // Case 1 — alias present resolves to canonical.
 test('resolves clientpulse.operator_alert → notify_operator', () => {
   __resetActionSlugAliasLogOnceForTests();
-  assert(resolveActionSlug('clientpulse.operator_alert') === 'notify_operator', 'operator_alert resolution');
+  expect(resolveActionSlug('clientpulse.operator_alert') === 'notify_operator', 'operator_alert resolution').toBeTruthy();
 });
 
 // Case 2 — alias present resolves to canonical (second alias).
 test('resolves config_update_hierarchy_template → config_update_organisation_config', () => {
   __resetActionSlugAliasLogOnceForTests();
-  assert(
-    resolveActionSlug('config_update_hierarchy_template') === 'config_update_organisation_config',
-    'hierarchy_template resolution',
-  );
+  expect(resolveActionSlug('config_update_hierarchy_template') === 'config_update_organisation_config', 'hierarchy_template resolution').toBeTruthy();
 });
 
 // Case 3 — unknown slug passes through unchanged.
 test('unknown slug passes through unchanged', () => {
   __resetActionSlugAliasLogOnceForTests();
-  assert(resolveActionSlug('crm.fire_automation') === 'crm.fire_automation', 'known canonical untouched');
-  assert(resolveActionSlug('some.unknown.slug') === 'some.unknown.slug', 'unknown untouched');
+  expect(resolveActionSlug('crm.fire_automation') === 'crm.fire_automation', 'known canonical untouched').toBeTruthy();
+  expect(resolveActionSlug('some.unknown.slug') === 'some.unknown.slug', 'unknown untouched').toBeTruthy();
 });
 
 // Case 4 — every alias value points at a registered canonical slug
 //           (prevents typos in the alias map itself).
 test('every alias value points at a registered canonical slug', () => {
   for (const [legacy, canonical] of Object.entries(ACTION_SLUG_ALIASES)) {
-    assert(
-      ACTION_REGISTRY[canonical] !== undefined,
-      `alias '${legacy}' → '${canonical}' but canonical is not in ACTION_REGISTRY`,
-    );
+    expect(ACTION_REGISTRY[canonical] !== undefined, `alias '${legacy}' → '${canonical}' but canonical is not in ACTION_REGISTRY`).toBeTruthy();
   }
 });
 
@@ -81,10 +57,7 @@ test('every alias value points at a registered canonical slug', () => {
 //           (prevents a canonical slug from shadowing itself via the map).
 test('no alias KEY shadows a registered canonical slug', () => {
   for (const legacy of Object.keys(ACTION_SLUG_ALIASES)) {
-    assert(
-      ACTION_REGISTRY[legacy] === undefined,
-      `alias key '${legacy}' is also in ACTION_REGISTRY — one of them must be removed`,
-    );
+    expect(ACTION_REGISTRY[legacy] === undefined, `alias key '${legacy}' is also in ACTION_REGISTRY — one of them must be removed`).toBeTruthy();
   }
 });
 
@@ -105,10 +78,7 @@ test('log-once warning fires exactly once per alias per process', () => {
   }
   const hitsForOperatorAlert = warnCalls.filter((m) => m.includes("'clientpulse.operator_alert'")).length;
   const hitsForHierarchyTpl = warnCalls.filter((m) => m.includes("'config_update_hierarchy_template'")).length;
-  assert(hitsForOperatorAlert === 1, `expected 1 warn for operator_alert, got ${hitsForOperatorAlert}`);
-  assert(hitsForHierarchyTpl === 1, `expected 1 warn for hierarchy_template, got ${hitsForHierarchyTpl}`);
-  assert(warnCalls.length === 2, `expected 2 total warns, got ${warnCalls.length}`);
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+  expect(hitsForOperatorAlert === 1, `expected 1 warn for operator_alert, got ${hitsForOperatorAlert}`).toBeTruthy();
+  expect(hitsForHierarchyTpl === 1, `expected 1 warn for hierarchy_template, got ${hitsForHierarchyTpl}`).toBeTruthy();
+  expect(warnCalls.length === 2, `expected 2 total warns, got ${warnCalls.length}`).toBeTruthy();
+});

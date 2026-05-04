@@ -178,13 +178,13 @@ export default function SystemPnlPage() {
                 <button
                   onClick={fetchAll}
                   disabled={loading}
-                  className="text-sm px-3 py-1.5 border border-slate-300 rounded hover:bg-slate-100 disabled:opacity-50"
+                  className="btn btn-secondary btn-sm"
                 >
                   {loading ? 'Refreshing…' : 'Refresh'}
                 </button>
                 <button
                   onClick={handleExportCsv}
-                  className="text-sm px-3 py-1.5 bg-slate-900 text-white rounded hover:bg-slate-800"
+                  className="btn btn-primary btn-sm"
                 >
                   Export CSV
                 </button>

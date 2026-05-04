@@ -4,7 +4,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 
 > **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, three-tier agent model, skill system, and all patterns specific to this application. Read it before making backend changes.
 >
-> **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, and multi-tenant safety checklist. Read it before any PR that touches tenant data, migrations, schema, or the service/route/lib tier.
+> **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, multi-tenant safety checklist, and the §8 development-discipline rule set. Read it before any non-trivial PR — the §8 rules (idempotency, error handling, sort tiebreakers, lifecycle hooks, deferred-enforcement logging, etc.) apply across `server/`, `client/`, and `shared/`, not just backend tenant code.
 >
 > **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills. **Editorial Rules** (vendor-neutral, marketing-ready, model-agnostic) live in `docs/capabilities.md` § *Editorial Rules* — violations block the edit.
 
@@ -47,6 +47,8 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Compare expected vs actual behaviour
 - Ask yourself: "Would a senior/staff engineer approve this?"
 
+**Verifiability heuristic.** Before scoping work, ask: is the success condition checkable by a deterministic test or only by human judgment? Verifiable work (route returns X, row saves with the right shape, test passes) can be agent-driven aggressively. Non-verifiable work (UX polish, tone, copy, "feels right", layout taste) needs a human in the loop on every iteration — frontier models are jagged here and will not self-correct toward the goal. For non-verifiable work: do not subagent-drive it overnight; sit with it; iterate visually.
+
 ## Verification Commands
 
 Run these after every non-trivial change. No task is complete until all relevant checks pass.
@@ -55,9 +57,9 @@ Run these after every non-trivial change. No task is complete until all relevant
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
 | Any TypeScript change | `npm run typecheck` | 3 |
-| Logic change in server/ | `npm test` (or relevant suite) | 2 |
+| Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
-| Client change | `npm run build` | 2 |
+| Client change | `npm run build:client` | 2 |
 
 ### Rules
 - Run the relevant checks, not all of them, unless the change spans client + server.
@@ -67,6 +69,23 @@ Run these after every non-trivial change. No task is complete until all relevant
   - What you tried
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
+
+### Test gates are CI-only — never run locally
+
+Full test-gate suites and whole-repo verification scripts DO NOT run in any local agent or development session. **Continuous integration runs the complete suite as a pre-merge gate.** This rule applies to every agent in `.claude/agents/`, every skill, every review loop iteration, and every main-session task — no carve-outs.
+
+**Forbidden locally — no exceptions:**
+- `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`.
+- `bash scripts/run-all-unit-tests.sh`, `bash scripts/run-all-gates.sh`.
+- Any individual `scripts/verify-*.sh` or `scripts/gates/*.sh` invocation. They are slow whole-repo scanners; CI runs them.
+- Any "regression sanity check", "quick re-verify everything", "confirm no regression" framing — these are dressed-up gate runs.
+
+**Allowed locally:**
+- `npm run lint`, `npm run typecheck`.
+- `npm run build:server` / `npm run build:client` when the change touches the build surface.
+- **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Point: confirm the new test runs and passes. Not to re-run anything else.
+
+Authoring tests and gates is encouraged — running the full battery of them locally is not. CI handles that.
 
 ---
 
@@ -125,6 +144,7 @@ Run these after every non-trivial change. No task is complete until all relevant
 - Not later. Not "I'll come back to it." Right now, as part of the task.
 - Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
 - Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+- **Canonical checklist:** `docs/doc-sync.md` — lists every reference doc with its update trigger. Enforced at finalisation by `chatgpt-pr-review`, `chatgpt-spec-review`, and `feature-coordinator`.
 
 ---
 
@@ -148,6 +168,20 @@ This reduces reprocessing cost when the session resumes and prevents the 5-minut
 - Each session writes to its own `tasks/builds/<slug>/progress.md` — never to a shared file
 - `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
 - Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
+
+**Async polling cadence** — When polling external state (CI, builds, deployments, jobs) from a Claude Code session: default to 90-120s between polls, not 4-5 min. CI on this repo typically completes in 1-2 min, so a too-long cadence pushes past a full cycle and delays merge. Pick cadence to match expected event time, not to maximise prompt-cache hits — responsiveness wins for fast pollable signals. Use `ScheduleWakeup` or `Monitor`; long synchronous `sleep` commands are runtime-blocked.
+
+---
+
+## 13. Doc style: agent-facing is dense, human-facing is readable
+
+Documentation falls into two classes — write each accordingly.
+
+**Agent-facing** (loaded into LLM context routinely): `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `KNOWLEDGE.md`, all skill files, `references/**`, agent definitions, this file. Optimise for tokens and signal density: bullets over prose, short sentences, no preambles, no reassurance text, no marketing language. Code examples only when copy-paste is the point — otherwise reference the canonical source. Every line should earn its tokens.
+
+**Human-facing** (read by people, not loaded into context routinely): `docs/capabilities.md`, `README.md`, customer-visible specs, marketing copy, public-facing docs. Optimise for clarity and tone: full sentences, narrative flow, vendor-neutral product language. Editorial rules apply (see `docs/capabilities.md § Editorial Rules`).
+
+If unsure: would Claude read this in most sessions? Yes → agent-facing. When editing an agent-facing doc, condense rather than expand — if a rule cannot be stated in ≤2 sentences, the detail belongs in `architecture.md` or `KNOWLEDGE.md` with a one-line pointer in the rule doc.
 
 ---
 
@@ -180,20 +214,35 @@ Every non-trivial task follows this sequence:
 
 The local Claude Code session IS the developer. The agent fleet provides specialist support — architecture, independent review, intake, and pipeline orchestration. You are not a builder in this fleet; you are the builder.
 
+**Code intelligence artifacts (optional infra).** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture-shaped questions (what calls X, what depends on Y, where does the route for Z live) before grepping. They are produced by `scripts/build-code-graph.ts`. If the cache appears inconsistent with what you see in source, trust source. Refresh paths, in order of preference:
+- *Automatic.* The `code-graph-freshness-check` SessionStart hook (`.claude/hooks/code-graph-freshness-check.js`) detects a dead watcher at session start and rebuilds the cache plus respawns the watcher in-process. Steady-state cost is <200ms per session; a stale-cache session pays the rebuild cost (sub-second warm, up to ~30s if days behind) once.
+- *Live during dev.* `npm run dev` runs `predev` which builds the cache and spawns a singleton chokidar watcher that keeps shards atomically updated on every file save.
+- *Manual.* Run `npm run code-graph:rebuild` if the cache is missing, looks stale (mtime older than your last large edit), or contradicts source. Run `npm run code-graph:health` for the on-demand status report (KEEP / TUNE / ESCALATE / KILL). If the cache infrastructure is not present in this repo (target of an in-progress framework import), fall back to grep.
+
 Agents live in `.claude/agents/`. Read their definitions before invoking them.
 
 | Agent | Purpose | When to invoke |
 |-------|---------|----------------|
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
-| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug present for per-chunk invocations from `feature-coordinator`). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
+| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug included when invoked mid-build). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done. For spec-driven tasks, run `spec-conformance` first. |
-| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | Automatically when feature-coordinator runs its branch-level review pass and Codex is available. Manual standalone invocation also allowed. Skipped silently when Codex is unavailable (e.g. Claude Code on the web). |
+| `adversarial-reviewer` | Adversarial / threat-model review — read-only. Hunts tenant-isolation, auth, race-condition, injection, resource-abuse, and cross-tenant data-leakage holes. Emits a fenced `adversarial-review-log` block; the caller persists it. Phase 1 advisory; non-blocking. | Auto-invoked from feature-coordinator branch-level review pass when diff matches the security surface (§5.1.2 of dev-pipeline-coordinators-spec). Manual invocation also supported. Phase 1 advisory; non-blocking. |
 | `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
-| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
+| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Phase 2 of the three-coordinator pipeline — open a new session and type `launch feature coordinator` after spec-coordinator completes Phase 1 |
+| `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, spec-reviewer, chatgpt-spec-review, handoff | Starting any new Significant or Major feature from a brief |
+| `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, chatgpt-pr-review, doc-sync sweep, KNOWLEDGE.md, MERGE_READY | After feature-coordinator completes Phase 2 |
+| `builder` | Sonnet sub-agent — implements a single plan chunk and enforces G1 gate | Auto-invoked by feature-coordinator; never invoke directly |
+| `mockup-designer` | Sonnet sub-agent — hi-fi clickable HTML prototypes, iterates round-by-round | Auto-invoked by spec-coordinator; never invoke directly |
+| `chatgpt-plan-review` | Manual ChatGPT-web review coordinator for implementation plans | Auto-invoked by feature-coordinator; never invoke directly |
 | `audit-runner` | Runs codebase audits per `docs/codebase-audit-framework.md`. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings → high-confidence fixes → deferred), self-writes the audit log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`, routes deferred items to `tasks/todo.md`. Uses a TodoWrite task list to process areas one by one without spawning sub-agents. Prints post-audit commands (`spec-conformance`, `pr-reviewer`) for the caller to run after the audit completes. Auto-commits and auto-pushes within its own flow. Does not create PRs — the user does. | Periodic codebase hygiene (quarterly), pre-major-release gating, post-incident health check, or any time a subsystem (RLS, agent execution, queues, skills, webhooks, frontend) feels gnarly. Default to Hotspot mode. |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
 | `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
+| `hotfix` | Fast-path coordinator for time-critical fixes. Bypasses the three-coordinator pipeline; still enforces lint + typecheck + targeted test + `pr-reviewer`. Mandatory KNOWLEDGE entry. | Production / main broken; bug found mid-session that must interrupt the active feature. NOT for refactors or new behaviour. |
+| `context-pack-loader` | Loads a mode-scoped slice of architecture.md / DEVELOPMENT_GUIDELINES.md / KNOWLEDGE.md instead of the full ~6k-line set. Inline playbook (not a sub-agent). | Operator types `load context pack: <review\|implement\|debug\|handover\|minimal>` at the start of a session, or the orchestrator auto-loads based on `current-focus.md` status. |
+| `codebase-explainer` | Produces a human-readable narrative tour of the codebase. Output goes to `docs/codebase-tour.md`. Different audience from `architecture.md` (which is agent-facing dense reference). | Onboarding a new engineer / contractor / external reviewer. Run `update tour` periodically when the stack or major patterns shift. |
+| `validate-setup` | Read-only framework health-checker. Verifies every agent's referenced files exist, every context-pack anchor resolves in `architecture.md`, ADR index matches files on disk, FRAMEWORK_VERSION matches CHANGELOG, every hook is registered in settings.json. Reports findings; never modifies files. | Periodic drift check (quarterly), post-adoption verification, or as a pre-merge gate for framework PRs (`.claude/agents/`, `.claude/hooks/`, `docs/decisions/`, `docs/context-packs/`, `references/`). |
 
 ### Model guidance per phase
 
@@ -230,7 +279,12 @@ Classify every task before starting:
 "feature-coordinator: implement [feature name]"
 "audit-runner: hotspot rls"              # see audit-runner.md for full mode list
 "dual-reviewer: [brief description]"     # local-only, user must explicitly ask
+"adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
 "spec-reviewer: review docs/path-to-spec.md"
+"spec-coordinator: <brief or rough spec topic>"   # Phase 1: spec + mockup + review
+"launch feature coordinator"                       # Phase 2: build + review (new session)
+"launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
+"hotfix: <what's broken>"                          # time-critical fix path
 ```
 
 `audit-runner` runs INLINE in the current session — do NOT use the Agent tool. Read `.claude/agents/audit-runner.md` and execute its instructions directly so the TodoWrite task list is visible.
@@ -241,13 +295,59 @@ For Standard/Significant/Major tasks, before marking done or opening a PR:
 
 1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
 2. `pr-reviewer` — always.
-3. `dual-reviewer` — optional, local-only, user must explicitly ask.
+3. `dual-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when Codex is available; manual standalone invocation also allowed. Skipped when Codex unavailable.
+4. `adversarial-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when diff matches security surface (§5.1.2). Manual invocation also supported. Phase 1 advisory; non-blocking.
+
+Steps 3 and 4 are independent optional steps; their order does not affect correctness.
 
 Full caller contracts (filename convention, deferred-items routing, NON_CONFORMANT triage, log persistence) live in [`tasks/review-logs/README.md`](./tasks/review-logs/README.md). Each agent definition under `.claude/agents/` carries its own copy of the contract relevant to that agent.
 
 ### Before you write a spec
 
 For Significant/Major specs, read [`docs/spec-authoring-checklist.md`](./docs/spec-authoring-checklist.md) before drafting. Trivial specs (typos, one-liners, pure ADRs) skip it.
+
+**When the user asks to create a spec from a brief:** write it directly. Do not ask clarifying questions about depth, format, or location. Architecture-level is the default (domain model, service contracts, data model, integration boundaries, chunk plan — no function signatures, no SQL, no wireframes). Save to `tasks/builds/{slug}/spec.md`. The implementation plan is a separate step that comes after.
+
+### Architecture decisions (ADRs)
+
+For decisions where the **why** matters for years (chose X over Y, locked a contract, set a policy), write an ADR in [`docs/decisions/`](./docs/decisions/) — short, dated, immutable once accepted. KNOWLEDGE.md is for observations and gotchas; ADRs are for durable choices with rationale. Template at [`docs/decisions/_template.md`](./docs/decisions/_template.md).
+
+### Context packs (mode-scoped loading)
+
+For sessions where the default load (CLAUDE.md + architecture.md + KNOWLEDGE.md + DEVELOPMENT_GUIDELINES.md ≈ 6k lines) is heavier than the task needs, use a mode-scoped context pack from [`docs/context-packs/`](./docs/context-packs/). Five packs ship: `review`, `implement`, `debug`, `handover`, `minimal`. Each names the sections to load and the sections to skip.
+
+Operator invokes via `load context pack: <mode>`. The `context-pack-loader` agent (inline playbook, see `.claude/agents/context-pack-loader.md`) reads the pack and slices `architecture.md` using the anchor IDs added in the 2026-05-03 refactor.
+
+### Test gates are CI-only
+
+Single source of truth: [`references/test-gate-policy.md`](./references/test-gate-policy.md). Forbidden / allowed lists live there; every agent and spec references that file rather than embedding its own copy.
+
+### Agent lifecycle (add / retire)
+
+**Adding** a new agent:
+1. Drop `<name>.md` in `.claude/agents/` with the standard frontmatter (`name`, `description`, `tools`, `model`).
+2. Add a row to the fleet table above.
+3. Add to the `Common invocations` block if applicable.
+4. Update `.claude/CHANGELOG.md` under the next version's `Added:` section.
+5. If the agent introduces a new convention, also update `docs/doc-sync.md`.
+
+**Retiring** an agent:
+1. Move the file to `.claude/agents/_retired/<name>-<YYYY-MM-DD>.md` (create the directory if needed). Don't delete — future sessions may grep history.
+2. Remove the row from the fleet table.
+3. Update `.claude/CHANGELOG.md` under `Deprecated:` (one version) → `Removed:` (next version).
+4. Search the agent fleet and reference docs for callers of the retired agent. Update or remove.
+5. If a successor agent exists, link from the retired file's frontmatter (`superseded_by: <new-agent-name>`).
+
+Never silently delete an agent — debugging "what happened to that agent we used last quarter?" is harder than two extra lines in the changelog.
+
+### Framework version
+
+Two `FRAMEWORK_VERSION` files exist in this repo and they answer different questions — they are NOT competing authorities:
+
+- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` + `setup/portable/.claude/CHANGELOG.md`. The framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. `setup/portable/.claude/CHANGELOG.md` is the source of truth.
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`. Records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. May lag canonical transiently while portable advances ahead of self-adoption.
+
+When propagating this framework to other repos, the canonical pair travels via the sync engine (`node setup/portable/sync.js --adopt`); future updates compare canonical versions and produce a delta. See `setup/portable/.claude/CHANGELOG.md` § *Upgrade protocol* and `.claude/CHANGELOG.md` § *Version authority — single source of truth*.
 
 ---
 
@@ -262,6 +362,12 @@ See [`tasks/current-focus.md`](./tasks/current-focus.md). Update it whenever the
 ## Key files per domain
 
 See [`architecture.md` § Key files per domain](./architecture.md). This is the index for domain entry points — update it when adding new domain areas.
+
+---
+
+## Replit boot procedure
+
+See [`replit.md`](./replit.md) for the agent quick-start: `npm install && npm run dev`, required env vars (`docs/env-manifest.json`), the dual-tsconfig typecheck one-liner, and where to look next in the codebase. Read it the first time you open this repo on Replit.
 
 ---
 
@@ -315,5 +421,6 @@ Automation OS is a consumer-simple product built on enterprise-grade backend cap
 ## User Preferences
 
 - Concise communication, no emojis
+- No em-dashes (—) in any UI copy, labels, or app-facing text. Use commas, colons, or rewrite the sentence.
 - No auto-commits or auto-pushes from the main session — the user commits explicitly after reviewing changes. **Exception:** review agents (`spec-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`, `chatgpt-spec-review`, `audit-runner`) auto-commit and auto-push within their own flows; the user has explicitly opted in so review output persists to the remote and is visible across sessions. Read-only reviewers (`pr-reviewer`) never commit.
 - Stop and ask when requirements are ambiguous enough to affect architecture

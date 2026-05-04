@@ -5,7 +5,29 @@ dist/
 *.log
 .superpowers/brainstorm/
 .test-runs/
+.tmp-review/
 shared/iee/*.js
 .claude/*.lock
 tasks/codex-iter*.txt
 .vs/
+
+# Mission Control dashboard (tools/mission-control/) — local-only build output
+tools/mission-control/dist/
+tools/mission-control/node_modules/
+
+# DB backup dumps — never commit (contain real user records, password hashes, org IDs)
+backups/
+tasks/users-backup.json
+
+# Code intelligence cache (Phase 0) — build output, regenerated on `npm run dev`
+references/.code-graph-cache.json
+references/.code-graph-watcher.log
+references/.watcher.lock
+references/.watcher.lock.lock
+references/.watcher.pid
+references/import-graph/
+references/project-map.md
+references/.code-graph-health-*.md
+
+# ChatGPT PR review working files — transient diff bundles for ChatGPT upload (chatgpt-pr-review agent, manual mode); removed at finalization
+.chatgpt-diffs/

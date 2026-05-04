@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSocket, useSocketRoom, useSocketConnected } from '../hooks/useSocket';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import MetricCard from '../components/MetricCard';
 import { PendingApprovalCard } from '../components/dashboard/PendingApprovalCard';
 import WorkspaceFeatureCard from '../components/dashboard/WorkspaceFeatureCard';
+import { QueueHealthSummary } from '../components/dashboard/QueueHealthSummary';
+import { FreshnessIndicator } from '../components/dashboard/FreshnessIndicator';
+import { OperationalMetricsPlaceholder } from '../components/dashboard/OperationalMetricsPlaceholder';
 import UnifiedActivityFeed from '../components/UnifiedActivityFeed';
+import { DashboardErrorBanner } from '../components/DashboardErrorBanner';
 import { resolvePulseDetailUrl } from '../lib/resolvePulseDetailUrl';
 import {
   trackPendingCardOpened,
@@ -13,6 +18,13 @@ import {
   trackPendingCardRejected,
 } from '../lib/telemetry';
 import type { PulseItem, PulseAttentionResponse } from '../hooks/usePulseAttention';
+
+type DashboardErrorMap = {
+  agents: boolean;
+  activity: boolean;
+  pulseAttention: boolean;
+  clientHealth: boolean;
+};
 
 interface Agent { id: string; name: string; status: string; }
 interface ActivityStats {
@@ -23,26 +35,255 @@ interface ActivityStats {
 }
 interface HealthSummary { totalClients: number; healthy: number; attention: number; atRisk: number; }
 
+interface TimestampedResponse<T> {
+  data: T;
+  serverTimestamp: string;
+}
+
+const RECONNECT_DEBOUNCE_MS = 500;
+
 export default function DashboardPage({ user }: { user: User }) {
   const [agents, setAgents]               = useState<Agent[]>([]);
   const [stats, setStats]                 = useState<ActivityStats | null>(null);
   const [attention, setAttention]         = useState<PulseAttentionResponse | null>(null);
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [loading, setLoading]             = useState(true);
+  const [errors, setErrors]               = useState<DashboardErrorMap>({
+    agents: false, activity: false, pulseAttention: false, clientHealth: false,
+  });
   const navigate = useNavigate();
 
+  // ── Per-group timestamp refs (latest-data-wins) ──────────────────────────
+  const approvalsTs     = useRef<string>('');
+  const activityTs      = useRef<string>('');
+  const clientHealthTs  = useRef<string>('');
+  const queueTs         = useRef<string>('');
+
+  // ── Per-group inflight + pending (coalescing) ─────────────────────────────
+  const approvalsInflight    = useRef(false);
+  const approvalsPending     = useRef(false);
+  const activityInflight     = useRef(false);
+  const activityPending      = useRef(false);
+  const clientHealthInflight = useRef(false);
+  const clientHealthPending  = useRef(false);
+  const queueInflight        = useRef(false);
+  const queuePending         = useRef(false);
+
+  // ── FreshnessIndicator ────────────────────────────────────────────────────
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>(() => new Date());
+  const lastUpdatedAtRef = useRef<Date>(new Date());
+
+  // ── Refresh tokens (signal child components to re-fetch) ─────────────────
+  const [activityRefreshToken, setActivityRefreshToken] = useState(0);
+  const [queueRefreshToken, setQueueRefreshToken]       = useState(0);
+
+  // ── Reconnect state ───────────────────────────────────────────────────────
+  const prevConnected      = useRef<boolean | null>(null);
+  const reconnectDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function applyIfNewer(
+    currentTs: { current: string },
+    incomingTs: string,
+    apply: () => void,
+  ): void {
+    if (incomingTs > currentTs.current) {
+      currentTs.current = incomingTs;
+      apply();
+    }
+  }
+
+  const markFresh = useCallback((ts: Date) => {
+    if (ts > lastUpdatedAtRef.current) {
+      lastUpdatedAtRef.current = ts;
+      setLastUpdatedAt(ts);
+    }
+  }, []);
+
+  // ── Refetch functions ─────────────────────────────────────────────────────
+
+  async function refetchApprovals() {
+    if (approvalsInflight.current) {
+      approvalsPending.current = true;
+      return;
+    }
+    approvalsInflight.current = true;
+    try {
+      const res = await api.get<TimestampedResponse<PulseAttentionResponse>>('/api/pulse/attention');
+      applyIfNewer(approvalsTs, res.data.serverTimestamp, () => {
+        setAttention(res.data.data);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchApprovals failed:', err);
+    } finally {
+      approvalsInflight.current = false;
+      if (approvalsPending.current) {
+        approvalsPending.current = false;
+        void refetchApprovals();
+      }
+    }
+  }
+
+  async function refetchActivity() {
+    if (activityInflight.current) {
+      activityPending.current = true;
+      return;
+    }
+    activityInflight.current = true;
+    try {
+      const [feedRes, statsRes] = await Promise.all([
+        api.get<TimestampedResponse<{ items: unknown[]; total: number }>>('/api/activity', { params: { limit: 20, sort: 'newest' } }),
+        api.get<TimestampedResponse<ActivityStats>>('/api/agent-activity/stats', { params: { sinceDays: 7 } }),
+      ]);
+      // Use min of two timestamps — both must be at least this fresh.
+      const groupTs = feedRes.data.serverTimestamp < statsRes.data.serverTimestamp
+        ? feedRes.data.serverTimestamp
+        : statsRes.data.serverTimestamp;
+      applyIfNewer(activityTs, groupTs, () => {
+        setStats(statsRes.data.data);
+        setActivityRefreshToken(t => t + 1);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchActivity failed:', err);
+    } finally {
+      activityInflight.current = false;
+      if (activityPending.current) {
+        activityPending.current = false;
+        void refetchActivity();
+      }
+    }
+  }
+
+  async function refetchClientHealth() {
+    if (clientHealthInflight.current) {
+      clientHealthPending.current = true;
+      return;
+    }
+    clientHealthInflight.current = true;
+    try {
+      const res = await api.get<TimestampedResponse<HealthSummary | null>>('/api/clientpulse/health-summary');
+      applyIfNewer(clientHealthTs, res.data.serverTimestamp, () => {
+        setHealthSummary(res.data.data);
+        markFresh(new Date());
+      });
+    } catch (err) {
+      console.error('[DashboardPage] refetchClientHealth failed:', err);
+    } finally {
+      clientHealthInflight.current = false;
+      if (clientHealthPending.current) {
+        clientHealthPending.current = false;
+        void refetchClientHealth();
+      }
+    }
+  }
+
+  function refetchQueue() {
+    setQueueRefreshToken(t => t + 1);
+  }
+
+  async function refetchAll() {
+    const cycleErrors: DashboardErrorMap = {
+      agents: false, activity: false, pulseAttention: false, clientHealth: false,
+    };
+
+    const [agentsRes, statsRes, attentionRes, healthRes] = await Promise.all([
+      api.get<Agent[]>('/api/agents').catch((err) => {
+        console.error('[Dashboard] agents fetch failed', err);
+        cycleErrors.agents = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<ActivityStats>>('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => {
+        console.error('[Dashboard] activity fetch failed', err);
+        cycleErrors.activity = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<PulseAttentionResponse>>('/api/pulse/attention').catch((err) => {
+        console.error('[Dashboard] pulseAttention fetch failed', err);
+        cycleErrors.pulseAttention = true;
+        return null;
+      }),
+      api.get<TimestampedResponse<HealthSummary | null>>('/api/clientpulse/health-summary').catch((err) => {
+        console.error('[Dashboard] clientHealth fetch failed', err);
+        cycleErrors.clientHealth = true;
+        return null;
+      }),
+    ]);
+
+    setErrors(cycleErrors);
+
+    if (agentsRes) setAgents(agentsRes.data);
+    if (statsRes) {
+      applyIfNewer(activityTs, statsRes.data.serverTimestamp ?? '', () => {
+        setStats(statsRes.data.data);
+        setActivityRefreshToken(t => t + 1);
+      });
+    }
+    if (attentionRes) {
+      applyIfNewer(approvalsTs, attentionRes.data.serverTimestamp ?? '', () => {
+        setAttention(attentionRes.data.data);
+      });
+    }
+    if (healthRes) {
+      applyIfNewer(clientHealthTs, healthRes.data.serverTimestamp ?? '', () => {
+        setHealthSummary(healthRes.data.data);
+      });
+    }
+    markFresh(new Date());
+    if (user.role === 'system_admin') refetchQueue();
+  }
+
+  // ── Socket subscriptions (org room — auto-joined on connect) ─────────────
+
+  // Spec §4.2 drift guardrail: every entry in the §4.2 wire-event-to-block
+  // table maps to a refetch function here, and each useSocket call below
+  // reads from this constant by literal key — TypeScript blocks renames or
+  // removals because the keyed access becomes a compile error.
+  const EVENT_TO_GROUP = {
+    'dashboard.approval.changed':      refetchApprovals,
+    'dashboard.activity.updated':      refetchActivity,
+    'dashboard.client.health.changed': refetchClientHealth,
+  } as const;
+
+  useSocket('dashboard.approval.changed',      useCallback(() => { void EVENT_TO_GROUP['dashboard.approval.changed'](); }, []));
+  useSocket('dashboard.activity.updated',      useCallback(() => { void EVENT_TO_GROUP['dashboard.activity.updated'](); }, []));
+  useSocket('dashboard.client.health.changed', useCallback(() => { void EVENT_TO_GROUP['dashboard.client.health.changed'](); }, []));
+
+  useSocketRoom(
+    'sysadmin',
+    user.role === 'system_admin' ? 'system' : null,
+    {
+      'dashboard.queue.changed': () => refetchQueue(),
+    },
+    () => { if (user.role === 'system_admin') refetchQueue(); },
+  );
+
+  const connected = useSocketConnected();
+
   useEffect(() => {
-    Promise.all([
-      api.get('/api/agents').catch((err) => { console.error('[Dashboard] Failed to fetch agents:', err); return { data: [] }; }),
-      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: null }; }),
-      api.get('/api/pulse/attention').catch((err) => { console.error('[Dashboard] Failed to fetch pulse attention:', err); return { data: null }; }),
-      api.get('/api/clientpulse/health-summary').catch(() => { return { data: null }; }),
-    ]).then(([a, s, p, h]) => {
-      setAgents(a.data);
-      setStats(s.data);
-      setAttention(p.data);
-      setHealthSummary(h.data);
-    }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
+    const wasConnected = prevConnected.current;
+    prevConnected.current = connected;
+
+    // Only act on the false→true transition (reconnect), not initial mount (null→true).
+    if (wasConnected === false && connected === true) {
+      if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+      reconnectDebounce.current = setTimeout(() => {
+        void refetchAll();
+      }, RECONNECT_DEBOUNCE_MS);
+    }
+
+    return () => {
+      if (reconnectDebounce.current) {
+        clearTimeout(reconnectDebounce.current);
+        reconnectDebounce.current = null;
+      }
+    };
+  }, [connected]);
+
+  useEffect(() => {
+    void refetchAll().finally(() => setLoading(false));
   }, []);
 
   const hour = new Date().getHours();
@@ -82,6 +323,8 @@ export default function DashboardPage({ user }: { user: User }) {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
+      <DashboardErrorBanner errors={errors} onRetry={() => { void refetchAll(); }} />
+
       {/* Greeting */}
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
@@ -92,6 +335,7 @@ export default function DashboardPage({ user }: { user: User }) {
             ? `${activeAgents.length} AI agent${activeAgents.length === 1 ? '' : 's'} ready to work.`
             : "Let's get your AI team set up."}
         </p>
+        <FreshnessIndicator lastUpdatedAt={lastUpdatedAt} />
       </div>
 
       {/* ── Metric cards ──────────────────────────────────────────────────── */}
@@ -151,7 +395,7 @@ export default function DashboardPage({ user }: { user: User }) {
 
       {/* ── System admin: Queue health summary ───────────────────────────── */}
       {user.role === 'system_admin' && (
-        <QueueHealthSummary />
+        <QueueHealthSummary refreshToken={queueRefreshToken} />
       )}
 
       {/* ── Pending approval ──────────────────────────────────────────────── */}
@@ -172,6 +416,9 @@ export default function DashboardPage({ user }: { user: User }) {
           </div>
         </div>
       )}
+
+      {/* [LAYOUT-RESERVED: Piece 3 — Operational metrics] */}
+      <OperationalMetricsPlaceholder />
 
       {/* ── Your workspaces ───────────────────────────────────────────────── */}
       <div className="mb-8">
@@ -226,46 +473,13 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* ── Recent activity ───────────────────────────────────────────────── */}
       <div className="mb-8">
         <h2 className="text-[17px] font-bold text-slate-900 tracking-tight mb-3.5">Recent activity</h2>
-        <UnifiedActivityFeed orgId={user.organisationId} limit={20} />
+        <UnifiedActivityFeed
+          orgId={user.organisationId}
+          limit={20}
+          refreshToken={activityRefreshToken}
+          expectedTimestamp={activityTs.current}
+        />
       </div>
     </div>
-  );
-}
-
-// ── Queue Health Summary (system admin only) ──────────────────────────────
-
-function QueueHealthSummary() {
-  const [data, setData] = useState<{ pending: number; dlq: number; failed: number } | null>(null);
-
-  useEffect(() => {
-    api.get('/api/system/job-queues')
-      .then(res => {
-        const queues = res.data as Array<{ pending: number; dlqDepth: number; failed: number }>;
-        setData({
-          pending: queues.reduce((s, q) => s + q.pending, 0),
-          dlq: queues.reduce((s, q) => s + q.dlqDepth, 0),
-          failed: queues.reduce((s, q) => s + q.failed, 0),
-        });
-      })
-      .catch(() => {});
-  }, []);
-
-  if (!data) return null;
-
-  const color = data.dlq > 0 || data.failed > 10
-    ? 'border-amber-200 bg-amber-50'
-    : 'border-green-200 bg-green-50';
-
-  return (
-    <Link to="/system/job-queues" className="no-underline block mb-4">
-      <div className={`border rounded-xl px-5 py-3 flex items-center gap-6 ${color}`}>
-        <div className="text-[13px] font-semibold text-slate-700">Queue Health</div>
-        <div className="flex gap-4 text-[12px]">
-          <span className="text-slate-500">Pending: <span className="font-semibold text-slate-700">{data.pending}</span></span>
-          <span className={data.dlq > 0 ? 'text-amber-600' : 'text-slate-500'}>DLQ: <span className="font-semibold">{data.dlq}</span></span>
-          <span className={data.failed > 10 ? 'text-red-600' : 'text-slate-500'}>Failed (24h): <span className="font-semibold">{data.failed}</span></span>
-        </div>
-      </div>
-    </Link>
   );
 }

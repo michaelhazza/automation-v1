@@ -9,12 +9,12 @@ import {
   llmRequests,
   llmPricing,
   orgMarginConfigs,
-  orgBudgets,
+  orgComputeBudgets,
   workspaceLimits,
   agentRuns,
   subaccounts,
 } from '../db/schema/index.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
 import type { RoutingLogFilters } from '../services/llmUsageService.js';
 
@@ -56,7 +56,7 @@ router.get(
       // Top 10 subaccounts by monthly spend — scoped to this org
       db.select({ costAggregate: costAggregates })
         .from(costAggregates)
-        .innerJoin(subaccounts, eq(costAggregates.entityId, subaccounts.id))
+        .innerJoin(subaccounts, and(eq(costAggregates.entityId, subaccounts.id), isNull(subaccounts.deletedAt)))
         .where(
           and(
             eq(costAggregates.entityType, 'subaccount'),
@@ -820,7 +820,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const [budget] = await db.select().from(orgBudgets).where(eq(orgBudgets.organisationId, orgId));
+    const [budget] = await db.select().from(orgComputeBudgets).where(eq(orgComputeBudgets.organisationId, orgId));
     res.json(budget ?? null);
   }),
 );
@@ -837,17 +837,17 @@ router.put(
     };
 
     const [upserted] = await db
-      .insert(orgBudgets)
+      .insert(orgComputeBudgets)
       .values({
         organisationId: orgId,
-        monthlyCostLimitCents: monthlyCostLimitCents ?? null,
+        monthlyComputeLimitCents: monthlyCostLimitCents ?? null,
         alertThresholdPct: alertThresholdPct ?? 80,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
-        target: orgBudgets.organisationId,
+        target: orgComputeBudgets.organisationId,
         set: {
-          monthlyCostLimitCents: monthlyCostLimitCents ?? null,
+          monthlyComputeLimitCents: monthlyCostLimitCents ?? null,
           alertThresholdPct: alertThresholdPct ?? 80,
           updatedAt: new Date(),
         },

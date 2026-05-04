@@ -4,6 +4,8 @@ import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentRunCancelService } from '../services/agentRunCancelService.js';
+import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
@@ -364,7 +366,7 @@ router.get(
       sinceDays: sinceDays ? Number(sinceDays) : undefined,
     });
 
-    res.json(stats);
+    res.json({ data: stats, serverTimestamp: new Date().toISOString() });
   })
 );
 
@@ -456,6 +458,28 @@ router.get('/api/system/agent-activity', authenticate, requireSystemAdmin, async
   res.json(runs);
 }));
 
+// ─── User-triggered cancel ────────────────────────────────────────────────────
+//
+// Best-effort stop. Sets agent_runs.status='cancelling'. The in-process loop
+// (non-IEE) reads status at the top of each iteration and exits cleanly; the
+// IEE worker observes the cancelled iee_runs row via its per-step ownership
+// check and exits via the existing 'ownership_lost' path. Idempotent — calling
+// on an already-terminal run is a no-op.
+
+router.post(
+  '/api/agent-runs/:runId/cancel',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const result = await agentRunCancelService.cancelRun(
+      req.orgId!,
+      req.params.runId,
+      req.user!.id,
+    );
+    res.json({ ok: true, ...result });
+  }),
+);
+
 router.get('/api/system/agent-activity/stats', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { sinceDays } = req.query;
   const stats = await agentActivityService.getStats({
@@ -463,5 +487,30 @@ router.get('/api/system/agent-activity/stats', authenticate, requireSystemAdmin,
   });
   res.json(stats);
 }));
+
+// ─── Resume a blocked agent run after OAuth integration connect ───────────────
+// The client calls this after receiving oauth_success from the popup, OR it is
+// called server-side by the OAuth callback when state.resumeToken is present.
+
+router.post(
+  '/api/agent-runs/resume-from-integration',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const { resumeToken, conversationId } = req.body as { resumeToken?: string; conversationId?: string };
+    if (!resumeToken || typeof resumeToken !== 'string' || !/^[a-f0-9]{64}$/.test(resumeToken)) {
+      // Mirror the validation applied at the OAuth callback path: tokens are
+      // 32-byte hex (64 chars). Anything else is a forged or malformed token —
+      // reject with 400 before hashing so we never store partial state.
+      throw Object.assign(new Error('resumeToken required'), { statusCode: 400, errorCode: 'INVALID_TOKEN' });
+    }
+    const result = await resumeFromIntegrationConnect({
+      resumeToken,
+      organisationId: req.orgId!,
+      conversationId,
+    });
+    res.json({ ...result, conversationId: conversationId ?? '' });
+  }),
+);
 
 export default router;

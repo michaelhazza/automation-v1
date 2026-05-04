@@ -3,8 +3,15 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { createBrief, getBriefArtefacts, getBriefMeta } from '../services/briefCreationService.js';
-import { writeConversationMessage } from '../services/briefConversationWriter.js';
-import type { BriefUiContext } from '../../shared/types/briefFastPath.js';
+import { decodeCursor } from '../services/briefArtefactCursorPure.js';
+import { handleConversationFollowUp } from '../services/briefConversationService.js';
+import { decideBriefApproval } from '../services/briefApprovalService.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { logger } from '../lib/logger.js';
+import { tasks, agentRuns } from '../db/schema/index.js';
+import { eq, and, inArray, asc } from 'drizzle-orm';
+import type { BriefCreationEnvelope, BriefUiContext } from '../../shared/types/briefFastPath.js';
 
 const router = Router();
 
@@ -14,35 +21,65 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
-    const { text, source, uiContext, subaccountId } = req.body as {
+    const {
+      text, source, uiContext, subaccountId,
+      explicitTitle, explicitDescription, priority,
+    } = req.body as {
       text?: string;
-      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic';
+      source?: 'global_ask_bar' | 'slash_remember' | 'programmatic' | 'new_brief_modal';
       uiContext?: Partial<BriefUiContext>;
       subaccountId?: string;
+      explicitTitle?: string;
+      explicitDescription?: string;
+      priority?: 'low' | 'normal' | 'high' | 'urgent';
     };
 
-    if (!text?.trim()) {
-      res.status(400).json({ message: 'text is required' });
+    // text is required unless an explicit title is provided
+    if (!text?.trim() && !explicitTitle?.trim()) {
+      res.status(400).json({ message: 'text or explicitTitle is required' });
       return;
+    }
+
+    // Cross-entity verification (DEVELOPMENT_GUIDELINES §9): when a
+    // subaccountId is supplied, confirm it belongs to req.orgId before any
+    // write. The Layout New Brief modal can present a stale subaccount list
+    // when an admin switches the org dropdown, and a malicious client could
+    // submit any UUID. resolveSubaccount throws { statusCode: 404 } on
+    // mismatch — asyncHandler maps that to a 404 response.
+    const effectiveSubaccountId = subaccountId ?? uiContext?.currentSubaccountId;
+    if (effectiveSubaccountId) {
+      await resolveSubaccount(effectiveSubaccountId, req.orgId!);
     }
 
     const context: BriefUiContext = {
       surface: uiContext?.surface ?? 'global_ask_bar',
       currentOrgId: req.orgId!,
-      currentSubaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      currentSubaccountId: effectiveSubaccountId,
       userPermissions: new Set<string>(),
     };
 
     const result = await createBrief({
       organisationId: req.orgId!,
-      subaccountId: subaccountId ?? uiContext?.currentSubaccountId,
+      subaccountId: effectiveSubaccountId,
       submittedByUserId: req.user!.id,
-      text: text.trim(),
+      text: text?.trim() ?? explicitTitle!.trim(),
       source: source ?? 'global_ask_bar',
       uiContext: context,
+      explicitTitle: explicitTitle?.trim(),
+      explicitDescription: explicitDescription?.trim(),
+      priority,
     });
 
-    res.status(201).json(result);
+    const envelope: BriefCreationEnvelope = {
+      briefId: result.briefId,
+      conversationId: result.conversationId,
+      fastPathDecision: result.fastPathDecision,
+      organisationId: req.orgId!,
+      subaccountId: effectiveSubaccountId ?? null,
+      organisationName: null,
+      subaccountName: null,
+    };
+    res.status(201).json(envelope);
   }),
 );
 
@@ -67,27 +104,69 @@ router.get(
   }),
 );
 
-// GET /api/briefs/:briefId/artefacts — list artefacts for a Brief
+// GET /api/briefs/:briefId/active-run — runId of the current in-flight agent
+// run for this brief. BriefDetailPage polls this to wire the live graph panel.
+router.get(
+  '/api/briefs/:briefId/active-run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
+  asyncHandler(async (req, res) => {
+    const { briefId } = req.params;
+    const tx = getOrgScopedDb('briefs.active_run');
+
+    // Oldest in-flight run wins so DelegationGraphView roots at the parent
+    // when a brief has both parent + child runs in flight (handoff/spawn chains).
+    const [run] = await tx
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.taskId, briefId),
+          eq(agentRuns.organisationId, req.orgId!),
+          inArray(agentRuns.status, ['running', 'delegated', 'cancelling']),
+        ),
+      )
+      .orderBy(asc(agentRuns.createdAt))
+      .limit(1);
+
+    res.json({ runId: run?.id ?? null });
+  }),
+);
+
+// GET /api/briefs/:briefId/artefacts — paginated artefact list for a Brief
 router.get(
   '/api/briefs/:briefId/artefacts',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
   asyncHandler(async (req, res) => {
     const { briefId } = req.params;
+    const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : 50;
+    if (req.query.limit !== undefined && (rawLimit === undefined || !Number.isFinite(rawLimit))) {
+      logger.info('brief_artefacts.limit_invalid', { briefId, raw: req.query.limit });
+    }
+    const cursor = typeof req.query.cursor === 'string'
+      ? decodeCursor(req.query.cursor)  // null on malformed → treated as first page
+      : null;
 
-    const artefacts = await getBriefArtefacts(briefId, req.orgId!);
-    res.json(artefacts);
+    const result = await getBriefArtefacts(briefId, req.orgId!, { limit, cursor });
+    res.json(result);
   }),
 );
 
-// POST /api/briefs/:briefId/messages — add a user message to a Brief
+// POST /api/briefs/:briefId/messages — add a follow-up user message to a Brief
 router.post(
   '/api/briefs/:briefId/messages',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
   asyncHandler(async (req, res) => {
     const { briefId } = req.params;
-    const { content, conversationId } = req.body as { content?: string; conversationId?: string };
+    const { content, conversationId, uiContext, subaccountId } = req.body as {
+      content?: string;
+      conversationId?: string;
+      uiContext?: Partial<BriefUiContext>;
+      subaccountId?: string;
+    };
 
     if (!content?.trim()) {
       res.status(400).json({ message: 'content is required' });
@@ -98,16 +177,88 @@ router.post(
       return;
     }
 
-    const result = await writeConversationMessage({
+    // Derive the canonical subaccountId from the brief row itself rather than
+    // trusting the client payload. The client only sends `uiContext.surface`,
+    // so a missing currentSubaccountId would otherwise default the
+    // classifier to 'org' scope and broaden the run for a subaccount-bound
+    // brief. Server-side lookup is the source of truth.
+    const tx = getOrgScopedDb('briefs.followup');
+    const [briefTask] = await tx
+      .select({ subaccountId: tasks.subaccountId })
+      .from(tasks)
+      .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, req.orgId!)))
+      .limit(1);
+
+    if (!briefTask) {
+      res.status(404).json({ message: 'Brief not found' });
+      return;
+    }
+
+    const canonicalSubaccountId = briefTask.subaccountId ?? subaccountId ?? uiContext?.currentSubaccountId;
+
+    const context: BriefUiContext = {
+      surface: uiContext?.surface ?? 'brief_chat',
+      currentOrgId: req.orgId!,
+      currentSubaccountId: canonicalSubaccountId ?? undefined,
+      userPermissions: new Set<string>(),
+    };
+
+    const result = await handleConversationFollowUp({
       conversationId,
       briefId,
       organisationId: req.orgId!,
-      role: 'user',
-      content: content.trim(),
+      subaccountId: canonicalSubaccountId ?? undefined,
+      text: content.trim(),
+      uiContext: context,
       senderUserId: req.user!.id,
     });
 
     res.status(201).json(result);
+  }),
+);
+
+// POST /api/briefs/:briefId/approvals/:artefactId/decision — approve or reject an approval card
+router.post(
+  '/api/briefs/:briefId/approvals/:artefactId/decision',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
+  asyncHandler(async (req, res) => {
+    const { briefId, artefactId } = req.params;
+    const { decision, reason, conversationId, subaccountId } = req.body as {
+      decision?: 'approve' | 'reject';
+      reason?: string;
+      conversationId?: string;
+      subaccountId?: string;
+    };
+
+    if (decision !== 'approve' && decision !== 'reject') {
+      res.status(400).json({ status: 'failed', error: 'decision must be approve or reject' });
+      return;
+    }
+    if (!conversationId) {
+      res.status(400).json({ status: 'failed', error: 'conversationId is required' });
+      return;
+    }
+
+    const result = await decideBriefApproval({
+      artefactId,
+      decision,
+      reason,
+      conversationId,
+      briefId,
+      organisationId: req.orgId!,
+      subaccountId,
+      userId: req.user!.id,
+    });
+
+    if (result.status === 'failed') {
+      if (result.error === 'artefact_not_found') { res.status(404).json(result); return; }
+      if (result.error === 'artefact_not_approval') { res.status(422).json(result); return; }
+      if (result.error === 'artefact_stale') { res.status(410).json(result); return; }
+      if (result.error === 'approval_already_decided') { res.status(409).json(result); return; }
+    }
+
+    res.status(200).json(result);
   }),
 );
 

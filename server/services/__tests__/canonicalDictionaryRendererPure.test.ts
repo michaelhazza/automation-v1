@@ -6,27 +6,9 @@
  *   npx tsx server/services/__tests__/canonicalDictionaryRendererPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { renderDictionary } from '../canonicalDictionary/canonicalDictionaryRendererPure.js';
 import type { CanonicalTableEntry } from '../canonicalDictionary/canonicalDictionaryRegistry.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 const FIXTURE: CanonicalTableEntry = {
   tableName: 'canonical_test',
@@ -51,37 +33,35 @@ console.log('renderDictionary');
 
 test('renders a single table', () => {
   const result = renderDictionary([FIXTURE]);
-  assert(result.includes('Test Table'), 'should contain human name');
-  assert(result.includes('canonical_test'), 'should contain table name');
-  assert(result.includes('Primary key'), 'should contain column purpose');
+  expect(result.includes('Test Table'), 'should contain human name').toBeTruthy();
+  expect(result.includes('canonical_test'), 'should contain table name').toBeTruthy();
+  expect(result.includes('Primary key'), 'should contain column purpose').toBeTruthy();
 });
 
 test('filters by table name', () => {
   const result = renderDictionary([FIXTURE], { tableFilter: ['nonexistent'] });
-  assert(result === 'No canonical tables match the filter.', 'should return empty message');
+  expect(result === 'No canonical tables match the filter.', 'should return empty message').toBeTruthy();
 });
 
 test('includes examples when requested', () => {
   const result = renderDictionary([FIXTURE], { includeExamples: true });
-  assert(result.includes('SELECT * FROM canonical_test'), 'should contain example query');
+  expect(result.includes('SELECT * FROM canonical_test'), 'should contain example query').toBeTruthy();
 });
 
 test('excludes examples by default', () => {
   const result = renderDictionary([FIXTURE]);
-  assert(!result.includes('Example Queries'), 'should not contain Example Queries heading');
+  expect(!result.includes('Example Queries'), 'should not contain Example Queries heading').toBeTruthy();
 });
 
 test('includes anti-patterns when requested', () => {
   const result = renderDictionary([FIXTURE], { includeAntiPatterns: true });
-  assert(result.includes('Do not use for X'), 'should contain anti-pattern text');
+  expect(result.includes('Do not use for X'), 'should contain anti-pattern text').toBeTruthy();
 });
 
 test('renders multiple tables separated by hr', () => {
   const result = renderDictionary([FIXTURE, { ...FIXTURE, tableName: 'canonical_other', humanName: 'Other' }]);
-  assert(result.includes('---'), 'should contain hr separator');
-  assert(result.includes('Other'), 'should contain second table name');
+  expect(result.includes('---'), 'should contain hr separator').toBeTruthy();
+  expect(result.includes('Other'), 'should contain second table name').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

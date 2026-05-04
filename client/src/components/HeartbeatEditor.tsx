@@ -108,7 +108,7 @@ export default function HeartbeatEditor({ agents, onUpdate, timezone = 'UTC', le
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {/* Hour labels */}
         <div className="flex items-center px-6 pt-4 pb-1">
-          <div style={{ width: 200 }} className="shrink-0" />
+          <div style={{ width: 280 }} className="shrink-0" />
           {HOUR_LABELS.map((h) => (
             <div key={h} className="flex-1 text-[11px] text-slate-400 font-medium">{h}h</div>
           ))}
@@ -126,7 +126,7 @@ export default function HeartbeatEditor({ agents, onUpdate, timezone = 'UTC', le
               <div key={agent.id} className={`px-6 py-3 ${isSaving ? 'opacity-60' : ''}`}>
                 <div className="flex items-center">
                   {/* Agent label + toggle */}
-                  <div className="shrink-0 flex items-center gap-2 pr-4" style={{ width: 200 }}>
+                  <div className="shrink-0 flex items-center gap-2 pr-4" style={{ width: 280 }}>
                     <button
                       onClick={() => handleToggle(agent)}
                       disabled={isSaving}
@@ -152,7 +152,10 @@ export default function HeartbeatEditor({ agents, onUpdate, timezone = 'UTC', le
 
                   {/* Timeline (read-only display) */}
                   <div className={`flex-1 relative h-7 ${!agent.heartbeatEnabled ? 'opacity-30' : ''}`}>
-                    <svg width="100%" height="28" className="block">
+                    {/* overflow-visible so the dots at 0h/24h don't get
+                        clipped at the SVG's left/right edges (cx=0%/100% with
+                        r=5.5 would otherwise lose half the circle). */}
+                    <svg width="100%" height="28" className="block overflow-visible">
                       <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1.5" />
                       {HOUR_LABELS.map((h) => (
                         <line key={h} x1={`${(h / 24) * 100}%`} y1="30%" x2={`${(h / 24) * 100}%`} y2="70%" stroke="#e2e8f0" strokeWidth="1" />
@@ -166,7 +169,7 @@ export default function HeartbeatEditor({ agents, onUpdate, timezone = 'UTC', le
 
                 {/* Expanded config */}
                 {isEditing && agent.heartbeatEnabled && (
-                  <div className="mt-3 ml-[200px] flex flex-wrap items-end gap-4 pb-1">
+                  <div className="mt-3 ml-[280px] flex flex-wrap items-end gap-4 pb-1">
                     {/* Start time */}
                     <div>
                       <div className="text-[11px] text-slate-500 font-medium mb-1">Start time ({timezone})</div>

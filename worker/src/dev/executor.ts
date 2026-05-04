@@ -11,6 +11,7 @@ import {
 import type { Observation } from '../../../shared/iee/observation.js';
 import { Observation as ObservationSchema } from '../../../shared/iee/observation.js';
 import { SafetyError } from '../../../shared/iee/failureReason.js';
+import type { DevTaskChecks } from '../../../shared/iee/jobPayload.js';
 import type { StepExecutor, ActionResult } from '../loop/executionLoop.js';
 import {
   createWorkspace,
@@ -20,6 +21,8 @@ import {
 } from './workspace.js';
 import { runShellCommand } from './shell.js';
 import { gitClone, gitCommit } from './git.js';
+import { runQualityChecks } from './qualityChecks.js';
+import { DEV_TASK_DEFAULT_CHECKS } from '../config/devChecks.js';
 import { db } from '../db.js';
 import { ieeArtifacts } from '../../../server/db/schema/ieeArtifacts.js';
 import { logger, truncateMiddle } from '../logger.js';
@@ -28,6 +31,8 @@ export interface BuildDevExecutorInput {
   ieeRunId: string;
   organisationId: string;
   initialCommands?: string[];
+  /** Override defaults for the post-write quality-check trio. */
+  checks?: DevTaskChecks;
 }
 
 export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<StepExecutor> {
@@ -35,6 +40,48 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
   let stepNumber = 0;
   let lastCommandOutput: string | undefined;
   let lastCommandExitCode: number | undefined;
+  // Populated by `runQualityChecks` after every write_file / git_commit.
+  // Held here so it persists across the next `observe()` call without
+  // leaking through every action result.
+  let lastChecks: Observation['lastChecks'] | undefined;
+
+  // Resolve check config: explicit per-job override wins, else defaults.
+  const effectiveChecks: DevTaskChecks = {
+    lintCommand:      input.checks?.lintCommand      ?? DEV_TASK_DEFAULT_CHECKS.lintCommand,
+    typecheckCommand: input.checks?.typecheckCommand ?? DEV_TASK_DEFAULT_CHECKS.typecheckCommand,
+    testCommand:      input.checks?.testCommand      ?? DEV_TASK_DEFAULT_CHECKS.testCommand,
+  };
+
+  // ── Wire `initialCommands` (previously dead-code) ────────────────────────
+  // Run each setup command exactly once before returning the executor.
+  // The very first observation reflects the result of the LAST initial
+  // command — same shape the LLM sees after any other run_command.
+  if (input.initialCommands && input.initialCommands.length > 0) {
+    for (const command of input.initialCommands) {
+      try {
+        const result = await runShellCommand(command, workspace.dir, {
+          ieeRunId: input.ieeRunId,
+          stepNumber: 0, // pre-loop bootstrap — explicit step 0
+        });
+        lastCommandOutput = result.stdout + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
+        lastCommandExitCode = result.exitCode;
+        // Stop on the first non-zero exit — subsequent commands (e.g. build
+        // steps after a failed `npm install`) won't work either.
+        if (result.exitCode !== 0) break;
+      } catch (err) {
+        // Denylist hits and timeouts land here — same stop logic.
+        const msg = err instanceof Error ? err.message : String(err);
+        lastCommandOutput = `initialCommand '${command.slice(0, 200)}' failed: ${msg}`;
+        lastCommandExitCode = -1;
+        logger.warn('iee.dev.initial_command_failed', {
+          ieeRunId: input.ieeRunId,
+          command: command.slice(0, 500),
+          error: msg.slice(0, 500),
+        });
+        break;
+      }
+    }
+  }
 
   return {
     mode: 'dev',
@@ -46,6 +93,7 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
         files,
         lastCommandOutput: lastCommandOutput ? truncateMiddle(lastCommandOutput, 4000) : undefined,
         lastCommandExitCode,
+        lastChecks,
       });
     },
 
@@ -75,6 +123,15 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
             path: target,
             sizeBytes: Buffer.byteLength(action.content, 'utf8'),
           });
+          // Run configured quality checks against the post-write state so
+          // the agent sees lint / typecheck / test results in the next
+          // observation. Failures here surface as `passed: false`; they do
+          // not abort the action.
+          lastChecks = await runQualityChecks({
+            workspaceDir: workspace.dir,
+            config: effectiveChecks,
+            ctx,
+          });
           return {
             output: { path: target, bytes: Buffer.byteLength(action.content, 'utf8') },
             summary: `wrote ${action.path}`,
@@ -103,6 +160,13 @@ export async function buildDevExecutor(input: BuildDevExecutorInput): Promise<St
           const result = await gitCommit(workspace.dir, action.message, ctx);
           lastCommandOutput = result.stdout + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
           lastCommandExitCode = result.exitCode;
+          // Same rationale as write_file — the agent should see the cost
+          // of what it just committed.
+          lastChecks = await runQualityChecks({
+            workspaceDir: workspace.dir,
+            config: effectiveChecks,
+            ctx,
+          });
           return {
             output: { exitCode: result.exitCode },
             summary: `committed: ${action.message.slice(0, 80)}`,

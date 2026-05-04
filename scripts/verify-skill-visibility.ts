@@ -1,4 +1,4 @@
-/**
+﻿/**
  * scripts/verify-skill-visibility.ts
  *
  * CI gate — fails the build if any skill file in server/skills/ has a
@@ -51,7 +51,10 @@ async function main(): Promise<void> {
   for (const file of mdFiles) {
     const slug = file.slice(0, -3);
     const filePath = join(SKILLS_DIR, file);
-    const raw = (await readFile(filePath, 'utf-8')).replace(/\r\n/g, '\n');
+    // Strip UTF-8 BOM so the leading `^---` anchor matches files saved with BOM.
+    const raw = (await readFile(filePath, 'utf-8'))
+      .replace(/^\uFEFF/, '')
+      .replace(/\r\n/g, '\n');
 
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) {

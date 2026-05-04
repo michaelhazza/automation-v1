@@ -565,11 +565,10 @@ export function computeRunResultStatus(
   finalStatus: string,
   hasError: boolean,
   hadUncertainty: boolean,
-  hasSummary: boolean,
 ): RunResultStatus | null {
   switch (finalStatus) {
     case 'completed':
-      if (hasError || hadUncertainty || !hasSummary) return 'partial';
+      if (hasError || hadUncertainty) return 'partial';
       return 'success';
     case 'completed_with_uncertainty':
       return 'partial';
@@ -584,6 +583,7 @@ export function computeRunResultStatus(
     case 'delegated':
     case 'awaiting_clarification':
     case 'waiting_on_clarification':
+    case 'blocked_awaiting_integration':
       return null;
     default:
       // Unknown statuses are treated as non-terminal. If a new status is

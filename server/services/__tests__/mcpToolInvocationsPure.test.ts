@@ -8,26 +8,9 @@
  * and agentActivityService (mcpCallSummary computation).
  * No DB required.
  */
+import { expect, test } from 'vitest';
+
 export {};
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -181,13 +164,13 @@ test('non-test run with subaccount and runId produces 6 dimensions (monthly+dail
     serverSlug: 'github',
     isTestRun: false,
   });
-  assertEqual(dims.length, 6, 'dimension count');
-  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'monthly'), 'mcp_org monthly present');
-  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present');
-  assert(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'monthly'), 'mcp_subaccount monthly present');
-  assert(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'daily'), 'mcp_subaccount daily present');
-  assert(dims.some((d) => d.entityType === 'mcp_run'), 'mcp_run present');
-  assert(dims.some((d) => d.entityType === 'mcp_server'), 'mcp_server present');
+  expect(dims.length, 'dimension count').toBe(6);
+  expect(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'monthly'), 'mcp_org monthly present').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'monthly'), 'mcp_subaccount monthly present').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_subaccount' && d.periodType === 'daily'), 'mcp_subaccount daily present').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_run'), 'mcp_run present').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_server'), 'mcp_server present').toBeTruthy();
 });
 
 test('non-test run without subaccount produces 4 dimensions (org monthly+daily, run, server)', () => {
@@ -199,9 +182,9 @@ test('non-test run without subaccount produces 4 dimensions (org monthly+daily, 
     serverSlug: 'github',
     isTestRun: false,
   });
-  assertEqual(dims.length, 4, 'dimension count');
-  assert(!dims.some((d) => d.entityType === 'mcp_subaccount'), 'mcp_subaccount absent');
-  assert(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present');
+  expect(dims.length, 'dimension count').toBe(4);
+  expect(!dims.some((d) => d.entityType === 'mcp_subaccount'), 'mcp_subaccount absent').toBeTruthy();
+  expect(dims.some((d) => d.entityType === 'mcp_org' && d.periodType === 'daily'), 'mcp_org daily present').toBeTruthy();
 });
 
 test('test run with runId produces only mcp_run dimension', () => {
@@ -213,8 +196,8 @@ test('test run with runId produces only mcp_run dimension', () => {
     serverSlug: 'github',
     isTestRun: true,
   });
-  assertEqual(dims.length, 1, 'only mcp_run for test run');
-  assertEqual(dims[0].entityType, 'mcp_run', 'entityType');
+  expect(dims.length, 'only mcp_run for test run').toBe(1);
+  expect(dims[0].entityType, 'entityType').toBe('mcp_run');
 });
 
 test('test run without runId produces zero dimensions', () => {
@@ -225,7 +208,7 @@ test('test run without runId produces zero dimensions', () => {
     serverSlug: 'github',
     isTestRun: true,
   });
-  assertEqual(dims.length, 0, 'no dimensions for test run without runId');
+  expect(dims.length, 'no dimensions for test run without runId').toBe(0);
 });
 
 test('mcp_server entityId is scoped to orgId:serverSlug', () => {
@@ -237,58 +220,58 @@ test('mcp_server entityId is scoped to orgId:serverSlug', () => {
     isTestRun: false,
   });
   const serverDim = dims.find((d) => d.entityType === 'mcp_server');
-  assert(!!serverDim, 'mcp_server present');
-  assertEqual(serverDim!.entityId, 'org-xyz:notion', 'entityId scoped correctly');
+  expect(!!serverDim, 'mcp_server present').toBeTruthy();
+  expect(serverDim!.entityId, 'entityId scoped correctly').toBe('org-xyz:notion');
 });
 
 // Invocation field derivation
 
 test('success status: isError=false, requiresFailureReason=false', () => {
   const { isError, requiresFailureReason } = deriveInvocationFlags({ status: 'success', callIndex: 3 });
-  assert(!isError, 'isError false on success');
-  assert(!requiresFailureReason, 'no failureReason needed on success');
+  expect(!isError, 'isError false on success').toBeTruthy();
+  expect(!requiresFailureReason, 'no failureReason needed on success').toBeTruthy();
 });
 
 test('timeout status: isError=true, requiresFailureReason=true', () => {
   const { isError, requiresFailureReason } = deriveInvocationFlags({ status: 'timeout', callIndex: 5 });
-  assert(isError, 'isError true on timeout');
-  assert(requiresFailureReason, 'failureReason needed on timeout');
+  expect(isError, 'isError true on timeout').toBeTruthy();
+  expect(requiresFailureReason, 'failureReason needed on timeout').toBeTruthy();
 });
 
 test('budget_blocked with null callIndex is pre-execution exit', () => {
   const { isPreExecution } = deriveInvocationFlags({ status: 'budget_blocked', callIndex: null });
-  assert(isPreExecution, 'budget_blocked with null callIndex is pre-execution');
+  expect(isPreExecution, 'budget_blocked with null callIndex is pre-execution').toBeTruthy();
 });
 
 // wroteInCatch / finally double-write prevention
 
 test('non-retryable error: catch fires but does not write, finally writes exactly once', () => {
   const result = simulateCallTool({ throwsOnce: true, retryable: false });
-  assert(result.catchFired, 'catch fired');
-  assert(!result.retried, 'no retry');
+  expect(result.catchFired, 'catch fired').toBeTruthy();
+  expect(!result.retried, 'no retry').toBeTruthy();
   // Non-retryable catch path does not set wroteInCatch, so finally writes the single row
-  assertEqual(result.rowsWritten, 1, 'finally-write only (catch does not write on non-retryable path)');
+  expect(result.rowsWritten, 'finally-write only (catch does not write on non-retryable path)').toBe(1);
 });
 
 test('retryable error: catch sets wroteInCatch=true, outer finally skips', () => {
   const result = simulateCallTool({ throwsOnce: true, retryable: true });
-  assert(result.retried, 'retry happened');
+  expect(result.retried, 'retry happened').toBeTruthy();
   // The outer finally fires but wroteInCatch is true, so only retry's write is emitted
   // Outer catch writes 'catch-retry', retry's finally writes 'finally-write' — total 2
-  assertEqual(result.rowsWritten, 2, 'catch-retry + retry-finally-write = 2 rows total');
+  expect(result.rowsWritten, 'catch-retry + retry-finally-write = 2 rows total').toBe(2);
 });
 
 test('success path: only finally fires, no catch', () => {
   const result = simulateCallTool({ throwsOnce: false, retryable: false });
-  assert(!result.catchFired, 'catch did not fire on success');
-  assertEqual(result.rowsWritten, 2, 'finally-success + finally-write');
+  expect(!result.catchFired, 'catch did not fire on success').toBeTruthy();
+  expect(result.rowsWritten, 'finally-success + finally-write').toBe(2);
 });
 
 // mcpCallSummary computation
 
 test('empty invocation rows returns null summary', () => {
   const summary = computeMcpCallSummary([]);
-  assert(summary === null, 'null for empty rows');
+  expect(summary === null, 'null for empty rows').toBeTruthy();
 });
 
 test('summary with one server sums correctly', () => {
@@ -297,10 +280,10 @@ test('summary with one server sums correctly', () => {
     { serverSlug: 'github', status: 'error', durationMs: 200 },
     { serverSlug: 'github', status: 'success', durationMs: 150 },
   ]);
-  assert(summary !== null, 'summary not null');
-  assertEqual(summary!.totalCalls, 3, 'totalCalls');
-  assertEqual(summary!.errorCount, 1, 'errorCount');
-  assertEqual(summary!.byServer[0].avgDurationMs, 150, 'avgDurationMs = round((100+200+150)/3)');
+  expect(summary !== null, 'summary not null').toBeTruthy();
+  expect(summary!.totalCalls, 'totalCalls').toBe(3);
+  expect(summary!.errorCount, 'errorCount').toBe(1);
+  expect(summary!.byServer[0].avgDurationMs, 'avgDurationMs = round((100+200+150)/3)').toBe(150);
 });
 
 test('budget_blocked does not count as errorCount — policy exit, not infra failure', () => {
@@ -308,9 +291,9 @@ test('budget_blocked does not count as errorCount — policy exit, not infra fai
     { serverSlug: 'github', status: 'success', durationMs: 100 },
     { serverSlug: 'github', status: 'budget_blocked', durationMs: 0 },
   ]);
-  assert(summary !== null, 'summary not null');
-  assertEqual(summary!.totalCalls, 2, 'totalCalls includes budget_blocked');
-  assertEqual(summary!.errorCount, 0, 'budget_blocked must not inflate errorCount');
+  expect(summary !== null, 'summary not null').toBeTruthy();
+  expect(summary!.totalCalls, 'totalCalls includes budget_blocked').toBe(2);
+  expect(summary!.errorCount, 'budget_blocked must not inflate errorCount').toBe(0);
 });
 
 test('summary with multiple servers groups correctly', () => {
@@ -319,17 +302,14 @@ test('summary with multiple servers groups correctly', () => {
     { serverSlug: 'notion', status: 'timeout', durationMs: 5000 },
     { serverSlug: 'notion', status: 'success', durationMs: 300 },
   ]);
-  assert(summary !== null, 'summary not null');
-  assertEqual(summary!.totalCalls, 3, 'totalCalls across servers');
-  assertEqual(summary!.errorCount, 1, 'errorCount (notion timeout)');
-  assertEqual(summary!.byServer.length, 2, 'two servers');
+  expect(summary !== null, 'summary not null').toBeTruthy();
+  expect(summary!.totalCalls, 'totalCalls across servers').toBe(3);
+  expect(summary!.errorCount, 'errorCount (notion timeout)').toBe(1);
+  expect(summary!.byServer.length, 'two servers').toBe(2);
   const notion = summary!.byServer.find((s) => s.serverSlug === 'notion')!;
-  assertEqual(notion.callCount, 2, 'notion callCount');
-  assertEqual(notion.errorCount, 1, 'notion errorCount');
-  assertEqual(notion.avgDurationMs, 2650, 'notion avgDurationMs = round((5000+300)/2)');
+  expect(notion.callCount, 'notion callCount').toBe(2);
+  expect(notion.errorCount, 'notion errorCount').toBe(1);
+  expect(notion.avgDurationMs, 'notion avgDurationMs = round((5000+300)/2)').toBe(2650);
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

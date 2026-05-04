@@ -21,6 +21,7 @@
 
 import { createHmac, timingSafeEqual, createHash } from 'crypto';
 import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import {
   clientPulseHealthSnapshots,
@@ -78,6 +79,10 @@ function mapApiBandToDb(apiBand: string): string {
     default:         return apiBand;
   }
 }
+
+// ── Module-level state ────────────────────────────────────────────────────────
+
+let cursorSecretFallbackWarned = false;
 
 // ── Sort order ────────────────────────────────────────────────────────────────
 
@@ -163,8 +168,14 @@ function getCursorSecret(orgId: string): string {
   const envSecret = process.env.PULSE_CURSOR_SECRET;
   if (envSecret) return envSecret;
   // Fallback: deterministic, org-scoped seed. Not a production secret, but
-  // prevents cross-org cursor reuse. Log a warning to alert operators.
-  console.warn('[clientPulseHighRisk] PULSE_CURSOR_SECRET is not set — using per-org fallback seed. Set PULSE_CURSOR_SECRET in production.');
+  // prevents cross-org cursor reuse. Log a warning to alert operators (once).
+  if (!cursorSecretFallbackWarned) {
+    cursorSecretFallbackWarned = true;
+    logger.warn('clientpulse_cursor_secret_fallback', {
+      event: 'clientpulse_cursor_secret_fallback',
+      message: 'PULSE_CURSOR_SECRET is not set; using fallback secret. Set PULSE_CURSOR_SECRET in production.',
+    });
+  }
   return createHash('sha256').update(`clientpulse-cursor-fallback:${orgId}`).digest('hex');
 }
 
@@ -255,7 +266,7 @@ export async function getPrioritisedClients(
 
   // ── 4. Sparkline: one batched query, 4 weekly buckets over last 28 days ──
   // Returns one row per (subaccount_id, week_bucket) with AVG score.
-  let sparklineMap = new Map<string, number[]>();
+  const sparklineMap = new Map<string, number[]>();
   try {
     const sparklineResult = await Promise.race([
       dbClient.execute<{

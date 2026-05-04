@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { User } from '../lib/auth';
 import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
 import NeedsAttentionRow from '../components/clientpulse/NeedsAttentionRow';
+import { DashboardErrorBanner } from '../components/DashboardErrorBanner';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
+
+type ClientPulseErrorMap = {
+  summary: boolean;
+  prioritised: boolean;
+};
 
 interface Props { user: User; }
 
@@ -52,22 +57,39 @@ export default function ClientPulseDashboardPage({ user }: Props) {
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [subscription, setSubscription] = useState<OrgSubscription | null>(null);
   const [ghlConnected, setGhlConnected] = useState<boolean | null>(null);
+  const [errors, setErrors] = useState<ClientPulseErrorMap>({ summary: false, prioritised: false });
   const { openConfigAssistant } = useConfigAssistantPopup();
 
-  useEffect(() => {
-    Promise.all([
-      api.get('/api/clientpulse/health-summary').catch((e) => { console.warn('health-summary failed', e); return null; }),
-      api.get('/api/clientpulse/high-risk').catch((e) => { console.warn('high-risk failed', e); return null; }),
+  async function fetchData() {
+    const cycleErrors: ClientPulseErrorMap = { summary: false, prioritised: false };
+
+    const [healthRes, riskRes, reportRes, subRes, onboardingRes] = await Promise.all([
+      api.get('/api/clientpulse/health-summary').catch((e) => {
+        console.warn('health-summary failed', e);
+        cycleErrors.summary = true;
+        return null;
+      }),
+      api.get('/api/clientpulse/high-risk').catch((e) => {
+        console.warn('high-risk failed', e);
+        cycleErrors.prioritised = true;
+        return null;
+      }),
       api.get('/api/reports/latest').catch((e) => { console.warn('reports/latest failed', e); return null; }),
       api.get('/api/my-subscription').catch((e) => { console.warn('my-subscription failed', e); return null; }),
       api.get('/api/onboarding/status').catch((e) => { console.warn('onboarding/status failed', e); return null; }),
-    ]).then(([healthRes, riskRes, reportRes, subRes, onboardingRes]) => {
-      if (healthRes?.data) setHealth(healthRes.data);
-      if (riskRes?.data?.clients) setHighRisk(riskRes.data.clients);
-      if (reportRes?.data) setLatestReport(reportRes.data);
-      if (subRes?.data) setSubscription(subRes.data);
-      if (onboardingRes?.data) setGhlConnected(onboardingRes.data.ghlConnected);
-    }).finally(() => setLoading(false));
+    ]);
+
+    setErrors(cycleErrors);
+
+    if (healthRes?.data?.data) setHealth(healthRes.data.data);
+    if (riskRes?.data?.clients) setHighRisk(riskRes.data.clients);
+    if (reportRes?.data) setLatestReport(reportRes.data);
+    if (subRes?.data) setSubscription(subRes.data);
+    if (onboardingRes?.data) setGhlConnected(onboardingRes.data.ghlConnected);
+  }
+
+  useEffect(() => {
+    void fetchData().finally(() => setLoading(false));
   }, []);
 
   // Live dashboard updates
@@ -75,7 +97,6 @@ export default function ClientPulseDashboardPage({ user }: Props) {
     if (!data || typeof data !== 'object') return;
     const update = data as Partial<HealthSummary>;
     setHealth((prev) => prev ? { ...prev, ...update } : prev);
-    toast.success('Dashboard updated with latest data');
   }, []));
 
   if (loading) return <DashboardSkeleton />;
@@ -84,6 +105,8 @@ export default function ClientPulseDashboardPage({ user }: Props) {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
+      <DashboardErrorBanner errors={errors} onRetry={() => { void fetchData(); }} />
+
       <GuidedTour />
 
       {/* Trial expired banner */}

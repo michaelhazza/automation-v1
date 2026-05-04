@@ -16,12 +16,16 @@ export const AGENT_RUN_STATUS = {
   // been handed off to a delegated execution backend (IEE worker today,
   // OpenClaw in future). Non-terminal. Detail lives on the backend row.
   DELEGATED: 'delegated',
+  // User-requested cancel has been observed; the run loop / IEE worker
+  // will exit at the next safe checkpoint and finalise as 'cancelled'.
+  // Non-terminal — exists only briefly.
+  CANCELLING: 'cancelling',
   COMPLETED: 'completed',
   FAILED: 'failed',
   TIMEOUT: 'timeout',
   CANCELLED: 'cancelled',
   LOOP_DETECTED: 'loop_detected',
-  BUDGET_EXCEEDED: 'budget_exceeded',
+  COMPUTE_BUDGET_EXCEEDED: 'budget_exceeded',
   AWAITING_CLARIFICATION: 'awaiting_clarification',
   WAITING_ON_CLARIFICATION: 'waiting_on_clarification',
   COMPLETED_WITH_UNCERTAINTY: 'completed_with_uncertainty',
@@ -33,6 +37,7 @@ export const IN_FLIGHT_RUN_STATUSES: readonly AgentRunStatus[] = [
   AGENT_RUN_STATUS.PENDING,
   AGENT_RUN_STATUS.RUNNING,
   AGENT_RUN_STATUS.DELEGATED,
+  AGENT_RUN_STATUS.CANCELLING,
 ];
 
 export const AWAITING_RUN_STATUSES: readonly AgentRunStatus[] = [
@@ -46,7 +51,7 @@ export const TERMINAL_RUN_STATUSES: readonly AgentRunStatus[] = [
   AGENT_RUN_STATUS.TIMEOUT,
   AGENT_RUN_STATUS.CANCELLED,
   AGENT_RUN_STATUS.LOOP_DETECTED,
-  AGENT_RUN_STATUS.BUDGET_EXCEEDED,
+  AGENT_RUN_STATUS.COMPUTE_BUDGET_EXCEEDED,
   AGENT_RUN_STATUS.COMPLETED_WITH_UNCERTAINTY,
 ];
 

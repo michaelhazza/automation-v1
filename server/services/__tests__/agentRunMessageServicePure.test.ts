@@ -5,38 +5,16 @@
  *   npx tsx server/services/__tests__/agentRunMessageServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   validateMessageShape,
   computeNextSequenceNumber,
 } from '../agentRunMessageServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertThrows(fn: () => void, label: string) {
+function assertThrows(fn: () => unknown, label: string): void {
   let thrown = false;
-  try {
-    fn();
-  } catch {
-    thrown = true;
-  }
+  try { fn(); } catch { thrown = true; }
   if (!thrown) throw new Error(`${label} — expected throw`);
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  if (a !== b) throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 
 console.log('');
@@ -79,6 +57,7 @@ test('rejects an invalid role', () => {
   assertThrows(
     () =>
       validateMessageShape({
+        // reason: deliberately passing an invalid role value to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         role: 'function' as any,
         content: 'x',
@@ -138,6 +117,7 @@ test('rejects non-string toolCallId', () => {
       validateMessageShape({
         role: 'assistant',
         content: [{ type: 'text', text: 'hi' }],
+        // reason: deliberately passing a non-string toolCallId to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         toolCallId: 42 as any,
       }),
@@ -163,15 +143,15 @@ test('accepts explicit null toolCallId', () => {
 // ── computeNextSequenceNumber ──────────────────────────────────────
 
 test('null current max → 0 (fresh run)', () => {
-  assertEqual(computeNextSequenceNumber(null), 0, 'fresh run starts at 0');
+  expect(computeNextSequenceNumber(null), 'fresh run starts at 0').toBe(0);
 });
 
 test('0 current max → 1', () => {
-  assertEqual(computeNextSequenceNumber(0), 1, 'increment from 0');
+  expect(computeNextSequenceNumber(0), 'increment from 0').toBe(1);
 });
 
 test('42 current max → 43', () => {
-  assertEqual(computeNextSequenceNumber(42), 43, 'increment from 42');
+  expect(computeNextSequenceNumber(42), 'increment from 42').toBe(43);
 });
 
 test('rejects negative current max', () => {
@@ -187,6 +167,4 @@ test('rejects NaN', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

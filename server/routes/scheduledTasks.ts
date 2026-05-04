@@ -215,9 +215,31 @@ router.post(
     const {
       name, description, sourceType, sourcePath, sourceHeaders,
       contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+      connectionId,
     } = req.body;
-    if (!name || !sourceType || !sourcePath) {
-      res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+    if (!name || !sourceType) {
+      res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });
+      return;
+    }
+    if (sourceType === 'google_drive') {
+      if (!connectionId) {
+        res.status(400).json({ error: 'Validation failed', details: 'connectionId is required for google_drive sources' });
+        return;
+      }
+      const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
+      // Spec §5.3 — Drive connections are subaccount-scoped (also accept org-level rows).
+      const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
+      if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
+        res.status(422).json({ error: 'invalid_connection_id' });
+        return;
+      }
+      // The connection must be either org-level or owned by this caller's subaccount.
+      if (conn.subaccountId !== null && conn.subaccountId !== req.params.subaccountId) {
+        res.status(422).json({ error: 'invalid_connection_id' });
+        return;
+      }
+    } else if (!sourcePath) {
+      res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
       return;
     }
     const result = await agentService.addScheduledTaskDataSource(
@@ -226,6 +248,7 @@ router.post(
       {
         name, description, sourceType, sourcePath, sourceHeaders,
         contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+        connectionId,
       },
       req.user?.id,
     );

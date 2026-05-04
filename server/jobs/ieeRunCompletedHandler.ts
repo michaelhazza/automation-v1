@@ -20,6 +20,7 @@ import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { finaliseAgentRunFromIeeRun } from '../services/agentRunFinalizationService.js';
 import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import { createWorker } from '../lib/createWorker.js';
 
 export const QUEUE = 'iee-run-completed';
 
@@ -71,53 +72,53 @@ function validatePayload(data: unknown): IeeRunCompletedPayload | null {
 
 export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void> {
   const config = getJobConfig(QUEUE);
-  await (boss as unknown as {
-    work: (
-      queue: string,
-      options: { teamSize: number; teamConcurrency: number },
-      handler: (job: { id: string; data: unknown }) => Promise<void>,
-    ) => Promise<string>;
-  }).work(QUEUE, { teamSize: 4, teamConcurrency: 1 }, async (job) => {
-    // Validate payload shape + version before touching the DB.
-    const payload = validatePayload(job.data);
-    if (!payload) {
-      logger.warn('iee.run_completed.invalid_payload', {
-        jobId: job.id,
-        rawKeys: typeof job.data === 'object' && job.data !== null
-          ? Object.keys(job.data as Record<string, unknown>)
-          : typeof job.data,
-      });
-      // Return (ack) rather than throw — retrying a malformed payload
-      // will always produce the same result. Poison pills go to the DLQ
-      // via retry exhaustion anyway; ack here keeps the sweep clean.
-      return;
-    }
-    const { ieeRunId, eventKey } = payload;
+  await createWorker<Record<string, unknown>>({
+    queue: QUEUE,
+    boss,
+    concurrency: 4,
+    resolveOrgContext: () => null,  // cross-org: payload carries no organisationId
+    handler: async (job) => {
+      // Validate payload shape + version before touching the DB.
+      const payload = validatePayload(job.data);
+      if (!payload) {
+        logger.warn('iee.run_completed.invalid_payload', {
+          jobId: job.id,
+          rawKeys: typeof job.data === 'object' && job.data !== null
+            ? Object.keys(job.data as Record<string, unknown>)
+            : typeof job.data,
+        });
+        // Return (ack) rather than throw — retrying a malformed payload
+        // will always produce the same result. Poison pills go to the DLQ
+        // via retry exhaustion anyway; ack here keeps the sweep clean.
+        return;
+      }
+      const { ieeRunId, eventKey } = payload;
 
-    // Source-of-truth re-read. The event payload is a hint; the iee_runs row
-    // is authoritative. This matters because the retry sweep may re-emit a
-    // stale event after the main-app handler has already processed it.
-    const [ieeRun] = await db
-      .select()
-      .from(ieeRuns)
-      .where(eq(ieeRuns.id, ieeRunId))
-      .limit(1);
+      // Source-of-truth re-read. The event payload is a hint; the iee_runs row
+      // is authoritative. This matters because the retry sweep may re-emit a
+      // stale event after the main-app handler has already processed it.
+      const [ieeRun] = await db
+        .select()
+        .from(ieeRuns)
+        .where(eq(ieeRuns.id, ieeRunId))
+        .limit(1);
 
-    if (!ieeRun) {
-      logger.warn('iee.run_completed.unknown_iee_run', { ieeRunId, eventKey });
-      return;
-    }
+      if (!ieeRun) {
+        logger.warn('iee.run_completed.unknown_iee_run', { ieeRunId, eventKey });
+        return;
+      }
 
-    try {
-      await finaliseAgentRunFromIeeRun(ieeRun);
-    } catch (err) {
-      logger.error('iee.run_completed.finalise_failed', {
-        ieeRunId,
-        eventKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err; // let pg-boss retry / DLQ per jobConfig
-    }
+      try {
+        await finaliseAgentRunFromIeeRun(ieeRun);
+      } catch (err) {
+        logger.error('iee.run_completed.finalise_failed', {
+          ieeRunId,
+          eventKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err; // let pg-boss retry / DLQ per jobConfig
+      }
+    },
   });
 
   logger.info('iee.run_completed.handler_registered', {

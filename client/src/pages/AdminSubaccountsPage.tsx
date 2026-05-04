@@ -120,7 +120,7 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
         </div>
         <button
           onClick={() => { setShowForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + New company
         </button>
@@ -167,13 +167,13 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
             <button
               onClick={handleCreate}
               disabled={submitting}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               {submitting ? 'Creating…' : 'Create'}
             </button>
             <button
               onClick={() => { setShowForm(false); setSelectedTemplateId(null); }}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors"
+              className="btn btn-secondary"
             >
               Cancel
             </button>

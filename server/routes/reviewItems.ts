@@ -7,7 +7,7 @@ import { actionService } from '../services/actionService.js';
 import { queueService } from '../services/queueService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitOrgUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getMajorThresholds } from '../services/pulseConfigService.js';
 import { buildDraftFromAction, getRunTotalCostMinor, getRunTotalCostMinorBatch } from '../services/pulseService.js';
 import { classify, buildAckText } from '../services/pulseLaneClassifier.js';
@@ -158,10 +158,13 @@ router.post(
         ackCurrencyCode: lane === 'major' ? majorCurrencyCode : undefined,
       }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
 
-      // If this action was created by a workflow step, enqueue a resume job
+      // If this action was created by a workflow step, enqueue a resume job.
+      // Workflow-driven actions always carry an agentId; system-initiated
+      // actions (e.g. spend-promotion) carry no workflowRunId and never
+      // reach this branch.
       const meta = action.metadataJson as Record<string, unknown> | null;
       const workflowRunId = meta?.workflowRunId as string | undefined;
-      if (workflowRunId) {
+      if (workflowRunId && action.agentId) {
         queueService.enqueueWorkflowResume({
           workflowRunId,
           approvedActionId: action.id,
@@ -174,6 +177,10 @@ router.post(
 
       const subaccountId = action.subaccountId;
       if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'approved',
+        subaccountId: action.subaccountId ?? null,
+      });
     }
 
     res.json({ ...result, lane });
@@ -222,6 +229,10 @@ router.post(
 
       const subaccountId = action.subaccountId;
       if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'rejected' });
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'rejected',
+        subaccountId: action.subaccountId ?? null,
+      });
     }
 
     res.json(result);
@@ -290,7 +301,19 @@ router.post(
     }
 
     if (approvable.length > 0) {
-      await reviewService.bulkApprove(approvable, req.orgId!, req.user!.id);
+      const bulkResult = await reviewService.bulkApprove(approvable, req.orgId!, req.user!.id);
+      // Home dashboard live-update — single emit per bulk request. Spec §5.1
+      // trigger language ("after a successful approve") is broad enough to
+      // cover bulk paths; the dashboard's per-group coalescing (§6.3)
+      // collapses rapid emits into a single refetch. subaccountId is null
+      // because a bulk batch may span subaccounts and the payload field is
+      // informational only (§4.3 payload-not-trusted rule).
+      if (bulkResult.succeeded.length > 0) {
+        emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+          action: 'approved',
+          subaccountId: null,
+        });
+      }
     }
 
     console.info('[Pulse] bulk_approve_result', {
@@ -321,6 +344,14 @@ router.post(
       return;
     }
     const result = await reviewService.bulkReject(ids, req.orgId!, req.user!.id);
+    // Home dashboard live-update — single emit per bulk request (matches the
+    // bulk-approve pattern above; see comment there for the spec rationale).
+    if (result.succeeded.length > 0) {
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'rejected',
+        subaccountId: null,
+      });
+    }
     res.json(result);
   })
 );

@@ -10,35 +10,13 @@
  *   npx tsx client/src/components/__tests__/DeliveryChannels.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   computeChannelState,
   computeAllChannelStates,
   CHANNEL_META,
 } from '../DeliveryChannelsPure.js';
 import type { DeliveryChannelConfig, AvailableChannels } from '../DeliveryChannelsPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true, got false`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false, got true`);
-}
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -61,22 +39,22 @@ console.log('');
 
 test('email isChecked=true regardless of value.email=false', () => {
   const state = computeChannelState('email', noneValue, allAvailable, false, true);
-  assertTrue(state.isChecked, 'email must always be checked');
+  expect(state.isChecked, 'email must always be checked').toBe(true);
 });
 
 test('email isChecked=true regardless of value.email=true', () => {
   const state = computeChannelState('email', allValue, allAvailable, false, true);
-  assertTrue(state.isChecked, 'email checked when value.email=true');
+  expect(state.isChecked, 'email checked when value.email=true').toBe(true);
 });
 
 test('email isDisabled=true (alwaysOn=true)', () => {
   const state = computeChannelState('email', allValue, allAvailable, false, true);
-  assertTrue(state.isDisabled, 'email must always be disabled (always-on badge)');
+  expect(state.isDisabled, 'email must always be disabled (always-on badge)').toBe(true);
 });
 
 test('email isDisabled=true even when form disabled=false', () => {
   const state = computeChannelState('email', allValue, allAvailable, false, true);
-  assertTrue(state.isDisabled, 'alwaysOn always disables the input');
+  expect(state.isDisabled, 'alwaysOn always disables the input').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -87,28 +65,28 @@ console.log('1 integration connected (email only):');
 
 test('email: checked and disabled', () => {
   const state = computeChannelState('email', allValue, onlyEmail, false, true);
-  assertTrue(state.isChecked, 'email checked');
-  assertTrue(state.isDisabled, 'email disabled');
+  expect(state.isChecked, 'email checked').toBe(true);
+  expect(state.isDisabled, 'email disabled').toBe(true);
 });
 
 test('portal: not checked when unavailable', () => {
   const state = computeChannelState('portal', allValue, onlyEmail, false, false);
-  assertFalse(state.isChecked, 'portal not checked when unavailable');
+  expect(state.isChecked, 'portal not checked when unavailable').toBe(false);
 });
 
 test('portal: disabled when unavailable', () => {
   const state = computeChannelState('portal', allValue, onlyEmail, false, false);
-  assertTrue(state.isDisabled, 'portal disabled when not connected');
+  expect(state.isDisabled, 'portal disabled when not connected').toBe(true);
 });
 
 test('slack: not checked when unavailable', () => {
   const state = computeChannelState('slack', allValue, onlyEmail, false, false);
-  assertFalse(state.isChecked, 'slack not checked when unavailable');
+  expect(state.isChecked, 'slack not checked when unavailable').toBe(false);
 });
 
 test('slack: disabled when unavailable', () => {
   const state = computeChannelState('slack', allValue, onlyEmail, false, false);
-  assertTrue(state.isDisabled, 'slack disabled when not connected');
+  expect(state.isDisabled, 'slack disabled when not connected').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -119,25 +97,25 @@ console.log('2 integrations (email + portal):');
 
 test('email: checked and disabled', () => {
   const state = computeChannelState('email', allValue, emailAndPortal, false, true);
-  assertTrue(state.isChecked, 'email checked');
-  assertTrue(state.isDisabled, 'email disabled');
+  expect(state.isChecked, 'email checked').toBe(true);
+  expect(state.isDisabled, 'email disabled').toBe(true);
 });
 
 test('portal: checked when value=true and available', () => {
   const state = computeChannelState('portal', allValue, emailAndPortal, false, false);
-  assertTrue(state.isChecked, 'portal checked when available and value=true');
-  assertFalse(state.isDisabled, 'portal enabled when available');
+  expect(state.isChecked, 'portal checked when available and value=true').toBe(true);
+  expect(state.isDisabled, 'portal enabled when available').toBe(false);
 });
 
 test('portal: not checked when value=false even if available', () => {
   const state = computeChannelState('portal', noneValue, emailAndPortal, false, false);
-  assertFalse(state.isChecked, 'portal unchecked when value=false');
+  expect(state.isChecked, 'portal unchecked when value=false').toBe(false);
 });
 
 test('slack: not checked (unavailable)', () => {
   const state = computeChannelState('slack', allValue, emailAndPortal, false, false);
-  assertFalse(state.isChecked, 'slack not checked when unavailable');
-  assertTrue(state.isDisabled, 'slack disabled when unavailable');
+  expect(state.isChecked, 'slack not checked when unavailable').toBe(false);
+  expect(state.isDisabled, 'slack disabled when unavailable').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -148,30 +126,30 @@ console.log('all integrations connected:');
 
 test('email: always checked and disabled', () => {
   const state = computeChannelState('email', allValue, allAvailable, false, true);
-  assertTrue(state.isChecked, 'email checked');
-  assertTrue(state.isDisabled, 'email disabled');
+  expect(state.isChecked, 'email checked').toBe(true);
+  expect(state.isDisabled, 'email disabled').toBe(true);
 });
 
 test('portal: checked when value=true', () => {
   const state = computeChannelState('portal', allValue, allAvailable, false, false);
-  assertTrue(state.isChecked, 'portal checked');
-  assertFalse(state.isDisabled, 'portal enabled');
+  expect(state.isChecked, 'portal checked').toBe(true);
+  expect(state.isDisabled, 'portal enabled').toBe(false);
 });
 
 test('slack: checked when value=true', () => {
   const state = computeChannelState('slack', allValue, allAvailable, false, false);
-  assertTrue(state.isChecked, 'slack checked');
-  assertFalse(state.isDisabled, 'slack enabled');
+  expect(state.isChecked, 'slack checked').toBe(true);
+  expect(state.isDisabled, 'slack enabled').toBe(false);
 });
 
 test('portal: not checked when value=false', () => {
   const state = computeChannelState('portal', noneValue, allAvailable, false, false);
-  assertFalse(state.isChecked, 'portal unchecked when value=false');
+  expect(state.isChecked, 'portal unchecked when value=false').toBe(false);
 });
 
 test('slack: not checked when value=false', () => {
   const state = computeChannelState('slack', noneValue, allAvailable, false, false);
-  assertFalse(state.isChecked, 'slack unchecked when value=false');
+  expect(state.isChecked, 'slack unchecked when value=false').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -182,12 +160,12 @@ console.log('form-level disabled:');
 
 test('portal: disabled when form disabled=true even if available', () => {
   const state = computeChannelState('portal', allValue, allAvailable, true, false);
-  assertTrue(state.isDisabled, 'portal disabled when form disabled');
+  expect(state.isDisabled, 'portal disabled when form disabled').toBe(true);
 });
 
 test('slack: disabled when form disabled=true even if available', () => {
   const state = computeChannelState('slack', allValue, allAvailable, true, false);
-  assertTrue(state.isDisabled, 'slack disabled when form disabled');
+  expect(state.isDisabled, 'slack disabled when form disabled').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -198,19 +176,19 @@ console.log('computeAllChannelStates:');
 
 test('emailAndPortal: email always checked, portal checked, slack not', () => {
   const states = computeAllChannelStates(allValue, emailAndPortal, false);
-  assertTrue(states.email.isChecked, 'email checked');
-  assertTrue(states.email.isDisabled, 'email disabled (always-on)');
-  assertTrue(states.portal.isChecked, 'portal checked');
-  assertFalse(states.portal.isDisabled, 'portal enabled');
-  assertFalse(states.slack.isChecked, 'slack not checked');
-  assertTrue(states.slack.isDisabled, 'slack disabled (not connected)');
+  expect(states.email.isChecked, 'email checked').toBe(true);
+  expect(states.email.isDisabled, 'email disabled (always-on)').toBe(true);
+  expect(states.portal.isChecked, 'portal checked').toBe(true);
+  expect(states.portal.isDisabled, 'portal enabled').toBe(false);
+  expect(states.slack.isChecked, 'slack not checked').toBe(false);
+  expect(states.slack.isDisabled, 'slack disabled (not connected)').toBe(true);
 });
 
 test('allAvailable + noneValue: only email checked', () => {
   const states = computeAllChannelStates(noneValue, allAvailable, false);
-  assertTrue(states.email.isChecked, 'email always checked');
-  assertFalse(states.portal.isChecked, 'portal not checked');
-  assertFalse(states.slack.isChecked, 'slack not checked');
+  expect(states.email.isChecked, 'email always checked').toBe(true);
+  expect(states.portal.isChecked, 'portal not checked').toBe(false);
+  expect(states.slack.isChecked, 'slack not checked').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -235,7 +213,7 @@ test('email is the only always-on channel', () => {
 test('portal and slack are not always-on', () => {
   const others = CHANNEL_META.filter((m) => m.key !== 'email');
   for (const m of others) {
-    assertFalse(m.alwaysOn, `${m.key} must not be always-on`);
+    expect(m.alwaysOn, `${m.key} must not be always-on`).toBe(false);
   }
 });
 
@@ -243,7 +221,4 @@ test('portal and slack are not always-on', () => {
 // Summary
 // ---------------------------------------------------------------------------
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-console.log('');
-if (failed > 0) process.exit(1);
+console.log('');console.log('');

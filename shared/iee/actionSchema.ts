@@ -82,6 +82,53 @@ const GitCommitAction = z.object({
   message: z.string().min(1).max(2000),
 });
 
+// --- Spend actions (Agentic Commerce Chunk 6) ---
+// Emitted only from the worker_hosted_form execution path when the IEE worker
+// initiates or completes a spend request. Recorded in iee_steps for audit trail.
+// Spec: tasks/builds/agentic-commerce/spec.md §5.2, §8.3, §8.4a
+// Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6 (types pinned here; Chunk 11 wires queue)
+
+const SpendRequestAction = z.object({
+  type: z.literal('spend_request'),
+  /** Full payload written to the agent-spend-request queue (§8.3). */
+  payload: z.object({
+    ieeRunId: z.string().uuid(),
+    skillRunId: z.string().uuid(),
+    organisationId: z.string().uuid(),
+    subaccountId: z.string().uuid(),
+    agentId: z.string().uuid(),
+    toolCallId: z.string().uuid(),
+    intent: z.string().min(1).max(500),
+    amountMinor: z.number().int().positive(),
+    currency: z.string().length(3),
+    merchant: z.object({
+      id: z.string().nullable(),
+      descriptor: z.string().min(1),
+    }),
+    chargeType: z.enum(['purchase', 'subscription', 'top_up', 'invoice_payment']),
+    args: z.record(z.unknown()),
+    /** Pre-built by worker using §9.1 key shape; main app recomputes and rejects on mismatch. */
+    idempotencyKey: z.string().min(1),
+    correlationId: z.string().uuid(),
+  }),
+});
+
+const SpendCompletionAction = z.object({
+  type: z.literal('spend_completion'),
+  /**
+   * Payload written to the agent-spend-completion queue (§8.4a).
+   * Emitted only after the worker fills a merchant-hosted payment form on the
+   * worker_hosted_form path. The main app's handler updates the agent_charges row.
+   */
+  payload: z.object({
+    ledgerRowId: z.string().uuid(),
+    outcome: z.enum(['merchant_succeeded', 'merchant_failed']),
+    providerChargeId: z.string().nullable(),
+    failureReason: z.string().nullable(),
+    completedAt: z.string(), // ISO 8601 from worker clock
+  }),
+});
+
 // --- Terminal actions (both modes) ---
 
 const DoneAction = z.object({
@@ -109,12 +156,20 @@ export const ExecutionAction = z.discriminatedUnion('type', [
   ReadFileAction,
   GitCloneAction,
   GitCommitAction,
+  SpendRequestAction,
+  SpendCompletionAction,
   DoneAction,
   FailedAction,
 ]);
 
 export type ExecutionAction = z.infer<typeof ExecutionAction>;
 export type ExecutionActionType = ExecutionAction['type'];
+
+/** Payload type for the spend_request action (§8.3 WorkerSpendRequest shape). */
+export type SpendRequestPayload = z.infer<typeof SpendRequestAction>['payload'];
+
+/** Payload type for the spend_completion action (§8.4a WorkerSpendCompletion shape). */
+export type SpendCompletionPayload = z.infer<typeof SpendCompletionAction>['payload'];
 
 /**
  * Available action types per execution mode. The worker uses this to restrict
@@ -130,6 +185,11 @@ export const BROWSER_ACTION_TYPES: readonly ExecutionActionType[] = [
   'type',
   'extract',
   'download',
+  // Spend actions are available in browser mode for worker_hosted_form execution path.
+  // The worker emits spend_request before filling a merchant form, and spend_completion after.
+  // Spec: tasks/builds/agentic-commerce/spec.md §5.2, §7.2
+  'spend_request',
+  'spend_completion',
   'done',
   'failed',
 ] as const;

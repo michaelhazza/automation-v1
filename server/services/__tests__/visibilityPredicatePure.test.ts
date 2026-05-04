@@ -8,29 +8,12 @@
  *   npx tsx server/services/__tests__/visibilityPredicatePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { isVisibleTo } from '../principal/visibilityPredicatePure.js';
 import type { VisibilityRow } from '../principal/visibilityPredicatePure.js';
 import type { PrincipalContext } from '../principal/types.js';
+import type { SystemPrincipal } from '../principal/types.js';
 import { buildUserPrincipal, buildServicePrincipal, buildDelegatedPrincipal } from '../principal/principalContext.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 // ---------------------------------------------------------------------------
 // Shared test data
@@ -91,19 +74,19 @@ const delegatedPrincipal = (overrides: Partial<Parameters<typeof buildDelegatedP
 console.log('cross-org denial');
 
 test('user principal denied when org mismatch', () => {
-  assert(!isVisibleTo(row(), userPrincipal({ organisationId: ORG_B })), 'should deny');
+  expect(!isVisibleTo(row(), userPrincipal({ organisationId: ORG_B })), 'should deny').toBeTruthy();
 });
 
 test('service principal denied when org mismatch', () => {
-  assert(!isVisibleTo(row(), servicePrincipal({ organisationId: ORG_B })), 'should deny');
+  expect(!isVisibleTo(row(), servicePrincipal({ organisationId: ORG_B })), 'should deny').toBeTruthy();
 });
 
 test('delegated principal denied when org mismatch', () => {
-  assert(!isVisibleTo(row(), delegatedPrincipal({ organisationId: ORG_B })), 'should deny');
+  expect(!isVisibleTo(row(), delegatedPrincipal({ organisationId: ORG_B })), 'should deny').toBeTruthy();
 });
 
 test('cross-org denied even for shared_org scope', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_org' }), userPrincipal({ organisationId: ORG_B })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_org' }), userPrincipal({ organisationId: ORG_B })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -114,27 +97,27 @@ console.log('');
 console.log('service principal');
 
 test('service sees shared_org', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org' }), servicePrincipal()), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org' }), servicePrincipal()), 'should allow').toBeTruthy();
 });
 
 test('service does not see private', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private' }), servicePrincipal()), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private' }), servicePrincipal()), 'should deny').toBeTruthy();
 });
 
 test('service does not see shared_team', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal()), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal()), 'should deny').toBeTruthy();
 });
 
 test('service sees shared_subaccount when subaccount matches', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), servicePrincipal({ subaccountId: SUB_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), servicePrincipal({ subaccountId: SUB_1 })), 'should allow').toBeTruthy();
 });
 
 test('service denied shared_subaccount when subaccount mismatch', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), servicePrincipal({ subaccountId: SUB_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), servicePrincipal({ subaccountId: SUB_1 })), 'should deny').toBeTruthy();
 });
 
 test('service sees shared_subaccount when row subaccountId is null (org-level)', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), servicePrincipal()), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), servicePrincipal()), 'should allow').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -145,15 +128,15 @@ console.log('');
 console.log('user principal — private');
 
 test('user sees private row when owner matches', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), userPrincipal({ userId: USER_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), userPrincipal({ userId: USER_1 })), 'should allow').toBeTruthy();
 });
 
 test('user denied private row when owner mismatch', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), userPrincipal({ userId: USER_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), userPrincipal({ userId: USER_1 })), 'should deny').toBeTruthy();
 });
 
 test('user denied private row when ownerUserId is null', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: null }), userPrincipal({ userId: USER_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: null }), userPrincipal({ userId: USER_1 })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -164,27 +147,27 @@ console.log('');
 console.log('user principal — shared_team');
 
 test('user sees shared_team when teams overlap', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: [TEAM_X] })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: [TEAM_X] })), 'should allow').toBeTruthy();
 });
 
 test('user sees shared_team when at least one team overlaps', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X, TEAM_Y] }), userPrincipal({ teamIds: [TEAM_Y] })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X, TEAM_Y] }), userPrincipal({ teamIds: [TEAM_Y] })), 'should allow').toBeTruthy();
 });
 
 test('user denied shared_team when no teams overlap', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_Y] }), userPrincipal({ teamIds: [TEAM_X] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_Y] }), userPrincipal({ teamIds: [TEAM_X] })), 'should deny').toBeTruthy();
 });
 
 test('user denied shared_team when user has empty teamIds', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: [] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: [] })), 'should deny').toBeTruthy();
 });
 
 test('user denied shared_team when row has empty sharedTeamIds', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [] }), userPrincipal({ teamIds: [TEAM_X] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [] }), userPrincipal({ teamIds: [TEAM_X] })), 'should deny').toBeTruthy();
 });
 
 test('user denied shared_team when both teamIds and sharedTeamIds empty', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [] }), userPrincipal({ teamIds: [] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [] }), userPrincipal({ teamIds: [] })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -195,19 +178,19 @@ console.log('');
 console.log('user principal — shared_subaccount');
 
 test('user sees shared_subaccount when subaccount matches', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), userPrincipal({ subaccountId: SUB_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), userPrincipal({ subaccountId: SUB_1 })), 'should allow').toBeTruthy();
 });
 
 test('user denied shared_subaccount when subaccount mismatch', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), userPrincipal({ subaccountId: SUB_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), userPrincipal({ subaccountId: SUB_1 })), 'should deny').toBeTruthy();
 });
 
 test('user sees shared_subaccount when row subaccountId is null (org-level)', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal()), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal()), 'should allow').toBeTruthy();
 });
 
 test('user sees shared_subaccount when both subaccountIds are null', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: null })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: null })), 'should allow').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -218,19 +201,19 @@ console.log('');
 console.log('user principal — shared_org');
 
 test('user sees shared_org', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org' }), userPrincipal()), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org' }), userPrincipal()), 'should allow').toBeTruthy();
 });
 
 test('user sees shared_org even with different subaccount', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_2 }), userPrincipal({ subaccountId: SUB_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_2 }), userPrincipal({ subaccountId: SUB_1 })), 'should allow').toBeTruthy();
 });
 
 test('user sees shared_org when ownerUserId differs', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org', ownerUserId: USER_2 }), userPrincipal({ userId: USER_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org', ownerUserId: USER_2 }), userPrincipal({ userId: USER_1 })), 'should allow').toBeTruthy();
 });
 
 test('user sees shared_org when ownerUserId is null', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org', ownerUserId: null }), userPrincipal()), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org', ownerUserId: null }), userPrincipal()), 'should allow').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -241,27 +224,27 @@ console.log('');
 console.log('delegated principal');
 
 test('delegated sees private when owner matches', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), delegatedPrincipal({ delegatingUserId: USER_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), delegatedPrincipal({ delegatingUserId: USER_1 })), 'should allow').toBeTruthy();
 });
 
 test('delegated denied private when owner mismatch', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), delegatedPrincipal({ delegatingUserId: USER_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), delegatedPrincipal({ delegatingUserId: USER_1 })), 'should deny').toBeTruthy();
 });
 
 test('delegated denied private when ownerUserId is null', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: null }), delegatedPrincipal()), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: null }), delegatedPrincipal()), 'should deny').toBeTruthy();
 });
 
 test('delegated denied shared_team even if teams overlap', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), delegatedPrincipal({ teamIds: [TEAM_X] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), delegatedPrincipal({ teamIds: [TEAM_X] })), 'should deny').toBeTruthy();
 });
 
 test('delegated denied shared_subaccount even if subaccount matches', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), delegatedPrincipal({ subaccountId: SUB_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), delegatedPrincipal({ subaccountId: SUB_1 })), 'should deny').toBeTruthy();
 });
 
 test('delegated denied shared_org', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_org' }), delegatedPrincipal()), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_org' }), delegatedPrincipal()), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -272,19 +255,19 @@ console.log('');
 console.log('subaccount NULL handling');
 
 test('user with null subaccountId sees shared_subaccount row with null subaccountId', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: null })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: null })), 'should allow').toBeTruthy();
 });
 
 test('user with subaccount sees org-level shared_subaccount (null) row', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: SUB_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), userPrincipal({ subaccountId: SUB_1 })), 'should allow').toBeTruthy();
 });
 
 test('service with null subaccount sees org-level shared_subaccount (null) row', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), servicePrincipal({ subaccountId: null })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), servicePrincipal({ subaccountId: null })), 'should allow').toBeTruthy();
 });
 
 test('service with subaccount denied row from different subaccount', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), servicePrincipal({ subaccountId: SUB_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_2 }), servicePrincipal({ subaccountId: SUB_1 })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -296,20 +279,20 @@ console.log('edge cases');
 
 test('user with many teams and partial overlap sees shared_team row', () => {
   const manyTeams = ['a', 'b', 'c', 'd', TEAM_X, 'e'];
-  assert(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: manyTeams })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: manyTeams })), 'should allow').toBeTruthy();
 });
 
 test('user with many teams and no overlap denied shared_team row', () => {
   const manyTeams = ['a', 'b', 'c', 'd', 'e'];
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: manyTeams })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), userPrincipal({ teamIds: manyTeams })), 'should deny').toBeTruthy();
 });
 
 test('service principal with teamIds still denied shared_team', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal({ teamIds: [TEAM_X] })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal({ teamIds: [TEAM_X] })), 'should deny').toBeTruthy();
 });
 
 test('delegated principal cross-org denied even for private with owner match', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), delegatedPrincipal({ organisationId: ORG_B, delegatingUserId: USER_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1 }), delegatedPrincipal({ organisationId: ORG_B, delegatingUserId: USER_1 })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -320,15 +303,15 @@ console.log('');
 console.log('user principal — null subaccountId');
 
 test('user with null subaccount denied shared_subaccount row with specific subaccount', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), userPrincipal({ subaccountId: null })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), userPrincipal({ subaccountId: null })), 'should deny').toBeTruthy();
 });
 
 test('user with null subaccount sees shared_org row', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_1 }), userPrincipal({ subaccountId: null })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_1 }), userPrincipal({ subaccountId: null })), 'should allow').toBeTruthy();
 });
 
 test('user with null subaccount sees private row when owner matches', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1, subaccountId: null }), userPrincipal({ subaccountId: null, userId: USER_1 })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1, subaccountId: null }), userPrincipal({ subaccountId: null, userId: USER_1 })), 'should allow').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -339,19 +322,19 @@ console.log('');
 console.log('service principal — null subaccountId');
 
 test('service with null subaccount denied shared_subaccount row with specific subaccount', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), servicePrincipal({ subaccountId: null })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: SUB_1 }), servicePrincipal({ subaccountId: null })), 'should deny').toBeTruthy();
 });
 
 test('service with null subaccount sees shared_org', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'shared_org' }), servicePrincipal({ subaccountId: null })), 'should allow');
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org' }), servicePrincipal({ subaccountId: null })), 'should allow').toBeTruthy();
 });
 
 test('service with null subaccount denied private', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'private' }), servicePrincipal({ subaccountId: null })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'private' }), servicePrincipal({ subaccountId: null })), 'should deny').toBeTruthy();
 });
 
 test('service with null subaccount denied shared_team', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal({ subaccountId: null })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_team', sharedTeamIds: [TEAM_X] }), servicePrincipal({ subaccountId: null })), 'should deny').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -362,17 +345,50 @@ console.log('');
 console.log('delegated principal — additional');
 
 test('delegated sees private with owner match even when subaccount differs', () => {
-  assert(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1, subaccountId: SUB_2 }), delegatedPrincipal({ delegatingUserId: USER_1, subaccountId: SUB_1 })), 'should allow — private ignores subaccount');
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_1, subaccountId: SUB_2 }), delegatedPrincipal({ delegatingUserId: USER_1, subaccountId: SUB_1 })), 'should allow — private ignores subaccount').toBeTruthy();
 });
 
 test('delegated denied shared_org even with matching subaccount', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_1 }), delegatedPrincipal({ subaccountId: SUB_1 })), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_org', subaccountId: SUB_1 }), delegatedPrincipal({ subaccountId: SUB_1 })), 'should deny').toBeTruthy();
 });
 
 test('delegated denied shared_subaccount even with null subaccount on row', () => {
-  assert(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), delegatedPrincipal()), 'should deny');
+  expect(!isVisibleTo(row({ visibilityScope: 'shared_subaccount', subaccountId: null }), delegatedPrincipal()), 'should deny').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+
+// ---------------------------------------------------------------------------
+// System principal
+// ---------------------------------------------------------------------------
+
+console.log('');
+console.log('system principal');
+
+test('system principal granted visibility when org matches', () => {
+  const principal: SystemPrincipal = {
+    type: 'system',
+    id: 'system-principal',
+    organisationId: ORG_A,
+    subaccountId: null,
+    teamIds: [],
+    isSystemPrincipal: true,
+  };
+  // private row, different owner — system bypasses ownership scoping
+  expect(isVisibleTo(row({ visibilityScope: 'private', ownerUserId: USER_2 }), principal)).toBe(true);
+  // subaccount-scoped row — system bypasses subaccount scoping
+  expect(isVisibleTo(row({ visibilityScope: 'shared_subaccount' }), principal)).toBe(true);
+});
+
+test('system principal denied when org mismatches', () => {
+  const principal: SystemPrincipal = {
+    type: 'system',
+    id: 'system-principal',
+    organisationId: ORG_B,
+    subaccountId: null,
+    teamIds: [],
+    isSystemPrincipal: true,
+  };
+  // row belongs to ORG_A; system principal is from ORG_B — org gate must fire
+  expect(isVisibleTo(row({ visibilityScope: 'shared_org' }), principal)).toBe(false);
+});

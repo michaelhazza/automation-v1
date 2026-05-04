@@ -19,23 +19,28 @@
  * See docs/iee-delegation-lifecycle-spec.md §3–5 for the full design.
  */
 
-import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
+import { eq, sql, and, isNull, inArray, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
-import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { actions } from '../db/schema/actions.js';
+import { memoryBlocks } from '../db/schema/memoryBlocks.js';
+import { subaccountAgents } from '../db/schema/subaccountAgents.js';
+import { emitAgentRunUpdate, emitOrgUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
 import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
+  computeMeaningfulOutputPure,
 } from './agentRunFinalizationServicePure.js';
 import { computeRunResultStatus } from './agentExecutionServicePure.js';
+import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths. The DB-touching entry points below are the only
 // additions here.
-export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun };
+export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun, computeMeaningfulOutputPure };
 
 type IeeRun = typeof ieeRuns.$inferSelect;
 
@@ -73,6 +78,78 @@ async function aggregateTokensForIeeRun(tx: TxLike, ieeRunId: string): Promise<T
     totalTokens: Number(row?.totalTokens ?? 0),
     llmCallCount: Number(row?.llmCallCount ?? 0),
   };
+}
+
+/**
+ * F22 — count actions proposed and memory blocks written for an agent run,
+ * then update subaccount_agents meaningful-run tracking columns if the run
+ * produced meaningful output. Best-effort: errors are caught by the caller.
+ *
+ * Exported so the non-IEE finalization path in `agentExecutionService.ts`
+ * can call it directly. The IEE path (this file's
+ * `finaliseAgentRunFromIeeRun`) and the non-IEE path (the agentic loop's
+ * terminal write) are the two completion sites; both must update the
+ * heartbeat columns or the F22 streak counter cannot detect inactivity
+ * from the primary execution path.
+ */
+export async function updateMeaningfulRunTracking(
+  agentRunId: string,
+  status: string,
+): Promise<void> {
+  // Count actions proposed for this run (agentRunId is the FK from actions).
+  const [actionsRow] = await db
+    .select({ c: count() })
+    .from(actions)
+    .where(eq(actions.agentRunId, agentRunId));
+  const actionProposedCount = Number(actionsRow?.c ?? 0);
+
+  // Count memory blocks written during this run (sourceRunId is the closest
+  // FK — it tracks the workflow/agent run that last wrote the block).
+  const [memoryRow] = await db
+    .select({ c: count() })
+    .from(memoryBlocks)
+    .where(and(eq(memoryBlocks.sourceRunId, agentRunId), isNull(memoryBlocks.deletedAt)));
+  const memoryBlockWrittenCount = Number(memoryRow?.c ?? 0);
+
+  const isMeaningful = computeMeaningfulOutputPure({
+    status,
+    actionProposedCount,
+    memoryBlockWrittenCount,
+  });
+
+  // Look up the subaccount_agent row for this run so we can update its tracking.
+  const [run] = await db
+    .select({ subaccountAgentId: agentRuns.subaccountAgentId })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, agentRunId))
+    .limit(1);
+
+  const subaccountAgentId = run?.subaccountAgentId;
+  if (!subaccountAgentId) return;
+
+  if (isMeaningful) {
+    // Reset the streak.
+    await db
+      .update(subaccountAgents)
+      .set({
+        lastMeaningfulTickAt: new Date(),
+        ticksSinceLastMeaningfulRun: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  } else {
+    // Non-meaningful completion advances the streak counter so monitoring
+    // built on `ticksSinceLastMeaningfulRun` can detect prolonged
+    // empty-completion runs. Without this branch the counter is stuck at 0
+    // and no consumer can observe the streak the F22 spec was added for.
+    await db
+      .update(subaccountAgents)
+      .set({
+        ticksSinceLastMeaningfulRun: sql`${subaccountAgents.ticksSinceLastMeaningfulRun} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, subaccountAgentId));
+  }
 }
 
 /**
@@ -116,6 +193,7 @@ export async function finaliseAgentRunFromIeeRun(
   let parentSubaccountId: string | null = null;
   let parentIsSubAgent = false;
   let parentAgentId: string | null = null;
+  let parentOrganisationId: string | null = null;
 
   await db.transaction(async (tx) => {
     // IMPORTANT: this transaction deliberately does NOT invoke the normal
@@ -170,7 +248,8 @@ export async function finaliseAgentRunFromIeeRun(
     // required on the parent.
     const parentAlreadyTerminal = parent.status !== 'delegated'
       && parent.status !== 'pending'
-      && parent.status !== 'running';
+      && parent.status !== 'running'
+      && parent.status !== 'cancelling';
 
     if (parentAlreadyTerminal && ieeRun.eventEmittedAt) {
       return;
@@ -178,9 +257,24 @@ export async function finaliseAgentRunFromIeeRun(
 
     const terminalStatus = mapIeeStatusToAgentRunStatus(ieeRun.status, ieeRun.failureReason);
     resolvedStatus = terminalStatus;
+
+    // Reconciliation observability: if the parent was already in 'cancelling'
+    // but the IEE run resolved to something other than 'cancelled', the run
+    // completed before the worker observed the cancel request. Best-effort
+    // semantics are expected, but log it so operators can correlate user-
+    // reported "I cancelled but it completed" observations with server state.
+    if (parent.status === 'cancelling' && terminalStatus !== 'cancelled') {
+      logger.warn('agentRunFinalization.cancel_intent_divergence', {
+        ieeRunId: ieeRun.id,
+        agentRunId: parent.id,
+        parentStatusAtFinalization: parent.status,
+        finalStatus: terminalStatus,
+      });
+    }
     parentSubaccountId = parent.subaccountId ?? null;
     parentIsSubAgent = parent.isSubAgent ?? false;
     parentAgentId = parent.agentId ?? null;
+    parentOrganisationId = parent.organisationId ?? null;
     const summary = buildSummaryFromIeeRun(ieeRun);
     const startedAt = parent.startedAt ?? ieeRun.startedAt ?? parent.createdAt;
     const completedAt = ieeRun.completedAt ?? new Date();
@@ -207,6 +301,18 @@ export async function finaliseAgentRunFromIeeRun(
       : null;
 
     if (!parentAlreadyTerminal) {
+      // Defence-in-depth: explicit transition assertion before the terminal
+      // write. The WHERE clause below already gates on a non-terminal status
+      // set, but assertValidTransition surfaces the contract violation as a
+      // typed error rather than a silent no-op UPDATE. See
+      // shared/stateMachineGuards.ts.
+      assertValidTransition({
+        kind: 'agent_run',
+        recordId: parent.id,
+        from: parent.status,
+        to: terminalStatus,
+      });
+
       // Roll up token + call counts inside the transaction so late
       // llm_requests inserts (up to the FOR UPDATE lock) are included.
       // See aggregateTokensForIeeRun JSDoc for the race this avoids.
@@ -220,7 +326,6 @@ export async function finaliseAgentRunFromIeeRun(
         terminalStatus,
         /* hasError */ isFailureStatus,
         /* hadUncertainty */ false,
-        /* hasSummary */ !!(summary && summary.trim().length > 0),
       );
 
       // Defence-in-depth: gate the terminal transition on the parent's
@@ -254,7 +359,7 @@ export async function finaliseAgentRunFromIeeRun(
         })
         .where(and(
           eq(agentRuns.id, parent.id),
-          inArray(agentRuns.status, ['pending', 'running', 'delegated'] as const),
+          inArray(agentRuns.status, ['pending', 'running', 'delegated', 'cancelling'] as const),
           // isNull(completedAt) is pre-existing defense-in-depth for the parent's
           // transitional gate. The write-once invariant for Phase B is guaranteed by
           // isNull(runResultStatus) alone; the completedAt guard can cause the update
@@ -290,6 +395,14 @@ export async function finaliseAgentRunFromIeeRun(
       failureReason: ieeRun.failureReason ?? null,
     });
 
+    if (!parentIsSubAgent && parentOrganisationId) {
+      emitOrgUpdate(parentOrganisationId, 'dashboard.activity.updated', {
+        source: 'agent_run',
+        runId: ieeRun.agentRunId,
+        finalStatus: resolvedStatus,
+      });
+    }
+
     // Codex dual-review finding #3: the non-IEE path pairs every
     // 'live:agent_started' emission with a matching 'live:agent_completed'
     // on the subaccount room when the run terminates. IEE-delegated runs
@@ -316,16 +429,36 @@ export async function finaliseAgentRunFromIeeRun(
       toStatus: resolvedStatus,
       failureReason: ieeRun.failureReason ?? null,
     });
+
+    // F22 — meaningful-output hook: update subaccount_agents tracking columns
+    // when the completed run produced at least one action or memory write.
+    if (resolvedStatus === 'completed') {
+      await updateMeaningfulRunTracking(ieeRun.agentRunId, resolvedStatus).catch((err) => {
+        logger.warn('agentRunFinalization.meaningful_hook_failed', {
+          agentRunId: ieeRun.agentRunId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   }
 
   return performedTransition;
 }
 
 /**
- * Scan for "Class 2" orphans: agent_runs stuck in 'delegated' whose linked
- * iee_runs row is already terminal. Recovers cases where the event handler
- * crashed post-DB-write or the event was lost between worker emit and
- * main-app consume.
+ * Scan for stuck non-terminal runs whose linked iee_runs row is already
+ * terminal. Covers two cases:
+ *
+ * - 'delegated': event handler crashed post-DB-write or the event was lost
+ *   between worker emit and main-app consume.
+ * - 'cancelling': the pg-boss iee-run-completed event failed to publish
+ *   after cancelIeeRun wrote iee_runs.status='cancelled'. Without this
+ *   sweep, a 'cancelling' parent stays stuck indefinitely because the
+ *   standard delegated-orphan path only queries status='delegated'.
+ *
+ * Invariant: no run may remain in 'cancelling' beyond the reconciliation
+ * window (120s). Either the loop / worker observes the cancel and finalises,
+ * or this sweep recovers it.
  *
  * Grace window: 120 seconds. Rows younger than that may be legitimately
  * between the worker's terminal write and the main-app handler firing.
@@ -342,7 +475,7 @@ export async function reconcileStuckDelegatedRuns(): Promise<number> {
     .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
     .where(
       and(
-        eq(agentRuns.status, 'delegated'),
+        inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
         sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
         isNull(ieeRuns.deletedAt),
         sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,

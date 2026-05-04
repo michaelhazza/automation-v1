@@ -16,6 +16,7 @@ import type { DocumentBundleAttachment } from '../db/schema/documentBundleAttach
 import type { AttachmentSubjectType } from '../db/schema/documentBundleAttachments.js';
 import type { ReferenceDocument } from '../db/schema/referenceDocuments.js';
 import { computeDocSetHash } from './documentBundleServicePure.js';
+import { logCachedContextWrite } from '../lib/cachedContextWriteScope.js';
 
 // ---------------------------------------------------------------------------
 // documentBundleService — stateful I/O for document bundles
@@ -74,6 +75,14 @@ export async function create(input: {
   if (!input.name.trim()) {
     throw { statusCode: 400, code: CACHED_CONTEXT_BUNDLE_NAME_EMPTY, message: 'Bundle name cannot be empty' };
   }
+  // F2b — observability surface for cached-context writes (see
+  // server/lib/cachedContextWriteScope.ts).
+  logCachedContextWrite('documentBundleService.create', {
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    table: 'document_bundles',
+    operation: 'insert',
+  }, { name: input.name });
   const db = getOrgScopedDb('documentBundleService.create');
   try {
     const [row] = await db.insert(documentBundles).values({
@@ -337,7 +346,7 @@ export async function suggestBundle(input: {
       )
     );
 
-  let distinctSubjects = attachments.filter((a) => {
+  const distinctSubjects = attachments.filter((a) => {
     if (!input.excludeSubjectId) return true;
     return !(a.subjectType === input.excludeSubjectId.subjectType && a.subjectId === input.excludeSubjectId.subjectId);
   });
@@ -375,7 +384,9 @@ export async function dismissBundleSuggestion(input: {
       docSetHash,
     })
     .onConflictDoUpdate({
-      target: [bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash],
+      // BUNDLE-DISMISS-RLS: target matches the 3-column unique index
+      // (migration 0231) — organisation_id scopes dismissals per org.
+      target: [bundleSuggestionDismissals.organisationId, bundleSuggestionDismissals.userId, bundleSuggestionDismissals.docSetHash],
       set: { dismissedAt: sql`now()` },
     })
     .returning();

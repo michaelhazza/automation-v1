@@ -47,6 +47,7 @@ export default function PortalConfigEditor({ subaccountId }: PortalConfigEditorP
 
   useEffect(() => {
     load();
+    // reason: `load` is an inline async function that closes over state setters; only the trigger key (subaccountId) should re-run this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
