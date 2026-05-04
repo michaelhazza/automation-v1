@@ -201,6 +201,27 @@ export class OrganisationService {
     };
   }
 
+  /**
+   * Update an org's shadow-charge retention window.
+   * Range: [1, 365]; default 90 (spec §14). Caller is responsible for
+   * permission gating (`SETTINGS_EDIT`); this method validates the range
+   * but does not authenticate.
+   */
+  async updateShadowChargeRetentionDays(orgId: string, days: number) {
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      throw { statusCode: 400, message: 'shadowChargeRetentionDays must be an integer between 1 and 365' };
+    }
+    const [updated] = await db
+      .update(organisations)
+      .set({ shadowChargeRetentionDays: days, updatedAt: new Date() })
+      .where(eq(organisations.id, orgId))
+      .returning({ shadowChargeRetentionDays: organisations.shadowChargeRetentionDays });
+    if (!updated) {
+      throw { statusCode: 404, message: 'Organisation not found' };
+    }
+    return { shadowChargeRetentionDays: updated.shadowChargeRetentionDays };
+  }
+
   async deleteOrganisation(id: string) {
     const [org] = await db
       .select()

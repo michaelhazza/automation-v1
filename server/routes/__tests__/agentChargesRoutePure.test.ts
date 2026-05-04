@@ -10,71 +10,55 @@
  */
 
 import { expect, test, describe } from 'vitest';
-
-// ---------------------------------------------------------------------------
-// Valid dimension values
-// ---------------------------------------------------------------------------
-
-const VALID_DIMENSIONS = ['agent_spend_subaccount', 'agent_spend_org', 'agent_spend_run'] as const;
-type ValidDimension = (typeof VALID_DIMENSIONS)[number];
-
-function isValidDimension(value: string): value is ValidDimension {
-  return VALID_DIMENSIONS.includes(value as ValidDimension);
-}
+import {
+  isValidAggregateDimension,
+  resolveListLimit,
+  isValidChargeStatus,
+  DEFAULT_LIST_LIMIT,
+  MAX_LIST_LIMIT,
+} from '../agentChargesRoutePure.js';
 
 describe('dimension query param validation', () => {
   test('agent_spend_subaccount is valid', () => {
-    expect(isValidDimension('agent_spend_subaccount')).toBe(true);
+    expect(isValidAggregateDimension('agent_spend_subaccount')).toBe(true);
   });
 
   test('agent_spend_org is valid', () => {
-    expect(isValidDimension('agent_spend_org')).toBe(true);
+    expect(isValidAggregateDimension('agent_spend_org')).toBe(true);
   });
 
   test('agent_spend_run is valid', () => {
-    expect(isValidDimension('agent_spend_run')).toBe(true);
+    expect(isValidAggregateDimension('agent_spend_run')).toBe(true);
   });
 
   test('unknown dimension is invalid', () => {
-    expect(isValidDimension('llm_cost_run')).toBe(false);
-    expect(isValidDimension('')).toBe(false);
-    expect(isValidDimension('agent_spend')).toBe(false);
+    expect(isValidAggregateDimension('llm_cost_run')).toBe(false);
+    expect(isValidAggregateDimension('')).toBe(false);
+    expect(isValidAggregateDimension('agent_spend')).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Limit clamping
-// ---------------------------------------------------------------------------
-
-function resolveLimit(limitStr: string | undefined): number {
-  return Math.min(parseInt(limitStr ?? '50', 10) || 50, 200);
-}
-
 describe('limit query param parsing', () => {
-  test('default is 50', () => {
-    expect(resolveLimit(undefined)).toBe(50);
+  test(`default is ${DEFAULT_LIST_LIMIT}`, () => {
+    expect(resolveListLimit(undefined)).toBe(DEFAULT_LIST_LIMIT);
   });
 
   test('valid value is accepted', () => {
-    expect(resolveLimit('100')).toBe(100);
+    expect(resolveListLimit('100')).toBe(100);
   });
 
-  test('value above 200 is capped at 200', () => {
-    expect(resolveLimit('500')).toBe(200);
+  test(`value above ${MAX_LIST_LIMIT} is capped at ${MAX_LIST_LIMIT}`, () => {
+    expect(resolveListLimit('500')).toBe(MAX_LIST_LIMIT);
   });
 
-  test('non-numeric value falls back to 50', () => {
-    expect(resolveLimit('abc')).toBe(50);
+  test(`non-numeric value falls back to ${DEFAULT_LIST_LIMIT}`, () => {
+    expect(resolveListLimit('abc')).toBe(DEFAULT_LIST_LIMIT);
   });
 
-  test('zero falls back to 50', () => {
-    expect(resolveLimit('0')).toBe(50);
+  test(`zero falls back to ${DEFAULT_LIST_LIMIT}`, () => {
+    expect(resolveListLimit('0')).toBe(DEFAULT_LIST_LIMIT);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Date parsing
-// ---------------------------------------------------------------------------
 
 describe('date filter parsing', () => {
   test('valid ISO date string parses to a Date', () => {
@@ -88,19 +72,6 @@ describe('date filter parsing', () => {
     expect(isNaN(d.getTime())).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Status filter validation — closed enum check
-// ---------------------------------------------------------------------------
-
-const VALID_STATUSES = [
-  'proposed', 'pending_approval', 'approved', 'executed', 'succeeded',
-  'failed', 'blocked', 'denied', 'disputed', 'shadow_settled', 'refunded',
-] as const;
-
-function isValidChargeStatus(s: string): boolean {
-  return (VALID_STATUSES as readonly string[]).includes(s);
-}
 
 describe('status filter validation', () => {
   test('succeeded is valid', () => {

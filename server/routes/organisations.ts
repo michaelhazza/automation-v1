@@ -7,9 +7,6 @@ import {
 import { parsePositiveInt, validateBody } from '../middleware/validate.js';
 import { createOrganisationBody, updateOrganisationBody } from '../schemas/organisations.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { organisations } from '../db/schema/index.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
@@ -85,19 +82,8 @@ router.patch(
     const parsed = typeof shadowChargeRetentionDays === 'number'
       ? shadowChargeRetentionDays
       : parseInt(shadowChargeRetentionDays as string, 10);
-
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
-      res.status(400).json({ error: 'shadowChargeRetentionDays must be an integer between 1 and 365' });
-      return;
-    }
-
-    const [updated] = await db
-      .update(organisations)
-      .set({ shadowChargeRetentionDays: parsed, updatedAt: new Date() })
-      .where(eq(organisations.id, req.orgId!))
-      .returning({ shadowChargeRetentionDays: organisations.shadowChargeRetentionDays });
-
-    res.json({ shadowChargeRetentionDays: updated.shadowChargeRetentionDays });
+    const result = await organisationService.updateShadowChargeRetentionDays(req.orgId!, parsed);
+    res.json(result);
   }),
 );
 

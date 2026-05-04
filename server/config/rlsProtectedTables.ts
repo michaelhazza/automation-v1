@@ -661,8 +661,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'org_compute_budgets',
     schemaFile: 'orgComputeBudgets.ts',
-    policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org LLM and compute cost limits (Compute Budget) — cross-tenant leak reveals financial configuration and usage caps.',
+    policyMigration: '0270_compute_budget_rename.sql',
+    rationale: 'Per-org LLM and compute cost limits (Compute Budget) — cross-tenant leak reveals financial configuration and usage caps. Originally protected as org_budgets in migration 0245; renamed to org_compute_budgets in 0270 and re-asserted RLS under the new name there.',
   },
   {
     tableName: 'org_margin_configs',
@@ -1005,13 +1005,10 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0271_agentic_commerce_schema.sql',
     rationale: 'Explicit per-user approver grants for spending budgets — reveals who may approve charges; cross-tenant leak exposes access control configuration.',
   },
-  // 0272 — cost_aggregates RLS retrofit (agentic commerce spend dimensions)
-  {
-    tableName: 'cost_aggregates',
-    schemaFile: 'costAggregates.ts',
-    policyMigration: '0272_cost_aggregates_rls_and_spend_dims.sql',
-    rationale: 'Pre-aggregated LLM and agent spend rollups — new agent_spend_* dimensions carry per-subaccount and per-org spend totals that are financially sensitive. Sentinel UUID rows (platform/provider) are globally readable per policy.',
-  },
+  // (cost_aggregates is registered in scripts/rls-not-applicable-allowlist.txt
+  // under the "ALTER TABLE ADD organisation_id" carve-out — the column was
+  // added in migration 0272, not in the original CREATE TABLE in 0024. RLS
+  // policy lives on cost_aggregates in migration 0272.)
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

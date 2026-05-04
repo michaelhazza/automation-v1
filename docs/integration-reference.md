@@ -73,6 +73,12 @@ read_capabilities:
   - slug: organisation.config.history
     aliases: [pulse_config_history, config_audit_trail]
     description: Browse the config_history audit trail for ClientPulse operational_config changes
+  - slug: charge_list
+    aliases: [charges_read, list_charges, agent_charges_list]
+    description: List agent_charges ledger rows (settled + in-flight) for the authed org
+  - slug: charge_status
+    aliases: [charge_read, get_charge, charge_detail]
+    description: Read a single agent_charges ledger row by id (status + state-machine snapshot)
 
 write_capabilities:
   - slug: send_email
@@ -120,6 +126,18 @@ write_capabilities:
   - slug: create_task
     aliases: [task_create, add_task, assign_task]
     description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
+  - slug: charge_create
+    aliases: [create_charge, agent_charge_create, charge_propose]
+    description: Propose an agent-driven charge through the charge router (gated by Spending Budget + Spending Policy; honours kill switch and shadow mode)
+  - slug: charge_refund
+    aliases: [refund_charge, agent_charge_refund, issue_refund_capability]
+    description: Issue a refund against a previously-succeeded agent charge (full or partial; subject to policy gating)
+  - slug: subscription_create
+    aliases: [create_subscription, agent_subscription_create, recurring_charge_create]
+    description: Create a recurring agent-driven charge (subscription / scheduled top-up) through the charge router
+  - slug: balance_topup
+    aliases: [topup_balance, agent_balance_topup, prepaid_topup]
+    description: Top up a prepaid balance (e.g. ad-spend account) via an agent-driven charge
 
 skills:
   - slug: classify_email
@@ -152,6 +170,21 @@ skills:
   - slug: crm.create_task
     aliases: [crm_create_task_skill, client_task_skill]
     description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
+  - slug: pay_invoice
+    aliases: [invoice_pay_skill, pay_invoice_skill]
+    description: Agent-driven invoice payment via the charge router (Stripe SPT path; main-app execution; spec §9.x)
+  - slug: purchase_resource
+    aliases: [resource_purchase_skill, agent_purchase_skill]
+    description: Agent-driven purchase via the worker-hosted-form path (Stripe SPT delivered to IEE worker; spec §9.x)
+  - slug: subscribe_to_service
+    aliases: [subscription_create_skill, agent_subscribe_skill]
+    description: Agent-driven recurring subscription creation via the charge router (Stripe SPT; recurring agent_charges rows)
+  - slug: top_up_balance
+    aliases: [balance_topup_skill, agent_topup_skill]
+    description: Agent-driven prepaid balance top-up via the charge router (Stripe SPT; ad-spend / messaging credit / similar)
+  - slug: issue_refund
+    aliases: [refund_issue_skill, agent_refund_skill]
+    description: Agent-driven refund issuance against a previously-succeeded agent charge (Stripe SPT; respects refund-policy gating)
 
 primitives:
   - slug: scheduled_run
@@ -175,6 +208,15 @@ primitives:
   - slug: config_history
     aliases: [audit_log, config_audit]
     description: Append-only audit log for config entity changes (version + snapshot + change_source)
+  - slug: spt_vault
+    aliases: [stripe_spt_vault, programmable_token_vault]
+    description: Stripe Programmable Token (SPT) storage primitive — short-lived, scoped, revocable per-sub-account credentials for agent-driven money movement
+  - slug: charge_router
+    aliases: [agent_charge_router, charge_routing]
+    description: Policy gate + state-machine + idempotency + advisory-lock-held capacity reads for agent-driven charges (spec §7)
+  - slug: spend_ledger
+    aliases: [agent_charge_ledger, agent_spend_ledger]
+    description: Append-only agent_charges ledger primitive — every spend attempt with full policy decision trace, idempotency key, and status lifecycle (DB-trigger-enforced append-only)
 ```
 
 ---
@@ -401,7 +443,7 @@ owner: platform-team
 slug: stripe_agent
 name: Stripe Agent
 provider_type: oauth
-status: ga
+status: partial
 visibility: public
 read_capabilities:
   - charge_list
