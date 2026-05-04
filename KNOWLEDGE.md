@@ -1,18 +1,40 @@
 # Project Knowledge Base
 
-Append-only register of patterns, decisions, and gotchas discovered during development.
+Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
 Read this at the start of every session. Never edit or remove existing entries — only append.
+
+> **Architecture decisions live in [`docs/decisions/`](./docs/decisions/), not here** (convention introduced 2026-05-03). KNOWLEDGE.md captures the "watch out for this" stream — observations, gotchas, learned conventions, user corrections. ADRs capture the "we chose X over Y because Z" stream — durable architectural choices with rationale and trade-offs. When in doubt, write a KNOWLEDGE entry first; promote to ADR if the decision keeps coming up.
+>
+> Entries before 2026-05-03 mix both streams (the convention didn't exist yet). They stay in place — splitting historical entries adds noise without adding signal. New entries follow the split.
+
+## Size-bound policy
+
+KNOWLEDGE.md is append-only and grows. At year 1, a healthy KNOWLEDGE.md is ~1,500–2,500 lines. Beyond ~3,000 it becomes noise — future sessions skim past entries that don't match their domain.
+
+Two safety valves:
+
+1. **Quarterly grouping pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. The originals stay; the summary becomes the entry future sessions read first. Never edit existing entries.
+2. **Promote to ADR / architecture.md when an entry keeps being cited.** If a Pattern entry has been quoted in 3+ specs or review logs, promote it: write an ADR or extend `architecture.md`, then leave a final entry pointing future readers to the new home.
+
+The file's value is in retrieval, not preservation. If retrieval slows down, the file is too big.
 
 ---
 
 ## How to Use
 
-### When to write (proactively, not just on failure)
+### When to write a KNOWLEDGE entry (proactively, not just on failure)
 - You discover a non-obvious codebase pattern
-- You make an architectural decision during implementation
 - You find a gotcha that would trip up a future session
 - You learn something about how a library/tool behaves in this project
 - The user corrects you (always capture the correction)
+- You learn a convention not documented elsewhere
+
+### When to write an ADR instead (`docs/decisions/`)
+- You make an architectural decision (chose X over Y) and the rationale matters for future sessions
+- You lock in a contract or invariant the system depends on
+- You set a policy (rate-limit, retention, security) that needs to be defended later
+
+See [`docs/decisions/README.md`](./docs/decisions/README.md) for the ADR convention and template.
 
 ### Entry format
 
@@ -22,12 +44,13 @@ Read this at the start of every session. Never edit or remove existing entries �
 [1-3 sentences. Be specific. Include file paths and function names where relevant.]
 ```
 
-### Categories
+### Categories (post-split)
 - **Pattern** — how something works in this codebase
-- **Decision** — why we chose X over Y
 - **Gotcha** — non-obvious trap or edge case
 - **Correction** — user corrected a wrong assumption
 - **Convention** — team/project convention not documented elsewhere
+
+The historical **Decision** category is retired for new entries — write an ADR instead. Existing Decision entries stay in place; future readers should treat them as observations rather than authoritative ADRs.
 
 ---
 
@@ -1949,3 +1972,84 @@ If future behaviour is anticipated:
 - Add the column in the migration that introduces the behaviour
 
 Avoid pre-emptive schema seams.
+
+---
+
+### 2026-05-04 Pattern — Version authority for parallel framework artefacts: source is canonical, deployment is a marker (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+When a repo carries the *source* of a framework AND a *deployment* of that same framework (e.g. `setup/portable/.claude/` is the canonical bundle that ships, while `.claude/` is the version currently deployed for THIS repo's sessions), the two `FRAMEWORK_VERSION` files do NOT have equal authority. Treating them as competing authorities produces ambiguous validation rules and forces drift-detection tooling (validate-setup, doctor) to ask "which one wins?" — a question that has no correct answer if both are framed as canonical.
+
+**Pattern:** declare one as canonical; declare the other as a deployment marker that may lag the canonical version transiently. Drift is bounded one-way: deployment may lag canonical, never *exceed* it. validate-setup warns only on the forbidden direction (deployment > canonical), not on lag (deployment < canonical).
+
+**Why it matters:** the parallel-artefact shape will recur every time we ship infrastructure that has a "kit" plus a "live deployment" in the same repo (frameworks, code-graph caches, capability registries that mirror to a generated file, future sync engines). Without explicit version-authority framing, every consumer downstream gets stuck in the same "which file is right?" debate. With explicit framing, the rule is short: source is canonical; deployment catches up via self-adoption.
+
+**Applied to:** `.claude/CHANGELOG.md` § *Version authority — single source of truth* and `setup/portable/.claude/CHANGELOG.md` 2.2.0 *Notes* (the latter cross-references the former). `CLAUDE.md` § *Framework version* updated to surface the canonical-vs-deployment distinction so future sessions don't re-derive it. Future drift-detection tooling reads the file relevant to scope, not as competing authorities — "what version is *deployed* here?" → root file; "what version does the artefact *ship*?" → canonical file. Generalises to any future "source + mirror" pair this codebase introduces.
+
+---
+
+### 2026-05-04 Gotcha — chatgpt-pr-review can re-flag a Round-N applied fix in Round N+1 as if it never landed (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+**Distinct from existing entries.** This is NOT the same shape as the 2026-04-23 "re-raise of Round 1 *rejections*" pattern (line 338) — that's about ChatGPT re-opening items that were rejected with rationale. And it's NOT the 2026-04-28 "external-reviewer false-positive rate" pattern (line 1261) — that's about ChatGPT misreading the codebase as it stands. The new shape: ChatGPT in Round N+1 flags an item that **was actioned and committed in Round N** as if the fix never landed. Most likely cause: the diff view ChatGPT was working from in Round N+1 was stale relative to the most recent commit, or the model dropped Round-N context between turns and re-read the original PR diff.
+
+**Concrete instance:** In PR #257 Round 2, ChatGPT listed `F4: Build script zip dependency unaddressed` as a finding. Round 1 had already added `assertZipBinaryAvailable()` preflight to `scripts/build-portable-framework.ts` (commit `5e2163ce`, lines 188–198) — verified by reading HEAD. ChatGPT was effectively working from a pre-Round-1 view.
+
+**Rules for handling:**
+
+1. **Verify the cited code at HEAD before triaging.** If `Read` of the file at the cited lines shows the fix is already present and the commit log shows it landed in a prior round, the finding is a false positive — do NOT re-implement.
+2. **Reject as false positive with evidence in the log.** Cite the round + commit hash + file:line where the fix landed. The triage row gets `**reject** (false positive)` with a one-line note. Burning a Round N+1 noise commit to "address" an already-addressed finding is worse than the false-positive log entry.
+3. **Don't extend the round to chase phantom items.** If the round produces zero net new signal once false positives are removed, that's still convergence. Close the loop on Round N+1's *real* signal; don't artificially extend rounds because half the findings were previously-addressed re-flags.
+
+**Generalises to:** any external-reviewer loop where the reviewer threads a conversation across multiple rounds (`chatgpt-pr-review`, future ChatGPT-style spec reviewers). Less applicable to walk-away reviewers like Codex (`spec-reviewer`, `dual-reviewer`) which read current file state on each iteration.
+
+---
+
+### 2026-05-04 Pattern — TDD on adversarial-reviewer findings: write the failing test from the reviewer's trace before fixing (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+When `adversarial-reviewer` reports a HOLES_FOUND verdict with concrete attack traces (path-traversal payload, race-condition timing, shell-injection vector), the right execution order is **test-from-trace → fix → confirm green**, not fix-then-test or fix-without-test.
+
+**Why this is the right order:**
+1. The trace is already structured as a failing-test specification — adversarial-reviewer hands you the inputs, the expected protective behaviour, and the failure mode if absent. Skipping the test step throws away that gift.
+2. A test written from the trace BEFORE the fix locks in the regression boundary. Future drift cannot silently re-open the hole — the test red-flags it on next CI run.
+3. The test also validates that the trace was *real* (not a hallucinated attack). If the test passes against the unfixed code, adversarial-reviewer was wrong about the hole — surface that and re-triage. Fix-without-test means you can ship a "fix" for a hole that didn't exist.
+
+**Applied to PR #257:** the `assertWithinRoot` defence picked up two rejection tests written directly from adversarial-reviewer's path-traversal trace; the `writeStateAtomic` PID-suffix race fix landed alongside a concurrent-write test that was red against the pre-fix code.
+
+**When to skip:** trivial spec-deviation findings where the "trace" is just "this string is missing from the doc" — no behaviour to test. Apply selectively to *behavioural* security findings.
+
+---
+
+### 2026-05-04 Pattern — adversarial-reviewer escalates findings that pr-reviewer treats as nits (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+`pr-reviewer` and `adversarial-reviewer` are not interchangeable. Even when both run over the same diff, they triage the same code differently:
+
+- `pr-reviewer` looks at code quality, correctness, maintainability — and tends to triage filesystem-writing-from-external-data items as "consider sanitising paths" (Strong, often deferred).
+- `adversarial-reviewer` reads the same code as a **threat model** — and triages the same items as `HOLES_FOUND` with concrete attack traces (path-traversal payload through manifest globs, shell-metacharacter injection through `execSync`, atomic-write race collision under concurrent processes).
+
+**Rule:** if the diff includes filesystem writes whose target paths are influenced by external data (manifest entries, glob patterns, user-supplied config, downloaded artefacts), run `adversarial-reviewer` even when not in the auto-trigger surface defined in `feature-coordinator §5.1.2`. The pr-reviewer "consider sanitising" pass is structurally insufficient for this shape — it produces gentle nits where the actual signal is "this code is exploitable."
+
+**Generalises to:** sync engines, build scripts, asset pipelines, downloaded-artefact processors, anything that writes to `${root}/${external-data}` paths.
+
+---
+
+### 2026-05-04 Pattern — Defence-in-depth path-containment: assert at expand time AND at write time, never just one (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+For any module that takes a root path plus external relative-path inputs and writes files inside the root: the path-containment assertion (`resolved.startsWith(root + sep)`) MUST live in BOTH the path-expansion phase AND each writer call site. Single-site enforcement is structurally fragile.
+
+**Why both, not one:**
+- Expansion-time only: a future caller bypasses expansion (passes a pre-expanded path directly to a writer) and the assertion never fires.
+- Writer-time only: every writer must remember to call the assert; one missed call site = one hole. Adversarial-reviewer found exactly this in PR #257's pre-fix sync engine.
+- Both sites: the assertion is defence-in-depth — even if expand-time was bypassed by mistake, the writer catches it; even if a writer forgot the call, expand-time caught it. The redundancy is intentional.
+
+**Applied to PR #257:** `setup/portable/sync.js` `assertWithinRoot()` is called both in `expandGlob()` (expansion phase) and at every `fs.writeFileSync` / `fs.copyFileSync` / `fs.unlinkSync` call site that takes a derived path.
+
+**Generalises to:** any pure-function-plus-side-effect-writer pair where the pure function is "validate" and the writer is "execute." Don't trust single-site enforcement for security-critical paths. Cost is negligible (one resolved-path check); savings on a missed-bypass attack are large.
