@@ -415,3 +415,74 @@ Background decay/pruning jobs that silently no-op today actually run, so test me
 
 **Rollback notes:**
 - Pure code change. Revert is a one-commit rollback. No schema; no data implications (pre-prod).
+
+### §3.5 Chunk 5 — Execution-Path Correctness
+
+- **Spec slug:** `pre-launch-execution-correctness-spec`
+- **Path:** `docs/pre-launch-execution-correctness-spec.md`
+- **Architect needed?** Inline planning. One sub-decision (`C4a-6-RETSHAPE` grandfather-vs-migrate) is architectural but the mini-spec already names it — this spec carries the recommendation and surfaces it to the architect only if the spec-reviewer escalates.
+- **Depends on:** Chunk 2 (some F-items live in the same files; schema decisions land first to avoid double-touching). Chunk 1 (RLS posture) implicitly.
+- **Blocks:** Chunk 3 (DR3, C4a-REVIEWED-DISP — but those are the dead-path items, not the dispatcher race-condition / vocab items in this chunk).
+
+**Goal (one paragraph for the spec):**
+The dispatcher and execution loops resist race conditions and contract gaps that surface only under sustained testing. Re-check invalidation after I/O in inline-dispatch handlers; defence-in-depth on dispatcher §5.10a rule 4; pre-dispatch resolution of `required_connections`; align `automation_execution_error` to the §5.7 error vocabulary; thread `errorMessage` from `preFinalizeMetadata` so failed-without-throw runs still extract memory; decouple `runResultStatus='partial'` from summary presence; pick one skill error envelope shape and make it 100% adherent.
+
+**Non-goals:**
+- No new dispatcher *step types*.
+- No new error-vocabulary categories beyond what W1-38 forces.
+- No skill rewrites beyond the envelope contract — handler logic stays.
+- No agent execution loop redesign.
+
+**Items closed (with source IDs):**
+- `C4b-INVAL-RACE` (mini-spec coined; canonical: `tasks/todo.md` L667) — re-check invalidation after I/O in `workflowEngineService.ts` tick switch.
+- `W1-43` (dispatcher §5.10a rule 4 defence-in-depth in `invokeAutomationStepService.ts:165–166`) — L648.
+- `W1-44` (pre-dispatch `required_connections` resolution; fail at dispatch, not provider edge) — L649.
+- `W1-38` (add `automation_execution_error` to §5.7 error vocabulary; spec + code align) — L651.
+- `HERMES-S1` (mini-spec coined; canonical: `tasks/todo.md` L97–105) — thread `errorMessage` from `preFinalizeMetadata` into `agentExecutionService.ts:1350-1368`.
+- `H3-PARTIAL-COUPLING` (mini-spec coined; canonical: `tasks/todo.md` L152) — decouple `runResultStatus='partial'` from summary presence; summary failure must not demote a successful run.
+- `C4a-6-RETSHAPE` (mini-spec coined; canonical: `tasks/todo.md` L337, L587) — skill error envelope: grandfather string OR migrate ~40 skills; spec must reflect reality.
+
+**Items explicitly NOT closed (and why):**
+- All `LAEL-*` observability items — explicitly deferred per mini-spec (build-during-testing watchlist).
+- `TEST-HARNESS` (capability-contract execution harness) — deferred per mini-spec.
+- `HYBRID-IDSCOPED` — deferred per mini-spec.
+- Approval dispatch (`C4a-REVIEWED-DISP`) — owned by Chunk 3.
+
+**Key decisions — escalated to architect (NOT pre-decided here):**
+1. **C4a-6-RETSHAPE — grandfather or migrate.** Two candidates per L337: (a) grandfather the legacy string pattern across ~40 skill handlers and treat §4.3 as new-delegation-skills-only; (b) migrate all skill handlers to the nested `{ code, message, context }` envelope and audit `executeWithActionAudit`, LLM-facing serialisation, and agent prompt parsing for breakage. The spec carries this question to the architect via a one-shot pass scoped only to C4a-6-RETSHAPE. Recommendation in the spec: option (a) — grandfather — because pre-prod invasiveness of (b) is high and the `executeWithActionAudit` risk is real. Architect can override.
+
+**Key decisions — resolved inline (no architect needed):**
+2. **C4b-INVAL-RACE scope.** Resolution: a single re-read+invalidation-check helper (`assertNotInvalidated(stepRunId, db)` or similar) is added to the inline-dispatch path. Each `await` on external I/O in `workflowEngineService.ts`'s tick switch (action_call, agent_call, prompt, invoke_automation) is followed by a call to the helper before any state mutation. Per-call-site explicitness > one mega-wrapper because the spec-reviewer prefers existing-primitives-and-explicit-call-sites posture.
+3. **W1-43 defence-in-depth.** Resolution: pure-function `assertSingleWebhookResolution(automation)` inside `resolveDispatch` per L648 — verifies one non-empty `webhookPath`, no alternative fields set; emits `automation_composition_invalid` with `status: 'automation_composition_invalid'` at dispatch on violation.
+4. **W1-44 pre-dispatch resolution.** Resolution: extract `resolveRequiredConnections(automation, subaccountId) → { ok } | { missing: string[] }` per L649 — uses `automation_connection_mappings` query, called before the webhook fetch in `invokeAutomationStepService`; emits `automation_missing_connection` with `status: 'missing_connection'` on failure. Pure-function tested.
+5. **W1-38 error-code reconciliation.** Resolution: spec adopts option (a) per L651 — introduce `automation_engine_unavailable` as a new §5.7 error code (requires a paired edit to `docs/riley-observations-dev-spec.md` §5.7 in the same PR as the code change). Options (b) and (c) were the alternatives; (a) is the most semantically correct (engine-not-found ≠ automation-not-found ≠ missing-connection).
+6. **HERMES-S1 errorMessage threading.** Resolution: `preFinalizeMetadata` (already in scope at `agentExecutionService.ts:1350-1368`) carries an `errorMessage?: string` field that is passed into `extractRunInsights` when `derivedRunResultStatus === 'failed'`. No new DB read. Per L105 the future loop result will eventually carry `errorMessage` but the immediate fix uses the in-scope value.
+7. **H3-PARTIAL-COUPLING.** Resolution: per L152, `runResultStatus='partial'` is no longer set automatically when `!hasSummary`. Summary-generation failure surfaces in a separate channel (`summaryGenerationFailed: true` on the run record or via existing log) but does not demote run status. The check moves into the summary-generation pipeline itself.
+
+**Files touched (concrete):**
+- `server/services/workflowEngineService.ts` (tick switch + new helper site)
+- `server/services/invokeAutomationStepService.ts` (W1-43 defence-in-depth + W1-44 pre-dispatch + W1-38 error code)
+- `server/services/agentExecutionService.ts` (HERMES-S1 errorMessage thread + H3 partial-coupling change)
+- `server/lib/preFinalizeMetadata.ts` (or wherever `preFinalizeMetadata` is defined) — new optional field.
+- `shared/iee/failure.ts` or the §5.7-vocab module (W1-38 new error code).
+- `docs/riley-observations-dev-spec.md` (W1-38 spec + §5.7 vocab edit).
+- Skill handlers (only if architect picks "migrate" for C4a-6-RETSHAPE): ~40 files in `server/services/skillExecutor.ts` + skill handler files. Listed in spec inventory only if the architect confirms migration.
+- Pure-function tests: `workflowEngineInvalidationPure.test.ts`, `invokeAutomationDispatchPure.test.ts` (rule 4 + pre-dispatch + error code), `agentExecutionErrorMessagePure.test.ts`, `runResultStatusPure.test.ts`.
+
+**Test plan:**
+- Static gates only.
+- Pure-function tests per resolved decision (4 named above).
+- C4b-INVAL-RACE specifically gets a deterministic test harness: simulate the "result returns after invalidation" sequence by calling the inline dispatch helper with a pre-invalidated step row and asserting the helper's discard branch fires.
+
+**Done criteria:**
+- Race-condition pure-function test for C4b passes.
+- W1-43 / W1-44 enforced at dispatcher boundary with pure-function tests.
+- W1-38 spec + code align on `automation_engine_unavailable`.
+- HERMES-S1 verified by failed-run-without-throw test extracting memory via the threaded `errorMessage`.
+- Skill error envelope contract is one of two documented options and 100% adherent across the codebase.
+- H3 partial-coupling: summary failure no longer demotes run status; pure-function test asserts.
+
+**Rollback notes:**
+- Revert is per-decision. The most invasive (if architect picks migrate on C4a-6-RETSHAPE) is the skill envelope migration. That ships as one PR commit and reverts cleanly.
+- W1-38 spec edit is paired with the code change — revert both together.
+- HERMES-S1 and H3-PARTIAL-COUPLING are isolated to `agentExecutionService.ts`; revert is local.
