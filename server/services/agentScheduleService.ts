@@ -178,6 +178,14 @@ export const agentScheduleService = {
       },
     });
 
+    // ── Optimiser peer-medians nightly refresh ─────────────────────────
+    const PEER_MEDIANS_QUEUE = 'refresh_optimiser_peer_medians';
+    await pgboss.work(PEER_MEDIANS_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      const { refreshOptimiserPeerMediansJob } = await import('../jobs/refreshOptimiserPeerMedians.js');
+      await refreshOptimiserPeerMediansJob(job);
+    });
+    await pgboss.schedule(PEER_MEDIANS_QUEUE, '0 0 * * *', null, { tz: 'UTC' });
+
     // ── Stale run cleanup — runs every 5 minutes ────────────────────────
     const STALE_CLEANUP_QUEUE = 'stale-run-cleanup';
     await pgboss.work(STALE_CLEANUP_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
