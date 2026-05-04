@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: docs/agentic-commerce-brief-addendum.md
-active_plan: tasks/builds/agentic-commerce/plan.md
-build_slug: agentic-commerce
-branch: claude/agentic-commerce-spending
-status: PLANNING
-last_updated: 2026-05-03
+active_spec: docs/sub-account-optimiser-spec.md
+active_plan: tasks/builds/stream-2-optimiser-finish/plan.md
+build_slug: stream-2-optimiser-finish
+branch: stream-2-optimiser-finish
+status: REVIEWING
+last_updated: 2026-05-05
 -->
 
 # Current Focus
