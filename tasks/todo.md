@@ -2825,3 +2825,117 @@ ChatGPT Round 3 produced 6 findings. 2 auto-applied in-branch (2, 3); 1 rejected
   - Spec section: §7 (Pause/Resume/Stop routes)
   - Gap: route URLs are run-scoped instead of spec-mandated task-scoped
   - Suggested approach: defer until the `workflow_run_id` FK on tasks lands; then add task-scoped variants (or replace the run-scoped routes). Alternatively, amend spec §7 to use run-scoped URLs to match the existing approval route convention — that would be a `chatgpt-spec-review` decision. Chunk 11 (open task UI) will consume these endpoints, so the decision must be made before Chunk 11 ships.
+
+---
+
+## Deferred from spec-conformance review — workflows-v1-phase-2 (2026-05-04)
+
+**Captured:** 2026-05-04T06:53:23Z
+**Source log:** `tasks/review-logs/spec-conformance-log-workflows-v1-phase-2-2026-05-04T06-53-23Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**Plan:** `tasks/builds/workflows-v1-phase-2/plan.md`
+**Scope verified:** Pre-chunk P0–P6 + Chunks 9, 10, 11, 12, 13, 14a, 14b, 15, 16
+
+NOTE: Items REQ 6.4 and REQ 7.9 in the prior section ("Deferred from spec-conformance review — workflows-v1") are now CLOSED — REQ 6.4 was verified by P0 (no impure wrapper exists; the inlined design is intentional) and REQ 7.9 was implemented by P3 (task-scoped pause/resume/stop routes shipped). Operator may remove those two entries from the prior section.
+
+- [ ] **REQ P1-8 — direct INSERTs into `workflow_runs` bypass the SQLSTATE 23505 → 409 conversion.** `server/services/workflowEngineService.ts:2556` (bulk-child fanout) and `:2806` (replay) both call `db.insert(workflowRuns)` directly. The partial unique index `workflow_runs_one_active_per_task_idx` will fire `23505` on these paths; without the catch in `WorkflowRunService.startRun:282-286`, callers get a raw 5xx instead of `TaskAlreadyHasActiveRunError → 409`. Plan acceptance criterion P1-8 explicitly required zero matches outside the service.
+  - Spec section: pre-chunk P1, plan acceptance criterion P1-8
+  - Gap: two direct-INSERT paths bypass the structured-error conversion
+  - Suggested approach: refactor `engine.dispatchBulkChildren` and `engine.startReplay` to route through `WorkflowRunService.startRun` (or extract the `try/catch + 23505 detect` block into a helper that both paths consume). Alternatively, broaden `startRun`'s shape to accept the bulk-child / replay cases natively and consolidate the path. Avoid swallowing `23505` in the engine code without the structured error mapping.
+
+- [ ] **REQ 9-9 — `normaliseApproverPoolSnapshot` not consumed by any service.** `shared/types/approverPoolSnapshot.ts` exports the normaliser but no service writes through it. `WorkflowApproverPoolService.resolvePool` returns the raw resolver output and `WorkflowGateRefreshPoolService` writes it directly to `workflow_step_gates.approver_pool_snapshot`. Plan acceptance: *"every snapshot write goes through `normaliseApproverPoolSnapshot`"*. Without this, `userInPool(snapshot, callerUuid)` checks can false-negative when the snapshot captures uppercase UUIDs from the `specific_users` author input.
+  - Spec section: Chunk 9, plan REQ 9-9 + spec §5.1
+  - Gap: snapshot back-fill at write sites missing
+  - Suggested approach: wrap every write to `workflow_step_gates.approver_pool_snapshot` (in both `WorkflowApproverPoolService` and `WorkflowGateRefreshPoolService`) with `normaliseApproverPoolSnapshot(...)`. Add a regression test asserting an uppercase-input snapshot resolves correctly via `userInPool`.
+
+- [ ] **REQ 9-10 — `WorkflowGateRefreshPoolService` does not emit `approval.pool_refreshed` task event.** Plan acceptance: *"approval.pool_refreshed is emitted by WorkflowGateRefreshPoolService after a successful re-resolution"*. Currently the service only logs `workflow_gate_pool_refreshed`. Without the WebSocket emission, all open Approval cards will not update their pool size after a `/refresh-pool` admin call.
+  - Spec section: Chunk 9, spec §5.1.2 + §8.2 (event taxonomy)
+  - Gap: missing WebSocket emission downstream of successful refresh
+  - Suggested approach: after the successful `WorkflowStepGateService.refreshPool` write at `workflowGateRefreshPoolService.ts:148-153`, call `appendAndEmitTaskEvent(taskId, ..., 'gate', { kind: 'approval.pool_refreshed', payload: { gateId, actorId: requestingUserId, newPoolSize: snapshot.length, newPoolFingerprint: poolFingerprint(snapshot), stillBelowQuorum } })`.
+
+- [ ] **REQ 9-11 — `approval.queued` and `ask.queued` events never emitted; `poolFingerprint` never sent on the wire. Sub-finding: fingerprint algorithm divergence (FNV-1a vs spec-named SHA-256).** Spec §8.2 + plan reduced-broadcast contract requires these events with `poolSize + poolFingerprint` instead of full ID lists. The `poolFingerprint` function exists at `shared/types/approverPoolSnapshot.ts:35-48` but is never called from any service. Without the upstream emit, Chunk 11's Approval-card REST snapshot fetch trigger has no signal to react to. The sub-finding: fingerprint uses FNV-1a (spec quote: *"sha256(sortedJoinedIds).slice(0, 16) — 64 bits of entropy"*); switching to SHA-256 is mechanical but changes every emitted fingerprint.
+  - Spec section: Chunk 9, spec §8.2 (event taxonomy + reduced-broadcast contract)
+  - Gap: gate-open path missing event emission; fingerprint algorithm differs from spec
+  - Suggested approach: in `WorkflowStepGateService.openGate` (or whichever call site creates the gate row), call `appendAndEmitTaskEvent` with `kind: 'approval.queued'` (or `'ask.queued'`) carrying `poolSize + poolFingerprint(snapshot) + seenPayload + seenConfidence`. Decide separately whether to migrate the fingerprint to SHA-256 (matches the spec literal) or amend the spec to allow FNV-1a (functionally equivalent, simpler bundle).
+
+- [ ] **REQ 9-12 — `step.approval_resolved` event is never emitted from any path.** Plan acceptance lists both `step.awaiting_approval` (which IS emitted at `workflowEngineService.ts:1620`) AND `step.approval_resolved`. The latter has no producer. Spec scope covers both `reviewKind` values: workflow-internal action approvals AND agentic-commerce spend approvals (the plan's round-4 cross-system coupling rule explicitly says `workflowEngineService` is the SOLE emitter for both).
+  - Spec section: Chunk 9, plan REQ 9-12 + plan §"Ownership of `step.approval_resolved`"
+  - Gap: emission point in the engine resume / decision-resolution path missing
+  - Suggested approach: in the action-approval resolution path AND in the spend-approval resume-poll path inside `workflowEngineService`, emit `step.approval_resolved` with `{ stepId, reviewKind, actionId, decision }` immediately before the next-step dispatch. Per plan ordering: emit MUST land before the next step is dispatched so the timeline shows resolved-then-next-started in order.
+
+- [ ] **REQ 9-14 — observability counters named in plan not implemented.** Plan §Chunk 9 lists prom-style counters `workflow_run_paused_total`, `workflow_gate_open_total`, `workflow_gate_resolved_total`, `workflow_gate_stalled_total`, `workflow_gate_orphaned_cascade_total`, `task_event_gap_detected_total`, `task_event_subsequence_collision_total`, `task_event_invalid_origin_total`, `task_event_invalid_payload_total`, `workflow_cost_accumulator_skew_total`. Implementation has only a `console.log` event-stats counter in `emitters.ts`.
+  - Spec section: Chunk 9, plan §"Observability metrics counters"
+  - Gap: no Prometheus / equivalent counter primitive wired
+  - Suggested approach: identify the project's existing `metrics.ts` infrastructure (or stand up a thin prom-client wrapper) and increment counters at the named emit sites (validator rejection paths, gate lifecycle paths, replay endpoints).
+
+- [ ] **REQ 11-extra — server never emits `task.degraded` and never writes `workflow_runs.degradation_reason`.** Client `useTaskProjection` reacts to `task.degraded` by triggering a full rebuild (`useTaskProjection.ts:67-69`), but no server path emits the event. The `degradation_reason` column in `workflow_runs` ships unused. Plan §"Consumer-side gap that survives the buffer and replay" requires the server to emit + write column on consumer-gap detection.
+  - Spec section: Chunk 9, plan §"Error handling — Consumer-side gap"
+  - Gap: server-side gap-detection emission path missing
+  - Suggested approach: in the replay endpoint and/or the WebSocket emit pipeline, when a consumer-gap pattern is detected (replay returns `hasGap: true` to a connected client), emit `task.degraded` with `reason: 'consumer_gap_detected'` and `UPDATE workflow_runs SET degradation_reason = ... WHERE id = ... AND degradation_reason IS NULL` (one-shot, first-write wins).
+
+- [ ] **REQ 12-11 — sidebar badge for pending Asks alongside Approvals not directly verified.** Spec §11.6 routing UX requires three paths (sidebar nav, "Waiting on you" page, email notification) that all land on the task view with the form card. The sidebar badge extension (counting Asks alongside Approvals) was a Chunk 12 plan deliverable but not verified at file level in this review.
+  - Spec section: Chunk 12, spec §11.6
+  - Gap: sidebar badge extension status uncertain
+  - Suggested approach: audit `client/src/components/sidebar/*` for the existing Approvals badge and confirm it has been extended to include pending Asks. If not, add the count.
+
+- [ ] **REQ 13-9 — `file.created` task event never emitted.** `file.edited` is emitted from the per-hunk-revert path in `fileRevertHunkService.ts:71-72`. `file.created` is in the event taxonomy (spec §8.2) but never emitted from any service. Without it, the Files tab cannot react in real time when a new file lands; the auto-select-latest behaviour spec §9.4.3 names is broken.
+  - Spec section: Chunk 13, spec §8.2 + §9.4.3
+  - Gap: file-creation emission missing
+  - Suggested approach: identify the existing file/version write path (the file-creation entry point used by agent skills) and wire `appendAndEmitTaskEvent(taskId, ..., 'engine', { kind: 'file.created', payload: { fileId, version, producerAgentId } })` after a successful insert.
+
+- [ ] **REQ 14b-extra — `workflowDrafts` route missing the spec-§3.3-mandated `subaccount_id = resolvedSubaccount.id` check.** `server/routes/workflowDrafts.ts:30,70` reads/discards drafts only by `(draftId, organisationId)`. RLS only enforces org scope; a same-org cross-subaccount read by ID will leak. Spec §3.3 explicitly: *"every read endpoint MUST verify subaccount_id = resolvedSubaccount.id in the route handler — RLS only enforces org scope, so a same-org cross-subaccount read by ID would otherwise leak."* Security-critical.
+  - Spec section: Chunk 14b, spec §3.3 (workflow_drafts authorisation contract)
+  - Gap: route handler missing subaccount-scope verification
+  - Suggested approach: in both `GET /api/workflow-drafts/:draftId` and `POST .../discard`, after `findById(draftId, organisationId)` succeeds, additionally verify `draft.subaccountId === req.subaccountId` (or via `resolveSubaccount(req.params.subaccountId, req.orgId)`); return 403 `gate_run_not_in_scope`-equivalent on mismatch (NOT 404, to avoid disclosing existence).
+
+- [ ] **REQ 15-7 + 15-8 — depth fail-fast not enforced at every entry point named in plan; depth metadata persisted under wrong field name.** Plan REQ 15-7 names `orchestratorFromTaskJob`, the skill handler, every async pg-boss job that spawns/continues a run, every WebSocket dispatch, every retry path as MUST-validate sites. Implementation enforces only at `workflowRunStartSkillService.ts:28-29`. Other entry points pass `workflowRunDepth: 1` without the throw. Separately, REQ 15-8 says depth lives at `workflow_runs.metadata.workflow_run_depth`; implementation persists it to `workflow_runs.contextJson._meta.workflowRunDepth` (different JSON path).
+  - Spec section: Chunk 15, plan REQs 15-7 and 15-8 + spec §13.4
+  - Gap: partial entry-point coverage of fail-fast; metadata path naming differs
+  - Suggested approach: extract a shared `validateWorkflowRunDepth(context)` helper from `workflowRunStartSkillService.ts:28-29`. Call it at the top of `orchestratorFromTaskJob`, the scheduler dispatch, every pg-boss job that spawns runs, the WebSocket dispatch path, and every retry path — pass top-level `workflowRunDepth: 1` only at the boundary, not as a safety fallback. Separately, decide between (a) renaming the persisted JSON path to spec-named `metadata.workflow_run_depth` (minor migration; affects downstream consumers reading the column) or (b) updating the plan/spec to use `_meta.workflowRunDepth` (zero code change). Prefer (a) since the spec is the contract.
+
+---
+
+## Deferred from review pipeline — workflows-v1-phase-2 Tier C + D (2026-05-04)
+
+**Context:** Operator approved Option 1 fix scope (Tiers A + B from the consolidated triage on 2026-05-04). These Tier C (medium polish + hardening) and Tier D (cosmetic NIT) items are deferred to a follow-up branch.
+
+**Source logs:**
+- `tasks/review-logs/spec-conformance-log-workflows-v1-phase-2-2026-05-04T06-53-23Z.md`
+- `tasks/review-logs/pr-review-log-workflows-v1-phase-2-2026-05-04T07-25-00Z.md`
+- `tasks/review-logs/adversarial-review-log-workflows-v1-phase-2-2026-05-04T07-40-00Z.md`
+
+### Tier C — medium polish + hardening
+
+- [ ] **spec REQ 13-9 — `file.created` event has no producer.** The taxonomy in `shared/types/taskEvent.ts:19` defines the event but `referenceDocumentService.create` is currently only called from manual-upload routes (`server/routes/referenceDocuments.ts:62, 139`) which are not task-scoped. The intended producer is a skill-driven file-creation path that does not yet exist in the codebase. Wiring `file.created` requires either (a) building the skill-driven file-write path first, or (b) extending `referenceDocumentService.create` with an optional `taskEventContext` parameter and updating the manual-upload route to pass it when the upload happens within a task surface. Defer to the follow-up branch that adds the file-write skill.
+
+- [ ] **pr-S1 — `appendAndEmitTaskEvent` events not durable; client full-rebuild incomplete.** (Half-done in Tier B fix wave 6 — cursor poisoning resolved by atomic `tasks.next_event_seq` allocation; persistence deferred because `agent_execution_events.run_id` is NOT NULL with FK to `agent_runs` but task-level events have no agent run association.) Required follow-up: schema migration making `agent_execution_events.run_id` nullable OR adding `workflow_run_id uuid` column with at-least-one-of constraint, then update `taskEventService.appendAndEmitTaskEvent` to accept `persistAs` and write the row inside the same transaction as the seq allocation. Until that lands, `run.paused.*`, `run.resumed`, `run.stopped.*`, `ask.submitted`, `ask.skipped`, `file.edited`, `chat.message`, `agent.milestone`, `step.awaiting_approval` are recoverable only via the live socket — a user opening the open-task view N seconds after one of these fired will see stale state until a synthetic refresh.
+
+- [ ] **pr-S3 — Fire-and-forget `workflowDraftService.create` in orchestrator job.** `server/jobs/orchestratorFromTaskJob.ts:148-161` calls `.catch(...)` instead of `await`. If user navigates to Studio via cadence card before INSERT commits, StudioPage 404s on the draft fetch. Fix: `await` the create.
+
+- [ ] **pr-S4 — `teams.ts` `checkOrgId` duplicates pattern; factor to shared helper.** Local helper at `server/routes/teams.ts:9-15` is duplicated in `assignableUsers.ts:16-19`. Factor into `server/lib/assertPathOrgMatchesAuthOrg.ts` and reuse.
+
+- [ ] **pr-S5 — `assignableUsersService` deletedAt filter check on subaccount path.** `server/services/assignableUsersService.ts:103-120` joins through `subaccountUserAssignments` without `isNull(deletedAt)` (verify schema first; the assignments table may not have `deletedAt`). If present, add the filter.
+
+- [ ] **pr-S6 — `useTaskProjection` full-rebuild request unbounded.** `client/src/hooks/useTaskProjection.ts:25` does not pass `?limit`. Server caps at 1000 silently. Add paginate-until-empty loop, or `hasMore` response field on the replay endpoint.
+
+- [ ] **spec REQ 9-14 — observability counters not implemented.** Plan §Chunk 9 lists 10 prom-style counters (`workflow_run_paused_total`, `workflow_gate_open_total`, `workflow_gate_resolved_total`, `workflow_gate_stalled_total`, `workflow_gate_orphaned_cascade_total`, `task_event_gap_detected_total`, `task_event_subsequence_collision_total`, `task_event_invalid_origin_total`, `task_event_invalid_payload_total`, `workflow_cost_accumulator_skew_total`). Wire up metrics primitive and increment at named sites.
+
+- [ ] **spec REQ 12-11 — sidebar badge for pending Asks alongside Approvals.** Spec §11.6 routing UX lists three paths (sidebar nav, "Waiting on you" page, email). Audit `client/src/components/sidebar/*` for the existing Approvals badge and extend to include pending Asks count.
+
+- [ ] **adv Finding 2 — `workflowDraftService` / `teamsService` / `assignableUsersService` use bare `db` on FORCE-RLS tables.** Convention violation; matches pre-existing `taskService` pattern. Switch to `getOrgScopedDb('source')` for defence-in-depth (RLS safety net) and consistency.
+
+- [ ] **adv Finding 4 — `streamEventsByTask` lacks explicit `organisationId` filter.** `server/services/agentExecutionEventService.ts:689-702` and `server/routes/taskEventStream.ts:53-58` filter only by `taskId` after pre-validating task ownership. Add explicit org filter as application-layer defence-in-depth (DEVELOPMENT_GUIDELINES §1).
+
+- [ ] **adv Finding 6 — Depth guard not initialised at HTTP startRun boundary.** `server/routes/workflowRuns.ts:74` does not pass `workflowRunDepth: 1` baseline. The skill-layer guard fail-closes (hard error rather than bypass), so currently safe — but a future code path that catches the error would silently bypass the depth limit. Initialise at the HTTP boundary too. Related to spec REQ 15-7 above.
+
+### Tier D — cosmetic NITs
+
+- [ ] **pr-N1 — `filesTabPure.ts` sort tiebreakers are primary-key only.** `client/src/components/openTask/filesTabPure.ts:49-56` — add `.fileId` secondary tiebreaker on `recent` / `oldest` / `author` sorts (DEVELOPMENT_GUIDELINES §8.17 + §8.21).
+
+- [ ] **pr-N2 — `taskEventService.ts` validation failure does not surface to caller.** `server/services/taskEventService.ts:31-38` returns void after `logger.warn` on validation failure. Consider returning `Promise<{ ok: true } | { ok: false, reason: string }>` so caller observability can branch.
+
+- [ ] **pr-N3 — `workflowDraftsCleanupJob` no per-org partial-success logging.** Single admin-tx DELETE across all orgs. Move to per-org admin-tx + per-org log if drafts table grows (DEVELOPMENT_GUIDELINES §2 maintenance-jobs gotcha).
+
+- [ ] **pr-N4 — `appendAndEmitTaskEvent` mixed promise-rejection patterns.** Most callers `void appendAndEmitTaskEvent(...)`; orchestrator-job sites use `.catch(logger.warn)`. Pick one pattern (`.catch` is more debuggable).
+
+- [ ] **pr-N5 — `OpenTaskView.tsx:34` shows `Loading...` (three dots) instead of `Loading…` (single ellipsis char).** Cosmetic consistency with rest of codebase.

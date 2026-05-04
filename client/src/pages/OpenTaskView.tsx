@@ -22,7 +22,10 @@ export default function OpenTaskView({ user }: { user: User }) {
 
   useEffect(() => {
     if (!taskId) return;
-    api.get<TaskMeta>(`/api/tasks/${taskId}`)
+    // Brief id and task id are the same row (workflows-v1 task = legacy brief).
+    // /api/briefs/:briefId returns { id, title, status, conversationId } —
+    // extra conversationId field is harmless to TaskMeta consumers here.
+    api.get<TaskMeta>(`/api/briefs/${taskId}`)
       .then(({ data }) => setTaskMeta(data))
       .catch((err) => {
         if (err?.response?.status === 404) navigate('/admin/tasks', { replace: true });

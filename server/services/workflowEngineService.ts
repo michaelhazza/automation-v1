@@ -66,6 +66,7 @@ import {
 import { logger } from '../lib/logger.js';
 import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { appendAndEmitTaskEvent } from './taskEventService.js';
+import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -1607,15 +1608,13 @@ export const WorkflowEngineService = {
               { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
             );
             // Chunk 9: also emit step.awaiting_approval to the task event stream.
-            // Sequence allocation is WS-only here (no DB write); the sequence is
-            // not globally allocated — a proper transactional allocation will be
-            // wired in a future chunk when the engine's tick path gains task-seq
-            // integration.
             if (run.taskId) {
               void appendAndEmitTaskEvent(
-                run.taskId,
-                Date.now(), // temporary — not a DB-allocated sequence; used only for WS eventId uniqueness
-                0,
+                {
+                  taskId: run.taskId,
+                  organisationId: run.organisationId,
+                  subaccountId: run.subaccountId,
+                },
                 'engine',
                 { kind: 'step.awaiting_approval', payload: { stepId: step.id, reviewKind, actionId: result.actionId } },
               );
@@ -2552,9 +2551,9 @@ export const WorkflowEngineService = {
           title: `Workflow run`,
           status: 'inbox',
         }, run.startedByUserId ?? undefined);
-        const [childRun] = await db
-          .insert(workflowRuns)
-          .values({
+        const childRun = await insertRunRowWithUniqueGuard(
+          db,
+          {
             organisationId: run.organisationId,
             subaccountId: targetId,
             templateVersionId: run.templateVersionId,
@@ -2565,8 +2564,9 @@ export const WorkflowEngineService = {
             targetSubaccountId: targetId,
             startedByUserId: run.startedByUserId,
             taskId: childTask.id,
-          })
-          .returning();
+          },
+          childTask.id,
+        );
 
         if (childRun) {
           // Create step runs for the child
@@ -2802,9 +2802,9 @@ export const WorkflowEngineService = {
 
     let runId!: string;
     await db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(workflowRuns)
-        .values({
+      const created = await insertRunRowWithUniqueGuard(
+        tx as unknown as typeof db,
+        {
           organisationId,
           subaccountId: source.subaccountId,
           // Carry forward the scope so org-scope replays don't violate the
@@ -2819,8 +2819,9 @@ export const WorkflowEngineService = {
           startedByUserId: userId,
           taskId: replayTask.id,
           startedAt,
-        })
-        .returning();
+        },
+        replayTask.id,
+      );
       runId = created.id;
       // Patch runId into _meta
       await tx.execute(

@@ -70,7 +70,13 @@ export const workflowPublishService = {
         )
       );
 
-    if (!newVersionRow) throw new Error('Version row not found after publish');
+    if (!newVersionRow) {
+      throw {
+        statusCode: 500,
+        message: 'Version row not found after publish',
+        errorCode: 'publish_inconsistent',
+      };
+    }
     return { versionId: newVersionRow.id, versionNumber: newVersionRow.version };
   },
 };

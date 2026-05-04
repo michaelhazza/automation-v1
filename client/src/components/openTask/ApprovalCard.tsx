@@ -9,8 +9,6 @@ export function ApprovalCard({ gate, taskId }: ApprovalCardProps) {
 
   useEffect(() => {
     if (!gate.poolFingerprint || gate.status === 'decided') return;
-    // TODO: B4 - gate snapshot endpoint needed (GET /api/tasks/:taskId/gates/:gateId)
-    // No snapshot endpoint exists yet; rendering poolSize count only.
     void api.get(`/api/tasks/${taskId}/gates/${gate.gateId}`)
       .then(({ data }: { data: { approverPool?: string[] } }) => setPoolMembers(data.approverPool ?? []))
       .catch(() => {});

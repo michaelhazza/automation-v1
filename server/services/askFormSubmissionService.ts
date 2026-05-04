@@ -53,7 +53,11 @@ async function resolveAskContext(
 ) {
   const runId = await resolveActiveRunForTask(taskId, organisationId);
   if (!runId) {
-    throw { statusCode: 404, message: 'no_active_run_for_task' };
+    throw {
+      statusCode: 404,
+      message: 'No active workflow run for this task',
+      errorCode: 'no_active_run_for_task',
+    };
   }
 
   const [stepRun] = await db
@@ -61,7 +65,11 @@ async function resolveAskContext(
     .from(workflowStepRuns)
     .where(and(eq(workflowStepRuns.runId, runId), eq(workflowStepRuns.stepId, stepId)));
   if (!stepRun) {
-    throw { statusCode: 404, message: 'step_not_found' };
+    throw {
+      statusCode: 404,
+      message: 'Step not found in this run',
+      errorCode: 'step_not_found',
+    };
   }
 
   const gate = await WorkflowStepGateService.getOpenGate(runId, stepId, organisationId);
@@ -75,7 +83,11 @@ async function resolveAskContext(
   }
 
   if (gate.gateKind !== 'ask') {
-    throw { statusCode: 400, message: 'wrong_gate_type' };
+    throw {
+      statusCode: 400,
+      message: 'This step is not an Ask gate',
+      errorCode: 'wrong_gate_type',
+    };
   }
 
   return { runId, stepRun, gate };
@@ -120,10 +132,14 @@ export const askFormSubmissionService = {
       callerUserId,
     );
 
-    void appendAndEmitTaskEvent(taskId, Date.now(), 0, 'user', {
-      kind: 'ask.submitted',
-      payload: { gateId: gate.id, submittedBy: callerUserId, values },
-    });
+    void appendAndEmitTaskEvent(
+      { taskId, organisationId, subaccountId: null },
+      'user',
+      {
+        kind: 'ask.submitted',
+        payload: { gateId: gate.id, submittedBy: callerUserId, values },
+      },
+    );
 
     return { ok: true as const };
   },
@@ -184,10 +200,14 @@ export const askFormSubmissionService = {
       callerUserId,
     );
 
-    void appendAndEmitTaskEvent(taskId, Date.now(), 0, 'user', {
-      kind: 'ask.skipped',
-      payload: { gateId: gate.id, submittedBy: callerUserId, stepId },
-    });
+    void appendAndEmitTaskEvent(
+      { taskId, organisationId, subaccountId: null },
+      'user',
+      {
+        kind: 'ask.skipped',
+        payload: { gateId: gate.id, submittedBy: callerUserId, stepId },
+      },
+    );
 
     return { ok: true as const };
   },

@@ -86,7 +86,15 @@ export const WorkflowRunPauseStopService = {
         : reason === 'cost_ceiling'
         ? { kind: 'run.paused.cost_ceiling' as const, payload: { capValue: pausedRun.effectiveCostCeilingCents ?? 0, currentCost: pausedRun.costAccumulatorCents } }
         : { kind: 'run.paused.wall_clock' as const, payload: { capValue: pausedRun.effectiveWallClockCapSeconds ?? 0, currentElapsed: 0 } };
-      void appendAndEmitTaskEvent(pausedRun.taskId, Date.now(), 0, 'user', taskEvent);
+      void appendAndEmitTaskEvent(
+        {
+          taskId: pausedRun.taskId,
+          organisationId: pausedRun.organisationId,
+          subaccountId: pausedRun.subaccountId,
+        },
+        'user',
+        taskEvent,
+      );
     }
 
     return { paused: true };
@@ -238,14 +246,22 @@ export const WorkflowRunPauseStopService = {
 
     // Chunk 9: emit to task event stream.
     if (finalRun.taskId) {
-      void appendAndEmitTaskEvent(finalRun.taskId, Date.now(), 0, 'user', {
-        kind: 'run.resumed',
-        payload: {
-          actorId: userId,
-          extensionCostCents: opts?.extendCostCents,
-          extensionSeconds: opts?.extendSeconds,
+      void appendAndEmitTaskEvent(
+        {
+          taskId: finalRun.taskId,
+          organisationId: finalRun.organisationId,
+          subaccountId: finalRun.subaccountId,
         },
-      });
+        'user',
+        {
+          kind: 'run.resumed',
+          payload: {
+            actorId: userId,
+            extensionCostCents: opts?.extendCostCents,
+            extensionSeconds: opts?.extendSeconds,
+          },
+        },
+      );
     }
 
     return { resumed: true, extensionCount: finalRun.extensionCount };
@@ -334,10 +350,18 @@ export const WorkflowRunPauseStopService = {
     // Chunk 9: emit to task event stream.
     const stoppedRun = stoppedRows[0];
     if (stoppedRun.taskId) {
-      void appendAndEmitTaskEvent(stoppedRun.taskId, Date.now(), 0, 'user', {
-        kind: 'run.stopped.by_user',
-        payload: { actorId: userId },
-      });
+      void appendAndEmitTaskEvent(
+        {
+          taskId: stoppedRun.taskId,
+          organisationId: stoppedRun.organisationId,
+          subaccountId: stoppedRun.subaccountId,
+        },
+        'user',
+        {
+          kind: 'run.stopped.by_user',
+          payload: { actorId: userId },
+        },
+      );
     }
 
     return { stopped: true };

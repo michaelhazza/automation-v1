@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { userCanAccessSubaccount, type UserDbRole } from '../lib/userSubaccountAccess.js';
 import { workflowDraftService } from '../services/workflowDraftService.js';
 
 const router = Router();
@@ -30,6 +31,20 @@ router.get(
     const draft = await workflowDraftService.findById(draftId, organisationId);
 
     if (!draft) {
+      res.status(404).json({ error: 'draft_not_found' });
+      return;
+    }
+
+    // Spec §3.3 — RLS only enforces org scope; a same-org cross-subaccount
+    // read by ID would otherwise leak. Verify caller has access to the draft's
+    // subaccount. 404 (not 403) so an attacker cannot enumerate which draft
+    // IDs exist in subaccounts they cannot access.
+    const hasAccess = await userCanAccessSubaccount(
+      req.user!.id,
+      req.user!.role as UserDbRole,
+      draft.subaccountId,
+    );
+    if (!hasAccess) {
       res.status(404).json({ error: 'draft_not_found' });
       return;
     }
@@ -67,15 +82,29 @@ router.post(
     const { draftId } = req.params;
     const organisationId = req.orgId!;
 
+    // Read first to check subaccount access — same disclosure-prevention
+    // contract as the GET endpoint above.
+    const existing = await workflowDraftService.findById(draftId, organisationId);
+    if (!existing) {
+      res.status(404).json({ error: 'draft_not_found' });
+      return;
+    }
+
+    const hasAccess = await userCanAccessSubaccount(
+      req.user!.id,
+      req.user!.role as UserDbRole,
+      existing.subaccountId,
+    );
+    if (!hasAccess) {
+      res.status(404).json({ error: 'draft_not_found' });
+      return;
+    }
+
     const result = await workflowDraftService.markConsumed(draftId, organisationId);
 
     if (result === null) {
-      // Could be not found or already consumed — check which.
-      const existing = await workflowDraftService.findById(draftId, organisationId);
-      if (!existing) {
-        res.status(404).json({ error: 'draft_not_found' });
-        return;
-      }
+      // Already consumed (the access check above already passed; this path is
+      // a same-tx race or pre-existing consumed state).
       res.status(410).json({
         error: 'draft_consumed',
         consumed_at: existing.consumedAt!.toISOString(),

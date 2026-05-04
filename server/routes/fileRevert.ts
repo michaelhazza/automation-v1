@@ -16,9 +16,7 @@ import * as referenceDocumentService from '../services/referenceDocumentService.
 import { fileDiffService } from '../services/fileDiffService.js';
 import { fileRevertHunkService } from '../services/fileRevertHunkService.js';
 import { resolveActiveRunForTask } from '../services/workflowRunResolverService.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { tasks } from '../db/schema/tasks.js';
-import { eq, and } from 'drizzle-orm';
+import { taskService } from '../services/taskService.js';
 
 const router = Router();
 
@@ -35,13 +33,7 @@ router.get(
     const { taskId, fileId } = req.params;
     const orgId = req.orgId!;
 
-    // Verify task belongs to the org.
-    const db = getOrgScopedDb('fileRevert.getFile');
-    const [task] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId)));
-    if (!task) {
+    if (!(await taskService.assertOrgOwnsTask(taskId, orgId))) {
       res.status(404).json({ error: 'task_not_found' });
       return;
     }
@@ -90,13 +82,7 @@ router.get(
     const { taskId, fileId } = req.params;
     const orgId = req.orgId!;
 
-    // Verify task belongs to the org.
-    const db = getOrgScopedDb('fileRevert.getDiff');
-    const [task] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId)));
-    if (!task) {
+    if (!(await taskService.assertOrgOwnsTask(taskId, orgId))) {
       res.status(404).json({ error: 'task_not_found' });
       return;
     }
@@ -171,16 +157,16 @@ router.post(
 
       res.json({ reverted: true, new_version: result.newVersion });
     } catch (err: unknown) {
-      const e = err as { statusCode?: number; error?: string; current_version?: number };
-      if (e.statusCode === 409 && e.error === 'base_version_changed') {
-        res.status(409).json({ error: 'base_version_changed', current_version: e.current_version });
+      const e = err as { statusCode?: number; errorCode?: string; currentVersion?: number };
+      if (e.statusCode === 409 && e.errorCode === 'base_version_changed') {
+        res.status(409).json({ error: 'base_version_changed', current_version: e.currentVersion });
         return;
       }
-      if (e.statusCode === 404 && e.error === 'file_not_found') {
+      if (e.statusCode === 404 && e.errorCode === 'file_not_found') {
         res.status(404).json({ error: 'file_not_found' });
         return;
       }
-      if (e.statusCode === 404 && e.error === 'version_not_found') {
+      if (e.statusCode === 404 && e.errorCode === 'version_not_found') {
         res.status(404).json({ error: 'file_not_found' });
         return;
       }

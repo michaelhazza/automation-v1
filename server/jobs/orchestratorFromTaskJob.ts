@@ -291,23 +291,27 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     // 2b. Cadence detection — emit recommendation card after task completion.
     const cadenceResult = detectCadenceSignals(description);
     if (cadenceResult.score >= 0.5) {
-      appendAndEmitTaskEvent(taskId, 0, 0, 'orchestrator', {
-        kind: 'chat.message',
-        payload: {
-          authorKind: 'agent',
-          authorId: organisationId,
-          body: "This looks like something you'd want to do regularly. Save it as a scheduled Workflow?",
-          attachments: [
-            {
-              cardKind: 'workflow_recommendation',
-              cardActions: [
-                { id: 'accept', label: 'Yes, set up' },
-                { id: 'decline', label: 'No thanks' },
-              ],
-            },
-          ],
+      appendAndEmitTaskEvent(
+        { taskId, organisationId, subaccountId: task.subaccountId },
+        'orchestrator',
+        {
+          kind: 'chat.message',
+          payload: {
+            authorKind: 'agent',
+            authorId: organisationId,
+            body: "This looks like something you'd want to do regularly. Save it as a scheduled Workflow?",
+            attachments: [
+              {
+                cardKind: 'workflow_recommendation',
+                cardActions: [
+                  { id: 'accept', label: 'Yes, set up' },
+                  { id: 'decline', label: 'No thanks' },
+                ],
+              },
+            ],
+          },
         },
-      }).catch((err: unknown) => {
+      ).catch((err: unknown) => {
         logger.warn('orchestratorFromTask.cadence_card_emit_failed', {
           taskId,
           error: err instanceof Error ? err.message : String(err),
@@ -318,13 +322,17 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     // Milestone classification — emit agent.milestone if this task produced a milestone-class outcome.
     const milestoneResult = classifyAsMilestone(description);
     if (milestoneResult.isMilestone) {
-      appendAndEmitTaskEvent(taskId, 0, 0, 'orchestrator', {
-        kind: 'agent.milestone',
-        payload: {
-          summary: milestoneResult.summary ?? description.slice(0, 120),
-          agentId: resolvedRoot.agentId,
+      appendAndEmitTaskEvent(
+        { taskId, organisationId, subaccountId: task.subaccountId },
+        'orchestrator',
+        {
+          kind: 'agent.milestone',
+          payload: {
+            summary: milestoneResult.summary ?? description.slice(0, 120),
+            agentId: resolvedRoot.agentId,
+          },
         },
-      }).catch((err: unknown) => {
+      ).catch((err: unknown) => {
         logger.warn('orchestratorFromTask.milestone_emit_failed', {
           taskId,
           error: err instanceof Error ? err.message : String(err),

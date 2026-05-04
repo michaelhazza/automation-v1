@@ -153,7 +153,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/replay',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { WorkflowEngineService } = await import('../services/workflowEngineService.js');
     const result = await WorkflowEngineService.createReplayRun(

@@ -42,6 +42,8 @@ import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
 import type { PauseReason } from './workflowRunPauseStopServicePure.js';
 import { TaskAlreadyHasActiveRunError } from './errors/TaskAlreadyHasActiveRunError.js';
+import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -250,43 +252,25 @@ export const WorkflowRunService = {
       const portalVisibleDefault = definition.portalPresentation !== undefined;
       const isPortalVisible = input.isPortalVisible ?? portalVisibleDefault;
 
-      let run: typeof workflowRuns.$inferSelect;
-      try {
-        const [inserted] = await tx
-          .insert(workflowRuns)
-          .values({
-            organisationId: input.organisationId,
-            subaccountId: input.subaccountId,
-            templateVersionId,
-            runMode: input.runMode ?? 'auto',
-            status: 'pending',
-            contextJson: effectiveContext as unknown as Record<string, unknown>,
-            contextSizeBytes: contextBytes,
-            startedByUserId: input.startedByUserId,
-            taskId: input.taskId,
-            startedAt,
-            isOnboardingRun: input.isOnboardingRun ?? false,
-            isPortalVisible,
-            workflowSlug: slug,
-          })
-          .returning();
-        run = inserted;
-      } catch (err: unknown) {
-        // PostgreSQL SQLSTATE 23505 = unique_violation
-        // The partial unique index workflow_runs_one_active_per_task_idx fires
-        // when there's already an active run for this task.
-        if (
-          typeof err === 'object' &&
-          err !== null &&
-          'code' in err &&
-          (err as { code: string }).code === '23505' &&
-          'constraint' in err &&
-          (err as { constraint: string }).constraint === 'workflow_runs_one_active_per_task_idx'
-        ) {
-          throw new TaskAlreadyHasActiveRunError(input.taskId);
-        }
-        throw err;
-      }
+      const run = await insertRunRowWithUniqueGuard(
+        tx as unknown as typeof db,
+        {
+          organisationId: input.organisationId,
+          subaccountId: input.subaccountId,
+          templateVersionId,
+          runMode: input.runMode ?? 'auto',
+          status: 'pending',
+          contextJson: effectiveContext as unknown as Record<string, unknown>,
+          contextSizeBytes: contextBytes,
+          startedByUserId: input.startedByUserId,
+          taskId: input.taskId,
+          startedAt,
+          isOnboardingRun: input.isOnboardingRun ?? false,
+          isPortalVisible,
+          workflowSlug: slug,
+        },
+        input.taskId,
+      );
       runId = run.id;
 
       // Patch the runId into context_json's _meta.
@@ -780,6 +764,37 @@ export const WorkflowRunService = {
       }
     }
 
+    // Spec REQ 9-12 — helper that emits step.approval_resolved AFTER the gate
+    // is resolved + step run is terminal. Plan ordering: emit MUST land before
+    // the next step is dispatched so the timeline shows resolved-then-next in
+    // order. reviewKind is best-effort — the runtime distinction is not
+    // persisted on the gate row, so we default to 'action_call_approval' (the
+    // dominant case at org-level decideApproval entry).
+    const emitApprovalResolved = (resolvedDecision: 'approved' | 'rejected'): void => {
+      if (!run.taskId) return;
+      const outputForActionId = (stepRun.outputJson as Record<string, unknown> | null) ?? null;
+      const actionId =
+        (typeof outputForActionId?.action_id === 'string' ? outputForActionId.action_id : null) ??
+        (typeof outputForActionId?.actionId === 'string' ? outputForActionId.actionId : '') ?? '';
+      void appendAndEmitTaskEvent(
+        {
+          taskId: run.taskId,
+          organisationId: run.organisationId,
+          subaccountId: run.subaccountId,
+        },
+        'gate',
+        {
+          kind: 'step.approval_resolved',
+          payload: {
+            stepId: stepRun.stepId,
+            reviewKind: 'action_call_approval',
+            actionId,
+            decision: resolvedDecision,
+          },
+        },
+      );
+    };
+
     if (decision === 'rejected') {
       // Synthesised-gate rejection: stall rather than fail. The step remains in
       // awaiting_approval and the stall-and-notify cadence (Chunk 8) handles escalation.
@@ -820,6 +835,7 @@ export const WorkflowRunService = {
         });
       }
 
+      emitApprovalResolved('rejected');
       return { stepRunStatus: 'failed', newVersion: stepRun.version + 1 };
     }
 
@@ -878,6 +894,7 @@ export const WorkflowRunService = {
         });
       }
 
+      emitApprovalResolved('approved');
       return { stepRunStatus: stepOutcome, newVersion: stepRun.version + 1 };
     }
 
@@ -919,6 +936,7 @@ export const WorkflowRunService = {
       });
     }
 
+    emitApprovalResolved('approved');
     return { stepRunStatus: 'completed', newVersion: stepRun.version + 1 };
   },
 };

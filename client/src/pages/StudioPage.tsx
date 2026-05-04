@@ -87,7 +87,7 @@ export default function StudioPage({ user: _user }: { user: User }) {
               if (controller.signal.aborted) return;
               const e = err as { response?: { status?: number } };
               if (e.response?.status === 410) {
-                toast.info('Draft already used or discarded — showing published version');
+                toast.info('Draft already used or discarded, showing published version');
               } else if (e.response?.status === 404) {
                 toast.warning('Draft not found');
               }
@@ -155,7 +155,7 @@ export default function StudioPage({ user: _user }: { user: User }) {
           : [String(errs)];
         setValidationErrors(errList);
         setPublishModalOpen(false);
-        toast.error('Validation failed — see errors below');
+        toast.error('Validation failed, see errors below');
       } else {
         toast.error('Publish failed');
       }

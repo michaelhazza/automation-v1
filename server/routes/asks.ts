@@ -54,9 +54,13 @@ router.post(
         res.status(409).json({ error: 'already_submitted', submitted_by: err.submittedBy, submitted_at: err.submittedAt });
         return;
       }
-      const shaped = err as { statusCode?: number; message?: string };
+      const shaped = err as { statusCode?: number; errorCode?: string };
       if (shaped.statusCode === 404) {
-        res.status(404).json({ error: shaped.message ?? 'not_found' });
+        res.status(404).json({ error: shaped.errorCode ?? 'not_found' });
+        return;
+      }
+      if (shaped.statusCode === 400) {
+        res.status(400).json({ error: shaped.errorCode ?? 'bad_request' });
         return;
       }
       throw err;
@@ -92,9 +96,13 @@ router.post(
         res.status(409).json({ error: 'already_resolved', current_status: err.currentStatus, submitted_by: err.submittedBy, submitted_at: err.submittedAt });
         return;
       }
-      const shaped = err as { statusCode?: number; message?: string };
+      const shaped = err as { statusCode?: number; errorCode?: string };
       if (shaped.statusCode === 404) {
-        res.status(404).json({ error: shaped.message ?? 'not_found' });
+        res.status(404).json({ error: shaped.errorCode ?? 'not_found' });
+        return;
+      }
+      if (shaped.statusCode === 400) {
+        res.status(400).json({ error: shaped.errorCode ?? 'bad_request' });
         return;
       }
       throw err;

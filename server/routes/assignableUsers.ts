@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { assignableUsersService, ForbiddenError } from '../services/assignableUsersService.js';
 import { ASSIGNABLE_USERS_INTENTS } from '../../shared/types/assignableUsers.js';
 import type { AssignableUsersIntent } from '../../shared/types/assignableUsers.js';
@@ -24,11 +25,16 @@ router.get(
       return;
     }
 
+    // Resolve and validate subaccount belongs to org. Without this, a same-org
+    // user could pass a foreign org's subaccount UUID and the service's LEFT
+    // JOIN on subaccount_user_assignments would leak cross-tenant membership.
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
     try {
       const result = await assignableUsersService.resolvePool({
         caller: { id: req.user!.id, dbRole: req.user!.role },
         organisationId: req.orgId!,
-        subaccountId: req.params.subaccountId,
+        subaccountId: subaccount.id,
         intent: intent as AssignableUsersIntent,
       });
       res.json(result);

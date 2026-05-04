@@ -25,7 +25,7 @@ export const fileRevertHunkService = {
     // 1. Verify org owns the file.
     const result = await referenceDocumentService.getByIdWithCurrentVersion(fileId, organisationId);
     if (!result) {
-      throw { statusCode: 404, error: 'file_not_found' };
+      throw { statusCode: 404, message: 'File not found', errorCode: 'file_not_found' };
     }
     const { doc } = result;
 
@@ -34,8 +34,9 @@ export const fileRevertHunkService = {
     if (doc.currentVersion !== expectedCurrentVersion) {
       throw {
         statusCode: 409,
-        error: 'base_version_changed',
-        current_version: doc.currentVersion,
+        message: 'Base version changed since the diff was rendered',
+        errorCode: 'base_version_changed',
+        currentVersion: doc.currentVersion,
       };
     }
 
@@ -46,7 +47,7 @@ export const fileRevertHunkService = {
     ]);
 
     if (!fromRow || !toRow) {
-      throw { statusCode: 404, error: 'version_not_found' };
+      throw { statusCode: 404, message: 'Version not found', errorCode: 'version_not_found' };
     }
 
     // 4. Compute hunks.
@@ -68,15 +69,19 @@ export const fileRevertHunkService = {
     });
 
     // 7. Emit file.edited task event.
-    void appendAndEmitTaskEvent(taskId, Date.now(), 0, 'user', {
-      kind: 'file.edited',
-      payload: {
-        fileId,
-        priorVersion: expectedCurrentVersion,
-        newVersion: newVersionRow.version,
-        editRequest: `hunk revert: hunk ${hunkIndex} of v${fromVersion}..v${expectedCurrentVersion}`,
+    void appendAndEmitTaskEvent(
+      { taskId, organisationId, subaccountId: null },
+      'user',
+      {
+        kind: 'file.edited',
+        payload: {
+          fileId,
+          priorVersion: expectedCurrentVersion,
+          newVersion: newVersionRow.version,
+          editRequest: `hunk revert: hunk ${hunkIndex} of v${fromVersion}..v${expectedCurrentVersion}`,
+        },
       },
-    });
+    );
 
     // 8. Return result.
     return { reverted: true, newVersion: newVersionRow.version };
