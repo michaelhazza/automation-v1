@@ -2,13 +2,17 @@ import { useState } from 'react';
 import { NowTab } from './NowTab';
 import { PlanTab } from './PlanTab';
 import { FilesTab } from './FilesTab';
-import type { TaskProjection } from '../../../../shared/types/taskProjection';
+import type { TaskProjection, FileProjection } from '../../../../shared/types/taskProjection';
 
 type Tab = 'now' | 'plan' | 'files';
 
-interface RightPaneTabsProps { projection: TaskProjection }
+interface RightPaneTabsProps {
+  projection: TaskProjection;
+  taskId: string;
+  files: FileProjection[];
+}
 
-export function RightPaneTabs({ projection }: RightPaneTabsProps) {
+export function RightPaneTabs({ projection, taskId, files }: RightPaneTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>('plan');
 
   return (
@@ -31,7 +35,7 @@ export function RightPaneTabs({ projection }: RightPaneTabsProps) {
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'now' && <NowTab projection={projection} />}
         {activeTab === 'plan' && <PlanTab projection={projection} />}
-        {activeTab === 'files' && <FilesTab />}
+        {activeTab === 'files' && <FilesTab taskId={taskId} files={files} />}
       </div>
     </div>
   );

@@ -57,7 +57,7 @@ export default function OpenTaskView({ user }: { user: User }) {
           <ActivityPane projection={projection} />
         </div>
         <div className="flex-1 overflow-hidden flex flex-col">
-          <RightPaneTabs projection={projection} />
+          <RightPaneTabs projection={projection} taskId={taskId!} files={projection.files} />
         </div>
       </div>
     </div>

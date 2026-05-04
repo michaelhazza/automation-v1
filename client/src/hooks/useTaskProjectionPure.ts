@@ -6,6 +6,7 @@ import type {
   AskGateProjection,
   StepProjection,
   ActivityEventProjection,
+  FileProjection,
 } from '../../../shared/types/taskProjection';
 import { INITIAL_TASK_PROJECTION } from '../../../shared/types/taskProjection';
 import type { TaskEventEnvelope, TaskEvent } from '../../../shared/types/taskEvent';
@@ -18,6 +19,7 @@ export type {
   AskGateProjection,
   StepProjection,
   ActivityEventProjection,
+  FileProjection,
 };
 
 /**
@@ -184,6 +186,34 @@ export function applyTaskEvent(prev: TaskProjection, envelope: TaskEventEnvelope
     case 'task.degraded':
       next.isDegraded = true;
       next.degradationReason = payload.payload.degradationReason;
+      break;
+    case 'file.created': {
+      const existing = prev.files.find(f => f.fileId === payload.payload.fileId);
+      if (existing) {
+        next.files = prev.files.map(f =>
+          f.fileId === payload.payload.fileId
+            ? { ...f, currentVersion: payload.payload.version, lastEditRequest: undefined }
+            : f
+        );
+      } else {
+        next.files = [
+          ...prev.files,
+          {
+            fileId: payload.payload.fileId,
+            currentVersion: payload.payload.version,
+            producerAgentId: payload.payload.producerAgentId,
+            updatedAt: timestamp,
+          },
+        ];
+      }
+      break;
+    }
+    case 'file.edited':
+      next.files = prev.files.map(f =>
+        f.fileId === payload.payload.fileId
+          ? { ...f, currentVersion: payload.payload.newVersion, lastEditRequest: payload.payload.editRequest, updatedAt: timestamp }
+          : f
+      );
       break;
     default:
       break;

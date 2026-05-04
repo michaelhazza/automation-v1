@@ -1,3 +1,11 @@
+export interface FileProjection {
+  fileId: string;
+  currentVersion: number;
+  producerAgentId: string;
+  lastEditRequest?: string;
+  updatedAt: string; // ISO
+}
+
 export interface ChatMessageProjection {
   id: string;
   authorKind: 'user' | 'agent';
@@ -61,6 +69,7 @@ export interface TaskProjection {
   askGates: AskGateProjection[];
   steps: StepProjection[];
   activityEvents: ActivityEventProjection[];
+  files: FileProjection[];
   runStatus: 'running' | 'paused' | 'paused_cost' | 'paused_wall_clock' | 'stopped' | null;
   isDegraded: boolean;
   degradationReason: string | null;
@@ -76,6 +85,7 @@ export const INITIAL_TASK_PROJECTION: TaskProjection = {
   askGates: [],
   steps: [],
   activityEvents: [],
+  files: [],
   runStatus: null,
   isDegraded: false,
   degradationReason: null,
