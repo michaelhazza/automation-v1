@@ -1,55 +1,52 @@
+// guard-ignore-file: pure-helper-convention reason="shape-only contract test against the impure service module; the service is the unit under test, not a sibling pure helper. The DraftSource union is a shared/types literal, not a sibling extraction"
 /**
  * workflowDraftService.test.ts
  *
  * Shape and type-level tests for workflowDraftService.
  * DB-touching methods are not called — only the exported shape is verified.
  *
- * Run via:
- *   npx tsx server/services/__tests__/workflowDraftService.test.ts
- *
  * Spec: tasks/builds/workflows-v1-phase-2/plan.md Chunk 14b.
  */
 
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+import { workflowDraftService } from '../workflowDraftService.js';
 
-// Verify DraftSource literal union is exhaustive as expected by the spec.
+// DraftSource literal union mirror — kept in lockstep with shared/types/workflowStepGate.ts
 type DraftSource = 'orchestrator' | 'studio_handoff';
-
 const validSources: DraftSource[] = ['orchestrator', 'studio_handoff'];
 
-function assertIncludes<T>(arr: T[], value: T, label: string): void {
-  assert.ok(arr.includes(value), `${label}: expected '${String(value)}' to be in the list`);
-}
+describe('DraftSource literal union', () => {
+  it('contains exactly two values', () => {
+    expect(validSources).toHaveLength(2);
+  });
 
-// DraftSource round-trip — both values are valid.
-assertIncludes(validSources, 'orchestrator', 'DraftSource');
-assertIncludes(validSources, 'studio_handoff', 'DraftSource');
-assert.equal(validSources.length, 2, 'DraftSource has exactly 2 members');
+  it('contains "orchestrator"', () => {
+    expect(validSources).toContain('orchestrator');
+  });
 
-// Service shape — verify all required methods are exported.
-// We import the module but do not call DB methods.
-import('../workflowDraftService.js').then((mod) => {
-  const svc = mod.workflowDraftService;
+  it('contains "studio_handoff"', () => {
+    expect(validSources).toContain('studio_handoff');
+  });
+});
 
-  assert.equal(typeof svc.findById, 'function', 'findById must be a function');
-  assert.equal(typeof svc.markConsumed, 'function', 'markConsumed must be a function');
-  assert.equal(typeof svc.create, 'function', 'create must be a function');
-  assert.equal(typeof svc.listUnconsumedOlderThan, 'function', 'listUnconsumedOlderThan must be a function');
+describe('workflowDraftService shape', () => {
+  it('exports findById as a 2-arg function', () => {
+    expect(typeof workflowDraftService.findById).toBe('function');
+    expect(workflowDraftService.findById.length).toBe(2);
+  });
 
-  // findById returns null when not found (verified via arity — no real DB call).
-  assert.equal(svc.findById.length, 2, 'findById takes (draftId, organisationId)');
-  assert.equal(svc.markConsumed.length, 2, 'markConsumed takes (draftId, organisationId)');
-  assert.equal(svc.create.length, 1, 'create takes (params)');
-  assert.equal(svc.listUnconsumedOlderThan.length, 1, 'listUnconsumedOlderThan takes (olderThan)');
+  it('exports markConsumed as a 2-arg function', () => {
+    expect(typeof workflowDraftService.markConsumed).toBe('function');
+    expect(workflowDraftService.markConsumed.length).toBe(2);
+  });
 
-  console.log('workflowDraftService shape tests passed');
-}).catch((err: unknown) => {
-  // Module import may fail in test environments without a real DB connection.
-  // This is expected — the shape is validated at the type level by TypeScript.
-  const message = err instanceof Error ? err.message : String(err);
-  if (message.includes('DATABASE_URL') || message.includes('connect') || message.includes('ECONNREFUSED')) {
-    console.log('workflowDraftService shape tests skipped (no DB available — expected in CI-less run)');
-    process.exit(0);
-  }
-  throw err;
+  it('exports create as a 1-arg function', () => {
+    expect(typeof workflowDraftService.create).toBe('function');
+    expect(workflowDraftService.create.length).toBe(1);
+  });
+
+  it('exports listUnconsumedOlderThan as a 1-arg function', () => {
+    expect(typeof workflowDraftService.listUnconsumedOlderThan).toBe('function');
+    expect(workflowDraftService.listUnconsumedOlderThan.length).toBe(1);
+  });
 });

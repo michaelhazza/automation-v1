@@ -1,10 +1,8 @@
+// guard-ignore-file: pure-helper-convention reason="validateTeamName logic is currently inlined inside teamsService.createTeam — no extracted sibling pure helper. The test mirrors the inline algorithm so future refactors that extract it stay testable in isolation"
 /**
  * teamsServicePure.test.ts — Pure validation tests for teams service.
  *
  * Tests the name validation and mock-list behaviour without DB calls.
- *
- * Runnable via:
- *   npx tsx server/services/__tests__/teamsServicePure.test.ts
  */
 
 import { expect, test, describe } from 'vitest';

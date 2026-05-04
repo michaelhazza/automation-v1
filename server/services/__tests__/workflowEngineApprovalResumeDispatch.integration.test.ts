@@ -137,6 +137,7 @@ async function cleanupWorkflowScope(scope: {
 
   // Clean up the task row seeded for this run (no cascade from workflow_runs → tasks).
   if (taskIdToClean) {
+    // guard-ignore-next-line: org-scoped-writes reason="integration-test cleanup — taskIdToClean was inserted by this test's own setup, and the bare-id delete is intentional because the test runs as the admin role outside any withOrgTx context"
     await db.delete(tasks).where(eq(tasks.id, taskIdToClean));
   }
 }

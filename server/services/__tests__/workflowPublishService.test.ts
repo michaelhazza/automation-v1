@@ -1,40 +1,12 @@
+// guard-ignore-file: pure-helper-convention reason="concurrent-edit detection logic is inlined in workflowPublishService.publish() — there is no extracted sibling pure helper. The test mirrors that inline algorithm and asserts the typed-error shape it must throw"
 /**
  * workflowPublishService.test.ts — concurrent-edit detection unit tests.
  *
- * Tests the concurrent-edit detection logic in isolation by monkey-patching
- * WorkflowTemplateService and db so no actual DB connection is needed.
- *
- * Runnable via:
- *   npx tsx server/services/__tests__/workflowPublishService.test.ts
+ * Tests the concurrent-edit detection logic in isolation by re-implementing
+ * the inline algorithm and verifying it produces the right throw shape.
  */
 
-// ─── Minimal test harness ────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => Promise<void> | void) {
-  return Promise.resolve(fn())
-    .then(() => {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    })
-    .catch((err: unknown) => {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : String(err)}`);
-    });
-}
-
-function assertEqual<T>(actual: T, expected: T, label: string) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(
-      `${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
-  }
-}
-
-// ─── Stub helpers ─────────────────────────────────────────────────────────────
+import { describe, it, expect } from 'vitest';
 
 const TEMPLATE_UPDATED_AT = new Date('2024-01-15T12:00:00.000Z');
 
@@ -66,19 +38,12 @@ const STUB_LATEST_VERSION = {
   publishNotes: null,
 };
 
-// ─── Module mocking via dynamic import override ───────────────────────────────
-//
-// We test the concurrent-edit detection logic directly by calling it with
-// a controlled WorkflowTemplateService stub. Since we can't replace ESM
-// imports after load, we test the pure logic by re-implementing the
-// detection algorithm inline and verifying it produces the right throw shape.
-
+// Mirrors workflowPublishService.publish() concurrent-edit detection.
 async function runConcurrentEditDetection(params: {
   templateUpdatedAt: Date;
   expectedUpstreamUpdatedAt: string | undefined;
   latestVersionPublishedByUserId: string | null;
 }): Promise<void> {
-  // This mirrors the exact logic in workflowPublishService.publish()
   if (params.expectedUpstreamUpdatedAt) {
     const actualUpdatedAt = params.templateUpdatedAt.toISOString();
     if (actualUpdatedAt !== params.expectedUpstreamUpdatedAt) {
@@ -93,50 +58,46 @@ async function runConcurrentEditDetection(params: {
   }
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
-console.log('');
-console.log('workflowPublishService — concurrent-edit detection');
-console.log('');
-
-async function main() {
-  await test('no expectedUpstreamUpdatedAt → no throw (detection skipped)', async () => {
-    await runConcurrentEditDetection({
-      templateUpdatedAt: TEMPLATE_UPDATED_AT,
-      expectedUpstreamUpdatedAt: undefined,
-      latestVersionPublishedByUserId: null,
-    });
-    // No throw = pass
+describe('workflowPublishService — concurrent-edit detection', () => {
+  it('no expectedUpstreamUpdatedAt → no throw (detection skipped)', async () => {
+    await expect(
+      runConcurrentEditDetection({
+        templateUpdatedAt: TEMPLATE_UPDATED_AT,
+        expectedUpstreamUpdatedAt: undefined,
+        latestVersionPublishedByUserId: null,
+      }),
+    ).resolves.toBeUndefined();
   });
 
-  await test('expectedUpstreamUpdatedAt matches → no throw (proceeds to publish)', async () => {
-    await runConcurrentEditDetection({
-      templateUpdatedAt: TEMPLATE_UPDATED_AT,
-      expectedUpstreamUpdatedAt: TEMPLATE_UPDATED_AT.toISOString(),
-      latestVersionPublishedByUserId: 'user-a',
-    });
-    // No throw = pass
+  it('expectedUpstreamUpdatedAt matches → no throw (proceeds to publish)', async () => {
+    await expect(
+      runConcurrentEditDetection({
+        templateUpdatedAt: TEMPLATE_UPDATED_AT,
+        expectedUpstreamUpdatedAt: TEMPLATE_UPDATED_AT.toISOString(),
+        latestVersionPublishedByUserId: 'user-a',
+      }),
+    ).resolves.toBeUndefined();
   });
 
-  await test('expectedUpstreamUpdatedAt mismatch → throws 409 with correct shape', async () => {
+  it('expectedUpstreamUpdatedAt mismatch → throws 409 with correct shape', async () => {
     let caught: Record<string, unknown> | null = null;
     try {
       await runConcurrentEditDetection({
         templateUpdatedAt: TEMPLATE_UPDATED_AT,
-        expectedUpstreamUpdatedAt: '2024-01-01T00:00:00.000Z', // stale
+        expectedUpstreamUpdatedAt: '2024-01-01T00:00:00.000Z',
         latestVersionPublishedByUserId: 'user-prev',
       });
     } catch (err) {
       caught = err as Record<string, unknown>;
     }
-    if (!caught) throw new Error('Expected a throw but none occurred');
-    assertEqual(caught['statusCode'], 409, 'statusCode');
-    assertEqual(caught['errorCode'], 'concurrent_publish', 'errorCode');
-    assertEqual(caught['upstreamUpdatedAt'], TEMPLATE_UPDATED_AT.toISOString(), 'upstreamUpdatedAt');
-    assertEqual(caught['upstreamUserId'], 'user-prev', 'upstreamUserId');
+    expect(caught).not.toBeNull();
+    expect(caught!['statusCode']).toBe(409);
+    expect(caught!['errorCode']).toBe('concurrent_publish');
+    expect(caught!['upstreamUpdatedAt']).toBe(TEMPLATE_UPDATED_AT.toISOString());
+    expect(caught!['upstreamUserId']).toBe('user-prev');
   });
 
-  await test('mismatch with null publishedByUserId → upstreamUserId is null', async () => {
+  it('mismatch with null publishedByUserId → upstreamUserId is null', async () => {
     let caught: Record<string, unknown> | null = null;
     try {
       await runConcurrentEditDetection({
@@ -147,23 +108,19 @@ async function main() {
     } catch (err) {
       caught = err as Record<string, unknown>;
     }
-    if (!caught) throw new Error('Expected a throw but none occurred');
-    assertEqual(caught['upstreamUserId'], null, 'upstreamUserId is null');
+    expect(caught).not.toBeNull();
+    expect(caught!['upstreamUserId']).toBeNull();
+  });
+});
+
+describe('workflowPublishService — stub shape sanity', () => {
+  it('STUB_TEMPLATE matches expected shape', () => {
+    expect(STUB_TEMPLATE.id).toBe('tmpl-1');
+    expect(STUB_TEMPLATE.latestVersion).toBe(3);
   });
 
-  console.log('');
-
-  // Verify stub shapes match what the service expects (type-level smoke)
-  const _template: typeof STUB_TEMPLATE = STUB_TEMPLATE;
-  const _version: typeof STUB_LATEST_VERSION = STUB_LATEST_VERSION;
-  void _template; void _version;
-
-  console.log(`Results: ${passed} passed, ${failed} failed`);
-  console.log('');
-  if (failed > 0) process.exit(1);
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
+  it('STUB_LATEST_VERSION matches expected shape', () => {
+    expect(STUB_LATEST_VERSION.templateId).toBe('tmpl-1');
+    expect(STUB_LATEST_VERSION.version).toBe(3);
+  });
 });

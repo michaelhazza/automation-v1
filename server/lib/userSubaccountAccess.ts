@@ -13,7 +13,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from './orgScopedDb.js';
 import { subaccountUserAssignments } from '../db/schema/index.js';
 
 export type UserDbRole = 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user';
@@ -30,6 +30,7 @@ export async function userCanAccessSubaccount(
     return false;
   }
 
+  const db = getOrgScopedDb('userSubaccountAccess');
   const [row] = await db
     .select({ id: subaccountUserAssignments.id })
     .from(subaccountUserAssignments)
