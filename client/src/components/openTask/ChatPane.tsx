@@ -4,6 +4,7 @@ import { MilestoneCard } from './MilestoneCard';
 import { ApprovalCard } from './ApprovalCard';
 import { ThinkingBox } from './ThinkingBox';
 import { AskFormCardPlaceholder } from './AskFormCardPlaceholder';
+import { PauseCard } from './PauseCard';
 
 interface ChatPaneProps { taskId: string; projection: TaskProjection }
 
@@ -59,6 +60,9 @@ export function ChatPane({ taskId, projection }: ChatPaneProps) {
           <AskFormCardPlaceholder key={g.gateId} gate={g} />
         ))}
         {projection.thinkingText && <ThinkingBox text={projection.thinkingText} />}
+        {projection.runStatus?.startsWith('paused') && (
+          <PauseCard taskId={taskId} reason={projection.runStatus as 'paused' | 'paused_cost' | 'paused_wall_clock'} />
+        )}
         <div ref={bottomRef} />
       </div>
     </div>

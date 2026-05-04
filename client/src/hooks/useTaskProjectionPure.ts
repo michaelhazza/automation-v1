@@ -31,7 +31,10 @@ export function applyTaskEvent(prev: TaskProjection, envelope: TaskEventEnvelope
   const next: TaskProjection = {
     ...prev,
     lastEventSeq: Math.max(prev.lastEventSeq, taskSequence),
-    lastEventSubseq: eventSubsequence,
+    lastEventSubseq:
+      taskSequence > prev.lastEventSeq ? eventSubsequence
+      : taskSequence === prev.lastEventSeq ? Math.max(prev.lastEventSubseq, eventSubsequence)
+      : prev.lastEventSubseq,
   };
 
   const activityEntry: ActivityEventProjection = {

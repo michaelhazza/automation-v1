@@ -1,6 +1,8 @@
 import type { TaskProjection } from '../../../../shared/types/taskProjection';
 import { classifyTask } from './openTaskViewPure';
 
+const SHOW_CONFIDENCE_CHIP = (import.meta as unknown as Record<string, Record<string, string>>).env?.VITE_SHOW_CONFIDENCE_CHIP === 'true';
+
 interface PlanTabProps { projection: TaskProjection }
 
 export function PlanTab({ projection }: PlanTabProps) {
@@ -37,6 +39,11 @@ export function PlanTab({ projection }: PlanTabProps) {
             <span className="text-[11px] text-slate-400 w-4 text-right">{i + 1}</span>
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
             <span className="text-[13px] text-slate-700 truncate">{step.stepType}</span>
+            {SHOW_CONFIDENCE_CHIP && step.params?.seenConfidence != null && (
+              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                {String(step.params.seenConfidence)}
+              </span>
+            )}
           </div>
         );
       })}

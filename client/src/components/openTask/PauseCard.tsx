@@ -10,12 +10,20 @@ interface PauseCardProps {
 
 export function PauseCard({ taskId, reason, onResume, onStop }: PauseCardProps) {
   const [loading, setLoading] = useState(false);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   const handleResume = async () => {
     setLoading(true);
+    setInlineError(null);
     try {
       await api.post(`/api/tasks/${taskId}/run/resume`);
       onResume?.();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      if (e?.response?.data?.error === 'no_active_run_for_task') {
+        setInlineError('No active workflow on this task.');
+        onResume?.();
+      }
     } finally {
       setLoading(false);
     }
@@ -23,9 +31,16 @@ export function PauseCard({ taskId, reason, onResume, onStop }: PauseCardProps) 
 
   const handleStop = async () => {
     setLoading(true);
+    setInlineError(null);
     try {
       await api.post(`/api/tasks/${taskId}/run/stop`);
       onStop?.();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      if (e?.response?.data?.error === 'no_active_run_for_task') {
+        setInlineError('No active workflow on this task.');
+        onStop?.();
+      }
     } finally {
       setLoading(false);
     }
@@ -41,7 +56,7 @@ export function PauseCard({ taskId, reason, onResume, onStop }: PauseCardProps) 
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 mb-2">
       <p className="text-[13px] font-semibold text-amber-800">{label}</p>
-      <div className="flex gap-2 mt-2">
+      <div className="flex items-center gap-2 mt-2">
         <button
           onClick={handleResume}
           disabled={loading}
@@ -56,6 +71,7 @@ export function PauseCard({ taskId, reason, onResume, onStop }: PauseCardProps) 
         >
           Stop
         </button>
+        {inlineError && <span className="text-[11px] text-slate-500">{inlineError}</span>}
       </div>
     </div>
   );
