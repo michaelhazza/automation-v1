@@ -6,6 +6,11 @@ import { taskService } from '../services/taskService.js';
 import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
 import { writeConversationMessage } from '../services/briefConversationWriter.js';
 import { logger } from '../lib/logger.js';
+import { detectCadenceSignals } from '../services/orchestratorCadenceDetectionPure.js';
+import { classifyAsMilestone } from '../services/orchestratorMilestoneEmitterPure.js';
+import { detectWorkflowDraftIntent } from '../services/chatTriageClassifierPure.js';
+import { appendAndEmitTaskEvent } from '../services/taskEventService.js';
+import { workflowDraftService } from '../services/workflowDraftService.js';
 
 // ---------------------------------------------------------------------------
 // orchestratorFromTaskJob
@@ -135,6 +140,26 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
     return;
   }
 
+  const description = task.description ?? '';
+
+  // 2c. Workflow draft request detection — if the operator explicitly asks to
+  //     save this task as a workflow, create a draft immediately.
+  const workflowDraftIntent = detectWorkflowDraftIntent(description);
+  if (workflowDraftIntent === 'workflow_draft_request' && task.subaccountId) {
+    workflowDraftService.create({
+      sessionId: taskId,
+      organisationId,
+      subaccountId: task.subaccountId,
+      payload: { steps: [], promptSummary: description },
+      draftSource: 'orchestrator',
+    }).catch((err: unknown) => {
+      logger.warn('orchestratorFromTask.workflow_draft_create_failed', {
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   // 3. Determine scope from payload — default to 'subaccount' for all
   //    enqueue paths that do not supply an explicit scope (e.g. taskService).
   //    This is a compatibility shim, not a policy. New enqueue paths must
@@ -258,9 +283,54 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         idempotencyKey,
         routingSource: 'rule',
       },
+      workflowRunDepth: 1,
     });
 
     logger.info('orchestratorFromTask.dispatched', { taskId, organisationId, subaccountAgentId: resolvedRoot.subaccountAgentId, scope, fallback: resolvedRoot.fallback });
+
+    // 2b. Cadence detection — emit recommendation card after task completion.
+    const cadenceResult = detectCadenceSignals(description);
+    if (cadenceResult.score >= 0.5) {
+      appendAndEmitTaskEvent(taskId, 0, 0, 'orchestrator', {
+        kind: 'chat.message',
+        payload: {
+          authorKind: 'agent',
+          authorId: organisationId,
+          body: "This looks like something you'd want to do regularly. Save it as a scheduled Workflow?",
+          attachments: [
+            {
+              cardKind: 'workflow_recommendation',
+              cardActions: [
+                { id: 'accept', label: 'Yes, set up' },
+                { id: 'decline', label: 'No thanks' },
+              ],
+            },
+          ],
+        },
+      }).catch((err: unknown) => {
+        logger.warn('orchestratorFromTask.cadence_card_emit_failed', {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
+    // Milestone classification — emit agent.milestone if this task produced a milestone-class outcome.
+    const milestoneResult = classifyAsMilestone(description);
+    if (milestoneResult.isMilestone) {
+      appendAndEmitTaskEvent(taskId, 0, 0, 'orchestrator', {
+        kind: 'agent.milestone',
+        payload: {
+          summary: milestoneResult.summary ?? description.slice(0, 120),
+          agentId: resolvedRoot.agentId,
+        },
+      }).catch((err: unknown) => {
+        logger.warn('orchestratorFromTask.milestone_emit_failed', {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   } catch (err) {
     logger.error('orchestratorFromTask.dispatch_failed', {
       taskId,

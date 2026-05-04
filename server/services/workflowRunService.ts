@@ -136,7 +136,7 @@ export const WorkflowRunService = {
     templateId?: string;
     systemTemplateSlug?: string;
     initialInput: Record<string, unknown>;
-    startedByUserId: string;
+    startedByUserId: string | undefined;
     runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
     bulkTargets?: string[];
     taskId: string;
@@ -152,6 +152,7 @@ export const WorkflowRunService = {
      * found, startRun throws `pinned_version_unavailable` (422).
      */
     pinnedTemplateVersionId?: string | null;
+    workflowRunDepth?: number;
   }): Promise<{ runId: string; status: WorkflowRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -230,6 +231,7 @@ export const WorkflowRunService = {
         templateVersionId,
         startedAt: startedAt.toISOString(),
         resolvedAgents,
+        workflowRunDepth: input.workflowRunDepth,
       },
     };
 

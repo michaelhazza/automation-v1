@@ -522,6 +522,8 @@ export interface RunContext {
     };
     isReplay?: boolean;
     replaySourceRunId?: string;
+    /** Nesting depth for workflow.run.start fan-out guard. 1 = top-level. */
+    workflowRunDepth?: number;
   };
 }
 
