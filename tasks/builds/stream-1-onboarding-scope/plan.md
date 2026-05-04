@@ -93,10 +93,22 @@ Branch claude/stream-1-onboarding-scope
 | `agentExecutionService.ts` | Lines ~834-870 | Doesn't touch | Safe |
 | Migration order | 0277 | 0278-0280 | Strict numeric order |
 
+## Pre-flight migration check (mandatory at every schema phase)
+
+Migration drift on main is a real risk during a multi-day stream. At the start of any phase that adds a migration, run:
+
+```bash
+# Print the highest existing migration number on main (excluding _down + meta)
+ls migrations/ | grep -v _down | grep -v meta | grep -E '^[0-9]{4}_' | sort | tail -1
+```
+
+If the next-free number is higher than this plan's reservation, **bump the reservation** and update both the spec and the per-build progress file before authoring the migration. Do NOT skip: a colliding migration number is a merge nightmare on main.
+
 ## Risks
 
 - Spec drift if F1 review reshapes `subaccountOnboardingService`. Mitigate: same operator reviews both PRs; F3 rebases on main after F1 merges.
-- Migration number drift on main during the build. Mitigate: `ls migrations/` at the start of any phase that adds one.
+- Migration number drift on main during the build. Mitigate: pre-flight check above at every schema phase.
+- Race conditions in F3's four-trigger surface (subscriber, cron, retry, manual). Mitigate: spec §5.2 single-writer rule + §3 partial UNIQUE index — both invariants asserted by tests in `baselineInvariants.test.ts`.
 
 ## Done definition (Stream 1)
 
@@ -105,6 +117,15 @@ Branch claude/stream-1-onboarding-scope
 - Both build progress files closed out
 - `KNOWLEDGE.md` appended for patterns learned
 - `tasks/current-focus.md` returned to NONE after final merge
+
+Hard invariants (asserted before either PR ships, not just at end-of-stream):
+- **Baseline created exactly once per sub-account** — F3 §10 invariant; UNIQUE index test in `baselineInvariants.test.ts` is green.
+- **Idempotent retry** — F3 §10 invariant; running `captureBaselineService.run` twice on the same `ready` baseline produces no new metric rows. Test green.
+- **Manual override never conflicts with auto capture** — F3 §10 invariant; concurrent-simulation test green.
+- **Admin reset never destroys history** — F3 §10 invariant; `baseline_version` increment test green.
+- **All baseline timestamps use Postgres `now()`** — static check (grep for `Date.now()` in `server/services/captureBaselineService.ts` + `baselineMetricReaders/` + `baselineReadinessService.ts`) returns zero hits.
+- **F1 artefact status enum locked** — F1 §8 invariant; wizard cannot exit with Tier 1+2 in `not_started` / `in_progress`. Test green.
+- **F1→F2 interface contract honoured** — F1 §6b; `getBaselineVoiceTone` returns `null` for any non-`completed` voice_tone artefact. Test green.
 
 ## Kickoff prompt
 

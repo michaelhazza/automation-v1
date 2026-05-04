@@ -96,22 +96,37 @@ Configurable per sub-account via `subaccount_settings.baseline_metrics_opt_in[]`
 CREATE TABLE subaccount_baselines (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id UUID NOT NULL,
-  subaccount_id UUID NOT NULL UNIQUE,  -- one baseline per sub-account
-  status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'captured', 'failed', 'manual', 'reset')),
+  subaccount_id UUID NOT NULL,
+  baseline_version INTEGER NOT NULL DEFAULT 1,  -- bumps on admin-reset; preserves history
+  status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'capturing', 'captured', 'failed', 'manual', 'reset')),
   capture_attempt_count SMALLINT NOT NULL DEFAULT 0,
-  ready_at TIMESTAMPTZ,         -- when readiness condition was first met
-  captured_at TIMESTAMPTZ,      -- immutable once set; set during capture transition
+  last_attempt_at TIMESTAMPTZ,                  -- set on every retry; backoff anchor
+  ready_at TIMESTAMPTZ,                          -- when readiness condition was first met
+  captured_at TIMESTAMPTZ,                       -- immutable once set; set during capture transition
   source TEXT NOT NULL CHECK (source IN ('auto', 'manual', 'mixed')) DEFAULT 'auto',
   confidence TEXT NOT NULL CHECK (confidence IN ('confirmed', 'estimated', 'partial')) DEFAULT 'partial',
-  failure_reason TEXT,
+  failure_reason TEXT,                           -- terminal-failure category (see §5.4 retry classification)
   admin_reset_reason TEXT,
   reset_at TIMESTAMPTZ,
   reset_by_user_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Idempotency invariant: only ONE active (non-reset) baseline per (subaccount, version).
+-- A reset bumps baseline_version and writes a new row; the prior row's status transitions to 'reset'.
+-- This UNIQUE prevents duplicate writes across the four-writer surface (subscriber, fallback job,
+-- retry, manual entry) — see §5.2 single-writer rule.
+CREATE UNIQUE INDEX subaccount_baselines_active_uniq
+  ON subaccount_baselines(subaccount_id, baseline_version)
+  WHERE status <> 'reset';
+
 CREATE INDEX subaccount_baselines_status_idx ON subaccount_baselines(organisation_id, status);
+CREATE INDEX subaccount_baselines_pending_retry_idx
+  ON subaccount_baselines(last_attempt_at)
+  WHERE status IN ('ready', 'failed') AND capture_attempt_count > 0;
 ```
+
+**Timestamp invariant.** Every TIMESTAMPTZ in this schema is set by Postgres `now()` / `transaction_timestamp()` — never by application-level `Date.now()`. This guarantees deterministic ordering for month-over-month comparisons, retry anchoring, and reporting-agent delta narration. Enforce in services: every INSERT / UPDATE that sets a timestamp column SHOULD use `sql\`now()\`` (Drizzle) or omit the field and rely on the column default.
 
 ### Migration 0279 — `subaccount_baseline_metrics`
 
@@ -123,9 +138,11 @@ CREATE TABLE subaccount_baseline_metrics (
   source TEXT NOT NULL CHECK (source IN ('canonical_metric', 'manual', 'unavailable')),
   unavailable_reason TEXT,                 -- e.g. 'integration_not_connected', 'api_failure', 'no_data_yet'
   captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (baseline_id, metric_slug)
+  PRIMARY KEY (baseline_id, metric_slug)   -- one row per (baseline, metric) — idempotent re-capture overwrites
 );
 ```
+
+**Idempotent metric writes.** The PK on `(baseline_id, metric_slug)` means re-capture for the same baseline writes via `ON CONFLICT (baseline_id, metric_slug) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, captured_at = now()`. Re-running capture for a `ready` baseline never produces duplicates.
 
 ### Migration 0280 — RLS + canonical dictionary
 
@@ -135,48 +152,89 @@ CREATE TABLE subaccount_baseline_metrics (
 
 ## §4 Readiness condition + capture trigger
 
-### Condition (per `clientpulse-soft-launch-blockers-brief.md` Item 1)
+### Condition
 
-A sub-account is "ready" when ALL of the following are true:
-- ≥1 active connector (GHL or Stripe — minimum requirement)
-- The connector has completed ≥2 successful poll cycles
-- At least 2 of: pipeline_value, lead_count, conversation_engagement, revenue have non-null values
+A sub-account is "ready" when ALL of the following are true. The definition is deterministic and persistence-backed — no in-memory state, no implicit "stability windows" that don't survive a restart.
 
-Readiness is evaluated by `baselineReadinessService.evaluate(subaccountId)`. Returns `{ ready: boolean, missing: string[], reason?: string }`.
+1. **≥1 active connector**: at least one row in `connector_configs` with `status='active'` linked to the sub-account.
+2. **≥2 successful poll cycles**: count of rows in `connector_poll_history` (or equivalent existing audit; **resolve canonical source at build start** — the table that records polling outcomes is referenced by `connectorPollingService`) where `subaccount_id = ? AND outcome = 'success' AND completed_at >= now() - interval '7 days'` is `>= 2`.
+3. **Settle window elapsed**: `(now() - earliest_qualifying_poll_completed_at) >= interval '1 hour'`. This is the deterministic, restart-safe replacement for the looser word "stable" — it gives connector backoffs / partial syncs time to converge before the first capture, without requiring any new persistence layer.
+4. **≥2 of 4 core metrics non-null**: of `pipeline_value`, `lead_count`, `conversation_engagement`, `revenue` slugs in `canonical_metrics`, at least 2 have non-null `currentValue`.
 
-### Trigger model
+`baselineReadinessService.evaluate(subaccountId): Promise<ReadinessResult>` is a pure read over those four sources. Never mutates state. Returns `{ ready: boolean, missing: string[], reason?: string, qualifying_poll_count: number, earliest_qualifying_poll_at: Date | null }`. Idempotent — calling it 1× or 100× per sub-account produces the same answer until the underlying data changes.
 
-Two trigger paths:
+### Trigger model — signal vs writer
 
-1. **Event-driven** — `connectorPollingService` emits `connector.sync.complete` event on every successful poll. A subscriber `evaluateBaselineReadiness(subaccountId)` runs the readiness condition. If transitioning from `pending` → `ready`, enqueue `captureBaseline` job.
+Multiple paths can OBSERVE that a sub-account became ready. Only ONE service WRITES baselines — see §5.2 single-writer rule. Trigger paths emit signals; they do not write.
 
-2. **Cron fallback** — daily job iterates `subaccount_baselines` rows where `status='pending'` and re-evaluates readiness. Catches any sub-account that missed the event-driven path (e.g. event handler failed).
+1. **Event-driven signal** — `connectorPollingService` emits `connector.sync.complete` on every successful poll. Subscriber `onSyncCompleteEvaluateReadiness(subaccountId)` calls `baselineReadinessService.evaluate`. If the result is `{ ready: true }` AND the existing row's `status='pending'`, the subscriber enqueues a `captureBaselineJob` with the sub-account ID. The subscriber NEVER writes to `subaccount_baselines` directly.
+
+2. **Cron fallback signal** — daily pg-boss job `evaluateAllPendingBaselines` iterates `subaccount_baselines` rows with `status='pending'` (and optionally `status='ready'` whose `last_attempt_at` indicates retry is due — see §5.4), calls `baselineReadinessService.evaluate`, and enqueues `captureBaselineJob` for any that newly qualify or are due for retry. Same single-writer constraint: the job enqueues, it does not write.
+
+3. **Manual override** — operator-driven write through `<ManualBaselineForm>` (§6). Goes through the same `captureBaselineService` entrypoint with a `source='manual'` flag — no separate write path.
 
 ### Why not at sub-account creation
 
-Brief specified the trigger should NOT be at creation — integrations need time to settle, polls need time to land. Readiness gate makes this explicit. A new sub-account row in `subaccount_baselines` is created with `status='pending'` from the existing `autoStartOwedOnboardingWorkflows` hook in `server/routes/subaccounts.ts:121-150`.
+Integrations need time to settle, polls need time to land. The settle window (≥1h since the first qualifying poll) makes this explicit. A new sub-account row in `subaccount_baselines` is created with `status='pending'` and `baseline_version=1` from the existing `autoStartOwedOnboardingWorkflows` hook in `server/routes/subaccounts.ts:121-150`. That insert is itself idempotent: the UNIQUE index from §3 prevents a duplicate `pending` row even if onboarding fires twice.
 
 ## §5 Capture flow + retry logic
 
+### §5.1 State machine
+
 ```
-pending → (readiness met) → ready → (capture job runs) → captured  [success]
-                                                       → failed    [3 attempts exhausted]
-                                                       → ready     [retry, attempt++]
-manual:    captured (admin-set), source='manual'
-reset:     admin reset → status returns to 'pending', new baseline row written, history preserved
+pending → (readiness met)        → ready
+ready   → (capture job picks up) → capturing
+capturing → success              → captured
+capturing → retryable failure    → ready  (capture_attempt_count++, last_attempt_at=now())
+capturing → non-retryable / 3rd retryable failure → failed
+ready (status='captured', operator opens form) → captured (source='mixed' or 'manual')
+captured → (admin reset)         → reset; new row written with baseline_version+1, status='pending'
 ```
 
-`captureBaselineService.run(subaccountId)`:
+The `capturing` status is intentional — it makes the in-flight state visible in DB and prevents two retry workers from picking up the same baseline simultaneously (the worker takes the row via `UPDATE … SET status='capturing' WHERE id=? AND status='ready' RETURNING *`; only one update wins).
 
-1. Read sub-account's connectors + opted-in metrics from `subaccount_settings.baseline_metrics_opt_in[]`
-2. For each metric in v1 set:
-   - Read latest from `canonical_metrics` if available → write to `subaccount_baseline_metrics` with `source='canonical_metric'`
-   - Else write `source='unavailable'` with reason `integration_not_connected` or `no_data_yet`
-3. If ≥2 metrics captured successfully: transition baseline to `captured`, set `captured_at`, set `confidence='confirmed'` if all opted-in metrics succeeded, else `partial`
-4. If <2 metrics succeed: increment `capture_attempt_count`, schedule retry in 24h
-5. After 3 failed attempts: transition to `failed`, surface in UI for manual entry
+### §5.2 Single-writer rule (invariant)
 
-Each step emits telemetry: `baseline.capture.started`, `baseline.metric.captured`, `baseline.metric.unavailable`, `baseline.capture.completed`, `baseline.capture.failed`.
+**`captureBaselineService` is the only service that writes to `subaccount_baselines` after the initial `pending` row insert.** Every other surface emits signals only.
+
+| Surface | What it does | What it MUST NOT do |
+|---|---|---|
+| `subaccountOnboardingService` (creation hook) | INSERTs the initial `pending` row with `baseline_version=1` | UPDATE / DELETE existing rows |
+| `connectorPollingService` event subscriber | Calls `baselineReadinessService.evaluate`; on `ready` enqueues `captureBaselineJob` | Write to `subaccount_baselines` directly |
+| `evaluateAllPendingBaselines` cron | Same as above for the fallback path | Write directly |
+| `<ManualBaselineForm>` POST endpoint | Calls `captureBaselineService.runManual(subaccountId, metricInputs, userId)` | Write directly to either table |
+| `<AdminBaselineResetButton>` POST endpoint | Calls `captureBaselineService.adminReset(subaccountId, reason, userId)` | Write directly |
+
+This eliminates the four-writer race the reviewer flagged. Concentrating all writes in one service is what makes the idempotency guarantees in §3 enforceable.
+
+### §5.3 Capture sequence (`captureBaselineService.run(subaccountId)`)
+
+The entrypoint is also the only retry entry point. The job runner calls it with the sub-account ID; the service handles state transitions internally.
+
+1. **Acquire `capturing` lock**: `UPDATE subaccount_baselines SET status='capturing', last_attempt_at=now() WHERE subaccount_id=? AND status='ready' AND baseline_version = (SELECT MAX(baseline_version) FROM subaccount_baselines WHERE subaccount_id=? AND status <> 'reset') RETURNING id`. Zero rows affected → another worker picked it up; exit cleanly (no error).
+2. **Read opted-in metric set** from `subaccount_settings.baseline_metrics_opt_in[]` (default = full v1 set).
+3. **Read source data per metric** via the per-metric reader (`getPipelineValue`, `getLeadCount`, etc.). Each reader returns `{ value, source, unavailable_reason? }` where `source ∈ {'canonical_metric', 'unavailable'}` and `unavailable_reason` describes the gap (`integration_not_connected`, `api_failure`, `no_data_yet`).
+4. **Upsert metric rows** in one transaction: `INSERT INTO subaccount_baseline_metrics (...) VALUES (...) ON CONFLICT (baseline_id, metric_slug) DO UPDATE SET value=EXCLUDED.value, source=EXCLUDED.source, captured_at=now()`. Idempotent re-write per §3.
+5. **Decide final state**:
+   - `>= 2` metrics with `source='canonical_metric'` → success: `UPDATE … SET status='captured', captured_at=now(), confidence=<computed>`. `confidence='confirmed'` if all opted-in slugs returned canonical values, else `partial`.
+   - `< 2` canonical metrics → retryable failure (treat as `no_data_yet` even if some slugs returned `unavailable`). Apply §5.4 classification.
+6. **Emit telemetry events** per §8 audit contract.
+
+### §5.4 Retry classification (replaces "3 attempts exhausted")
+
+Errors are classified at the per-metric reader boundary. Aggregate classification at the service boundary determines the next state.
+
+| Class | Examples (per-metric) | Retry? | Next state |
+|---|---|---|---|
+| **Retryable** | HTTP 5xx, 429, network timeouts, `no_data_yet` while polls are still arriving, transient DB serialisation conflicts | Yes — exponential backoff: 1h, 4h, 24h | `ready` (cron fallback re-picks at next eligible window) |
+| **Non-retryable** | HTTP 4xx (other than 429), schema mismatch on canonical metric shape, `integration_not_connected`, opted-in metric with no reader implementation | No | `failed` immediately; `failure_reason` set to category |
+| **Soft-success** | Some metrics retryable, ≥2 already captured | n/a — already success | `captured` with `confidence='partial'` |
+
+Retry budget: maximum **3 attempts** for retryable failures (per the original spec intent). After the 3rd retryable failure, transition to `failed` with `failure_reason='retry_budget_exhausted'`. Backoff anchor is `last_attempt_at` (column added in §3 migration 0278). The `evaluateAllPendingBaselines` cron picks up rows where `status IN ('ready', 'failed') AND capture_attempt_count > 0 AND last_attempt_at <= now() - <backoff_window>`.
+
+Non-retryable errors transition straight to `failed` without consuming retry budget — so a sub-account whose connector isn't installed never burns 3 retries before surfacing for manual entry.
+
+`<ManualBaselineForm>` is the recovery path for any `failed` baseline regardless of failure category.
 
 ## §6 Manual-entry path
 
@@ -186,6 +244,24 @@ UI on `/subaccounts/:id` overview page:
 - Validation: no negative values; lead count ≤ all-time-high seen in history; required currency unit
 - Save: writes individual metric rows with `source='manual'`, transitions baseline to `source='mixed'` (if some auto + some manual) or `source='manual'`, updates `confidence` accordingly
 - Admin reset: `<AdminBaselineResetButton>` (sysadmin only) — writes `admin_reset_reason`, transitions status to `reset`, creates new baseline row in `pending`. Old baseline is preserved (history). Used when an agency operator wants to re-baseline mid-engagement.
+
+## §6a Audit + event logging contract
+
+Every transition emits a structured event via `tracing.ts`. Required for debuggability — when a baseline ends up `failed` or shows unexpected delta in a report, these events are the audit trail.
+
+| Event name | Emitted from | Required fields |
+|---|---|---|
+| `baseline.capture.triggered` | subscriber, fallback cron, manual endpoint | `subaccount_id`, `baseline_id`, `source` ∈ `{'subscriber','fallback','manual','admin_reset'}` |
+| `baseline.capture.started` | `captureBaselineService.run` (after `capturing` lock acquired) | `subaccount_id`, `baseline_id`, `attempt_number`, `version` |
+| `baseline.metric.captured` | per-metric reader success | `subaccount_id`, `baseline_id`, `metric_slug`, `source='canonical_metric'`, `value_summary` |
+| `baseline.metric.unavailable` | per-metric reader fall-through | `subaccount_id`, `baseline_id`, `metric_slug`, `unavailable_reason`, `error_class` ∈ `{'retryable','non_retryable'}` |
+| `baseline.capture.succeeded` | end of `run` on success | `subaccount_id`, `baseline_id`, `confidence`, `metrics_captured_count`, `metrics_unavailable_count` |
+| `baseline.capture.retry_scheduled` | retryable failure path | `subaccount_id`, `baseline_id`, `attempt_number`, `next_attempt_at`, `failure_reasons[]` |
+| `baseline.capture.failed` | non-retryable OR retry budget exhausted | `subaccount_id`, `baseline_id`, `failure_reason`, `final_attempt_count` |
+| `baseline.manual.applied` | `<ManualBaselineForm>` POST | `subaccount_id`, `baseline_id`, `user_id`, `metrics_overridden[]` |
+| `baseline.admin_reset` | `<AdminBaselineResetButton>` POST | `subaccount_id`, `prior_baseline_id`, `new_baseline_id`, `prior_version`, `new_version`, `user_id`, `reason` |
+
+The `tracing.ts` event registry must be extended with all 9 names. Each event is a one-liner: emit at the state transition, no batching, no conditional emission.
 
 ## §7 Reporting Agent integration (delta semantics)
 
@@ -204,11 +280,11 @@ No new schema; just a service helper + report template extension.
 
 ### Phase 1 — Schema (~3h)
 
-- [ ] Author migrations 0278 (`subaccount_baselines`), 0279 (`subaccount_baseline_metrics`), 0280 (RLS + canonical dictionary). All paired with `.down.sql`. **Confirm next-free migration number at build start** — main may have moved further.
+- [ ] Author migrations 0278 (`subaccount_baselines` per §3 — including `baseline_version`, `last_attempt_at`, `capturing` status, partial UNIQUE index on `(subaccount_id, baseline_version) WHERE status <> 'reset'`, retry-anchor index), 0279 (`subaccount_baseline_metrics` with PK on `(baseline_id, metric_slug)` — supports `ON CONFLICT … DO UPDATE` idempotent writes), 0280 (RLS + canonical dictionary). All paired with `.down.sql`. **Confirm next-free migration number at build start** — main may have moved further.
 - [ ] Add Drizzle schemas `server/db/schema/subaccountBaselines.ts`, `server/db/schema/subaccountBaselineMetrics.ts`.
 - [ ] Register both in `rlsProtectedTables.ts` and `canonicalDictionary.ts`.
 - [ ] Add `baseline_metrics_opt_in` key to `subaccount_settings` zod schema (defaults to full v1 metric set).
-- [ ] Pure validator unit tests for status state-machine, source enum, confidence enum (1 file, ~12 cases).
+- [ ] Pure validator unit tests for status state-machine (incl. `capturing`), source enum, confidence enum, retry-classification mapping, idempotency-key uniqueness (1 file, ~14 cases).
 
 ### Phase 2 — Readiness condition + sync-complete event (~5h)
 
@@ -271,7 +347,7 @@ No new schema; just a service helper + report template extension.
 - `server/routes/admin/baselineReset.ts` (new)
 - `server/jobs/captureBaselineJob.ts` (new)
 - `server/jobs/evaluateAllPendingBaselines.ts` (new)
-- `server/lib/tracing.ts` (5 new event names)
+- `server/lib/tracing.ts` (9 new event names per §6a audit + event logging contract)
 
 ### Shared
 - `shared/schemas/subaccount.ts` (extend with `baseline_metrics_opt_in`)
@@ -284,24 +360,35 @@ No new schema; just a service helper + report template extension.
 - `client/src/pages/SubaccountDetailPage.tsx` (badge + form wiring)
 
 ### Tests
-- `server/services/__tests__/baselineReadinessService.test.ts`
-- `server/services/__tests__/captureBaselineService.test.ts`
-- `server/services/__tests__/baselineMetricReaders.test.ts`
+- `server/services/__tests__/baselineReadinessService.test.ts` — readiness combinations, settle-window edge cases (just-under, just-over the 1h gate), missing-poll-history fallback
+- `server/services/__tests__/captureBaselineService.test.ts` — happy path, retry classification (retryable / non-retryable), exhaustion to `failed`, idempotent re-run, `capturing` lock contention, single-writer assertion (concurrent subscriber + cron simulation)
+- `server/services/__tests__/baselineMetricReaders.test.ts` — per-metric readers + their failure classifications
 - `server/services/reportingAgent/__tests__/baselineHelper.test.ts`
+- `server/services/__tests__/baselineInvariants.test.ts` — the §10 hard invariants: UNIQUE-index enforcement, admin-reset-preserves-history, manual + auto concurrent never duplicates, `Date.now()` static check (grep-based)
 
 ### Docs (Phase 6 closeout)
 - `docs/capabilities.md`, `docs/clientpulse-dev-spec.md` (mark addressed)
 
 ## §10 Done definition
 
+Functional outcomes:
 - A new sub-account creates a `pending` baseline row at creation.
-- Readiness condition transitions `pending → ready` on second successful poll cycle (or daily fallback).
+- Readiness condition transitions `pending → ready` on second successful poll cycle PLUS the ≥1h settle window (or daily fallback).
 - Capture job writes baseline metric rows for all available canonical metrics.
-- Retry logic exhausts cleanly; failed baselines surface for manual entry.
+- Retry logic classifies retryable vs non-retryable failures correctly; non-retryable transitions straight to `failed` without consuming retry budget.
+- Failed baselines surface for manual entry.
 - Manual entry round-trips correctly (writes individual metric rows, updates `source` + `confidence`).
-- Admin reset preserves history (creates new baseline, doesn't delete old).
+- Admin reset preserves history (creates new baseline with `baseline_version+1`, doesn't delete old).
 - Reporting Agent's portfolio report includes "Since onboarding" delta sections.
-- Telemetry events emit at each state transition.
+- All 9 telemetry events from §6a emit at the correct state transitions.
+
+Hard invariants (asserted by tests):
+- **Exactly one active baseline per sub-account.** UNIQUE index on `(subaccount_id, baseline_version) WHERE status <> 'reset'` is enforced; integration test seeds two concurrent `pending` inserts and asserts the second fails with constraint violation.
+- **Idempotent retry.** Calling `captureBaselineService.run` twice for the same `ready` baseline produces the same row state and the same metric rows; `subaccount_baseline_metrics` count is unchanged on the second call (tested via fixture).
+- **Single-writer rule honoured.** No code path other than `captureBaselineService` writes to `subaccount_baselines` after the initial `pending` insert. Asserted via grep / static check in CI; integration test asserts that simulating the subscriber and the cron in parallel never produces duplicate rows.
+- **Manual override never conflicts with auto capture.** When `<ManualBaselineForm>` POSTs while a `capturing` lock is held, the manual write blocks until the auto path completes (or fails), then runs as `runManual` against the same baseline_id. Asserted via integration test simulating concurrent auto + manual.
+- **Admin reset never destroys history.** Test asserts that after reset, the prior baseline row exists with `status='reset'` AND a new row exists with `baseline_version+1` AND `status='pending'`.
+- **All timestamps use Postgres `now()`.** Static check (grep for `Date.now()` in `server/services/captureBaselineService.ts`, `baselineMetricReaders/`, `baselineReadinessService.ts`) returns zero hits in CI.
 
 ## §11 Dependencies
 

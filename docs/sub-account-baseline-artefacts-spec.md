@@ -118,17 +118,31 @@ CREATE INDEX memory_blocks_tier_idx
 
 ALTER TABLE subaccounts
   ADD COLUMN baseline_artefacts_status JSONB
-  DEFAULT '{"tier1":{},"tier2":{},"tier3":{}}'::jsonb;
+  DEFAULT '{"version":1,"tier1":{"brand_identity":{"status":"not_started"},"voice_tone":{"status":"not_started"}},"tier2":{"offer_positioning":{"status":"not_started"},"audience_icp":{"status":"not_started"}},"tier3":{"operating_constraints":{"status":"not_started"},"proof_library":{"status":"not_started"}}}'::jsonb;
 ```
 
-`baseline_artefacts_status` shape:
+`baseline_artefacts_status` shape (per-artefact status object, NOT a loose string):
 ```json
 {
-  "tier1": { "brand_identity": "pending|captured|reviewed", "voice_tone": "..." },
-  "tier2": { "offer_positioning": "...", "audience_icp": "..." },
-  "tier3": { "operating_constraints": "...", "proof_library": "..." }
+  "version": 1,
+  "tier1": {
+    "brand_identity": { "status": "completed", "captured_at": "2026-05-04T10:12:33Z", "skipped_at": null, "memory_block_id": "uuid", "captured_by_user_id": "uuid" },
+    "voice_tone":     { "status": "in_progress", "captured_at": null, "skipped_at": null, "memory_block_id": null, "captured_by_user_id": "uuid" }
+  },
+  "tier2": {
+    "offer_positioning": { "status": "skipped", "captured_at": null, "skipped_at": "2026-05-04T10:14:01Z", "memory_block_id": null, "captured_by_user_id": "uuid" },
+    "audience_icp":      { "status": "not_started", "captured_at": null, "skipped_at": null, "memory_block_id": null, "captured_by_user_id": null }
+  },
+  "tier3": {
+    "operating_constraints": { "status": "not_started", "captured_at": null, "skipped_at": null, "workspace_memory_id": null, "captured_by_user_id": null },
+    "proof_library":         { "status": "not_started", "captured_at": null, "skipped_at": null, "workspace_memory_id": null, "captured_by_user_id": null }
+  }
 }
 ```
+
+**Per-artefact status enum:** `not_started | in_progress | completed | skipped`. The shape is locked by `shared/schemas/subaccount.ts` `baselineArtefactsStatusSchema`. Tier-1 + Tier-2 default to `not_started`; the wizard transitions them through `in_progress → completed`. Tier-3 may be `skipped` at wizard exit (legitimate "skip-and-complete-later" path); Tier-1 + Tier-2 may NOT — the workflow validator rejects wizard completion if any Tier-1 / Tier-2 artefact is `not_started` or `in_progress`. `skipped_at` and `captured_at` are mutually exclusive — one is set, the other is null.
+
+`version: 1` future-proofs the shape: any future redesign bumps `version` and gates the migration on the prior shape. Service code reads `version` and refuses to operate on an unknown one.
 
 Down-migration drops both columns + index. Both columns nullable; existing rows untouched.
 
@@ -224,6 +238,41 @@ Per-block `<EditArtefactDrawer>` accessible later from `/subaccounts/:id/knowled
 
 ---
 
+## §6a Audit + event logging contract
+
+Every artefact-state transition emits a structured event via `tracing.ts`. Required for debuggability and for downstream consumers (F2's `escalation.repeat_phrase` recommendation reads brand-voice presence via the F1→F2 interface in §6b).
+
+| Event name | Emitted from | Required fields |
+|---|---|---|
+| `artefact.capture.started` | wizard step entry / drawer open | `subaccount_id`, `tier`, `slug`, `user_id` |
+| `artefact.capture.completed` | `subaccountOnboardingService.markArtefactCaptured` | `subaccount_id`, `tier`, `slug`, `user_id`, `memory_block_id` (Tier 1+2) or `workspace_memory_id` (Tier 3), `version` |
+| `artefact.capture.skipped` | wizard skip-to-later (Tier 3 only — Tier 1+2 may not be skipped) | `subaccount_id`, `tier`, `slug`, `user_id`, `reason` (one of `defer_for_later`, `not_applicable`) |
+| `artefact.capture.edited` | post-onboarding `<EditArtefactDrawer>` save | `subaccount_id`, `tier`, `slug`, `user_id`, `prior_version`, `new_version` |
+| `baseline_artefact.tier_loaded` | tier loaders (already in §4) | `org_id`, `subaccount_id`, `agent_role`, `tier`, `block_slug`, `token_count` |
+
+The `tracing.ts` event registry must be extended with all 5 names. Each is a one-liner; emit at the state transition, no batching.
+
+## §6b F1 → F2 interface contract
+
+F2's `escalation.repeat_phrase` recommendation produces a better action hint when F1's brand-voice artefact exists. Define the read contract explicitly so the coupling is documented, not implicit.
+
+**Reader function:** `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId): Promise<BaselineVoiceTone | null>`. Returns `null` when the artefact is `not_started` / `in_progress` / `skipped`. Returns the parsed memory block content when `status='completed'`.
+
+**Return shape (`BaselineVoiceTone`):**
+```ts
+{
+  descriptors: string[];          // 3-5 tone words (e.g. ["confident","plain-spoken","direct"])
+  example_sentences: string[];    // 2-3 examples
+  prohibited_phrases: string[];   // explicit list — drives F2's repeat_phrase action hint
+  formality_level: 'casual' | 'neutral' | 'formal';
+  captured_at: Date;              // for staleness checks downstream
+}
+```
+
+**F2 use:** when generating an action hint for `escalation.repeat_phrase`, F2 calls this reader. If non-null AND `prohibited_phrases` contains the offending phrase, action hint says "Add 'guarantee' to your brand voice — it's flagged 3 times this week. Open Configuration Assistant →" with a deep-link. If null, action hint falls back to the generic Configuration Assistant link. F2 spec §2 already documents this graceful degradation; this section pins the contract on the F1 side.
+
+**No new dependency:** F1 does not import or reference F2. F2 imports `getBaselineVoiceTone` from F1's service. The interface is declared in `shared/types/baselineArtefacts.ts` (one-liner alongside the status schema) so both sides reference it without circular coupling.
+
 ## §7 Files touched
 
 ### Server
@@ -233,11 +282,12 @@ Per-block `<EditArtefactDrawer>` accessible later from `/subaccounts/:id/knowled
 - `server/db/schema/memoryBlocks.ts` (2 columns)
 - `server/db/schema/subaccounts.ts` (1 column)
 - `server/workflows/baseline-artefacts-capture.workflow.ts` (new file, ~250 LOC)
-- `server/lib/tracing.ts` (2 new event names)
+- `server/lib/tracing.ts` (5 new event names per §6a audit + event logging contract)
 
 ### Shared
 - `shared/constants/baselineArtefacts.ts` (new)
-- `shared/schemas/subaccount.ts` (extend)
+- `shared/schemas/subaccount.ts` (extend with `baselineArtefactsStatusSchema` per §3 shape — per-artefact `{ status, captured_at, skipped_at, memory_block_id?, workspace_memory_id?, captured_by_user_id }`)
+- `shared/types/baselineArtefacts.ts` (new — `BaselineVoiceTone` type per §6b for the F1→F2 contract; consumed by F2 only)
 
 ### Client
 - `client/src/pages/OnboardingWizardPage.tsx` (new step, ~100 LOC)
@@ -256,13 +306,22 @@ Per-block `<EditArtefactDrawer>` accessible later from `/subaccounts/:id/knowled
 
 ## §8 Done definition
 
+Functional outcomes:
 - All six artefacts capturable via wizard.
 - Tier-1 blocks present in system prompt of any client-touching agent run for a sub-account that has captured them.
 - Tier-2 blocks present only when agent domain matches.
 - Tier-3 retrievable via existing workspace memory paths.
 - Token-budget telemetry shows < 1k token impact per run for tier 1+2 combined.
-- `subaccounts.baseline_artefacts_status` accurately reflects capture state.
+- `subaccounts.baseline_artefacts_status` accurately reflects capture state per §3 shape.
 - Riley docs (Phase 0) accurately reflect shipped/unshipped state.
+- All 5 §6a telemetry events emit at the correct state transitions.
+
+Hard invariants (asserted by tests):
+- **Status enum locked.** Tier-1 + Tier-2 wizard cannot complete with any artefact in `not_started` or `in_progress`. Asserted via workflow-validator pure test.
+- **`skipped` is Tier-3-only.** Tier-1 + Tier-2 cannot transition to `skipped`; the validator rejects it. Pure test.
+- **`captured_at` and `skipped_at` are mutually exclusive.** Schema-level zod refinement; pure test.
+- **`baselineArtefactsStatusSchema.version` gate.** Service refuses to read a status JSON whose `version` is not the current expected value. Pure test with fixture of older + newer version.
+- **F1→F2 contract honoured.** `getBaselineVoiceTone` returns `null` for any non-`completed` voice_tone artefact, returns the parsed shape for `completed` ones. Pure test against fixture sub-accounts.
 
 ## §9 Dependencies
 
