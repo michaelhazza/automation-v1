@@ -7,6 +7,7 @@
 **Scope:** Phase A only — spec §4 (technical components), §5 (ADAPT.md Phase 6), §6 (SYNC.md), §7 (customisation), §10 (Phase A deliverables). Phases B and C out of scope per handoff + plan.
 **Changed-code set:** 20 files + new `setup/portable/tests/` directory. Excludes the spec itself (it is the verification target).
 **Run at:** 2026-05-04T05:47:00Z
+**Commit at finish:** `ade9267e`
 
 ---
 
