@@ -51,7 +51,7 @@ router.post(
         return;
       }
       if (err instanceof AskAlreadyResolvedError) {
-        res.status(409).json({ error: 'already_resolved', current_status: err.currentStatus });
+        res.status(409).json({ error: 'already_submitted', submitted_by: err.submittedBy, submitted_at: err.submittedAt });
         return;
       }
       const shaped = err as { statusCode?: number; message?: string };
@@ -89,7 +89,7 @@ router.post(
         return;
       }
       if (err instanceof AskAlreadyResolvedError) {
-        res.status(409).json({ error: 'already_resolved', current_status: err.currentStatus });
+        res.status(409).json({ error: 'already_resolved', current_status: err.currentStatus, submitted_by: err.submittedBy, submitted_at: err.submittedAt });
         return;
       }
       const shaped = err as { statusCode?: number; message?: string };

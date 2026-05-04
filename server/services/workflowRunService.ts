@@ -633,7 +633,7 @@ export const WorkflowRunService = {
     });
 
     if (gate) {
-      const resolutionReason = formData['_skip'] ? 'skipped' : 'submitted';
+      const resolutionReason = formData['skipped'] === true ? 'skipped' : 'submitted';
       // NOTE: The engine call above runs in its own transaction. A crash between
       // the engine call and this transaction leaves the step terminal with the
       // gate open. The gate will be cleaned up by any subsequent cancelRun/failRun

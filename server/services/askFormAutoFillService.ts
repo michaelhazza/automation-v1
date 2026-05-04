@@ -4,8 +4,10 @@
  * Spec: docs/workflows-dev-spec.md §11.5.
  *
  * Auto-fill rule: include a value only when the field key exists in the prior
- * run's output AND the current schema's field matches that key. Type matching
- * is key-present only in V1 — the client's validateAskForm enforces types.
+ * run's output AND the current schema contains that key. Because prior runs
+ * are filtered to the same templateVersionId as the current run, the schema
+ * is guaranteed identical — field types cannot change within a version — so
+ * a key-presence check is both necessary and sufficient per §11.5.
  */
 
 import { eq, and, lt, desc } from 'drizzle-orm';
@@ -70,13 +72,16 @@ export const askFormAutoFillService = {
     if (!priorValues || typeof priorValues !== 'object' || Array.isArray(priorValues)) return {};
 
     const typedPriorValues = priorValues as Record<string, unknown>;
-    const currentFieldKeys = new Set(currentFields.map((f) => f.key));
+    // Build a map so we can look up by key. Same templateVersionId guarantees
+    // schema identity (types can't change within a version), so key presence is
+    // the correct and sufficient type-match check per §11.5.
+    const currentFieldByKey = new Map(currentFields.map((f) => [f.key, f]));
 
     // Return only keys that exist in the current schema.
     const result: Record<string, unknown> = {};
-    for (const key of Object.keys(typedPriorValues)) {
-      if (currentFieldKeys.has(key)) {
-        result[key] = typedPriorValues[key];
+    for (const [key, value] of Object.entries(typedPriorValues)) {
+      if (currentFieldByKey.has(key)) {
+        result[key] = value;
       }
     }
     return result;

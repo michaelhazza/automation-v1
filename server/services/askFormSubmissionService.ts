@@ -10,12 +10,13 @@
 
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowStepRuns } from '../db/schema/workflowRuns.js';
+import { workflowStepRuns, workflowRuns } from '../db/schema/workflowRuns.js';
+import { workflowTemplateVersions, systemWorkflowTemplateVersions } from '../db/schema/workflowTemplates.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { WorkflowRunService } from './workflowRunService.js';
 import { resolveActiveRunForTask } from './workflowRunResolverService.js';
 import { appendAndEmitTaskEvent } from './taskEventService.js';
-import type { AskParams } from '../../shared/types/askForm.js';
+import type { WorkflowDefinition } from '../lib/workflow/types.js';
 
 export class NotInSubmitterPoolError extends Error {
   readonly code = 'not_in_submitter_pool' as const;
@@ -27,7 +28,11 @@ export class NotInSubmitterPoolError extends Error {
 
 export class AskAlreadyResolvedError extends Error {
   readonly code = 'already_resolved' as const;
-  constructor(public readonly currentStatus: string) {
+  constructor(
+    public readonly currentStatus: string,
+    public readonly submittedBy?: string,
+    public readonly submittedAt?: string,
+  ) {
     super(`Ask gate is already resolved (status: ${currentStatus})`);
     this.name = 'AskAlreadyResolvedError';
   }
@@ -61,7 +66,12 @@ async function resolveAskContext(
 
   const gate = await WorkflowStepGateService.getOpenGate(runId, stepId, organisationId);
   if (!gate) {
-    throw new AskAlreadyResolvedError(stepRun.status);
+    const out = stepRun.outputJson as Record<string, unknown> | null;
+    throw new AskAlreadyResolvedError(
+      stepRun.status,
+      typeof out?.submitted_by === 'string' ? out.submitted_by : undefined,
+      typeof out?.submitted_at === 'string' ? out.submitted_at : undefined,
+    );
   }
 
   if (gate.gateKind !== 'ask') {
@@ -128,8 +138,34 @@ export const askFormSubmissionService = {
 
     checkPoolMembership(gate, callerUserId);
 
-    const params = stepRun.inputJson as (AskParams & Record<string, unknown>) | null;
-    if (!params || params.allowSkip !== true) {
+    // Load allowSkip from the step's authoring-time params (not from
+    // stepRun.inputJson which holds engine-resolved binding inputs).
+    const [run] = await db
+      .select({ templateVersionId: workflowRuns.templateVersionId })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, runId));
+
+    let definition: WorkflowDefinition | null = null;
+    if (run) {
+      const [orgVer] = await db
+        .select({ definitionJson: workflowTemplateVersions.definitionJson })
+        .from(workflowTemplateVersions)
+        .where(eq(workflowTemplateVersions.id, run.templateVersionId));
+      if (orgVer) {
+        definition = orgVer.definitionJson as unknown as WorkflowDefinition;
+      } else {
+        const [sysVer] = await db
+          .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
+          .from(systemWorkflowTemplateVersions)
+          .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
+        if (sysVer) {
+          definition = sysVer.definitionJson as unknown as WorkflowDefinition;
+        }
+      }
+    }
+
+    const step = definition?.steps.find((s) => s.id === stepId);
+    if (step?.params?.allowSkip !== true) {
       throw new SkipNotAllowedError();
     }
 
@@ -138,7 +174,6 @@ export const askFormSubmissionService = {
       submitted_at: new Date().toISOString(),
       values: {},
       skipped: true,
-      _skip: true,
     };
 
     await WorkflowRunService.submitStepInput(

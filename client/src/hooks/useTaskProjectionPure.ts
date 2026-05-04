@@ -128,7 +128,9 @@ export function applyTaskEvent(prev: TaskProjection, envelope: TaskEventEnvelope
       break;
     case 'ask.skipped':
       next.askGates = prev.askGates.map(g =>
-        g.gateId === payload.payload.gateId ? { ...g, status: 'skipped' as const } : g
+        g.gateId === payload.payload.gateId
+          ? { ...g, status: 'skipped' as const, submittedBy: payload.payload.submittedBy }
+          : g
       );
       break;
     case 'step.queued':
