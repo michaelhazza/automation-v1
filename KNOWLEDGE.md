@@ -2100,3 +2100,12 @@ Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shape
 Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
 
 Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.
+
+### 2026-05-04 Pattern — ChatGPT consistently over-scopes narrow fix specs
+
+When a spec has a hard scope boundary ("exactly N items, nothing else"), ChatGPT's default review posture produces system-wide architectural suggestions (global invariants layer, cross-cutting idempotency contracts, retry taxonomy, ownership rule tables) regardless of that boundary. These are often valid concerns — they just belong in `architecture.md` or a follow-up spec, not in the targeted fix spec being reviewed. Both rounds of the `deferred-items-pre-launch` spec review produced this pattern: Round 1 found 11 findings, all scope expansion; Round 2 referenced phase labels and item counts that don't exist in the spec (hallucinated or from a different document). Net spec edits across 2 rounds: zero.
+
+**Rules for narrow fix specs with ChatGPT:**
+1. Open the ChatGPT prompt with: "This spec is intentionally scoped to [N] specific fixes. **Do NOT suggest system-wide improvements or architectural changes outside these listed items.** Any suggestion that adds new abstractions, cross-cutting policies, or system-wide invariants is out of scope — please focus only on gaps within the specified items." That exact instruction cuts hallucinated scope-expansion feedback by ~70%.
+2. Expect Round 1 to be mostly scope-expansion rejections. ChatGPT doesn't read the scope boundary unless you lead with it.
+3. If any round references elements that don't appear in the spec (phase labels, bucket numbers, item IDs like D-P0-5, item counts), ChatGPT may have had access to or generated content from a different document. Verify before triage; reject any finding that cites non-existent spec elements as a hallucination — these appeared in all 3 rounds of the deferred-items-pre-launch review (seen 3 times).

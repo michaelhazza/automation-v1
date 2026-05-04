@@ -13,7 +13,7 @@ This file is the ground-truth framing reference for the `spec-reviewer` agent. E
 # Update last_reviewed_at when the framing block below is verified or modified.
 # stale_after_days = 60: spec-reviewer warns when last_reviewed_at is older.
 # stale_blocks_at_days = 120: spec-reviewer refuses to start until reviewed.
-last_reviewed_at: 2026-04-16
+last_reviewed_at: 2026-05-04
 stale_after_days: 60
 stale_blocks_at_days: 120
 ```
