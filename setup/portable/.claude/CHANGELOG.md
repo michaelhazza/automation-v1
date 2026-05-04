@@ -95,4 +95,4 @@ Repos can stay on older versions intentionally. The framework is designed to be 
 
 ## 1.0.0 — predates this changelog
 
-The original Automation OS internal setup. Agent fleet of 16, three-coordinator pipeline, ChatGPT review agents, doc-sync sweep, audit framework. No formal version tracking.
+The original [PROJECT_NAME] internal setup. Agent fleet of 16, three-coordinator pipeline, ChatGPT review agents, doc-sync sweep, audit framework. No formal version tracking.
