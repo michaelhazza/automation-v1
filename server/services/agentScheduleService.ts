@@ -247,8 +247,10 @@ export const agentScheduleService = {
     });
     await pgboss.schedule(STALE_CLEANUP_QUEUE, '*/5 * * * *');
 
-    // Register all active schedules
+    // Register all active schedules (non-optimiser SAs)
     await this.registerAllActiveSchedules();
+    // Self-heal optimiser schedules on startup (optimiser SAs use a separate queue)
+    await this.registerAllOptimiserSchedules();
   },
 
   /**
@@ -299,6 +301,52 @@ export const agentScheduleService = {
     }
 
     logger.info(`[AgentScheduler] Registered ${registered} active schedules (includes org subaccount agents)`);
+  },
+
+  /**
+   * Startup self-heal for optimiser schedules. Sweeps all optimiser-enabled
+   * subaccounts and calls registerOptimiserSchedule for each, so pg-boss
+   * schedules are restored even after a pg-boss table wipe or environment reset.
+   *
+   * Mirrors registerAllActiveSchedules but for OPTIMISER_SCAN_QUEUE. Called from
+   * initialize() after the non-optimiser sweep.
+   */
+  async registerAllOptimiserSchedules() {
+    const [optimiserSystemAgent] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(eq(systemAgents.slug, 'subaccount-optimiser'))
+      .limit(1);
+
+    if (!optimiserSystemAgent) {
+      logger.warn('[AgentScheduler] Optimiser system agent not found — skipping startup optimiser sweep');
+      return;
+    }
+
+    const rows = await db
+      .select({ subaccountId: subaccountAgents.subaccountId })
+      .from(subaccountAgents)
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .where(
+        and(
+          eq(subaccountAgents.scheduleEnabled, true),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+          eq(agents.systemAgentId, optimiserSystemAgent.id),
+        )
+      );
+
+    let registered = 0;
+    for (const row of rows) {
+      try {
+        await this.registerOptimiserSchedule(row.subaccountId);
+        registered++;
+      } catch (err) {
+        logger.error(`[AgentScheduler] Failed to re-register optimiser schedule for subaccount ${row.subaccountId}`, { error: String(err) });
+      }
+    }
+
+    logger.info(`[AgentScheduler] Registered ${registered} optimiser schedules on startup`);
   },
 
   /**
@@ -378,8 +426,8 @@ export const agentScheduleService = {
    * The INSERT ... ON CONFLICT DO NOTHING makes it safe to re-run idempotently.
    *
    * Schedule name: `${OPTIMISER_SCAN_QUEUE}:${subaccountAgentId}` (invariant 13).
-   * Cron: `${computeStaggerMinutes(subaccountId)} 6 * * *` — runs in the 6-hour
-   * window 06:00–11:59 UTC, deterministically offset per subaccount.
+   * Cron: stagger offset [0,359] maps to a (minute, hour) pair in the 06:00–11:59
+   * UTC window: minute = offset % 60, hour = 6 + floor(offset / 60).
    */
   async registerOptimiserSchedule(subaccountId: string): Promise<{
     subaccountAgentId: string;
@@ -426,9 +474,11 @@ export const agentScheduleService = {
       throw { statusCode: 500, message: 'Optimiser agent not found for organisation', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
     }
 
-    // 4. Compute staggered cron
-    const minutes = computeStaggerMinutes(subaccountId);
-    const cron = `${minutes} 6 * * *`;
+    // 4. Compute staggered cron — offset in [0,359] spans 06:00–11:59 UTC
+    const offset = computeStaggerMinutes(subaccountId);
+    const minute = offset % 60;
+    const hour = 6 + Math.floor(offset / 60);
+    const cron = `${minute} ${hour} * * *`;
 
     // 5. INSERT subaccount_agents ON CONFLICT DO NOTHING (idempotent)
     const inserted = await db

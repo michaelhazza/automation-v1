@@ -42,8 +42,8 @@ export interface SkillSlowEvidence {
  * When the view is empty, the orchestrator emits `optimiser.scan.partial` and
  * skips this category entirely — no error is raised.
  *
- * @param tx Any database transaction (org-scoped or admin) — this is a
- *   read-only EXISTS check that does not require the admin role.
+ * @param tx Must be an admin-role connection. The view is REVOKED from the
+ *   default role (migration 0277). Callers must use withAdminConnectionGuarded.
  */
 export async function peerMediansViewIsPopulated(tx: OrgScopedTx): Promise<boolean> {
   const rows = await tx.execute<{ populated: boolean }>(sql`
@@ -67,7 +67,7 @@ export async function peerMediansViewIsPopulated(tx: OrgScopedTx): Promise<boole
  * **MUST be called within `withAdminConnectionGuarded`.**
  * The JOIN to `optimiser_skill_peer_medians` requires the admin_role because
  * that view is REVOKE'd from the default role (it is a cross-tenant aggregate;
- * see migrations/0268_optimiser_peer_medians.sql). The orchestrator (Chunk 5)
+ * see migrations/0277_optimiser_peer_medians.sql). The orchestrator (Chunk 5)
  * is responsible for wrapping this call inside `withAdminConnectionGuarded`.
  *
  * Invariant 32: the JOIN includes `AND pm.median_version = $expectedMedianVersion`

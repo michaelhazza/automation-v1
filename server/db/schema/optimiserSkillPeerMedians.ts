@@ -1,5 +1,5 @@
 // BYPASSES RLS — cross-tenant aggregate; admin_role only via REVOKE/GRANT.
-// See migrations/0268_optimiser_peer_medians.sql for rationale.
+// See migrations/0277_optimiser_peer_medians.sql for rationale.
 import { pgMaterializedView, numeric, text, integer, timestamp, bigint } from 'drizzle-orm/pg-core';
 
 // Declare the view columns so TypeScript callers get full type inference.

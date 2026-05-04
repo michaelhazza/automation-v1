@@ -147,24 +147,30 @@ export async function runOptimiserScan(
   const priorRecs = await loadPriorRecs(tx, subaccountId);
 
   // ── Step 3: peer-medians view check + version read ──────────────────────
-  // peerMediansViewIsPopulated uses an org-scoped tx — this is safe because
-  // the view is a simple EXISTS check that does not require admin_role.
-  const viewPopulated = await peerMediansViewIsPopulated(tx);
+  // optimiser_skill_peer_medians is REVOKED from the default role; SELECT
+  // requires admin_role (migration 0277). Both the EXISTS check and
+  // MAX(median_version) read must run inside withAdminConnectionGuarded.
+  await withAdminConnectionGuarded(
+    { source: 'optimiser.scan.peerMediansCheck', allowRlsBypass: false },
+    async (adminTx) => {
+      const viewPopulated = await peerMediansViewIsPopulated(adminTx);
 
-  if (!viewPopulated) {
-    partialMode = true;
-    logger.info('optimiser.scan.partial', {
-      subaccountId,
-      organisationId,
-      medianVersion: 0,
-    });
-  } else {
-    // Invariant 32: use MAX not LIMIT 1 for version read
-    const versionRows = await tx.execute<{ max_version: number }>(
-      sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
-    );
-    medianVersion = versionRows[0]?.max_version ?? 0;
-  }
+      if (!viewPopulated) {
+        partialMode = true;
+        logger.info('optimiser.scan.partial', {
+          subaccountId,
+          organisationId,
+          medianVersion: 0,
+        });
+      } else {
+        // Invariant 32: use MAX not LIMIT 1 for version read
+        const versionRows = await adminTx.execute<{ max_version: number }>(
+          sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
+        );
+        medianVersion = versionRows[0]?.max_version ?? 0;
+      }
+    },
+  );
 
   // ── Step 4: build evaluator context (shared across all categories) ───────
   const evalCtx: EvaluatorContext = {
