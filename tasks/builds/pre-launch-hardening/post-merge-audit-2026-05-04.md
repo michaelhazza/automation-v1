@@ -176,3 +176,36 @@ If the user wants the defense-in-depth upgrade prioritised, the cleanest path is
 **Recommendation:** **KEEP Chunk 6, narrowed.**
 - Drop `S2-SKILL-MD` (closed).
 - Optionally absorb `SC-2026-04-26-1` if it turns out to need a new owning spec (verification: run `verify-rls-protected-tables.sh` and confirm exit code).
+
+---
+
+## §7 Recommendation summary + pre-write verifications
+
+### 7.1 Three specs, not six
+
+| New spec slug | Carries items from | Architect needed? |
+|---|---|---|
+| `pre-launch-schema-decisions-spec` | original Chunk 2 (12 items, all open) | **Yes** — F6/F10/F11, WB-1, DELEG-CANONICAL |
+| `pre-launch-execution-correctness-spec` | original Chunk 5 (6+1 open items, with `C4b` narrowed) + `C4a-REVIEWED-DISP` from Chunk 3 | **Yes** — `C4a-REVIEWED-DISP` resume-vs-branch + `C4a-6-RETSHAPE` grandfather-vs-migrate |
+| `pre-launch-gate-hygiene-spec` | original Chunk 6 minus `S2-SKILL-MD`, optionally absorbing `SC-2026-04-26-1` and pre-prod-tenancy Phase 3 `B10` defense-in-depth | No |
+
+### 7.2 Pre-write verifications (1 minute each)
+
+Run these before authoring any of the 3 specs to confirm the reduced scope is correct:
+
+1. `bash scripts/verify-rls-protected-tables.sh` — does `SC-2026-04-26-1` still fail? If yes, Chunk 6 absorbs it. If no, stale `tasks/todo.md` entry — close it.
+2. `grep -n "completeStepRun\|approvalResume\|invokeAutomationStep" server/services/workflowEngineService.ts | head -30` and verify the approval-resume path does an `invokeAutomationStep()` re-entry — confirms `C4a-REVIEWED-DISP` open vs closed.
+3. Confirm pre-prod-tenancy Phase 3 (`docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`) still owns `B10` defense-in-depth — if not, lift into Chunk 6.
+4. `grep -n "stateMachineGuards" server/services/workflowEngineService.ts server/services/agentRunFinalizationService.ts` — confirm the wired surface area matches what `tasks/todo.md` line 1133 records, so Chunk 5's narrowed `C4b` scope is accurate.
+
+### 7.3 Suggested next move (if user agrees with this audit)
+
+- **Discard the 6-spec plan in `tasks/builds/pre-launch-hardening/plan.md`.** Replace with a 3-spec plan reflecting this audit. The existing plan WIP (Chunks 2 / 5 / 6 outlines) survives largely intact as raw material; Chunks 1 / 3 / 4 outlines drop.
+- **Annotate the closed mini-spec items in `tasks/todo.md`** with `[absorbed: <merging-spec-slug>]` so the audit trail survives. Don't delete the items.
+- **Update `docs/pre-launch-hardening-mini-spec.md`** with a `## 2026-05-04 audit` section noting which chunks dissolved and pointing at this file.
+- **Branch-rename suggestion.** The branch is `claude/pre-launch-hardening-spec-fs3Wy`. Keep the name — this branch authors the surviving 3 specs and lands them via separate PRs as originally planned.
+
+### 7.4 If the user disagrees
+
+- The pre-merge 6-spec plan is preserved in `tasks/builds/pre-launch-hardening/plan.md` (commits up to `b37fc6a`) plus the in-flight Chunk 5 outline (commit `ee83d99`). Nothing is lost.
+- Standalone Chunk 1 / 3 / 4 specs would mostly restate already-shipped work plus the 1-2 residual items per chunk; the user should confirm explicitly that this is the desired shape before reopening that path.
