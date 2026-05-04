@@ -7,6 +7,7 @@
 **Scope:** Phase A only — in-tree sync infrastructure under `setup/portable/`. Phases B and C out of scope per the build's plan.
 **Plan:** `tasks/builds/framework-standalone-repo/plan.md`
 **Run at:** 2026-05-04T05-53-43Z
+**Commit at finish:** `1c671829`
 
 > **Note on prior log.** A prior spec-conformance run for this build was logged at `tasks/review-logs/spec-conformance-log-framework-standalone-repo-2026-05-04T05-47-00Z.md` (commit `ade9267e`) by an earlier session, marking the branch CONFORMANT (54/54). This run is the one requested by the operator just now. It re-verifies independently and reaches a different verdict: NON_CONFORMANT (29/31, two directional gaps). The delta between the two runs is documented in §7 below.
 
