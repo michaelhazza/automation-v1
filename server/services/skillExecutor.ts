@@ -171,6 +171,12 @@ export interface SkillExecutionContext {
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
   /**
+   * Depth of the current workflow run chain. 1 = top-level. Incremented on
+   * each workflow.run.start call. MAX_WORKFLOW_DEPTH = 3.
+   * Absent for non-workflow runs (orchestrator job, direct agent invocations).
+   */
+  workflowRunDepth?: number;
+  /**
    * The conversation this run is associated with, when known. Populated from
    * AgentRunRequest.conversationId so that worker skills that need to write
    * conversation-scoped data (e.g. update_thread_context) can resolve the
@@ -609,6 +615,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
+  },
+  'workflow.run.start': async (input, context) => {
+    const { handleWorkflowRunStartSkill } = await import('./workflowRunStartSkillService.js');
+    return handleWorkflowRunStartSkill(input, context);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──

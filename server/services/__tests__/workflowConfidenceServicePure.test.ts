@@ -79,33 +79,73 @@ describe('rule 4: irreversible_side_effect', () => {
 });
 
 describe('rule 5: many_similar_past_runs', () => {
-  test('fires when >= 5 reviews and rejected / total < 0.2', () => {
+  // Pathway A: clean history (3+ approved, 0 rejected)
+  test('pathway A: fires at exactly 3 approved, 0 rejected', () => {
     const result = computeConfidence(
-      makeInput({ pastReviewsCount: { approved: 9, rejected: 0 } }),
+      makeInput({ pastReviewsCount: { approved: 3, rejected: 0 } }),
     );
     expect(result.key).toBe('many_similar_past_runs');
     expect(result.confidence.value).toBe('high');
   });
 
-  test('fires at exactly 5 reviews with 0 rejected', () => {
+  test('pathway A: does NOT fire at 2 approved, 0 rejected (below minimum)', () => {
+    const result = computeConfidence(
+      makeInput({ pastReviewsCount: { approved: 2, rejected: 0 } }),
+    );
+    expect(result.key).not.toBe('many_similar_past_runs');
+  });
+
+  test('pathway A: fires at 5 approved, 0 rejected (both pathways satisfied)', () => {
     const result = computeConfidence(
       makeInput({ pastReviewsCount: { approved: 5, rejected: 0 } }),
     );
     expect(result.key).toBe('many_similar_past_runs');
   });
 
-  test('does NOT fire when rejected / total >= 0.2', () => {
+  test('pathway A: fires at 6 approved, 0 rejected', () => {
     const result = computeConfidence(
-      makeInput({ pastReviewsCount: { approved: 8, rejected: 2 } }),
+      makeInput({ pastReviewsCount: { approved: 6, rejected: 0 } }),
+    );
+    expect(result.key).toBe('many_similar_past_runs');
+  });
+
+  // Pathway B: established pattern (>=5 total, <15% rejection rate)
+  test('pathway B: 5 approved, 1 rejected (total=6, rate=16.7%) does NOT fire', () => {
+    const result = computeConfidence(
+      makeInput({ pastReviewsCount: { approved: 5, rejected: 1 } }),
     );
     expect(result.key).not.toBe('many_similar_past_runs');
   });
 
-  test('does NOT fire when total < 5', () => {
+  test('pathway B: 6 approved, 1 rejected (total=7, rate=14.3%) fires', () => {
     const result = computeConfidence(
-      makeInput({ pastReviewsCount: { approved: 4, rejected: 0 } }),
+      makeInput({ pastReviewsCount: { approved: 6, rejected: 1 } }),
+    );
+    expect(result.key).toBe('many_similar_past_runs');
+    expect(result.confidence.value).toBe('high');
+  });
+
+  test('pathway B: 4 approved, 1 rejected (total=5, rate=20%) does NOT fire', () => {
+    const result = computeConfidence(
+      makeInput({ pastReviewsCount: { approved: 4, rejected: 1 } }),
     );
     expect(result.key).not.toBe('many_similar_past_runs');
+  });
+
+  test('pathway B: does NOT fire when total < 5 even with 0% rate', () => {
+    // Pathway A also does not fire (only 1 approved). Both blocked.
+    const result = computeConfidence(
+      makeInput({ pastReviewsCount: { approved: 1, rejected: 0 } }),
+    );
+    expect(result.key).not.toBe('many_similar_past_runs');
+  });
+
+  test('legacy: high volume with 0 rejections still fires', () => {
+    const result = computeConfidence(
+      makeInput({ pastReviewsCount: { approved: 9, rejected: 0 } }),
+    );
+    expect(result.key).toBe('many_similar_past_runs');
+    expect(result.confidence.value).toBe('high');
   });
 });
 

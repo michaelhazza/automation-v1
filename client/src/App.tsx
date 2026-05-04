@@ -21,6 +21,7 @@ const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminAutomationsPage = lazy(() => import('./pages/AdminAutomationsPage'));
 const AdminAutomationEditPage = lazy(() => import('./pages/AdminAutomationEditPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const TeamsAdminPage = lazy(() => import('./pages/TeamsAdminPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
@@ -86,8 +87,10 @@ const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPa
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
-// Universal Brief — detail page (Phase 2)
-const BriefDetailPage = lazy(() => import('./pages/BriefDetailPage'));
+// Workflows V1 Phase 2 — open task view (Chunk 11)
+const OpenTaskView = lazy(() => import('./pages/OpenTaskView'));
+// Workflows V1 Phase 2 — Workflow Studio (Chunk 14a)
+const StudioPage = lazy(() => import('./pages/StudioPage'));
 // Learned Rules library (Phase 5)
 const LearnedRulesPage = lazy(() => import('./pages/LearnedRulesPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
@@ -248,6 +251,12 @@ function SpendLedgerPageRoute({ user }: { user: User }) {
   return <SpendLedgerPage user={user} readOnly={readOnly} />;
 }
 
+function BriefRedirect() {
+  const { briefId } = useParams<{ briefId: string }>();
+  if (!briefId) return <Navigate to="/admin/tasks" replace />;
+  return <Navigate to={`/admin/tasks/${briefId}`} replace />;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -340,6 +349,7 @@ export default function App() {
             <Route path="/admin/automations" element={<AdminAutomationsPage user={user!} />} />
             <Route path="/admin/automations/:id" element={<AdminAutomationEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
+            <Route path="/admin/teams" element={<TeamsAdminPage user={user!} />} />
             <Route path="/admin/settings" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/board-config" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/categories" element={<Navigate to="/admin/org-settings" replace />} />
@@ -408,8 +418,13 @@ export default function App() {
             {/* Configuration Assistant */}
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
-            {/* Universal Brief detail page (Phase 2) */}
-            <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
+            {/* Universal Brief detail page (Phase 2) — redirects to canonical /admin/tasks/:taskId */}
+            <Route path="/admin/briefs/:briefId" element={<BriefRedirect />} />
+            {/* Workflows V1 Phase 2 — open task view (Chunk 11) */}
+            <Route path="/admin/tasks/:taskId" element={<OpenTaskView user={user!} />} />
+            {/* Workflows V1 Phase 2 — Workflow Studio (Chunk 14a) */}
+            <Route path="/admin/workflows/:id/edit" element={<StudioPage user={user!} />} />
+            <Route path="/admin/workflows/new" element={<StudioPage user={user!} />} />
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />

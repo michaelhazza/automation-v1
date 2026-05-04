@@ -32,6 +32,19 @@ ALTER TABLE workflow_runs
   ADD CONSTRAINT workflow_runs_cost_accumulator_nonneg
   CHECK (cost_accumulator_cents >= 0);
 
+ALTER TABLE workflow_runs
+  ADD COLUMN task_id uuid NOT NULL REFERENCES tasks(id);
+
+CREATE INDEX workflow_runs_task_id_idx
+  ON workflow_runs (task_id);
+
+-- One active run per task — DB-level invariant.
+-- terminal = completed | completed_with_errors | failed | cancelled | partial
+-- 'cancelling' is NOT terminal — cleanup is in flight.
+CREATE UNIQUE INDEX workflow_runs_one_active_per_task_idx
+  ON workflow_runs (task_id)
+  WHERE status NOT IN ('completed', 'completed_with_errors', 'failed', 'cancelled', 'partial');
+
 CREATE INDEX IF NOT EXISTS workflow_runs_status_paused_idx
   ON workflow_runs (id)
   WHERE status = 'paused';
@@ -70,6 +83,11 @@ CREATE INDEX IF NOT EXISTS agent_execution_events_run_task_seq_idx
 -- ── tasks ──
 ALTER TABLE tasks
   ADD COLUMN IF NOT EXISTS next_event_seq integer NOT NULL DEFAULT 0;
+
+-- created_by_user_id: identifies the human requester of the task; used by the
+-- workflow approver pool resolver for the task_requester group kind (P2).
+ALTER TABLE tasks
+  ADD COLUMN IF NOT EXISTS created_by_user_id uuid REFERENCES users(id);
 
 ALTER TABLE tasks
   ADD CONSTRAINT tasks_next_event_seq_nonneg

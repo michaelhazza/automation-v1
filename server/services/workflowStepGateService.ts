@@ -19,19 +19,44 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
-import { workflowStepGates } from '../db/schema/index.js';
+import { workflowStepGates, workflowRuns } from '../db/schema/index.js';
 import type { WorkflowStepGateRow, NewWorkflowStepGateRow } from '../db/schema/workflowStepGates.js';
+import type { WorkflowRun } from '../db/schema/workflowRuns.js';
 import type { GateResolutionReason, ApproverPoolSnapshot } from '../../shared/types/workflowStepGate.js';
+import { normaliseApproverPoolSnapshot, poolFingerprint } from '../../shared/types/approverPoolSnapshot.js';
 import { logger } from '../lib/logger.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import { buildGateSnapshot } from './workflowStepGateServicePure.js';
 import { WorkflowConfidenceService } from './workflowConfidenceService.js';
 import { WorkflowGateStallNotifyService } from './workflowGateStallNotifyService.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
 
 // Transaction-aware db handle: either the root db or a drizzle transaction context
 type TxOrDb = DB | Parameters<Parameters<DB['transaction']>[0]>[0];
 
 export const WorkflowStepGateService = {
+  /**
+   * Loads the run row once per gate operation.
+   * Returns the full WorkflowRun row, or null if the run is not found or belongs
+   * to a different org. Callers that need taskId read run.taskId directly.
+   */
+  async loadWorkflowRunContext(
+    runId: string,
+    organisationId: string,
+    dbHandle: TxOrDb,
+  ): Promise<WorkflowRun | null> {
+    const [run] = await (dbHandle as typeof db)
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, organisationId),
+        ),
+      );
+    return run ?? null;
+  },
+
   /**
    * Return the open gate for a (run, step) pair, or null if none exists.
    * Uses db directly — no transaction needed for reads.
@@ -52,6 +77,29 @@ export const WorkflowStepGateService = {
           isNull(workflowStepGates.resolvedAt),
         ),
       );
+    return row ?? null;
+  },
+
+  /**
+   * Read a single gate by (gateId, organisationId). Returns null when the gate
+   * does not exist OR is in a different org. Used by the GET gate-detail route
+   * the Approval card hits to load the snapshot list when the run-context lacks
+   * the resolved pool member IDs.
+   */
+  async getGateById(
+    gateId: string,
+    organisationId: string,
+  ): Promise<WorkflowStepGateRow | null> {
+    const [row] = await db
+      .select()
+      .from(workflowStepGates)
+      .where(
+        and(
+          eq(workflowStepGates.id, gateId),
+          eq(workflowStepGates.organisationId, organisationId),
+        ),
+      )
+      .limit(1);
     return row ?? null;
   },
 
@@ -105,6 +153,18 @@ export const WorkflowStepGateService = {
       });
       return existing;
     }
+
+    // Load run context once — runCtx.taskId is available for Chunk 9 event emission.
+    const runCtx = await this.loadWorkflowRunContext(input.workflowRunId, input.organisationId, tx);
+    if (!runCtx) {
+      logger.warn('workflow_gate_open_run_not_found', {
+        workflowRunId: input.workflowRunId,
+        organisationId: input.organisationId,
+      });
+      throw { statusCode: 404, message: 'Workflow run not found', errorCode: 'run_not_found' };
+    }
+    // runCtx.taskId is now available for Chunk 9 event emission.
+    void runCtx;
 
     // Compute seenPayload from stepDefinition if provided (overrides explicit value).
     let resolvedSeenPayload: import('../../shared/types/workflowStepGate.js').SeenPayload | null =
@@ -166,6 +226,13 @@ export const WorkflowStepGateService = {
       }
     }
 
+    // Spec REQ 9-9 — every snapshot write goes through `normaliseApproverPoolSnapshot`
+    // so `userInPool(snapshot, callerUuid)` checks cannot false-negative on
+    // uppercase/duplicate inputs.
+    const normalisedSnapshot = input.approverPoolSnapshot
+      ? (normaliseApproverPoolSnapshot(input.approverPoolSnapshot) as unknown as ApproverPoolSnapshot)
+      : null;
+
     try {
       const [row] = await tx
         .insert(workflowStepGates)
@@ -175,7 +242,7 @@ export const WorkflowStepGateService = {
           gateKind: input.gateKind,
           seenPayload: resolvedSeenPayload,
           seenConfidence: resolvedSeenConfidence,
-          approverPoolSnapshot: input.approverPoolSnapshot ?? null,
+          approverPoolSnapshot: normalisedSnapshot,
           isCriticalSynthesised: input.isCriticalSynthesised,
           organisationId: input.organisationId,
         })
@@ -186,6 +253,64 @@ export const WorkflowStepGateService = {
         stepId: input.stepId,
         gateKind: input.gateKind,
       });
+
+      // Spec REQ 9-11 — emit approval.queued or ask.queued so Chunk 11's
+      // Approval / Ask card surfaces in real time. Pool size + fingerprint
+      // are broadcast (not the full ID list) per the reduced-broadcast
+      // contract that prevents pool-ID enumeration over WebSocket.
+      const runForEmit = await this.loadWorkflowRunContext(
+        input.workflowRunId,
+        input.organisationId,
+        tx,
+      );
+      if (runForEmit?.taskId) {
+        const fingerprint = normalisedSnapshot
+          ? poolFingerprint(normaliseApproverPoolSnapshot(normalisedSnapshot))
+          : '';
+        const poolSize = normalisedSnapshot?.length ?? 0;
+        if (input.gateKind === 'ask') {
+          const params = (input.stepDefinition?.params ?? {}) as Record<string, unknown>;
+          void appendAndEmitTaskEvent(
+            {
+              taskId: runForEmit.taskId,
+              organisationId: input.organisationId,
+              subaccountId: input.subaccountId ?? null,
+            },
+            'gate',
+            {
+              kind: 'ask.queued',
+              payload: {
+                gateId: row.id,
+                stepId: input.stepId,
+                poolSize,
+                poolFingerprint: fingerprint,
+                schema: params.fields ?? null,
+                prompt: typeof params.prompt === 'string' ? params.prompt : '',
+              },
+            },
+          );
+        } else {
+          void appendAndEmitTaskEvent(
+            {
+              taskId: runForEmit.taskId,
+              organisationId: input.organisationId,
+              subaccountId: input.subaccountId ?? null,
+            },
+            'gate',
+            {
+              kind: 'approval.queued',
+              payload: {
+                gateId: row.id,
+                stepId: input.stepId,
+                poolSize,
+                poolFingerprint: fingerprint,
+                seenPayload: resolvedSeenPayload,
+                seenConfidence: resolvedSeenConfidence,
+              },
+            },
+          );
+        }
+      }
 
       // Schedule stall notifications (best-effort — gate is already open).
       // boss.send() uses its own connection outside the caller's drizzle tx.
@@ -243,6 +368,19 @@ export const WorkflowStepGateService = {
       from: 'open',
       to: 'resolved',
     });
+
+    // Load run context — runCtx?.taskId is available for Chunk 9 event emission.
+    // Best-effort: gate may already be resolved (idempotent path), so run may be
+    // terminal. We load the gate first to get workflowRunId for the run lookup.
+    const [gateRow] = await (tx as typeof db)
+      .select({ workflowRunId: workflowStepGates.workflowRunId })
+      .from(workflowStepGates)
+      .where(eq(workflowStepGates.id, gateId));
+    const runCtx = gateRow
+      ? await this.loadWorkflowRunContext(gateRow.workflowRunId, organisationId, tx)
+      : null;
+    // runCtx?.taskId is now available for Chunk 9 event emission.
+    void runCtx;
 
     const result = await tx
       .update(workflowStepGates)
@@ -357,9 +495,11 @@ export const WorkflowStepGateService = {
     newSnapshot: ApproverPoolSnapshot,
     tx: TxOrDb,
   ): Promise<{ refreshed: boolean; poolSize?: number; reason?: string }> {
+    // Spec REQ 9-9 — normalise on every write site.
+    const normalisedSnapshot = normaliseApproverPoolSnapshot(newSnapshot) as unknown as ApproverPoolSnapshot;
     const result = await tx
       .update(workflowStepGates)
-      .set({ approverPoolSnapshot: newSnapshot })
+      .set({ approverPoolSnapshot: normalisedSnapshot })
       .where(
         and(
           eq(workflowStepGates.id, gateId),

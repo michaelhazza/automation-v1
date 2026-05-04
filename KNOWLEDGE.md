@@ -2053,3 +2053,50 @@ For any module that takes a root path plus external relative-path inputs and wri
 **Applied to PR #257:** `setup/portable/sync.js` `assertWithinRoot()` is called both in `expandGlob()` (expansion phase) and at every `fs.writeFileSync` / `fs.copyFileSync` / `fs.unlinkSync` call site that takes a derived path.
 
 **Generalises to:** any pure-function-plus-side-effect-writer pair where the pure function is "validate" and the writer is "execute." Don't trust single-site enforcement for security-critical paths. Cost is negligible (one resolved-path check); savings on a missed-bypass attack are large.
+
+### 2026-05-04 Pattern — Two-layer event-source dedup for live-projection hooks
+
+When a UI hook ingests events from both a WebSocket socket and an HTTP replay endpoint, replay-vs-socket overlap will duplicate events into the projection unless dedup is explicit. Pattern that survived chatgpt-pr-review:
+
+- **Layer A (hook boundary):** `seenEventIds: Set<string>` ref, FIFO eviction at a soft cap (~2000 entries = ~15 min at typical event rates, exceeds the full-rebuild interval). Every event-application path (socket callback, full rebuild, delta reconcile) calls `noteSeen(eventId)` first; returns false if already applied. Full rebuild resets the Set alongside resetting state.
+- **Layer B (pure reducer):** cursor short-circuit at the top of the reducer — `if ((event.taskSequence, event.eventSubsequence) <= (prev.lastEventSeq, prev.lastEventSubseq)) return prev`. Idempotent regardless of caller.
+
+Either layer alone is correctness-sufficient. Together they survive (a) reducer regressions (Set still dedups), (b) Set eviction past cap (cursor still dedups), (c) socket/replay race. See `client/src/hooks/useTaskProjection.ts` + `client/src/hooks/useTaskProjectionPure.ts:30-46`.
+
+### 2026-05-04 Gotcha — Cleanup jobs on FORCE-RLS tables MUST use withAdminConnection
+
+A pg-boss handler that runs `db.delete(...)` directly on a FORCE-RLS table silently affects 0 rows on every tick. Background handlers run outside `withOrgTx` context — `current_setting('app.organisation_id', true)` returns an empty string — and the RLS policy's `<> ''` predicate evaluates false, making every row invisible. The DELETE succeeds with rowcount 0; nothing logs an error.
+
+Pattern: cross-org maintenance sweeps MUST use `withAdminConnection({source, reason}, async tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Every other cleanup job (`agentRunCleanupJob`, etc.) follows this. The original `workflowDraftsCleanupJob` shipped without it and was caught by adversarial-reviewer; fixed in commit `28fb2e25`.
+
+### 2026-05-04 Pattern — Single chokepoint for INSERT into a uniqueness-protected table
+
+When a table has a partial unique index that maps to a typed API error (e.g. `workflow_runs_one_active_per_task_idx` → `TaskAlreadyHasActiveRunError → 409`), every INSERT path MUST go through one helper that catches SQLSTATE 23505 and translates. Direct `db.insert(table)` in service code surfaces the raw Postgres error as a 5xx.
+
+Pattern: extract a small module like `server/services/workflowRunInsertHelper.ts` with `insertRunRowWithUniqueGuard(tx, values, taskId)`. Place it in its own file to avoid cycles between caller services. Every service that creates rows calls the helper. CI grep gate names the helper as the only allowed match.
+
+### 2026-05-04 Gotcha — Date.now() poisons cursor-based projection delta polling
+
+Per-task event-source projection uses `(taskSequence, eventSubsequence)` as the delta cursor — client polls `?fromSeq=N&fromSubseq=M` and the reducer advances `lastEventSeq = max(prev, taskSequence)`. If any emitter passes `Date.now()` as a placeholder for `taskSequence` (≈1.7e12), the reducer pins the cursor to that value, all subsequent delta polls return empty, and live deltas are silently dead.
+
+Pattern: allocate `task_sequence` atomically inside the same transaction as the state change — `UPDATE tasks SET next_event_seq = next_event_seq + 1 WHERE id = $1 AND organisation_id = $2 RETURNING next_event_seq`. Never use `Date.now()` as a placeholder, even temporarily. See `server/services/taskEventService.ts:appendAndEmitTaskEvent`.
+
+### 2026-05-04 Pattern — Server-side validation parity via shared module
+
+Form validators live on the client for inline UX, but the client validator is NOT the contract enforcement boundary — the server is. If only the client validates, an attacker bypasses validation by hitting the API directly with malformed values.
+
+Pattern: move the pure validator to `shared/types/<feature>ValidationPure.ts`. Client re-exports via a one-line shim from its old location (preserves call sites). Server imports the shared module directly and calls it inside the submission service before any state change. On failure throw `{statusCode: 400, message, errorCode: 'invalid_form_values', fieldErrors}`. Route surfaces `field_errors` to the client; the client renders them inline alongside its own pre-submit errors. Same pure module = no contract drift. Implemented for ask-form submission in commit `7e61f350`.
+
+### 2026-05-04 Pattern — 404 (not 403) for cross-subaccount disclosure prevention
+
+Routes that resolve a resource by primary ID (no `:subaccountId` path segment) cannot use `resolveSubaccount` upfront — they need to load the resource first to know the subaccount it belongs to. After loading (org-scoped), if the caller doesn't have access to the resource's subaccount, return 404 — NOT 403. A 403 confirms the resource exists, which is itself a disclosure. A 404 is indistinguishable from "resource does not exist".
+
+Pattern: `await userCanAccessSubaccount(userId, dbRole, resource.subaccountId)` from `server/lib/userSubaccountAccess.ts`. If false, return the same 404 you'd return for "not in this org". Implemented for `workflowDrafts` route in commit `28fb2e25`.
+
+### 2026-05-04 Gotcha — agent_execution_events.run_id NOT NULL blocks task-level event persistence
+
+Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shaped task events: pause/resume/stop, gate transitions, orchestrator chat cards, milestones. None of these have an associated `agent_runs` row. The `agent_execution_events` table requires `run_id NOT NULL REFERENCES agent_runs(id)`. So persistence is impossible without a schema migration.
+
+Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
+
+Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.

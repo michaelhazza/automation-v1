@@ -277,6 +277,8 @@ export interface AgentRunRequest {
    * card messages can be persisted to agent_messages.
    */
   conversationId?: string;
+  /** Workflow nesting depth — propagated from parent run via workflow.run.start skill. Top-level orchestrator runs set this to 1. */
+  workflowRunDepth?: number;
 }
 
 export interface AgentRunResult {
@@ -2310,6 +2312,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     runContextData,
     readDataSourceCallCount: 0,
     hierarchy: hierarchyContext,
+    workflowRunDepth: request.workflowRunDepth,
   };
 
   // Throttle trace events to prevent event floods (max 2/sec)

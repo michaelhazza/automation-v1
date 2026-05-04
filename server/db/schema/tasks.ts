@@ -4,6 +4,7 @@ import type { DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
+import { users } from './users';
 import { automations } from './automations';
 import { projects } from './projects';
 import { goals } from './goals';
@@ -28,6 +29,10 @@ export const tasks = pgTable(
     assignedAgentIds: jsonb('assigned_agent_ids').$type<string[]>().default([]),
     createdByAgentId: uuid('created_by_agent_id')
       .references(() => agents.id),
+    // Workflows V1 Phase 2 (P2) — task requester for approval pool resolution.
+    // Populated on task creation when a human user is the requester.
+    createdByUserId: uuid('created_by_user_id')
+      .references(() => users.id),
     processId: uuid('process_id')
       .references(() => automations.id),
     projectId: uuid('project_id')

@@ -725,6 +725,19 @@ export const queueService = {
         }
       });
 
+      // Workflows V1 — daily purge of unconsumed workflow_drafts older than 7 days.
+      await (boss as any).work('workflow-drafts-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runWorkflowDraftsCleanup } = await import('../jobs/workflowDraftsCleanupJob.js');
+          await withTimeout(runWorkflowDraftsCleanup().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'workflow-drafts-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2B — memory dedup daily sweep
       await (boss as any).work('maintenance:memory-dedup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1090,6 +1103,7 @@ export const queueService = {
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
+      await boss.schedule('workflow-drafts-cleanup', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
       // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});

@@ -182,6 +182,17 @@ import spendingBudgetsRouter from './routes/spendingBudgets.js';
 import spendingPoliciesRouter from './routes/spendingPolicies.js';
 import agentChargesRouter from './routes/agentCharges.js';
 import approvalChannelsRouter from './routes/approvalChannels.js';
+// Workflows V1 Phase 2 — task event stream replay (Chunk 9)
+import taskEventStreamRouter from './routes/taskEventStream.js';
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+import assignableUsersRouter from './routes/assignableUsers.js';
+import teamsRouter from './routes/teams.js';
+// Workflows V1 Phase 2 — Ask form submit / skip / autofill (Chunk 12)
+import asksRouter from './routes/asks.js';
+// Workflows V1 Phase 2 — File viewer, diff, per-hunk revert (Chunk 13)
+import fileRevertRouter from './routes/fileRevert.js';
+// Workflows V1 Phase 2 — workflow drafts fetch + discard (Chunk 14b)
+import workflowDraftsRouter from './routes/workflowDrafts.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -401,6 +412,15 @@ app.use(spendingBudgetsRouter);
 app.use(spendingPoliciesRouter);
 app.use(agentChargesRouter);
 app.use(approvalChannelsRouter);
+// Workflows V1 Phase 2 — task event stream replay (Chunk 9)
+app.use(taskEventStreamRouter);
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+app.use(assignableUsersRouter);
+app.use(teamsRouter);
+// Workflows V1 Phase 2 — Ask form submit / skip / autofill (Chunk 12)
+app.use(asksRouter);
+app.use(fileRevertRouter);
+app.use(workflowDraftsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

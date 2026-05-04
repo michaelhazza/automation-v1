@@ -14,6 +14,8 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { WorkflowRunService } from '../services/workflowRunService.js';
 import { WorkflowRunPauseStopService } from '../services/workflowRunPauseStopService.js';
+import { taskService } from '../services/taskService.js';
+import { resolveActiveRunForTask } from '../services/workflowRunResolverService.js';
 
 const router = Router();
 
@@ -64,6 +66,11 @@ router.post(
       res.status(400).json({ error: 'bulkTargets is required for bulk run mode' });
       return;
     }
+    const task = await taskService.createTask(req.orgId!, subaccountId, {
+      title: templateId ? `Workflow run` : `System workflow run`,
+      status: 'inbox',
+      brief: JSON.stringify(input ?? {}),
+    }, req.user!.id);
     const result = await WorkflowRunService.startRun({
       organisationId: req.orgId!,
       subaccountId,
@@ -71,6 +78,7 @@ router.post(
       systemTemplateSlug,
       initialInput: input ?? {},
       startedByUserId: req.user!.id,
+      taskId: task.id,
       runMode: effectiveMode as 'auto' | 'supervised' | 'background' | 'bulk',
       bulkTargets,
     });
@@ -145,7 +153,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/replay',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { WorkflowEngineService } = await import('../services/workflowEngineService.js');
     const result = await WorkflowEngineService.createReplayRun(
@@ -267,21 +275,22 @@ router.post(
   })
 );
 
-// ─── Pause / Resume / Stop ───────────────────────────────────────────────────
-// Spec: tasks/Workflows-spec.md §7 — operator-initiated pause, resume, stop.
+// ─── Task-scoped Pause / Resume / Stop ─────────────────────────────────────
+// Spec §7 mandates POST /api/tasks/:taskId/run/{pause,resume,stop}.
+// The partial-unique index ensures at most one active run per task.
 
 router.post(
-  '/api/workflow-runs/:runId/pause',
+  '/api/tasks/:taskId/run/pause',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const { runId } = req.params;
-    const result = await WorkflowRunPauseStopService.pauseRun(
-      runId,
-      req.orgId!,
-      req.user!.id,
-      'by_user',
-    );
+    const { taskId } = req.params;
+    const runId = await resolveActiveRunForTask(taskId, req.orgId!);
+    if (!runId) {
+      res.status(404).json({ error: 'no_active_run_for_task' });
+      return;
+    }
+    const result = await WorkflowRunPauseStopService.pauseRun(runId, req.orgId!, req.user!.id, 'by_user');
     if (!result.paused) {
       res.json({ paused: false, reason: result.reason ?? 'not_running' });
       return;
@@ -291,33 +300,25 @@ router.post(
 );
 
 router.post(
-  '/api/workflow-runs/:runId/resume',
+  '/api/tasks/:taskId/run/resume',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const { runId } = req.params;
+    const { taskId } = req.params;
     const { extendCostCents, extendSeconds } = req.body as { extendCostCents?: number; extendSeconds?: number };
-
-    const result = await WorkflowRunPauseStopService.resumeRun(
-      runId,
-      req.orgId!,
-      req.user!.id,
-      { extendCostCents, extendSeconds },
-    );
-
+    const runId = await resolveActiveRunForTask(taskId, req.orgId!);
+    if (!runId) {
+      res.status(404).json({ error: 'no_active_run_for_task' });
+      return;
+    }
+    const result = await WorkflowRunPauseStopService.resumeRun(runId, req.orgId!, req.user!.id, { extendCostCents, extendSeconds });
     if (result.resumed) {
       res.json({ resumed: true, extension_count: result.extensionCount ?? 0 });
       return;
     }
-
-    // Spec §7: flat-shape responses for resume failure modes.
     const reason = result.reason ?? 'unknown';
     if (reason === 'extension_required') {
-      res.status(400).json({
-        error: 'extension_required',
-        reason: 'previous_pause_was_cap_triggered',
-        cap: result.cap ?? 'cost_ceiling',
-      });
+      res.status(400).json({ error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: result.cap ?? 'cost_ceiling' });
       return;
     }
     if (reason === 'extension_cap_reached') {
@@ -325,10 +326,7 @@ router.post(
       return;
     }
     if (reason === 'race_with_other_action') {
-      res.status(409).json({
-        error: 'race_with_other_action',
-        current_status: result.currentStatus ?? 'unknown',
-      });
+      res.status(409).json({ error: 'race_with_other_action', current_status: result.currentStatus ?? 'unknown' });
       return;
     }
     res.json({ resumed: false, reason });
@@ -336,11 +334,16 @@ router.post(
 );
 
 router.post(
-  '/api/workflow-runs/:runId/stop',
+  '/api/tasks/:taskId/run/stop',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const { runId } = req.params;
+    const { taskId } = req.params;
+    const runId = await resolveActiveRunForTask(taskId, req.orgId!);
+    if (!runId) {
+      res.status(404).json({ error: 'no_active_run_for_task' });
+      return;
+    }
     const result = await WorkflowRunPauseStopService.stopRun(runId, req.orgId!, req.user!.id);
     if (!result.stopped) {
       res.json({ stopped: false, reason: result.reason, current_status: result.currentStatus });
