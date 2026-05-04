@@ -17,6 +17,8 @@ import { WorkflowRunService } from './workflowRunService.js';
 import { resolveActiveRunForTask } from './workflowRunResolverService.js';
 import { appendAndEmitTaskEvent } from './taskEventService.js';
 import type { WorkflowDefinition } from '../lib/workflow/types.js';
+import { validateAskForm } from '../../shared/types/askFormValidationPure.js';
+import type { AskField, AskParams } from '../../shared/types/askForm.js';
 
 export class NotInSubmitterPoolError extends Error {
   readonly code = 'not_in_submitter_pool' as const;
@@ -105,6 +107,39 @@ function checkPoolMembership(
   }
 }
 
+async function loadStepDefinition(
+  runId: string,
+  stepId: string,
+): Promise<{ fields: AskField[]; params: AskParams } | null> {
+  const [run] = await db
+    .select({ templateVersionId: workflowRuns.templateVersionId })
+    .from(workflowRuns)
+    .where(eq(workflowRuns.id, runId));
+  if (!run) return null;
+
+  let definition: WorkflowDefinition | null = null;
+  const [orgVer] = await db
+    .select({ definitionJson: workflowTemplateVersions.definitionJson })
+    .from(workflowTemplateVersions)
+    .where(eq(workflowTemplateVersions.id, run.templateVersionId));
+  if (orgVer) {
+    definition = orgVer.definitionJson as unknown as WorkflowDefinition;
+  } else {
+    const [sysVer] = await db
+      .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
+      .from(systemWorkflowTemplateVersions)
+      .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
+    if (sysVer) {
+      definition = sysVer.definitionJson as unknown as WorkflowDefinition;
+    }
+  }
+
+  const step = definition?.steps.find((s) => s.id === stepId);
+  const params = step?.params as AskParams | undefined;
+  if (!params || !Array.isArray(params.fields)) return null;
+  return { fields: params.fields, params };
+}
+
 export const askFormSubmissionService = {
   async submit(
     taskId: string,
@@ -116,6 +151,23 @@ export const askFormSubmissionService = {
     const { runId, stepRun, gate } = await resolveAskContext(taskId, stepId, organisationId);
 
     checkPoolMembership(gate, callerUserId);
+
+    // Server-side validation. Same pure module as the client's inline check —
+    // the client validation is UX, this is the contract enforcement boundary.
+    // If the step has no field schema we accept the submission (legacy step
+    // shapes that predate the form runtime).
+    const stepDef = await loadStepDefinition(runId, stepId);
+    if (stepDef) {
+      const result = validateAskForm(stepDef.fields, values);
+      if (!result.valid) {
+        throw {
+          statusCode: 400,
+          message: 'Submitted values failed validation',
+          errorCode: 'invalid_form_values',
+          fieldErrors: result.errors,
+        };
+      }
+    }
 
     const outputJson: Record<string, unknown> = {
       submitted_by: callerUserId,

@@ -2836,6 +2836,12 @@ NOTE: Items REQ 6.4 and REQ 7.9 in the prior section ("Deferred from spec-confor
 
 ### Tier D — cosmetic NITs
 
+- [ ] **chatgpt-pr-review F8 — `ActivityPane` timestamp rendering uses `toLocaleTimeString` (locale + tz drift).** `client/src/components/openTask/ActivityPane.tsx:73-77`. Consistency with the rest of the deterministic rendering surface would replace this with a standardised formatter (e.g. fixed `HH:mm:ss` in the user's tz, or a shared `formatTimeOfDay` helper). Cosmetic; does not affect correctness.
+
+- [ ] **chatgpt-pr-review F9 — `ApprovalCard` pool-fetch leaky condition.** `client/src/components/openTask/ApprovalCard.tsx:11` — fires when `gate.poolFingerprint` is set and status is open, but does not re-fire when fingerprint changes due to a stale-vs-server case where the projection lags. Edge case; the `approval.pool_refreshed` envelope (REQ 9-10) refreshes the projection.fingerprint which retriggers naturally on the next render. Not critical.
+
+- [ ] **chatgpt-pr-review F7 — `AskFormCard` hardcoded `'you'` identity string.** `client/src/components/openTask/AskFormCard.tsx:65, 88` — after submit/skip success the local UI shows `Submitted by you` until the projection round-trips. Functionally correct (the local actor IS the submitter), but the projection's `submittedBy` is the canonical user id. Consider reading `req.user.id` (passed as a prop or read from auth context) and rendering the user's display name instead. Operator decision: keep the friendly literal or wire to identity? **User-facing copy choice — needs operator approval before changing.**
+
 - [ ] **pr-N1 — `filesTabPure.ts` sort tiebreakers are primary-key only.** `client/src/components/openTask/filesTabPure.ts:49-56` — add `.fileId` secondary tiebreaker on `recent` / `oldest` / `author` sorts (DEVELOPMENT_GUIDELINES §8.17 + §8.21).
 
 - [ ] **pr-N2 — `taskEventService.ts` validation failure does not surface to caller.** `server/services/taskEventService.ts:31-38` returns void after `logger.warn` on validation failure. Consider returning `Promise<{ ok: true } | { ok: false, reason: string }>` so caller observability can branch.

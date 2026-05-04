@@ -9,9 +9,22 @@ export function ApprovalCard({ gate, taskId }: ApprovalCardProps) {
 
   useEffect(() => {
     if (!gate.poolFingerprint || gate.status === 'decided') return;
+    let cancelled = false;
     void api.get(`/api/tasks/${taskId}/gates/${gate.gateId}`)
-      .then(({ data }: { data: { approverPool?: string[] } }) => setPoolMembers(data.approverPool ?? []))
-      .catch(() => {});
+      .then(({ data }: { data: { approverPool?: string[] } }) => {
+        if (cancelled) return;
+        setPoolMembers(data.approverPool ?? []);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.warn('ApprovalCard.pool_fetch_failed', {
+          taskId,
+          gateId: gate.gateId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    return () => { cancelled = true; };
   }, [gate.poolFingerprint, gate.gateId, taskId, gate.status]);
 
   const displayCount = poolMembers !== null ? poolMembers.length : gate.poolSize;

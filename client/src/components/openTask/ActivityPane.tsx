@@ -20,7 +20,7 @@ export function ActivityPane({ projection }: ActivityPaneProps) {
       }
       prevCountRef.current = count;
     }
-  }, [projection.activityEvents.length, isUserScrolledUp]);
+  }, [projection.activityEvents, isUserScrolledUp]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;

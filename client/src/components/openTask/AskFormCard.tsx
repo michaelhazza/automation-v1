@@ -22,20 +22,42 @@ export function AskFormCard({ gate, taskId }: AskFormCardProps) {
   );
   const [submittedBy, setSubmittedBy] = useState<string | null>(gate.submittedBy ?? null);
 
+  // Reconcile local status with the projection. Server is the source of truth;
+  // local state exists only to cover the optimistic-UI window between submit
+  // success and the next projection tick. If another actor resolves the gate
+  // out-of-band, the projection update wins.
+  useEffect(() => {
+    setLocalStatus(gate.status);
+    setSubmittedBy(gate.submittedBy ?? null);
+  }, [gate.status, gate.submittedBy]);
+
   // Fetch auto-fill values on mount (only when pending and autoFillFrom is set).
+  // Cancellation flag prevents a late autofill response from overwriting newer
+  // user input if the component unmounts or the gate identity changes.
   useEffect(() => {
     if (localStatus !== 'pending' || !params || params.autoFillFrom === 'none') return;
+    let cancelled = false;
     const fieldsParam = encodeURIComponent(JSON.stringify(params.fields));
     void api
       .get<{ values: Record<string, unknown> }>(
         `/api/tasks/${taskId}/ask/${gate.stepId}/autofill?fields=${fieldsParam}`,
       )
       .then(({ data }) => {
+        if (cancelled) return;
         if (data.values && Object.keys(data.values).length > 0) {
           setValues((prev) => ({ ...data.values, ...prev }));
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.warn('AskFormCard.autofill_failed', {
+          taskId,
+          stepId: gate.stepId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gate.stepId, taskId]);
 
@@ -64,10 +86,20 @@ export function AskFormCard({ gate, taskId }: AskFormCardProps) {
       setLocalStatus('submitted');
       setSubmittedBy('you');
     } catch (err: unknown) {
-      const shaped = err as { response?: { status?: number; data?: { error?: string } } };
+      const shaped = err as {
+        response?: {
+          status?: number;
+          data?: { error?: string; field_errors?: Record<string, string> };
+        };
+      };
       const status = shaped.response?.status;
       const code = shaped.response?.data?.error;
-      if (status === 409 && code === 'already_resolved') {
+      const fieldErrors = shaped.response?.data?.field_errors;
+      if (status === 400 && code === 'invalid_form_values' && fieldErrors) {
+        // Server rejected the same shape the client validator did. Surface the
+        // server-side errors inline so the user can correct and retry.
+        setErrors(fieldErrors);
+      } else if (status === 409 && code === 'already_resolved') {
         setInlineError('Someone else already submitted this form');
       } else if (status === 403) {
         setInlineError('You are not authorised to submit this form');
