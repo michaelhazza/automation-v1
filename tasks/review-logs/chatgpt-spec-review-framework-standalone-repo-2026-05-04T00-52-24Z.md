@@ -152,3 +152,54 @@
 - [user] F14: Closed OQ 11.3 — defer npm wrapper; ship `--dry-run`, `--check`, `--doctor` in v1
 
 ---
+
+## Round 2 — 2026-05-04T01:20:00Z
+
+### ChatGPT Feedback (raw)
+
+> This is in very good shape now. You've removed the real structural risks. What's left are edge-case correctness + operational sharpness issues. Nothing here blocks implementation, but a few are worth tightening now because they're painful to retrofit later.
+>
+> 1. Substitution under-specified (placeholder format hard rule, scoping to substituteAt !== "never" + clean files only, idempotency guarantee). 2. New file handling missing (no lastAppliedHash for post-adoption files; treat as new → write → add to state). 3. Rename hint (possible rename detected print when removed + added paths are similar). 4. .framework-new lifecycle scan at startup. 5. Hook merge identity = command path (replace on match, append otherwise; stable ordering). 6. --doctor claim downgrade (detect divergence only, not provenance; missing state.json → treat all as customised). 7. Submodule dirty definition (uncommitted → block; detached HEAD → allowed). 8. Version pinning command example. 9. --check split: --check = outdated only; --strict = outdated or customised. 10. Structured logging: SYNC file=<path> status=updated|customised|skipped.
+>
+> Final verdict: Architecture solid, sync model correct, migration safe. Remaining risk: edge-case correctness, not design.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F23: Substitution — hard format rule + scoping + idempotency | technical-escalated (high) | apply | user: apply | high | Silent corruption risk if unspecified. |
+| F24: New file handling — if not in state.files → write + add; syncIgnore respected | technical-escalated (high) | apply | user: apply | high | Undefined behaviour on post-adoption framework additions. |
+| F25: Rename hint — print possible-rename when removed + new paths are similar | technical | apply | auto (apply) | medium | Low-effort, high-clarity output improvement. |
+| F26: .framework-new lifecycle scan at sync start | technical | apply | auto (apply) | medium | Prevents stale unresolved merge files going unnoticed. |
+| F27: Hook identity = command path; replace on match, append otherwise; stable order | technical | apply | auto (apply) | medium | Tightens §4.6; prevents duplicates across syncs. |
+| F28: Downgrade --doctor claim; missing state.json → treat all as customised | technical | apply | auto (apply) | medium | Spec accuracy; safer failure-mode default. |
+| F29: Define submodule dirty: uncommitted → block; detached HEAD → allowed | technical | apply | auto (apply) | medium | Clarifies sync.js startup check. |
+| F30: Version pinning command example | technical | apply | auto (apply) | low | Prevents tag/branch confusion for operators. |
+| F31: Split --check: outdated only; add --strict: outdated or customised | user-facing | apply | user: apply | medium | Redefines flag approved Round 1; confirmed. |
+| F32: Structured logging: SYNC file=<path> status=... per file | technical | apply | auto (apply) | low | CI-parseable output; future tooling. |
+
+Operator decisions: F23 apply, F24 apply, F31 apply. All 10 findings approved.
+
+### Top themes (Round 2)
+1. **Substitution correctness** — hard format rule (`{{...}}`), scoping (`substituteAt !== "never"`), idempotency invariant.
+2. **New file handling** — post-adoption framework additions now have explicit write-and-track logic.
+3. **Lifecycle enforcement** — `.framework-new` startup scan, missing state.json exits cleanly, submodule dirty = block.
+4. **CLI contract sharpening** — `--check` / `--strict` split; `--doctor` claim downgraded to divergence-detection only.
+5. **Hook identity + ordering** — command path = identity; replace on match; stable ordering across syncs.
+
+### Applied (auto-applied + user-approved, Round 2)
+
+**Auto-applied (technical):**
+- [auto] F25: Added rename hint to removedFiles loop (step 8 pseudocode) — prints `INFO: possible rename` when removed + new paths are similar
+- [auto] F26: Added startup scan (step 0 pseudocode) — exits on unresolved `.framework-new` files unless `--force`
+- [auto] F27: Added hook identity rule to §4.6 — command path = identity; replace on match; stable framework-first ordering; unit-tested
+- [auto] F28: Updated `--doctor` flag description and §9 risk row — detects divergence only, cannot reconstruct provenance; missing state.json exits with treat-all-as-customised default
+- [auto] F29: Added submodule cleanliness check (step 6 pseudocode) — uncommitted changes → block; detached HEAD → allowed; branch mismatch → warning
+- [auto] F30: Added pinned-checkout command examples to §4.7 — `git -C .claude-framework checkout v2.1.0` with explicit note against `branch = v2.1.0` in `.gitmodules`
+- [auto] F32: Added structured log line (`SYNC file=<path> status=...`) to each step 7/8 operation
+- [auto] Integrity check: all §4.6 cross-references intact; step 7/8 log-line reference correct; §8 migration step-7 reference unaffected
+
+**User-approved:**
+- [user] F23: Added Substitution engine rules block (§4.5) — 4 hard invariants: `{{PLACEHOLDER_NAME}}` format, substituteAt scoping, idempotency (no nested placeholders), substitution applied to `.framework-new` too
+- [user] F24: Added new-file check (step 7d pseudocode) — file absent from state.files or not on disk → write + add to state; respects syncIgnore; never treated as customised
+- [user] F31: Split `--check` and `--strict` in flags table; updated §11.3 description to match

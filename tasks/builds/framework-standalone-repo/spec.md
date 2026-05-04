@@ -427,36 +427,66 @@ Lives in the framework repo. Invoked from the target repo as `node .claude-frame
 Logic in pseudocode:
 
 ```
-1. Read target's .claude/.framework-state.json
+0. STARTUP CHECK — scan target for *.framework-new files.
+   If any exist and --force not set:
+     Print: "WARN: Unresolved merge files: <list>. Resolve or delete before syncing."
+     Exit 1.
+
+1. If state.json missing or unreadable:
+   Print: "ERROR: .framework-state.json not found or corrupted. Run sync.js --adopt to re-initialise,
+           or --doctor to inspect. All files treated as customised until state is restored."
+   Exit 1.
+
 2. Read .claude-framework/manifest.json
 3. Expand all managedFiles globs in lexicographic order (deterministic, cross-platform).
 4. Read .claude-framework/.claude/FRAMEWORK_VERSION (the new version).
 5. If state.frameworkVersion === new version: print "already on latest (v<X>)", exit 0.
-6. For each framework-managed file (in glob-expansion order):
-   a. If file is in state.syncIgnore: skip silently.
-   b. If file.mode === "adopt-only": skip (project owns it after adoption).
+
+6. Check submodule cleanliness. If .claude-framework/ has uncommitted changes:
+   Print: "ERROR: .claude-framework/ submodule has uncommitted changes. Stash or revert before syncing."
+   Exit 1. (Detached HEAD and branch-name mismatch are allowed with a warning, not an error.)
+
+7. For each framework-managed file (in glob-expansion order):
+   a. If file is in state.syncIgnore: skip silently. Emit: SYNC file=<path> status=skipped
+   b. If file.mode === "adopt-only": skip (project owns it post-adoption). Emit: SYNC file=<path> status=skipped
    c. If file.mode === "settings-merge": apply flat-merge logic (§4.6), skip to next file.
-   d. Read the current target file content. Normalise: strip BOM, LF endings, strip trailing whitespace per line.
-   e. Compute sha256(normalised content). Compare to state.files[path].lastAppliedHash.
-   f. If hashes match (file is clean — operator hasn't edited it since last sync):
-      - Read new framework source, apply substitutions from state.json.
+   d. NEW FILE CHECK — if state.files has no entry for this path OR target file does not exist:
+      - Treat as new (framework-added since last sync, or not yet tracked by state).
+      - Read framework source. Apply substitutions if file.substituteAt !== "never".
+      - Write to target path.
+      - Add state.files[path]: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit,
+        customisedLocally = false.
+      - Emit: SYNC file=<path> status=new. Increment new-files counter. Skip to next file.
+   e. Read the current target file content. Normalise: strip BOM, LF endings, strip trailing whitespace per line.
+   f. Compute sha256(normalised content). Compare to state.files[path].lastAppliedHash.
+   g. If hashes match (file is clean — no local edits since last sync):
+      - Read new framework source. Apply substitutions if file.substituteAt !== "never".
       - Write substituted content to target path.
-      - Update state.json: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit.
-   g. If hashes differ (file was locally modified):
+      - Update state.files[path]: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit.
+      - Emit: SYNC file=<path> status=updated
+   h. If hashes differ (file was locally modified since last sync):
       - Set state.files[path].customisedLocally = true (informational).
-      - Read new framework source, apply substitutions, write to <target-path>.framework-new.
-      - Print: "MANUAL MERGE: <path> customised — see <path>.framework-new for new framework content.
-               Merge manually, delete .framework-new, re-run sync to update the hash."
+      - Read new framework source. Apply substitutions if file.substituteAt !== "never".
+      - Write to <target-path>.framework-new.
+      - Print: "MANUAL MERGE: <path> — customised. See <path>.framework-new. Merge, delete .framework-new,
+               re-run sync."
       - Do NOT overwrite the target file.
-7. For each file in manifest.removedFiles:
-   - If state records lastAppliedHash for the file and file still exists in target:
-     - Print: "WARN: <path> removed from framework in v<removedIn>. Remove manually if it was framework-managed."
-   - Never delete automatically.
-8. Read CHANGELOG entries between old and new versions. Print summary.
-9. Update state.json: frameworkVersion = new version.
-10. Exit 0. Print: N files updated, M customised (.framework-new written), K removal warnings.
+      - Emit: SYNC file=<path> status=customised
+
+8. For each file in manifest.removedFiles:
+   If state records lastAppliedHash for the file and file still exists in target:
+     Print: "WARN: <path> removed from framework in v<removedIn>. Remove manually."
+     Emit: SYNC file=<path> status=removed-warn
+   Check: if a removed path and a newly-written path share the same directory + similar filename:
+     Print: "INFO: possible rename detected — old: <removed-path>, new: <new-path>"
+   Never delete automatically.
+
+9. Read CHANGELOG entries between old and new versions. Print summary.
+10. Update state.json: frameworkVersion = new version.
+11. Exit 0. Print: N updated, M new, P customised (.framework-new written), K removal warnings.
 
 INVARIANT: sync.js never stages, commits, pushes, or deletes files. The operator commits the result.
+Each file operation emits one structured log line (step 7/8 above): machine-parseable, human-readable.
 ```
 
 Flags:
@@ -465,10 +495,22 @@ Flags:
 |------|-----------|
 | `--adopt` | First-run mode: no existing state.json. Copy all managed files fresh, write initial state.json. |
 | `--dry-run` | Print what would change without writing anything. Shows which files are clean vs customised. |
-| `--check` | Exit 0 if all managed sync-mode files are clean and up-to-date; exit 1 otherwise. For CI gates. |
-| `--doctor` | Diagnose state.json health: orphaned entries, missing files, hash mismatches. No writes. |
+| `--check` | Exit 0 if framework version is current (all sync-mode files have been synced to latest); exit 1 if a framework update is available. Does NOT fail on customised files — those are intentional. |
+| `--strict` | As `--check`, plus exit 1 if any customised files exist. Use in repos that enforce no local modifications. |
+| `--doctor` | Diagnose state.json health: orphaned entries, missing target files, hash mismatches. Detects clean vs. modified divergence only — cannot reconstruct provenance (framework version, substitutions used). No writes. |
+| `--force` | Skip the `.framework-new` startup check and proceed even if unresolved merges exist. |
 
-Implementation: TypeScript, ~250 lines. Standalone — no dependencies beyond Node stdlib (`fs/promises` + a small lexicographic glob expander).
+Implementation: TypeScript, ~300 lines. Standalone — no dependencies beyond Node stdlib (`fs/promises` + a small lexicographic glob expander).
+
+**Substitution engine rules (hard invariants)**
+
+1. **Placeholder format**: `{{PLACEHOLDER_NAME}}` — double-brace delimiters, UPPER_SNAKE_CASE inside. This format is non-natural-language and non-overlapping. No other format (e.g. `[PROJECT_NAME]`, `<PROJECT_NAME>`, `%PROJECT_NAME%`) is valid. Any file containing a differently-formatted placeholder is either already substituted or uses a framework-internal literal — sync leaves it alone.
+
+2. **Scoping**: substitution runs only on files where `file.substituteAt !== "never"`. Files marked `substituteAt: "never"` are written verbatim; any `{{...}}` inside them are treated as content, not placeholders.
+
+3. **Idempotency**: applying substitutions twice must produce identical output. This requires: (a) no placeholder appears in its own substitution value; (b) no substitution value contains `{{...}}` patterns; (c) values are flat strings, never templates. Enforce at adoption time: if a value contains `{{`, reject with an error.
+
+4. **Substitution on `.framework-new`**: when a customised file gets a `.framework-new` written, apply substitutions using the same rules as a clean-file write (so the operator sees the post-substitution framework version, not raw placeholders).
 
 ### 4.6 `.claude/settings.json` hook merge contract
 
@@ -479,10 +521,11 @@ Claude Code requires a flat hooks shape: `{ "hooks": { "<HookEventName>": [<hand
 Flat-merge rules:
 
 1. **Framework ownership** — the framework owns hook entries whose `command` field references a file under `.claude/hooks/` (the framework's own hook scripts). Sync regenerates exactly those entries on every upgrade.
-2. **Project hooks coexist** — any hook entry the operator added (referencing a non-framework script or an inline command) is preserved. Sync never removes project hooks.
-3. **Collision rule** — if a framework hook and a project hook both target the same hook event, the project hook is preserved and the framework hook is also written. Neither wins outright; both coexist. If there is a true collision on the same script path, **project wins** (the framework's version is not written).
-4. **Order** — framework hooks are written first, then project hooks. Claude Code executes hooks in array order; document this in SYNC.md so operators know how to reorder if needed.
-5. **Testable invariant** — the flat-merge contract has unit tests in `sync.test.ts` verifying: framework hooks present + project hooks preserved + no duplicates.
+2. **Hook entry identity** — a hook entry's identity is its `command` value (first token for shell strings). On upgrade: if a framework hook entry's command matches an existing entry under the same event → **replace in-place** (update the entry). If no match → **append** at the framework boundary. This prevents duplicate hook entries across syncs.
+3. **Project hooks coexist** — any hook entry the operator added (referencing a non-framework script or an inline command) is preserved. Sync never removes project hooks.
+4. **Collision rule** — if a framework and project hook share the same command path under the same event: **project wins** (the framework's version of that entry is not written).
+5. **Stable ordering** — on every sync, the order of entries is: (framework entries in their manifest-declared order) then (project entries in the order they appear in the current file). This is deterministic across runs and produces clean diffs.
+6. **Testable invariant** — the flat-merge contract has unit tests in `sync.test.ts` verifying: framework hooks present + project hooks preserved + no duplicates across syncs + stable ordering.
 
 ### 4.7 Versioning & releases on the framework repo
 
@@ -491,7 +534,24 @@ Flat-merge rules:
 - **Branches** for ongoing work: `main` is the rolling-latest. Major changes can use feature branches that merge to main.
 - **Optional later:** GitHub Releases with auto-generated changelog. Not required for v1.
 
-Target repos pin to `branch = main` in `.gitmodules` by default (rolling). Operators who want to lock to a version edit `.gitmodules` to `branch = v2.1.0`.
+Target repos pin to `branch = main` in `.gitmodules` by default (rolling). Operators who want to lock to a specific version:
+
+```bash
+# Pin to v2.1.0 (removes branch tracking, locks to the tag commit)
+git -C .claude-framework checkout v2.1.0
+git add .claude-framework
+git commit -m "chore: pin claude-code-framework to v2.1.0"
+```
+
+To return to rolling-latest:
+```bash
+git -C .claude-framework checkout main
+git submodule update --remote
+git add .claude-framework
+git commit -m "chore: unpin claude-code-framework (rolling main)"
+```
+
+**Do not** set `branch = v2.1.0` in `.gitmodules` — that tells git to track a branch named "v2.1.0", which does not exist. Tags and branches are different. The correct pinning approach is the commit-pointer checkout above.
 
 ---
 
@@ -720,7 +780,7 @@ node .claude-framework/sync.js
 | **Two repos to maintain.** Releases now require pushing to the framework repo *and* updating the submodule pointer in target repos. | This is the cost of distribution. The win is that updates flow to N target repos for the cost of pushing once. As long as N ≥ 2, it pays back. |
 | **What if GitHub goes down / framework repo gets deleted?** Submodule updates fail until the source is reachable. | Each target repo's submodule clone is a complete copy; existing target repos continue to function indefinitely without framework-repo access. They just can't pull updates. Mitigation: optionally mirror the framework repo to a second remote. |
 | **Cross-platform line ending issues.** Submodule files cloned on Windows get CRLF; on macOS get LF. Sync's hash compare must handle this. | `.gitattributes` in framework repo: `*.md text eol=lf` to force LF. Sync normalises before hash. Tested cross-platform before release. |
-| **State file corruption or loss.** If `.framework-state.json` is corrupted or deleted, sync cannot distinguish clean from customised files. | `sync.js --doctor` diagnoses the issue. `sync.js --dry-run` lets the operator inspect before writing. State can be partially reconstructed by re-hashing current files against the framework source — files that match are clean; files that differ are treated as customised. |
+| **State file corruption or loss.** If `.framework-state.json` is corrupted or deleted, sync exits with an error and treats all files as customised. `--doctor` can report which target files diverge from the current framework source (detects clean vs. modified) but cannot reconstruct provenance (original framework version, substitutions used, source path). Recovery requires manual re-adopt (`--adopt`). | Run `sync.js --doctor` for diagnostics. If state is unrecoverable, re-run `--adopt` to reinitialise; the operator resolves any divergence manually. |
 | **Framework file rename or deletion.** Renamed or deleted files in the framework create orphaned generated files in target repos that receive no further updates. | Manifest `removedFiles` entries with `action: warn-only` inform operators. Rename: treated as delete + add (old file orphaned; new file adopted). Never auto-deleted. |
 | **Settings merge collision.** Hook entries from framework and project could conflict on ordering or be duplicated across syncs. | Flat-merge contract (§4.6): framework owns entries referencing `.claude/hooks/*`; project hooks coexist; project wins on true collision; framework-first ordering. Deterministic rules, covered by unit tests. |
 | **Self-adoption drift.** Automation OS internal files may have diverged from `setup/portable/` beyond placeholder substitution, causing silent overwrites or noisy migration PRs. | Preflight diff (§8 step 6.5) classifies all differences before self-adoption runs. Framework drift is backported first. |
