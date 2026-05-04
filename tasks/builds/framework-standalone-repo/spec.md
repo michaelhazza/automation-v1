@@ -449,17 +449,31 @@ Logic in pseudocode:
 7. For each framework-managed file (in glob-expansion order):
    a. If file is in state.syncIgnore: skip silently. Emit: SYNC file=<path> status=skipped
    b. If file.mode === "adopt-only": skip (project owns it post-adoption). Emit: SYNC file=<path> status=skipped
+   b2. MODE CHANGE CHECK — if state.files[path] exists and its recorded mode differs from file.mode:
+       - If file.mode is now "adopt-only" (was previously "sync"):
+         - Mark state.files[path].adoptedOwnership = true.
+         - Emit: SYNC file=<path> status=ownership-transferred (project now owns). Skip to next file.
    c. If file.mode === "settings-merge": apply flat-merge logic (§4.6), skip to next file.
-   d. NEW FILE CHECK — if state.files has no entry for this path OR target file does not exist:
-      - Treat as new (framework-added since last sync, or not yet tracked by state).
-      - Read framework source. Apply substitutions if file.substituteAt !== "never".
-      - Write to target path.
-      - Add state.files[path]: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit,
-        customisedLocally = false.
-      - Emit: SYNC file=<path> status=new. Increment new-files counter. Skip to next file.
+   d. NEW FILE CHECK:
+      - If state.files has no entry for this path AND target file does not exist:
+        - Treat as new (framework-added since last sync).
+        - Read framework source. Apply substitutions if file.substituteAt !== "never".
+        - Write to target path.
+        - Add state.files[path]: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit,
+          customisedLocally = false.
+        - Emit: SYNC file=<path> status=new. Skip to next file.
+      - If state.files has no entry for this path AND target file exists:
+        - File exists locally but was never tracked (pre-existing or manually placed).
+        - Read new framework source. Apply substitutions if file.substituteAt !== "never".
+        - Write to <target-path>.framework-new.
+        - Print: "MANUAL MERGE: <path> — exists locally but not in state. Review <path>.framework-new."
+        - Set state.files[path].customisedLocally = true.
+        - Emit: SYNC file=<path> status=customised. Skip to next file.
    e. Read the current target file content. Normalise: strip BOM, LF endings, strip trailing whitespace per line.
    f. Compute sha256(normalised content). Compare to state.files[path].lastAppliedHash.
    g. If hashes match (file is clean — no local edits since last sync):
+      - If state.files[path].lastAppliedFrameworkVersion === current framework version:
+        - Already synced to this version. Emit: SYNC file=<path> status=skipped. Skip to next file.
       - Read new framework source. Apply substitutions if file.substituteAt !== "never".
       - Write substituted content to target path.
       - Update state.files[path]: lastAppliedHash, lastAppliedFrameworkVersion, lastAppliedFrameworkCommit.
@@ -467,7 +481,7 @@ Logic in pseudocode:
    h. If hashes differ (file was locally modified since last sync):
       - Set state.files[path].customisedLocally = true (informational).
       - Read new framework source. Apply substitutions if file.substituteAt !== "never".
-      - Write to <target-path>.framework-new.
+      - Write to <target-path>.framework-new (overwrites silently if already exists; prints notice if replaced).
       - Print: "MANUAL MERGE: <path> — customised. See <path>.framework-new. Merge, delete .framework-new,
                re-run sync."
       - Do NOT overwrite the target file.
@@ -481,8 +495,14 @@ Logic in pseudocode:
      Print: "INFO: possible rename detected — old: <removed-path>, new: <new-path>"
    Never delete automatically.
 
-9. Read CHANGELOG entries between old and new versions. Print summary.
-10. Update state.json: frameworkVersion = new version.
+9. Read CHANGELOG entries between old and new versions. Print summary. If CHANGELOG is missing or version
+   range cannot be parsed, print: "WARN: Could not read CHANGELOG for v<old>→v<new>. Consult
+   .claude-framework/CHANGELOG.md manually." Continue without failing.
+10. Write state.json — only after all file operations in steps 7–8 complete successfully.
+    Write to .framework-state.json.tmp then atomically rename to .framework-state.json.
+    Updates: frameworkVersion = new version, all per-file lastApplied* fields modified this run.
+    INVARIANT: state.json is never partially-written; interrupted syncs leave state at the previous
+    version (re-running sync is always safe).
 11. Exit 0. Print: N updated, M new, P customised (.framework-new written), K removal warnings.
 
 INVARIANT: sync.js never stages, commits, pushes, or deletes files. The operator commits the result.
@@ -493,11 +513,11 @@ Flags:
 
 | Flag | Behaviour |
 |------|-----------|
-| `--adopt` | First-run mode: no existing state.json. Copy all managed files fresh, write initial state.json. |
+| `--adopt` | First-run mode: no existing state.json. For each managed file: if the file does not exist → write it and add a state entry; if the file already exists → compute its hash and add a state entry only (non-destructive — does not overwrite). Use for migration of repos where framework files are already in place. |
 | `--dry-run` | Print what would change without writing anything. Shows which files are clean vs customised. |
 | `--check` | Exit 0 if framework version is current (all sync-mode files have been synced to latest); exit 1 if a framework update is available. Does NOT fail on customised files — those are intentional. |
 | `--strict` | As `--check`, plus exit 1 if any customised files exist. Use in repos that enforce no local modifications. |
-| `--doctor` | Diagnose state.json health: orphaned entries, missing target files, hash mismatches. Detects clean vs. modified divergence only — cannot reconstruct provenance (framework version, substitutions used). No writes. |
+| `--doctor` | Diagnose state.json health: orphaned entries, missing target files, hash mismatches. Detects: (a) files where content ≠ lastAppliedHash (modified since last sync), (b) files where content ≠ lastAppliedHash AND no .framework-new sibling exists (unconfirmed merge resolution — merge was completed manually but sync was never re-run). Cannot reconstruct provenance (framework version, substitutions). No writes. |
 | `--force` | Skip the `.framework-new` startup check and proceed even if unresolved merges exist. |
 
 Implementation: TypeScript, ~300 lines. Standalone — no dependencies beyond Node stdlib (`fs/promises` + a small lexicographic glob expander).
@@ -508,7 +528,7 @@ Implementation: TypeScript, ~300 lines. Standalone — no dependencies beyond No
 
 2. **Scoping**: substitution runs only on files where `file.substituteAt !== "never"`. Files marked `substituteAt: "never"` are written verbatim; any `{{...}}` inside them are treated as content, not placeholders.
 
-3. **Idempotency**: applying substitutions twice must produce identical output. This requires: (a) no placeholder appears in its own substitution value; (b) no substitution value contains `{{...}}` patterns; (c) values are flat strings, never templates. Enforce at adoption time: if a value contains `{{`, reject with an error.
+3. **Idempotency**: applying substitutions twice must produce identical output. This requires: (a) no placeholder appears in its own substitution value; (b) no substitution value contains `{{...}}` patterns; (c) values are flat strings, never templates. Enforce at adoption time and on every sync run: if any substitution value contains `{{`, reject with an error before writing any files.
 
 4. **Substitution on `.framework-new`**: when a customised file gets a `.framework-new` written, apply substitutions using the same rules as a clean-file write (so the operator sees the post-substitution framework version, not raw placeholders).
 
@@ -788,6 +808,7 @@ node .claude-framework/sync.js
 | **Tag/branch confusion.** `.gitmodules branch = v2.1.0` uses a branch name to mean a tag; submodule update behaviour differs between branch tracking and tag pinning. | Document the distinction: to pin to a specific version, remove `branch` from `.gitmodules` and lock the submodule to a tag commit via `git -C .claude-framework checkout v2.1.0 && git add .claude-framework`. Rolling latest uses `branch = main`. Never use `branch = v2.1.0` to mean "track tag v2.1.0." |
 | **Security/trust of `sync.js`.** Target repos execute JavaScript from the framework submodule; a compromised framework repo could run arbitrary code. | Initial posture: private repo (§11.2) limits exposure. Review `sync.js` changes before updating the submodule pointer to a new version. Signed git tags provide verification that the code matches what was reviewed. |
 | **Placeholder collision.** Simple find-replace for substitution placeholders may accidentally match examples, code blocks, or comments inside agent files that happen to contain the placeholder text. | Use delimited placeholder syntax (e.g., `{{PROJECT_NAME}}` rather than bare `[PROJECT_NAME]`) and scope substitution to manifest-declared files only. Test with intentionally collision-prone content before release. |
+| **Operator forgets re-run after merge resolution.** After resolving a `.framework-new` conflict manually, the operator may delete `.framework-new` without re-running sync — leaving `state.files[path].lastAppliedHash` stale. Future syncs continue flagging the file as customised even after the intended resolution. | SYNC.md guided flow prompts re-run after each merge resolution. `--doctor` detects this pattern: files where `sha256(current content) !== lastAppliedHash` AND no `.framework-new` sibling exists (case b in `--doctor` output). |
 
 ---
 

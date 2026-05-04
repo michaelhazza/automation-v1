@@ -203,3 +203,57 @@ Operator decisions: F23 apply, F24 apply, F31 apply. All 10 findings approved.
 - [user] F23: Added Substitution engine rules block (§4.5) — 4 hard invariants: `{{PLACEHOLDER_NAME}}` format, substituteAt scoping, idempotency (no nested placeholders), substitution applied to `.framework-new` too
 - [user] F24: Added new-file check (step 7d pseudocode) — file absent from state.files or not on disk → write + add to state; respects syncIgnore; never treated as customised
 - [user] F31: Split `--check` and `--strict` in flags table; updated §11.3 description to match
+
+---
+
+## Round 3 — 2026-05-04T02:30:00Z
+
+### ChatGPT Feedback (raw)
+
+> Overall verdict: "you are now ready to implement Phase A"
+>
+> 1. 🔴 --adopt ambiguity — spec says "--adopt copies all managed files fresh" but self-adoption (migration step 7) requires non-destructive behaviour (file already exists → hash only, don't overwrite). The two descriptions conflict.
+> 2. Eligible for update condition missing — step 7g jumps straight to writing without checking if lastAppliedFrameworkVersion < current. An already-synced file (clean hash, same version) would be needlessly re-written.
+> 3. Partial-sync atomicity — state.json updated file-by-file during sync; if interrupted mid-run, state is partially-written and diverges from what was actually applied.
+> 4. New-file vs existing-untracked distinction — step 7d's "OR target file does not exist" branch catches both "not in state and not on disk" (new) and "not in state but on disk" (pre-existing) — second case should be treated as customised, not new.
+> 5. .framework-new overwrite behaviour undefined — if sync runs again with an unresolved .framework-new still present (operator ran --force), the old .framework-new is silently replaced; spec doesn't mention this.
+> 6. Substitution validation scope — idempotency rule says "enforce at adoption time" but doesn't say validation also runs on every sync. If a value is edited in state.json between runs, it could corrupt subsequent syncs.
+> 7. Manifest mode-change not handled — if a file transitions from "sync" to "adopt-only" between framework versions, sync has no rule for what happens to an existing state entry.
+> 8. Changelog parsing fallback — step 9 "print summary" assumes CHANGELOG exists and is parseable; no fallback if it's missing or malformed.
+> 9. Missing risk row: operator forgets to re-run sync after resolving .framework-new. Merges the two versions, deletes .framework-new, but never re-runs — state.json hash stays stale. --doctor could detect this (content ≠ lastAppliedHash AND no .framework-new sibling).
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F33: --adopt must be non-destructive (exists → hash+state; missing → write+state) | technical-escalated (high) | apply | user: apply | high | Conflict between flag description and migration step 7 self-adoption behaviour. |
+| F34: Add lastAppliedFrameworkVersion eligibility check before writing in step 7g | technical | apply | auto (apply) | medium | Prevents needless re-writes when file already synced to current version. |
+| F35: Write all files first, then write state.json atomically (.tmp → rename) | technical | apply | auto (apply) | high | Interrupted syncs leave state partially-written without this; re-run idempotency requires it. |
+| F36: Split step 7d: "not in state AND not on disk" → new; "not in state BUT on disk" → customised | technical | apply | auto (apply) | high | Pre-existing untracked files should not be overwritten; silently correct wrong behaviour. |
+| F37: .framework-new overwrite: overwrite silently, print notice if replaced | technical | apply | auto (apply) | low | Defines behaviour when --force used with pending merges. |
+| F38: Substitution validation runs at --adopt AND every sync (not just adoption) | technical | apply | auto (apply) | medium | State.json values may be edited between runs; catch corrupt values before file writes. |
+| F39: Mode-change (sync → adopt-only): mark adoptedOwnership=true in state, log transition | technical | apply | auto (apply) | medium | Without this, a mode-changed file falls through to regular sync logic incorrectly. |
+| F40: Changelog fallback: if CHANGELOG missing/unparseable, warn and continue | technical | apply | auto (apply) | low | Sync should not fail on a non-critical diagnostic step. |
+| F41: Add risk row (operator forgets re-run) + --doctor detects content≠hash AND no .framework-new | technical | apply | auto (apply) | medium | Closes the most common post-resolution footgun; adds targeted --doctor detection. |
+
+Operator decision: F33 apply (user implicitly approved via "implement anything else important?" + "after you've done all of that").
+
+### Top themes (Round 3)
+1. **Non-destructive idempotency** — --adopt (F33), atomic state.json (F35), untracked-file case (F36).
+2. **Edge-case completeness** — .framework-new overwrite (F37), mode transitions (F39), changelog fallback (F40).
+3. **Observability tightening** — substitution validation every run (F38), --doctor unconfirmed-resolution detection (F41).
+
+### Applied (auto-applied + user-approved, Round 3)
+
+**Auto-applied (technical):**
+- [auto] F34: Added `lastAppliedFrameworkVersion === current` early-exit check in step 7g before writing
+- [auto] F35: Rewrote step 10 to write .framework-state.json.tmp → atomically rename; added "never partially-written" INVARIANT
+- [auto] F36: Split step 7d into two branches: (1) not in state AND not on disk → new; (2) not in state AND on disk → existing-untracked → customised
+- [auto] F37: Added "(overwrites silently if already exists; prints notice if replaced)" to .framework-new write in step 7h
+- [auto] F38: Changed "Enforce at adoption time" → "Enforce at adoption time and on every sync run" in substitution engine rules §4.5
+- [auto] F39: Added step 7b2 MODE CHANGE CHECK — sync→adopt-only transition marks adoptedOwnership=true and emits ownership-transferred
+- [auto] F40: Added fallback warning to step 9 — WARN if CHANGELOG missing or unparseable; continue without failing
+- [auto] F41: (a) Expanded `--doctor` flag description: detects (a) content≠hash and (b) content≠hash AND no .framework-new (unconfirmed resolution); (b) added new risk row to §9: operator forgets re-run after merge resolution
+
+**User-approved:**
+- [user] F33: Rewrote `--adopt` flag description to be non-destructive (file exists → hash+state only; file missing → write+state); aligns with migration step 7 self-adoption behaviour already described correctly in §8
