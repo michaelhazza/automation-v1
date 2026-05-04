@@ -87,8 +87,6 @@ const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPa
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
-// Universal Brief — detail page (Phase 2)
-const BriefDetailPage = lazy(() => import('./pages/BriefDetailPage'));
 // Workflows V1 Phase 2 — open task view (Chunk 11)
 const OpenTaskView = lazy(() => import('./pages/OpenTaskView'));
 // Workflows V1 Phase 2 — Workflow Studio (Chunk 14a)
@@ -253,6 +251,12 @@ function SpendLedgerPageRoute({ user }: { user: User }) {
   return <SpendLedgerPage user={user} readOnly={readOnly} />;
 }
 
+function BriefRedirect() {
+  const { briefId } = useParams<{ briefId: string }>();
+  if (!briefId) return <Navigate to="/admin/tasks" replace />;
+  return <Navigate to={`/admin/tasks/${briefId}`} replace />;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -414,8 +418,8 @@ export default function App() {
             {/* Configuration Assistant */}
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
-            {/* Universal Brief detail page (Phase 2) */}
-            <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
+            {/* Universal Brief detail page (Phase 2) — redirects to canonical /admin/tasks/:taskId */}
+            <Route path="/admin/briefs/:briefId" element={<BriefRedirect />} />
             {/* Workflows V1 Phase 2 — open task view (Chunk 11) */}
             <Route path="/admin/tasks/:taskId" element={<OpenTaskView user={user!} />} />
             {/* Workflows V1 Phase 2 — Workflow Studio (Chunk 14a) */}

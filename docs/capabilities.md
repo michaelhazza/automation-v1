@@ -338,6 +338,9 @@ Multi-step workflow automation with dependency graphs, parallel execution, branc
 - **Onboarding auto-start** — Designated playbooks launch automatically in supervised mode when a new client workspace is created — the Onboarding tab tracks progress so nothing falls through the cracks
 - **Workflow Studio** — Chat-based authoring with validation, simulation, and cost estimation; platform and agency templates with versioning; fork and customise per agency; automatic recovery sweeps for stuck runs
 - **No-code workflow migration wedge** — One-shot converter that ingests a no-code workflow JSON export and produces a draft supervised playbook, mapping each source node to a step with appropriate side-effect classification, approval gates, and a mapping report flagging anything the admin needs to review or rewrite. Credentials are never migrated; the admin re-authenticates via managed OAuth flows. Net effect: an agency's existing workflow library becomes multi-tenant, supervised, and cost-attributed in hours rather than a re-platforming project.
+- **Visual Workflow Studio** — Org admins can author multi-step automated workflows in a visual canvas. Steps can involve agents, actions, human approvals, and user input forms. Workflows support branching, parallel execution, and loops.
+- **Workflow runs** — Workflows execute against a subaccount context, with built-in cost and time ceilings, approval gates, and a real-time status feed for operators.
+- **Scheduled workflows** — Workflows can be triggered on a schedule or by agent actions, with a maximum nesting depth of 3 to prevent runaway automated fan-out.
 
 ### Human-in-the-Loop
 

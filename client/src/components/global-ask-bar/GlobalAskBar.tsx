@@ -60,7 +60,7 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
     setDisambiguation(null);
     setError(null);
     if (data.type === 'brief_created') {
-      navigate(`/admin/briefs/${data.briefId}`);
+      navigate(`/admin/tasks/${data.briefId}`);
     }
   };
 
