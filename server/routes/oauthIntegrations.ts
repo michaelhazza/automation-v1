@@ -428,27 +428,11 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
     });
   }
 
-  // C-P0-2: if a pendingRunId was stored on the nonce, enqueue a resume job
-  // so the paused agent run continues automatically after OAuth completes.
-  const pendingRunId = stateData.pendingRunId ?? null;
-  if (pendingRunId) {
-    try {
-      const { enqueueResumeAfterOAuth } = await import('../jobs/resumeRunAfterOAuthJob.js');
-      await enqueueResumeAfterOAuth({ runId: pendingRunId, organisationId: ghlOrgId });
-    } catch (err) {
-      logger.warn('ghl.oauth.resume_enqueue_failed', {
-        event: 'ghl.oauth.resume_enqueue_failed',
-        orgId: ghlOrgId,
-        runId: pendingRunId,
-        error: { message: String(err) },
-      });
-    }
-  } else {
-    logger.debug('ghl.oauth.no_pending_run', {
-      event: 'ghl.oauth.no_pending_run',
-      orgId: ghlOrgId,
-    });
-  }
+  // C-P0-2: agent resume after OAuth is satisfied by the synchronous
+  // resumeFromIntegrationConnect path in /api/integrations/oauth2/callback
+  // (JWT-based OAuth flow). The GHL agency OAuth path (/api/oauth/callback)
+  // uses a raw nonce store and does not carry an agent resume token, so no
+  // resume is needed here.
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));

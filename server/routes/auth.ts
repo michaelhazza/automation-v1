@@ -90,13 +90,13 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
 }));
 
 router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
-  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown'), 5, 300);
+  const { email } = req.body as ForgotPasswordInput;
+  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', String(email)), 5, 300);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });
     return;
   }
-  const { email } = req.body as ForgotPasswordInput;
   const result = await authService.forgotPassword(email);
   auditService.log({
     actorType: 'user',

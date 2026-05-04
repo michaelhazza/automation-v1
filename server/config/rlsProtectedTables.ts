@@ -1017,6 +1017,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0271_agentic_commerce_schema.sql',
     rationale: 'Explicit per-user approver grants for spending budgets — reveals who may approve charges; cross-tenant leak exposes access control configuration.',
   },
+  // 0279 — Task Events: durable per-task typed event log (D-P0-5)
+  {
+    tableName: 'task_events',
+    schemaFile: 'taskEvents.ts',
+    policyMigration: '0279_task_events.sql',
+    rationale: 'Per-task typed event log (pause, resume, gate updates, approval events) — payloads may contain step context, approver identities, and workflow state that must not leak cross-tenant.',
+  },
   // 0272 — cost_aggregates RLS retrofit.
   //
   // Note: the CREATE TABLE for cost_aggregates in migration 0024 has no

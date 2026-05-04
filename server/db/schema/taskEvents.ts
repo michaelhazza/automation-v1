@@ -1,7 +1,5 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { tasks } from './tasks';
-import { organisations } from './organisations';
-import { subaccounts } from './subaccounts';
 
 // ---------------------------------------------------------------------------
 // Task Events — durable typed per-task event log.
@@ -19,8 +17,8 @@ export const taskEvents = pgTable(
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
-    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
+    organisationId: uuid('organisation_id').notNull(),
+    subaccountId: uuid('subaccount_id'),
     seq: integer('seq').notNull(),
     eventType: text('event_type').notNull(),
     payload: jsonb('payload').notNull().default({}),

@@ -4,6 +4,8 @@ export const MAX_WORKFLOW_RUN_DEPTH = 10;
 
 export class RunDepthExceededError extends Error {
   readonly code = 'run_depth_exceeded';
+  readonly statusCode = 422;
+  readonly errorCode = 'run_depth_exceeded';
   constructor(depth: number) {
     super(`Workflow run depth ${depth} exceeds max ${MAX_WORKFLOW_RUN_DEPTH}`);
     this.name = 'RunDepthExceededError';
