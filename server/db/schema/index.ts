@@ -249,3 +249,7 @@ export * from './conversationThreadContext';
 
 // Sub-Account Optimiser — generic agent-output primitive (migration 0267)
 export * from './agentRecommendations';
+
+// Sub-Account Optimiser — cross-tenant peer-median view (migration 0268)
+// BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
+export * from './optimiserSkillPeerMedians';

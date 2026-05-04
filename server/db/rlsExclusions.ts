@@ -21,6 +21,7 @@ export const RLS_EXCLUSIONS: ReadonlyArray<RlsExclusion> = [
   { tableName: 'users', rationale: 'Cross-org — users can belong to multiple orgs' },
   { tableName: 'system_agents', rationale: 'Platform templates — identical for all orgs' },
   { tableName: 'skill_definitions', rationale: 'System-managed skill catalogue' },
+  { tableName: 'optimiser_skill_peer_medians', rationale: 'Cross-tenant aggregate p50/p95/p99 per skill_slug; no per-tenant rows in projection; HAVING n_tenants >= 5; admin_role only via REVOKE/GRANT' },
 ];
 
 export const RLS_EXCLUDED_TABLE_NAMES: ReadonlySet<string> = new Set(
