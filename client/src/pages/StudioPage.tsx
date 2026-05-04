@@ -5,19 +5,19 @@
  *   /admin/workflows/:id/edit  — load and display an existing template
  *   /admin/workflows/new       — empty canvas placeholder
  *
- * Canvas is read-only in Chunk 14a. Step inspectors come in Chunk 14b.
- *
- * Spec: tasks/builds/workflows-v1-phase-2/plan.md Chunk 14a.
+ * Spec: tasks/builds/workflows-v1-phase-2/plan.md Chunk 14a + 14b.
  */
 
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
 import StudioCanvas from '../components/studio/StudioCanvas';
 import StudioBottomBar from '../components/studio/StudioBottomBar';
 import PublishModal from '../components/studio/PublishModal';
+import StudioInspector from '../components/studio/StudioInspector';
+import StudioChatPanel from '../components/studio/StudioChatPanel';
 import type { CanvasStep } from '../components/studio/studioCanvasPure';
 
 interface WorkflowTemplate {
@@ -39,7 +39,9 @@ interface LoadedState {
 export default function StudioPage({ user: _user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isNew = !id || id === 'new';
+  const fromDraftId = searchParams.get('fromDraft');
 
   const [loaded, setLoaded] = useState<LoadedState | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -54,13 +56,14 @@ export default function StudioPage({ user: _user }: { user: User }) {
 
   useEffect(() => {
     if (isNew) return;
+    const controller = new AbortController();
     setLoading(true);
     api
       .get<{
         template: WorkflowTemplate;
         definition: Record<string, unknown> | null;
         latestVersionPublishedByUserId: string | null;
-      }>(`/api/admin/workflows/${id}`)
+      }>(`/api/admin/workflows/${id}`, { signal: controller.signal })
       .then(({ data }) => {
         const steps = (data.definition?.steps ?? []) as CanvasStep[];
         setLoaded({
@@ -69,16 +72,43 @@ export default function StudioPage({ user: _user }: { user: User }) {
           upstreamUpdatedAt: data.template.updatedAt,
           latestVersionPublishedByUserId: data.latestVersionPublishedByUserId,
         });
+
+        if (fromDraftId) {
+          api
+            .get<{ payload: Record<string, unknown> }>(`/api/workflow-drafts/${fromDraftId}`, { signal: controller.signal })
+            .then(({ data: draftData }) => {
+              const draftSteps = (draftData.payload?.steps ?? null) as CanvasStep[] | null;
+              if (draftSteps) {
+                setLoaded((prev) => (prev ? { ...prev, steps: draftSteps } : prev));
+                toast.success('Draft loaded into canvas');
+              }
+            })
+            .catch((err: unknown) => {
+              if (controller.signal.aborted) return;
+              const e = err as { response?: { status?: number } };
+              if (e.response?.status === 410) {
+                toast.info('Draft already used or discarded — showing published version');
+              } else if (e.response?.status === 404) {
+                toast.warning('Draft not found');
+              }
+            });
+        }
       })
-      .catch((err) => {
-        if (err?.response?.status === 404) {
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        const e = err as { response?: { status?: number } };
+        if (e.response?.status === 404) {
           navigate('/workflows', { replace: true });
         } else {
           toast.error('Failed to load workflow template');
         }
       })
-      .finally(() => setLoading(false));
-  }, [id, isNew, navigate]);
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [id, isNew, navigate, fromDraftId]);
 
   async function handlePublishConfirm(notes: string, force: boolean) {
     const steps = loaded?.steps ?? [];
@@ -140,6 +170,9 @@ export default function StudioPage({ user: _user }: { user: User }) {
 
   const steps: CanvasStep[] = isNew ? [] : (loaded?.steps ?? []);
   const templateName = isNew ? 'New Workflow' : (loaded?.template.name ?? 'Workflow');
+  const selectedStep = selectedStepId
+    ? (steps.find((s) => s.id === selectedStepId) ?? null)
+    : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-50">
@@ -201,6 +234,15 @@ export default function StudioPage({ user: _user }: { user: User }) {
         concurrentEditUpstream={concurrentEdit}
         publishing={publishing}
       />
+
+      {/* Step inspector — fixed right overlay */}
+      <StudioInspector
+        step={selectedStep}
+        onClose={() => setSelectedStepId(undefined)}
+      />
+
+      {/* Studio AI chat panel — fixed left pill/panel */}
+      <StudioChatPanel />
     </div>
   );
 }
