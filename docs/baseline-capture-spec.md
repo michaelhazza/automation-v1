@@ -1,13 +1,13 @@
 # Baseline Capture at Sub-Account Onboarding — Dev Spec
 
-**Status:** DRAFT
+**Status:** DRAFT — pending `spec-reviewer`. **GHL Module C OAuth blocker resolved via PR #254 (merged 2026-05-03); F3 is now unblocked.**
+**Last reviewed against main:** 2026-05-04 (post-merge of Workflows v1 Phase 2 / PR #258)
 **Build slug:** `baseline-capture`
 **Branch:** `claude/baseline-capture`
-**Migrations claimed:** `0268`, `0269`, `0270`
-**Concurrent peers:** F1 `subaccount-artefacts` (0266), F2 `subaccount-optimiser` (0267)
-**Related code:** `server/services/canonicalDataService.ts`, `server/services/connectorPollingService.ts`, `server/services/intelligenceSkillExecutor.ts`, `server/adapters/ghlAdapter.ts`, `server/services/subaccountOnboardingService.ts`, `server/routes/subaccounts.ts`, `server/db/schema/canonicalMetrics.ts`, `client/src/pages/SubaccountDetailPage.tsx`
-**Related specs:** `docs/clientpulse-dev-spec.md`, `docs/clientpulse-ghl-dev-brief.md`, `docs/clientpulse-soft-launch-blockers-brief.md`, `docs/canonical-data-platform-p1-p2-p3-impl.md`
-**Hard upstream:** GHL Module C OAuth must be functional for an integration to capture data; without it, baselines work only for sub-accounts that already have an active per-sub-account OAuth connection.
+**Migrations claimed:** `0278`, `0279`, `0280` (was `0268-0270`; reallocated after main consumed those numbers — Module C took 0268 + 0269, Workflows v1 took 0270, agentic commerce took 0271, then 0272-0276 for related work)
+**Concurrent peers:** F1 `subaccount-artefacts` (migration `0277` — must land first because both extend `subaccountOnboardingService.ts` and `subaccounts` table area), F2 `subaccount-optimiser` (Phase 0 / migration 0267 SHIPPED on main; Phases 1-4 pending — fully independent)
+**Related code:** `server/services/canonicalDataService.ts`, `server/services/connectorPollingService.ts`, `server/services/intelligenceSkillExecutor.ts`, `server/adapters/ghlAdapter.ts`, `server/services/subaccountOnboardingService.ts`, `server/routes/subaccounts.ts`, `server/db/schema/canonicalMetrics.ts`, `server/db/schema/connectorLocationTokens.ts` (NEW post-Module-C), `client/src/pages/SubaccountDetailPage.tsx`
+**Related specs:** `docs/clientpulse-dev-spec.md`, `docs/clientpulse-ghl-dev-brief.md`, `docs/clientpulse-soft-launch-blockers-brief.md`, `docs/canonical-data-platform-p1-p2-p3-impl.md`, `docs/ghl-module-c-oauth-spec.md` (upstream — now shipped)
 
 ---
 
@@ -31,7 +31,7 @@ When a new sub-account becomes ready (defined: at least one connected integratio
 - §6 Manual-entry path
 - §7 Reporting Agent integration (delta semantics)
 - §8 Build chunks
-  - Phase 1 — Schema (3 tables)
+  - Phase 1 — Schema (3 tables, migrations 0278-0280)
   - Phase 2 — Readiness condition + sync-complete event
   - Phase 3 — Capture service + retry/failure handling
   - Phase 4 — Manual entry UI + admin reset
@@ -56,7 +56,7 @@ When a new sub-account becomes ready (defined: at least one connected integratio
 | Health snapshot writes (`client_pulse_health_snapshots`) | Shipped, actively written | `intelligenceSkillExecutor.ts:372` (migration 0173) |
 | Churn assessment writes (`client_pulse_churn_assessments`) | Shipped, actively written | `intelligenceSkillExecutor.ts:584` (migration 0174) |
 | Sub-account creation hook (`autoStartOwedOnboardingWorkflows`) | Shipped | `server/routes/subaccounts.ts:121-150` — repurposable as the baseline capture trigger insertion point |
-| GHL Module C OAuth (agency-level) | **STUBBED** | `server/routes/ghl.ts:1-75` — placeholder routes, callback TODO not implemented |
+| GHL Module C OAuth (agency-level) | **SHIPPED via PR #254** | `server/routes/ghl.ts` is now production. Agency-level OAuth + sub-account auto-enrol + per-location token cache (`connector_location_tokens`, migration 0269) all live on main. F3 baseline capture works at-scale across every location auto-enrolled by Module C. |
 | `system_monitor_baselines` | Shipped — but **infrastructure-only** (latency p50/p95/p99), unrelated to client business baselines | `server/db/schema/systemMonitorBaselines.ts` |
 
 What's NOT shipped that this spec needs:
@@ -88,9 +88,9 @@ For each unsupported metric, baseline records a "not captured — integration no
 
 Configurable per sub-account via `subaccount_settings.baseline_metrics_opt_in[]` — agency operator can disable specific metrics if not relevant to that client.
 
-## §3 Storage model — new tables 0268-0270
+## §3 Storage model — new tables 0278-0280
 
-### Migration 0268 — `subaccount_baselines`
+### Migration 0278 — `subaccount_baselines`
 
 ```sql
 CREATE TABLE subaccount_baselines (
@@ -113,7 +113,7 @@ CREATE TABLE subaccount_baselines (
 CREATE INDEX subaccount_baselines_status_idx ON subaccount_baselines(organisation_id, status);
 ```
 
-### Migration 0269 — `subaccount_baseline_metrics`
+### Migration 0279 — `subaccount_baseline_metrics`
 
 ```sql
 CREATE TABLE subaccount_baseline_metrics (
@@ -127,7 +127,7 @@ CREATE TABLE subaccount_baseline_metrics (
 );
 ```
 
-### Migration 0270 — RLS + canonical dictionary
+### Migration 0280 — RLS + canonical dictionary
 
 - Add `subaccount_baselines` and `subaccount_baseline_metrics` to `rlsProtectedTables.ts`
 - Add policies via migration extension (per `0245_all_tenant_tables_rls.sql` pattern)
@@ -204,7 +204,7 @@ No new schema; just a service helper + report template extension.
 
 ### Phase 1 — Schema (~3h)
 
-- [ ] Author migrations 0268 (`subaccount_baselines`), 0269 (`subaccount_baseline_metrics`), 0270 (RLS + canonical dictionary). All paired with `.down.sql`.
+- [ ] Author migrations 0278 (`subaccount_baselines`), 0279 (`subaccount_baseline_metrics`), 0280 (RLS + canonical dictionary). All paired with `.down.sql`. **Confirm next-free migration number at build start** — main may have moved further.
 - [ ] Add Drizzle schemas `server/db/schema/subaccountBaselines.ts`, `server/db/schema/subaccountBaselineMetrics.ts`.
 - [ ] Register both in `rlsProtectedTables.ts` and `canonicalDictionary.ts`.
 - [ ] Add `baseline_metrics_opt_in` key to `subaccount_settings` zod schema (defaults to full v1 metric set).
@@ -303,18 +303,17 @@ No new schema; just a service helper + report template extension.
 - Reporting Agent's portfolio report includes "Since onboarding" delta sections.
 - Telemetry events emit at each state transition.
 
-## §11 Dependencies + GHL OAuth caveat
+## §11 Dependencies
 
 **Soft dependency:** F1 `subaccount-artefacts` must land first because both modify `subaccounts` table area (F1 adds `baseline_artefacts_status` JSONB; F3 doesn't touch this column but adds `baseline_metrics_opt_in` to `subaccount_settings` JSONB). Coordinate via merge order — F1 first.
 
-**Hard upstream caveat — GHL Module C OAuth:**
-- The GHL adapter ingestion is real (`ghlAdapter.ts:130-226` makes real `axios.get` calls).
-- However, `server/routes/ghl.ts` is **stubbed** — agency-level OAuth callback is a TODO (line 61), `/locations` returns `[]`.
-- For sub-accounts where a per-sub-account OAuth has been completed via `server/routes/oauthIntegrations.ts`, baseline capture works today.
-- For agencies onboarding many sub-accounts at once via the agency-level OAuth, baseline capture is gated until Module C ships.
-- This spec ships the baseline plumbing regardless; coverage scales when Module C lands. File "GHL Module C OAuth completion" as a separate Significant task — not in this spec's scope.
+**Upstream — GHL Module C OAuth (RESOLVED):**
+- Status: **SHIPPED on main 2026-05-03 via PR #254** (`docs/ghl-module-c-oauth-spec.md`).
+- Agency-level OAuth + sub-account auto-enrol via `INSTALL` webhook + per-location token cache (`connector_location_tokens`) all live in production.
+- For agencies installing the app, every sub-account underneath is auto-enrolled and gains a connector record automatically. F3 baseline capture works at scale from day 1 — no per-sub-account manual onboarding required.
+- For sub-accounts that pre-existed Module C with their own per-sub-account OAuth (via `server/routes/oauthIntegrations.ts`), baseline capture continues to work as it would have under the original spec.
 
-**Hard upstream:** None of the v1 metrics depend on Mailgun/Twilio/Google Business Profile — those are out of scope and recorded as `unavailable`. No additional integrations need to be built for v1.
+**Out of scope upstream:** None of the v1 metrics depend on Mailgun/Twilio/Google Business Profile — those are out of scope and recorded as `unavailable`. No additional integrations need to be built for v1.
 
 ## §12 Risks
 
@@ -322,15 +321,17 @@ No new schema; just a service helper + report template extension.
 - **Readiness condition too lax** — may capture baseline before data has settled. Mitigate: 2-poll-cycle requirement is explicit; test against fixtures with single-cycle anomalies.
 - **Manual entry abuse** — operator could set unrealistic baseline to inflate later "delta". Mitigate: validation caps + audit trail (`source='manual'`, captured-by user_id) + report disclaimer when baseline is manual.
 - **Admin reset history loss** — if reset deletes old baseline, history is lost. Mitigate: spec requires preserving old row, only creating new pending baseline.
-- **Schema drift on parallel branches** — F1 also touches `subaccounts` table area. Coordinate migrations: F1 = 0266 first, then F3 = 0268-0270. If F1 slips, F3 can land first, but its `baseline_metrics_opt_in` settings key uses the same JSONB column F1 doesn't conflict with.
-- **GHL Module C delay** — without agency OAuth, scale is gated. Mitigate: ship baseline plumbing now, coverage scales when Module C lands.
+- **Schema drift on parallel branches** — F1 also touches `subaccounts` table area. Coordinate migrations: F1 = `0277` first, then F3 = `0278-0280`. If F1 slips, F3 can land first, but its `baseline_metrics_opt_in` settings key uses a JSONB column F1 doesn't conflict with.
+- ~~**GHL Module C delay** — without agency OAuth, scale is gated. Mitigate: ship baseline plumbing now, coverage scales when Module C lands.~~ **RESOLVED — Module C shipped via PR #254 (2026-05-03). F3 now ships at scale from day 1 for any agency installing the app.**
 
 ## §13 Concurrent-build hygiene
 
-- Migrations `0268`, `0269`, `0270` reserved here. Do not use elsewhere.
+- Migrations `0278`, `0279`, `0280` reserved here (was `0268-0270`; reallocated after main consumed through `0276`). **Confirm next-free at build start** — main may move further. Do not use elsewhere once claimed.
 - Branch `claude/baseline-capture`. Worktree at `../automation-v1.baseline-capture`.
 - Progress lives in `tasks/builds/baseline-capture/progress.md`.
 - Touches `connectorPollingService.ts` event emit — F2 doesn't touch; F1 doesn't touch; safe.
 - Touches `subaccountOnboardingService.ts` for `pending` row creation — F1 also touches this file (`markArtefactCaptured`). Coordinate by adding methods, not modifying existing ones; merge order F1 → F3.
 - Touches `subaccount_settings` JSONB key `baseline_metrics_opt_in` — F1 uses different key (`baseline_artefacts_status` on `subaccounts` table directly, not in settings). No collision.
 - F3 must land after F1 if both are in flight simultaneously, OR F3 lands first and F1 rebases on top. Pick one — recommend F1 first (smaller scope, less surface area).
+- F2 Phase 0 ALREADY SHIPPED on main; Phases 1-4 of F2 are fully independent of F3 and can run in parallel without coordination.
+- GHL Module C agency OAuth (was the prior hard upstream blocker for F3 at-scale coverage) shipped on main via PR #254. F3 now ships at scale from day 1.
