@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: MERGE_READY
+active_spec: tasks/builds/framework-standalone-repo/spec.md
+active_plan: tasks/builds/framework-standalone-repo/plan.md
+build_slug: framework-standalone-repo
+branch: claude/framework-standalone-repo
+status: BUILDING
 last_updated: 2026-05-04
 last_merge_ready_pr: #255
 last_merge_ready_slug: agentic-commerce
@@ -22,10 +22,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none.
-**Active plan:** none.
-**Active build slug:** none.
-**Status:** **MERGE_READY** — Phase 3 complete for `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). Merge-conflict against `origin/main` (3 files) resolved in commit `a9c9c1f1` (workflows-v1 + agentic-commerce coexist; precedent for migration number collision at 0263). chatgpt-pr-review LOOP CLOSED at Round 3 with verdict 🟢 Clean green (production-safe); rounds 1+2+3 across 3 ChatGPT manual rounds applied 7 fixes + caught 1 critical side-finding (frontend↔server route mismatch on grant management UI) + rejected 1 false positive + deferred 10 items + had 3 dissolutions independently confirmed every round. `ready-to-merge` label re-applied at <pending> after operator's explicit end-to-end authorisation. CI is running G5 / heavyweight test suite. Awaiting CI green, then merge via `gh pr merge` (operator authorised the merge as part of finalisation). After merge, set status to `MERGED` (or `NONE` to clear the trail). finalisation-coordinator does NOT auto-merge by default — this PR has explicit operator authorisation.
+**Active spec:** `tasks/builds/framework-standalone-repo/spec.md` — Final.
+**Active plan:** `tasks/builds/framework-standalone-repo/plan.md` — pending (architect not yet run).
+**Active build slug:** `framework-standalone-repo`.
+**Status:** **BUILDING** — Phase 1 complete. Spec locked after 3 ChatGPT review rounds (31 findings, all closed). Handoff written at `tasks/builds/framework-standalone-repo/handoff.md`. Feature-coordinator to run Phase 2 on a fresh branch `claude/framework-standalone-repo` from `main`.
+
+**Last merge-ready:** `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). Phase 3 complete for `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). Merge-conflict against `origin/main` (3 files) resolved in commit `a9c9c1f1` (workflows-v1 + agentic-commerce coexist; precedent for migration number collision at 0263). chatgpt-pr-review LOOP CLOSED at Round 3 with verdict 🟢 Clean green (production-safe); rounds 1+2+3 across 3 ChatGPT manual rounds applied 7 fixes + caught 1 critical side-finding (frontend↔server route mismatch on grant management UI) + rejected 1 false positive + deferred 10 items + had 3 dissolutions independently confirmed every round. `ready-to-merge` label re-applied at <pending> after operator's explicit end-to-end authorisation. CI is running G5 / heavyweight test suite. Awaiting CI green, then merge via `gh pr merge` (operator authorised the merge as part of finalisation). After merge, set status to `MERGED` (or `NONE` to clear the trail). finalisation-coordinator does NOT auto-merge by default — this PR has explicit operator authorisation.
 
 **Last merge-ready build:** `agentic-commerce` — Stripe SPT-backed agent spending primitive. 16 chunks, ~140 files vs `origin/main` (now merged), 7 migrations (0270 Compute Budget rename, 0271 schema + RLS + append-only triggers, 0272 cost_aggregates RLS retrofit, 0273 stripe_agent providerType, 0274 actions.agent_id nullable, 0275 grants_active_unique partial UNIQUE, plus main's 0270 workflows-v1 alongside). New SPEND_APPROVER permission key. New webhook handler (`stripeAgentWebhook.ts`) with HMAC verification, three-layer dedup, tenant-context derivation, replay protection, connectionStatus allowlist gate. 6 new payment skills, 6 new pg-boss jobs, 14 new client surfaces. Pipeline outcomes: spec-conformance CONFORMANT (re-verification scope, 1 latent DG closed) → pr-reviewer 5 blocking + 4 strong all closed in-branch → dual-reviewer skipped (Codex unavailable, allowed) → adversarial-reviewer 1 blocker fixed (webhook connectionStatus allowlist), 11 items deferred to `tasks/todo.md`, 3 dissolved → chatgpt-pr-review 3 rounds (Yellow → Green → Clean green; 7 of 22 findings auto-applied + 1 critical side-finding caught and fixed + 1 false positive rejected + 10 deferred + 3 cross-round dissolutions held) → doc-sync sweep complete → KNOWLEDGE.md 4 patterns appended (trigger-enforced caller-identity GUC, webhook connectionStatus allowlist, DB-layer idempotency partial UNIQUE, pre-insert+post-resolution-snapshot). Branch `claude/agentic-commerce-spending`.
 

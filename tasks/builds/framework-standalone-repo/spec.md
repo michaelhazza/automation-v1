@@ -2,7 +2,7 @@
 
 **Build slug:** `framework-standalone-repo`
 **Branch (proposed):** `claude/framework-standalone-repo` (separate from `claude/evaluate-summonaikit-B89k3`)
-**Status:** draft — pending operator feedback before implementation
+**Status:** final — chatgpt-spec-review APPROVED (3 rounds, 31 findings closed, 2026-05-04)
 **Date:** 2026-05-04
 **Author:** session-driven; reviewed before code written
 
