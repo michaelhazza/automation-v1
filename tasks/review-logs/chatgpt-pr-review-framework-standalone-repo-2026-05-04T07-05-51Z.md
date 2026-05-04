@@ -51,3 +51,45 @@ Verdict text: 5 findings (F1–F5). Operator pasted the response in-session.
 - `package.json` — added `test:portable-framework` script (F4). HITL-approved by operator before edit.
 
 ---
+
+## Round 2 — 2026-05-04
+
+### ChatGPT verdict
+
+> Almost there. One more tightening pass before merge.
+>
+> No structural concerns anymore. This is now a hardening pass, not a redesign.
+
+7 findings (4 from Round 1 re-flagged, 3 new). Operator pasted the response in-session.
+
+### Findings + triage
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| 1 | Version authority still ambiguous (root vs portable dual authority) | **accept** (strengthen) | Round 1 doc note treated both as valid (which IS the dual-authority pattern ChatGPT flagged). Strengthened: portable is canonical; root is a deployment marker. Drift is bounded — deployment may lag, never exceed canonical. Updated `.claude/CHANGELOG.md` with explicit "Version authority — single source of truth" framing. |
+| 2 | Scanner string-based and brittle | **partial** | Modest expansion: added case variants (`automation-os`, `automation_os`, `automation_v1`, `automationV1`, lowercase / uppercase Synthetos) to FORBIDDEN_STRINGS in `scripts/build-portable-framework.ts`. Verified no false-positives against current bundle content. Deeper "positive validation" redesign (allow-listed patterns, structural rules) is an architecture call — deferred to `tasks/todo.md` for follow-up. |
+| 3 | Tests not enforced via CI | **accept** | Added `portable_framework_tests` job to `.github/workflows/ci.yml` invoking `npm run test:portable-framework`. Unconditional gate, runs on every PR (no `ready-to-merge` label gating, unlike unit_tests/integration_tests — the portable test suite is fast and the gate should fire early). |
+| 4 | Build script `zip` dependency unaddressed | **reject** (false positive) | Already fixed in Round 1 (commit `5e2163ce`, `scripts/build-portable-framework.ts:188-198` — `assertZipBinaryAvailable()` preflight with installation hints for apt/apk/brew). ChatGPT may have been working from a stale view of the diff. No action. |
+| 5 | Agent duplication guard (root vs portable) | **defer** | Routed to `tasks/todo.md`. Real concern but the long-term fix is Phase C self-adoption — at that point root becomes a sync.js output, dissolving the duplication question. Until Phase C, low priority. |
+| 6 | Manifest schema validation | **defer** | Routed to `tasks/todo.md`. Real concern; wants architect input on hand-rolled validator design + manifest schema versioning question. Too heavy for a Round 2 in-branch fix without architect step. |
+| 7 | Sync engine observability (dry-run summary, JSON report) | **defer** | Routed to `tasks/todo.md`. Polish, not blocker. Useful once the engine is invoked across many consumer repos. |
+
+### Verification
+
+- `npm run lint` — 0 errors (726 pre-existing warnings unchanged).
+- `npm run typecheck` — clean.
+- `npm run test:portable-framework` — 113/113 pass.
+- Scanner regression check: grep for new variants in `setup/portable/` returned 0 matches (no false-positives).
+
+### Round 2 verdict
+
+3 must-fix accepted (version authority strengthening, scanner expansion, CI gate), 1 rejected as false positive (zip preflight), 3 hardening items deferred to `tasks/todo.md`. Round 1 + Round 2 cumulative: 8 actioned, 1 rejected, 4 deferred — full triage trail preserved in this log + `tasks/todo.md`.
+
+### Files changed in Round 2
+
+- `.claude/CHANGELOG.md` — replaced "Root vs portable bundle versioning" with stronger "Version authority — single source of truth" (F1v2).
+- `scripts/build-portable-framework.ts` — expanded `FORBIDDEN_STRINGS` with case variants (F2v2).
+- `.github/workflows/ci.yml` — added `portable_framework_tests` job (F3v2).
+- `tasks/todo.md` — appended `## Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)` section with 4 items (F2 deeper redesign, F5, F6, F7).
+
+---

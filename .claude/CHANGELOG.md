@@ -30,16 +30,24 @@ When a repo's `FRAMEWORK_VERSION` falls behind the latest:
 
 Repos can stay on older versions intentionally. The framework is designed to be additive; older versions don't break.
 
-## Root vs portable bundle versioning
+## Version authority — single source of truth
 
-This repo carries two `FRAMEWORK_VERSION` files that may drift intentionally:
+**The portable bundle (`setup/portable/.claude/`) is the canonical framework. Root is a deployment.**
 
-- **Root** (`.claude/FRAMEWORK_VERSION`, this changelog) — the framework version actually deployed in this repo's `.claude/` tree. Reflects what is currently running for our own sessions.
-- **Portable bundle** (`setup/portable/.claude/FRAMEWORK_VERSION`, `setup/portable/.claude/CHANGELOG.md`) — the framework version shipped to consuming repos via the bundle / sync engine. May ship versions that this repo has not yet self-adopted.
+This repo carries two `FRAMEWORK_VERSION` files. They do NOT have equal authority:
 
-When the bundle introduces new framework infrastructure that lives entirely under `setup/portable/` (e.g. the v2.2.0 sync engine, manifest, and substitution-engine contract), the bundle changelog bumps but the root changelog does NOT — because the root deployment is unchanged. The root catches up only when this repo self-adopts the bundle (Phase C of the framework-standalone-repo build).
+- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` and `setup/portable/.claude/CHANGELOG.md`. This is the framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. This file is the source of truth.
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file). This records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. It is NOT a separate version authority — it can lag the canonical version transiently while portable advances ahead of self-adoption.
 
-If `validate-setup` or future drift-detection tooling needs to compare versions, it should read the file relevant to its scope: the root file for "what is deployed here," the bundle file for "what would a consumer get."
+The canonical version always advances first; deployments catch up via self-adoption (Phase C of the framework-standalone-repo build, or `node setup/portable/sync.js --adopt` in any other consumer).
+
+**Validate-setup and future drift-detection tooling read the file relevant to scope, not as competing authorities:**
+- "What version of the framework is *deployed* here?" → root `FRAMEWORK_VERSION` (in this repo OR in any consuming repo's `.claude/`).
+- "What version does the framework artifact ship?" → canonical `setup/portable/.claude/FRAMEWORK_VERSION` (only in the framework's source repo, eventually a standalone GitHub repo).
+
+These answer different questions. They are not asserted equal.
+
+Drift between them is expected and bounded: a deployment may lag the canonical version, but should never *exceed* it. Validate-setup should warn if the deployment file's version is greater than the canonical file's version (when both are present in the same repo, as they are here pre-Phase-C).
 
 ---
 

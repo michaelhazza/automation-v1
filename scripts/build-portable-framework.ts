@@ -37,11 +37,27 @@ const CHANGELOG_FILE = path.join(SOURCE_DIR, '.claude', 'CHANGELOG.md');
 // Strings that must NOT appear in the bundle. Catches forgotten substitutions
 // before they ship. The internal repo's project name is the most important
 // one — if it leaks into the export, target repos will see it.
+//
+// Includes case variants because authors freely switch between them in prose
+// (Automation OS, AutomationOS, automation-os, automation_os). String-blacklist
+// is brittle as a long-term enforcement model — a richer "positive validation"
+// approach (allow-listed patterns + structural rules) is tracked in
+// tasks/todo.md as a follow-up. Until then, expand variants here as new ones
+// appear.
 const FORBIDDEN_STRINGS = [
+  // Project name variants
   'Automation OS',
   'AutomationOS',
+  'automation-os',
+  'automation_os',
+  // Repo name + variants
   'automation-v1',
+  'automation_v1',
+  'automationV1',
+  // Org / parent names
   'Synthetos',
+  'synthetos',
+  'SYNTHETOS',
 ];
 
 interface PreflightResult {
