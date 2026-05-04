@@ -151,6 +151,7 @@ export const taskService = {
         assignedAgentId: agentId,
         assignedAgentIds: agentIds,
         createdByAgentId: data.createdByAgentId ?? null,
+        createdByUserId: userId ?? null,
         processId: data.processId ?? null,
         position,
         dueDate: data.dueDate ?? null,

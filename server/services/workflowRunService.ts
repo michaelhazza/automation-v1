@@ -41,6 +41,7 @@ import { WorkflowApproverPoolService } from './workflowApproverPoolService.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
 import type { PauseReason } from './workflowRunPauseStopServicePure.js';
+import { TaskAlreadyHasActiveRunError } from './errors/TaskAlreadyHasActiveRunError.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -138,6 +139,7 @@ export const WorkflowRunService = {
     startedByUserId: string;
     runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
     bulkTargets?: string[];
+    taskId: string;
     /** Mark the run as the onboarding instance for §9.3 Onboarding tab. */
     isOnboardingRun?: boolean;
     /** Mark the run as visible in the sub-account portal (§9.4). Defaults to
@@ -246,23 +248,43 @@ export const WorkflowRunService = {
       const portalVisibleDefault = definition.portalPresentation !== undefined;
       const isPortalVisible = input.isPortalVisible ?? portalVisibleDefault;
 
-      const [run] = await tx
-        .insert(workflowRuns)
-        .values({
-          organisationId: input.organisationId,
-          subaccountId: input.subaccountId,
-          templateVersionId,
-          runMode: input.runMode ?? 'auto',
-          status: 'pending',
-          contextJson: effectiveContext as unknown as Record<string, unknown>,
-          contextSizeBytes: contextBytes,
-          startedByUserId: input.startedByUserId,
-          startedAt,
-          isOnboardingRun: input.isOnboardingRun ?? false,
-          isPortalVisible,
-          workflowSlug: slug,
-        })
-        .returning();
+      let run: typeof workflowRuns.$inferSelect;
+      try {
+        const [inserted] = await tx
+          .insert(workflowRuns)
+          .values({
+            organisationId: input.organisationId,
+            subaccountId: input.subaccountId,
+            templateVersionId,
+            runMode: input.runMode ?? 'auto',
+            status: 'pending',
+            contextJson: effectiveContext as unknown as Record<string, unknown>,
+            contextSizeBytes: contextBytes,
+            startedByUserId: input.startedByUserId,
+            taskId: input.taskId,
+            startedAt,
+            isOnboardingRun: input.isOnboardingRun ?? false,
+            isPortalVisible,
+            workflowSlug: slug,
+          })
+          .returning();
+        run = inserted;
+      } catch (err: unknown) {
+        // PostgreSQL SQLSTATE 23505 = unique_violation
+        // The partial unique index workflow_runs_one_active_per_task_idx fires
+        // when there's already an active run for this task.
+        if (
+          typeof err === 'object' &&
+          err !== null &&
+          'code' in err &&
+          (err as { code: string }).code === '23505' &&
+          'constraint' in err &&
+          (err as { constraint: string }).constraint === 'workflow_runs_one_active_per_task_idx'
+        ) {
+          throw new TaskAlreadyHasActiveRunError(input.taskId);
+        }
+        throw err;
+      }
       runId = run.id;
 
       // Patch the runId into context_json's _meta.

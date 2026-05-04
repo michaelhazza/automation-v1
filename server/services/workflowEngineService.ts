@@ -81,6 +81,7 @@ import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types
 import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { taskService } from './taskService.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
 import {
@@ -2532,6 +2533,10 @@ export const WorkflowEngineService = {
       if (created >= slotsAvailable) break; // respect concurrency cap
 
       try {
+        const childTask = await taskService.createTask(run.organisationId, targetId, {
+          title: `Workflow run`,
+          status: 'inbox',
+        }, run.startedByUserId ?? undefined);
         const [childRun] = await db
           .insert(workflowRuns)
           .values({
@@ -2544,6 +2549,7 @@ export const WorkflowEngineService = {
             parentRunId: run.id,
             targetSubaccountId: targetId,
             startedByUserId: run.startedByUserId,
+            taskId: childTask.id,
           })
           .returning();
 
@@ -2771,6 +2777,14 @@ export const WorkflowEngineService = {
       },
     };
 
+    // Replay creates a new task linked to the replayed run.
+    const replayTask = await taskService.createTask(
+      organisationId,
+      source.subaccountId ?? organisationId,
+      { title: `Workflow run`, status: 'inbox' },
+      userId,
+    );
+
     let runId!: string;
     await db.transaction(async (tx) => {
       const [created] = await tx
@@ -2788,6 +2802,7 @@ export const WorkflowEngineService = {
           contextSizeBytes: Buffer.byteLength(JSON.stringify(replayContext), 'utf8'),
           replayMode: true,
           startedByUserId: userId,
+          taskId: replayTask.id,
           startedAt,
         })
         .returning();

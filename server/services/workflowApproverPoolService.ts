@@ -13,6 +13,7 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
 import {
+  tasks,
   teams,
   teamMembers,
   users,
@@ -56,12 +57,10 @@ export const WorkflowApproverPoolService = {
       }
 
       case 'task_requester': {
-        // The run may be linked to a task via startedByUserId — use that as the
-        // requester proxy. Tasks don't carry a workflow_run_id FK in V1.
-        // V1: uses startedByUserId as requester proxy. V2: join to tasks.created_by_user_id when workflow_run_id FK is added to tasks.
-        const [run] = await (dbHandle as typeof db)
-          .select({ startedByUserId: workflowRuns.startedByUserId })
-          .from(workflowRuns)
+        const [row] = await (dbHandle as typeof db)
+          .select({ createdByUserId: tasks.createdByUserId })
+          .from(tasks)
+          .innerJoin(workflowRuns, eq(workflowRuns.taskId, tasks.id))
           .where(
             and(
               eq(workflowRuns.id, runContext.runId),
@@ -69,16 +68,16 @@ export const WorkflowApproverPoolService = {
             ),
           );
 
-        if (!run) {
-          logger.warn('workflow_approver_pool_task_not_found', {
+        if (!row) {
+          logger.warn('workflow_approver_pool_task_requester_not_found', {
             runId: runContext.runId,
             organisationId: runContext.organisationId,
-            reason: 'no_started_by_user',
+            reason: 'task_not_found',
           });
           return [];
         }
 
-        if (run.startedByUserId === null) {
+        if (row.createdByUserId === null) {
           logger.warn('workflow_approver_pool_task_requester_null', {
             runId: runContext.runId,
             organisationId: runContext.organisationId,
@@ -86,7 +85,7 @@ export const WorkflowApproverPoolService = {
           return [];
         }
 
-        return [run.startedByUserId];
+        return [row.createdByUserId];
       }
 
       case 'team': {

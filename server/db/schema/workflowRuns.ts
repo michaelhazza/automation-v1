@@ -17,6 +17,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { workflowTemplateVersions } from './workflowTemplates';
+import { tasks } from './tasks';
 import type { GateResolutionReason } from '../../../shared/types/workflowStepGate.js';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,7 @@ export const workflowRuns = pgTable(
     parentRunId: uuid('parent_run_id').references((): any => workflowRuns.id),
     targetSubaccountId: uuid('target_subaccount_id').references(() => subaccounts.id),
     startedByUserId: uuid('started_by_user_id').references(() => users.id),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
@@ -110,6 +112,11 @@ export const workflowRuns = pgTable(
       'workflow_runs_cost_accumulator_nonneg',
       sql`${table.costAccumulatorCents} >= 0`,
     ),
+    // Workflows V1 Phase 2 (migration 0276) — task FK indexes
+    taskIdIdx: index('workflow_runs_task_id_idx').on(table.taskId),
+    oneActivePerTaskIdx: uniqueIndex('workflow_runs_one_active_per_task_idx')
+      .on(table.taskId)
+      .where(sql`${table.status} NOT IN ('completed', 'completed_with_errors', 'failed', 'cancelled', 'partial')`),
   })
 );
 

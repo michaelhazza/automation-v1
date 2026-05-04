@@ -85,6 +85,7 @@ export const WorkflowGateRefreshPoolService = {
       runId: run.id,
       organisationId: run.organisationId,
       subaccountId: run.subaccountId,
+      taskId: run.taskId,
     };
 
     // Step 3: load the template definition to find the approverGroup for this step

@@ -65,6 +65,7 @@ let workflowTemplateVersions: Awaited<typeof import('../../db/schema/index.js')>
 let automations: Awaited<typeof import('../../db/schema/index.js')>['automations'];
 let automationEngines: Awaited<typeof import('../../db/schema/index.js')>['automationEngines'];
 let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisations'];
+let tasks: Awaited<typeof import('../../db/schema/index.js')>['tasks'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
 let WorkflowRunService: Awaited<typeof import('../workflowRunService.js')>['WorkflowRunService'];
@@ -82,6 +83,7 @@ if (!SKIP) {
     automations,
     automationEngines,
     organisations,
+    tasks,
   } = await import('../../db/schema/index.js'));
   ({ eq, and } = await import('drizzle-orm'));
   ({ WorkflowRunService } = await import('../workflowRunService.js'));
@@ -124,13 +126,19 @@ async function cleanupWorkflowScope(scope: {
   await db.delete(workflowStepRuns).where(eq(workflowStepRuns.runId, scope.runId));
 
   const runRows = await db
-    .select({ id: workflowRuns.id })
+    .select({ id: workflowRuns.id, taskId: workflowRuns.taskId })
     .from(workflowRuns)
     .where(eq(workflowRuns.id, scope.runId));
   if (runRows.some((r) => r.id !== scope.runId)) {
     throw new Error(`Cleanup helper would have deleted runs outside scope ${scope.runId}`);
   }
+  const taskIdToClean = runRows[0]?.taskId ?? null;
   await db.delete(workflowRuns).where(eq(workflowRuns.id, scope.runId));
+
+  // Clean up the task row seeded for this run (no cascade from workflow_runs → tasks).
+  if (taskIdToClean) {
+    await db.delete(tasks).where(eq(tasks.id, taskIdToClean));
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -296,6 +304,13 @@ async function seedRunWithAwaitingStep(opts: {
   const runId = crypto.randomUUID();
   const stepRunId = crypto.randomUUID();
 
+  // Create a task row for the FK — org-scope run has no subaccount so subaccountId is null.
+  const [seedTask] = await db.insert(tasks).values({
+    organisationId: opts.orgId,
+    title: `Integration test workflow run`,
+    status: 'inbox',
+  }).returning({ id: tasks.id });
+
   await db.insert(workflowRuns).values({
     id: runId,
     organisationId: opts.orgId,
@@ -310,6 +325,7 @@ async function seedRunWithAwaitingStep(opts: {
       steps: {},
       _meta: { runId, templateVersionId: opts.templateVersionId, startedAt: new Date().toISOString() },
     },
+    taskId: seedTask.id,
     startedAt: new Date(),
   });
 

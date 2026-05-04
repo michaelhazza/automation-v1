@@ -19,8 +19,9 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
-import { workflowStepGates } from '../db/schema/index.js';
+import { workflowStepGates, workflowRuns } from '../db/schema/index.js';
 import type { WorkflowStepGateRow, NewWorkflowStepGateRow } from '../db/schema/workflowStepGates.js';
+import type { WorkflowRun } from '../db/schema/workflowRuns.js';
 import type { GateResolutionReason, ApproverPoolSnapshot } from '../../shared/types/workflowStepGate.js';
 import { logger } from '../lib/logger.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
@@ -32,6 +33,28 @@ import { WorkflowGateStallNotifyService } from './workflowGateStallNotifyService
 type TxOrDb = DB | Parameters<Parameters<DB['transaction']>[0]>[0];
 
 export const WorkflowStepGateService = {
+  /**
+   * Loads the run row once per gate operation.
+   * Returns the full WorkflowRun row, or null if the run is not found or belongs
+   * to a different org. Callers that need taskId read run.taskId directly.
+   */
+  async loadWorkflowRunContext(
+    runId: string,
+    organisationId: string,
+    dbHandle: TxOrDb,
+  ): Promise<WorkflowRun | null> {
+    const [run] = await (dbHandle as typeof db)
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, organisationId),
+        ),
+      );
+    return run ?? null;
+  },
+
   /**
    * Return the open gate for a (run, step) pair, or null if none exists.
    * Uses db directly — no transaction needed for reads.
@@ -105,6 +128,18 @@ export const WorkflowStepGateService = {
       });
       return existing;
     }
+
+    // Load run context once — runCtx.taskId is available for Chunk 9 event emission.
+    const runCtx = await this.loadWorkflowRunContext(input.workflowRunId, input.organisationId, tx);
+    if (!runCtx) {
+      logger.warn('workflow_gate_open_run_not_found', {
+        workflowRunId: input.workflowRunId,
+        organisationId: input.organisationId,
+      });
+      throw { statusCode: 404, message: 'Workflow run not found', errorCode: 'run_not_found' };
+    }
+    // runCtx.taskId is now available for Chunk 9 event emission.
+    void runCtx;
 
     // Compute seenPayload from stepDefinition if provided (overrides explicit value).
     let resolvedSeenPayload: import('../../shared/types/workflowStepGate.js').SeenPayload | null =
@@ -243,6 +278,19 @@ export const WorkflowStepGateService = {
       from: 'open',
       to: 'resolved',
     });
+
+    // Load run context — runCtx?.taskId is available for Chunk 9 event emission.
+    // Best-effort: gate may already be resolved (idempotent path), so run may be
+    // terminal. We load the gate first to get workflowRunId for the run lookup.
+    const [gateRow] = await (tx as typeof db)
+      .select({ workflowRunId: workflowStepGates.workflowRunId })
+      .from(workflowStepGates)
+      .where(eq(workflowStepGates.id, gateId));
+    const runCtx = gateRow
+      ? await this.loadWorkflowRunContext(gateRow.workflowRunId, organisationId, tx)
+      : null;
+    // runCtx?.taskId is now available for Chunk 9 event emission.
+    void runCtx;
 
     const result = await tx
       .update(workflowStepGates)
