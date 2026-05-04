@@ -65,30 +65,6 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 
 ---
 
-## Fix Progress
-
-- [x] Fix TypeScript compile errors
-- [x] Convert manual try/catch routes to asyncHandler (25 files)
-- [x] Fix missing org scoping in services
-- [x] Fix missing soft-delete filters
-- [x] Add missing DB indexes
-- [x] Fix unsafe JSON.parse calls
-- [x] Wrap multi-step DB operations in transactions
-- [x] Convert hard-delete to soft-delete in taskService
-- [x] Validate TOKEN_ENCRYPTION_KEY on startup
-- [x] Add API request timeout
-- [x] Final build & type check (server + client clean)
-
-### Migration Required
-
-The following schema changes need a DB migration before testing:
-- `skills` table: new `deleted_at` column (for soft-delete support)
-- `task_deliverables` table: new `deleted_at` column (for soft-delete support)
-
-Generate with: `npm run db:generate` then `npm run migrate`
-
----
-
 ## Hermes Tier 1 — Deferred Item (S1 from pr-reviewer)
 
 **Captured**: 2026-04-21  
@@ -715,18 +691,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
   - Gap: Current return value has `error` as a flat string and `context` hoisted to the top level. The telemetry event writes (`insertExecutionEventSafe` payloads) use the spec-correct nested envelope, so the split is return-value-only.
   - Suggested approach: This is a contract change. Legacy `skillExecutor` skills throughout the file return `error: string`, so moving delegation errors to a nested envelope either (a) introduces inconsistency across skills, or (b) implies a broader migration. Decide with architect whether the legacy string pattern is grandfathered and spec §4.3 describes the new-delegation-skills-only envelope, or whether the return shape should be changed and downstream consumers (agent prompts, action-audit wrapper `executeWithActionAudit`, any LLM-facing serialization) must be audited for breakage.
 
-## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4b (2026-04-24)
-
-**Captured:** 2026-04-24T00:00:00Z
-**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-2026-04-24T00-00-00Z.md`
-**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4b, lines 627–661) + `docs/hierarchical-delegation-dev-spec.md` (§6.5, §12.2)
-
-- [x] REQ #C4b-1 — Pure test file `skillService.resolver.test.ts` does not cover the "WARN logged" assertion called out in the plan's Files-New bullet.
-  - Spec section: `plan.md` line 632 ("`context.hierarchy` undefined → no derived skills, WARN logged"); acceptance criterion line 661 ("logs WARN `hierarchy_missing_at_resolver_time` once").
-  - Gap: The pure test file only covers the "returns `[]`" half of the plan's undefined-hierarchy case. WARN emission lives inside the impure `resolveSkillsForAgent`; the test file explicitly notes (lines 7–10) that this case was deferred to integration-level coverage because it requires a logger mock plus DB scaffolding. No such integration test exists yet in this chunk.
-  - Suggested approach: Either (a) mock the `logger` module and assert WARN in a thin integration test against `resolveSkillsForAgent` (will need to stub the `skills` table query or use an empty `skillSlugs` input so the DB path short-circuits on line 127's early return), or (b) refactor the WARN decision into a pure helper returning `{ derivedSlugs, warn: boolean, reason }` so the pure test can assert the boolean alongside the slug output. Option (b) is the cleaner pure-helper shape and keeps `skillServicePure.ts` authoritative for Chunk 4b's logic.
-  - Closed 2026-04-24 (commit `8c68d8a9`): option (b) taken — `shouldWarnMissingHierarchy({ hierarchy, subaccountId })` extracted into `skillServicePure.ts`; `resolveSkillsForAgent` calls it; three new pure tests assert the full decision table (undefined/undefined, undefined/provided, present/provided). Re-verified by `spec-conformance` re-run — see `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-recheck-2026-04-24T01-00-00Z.md`.
-
 ## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4c (2026-04-24)
 
 **Captured:** 2026-04-23T22:05:43Z
@@ -753,15 +717,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
   - Gap: Spec presumes a two-tab baseline (Trace + Payload) that did not exist in `main`. Implementation decided to add exactly two tabs (Trace + Delegation Graph). Labelled the first "Trace" (title-case matches spec); labelled the second "Delegation Graph" (title-case — spec says "Delegation graph", lowercase `g`). This is a spec-vs-reality contradiction, not an implementation defect.
   - Suggested approach: Human call required. Three options: (a) accept the two-tab surface as final and edit the plan to remove the ghost "Payload" tab reference; (b) introduce a genuine "Payload" tab that renders some run-payload view (would need its own spec — the plan does not define Payload tab contents); (c) amend the plan to make the third-tab phrasing a typo and confirm two tabs is the shape. Recommend (a) or (c).
 
-## Deferred from spec-conformance review — paperclip-hierarchy (2026-04-23)
-
-**Captured:** 2026-04-23T23:05:56Z
-**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`
-**Spec:** `docs/hierarchical-delegation-dev-spec.md` (whole-branch pass — all four phases)
-**Branch:** `claude/build-paperclip-hierarchy-ymgPW`
-
-- [x] **REQ #WB-1 — INV-1.2 `agent_runs.handoff_source_run_id` is never written; handoff edges cannot render in the delegation graph (architectural).** **DONE (2026-04-29 verification):** shipped under pre-launch-hardening Phase 2 (commit `f2696a53`). `AgentRunRequest.handoffSourceRunId?: string` added at `agentExecutionService.ts:183`; INSERT propagation at `agentExecutionService.ts:407`; `agent-handoff-run` worker dual-writes both pointers at `agentScheduleService.ts:127-128`; `skill_executor.ts:2934, 3677` propagate `context.runId` per spec §10.6. Pure tests green: `agentExecutionServiceWb1Pure.test.ts` (4/4) + `delegationGraphServicePure.test.ts` (11/11 incl. handoff-edge + dual-pointer cases). Re-attempting via the `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op. The spec's run-id continuity invariant (§10.6 clause 2) requires every handoff-created `agent_runs` row to carry `handoffSourceRunId = context.runId` of the `reassign_task` call. The column exists on the Drizzle schema (`agentRuns.ts:211`) and is read by `delegationGraphServicePure.ts:72` to produce handoff edges, but no write site populates it: `AgentRunRequest` has no `handoffSourceRunId` field, `agentExecutionService`'s `agent_runs` INSERT (lines ~395–412) does not set it, and the handoff worker at `agentScheduleService.ts:127` routes `sourceRunId → parentRunId` instead. Consequences: (1) handoff edges are invisible in the `/api/agent-runs/:id/delegation-graph` response (spawn edges still render because `parentRunId + isSubAgent` gate); (2) INV-1.3 "both pointers when both caused it" is unreachable; (3) INV-1.4 "`delegation_outcomes.runId === child.handoffSourceRunId` for handoffs" is structurally broken. Because `parentRunId` is currently reused for handoff chains by pre-existing code (the trace-session logic at `agentExecutionService.ts:1226-1232` and `agentActivityService.getRunChain` read `parentRunId` for handoff chains), the fix is cross-cutting — it requires a design call (keep `parentRunId` for handoff runs alongside the new `handoffSourceRunId`, or clear it and migrate downstream chain logic to the new column). Deferring as architectural. Suggested approach: (a) add `handoffSourceRunId?: string` to `AgentRunRequest`; (b) propagate it into the `agent_runs` INSERT in `agentExecutionService.executeRun`; (c) extend the `agent-handoff-run` worker payload and pass it through; (d) decide whether `parentRunId` is ALSO set (backward-compat) or null for handoff runs, and update pure graph emission + run-chain consumers accordingly. Source: `docs/hierarchical-delegation-dev-spec.md` §5.3 + §7.2 + §10.6; log `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`.
-
 ## Deferred from spec-conformance review — riley-observations wave 1 (2026-04-24)
 
 **Captured:** 2026-04-24T05:37:51Z
@@ -782,17 +737,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
 **Source log:** tasks/review-logs/pr-review-log-riley-observations-2026-04-24T06-20-00Z.md
 
 - [ ] **Migration 0219 — rename `review_audit_records.workflow_run_id` column** (#9): The column on `review_audit_records` references `flow_runs` (post-M1) but is still named `workflow_run_id`. This is misleading post-M3 when a new `workflow_runs` table also exists. Add `ALTER TABLE review_audit_records RENAME COLUMN workflow_run_id TO flow_run_id` to migration 0219 and update `server/db/schema/reviewAuditRecords.ts` + the down migration. This is a schema change requiring a new migration if 0219 is already applied to any environment.
-
-## Deferred from dual-reviewer review — riley-observations (2026-04-24)
-
-**Captured:** 2026-04-24 from dual-reviewer iteration 2
-**Source log:** tasks/review-logs/dual-review-log-riley-observations-2026-04-24T08-00-00Z.md
-
-- [x] **Review-gated `invoke_automation` steps never dispatch after approval** (Codex iter 2 finding #4). **DONE (2026-04-29 verification):** spec'd at `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §1.3, shipped via `28f7b371 feat(approval): extract resolveApprovalDispatchAction pure helper + tests (§1.3)` + `47777472 feat(pre-launch-hardening): Phase 6 — wire dead paths DR1/DR2/DR3/C4a-REVIEWED-DISP`. Resolution: option (b) — `resolveApprovalDispatchAction` pure helper at `server/services/resolveApprovalDispatchActionPure.ts` decides; `decideApproval` at `workflowRunService.ts:577-584` routes invoke_automation through `WorkflowEngineService.resumeInvokeAutomationStep` (dedicated resume path at `workflowEngineService.ts:1749`). Audit-trail decision: mutate-existing row (UPDATE awaiting_approval → running, same `flow_step_run` id). Pure tests green: `decideApprovalStepTypePure.test.ts` (9/9) + `resumeInvokeAutomationStepPure.test.ts` (10/10). Integration harness exists at `workflowEngineApprovalResumeDispatch.integration.test.ts` (3 cases incl. HMAC + sign-call boundary spy + concurrent double-approve) — note: end-to-end run is currently blocked by env.ts Zod enum not allowing `NODE_ENV='integration'`, separate bug worth filing. Re-attempting via `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op.
-
-- [x] **Inline-dispatch step handlers do not re-check invalidation after awaiting external I/O** (Codex iter 3 finding #7). **DONE (2026-04-29 verification):** shipped under pre-launch-hardening Phase 5 (`35112d09 feat(hardening): Phase 5 — execution-path correctness`). `withInvalidationGuard` helper at `workflowEngineService.ts:128-139` re-reads the step row after external I/O and returns `{ discarded: true, reason: 'invalidated' }` if status flipped. Wrapped around every external-I/O dispatch site: action_call (line 1386), agent-step queue dispatch covering agent_call/prompt (line 1555), invoke_automation primary (line 1609), approval-resume path (line 1808). Each call site short-circuits on `'discarded' in guardedResult` before reaching `completeStepRunInternal`. Pure tests green: `invalidationRacePure.test.ts` (5/5: still-running / invalidated / completed-non-invalidated / failed / discarded-sentinel-distinct). Re-attempting via `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op.
-
-
 
 ## Deferred from chatgpt-pr-review — riley-observations (2026-04-24 round 2)
 
@@ -1399,18 +1343,6 @@ The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly
 
 ---
 
-## Deferred from spec-conformance review — code-intel-phase-0 (2026-04-28)
-
-**Captured:** 2026-04-28T04:04:26Z
-**Source log:** `tasks/review-logs/spec-conformance-log-code-intel-phase-0-2026-04-28T04-04-26Z.md`
-**Spec:** `tasks/builds/code-intel-phase-0/plan.md`
-
-- [x] D1 — Watcher start failure logged to log file rather than dev-server stdout
-  - Resolved in-session in commit `36d97be9`. plan.md line 112 updated to state the watcher subprocess logs init failures to `references/.code-graph-watcher.log`. Parent process already prints the spawn-time pointer (`[code-graph] watcher started in background (pid X). Tail logs with: …`).
-
-- [x] D2 — `code-graph:rebuild` does not release a held watcher lock
-  - Resolved in-session in commit `36d97be9`. Watcher now writes its PID to `references/.watcher.pid` after lock acquisition. `--rebuild` reads the PID, sends SIGTERM, waits 300ms, then force-clears the lock and PID artifacts before dropping the cache. Validated end-to-end: rebuild with a live watcher prints "sent SIGTERM to watcher (pid X)", terminates the old, spawns a new one with a fresh PID; PowerShell process count confirms the singleton invariant.
-
 ## Follow-ups surfaced during pr-reviewer pass — code-intel-phase-0 (2026-04-28)
 
 - [x] Add executable test coverage for the watcher's load-bearing invariants (pr-reviewer S4)
@@ -1531,16 +1463,6 @@ Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health
   - Current behaviour: ~750-token prompt, runtime cost negligible.
   - Suggested fix: if/when token cost matters, trim repeated explanations and condense the section 4 bucket guidance to a single sentence.
   - Defer; not blocking. Cosmetic.
-
-## ChatGPT PR final-review — round 3 (P1 + P2 applied) — code-graph-health-check (2026-04-28)
-
-Reviewer's framing: the script has crossed from "utility" to "decision engine," which raises the bar — silently misleading data and rule contradictions are now critical, not refinements.
-
-- [x] **P1 — Cross-project transcript contamination** (resolved)
-  - `resolveProjectDirs()` previously fell back to scanning every directory under `~/.claude/projects` when no exact / sibling match was found. That silently mixed adoption / correction / volume signals from unrelated codebases, producing a misleading "this repo's cache is healthy" report when the truth was "this repo has no transcripts." Resolved: the fallback block is removed; the function returns `[]` on no match, and the downstream `transcriptsAvailable === false` path correctly surfaces "no session data found." Code comment in the function explains the deliberate non-fallback.
-
-- [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
-  - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
 
 ## ChatGPT PR final-review — round 4 (deferred refinements) — code-graph-health-check (2026-04-28)
 
@@ -1682,23 +1604,6 @@ production. On staging/prod with 5–20ms app→DB latency, expected speedup is 
 Action: re-run `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` after deploy to
 a staging environment with real app→DB network latency. Pass conditions remain:
 ≥5× speedup vs legacy advisory-lock path AND ≥200 rows/sec/org.
-
----
-
-## Deferred from spec-conformance review — pre-prod-tenancy (2026-04-29)
-
-**Captured:** 2026-04-29T06:57:41Z
-**Source log:** `tasks/review-logs/spec-conformance-log-pre-prod-tenancy-2026-04-29T06-57-41Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`
-
-- [x] **CONFORM-1 [CLOSED 2026-04-29]**: workflow_engines / workflow_runs manifest entries cite migrations that contain no `CREATE POLICY` block
-  - **Resolution:** Option (a) — added `0000_wandering_firedrake.sql` and `0076_playbooks.sql` to `HISTORICAL_BASELINE_FILES` in `scripts/verify-rls-coverage.sh` with `@rls-baseline:` annotations in both migration files. Also fixed redundant `migrations/` prefix in registry `policyMigration` entries (convention is filename only). `verify-rls-coverage.sh` workflow_engines/workflow_runs violations now resolved (gate violation count 10 → 8; remaining 8 are pre-existing about other tables). Honors §3.4.1 registry-only rule, §7.1 CI invariant, and §0.4 sister-branch scope-out.
-
-- [x] **CONFORM-2 [CLOSED 2026-04-29]**: Nullable-aware RLS policy on `org_margin_configs` and `skills` allows tenant code paths to write `organisation_id = NULL` rows
-  - **Resolution:** Audit confirmed only one tenant write path on `skills` could hit NULL — `seedBuiltInSkills` at boot. Migration 0245 WITH CHECK clauses tightened to canonical shape (drop `IS NULL` from WITH CHECK; keep nullable-aware USING for read access). `seedBuiltInSkills` migrated to `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS) so boot-time NULL writes go via admin path. `org_margin_configs` had no tenant writes at all — only migration 0024 seeds the platform-default NULL row. Now fully compliant with spec §2.1 canonical shape.
-
-- [x] **CONFORM-3 [CLOSED 2026-04-29]**: Phase 3 §5.2.1 audit triplet line-number drift for ruleAutoDeprecateJob
-  - **Resolution:** Updated per-job audit paragraph in `tasks/builds/pre-prod-tenancy/progress.md` to use commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition). All three places now agree byte-identically per §5.2.1.
 
 ---
 
@@ -1847,62 +1752,6 @@ Captured 2026-04-30 from ChatGPT review of [PR #237](https://github.com/michaelh
   - Issue: ChatGPT flagged silent catches as "dangerous in admin flows". Some are intentional (`.catch(() => setIdentity(null))` = "no identity yet → render onboarding CTA"), others swallow real errors (e.g. `.catch(() => setThreadMessages([]))`).
   - Why deferred: codebase-wide pattern, not specific to this PR. Blanket-fix would regress UX (the "no identity yet" path).
   - Suggested approach: pass: classify each catch — if the error is a meaningful state ("not found"), keep the silent transition but log at `console.warn`. Otherwise surface a toast or error banner. Worth a focused sweep across `client/src/pages/Agent*Page.tsx` and the workspace components.
-
-## Deferred from spec-conformance review — agent-as-employee phases D+E (2026-04-30)
-
-**Captured:** 2026-04-30T00:38:18Z
-**Source log:** `tasks/review-logs/spec-conformance-log-agent-as-employee-phases-de-2026-04-30T00-38-18Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`
-
-- [x] **DE-CR-1** — `processIdentityMigration` worker is registered with bare `(boss as any).work(...)` so no `withOrgTx` is opened for the handler — `getOrgScopedDb()` will throw `missing_org_context` on first invocation
-  - Spec section: §13 (queued execution model), §10.5 (multi-tenant safety checklist item 6)
-  - Gap: `server/services/queueService.ts:1140` registers `workspace.migrate-identity` outside `createWorker`, but `workspaceMigrationService.processIdentityMigration` uses `getOrgScopedDb`. The handler will fail-closed on every job. Migration is non-functional in production until this is wired.
-  - Suggested approach: switch the registration to `createWorker<MigrateIdentityJob>({ queue: 'workspace.migrate-identity', boss, handler: ..., timeoutMs: 270_000 })`. The job payload already carries `organisationId` + `subaccountId`, so the default `resolveOrgContext` works. Remove the bare `boss.work(...)` block.
-
-- [x] **DE-CR-2** — `seatRollupJob` reads from `workspace_identities` via the bare `db` connection — RLS-FORCED table, no session var → returns 0 rows
-  - Spec section: §10.6 (seat rollup wiring), §10.5 (multi-tenant safety checklist item 6), DEVELOPMENT_GUIDELINES.md §1
-  - Gap: `server/jobs/seatRollupJob.ts` imports `db` directly. `workspace_identities` has `FORCE ROW LEVEL SECURITY` (migration 0254 line 245). With `app.organisation_id` unset, the policy rejects every row. `consumed_seats` will always roll up to 0.
-  - Suggested approach: replicate `memoryDedupJob.ts`. Use `withAdminConnection` for the cross-org SELECT iteration (BYPASSRLS), then `withOrgTx` per-organisation for the `UPDATE org_subscriptions ... consumed_seats`.
-
-- [x] **DE-CR-3** — Migration status-poll response shape diverges from spec §12 `MigrateSubaccountResponse`
-  - Spec section: §12 (Contract `MigrateSubaccountResponse`)
-  - Gap: spec contract says `{ status, total, migrated, failed, failures: [{ actorId, previousIdentityId, reason, retryable }] }`. Implementation returns `{ status, total, completed, failed, skipped, perIdentity }`. `migrated` was renamed to `completed`; `failures[]` (with `retryable`) is replaced by `perIdentity[]` (no retryable classification).
-  - Suggested approach: rename `completed` → `migrated`. Add a `failures: Array<{ actorId, previousIdentityId, reason, retryable }>` aggregate alongside `perIdentity` (keep `perIdentity` for the modal's progress bar, but populate the spec-named `failures[]` for callers expecting the contract). `previousIdentityId` is recoverable from `auditEvents.metadata.from`. `retryable` follows §7's failure-reason → retryability table.
-
-- [x] **DE-CR-4** — `WorkspaceTenantConfig` interface drops spec-named fields `backend`, `connectorConfigId`, `domain`
-  - Spec section: §12 (Contract `WorkspaceTenantConfig`)
-  - Gap: spec example carries `backend`, `connectorConfigId`, `domain`, `defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`. Implementation in `shared/types/workspaceAdapterContract.ts:79–84` carries only the last three plus an extra `subaccountName`. Callers cannot resolve which backend or connector this tenant is on without a separate query.
-  - Suggested approach: extend `WorkspaceTenantConfig` to include `backend: 'synthetos_native' | 'google_workspace' | null`, `connectorConfigId: string | null`, `domain: string | null` populated from `connector_configs.config_json.domain` (with the `NATIVE_EMAIL_DOMAIN` fallback already used in the workspace summary route). `subaccountName` is fine as an additive helper; document why it's there.
-
-- [x] **DE-CR-5** — Per-step migration failure audits emit `identity.migration_activation_failed` and `identity.migration_archive_failed` action types not enumerated in spec §14.4
-  - Spec section: §14.4 (terminal events), §10 (activity types)
-  - Gap: spec §14.4 says the per-identity terminal failure event is `identity.migration_failed`. `workspaceMigrationService.processIdentityMigration` writes step-specific actions for activation (line 202) and archive (line 227) failures. These types are not in `WORKSPACE_EVENT_TYPES` (`activityService.ts:509`), so they will not surface on the activity feed; the migration status-poll route detects them via hardcoded action-name matching, which couples the route to an action namespace that isn't in the spec or the activity union.
-  - Suggested approach: collapse all three terminal-failure events to `identity.migration_failed`, distinguishing the failed step via `metadata.step ∈ {'provision','activate','archive'}`. Update the status-poll route to read only `identity.migrated` and `identity.migration_failed`.
-
-- [x] **DE-CR-6** — `subaccount.migration_completed` audit event is in the activity-type union but never written
-  - Spec section: §14.4 (terminal event for "Migration of one subaccount")
-  - Gap: spec §14.4 lists `subaccount.migration_completed` as the per-subaccount terminal event with `status ∈ {'success','partial','failed'}`. Nothing in the implementation writes this row — the status-poll route computes the aggregate on demand from per-identity audits. Operators have no audit trail of "subaccount X migrated" for the activity feed.
-  - Suggested approach: when the last in-flight identity for a `migrationJobBatchId` reaches a terminal state, write a single `subaccount.migration_completed` audit row with `metadata = { batchId, status, total, migrated, failed }`. Either fire from the worker after each per-identity job (idempotent on `(batchId)`), or schedule a "migration finaliser" job dispatched on the last per-identity completion.
-
-- [x] **DE-CR-7** — `activity.ts` route uses offset-based pagination; spec §12 forbids it for the activity feed
-  - Spec section: §12 (Contract `ActivityFeedItem` — "Offset pagination ... is explicitly forbidden for this feed")
-  - Gap: `parseFilters` accepts `limit` + `offset`; `listActivityItems` slices `items.slice(offset, offset + limit)`. Spec §12 mandates cursor pagination (`{ created_at, id }` opaque cursor) and explicitly forbids offset, citing drift under concurrent inserts.
-  - Suggested approach: change the contract to cursor-based. Server emits `{ items, nextCursor }`; cursor is `base64({ created_at, id })`. WHERE clause becomes `(created_at, id) < (cursor.created_at, cursor.id)` over the merged result set. Keep limit; remove offset. ActivityPage and AgentActivityTab both need updating in lockstep.
-
-- [x] **DE-CR-8** — `ActivityFeedItem` tiebreaker is `id DESC`; spec §12 says `id ASC`
-  - Spec section: §12 (Contract `ActivityFeedItem` — "Tie-breaker: `id ASC` within the same `created_at`")
-  - Gap: `server/services/activityServicePure.ts:98` defines `idDesc(a, b)` as the tiebreaker; spec contract calls for `id ASC`. The DB-level `.orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))` (activityService line 593) follows the same DESC pattern.
-  - Suggested approach: flip both the pure tiebreaker and the DB orderBy. The pure-function determinism test in §8.21 should be re-run after the change.
-
-- [x] **DE-CR-9** — Org-chart and actors routes use `WORKSPACE_CONNECTOR_MANAGE` instead of a viewer-level permission
-  - Spec section: §10.1 (permission keys table)
-  - Gap: spec §10.1 reserves `subaccounts:manage_workspace` (= `WORKSPACE_CONNECTOR_MANAGE`) for *configuring* the workspace; viewing the org chart and actor list should be available to a `manager` who has `agents:view_activity` (already exists). The current permission gate hides the org chart from operators who can manage agents day-to-day but lack workspace-config rights.
-  - Suggested approach: split the gates. `GET /workspace/org-chart` and `GET /workspace/actors` use `AGENTS_VIEW_ACTIVITY` (or just `authenticate`+`resolveSubaccount` if the data is non-sensitive). `POST /configure`, `POST /onboard`, `POST /migrate`, lifecycle mutations stay on `WORKSPACE_CONNECTOR_MANAGE`.
-
-- [x] **DE-CR-10** — `seatRollupJob` and `activityService` call `db` directly instead of going through service-layer helpers
-  - Spec section: §10.5 (multi-tenant safety checklist), DEVELOPMENT_GUIDELINES.md §2 ("Routes and `server/lib/**` never import `db` directly — call a service")
-  - Gap: `server/jobs/seatRollupJob.ts` and the workspace-extension fetchers in `server/services/activityService.ts` keep the pre-existing pattern of importing `db` directly. The activityService precedent existed before this branch — but the new `fetchAuditEvents` adds another consumer.
-  - **Resolution (2026-04-30):** Decision recorded in `tasks/builds/agent-as-employee/progress.md` § "Spec-conformance follow-ups". The DEVELOPMENT_GUIDELINES.md §2 rule scopes to "routes and `server/lib/**`" — services and jobs are exempt. `seatRollupJob` no longer imports `db` directly post-DE-CR-2 fix (uses `withAdminConnection`); `activityService` (a service) is permitted to import `db` per the rule. No code change required.
 
 ## Test infrastructure hygiene
 
@@ -2191,11 +2040,6 @@ Add structured log lines for each when the observability layer is extended.
 Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','network_error','quota_exceeded','budget_exceeded','unsupported_content'))` in a future migration. Low urgency — TS types already enforce this on all code paths.
 
 ---
-
-## Doc drift backlog (audit 2026-05-01)
-
-- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
-- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign as worked example. Added "Worked example — ClientPulse health monitoring" section covering band-pill pattern, drilldown minimal surface, intervention modal, and per-block settings. User approved editorial decisions 2026-05-01.
 
 ## Deferred from pr-reviewer review — fix-doco-may2026
 
@@ -2704,6 +2548,68 @@ Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blo
 - [ ] **Add `grant_type` / token-source column to `connector_location_tokens` and `connector_configs`.** Currently both tables persist tokens without recording how the token was acquired (`agency_oauth_mint`, `location_oauth`, `direct_install`, `manual_paste`, `user_oauth`, future provider-specific grant types). When a second OAuth provider lands or when GHL adds a new grant flow, distinguishing source is a join-on-nothing problem. Cheap migration now (`token_source text`, default backfill `'agency_oauth_mint'` for existing GHL rows) saves a debugging session later when an operator needs to filter by source. **When required:** when the second OAuth provider lands. Source: chatgpt-pr-review PR #254 round 2 finding 6.
 
 - [ ] **Operator-facing kill switch UI / endpoint for `connector_configs.status='disconnected'`.** The status enum (`'active' | 'error' | 'disconnected'`) and short-circuiting at `findAgencyConnectionByCompanyId` + `connectorPollingTick` are already in place. What's missing is a one-click admin path: `POST /api/admin/connector-configs/:id/disable` that flips the status to `disconnected` and soft-deletes the location tokens (see related cascade item above). Useful in production incident response when a partner integration is misbehaving. **When required:** before the first production incident (operator response time gates this). Source: chatgpt-pr-review PR #254 round 2 finding 7.
+
+## Deferred from setup refactor — 2026-05-03
+
+**Captured:** 2026-05-03
+**Source:** session refactoring agent fleet + adding ADR + context-pack + hotfix conventions
+**Status update (2026-05-03 same day):** all 8 items addressed inline — see resolution notes per item.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Migrate historical KNOWLEDGE.md "Decision" entries into proper ADRs under `docs/decisions/`
+  - Resolution: 5 ADRs written (0001-0005) covering the clearest decisions: mixed-mode review agents, interactive vs walk-away review agents, workspace identity canonical pattern, GEO skills as methodology skills, risk-class split rollout. Remaining 6 historical Decision entries judged to be patterns/observations/research-notes rather than ADR-worthy and stay in KNOWLEDGE.md.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Section-anchor architecture.md so context-packs can splice precisely
+  - Resolution: 54 HTML anchors added via Python script. All 5 context-pack files updated to reference specific anchors (`architecture.md#service-layer`, etc.).
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Build the `context-pack-loader` skill that reads a pack and emits sliced content
+  - Resolution: agent at `.claude/agents/context-pack-loader.md`. Inline playbook (not a sub-agent — that would defeat the token-savings point). Wired into CLAUDE.md fleet table. Auto-triggered by `current-focus.md` status when operator types "load context pack" without naming a mode.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Slim `.claude/agents/spec-reviewer.md` by extracting the directional-signals classifier
+  - Resolution: 70 lines extracted to `references/spec-review-directional-signals.md`. Agent file: 575 → 509 lines. Saves tokens on every spec-reviewer invocation.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Archive sweep of `tasks/todo.md`
+  - Resolution: 9 fully-resolved sections (every checkbox `[x]`) moved to `tasks/todo-archive/2026-Q2.md`. todo.md: 2,567 → 2,411 lines. Mixed and all-open sections kept — they're active backlog.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Archive sweep of `docs/`
+  - Resolution: 0 docs eligible for automated archive after re-verification (the original 4 candidates were false positives — see `tasks/docs-archive-triage-2026-05-03.md` for analysis). Durable enabler shipped instead: Status: header convention added to `docs/spec-authoring-checklist.md § 11`. Future archive sweeps will work once specs adopt the header.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Add a "codebase-explainer" agent for external onboarding
+  - Resolution: agent at `.claude/agents/codebase-explainer.md`. Produces `docs/codebase-tour.md`. Different audience from architecture.md (human-facing prose vs agent-facing dense reference). Wired into CLAUDE.md fleet table.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Wire spec-reviewer to enforce `docs/spec-context.md` staleness check
+  - Resolution: staleness gate added to `spec-reviewer.md § Step A`. Reads `last_reviewed_at` / `stale_after_days` / `stale_blocks_at_days` from spec-context.md YAML block. Yellow warning at `stale_after_days`, red block at `stale_blocks_at_days`. Falls back to yellow + deferred-item if the staleness header is missing.
+
+## Deferred from setup audit — 2026-05-03
+
+**Captured:** 2026-05-03 (audit pass before propagating framework to other repos)
+**Scope:** items surfaced during the pre-propagation audit. Each is HIGH-VALUE but HIGH-COST — too risky to land in the same session as the smaller fixes.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Extract shared boilerplate from `chatgpt-pr-review.md` (976 lines) and `chatgpt-spec-review.md` (667 lines) to `references/chatgpt-review-protocol.md`
+  - **Why:** the two files have the EXACT same 7-section structure (`Configuration`, `Before doing anything else, read`, `On Start`, `Per-Round Loop`, `Finalization`, `Log Format`, `Rules`). Probably 30-40% shared content (round handling, finding triage shape, KNOWLEDGE.md sweep, doc-sync at finalisation, log format). Saves ~400 tokens/session when either agent runs.
+  - **Approach:** read both end-to-end, identify shared sections, extract to `references/chatgpt-review-protocol.md`. Each agent then carries only its mode-specific content + a pointer.
+  - **Risk:** breaking either agent's flow if the extraction over-merges. Agents are load-bearing for review pipeline. Test by running each on a real PR/spec after extraction.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Move domain-specific subsystem sections out of `architecture.md` (3,542 lines) to `architecture/<domain>.md` files
+  - **Why:** 15 of 19 agents always-load architecture.md. Domain-specific subsystems (IEE 423 lines, Playbooks 299 lines, ClientPulse Intervention Pipeline 190 lines, Scraping Engine 150 lines, Run Continuity 124 lines) only matter when working on those subsystems. Their full-load tax is paid every session whether the session touches them or not. Saves ~1,200 tokens always-loaded.
+  - **Approach:** create `architecture/iee.md`, `architecture/playbooks.md`, etc. Replace each domain section in `architecture.md` with a one-paragraph summary + pointer. Update context-pack anchors that reference moved sections. Confirm `KNOWLEDGE.md` cross-references still resolve.
+  - **Risk:** breaks every agent that loads `architecture.md` until their context-loading instructions are updated. Better done once context-pack-loader is wired to all agents (next deferred item below).
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Wire the agent fleet to use context packs by default (not opt-in)
+  - **Why:** `context-pack-loader.md` ships in this version but is operator-invoked. Most agents still load full architecture.md. To realise the token savings, each agent's `Context Loading` step should default to its matching pack: `pr-reviewer` → review pack, `architect` → implement pack, etc.
+  - **Approach:** edit each agent's Context Loading block to read "load context pack: <mode> (or fall back to listed full files if pack-loader is unavailable)". Pack name comes from a per-agent table.
+  - **Risk:** agents need their packs to actually contain the sections they need. Requires the architecture.md domain-split above to land first, otherwise packs reference monolithic sections.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Add a `validate-setup` skill that confirms the agent fleet is healthy in a new repo
+  - **Why:** ADAPT.md Phase 4 does this once at setup time. After that, drift accumulates silently — anchors get renamed, agents get edited, the operator never re-runs ADAPT. A `validate-setup` skill would re-check on demand and emit a health report.
+  - **Approach:** new agent at `.claude/agents/validate-setup.md`. Steps: (1) read every agent in fleet, confirm referenced files exist; (2) read every context pack, confirm referenced anchors exist; (3) check `FRAMEWORK_VERSION` against latest known; (4) check `KNOWLEDGE.md` size; (5) check `tasks/todo.md` size; (6) emit a report.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Quarterly KNOWLEDGE.md grouping pass
+  - **Why:** the size-bound policy (KNOWLEDGE.md preamble) prescribes a quarterly grouping pass but no agent runs it. Without an agent, the policy is aspirational.
+  - **Approach:** extend `audit-runner` with a `knowledge` mode that reads KNOWLEDGE.md, identifies thematically duplicate entries, appends summary entries that cite originals by date, never edits originals. Run quarterly.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Backfill `Status:` headers across the existing 84 specs in `docs/`
+  - **Why:** the Status: convention added in this session is forward-looking only. The existing 84 specs lack it, so docs/ archive sweeps still produce 0 candidates (per the 2026-05-03 triage report). One-time backfill unlocks the future archive sweeps.
+  - **Approach:** `audit-runner` mode that reads each spec, infers status from `tasks/builds/<slug>/handoff.md` (if it exists) and merge state, writes the header. Operator review before commit.
 
 ## Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)
 
