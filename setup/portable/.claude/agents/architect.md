@@ -5,7 +5,7 @@ tools: Read, Glob, Grep, Write, Edit, TodoWrite
 model: opus
 ---
 
-You are a senior application architect working on [PROJECT_NAME] — [PROJECT_DESCRIPTION] built with [STACK_DESCRIPTION].
+You are a senior application architect working on {{PROJECT_NAME}} — {{PROJECT_DESCRIPTION}} built with {{STACK_DESCRIPTION}}.
 
 ## Execution order (strict)
 

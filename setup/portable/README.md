@@ -23,11 +23,15 @@ A portable agent fleet + governance docs + hooks for Claude Code projects. Drops
 
 If you don't know which profile to pick, use STANDARD. See `ADAPT.md` § 11 for differences.
 
+## Placeholder format
+
+Agent files and docs use `{{PROJECT_NAME}}`, `{{PROJECT_DESCRIPTION}}`, `{{STACK_DESCRIPTION}}`, and `{{COMPANY_NAME}}` as substitution placeholders (double-brace format). Phase 2 of `ADAPT.md` replaces them with your project's values. Do not use the old single-bracket format `[PROJECT_NAME]` — the build script flags any remaining old-format occurrences as errors.
+
 ## What ships
 
 | Path | Contents |
 |------|----------|
-| `.claude/agents/` | 20 agent definitions (with placeholders) |
+| `.claude/agents/` | 20 agent definitions (with `{{...}}` placeholders) |
 | `.claude/hooks/` | 4 portable hooks: `long-doc-guard`, `correction-nudge`, `config-protection`, `code-graph-freshness-check` |
 | `.claude/settings.json` | Hook registration (PreToolUse, UserPromptSubmit, SessionStart) |
 | `.claude/FRAMEWORK_VERSION` | Semver — used to detect drift across repos |
@@ -44,6 +48,9 @@ If you don't know which profile to pick, use STANDARD. See `ADAPT.md` § 11 for 
 | `references/verification-commands.md` | Stack-template lint/typecheck/build/test commands |
 | `tasks/` | Empty scaffolding (current-focus, todo, ideas, bugs, lessons, runbooks/, review-logs/, builds/_example/) |
 | `ADAPT.md` | Master prompt — Claude reads this and walks adoption |
+| `manifest.json` | File ownership declaration — lists every managed path, mode, and substitution rules |
+| `sync.js` | Sync engine — one-command upgrade (`node .claude-framework/sync.js`) |
+| `SYNC.md` | Guided upgrade walkthrough for Claude — operator pastes a short prompt; Claude walks the phases |
 | `README.md` | This file |
 
 ## What this bundle does NOT ship
@@ -65,12 +72,9 @@ Pick at adoption time:
 
 ## Upgrading from a previous framework version
 
-Don't re-run `ADAPT.md` — it expects fresh placeholders, and your repo already has substituted values. Instead, follow `.claude/CHANGELOG.md` § *Upgrade protocol*:
+For ongoing upgrades, see `SYNC.md`. When the framework releases a new version, update your submodule pointer and run `node .claude-framework/sync.js` — SYNC.md walks the upgrade phases (diff versions, read changelog, dry-run, apply, merge customised files, verify, commit).
 
-1. Read the changelog from the latest version backward to your `.claude/FRAMEWORK_VERSION`.
-2. Apply each `Breaking:` migration. Pick which `Added:` items to adopt.
-3. Diff each `Changed:` file against your local copy.
-4. Bump `.claude/FRAMEWORK_VERSION` when done.
+Don't re-run `ADAPT.md` — it expects fresh placeholders, and your repo already has substituted values. Instead, use the sync engine: update the `.claude-framework/` submodule to the new framework version, then follow SYNC.md.
 
 ## Source
 

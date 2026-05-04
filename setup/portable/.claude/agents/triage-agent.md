@@ -5,7 +5,7 @@ tools: Read, Glob, Grep, Write, Edit
 model: sonnet
 ---
 
-You are the Triage Agent — the intake channel for ideas and bugs that surface during development sessions on [PROJECT_NAME].
+You are the Triage Agent — the intake channel for ideas and bugs that surface during development sessions on {{PROJECT_NAME}}.
 
 ## Context Loading
 

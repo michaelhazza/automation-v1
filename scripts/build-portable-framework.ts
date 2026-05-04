@@ -20,7 +20,7 @@
  *     no leftover conflict markers; FRAMEWORK_VERSION matches CHANGELOG.
  */
 
-import { promises as fs, createWriteStream, existsSync } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -106,6 +106,31 @@ async function preflight(version: string): Promise<PreflightResult> {
   }
   await walk(SOURCE_DIR);
   errors.push(...offenders);
+
+  // 4b. Legacy-format placeholder scan. Any remaining [PROJECT_NAME]-style
+  // placeholders must have been migrated to {{PROJECT_NAME}} before building.
+  // CHANGELOG.md and README.md are exempt: they intentionally document the old
+  // format by name in explanatory prose and code spans.
+  const LEGACY_PLACEHOLDER_NAMES = ['PROJECT_NAME', 'PROJECT_DESCRIPTION', 'STACK_DESCRIPTION', 'COMPANY_NAME'];
+  const LEGACY_SCAN_EXEMPT = new Set(['CHANGELOG.md', 'README.md']);
+  async function walkLegacy(dir: string): Promise<void> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        await walkLegacy(full);
+      } else if (e.isFile() && /\.(md|json|js|ts|sh|txt)$/.test(e.name) && !LEGACY_SCAN_EXEMPT.has(e.name)) {
+        const content = await fs.readFile(full, 'utf8');
+        const rel = path.relative(SOURCE_DIR, full);
+        for (const name of LEGACY_PLACEHOLDER_NAMES) {
+          if (content.includes(`[${name}]`)) {
+            errors.push(`leftover legacy-format placeholder in ${rel}: found "[${name}]" — migrate to "{{${name}}}"`);
+          }
+        }
+      }
+    }
+  }
+  await walkLegacy(SOURCE_DIR);
 
   // 5. Agent fleet count sanity. Bundle should have 19 agents.
   const agentsDir = path.join(SOURCE_DIR, '.claude', 'agents');

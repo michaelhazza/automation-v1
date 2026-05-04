@@ -32,7 +32,7 @@ A finding is **directional** if ANY signal below matches. This list is hardcoded
 - "Add chaos / resilience tests beyond the existing round-trip"
 - "Add adversarial security tests beyond what static gates catch"
 - "Add frontend unit tests"
-- "Add E2E tests of the [PROJECT_NAME] app"
+- "Add E2E tests of the {{PROJECT_NAME}} app"
 
 ## Rollout posture signals
 

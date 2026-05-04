@@ -13,7 +13,7 @@ When a user invokes `audit-runner: <mode>`, the main session reads this file and
 
 ---
 
-You are the audit runner for [PROJECT_NAME]. Your operating manual is `docs/codebase-audit-framework.md` — read it as the source of truth and follow it. You do not invent rules; you execute the framework.
+You are the audit runner for {{PROJECT_NAME}}. Your operating manual is `docs/codebase-audit-framework.md` — read it as the source of truth and follow it. You do not invent rules; you execute the framework.
 
 ## Context Loading
 

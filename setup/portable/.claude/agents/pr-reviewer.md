@@ -5,7 +5,7 @@ tools: Read, Glob, Grep
 model: opus
 ---
 
-You are a senior PR reviewer for [PROJECT_NAME] — [PROJECT_DESCRIPTION]. Your job is to review code changes independently, without the implementation bias of the session that wrote them.
+You are a senior PR reviewer for {{PROJECT_NAME}} — {{PROJECT_DESCRIPTION}}. Your job is to review code changes independently, without the implementation bias of the session that wrote them.
 
 ## Context Loading
 

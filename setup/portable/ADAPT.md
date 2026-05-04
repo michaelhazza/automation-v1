@@ -14,8 +14,9 @@
 8. Phase 3 — Customise verification commands + anchors
 9. Phase 4 — Wire into target CLAUDE.md
 10. Phase 5 — Verify
-11. Profile reference
-12. Common pitfalls
+11. Phase 6 — Record adoption state
+12. Profile reference
+13. Common pitfalls
 
 ---
 
@@ -48,10 +49,10 @@ Have these ready before starting — Phase 2 substitutes them everywhere:
 
 | Placeholder | Example value | Notes |
 |---|---|---|
-| `[PROJECT_NAME]` | `Acme Platform` | Short, human-readable. Used in agent intros. |
-| `[PROJECT_DESCRIPTION]` | `a customer billing platform` | One short clause. |
-| `[STACK_DESCRIPTION]` | `Node + Express + Drizzle ORM (PostgreSQL) + React` | Comma-separated. Stack-name level, not version-pinned. |
-| `[COMPANY_NAME]` | `Acme Inc` | Optional. If empty, lines containing it are deleted. |
+| `{{PROJECT_NAME}}` | `Acme Platform` | Short, human-readable. Used in agent intros. |
+| `{{PROJECT_DESCRIPTION}}` | `a customer billing platform` | One short clause. |
+| `{{STACK_DESCRIPTION}}` | `Node + Express + Drizzle ORM (PostgreSQL) + React` | Comma-separated. Stack-name level, not version-pinned. |
+| `{{COMPANY_NAME}}` | `Acme Inc` | Optional. If empty, lines containing it are deleted. |
 
 Plus the **profile selection**: MINIMAL (4 agents) / STANDARD (10) / FULL (20). See § 11.
 
@@ -97,14 +98,14 @@ Walk every file under `.claude/agents/`, `docs/`, and `references/` and substitu
 
 | Find | Replace with |
 |---|---|
-| `[PROJECT_NAME]` | operator's project name |
-| `[PROJECT_DESCRIPTION]` | operator's project description |
-| `[STACK_DESCRIPTION]` | operator's stack description |
-| `[COMPANY_NAME]` | operator's company name (or delete the line if empty) |
+| `{{PROJECT_NAME}}` | operator's project name |
+| `{{PROJECT_DESCRIPTION}}` | operator's project description |
+| `{{STACK_DESCRIPTION}}` | operator's stack description |
+| `{{COMPANY_NAME}}` | operator's company name (or delete the line if empty) |
 
 Use a deterministic find-and-replace — do NOT rewrite prose around the placeholders. The framework's tone is intentional.
 
-After Phase 2, grep for any remaining `[PROJECT_NAME]` / `[PROJECT_DESCRIPTION]` / `[STACK_DESCRIPTION]` / `[COMPANY_NAME]`. Zero hits expected.
+After Phase 2, grep for any remaining `{{PROJECT_NAME}}` / `{{PROJECT_DESCRIPTION}}` / `{{STACK_DESCRIPTION}}` / `{{COMPANY_NAME}}`. Zero hits expected.
 
 ---
 
@@ -152,14 +153,127 @@ If `validate-setup` is NOT in the profile, run a manual smoke check:
 1. `ls .claude/agents/` — count matches profile (4 / 10 / 20).
 2. `ls .claude/hooks/` — 4 files present.
 3. `cat .claude/FRAMEWORK_VERSION` — matches the bundle's version.
-4. `grep -rE '\[PROJECT_NAME\]|\[STACK_DESCRIPTION\]' .claude/ docs/ references/` — zero hits.
+4. `grep -rE '\{\{PROJECT_NAME\}\}|\{\{STACK_DESCRIPTION\}\}' .claude/ docs/ references/` — zero hits.
 5. `node .claude/hooks/code-graph-freshness-check.js < /dev/null` — exits 0 (degrades gracefully when the cache build script isn't present).
 
 If any check fails, stop and report.
 
 ---
 
-## 11. Profile reference
+## 11. Phase 6 — Record adoption state
+
+Now that the framework files are in place and substituted (Phases 1–5), record the adoption state so future sync runs can track which files have been customised and auto-apply framework updates.
+
+### What this step does
+
+Running `sync.js --adopt` scans every framework-managed file in the target repo (per `manifest.json`):
+- If a file is **missing**: writes it fresh (same as Phase 1 would have done).
+- If a file is **already in place**: computes its hash and records it in `.claude/.framework-state.json`. Does NOT overwrite the file.
+
+The result is `.claude/.framework-state.json` — the adoption record. Future `sync.js` invocations use it to detect whether a file has been customised (hash mismatch) or is clean (hash matches, safe to auto-update).
+
+### Inputs needed
+
+From your Phase 0 and Phase 2 work, you should have:
+- The 4 substitution values: `{{PROJECT_NAME}}`, `{{PROJECT_DESCRIPTION}}`, `{{STACK_DESCRIPTION}}`, `{{COMPANY_NAME}}` (and their actual values).
+- The framework's location (if using submodule: `.claude-framework/`; if using a local copy: the path to the `sync.js` file).
+
+### Steps
+
+**6a. Confirm the framework source is reachable.**
+
+If adopting via submodule (recommended):
+```bash
+ls .claude-framework/sync.js   # should exist
+ls .claude-framework/.claude/FRAMEWORK_VERSION  # should print 2.2.0 or later
+```
+
+If using a local copy (e.g. `setup/portable/`):
+```bash
+ls sync.js
+ls .claude/FRAMEWORK_VERSION
+```
+
+**6b. Write the initial substitution map.**
+
+Before running `--adopt`, the state.json needs the substitution map. Write a minimal state.json so `--adopt` can reference it (otherwise sync may emit a warning about an empty substitution map):
+
+```json
+{
+  "frameworkVersion": "0.0.0",
+  "adoptedAt": "<current ISO timestamp>",
+  "adoptedFromCommit": null,
+  "profile": "STANDARD",
+  "substitutions": {
+    "PROJECT_NAME": "<your project name>",
+    "PROJECT_DESCRIPTION": "<your project description>",
+    "STACK_DESCRIPTION": "<your stack description>",
+    "COMPANY_NAME": "<your company name>"
+  },
+  "lastSubstitutionHash": "",
+  "files": {},
+  "syncIgnore": []
+}
+```
+
+Write this to `.claude/.framework-state.json`. The `frameworkVersion: "0.0.0"` placeholder tells sync that everything needs to be (re-)catalogued.
+
+**6c. Run `--adopt` mode.**
+
+From the target repo root:
+```bash
+node .claude-framework/sync.js --adopt
+```
+
+Or if using a local path:
+```bash
+node <path-to-sync.js> --adopt
+```
+
+Sync will print one line per file: `SYNC file=<path> status=<new|skipped|...>`. At the end, it prints a summary line with counts and updates `.claude/.framework-state.json`.
+
+**6d. Verify.**
+
+```bash
+node .claude-framework/sync.js --doctor
+```
+
+Expected output: `DOCTOR: diagnosis complete.` with exit code 0.
+
+Also verify the state file was written:
+```bash
+node -e "const s=JSON.parse(require('fs').readFileSync('.claude/.framework-state.json','utf8')); console.log('version:', s.frameworkVersion, 'files:', Object.keys(s.files).length)"
+```
+
+Expected: `version: 2.2.0 files: <N>` where N matches the number of managed files.
+
+**6e. Commit the adoption record.**
+
+```bash
+git add .claude-framework .claude/.framework-state.json
+git commit -m "feat: adopt claude-code-framework v2.2.0 as submodule"
+```
+
+### Important: framework dev location
+
+From this point on, **do not edit framework-managed files in this target repo's generated copies** (`.claude/agents/*`, `.claude/hooks/*`, etc.). If you spot an improvement to an agent prompt, make the change in the framework repo and sync it back:
+
+```bash
+# In the framework repo
+# ... make your change ...
+git commit -m "fix: improve pr-reviewer prompt"
+git tag v2.2.1
+
+# In the target repo
+git submodule update --remote
+node .claude-framework/sync.js
+```
+
+For future upgrades, see `.claude-framework/SYNC.md` — the guided upgrade walkthrough.
+
+---
+
+## 12. Profile reference
 
 ### MINIMAL (4 agents) — solo dev, self-review baseline
 
@@ -181,10 +295,10 @@ Use when the project supports the overhead — `chatgpt-*` agents need ChatGPT-w
 
 ---
 
-## 12. Common pitfalls
+## 13. Common pitfalls
 
 1. **Forgetting to merge `.claude/settings.json`.** If the target already had hooks, the bundle's `settings.json` will overwrite them unless you merge. Phase 1 specifies a merge — follow it.
-2. **Substituting `[PROJECT_NAME]` to a value with regex specials.** Project names with `/`, `.`, `[`, `]` need escaping. Substitute one at a time and double-check.
+2. **Substituting `{{PROJECT_NAME}}` to a value with regex specials.** Project names with `/`, `.`, `{`, `}` need escaping. Substitute one at a time and double-check.
 3. **Pruning agents that other agents reference.** `feature-coordinator` calls `builder`, `pr-reviewer`, etc. Profiles in § 11 are pre-curated to avoid this — pick a profile, don't hand-prune mid-tier.
 4. **Skipping Phase 3b but keeping context-packs that reference anchors.** Packs will fall back to whole-file reads (slow) and warn. Either run Phase 3b or accept the warnings.
 5. **Running ADAPT.md a second time over an already-adapted repo.** Don't — Phase 2 substitution will turn already-substituted text into double-substituted gibberish. To upgrade, follow `.claude/CHANGELOG.md` § *Upgrade protocol* instead.

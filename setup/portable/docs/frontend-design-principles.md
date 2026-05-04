@@ -6,7 +6,7 @@ Durable rules for any UI artifact built in this repo — mockups, components, pa
 
 ## Why this document exists
 
-[PROJECT_NAME] positions as **consumer-simple on enterprise-grade backend**. The product sells to agency operators, solo founders, and non-technical knowledge workers — the same audience that finds tools like HubSpot and Salesforce overwhelming. The backend needs to be powerful (router, cost ledger, HITL gates, cached-context infrastructure, policy engine); the frontend needs to be invisible where possible and obvious everywhere else. These two stay decoupled.
+{{PROJECT_NAME}} positions as **consumer-simple on enterprise-grade backend**. The product sells to agency operators, solo founders, and non-technical knowledge workers — the same audience that finds tools like HubSpot and Salesforce overwhelming. The backend needs to be powerful (router, cost ledger, HITL gates, cached-context infrastructure, policy engine); the frontend needs to be invisible where possible and obvious everywhere else. These two stay decoupled.
 
 The trap this doc prevents: **treating the spec's exposed capability surface as the UI surface.** A spec that adds `bundle_utilization`, `prefix_hash`, `cache_creation_tokens`, `run_outcome = 'completed' | 'degraded' | 'failed'`, and per-tenant cache-cost rollups does not imply a bundle-utilization dashboard, a prefix-hash inspector, a cache-cost explorer, and a per-tenant financial breakdown. Backend spec → full coverage. Frontend design → strict editorial filter.
 
@@ -37,7 +37,7 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 
 Work through these in order. An unchecked box is a design finding; every unchecked box means the artifact is under-specified and not ready to build.
 
-- [ ] **Who is the primary user of this screen?** Roles: agency operator / solo founder / tenant admin / internal staff / [COMPANY_NAME] admin. Different users tolerate different complexity ceilings. Agency operator = lowest tolerance. Internal staff = highest.
+- [ ] **Who is the primary user of this screen?** Roles: agency operator / solo founder / tenant admin / internal staff / {{COMPANY_NAME}} admin. Different users tolerate different complexity ceilings. Agency operator = lowest tolerance. Internal staff = highest.
 - [ ] **What single task are they here to complete?** One sentence. Example: *"Attach a document bundle to this scheduled task."* NOT *"Manage document bundles and monitor utilization and review run history."* If the answer is a list, you have multiple screens, not one.
 - [ ] **What is the minimum information needed to complete that task?** List it. Example: bundle name, bundle document count, an attach button. NOT utilization-per-tier, cache-hit-rate, prefix-hash preview, attach button.
 - [ ] **What would happen if I removed X?** For every candidate element (panel, metric, chart, table, sidebar card), ask this. If the answer is *"the user would still complete the primary task"*, the element is deferred.
@@ -119,7 +119,7 @@ Hard caps. A screen exceeding these is a design finding; cut before shipping.
 | Hash / ID exposures | 0 by default | Internal identifiers never surface to the primary user. Admin view only. |
 | Tier / model / variant comparisons | 0 | The user does not care what model runs under the hood. If they do, it's an admin concern. |
 
-Admin-only views (accessed via an explicit toggle, hidden from the primary nav) operate under a relaxed budget: 5 panels, 2 sidebars, charts and KPIs permitted. These exist to serve [COMPANY_NAME] internal staff and advanced tenant admins — never the default operator.
+Admin-only views (accessed via an explicit toggle, hidden from the primary nav) operate under a relaxed budget: 5 panels, 2 sidebars, charts and KPIs permitted. These exist to serve {{COMPANY_NAME}} internal staff and advanced tenant admins — never the default operator.
 
 ---
 
@@ -166,7 +166,7 @@ If any answer is "no" or "not sure", cut before shipping. Shipping a fatter UI "
 
 Almost never. The two legitimate exceptions:
 
-1. **Admin-only views.** Operate under the relaxed budget above. Gated behind an explicit role check, hidden from the primary nav, discoverable only via direct URL or an admin settings page. Every [PROJECT_NAME] user is NOT an admin.
+1. **Admin-only views.** Operate under the relaxed budget above. Gated behind an explicit role check, hidden from the primary nav, discoverable only via direct URL or an admin settings page. Every {{PROJECT_NAME}} user is NOT an admin.
 2. **Safety-critical information-dense screens.** Payload-rendering screens where the complexity exists to prevent harm — HITL block payloads, terminal-failure review queues, dry-run diff previews. Even here, the rule is "surface only what's needed to make the decision", not "surface everything the backend knows".
 
 Everything else obeys the rules. If you find yourself arguing for a third exception during a design, you're almost certainly rationalising a data-model-first mistake — go back to the primary task and start over.
