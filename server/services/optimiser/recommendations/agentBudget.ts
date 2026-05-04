@@ -40,7 +40,7 @@ export const evaluate: Evaluator<AgentBudgetEvidence> = (
       );
     }
 
-    const { percentUsed } = ev;
+    const percentUsed = ev.percentUsed;
 
     let severity: 'info' | 'warn' | 'critical' | null = null;
     if (percentUsed > 1.0) {
@@ -58,11 +58,11 @@ export const evaluate: Evaluator<AgentBudgetEvidence> = (
       severity,
       dedupeKey,
       evidence: {
-        agentId: ev.agentId,
-        agentName: ev.agentName,
-        thisMonthSpendUsd: ev.thisMonthSpendUsd,
-        budgetLimitUsd: ev.budgetLimitUsd,
-        percentUsed: ev.percentUsed,
+        agent_id: ev.agentId,
+        this_month: Math.round(ev.thisMonthSpendUsd * 100),
+        last_month: 0,
+        budget: Math.round(ev.budgetLimitUsd * 100),
+        top_cost_driver: 'unknown',
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],

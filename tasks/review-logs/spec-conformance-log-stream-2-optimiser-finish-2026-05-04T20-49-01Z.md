@@ -8,6 +8,7 @@
 **Scope:** Stream 2 — spec §9 Phases 1-4 (Phase 0 already shipped on main via PR #251) — corresponds to plan Chunks 1-8.
 **Changed-code set:** ~80 files (8 query modules, 8 evaluator modules, 8 skill specs, 8 evaluator tests + 8 query tests, orchestration, scheduling, dashboard, migration 0268, peer-medians refresh job, 2 docs updates, etc.).
 **Run at:** 2026-05-04T20:49:01Z
+**Commit at finish:** `e4165a42`
 
 ---
 

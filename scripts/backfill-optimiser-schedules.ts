@@ -14,7 +14,7 @@
 
 import 'dotenv/config';
 import { pathToFileURL } from 'url';
-import { eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { agentScheduleService } from '../server/services/agentScheduleService.js';
 import { db, client } from '../server/db/index.js';
 import { subaccounts } from '../server/db/schema/index.js';
@@ -73,9 +73,7 @@ export async function runBackfillOptimiserSchedules(): Promise<{
   const rows = await db
     .select({ id: subaccounts.id, name: subaccounts.name })
     .from(subaccounts)
-    .where(eq(subaccounts.optimiserEnabled, true))
-    // Exclude soft-deleted subaccounts
-    .where(isNull(subaccounts.deletedAt));
+    .where(and(eq(subaccounts.optimiserEnabled, true), isNull(subaccounts.deletedAt)));
 
   console.log(`[backfill-optimiser] found ${rows.length} subaccount(s) with optimiser_enabled=true`);
 

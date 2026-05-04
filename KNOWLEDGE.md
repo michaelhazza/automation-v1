@@ -1829,3 +1829,15 @@ Applied in: skillLatency category, `peerMediansViewIsPopulated()` check in runOp
 When a scan reads a materialised view for baselines, read `SELECT MAX(median_version)` once before the scan loop and thread it into every JOIN as `AND view.median_version = $expectedVersion`. This guards against a concurrent REFRESH bumping the version mid-scan and producing mixed-version evidence. If no rows match after the version check, emit partial-mode — same path as empty view.
 
 Applied in: runOptimiserScan + skillLatency query (stream-2-optimiser-finish, invariant 32).
+
+### [2026-05-05] Gap — renderRecommendation RENDER_VERSION invalidation is a no-op
+
+`server/services/optimiser/renderRecommendation.ts` stores `RENDER_VERSION` from `renderVersion.ts` but does NOT persist it to the DB. Bumping `RENDER_VERSION` does not auto-invalidate cached renders. To invalidate: run `UPDATE agent_recommendations SET evidence_hash = '' WHERE category LIKE 'optimiser.%'` after a prompt-template change, or add a `render_version` column (migration 0269 or later) and AND it into the cache lookup. Tracked in tasks/todo.md. Do NOT add version prefix to the stored `evidence_hash` — that column is used by `materialDelta` comparison in `agentRecommendationsService` and must remain the bare sha256.
+
+### [2026-05-05] Gap — renderRecommendation cache lookup uses bare `db` (RLS bypass)
+
+`renderRecommendation.ts` queries `agent_recommendations` using the raw `db` pool (no `app.organisation_id` session variable). With FORCE RLS enabled, this returns empty rows — the LLM render cache never hits. Workaround: pass an org-scoped tx handle from `runOptimiserScan` into `renderRecommendation`. An `organisationId` filter was added (2026-05-05) as defence-in-depth against cross-tenant copy leakage, but the root fix (org-scoped connection) is deferred. Tracked in tasks/todo.md.
+
+### [2026-05-05] Bug — backfill advisory lock is session-scoped but acquired on a pool connection
+
+`scripts/backfill-optimiser-schedules.ts` acquires `pg_try_advisory_lock` via the shared Drizzle pool. The lock is session-level and only holds for the Postgres backend that ran the `SELECT`. Subsequent `db.execute` calls may use different pool connections, so the lock provides no mutual exclusion. Use `client` (the raw postgres-js client, also exported from `server/db/index.js`) with a dedicated connection for both the lock acquisition and all subsequent queries. Pre-existing bug; not introduced by stream-2-optimiser-finish. Tracked in tasks/todo.md.

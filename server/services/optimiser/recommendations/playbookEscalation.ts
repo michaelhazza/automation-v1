@@ -58,14 +58,15 @@ export const evaluate: Evaluator<EscalationRateEvidence> = (
       severity,
       dedupeKey,
       evidence: {
-        workflowId: ev.workflowId,
-        escalationCount: ev.escalationCount,
-        totalCount: ev.totalCount,
-        escalationRate: ev.escalationRate,
+        workflow_id: ev.workflowId,
+        run_count: ev.totalCount,
+        escalation_count: ev.escalationCount,
+        escalation_pct: ev.escalationRate,
+        common_step_id: null,
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],
-      actionHint: escalationActionHint(ev.workflowId),
+      actionHint: escalationActionHint(ev.workflowId, null),
     });
   }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket, useSocketRoom, useSocketConnected } from '../hooks/useSocket';
 import api from '../lib/api';
@@ -19,6 +19,8 @@ import {
 } from '../lib/telemetry';
 import type { PulseItem, PulseAttentionResponse } from '../hooks/usePulseAttention';
 import { AgentRecommendationsList } from '../components/recommendations/AgentRecommendationsList';
+import { useAgentRecommendationsTotal } from '../hooks/useAgentRecommendationsTotal';
+import type { RecommendationsTotalScope } from '../hooks/useAgentRecommendationsTotal';
 
 type DashboardErrorMap = {
   agents: boolean;
@@ -58,8 +60,14 @@ export default function DashboardPage({ user }: { user: User }) {
   // activeClientId is read from localStorage (same source as Layout). Initialize
   // once per mount — the value is stable for the lifetime of this page render.
   const [activeClientId] = useState<string | null>(() => getActiveClientId());
-  const [recommendationsTotal, setRecommendationsTotal] = useState<number | null>(null);
   const [recommendationsMode, setRecommendationsMode] = useState<'collapsed' | 'expanded'>('collapsed');
+  const recScope = useMemo<RecommendationsTotalScope | null>(
+    () => activeClientId
+      ? { type: 'subaccount', id: activeClientId }
+      : { type: 'org', id: user.organisationId },
+    [activeClientId, user.organisationId],
+  );
+  const recommendationsTotal = useAgentRecommendationsTotal(recScope);
 
   // ── Per-group timestamp refs (latest-data-wins) ──────────────────────────
   const approvalsTs     = useRef<string>('');
@@ -428,7 +436,7 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* [LAYOUT-RESERVED: Piece 3 — Operational metrics] */}
       <OperationalMetricsPlaceholder />
 
-      {/* ── Agent recommendations (Invariant 29: no mount when total === 0 or null) ── */}
+      {/* ── Agent recommendations (Invariant 29: no mount when total === null or 0) ── */}
       {recommendationsTotal !== null && recommendationsTotal > 0 && (
         <div className="mb-8">
           <h2 className="text-[17px] font-bold text-slate-900 tracking-tight mb-3.5">
@@ -443,7 +451,6 @@ export default function DashboardPage({ user }: { user: User }) {
             includeDescendantSubaccounts={!activeClientId}
             mode={recommendationsMode}
             limit={recommendationsMode === 'collapsed' ? 3 : 20}
-            onTotalChange={setRecommendationsTotal}
           />
           {recommendationsMode === 'collapsed' && recommendationsTotal > 3 && (
             <button
@@ -455,22 +462,6 @@ export default function DashboardPage({ user }: { user: User }) {
             </button>
           )}
         </div>
-      )}
-      {/* Pre-fetch probe: mount the list hidden when total is null so we get the first count.
-          The list returns null (emptyState='hide') so nothing renders visually. */}
-      {recommendationsTotal === null && (
-        <AgentRecommendationsList
-          scope={
-            activeClientId
-              ? { type: 'subaccount', subaccountId: activeClientId }
-              : { type: 'org', orgId: user.organisationId }
-          }
-          includeDescendantSubaccounts={!activeClientId}
-          mode="collapsed"
-          limit={1}
-          emptyState="hide"
-          onTotalChange={setRecommendationsTotal}
-        />
       )}
 
       {/* ── Your workspaces ───────────────────────────────────────────────── */}

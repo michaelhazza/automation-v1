@@ -7,6 +7,7 @@
 
 import type { EvaluatorOutput, EvaluatorContext } from './types.js';
 import type { QueryRow } from '../queries/types.js';
+import { skillSlowActionHint } from './actionHints.js';
 
 export interface SkillSlowEvidence {
   skillSlug: string;
@@ -47,13 +48,11 @@ export function evaluateSkillSlow(
 
     // Invariant 33: all optional fields set to null, never undefined
     const evidence: Record<string, unknown> = {
-      skillSlug: e.skillSlug ?? null,
-      thisP95Ms: e.thisP95Ms,
-      peerP95Ms: e.peerP95Ms,
-      peerP50Ms: e.peerP50Ms ?? null,
-      nTenants: e.nTenants ?? null,
-      medianVersion: e.medianVersion,
-      ratioVsPeerP95: e.ratioVsPeerP95,
+      skill_slug: e.skillSlug ?? null,
+      latency_p95_ms: e.thisP95Ms,
+      peer_p95_ms: e.peerP95Ms,
+      ratio: e.ratioVsPeerP95,
+      median_version: e.medianVersion,
     };
 
     results.push({
@@ -62,12 +61,11 @@ export function evaluateSkillSlow(
       dedupeKey,
       evidence,
       priorityTuple: [2, CATEGORY, dedupeKey],
-      actionHint: null, // no specific action hint for skill latency
+      actionHint: skillSlowActionHint(e.skillSlug ?? dedupeKey, ctx.subaccountId),
     });
   }
 
-  // ctx unused — accepted for interface consistency with other evaluators
-  void ctx;
+
 
   return results;
 }

@@ -23,8 +23,9 @@ export interface RenderResult {
 
 // ---------------------------------------------------------------------------
 // Cache lookup — find any existing row with matching evidence_hash + category.
-// render_version is baked into the evidence_hash when RENDER_VERSION changes,
-// so a bump automatically produces a cache miss for all categories.
+// The stored evidence_hash is the bare sha256 from agentRecommendationsService.
+// RENDER_VERSION is used to label the prompt template version; bumping it does
+// not auto-invalidate cached renders (would require a separate DB column).
 // ---------------------------------------------------------------------------
 
 export async function renderRecommendation(
@@ -34,17 +35,20 @@ export async function renderRecommendation(
   evidence: Record<string, unknown>,
   orgId: string,
 ): Promise<RenderResult> {
-  // Incorporate render version into the cache check — rows cached under an
-  // older prompt template are not served even if the evidence hash matches.
-  const cacheEvidenceHash = `v${RENDER_VERSION}:${evidenceHash}`;
+  // _renderVersion is declared to make future invalidation explicit when a
+  // render_version column is added to the schema.
+  void RENDER_VERSION;
 
+  // dedupeKey is used for logging only — evidence_hash already encodes the
+  // deduplication key in all 8 categories (it's part of the canonicalised evidence).
   const cached = await db
     .select({ title: agentRecommendations.title, body: agentRecommendations.body })
     .from(agentRecommendations)
     .where(
       and(
-        eq(agentRecommendations.evidenceHash, cacheEvidenceHash),
+        eq(agentRecommendations.evidenceHash, evidenceHash),
         eq(agentRecommendations.category, category),
+        eq(agentRecommendations.organisationId, orgId),
       ),
     )
     .limit(1);

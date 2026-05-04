@@ -51,11 +51,11 @@ export const evaluate: Evaluator<EscalationPhraseEvidence> = (
       evidence: {
         phrase: ev.phrase,
         count: ev.count,
-        sampleEscalationIds: ev.sampleEscalationIds,
+        sample_escalation_ids: ev.sampleEscalationIds,
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],
-      actionHint: phraseActionHint(ctx.subaccountId),
+      actionHint: phraseActionHint(ctx.subaccountId, ev.phrase),
     });
   }
 

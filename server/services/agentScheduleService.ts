@@ -35,6 +35,7 @@ export function computeStaggerMinutes(subaccountId: string): number {
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
+const OPTIMISER_SCAN_QUEUE = 'optimiser-scan';
 // AGENT_ORG_RUN_QUEUE removed — org agents now run via AGENT_RUN_QUEUE through the org subaccount
 
 export const agentScheduleService = {
@@ -200,6 +201,25 @@ export const agentScheduleService = {
       await refreshOptimiserPeerMediansJob(job);
     });
     await pgboss.schedule(PEER_MEDIANS_QUEUE, '0 0 * * *', null, { tz: 'UTC' });
+
+    // ── Optimiser scan — daily per-subaccount scan ─────────────────────
+    // createWorker opens db.transaction + withOrgTx, satisfying the ALS
+    // requirement that getOrgScopedDb() reads inside runOptimiserScan.
+    await createWorker<{
+      subaccountId: string;
+      organisationId: string;
+      agentId: string;
+      subaccountAgentId: string;
+    }>({
+      queue: OPTIMISER_SCAN_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      timeoutMs: 540_000, // 9 min hard ceiling — scan has its own circuit breaker
+      handler: async (job) => {
+        const { handleOptimiserScan } = await import('../jobs/runOptimiserScanJob.js');
+        await handleOptimiserScan(job);
+      },
+    });
 
     // ── Stale run cleanup — runs every 5 minutes ────────────────────────
     const STALE_CLEANUP_QUEUE = 'stale-run-cleanup';
@@ -409,6 +429,7 @@ export const agentScheduleService = {
         organisationId: subaccount.organisationId,
         scheduleCron: cron,
         scheduleEnabled: true,
+        // Hardcoded UTC: subaccounts schema has no timezone column; spec §6 notes per-subaccount timezone is a future enhancement
         scheduleTimezone: 'UTC',
         isActive: true,
         createdAt: new Date(),
@@ -448,16 +469,18 @@ export const agentScheduleService = {
         await this.updateSchedule(subaccountAgentId, {
           scheduleCron: cron,
           scheduleEnabled: true,
-          scheduleTimezone: 'UTC',
+          scheduleTimezone: 'UTC', // hardcoded UTC — see above
         });
       }
     }
 
-    const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
+    // Optimiser uses a dedicated queue so jobs reach runOptimiserScan, not the LLM agent loop.
+    const scheduleName = `${OPTIMISER_SCAN_QUEUE}:${subaccountAgentId}`;
 
-    // 6. Register (or re-register) the pg-boss schedule
-    await this.registerSchedule(
-      subaccountAgentId,
+    // 6. Register (or re-register) the pg-boss schedule on the optimiser-scan queue
+    const pgboss = await getPgBoss() as any;
+    await pgboss.schedule(
+      scheduleName,
       cron,
       {
         subaccountAgentId,
@@ -465,7 +488,7 @@ export const agentScheduleService = {
         subaccountId,
         organisationId: subaccount.organisationId,
       },
-      'UTC',
+      { tz: 'UTC' },
     );
 
     return { subaccountAgentId, cron, scheduleName, wasNew };

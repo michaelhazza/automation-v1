@@ -58,9 +58,10 @@ export const evaluate: Evaluator<MemoryCitationEvidence> = (
       severity,
       dedupeKey,
       evidence: {
-        agentId: ev.agentId,
-        avgCitationScore: ev.avgCitationScore,
-        totalCitations: ev.totalCitations,
+        agent_id: ev.agentId,
+        low_citation_pct: Number((1 - ev.avgCitationScore).toFixed(4)),
+        total_injected: ev.totalCitations,
+        projected_token_savings: 0,
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],

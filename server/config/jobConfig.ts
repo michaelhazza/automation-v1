@@ -474,6 +474,20 @@ export const JOB_CONFIG = {
     deadLetter: 'system-monitor-ingest__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
+
+  // ── Subaccount Optimiser (F2) — daily per-subaccount scan ────────
+  // Runs the full 8-category optimiser scan for one subaccount. Scan
+  // re-reads current DB state each tick so retries are idempotent.
+  // expireInSeconds is a hard circuit-breaker; the handler has its own
+  // circuit-breaker at SCAN_FAILURE_CIRCUIT_BREAKER_THRESHOLD.
+  'optimiser-scan': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'optimiser-scan__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
