@@ -93,3 +93,53 @@ Verdict text: 5 findings (F1–F5). Operator pasted the response in-session.
 - `tasks/todo.md` — appended `## Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)` section with 4 items (F2 deeper redesign, F5, F6, F7).
 
 ---
+
+## Round 3 — 2026-05-04 — LOOP CLOSED
+
+### ChatGPT verdict
+
+> Final pass: I'd close the ChatGPT loop. No new substantive blockers from the latest uploaded PR view. The key Round 2 items now look addressed.
+>
+> Recommendation: wait for portable_framework_tests to pass on GitHub, then merge.
+
+ChatGPT explicitly verified the Round 2 fixes:
+- CI is now wired (4 checks in `.github/workflows/ci.yml`).
+- Version authority is documented as portable-canonical / root deployment marker.
+- Portable tests cover adopt/sync/merge/settings/substitution/flags paths.
+- Sync engine has meaningful test coverage including CRLF and customisation handling.
+
+### Findings + triage
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| 8 | Wording ambiguity in `.claude/CHANGELOG.md` — "This file is the source of truth" appears inside the root file but refers to `setup/portable/.claude/CHANGELOG.md` | **accept** | Named the canonical file explicitly: `setup/portable/.claude/CHANGELOG.md` is the source of truth. |
+
+### Round 3 verdict
+
+ChatGPT closed the loop on its own ("I'd close the ChatGPT loop"). One nit accepted and applied. The convergence pattern (Round 1 packaging/metadata → Round 2 hardening → Round 3 nit + close) is the canonical signal that the loop is genuinely converged, not artificially terminated.
+
+### Files changed in Round 3
+
+- `.claude/CHANGELOG.md` — F8 wording fix: "This file is the source of truth" → "`setup/portable/.claude/CHANGELOG.md` is the source of truth"; "this file" → "this file you are reading now" for the deployment marker.
+
+---
+
+## Cumulative review state (final)
+
+| Round | Findings | Actioned | Rejected (FP) | Deferred |
+|---|---|---|---|---|
+| 1 | 5 | 5 | 0 | 0 |
+| 2 | 7 | 3 | 1 | 3 |
+| 3 | 1 | 1 | 0 | 0 |
+| **Total** | **13** | **9** | **1** | **3** |
+
+**Final verdict:** chatgpt-pr-review LOOP CLOSED at Round 3 with explicit ChatGPT close recommendation + 1 wording nit applied.
+
+**Pre-merge condition:** wait for the `portable_framework_tests` CI job to pass on GitHub (gate added in Round 2 commit `7540ed08`).
+
+**Deferred items routed to** `tasks/todo.md § Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)`:
+1. Scanner positive-validation redesign beyond string blacklist (F2 deeper)
+2. Agent duplication guard root vs portable (F5)
+3. Manifest schema validation in sync.js (F6)
+4. Sync engine observability — dry-run summary / JSON report (F7)
+

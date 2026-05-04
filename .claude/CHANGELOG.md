@@ -36,8 +36,8 @@ Repos can stay on older versions intentionally. The framework is designed to be 
 
 This repo carries two `FRAMEWORK_VERSION` files. They do NOT have equal authority:
 
-- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` and `setup/portable/.claude/CHANGELOG.md`. This is the framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. This file is the source of truth.
-- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file). This records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. It is NOT a separate version authority — it can lag the canonical version transiently while portable advances ahead of self-adoption.
+- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` and `setup/portable/.claude/CHANGELOG.md`. This is the framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. **`setup/portable/.claude/CHANGELOG.md` is the source of truth.**
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file you are reading now). This file records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. It is NOT a separate version authority — it can lag the canonical version transiently while portable advances ahead of self-adoption.
 
 The canonical version always advances first; deployments catch up via self-adoption (Phase C of the framework-standalone-repo build, or `node setup/portable/sync.js --adopt` in any other consumer).
 
