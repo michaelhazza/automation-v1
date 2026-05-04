@@ -1,5 +1,6 @@
 # Dual Review Log — pre-launch-phase-1
 
+**Commit at finish:** 6633535a
 **Files reviewed:** Branch diff `main..claude/pre-launch-phase-1` (48 files, +2304/-171). Focus on Chunk-3 onboarding queue (`server/jobs/ghlAutoStartOnboardingJob.ts`, `server/services/queueService.ts`, `server/services/subaccountOnboardingService.ts`, `server/services/ghlAgencyOauthService.ts`), Chunk-2 OAuth popup (`client/src/hooks/useOAuthPopup.ts`, `server/routes/oauthIntegrations.ts`), Chunk-2 auth rate limits (`server/routes/auth.ts`).
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-04T21:07:51Z
