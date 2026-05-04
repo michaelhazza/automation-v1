@@ -20,7 +20,7 @@ import { createHash } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
-import { budgetReservations } from '../db/schema/budgetReservations.js';
+import { computeReservations } from '../db/schema/computeReservations.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
@@ -160,14 +160,14 @@ export async function enqueueIEETask(input: EnqueueIEETaskInput): Promise<Enqueu
   // Reuse the existing budget_reservations table — entityType='iee_run',
   // entityId = the iee_runs.id we just minted. The TTL is 15 minutes
   // (§13.6.1.a) — comfortably above the pg-boss expireInSeconds ceiling.
-  // budgetService is the canonical place for the actual budget check; here
+  // computeBudgetService is the canonical place for the actual budget check; here
   // we only record the reservation row so the existing aggregator can see it.
   const estimatedCostCents = estimateIeeCostCents(task);
   const reservationKey = `iee:${ieeRunId}`;
   const ttlMinutes = Number(process.env.IEE_RESERVATION_TTL_MINUTES ?? '15');
 
   await db
-    .insert(budgetReservations)
+    .insert(computeReservations)
     .values({
       idempotencyKey: reservationKey,
       entityType:     'iee_run',

@@ -23,7 +23,11 @@ export type StepType =
   | 'conditional'
   | 'agent_decision'
   | 'action_call'
-  | 'invoke_automation';
+  | 'invoke_automation'
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask';
 
 export type SideEffectType =
   | 'none'
@@ -250,6 +254,13 @@ export interface WorkflowStep {
    * order wins. Spec §4.12.
    */
   final?: boolean;
+
+  /**
+   * V1 publish-time metadata bag. Read by workflowValidatorPure (Rules 6–8):
+   * approverGroup, is_critical, allowMultipleSubmissions. Not consumed by the
+   * engine directly — engine uses the typed fields above.
+   */
+  params?: Record<string, unknown>;
 
   // ── type: invoke_automation ───────────────────────────────────────────────
   /**

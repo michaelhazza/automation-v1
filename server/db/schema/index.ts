@@ -56,12 +56,12 @@ export * from './automationConnectionMappings';
 export * from './projects';
 export * from './llmPricing';
 export * from './orgMarginConfigs';
-export * from './orgBudgets';
+export * from './orgComputeBudgets';
 export * from './llmRequests';
 export * from './llmRequestsArchive';
 export * from './llmInflightHistory';
 export * from './costAggregates';
-export * from './budgetReservations';
+export * from './computeReservations';
 export * from './hierarchyTemplates';
 export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
@@ -249,3 +249,10 @@ export * from './conversationThreadContext';
 
 // Sub-Account Optimiser — generic agent-output primitive (migration 0267)
 export * from './agentRecommendations';
+
+// GHL Agency OAuth — location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
+
+// Workflows V1 — step gates + drafts (migration 0270)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';

@@ -1,0 +1,13 @@
+-- Down migration for 0273_integration_connections_stripe_agent.sql
+--
+-- The 'stripe_agent' providerType is enforced at the TypeScript layer only
+-- (TEXT column with .$type<> annotation in Drizzle schema). There is no
+-- DB-level ENUM to revert.
+--
+-- To roll back: remove 'stripe_agent' from the providerType union in
+-- server/db/schema/integrationConnections.ts and redeploy. Any existing
+-- rows with providerType = 'stripe_agent' should be deleted or migrated
+-- before removing the TypeScript union value to avoid silent runtime errors.
+--
+-- This down migration is intentionally a no-op at the SQL level.
+SELECT 1;

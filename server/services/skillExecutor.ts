@@ -1991,6 +1991,34 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       }),
     );
   },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
+  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
+  // input, resolves spending context, normalises merchant (invariant 21), and
+  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
+  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: async (input, context) => {
+    const { executePayInvoice } = await import('./spendSkillHandlers.js');
+    return executePayInvoice(input, context);
+  },
+  purchase_resource: async (input, context) => {
+    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
+    return executePurchaseResource(input, context);
+  },
+  subscribe_to_service: async (input, context) => {
+    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
+    return executeSubscribeToService(input, context);
+  },
+  top_up_balance: async (input, context) => {
+    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
+    return executeTopUpBalance(input, context);
+  },
+  issue_refund: async (input, context) => {
+    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
+    return executeIssueRefund(input, context);
+  },
 };
 
 export const skillExecutor = {

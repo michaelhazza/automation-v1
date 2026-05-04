@@ -16,7 +16,7 @@ interface DedupeEntry {
   expiresAt: number;
 }
 
-class WebhookDedupeStore {
+export class WebhookDedupeStore {
   private entries = new Map<string, DedupeEntry>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 

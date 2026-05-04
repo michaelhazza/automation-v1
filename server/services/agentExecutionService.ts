@@ -101,6 +101,10 @@ import { agentMessages } from '../db/schema/index.js';
 import { buildThreadContextReadModel } from './conversationThreadContextService.js';
 import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
 import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
+import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
+import { spendingBudgets } from '../db/schema/spendingBudgets.js';
+import { spendingPolicies } from '../db/schema/spendingPolicies.js';
+import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -2408,9 +2412,52 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           const planSummary = plan.actions
             .map((a, i) => `${i + 1}. ${a.tool}${a.reason ? ` — ${a.reason}` : ''}`)
             .join('\n');
+
+          // Chunk 7: advisory spend-policy preview (fail-open, never blocks)
+          let spendPreviewNote = '';
+          try {
+            const spendActions = plan.actions.filter((a) =>
+              (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(a.tool),
+            );
+            if (spendActions.length > 0 && request.subaccountId) {
+              const [budgetRow] = await db
+                .select({ policy: spendingPolicies })
+                .from(spendingBudgets)
+                .innerJoin(spendingPolicies, eq(spendingPolicies.spendingBudgetId, spendingBudgets.id))
+                .where(
+                  and(
+                    eq(spendingBudgets.organisationId, request.organisationId),
+                    eq(spendingBudgets.subaccountId, request.subaccountId),
+                  ),
+                )
+                .limit(1);
+
+              if (budgetRow) {
+                const parsedPlan = {
+                  steps: spendActions.map((a) => ({
+                    amountMinor: 1,
+                    currency: 'USD',
+                    merchant: { id: null, descriptor: '' },
+                    intent: a.reason ?? a.tool,
+                  })),
+                };
+                const previews = previewSpendForPlan(parsedPlan, budgetRow.policy as unknown as SpendingPolicy);
+                const nonAuto = previews.filter((p) => p.verdict !== 'would_auto');
+                if (nonAuto.length > 0) {
+                  const notes = nonAuto
+                    .map((p) => `  step ${p.stepIndex + 1} (${spendActions[p.stepIndex]?.tool ?? '?'}): ${p.verdict}`)
+                    .join('\n');
+                  spendPreviewNote = `\nSpend policy advisory:\n${notes}`;
+                }
+              }
+            }
+          } catch (previewErr) {
+            console.warn('[P4.3] Spend preview failed (non-blocking):', previewErr);
+          }
+
           messages.push({
             role: 'user',
-            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}\n</system-reminder>`,
+            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}${spendPreviewNote}\n</system-reminder>`,
           });
 
           // Track token usage from the planning call

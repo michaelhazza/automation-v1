@@ -73,6 +73,7 @@ import webLoginConnectionsRouter from './routes/webLoginConnections.js';
 import workflowTemplatesRouter from './routes/workflowTemplates.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import workflowStudioRouter from './routes/workflowStudio.js';
+import workflowGatesRouter from './routes/workflowGates.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
 import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
@@ -169,12 +170,18 @@ import workspaceRouter from './routes/workspace.js';
 import workspaceMailRouter from './routes/workspaceMail.js';
 import workspaceCalendarRouter from './routes/workspaceCalendar.js';
 import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
+import stripeAgentWebhookRouter from './routes/webhooks/stripeAgentWebhook.js';
 // Suggested action chip dispatch
 import suggestedActionsRouter from './routes/suggestedActions.js';
 // Thread Context — per-conversation living doc (Chunk A)
 import conversationThreadContextRouter from './routes/conversationThreadContext.js';
 // Sub-Account Optimiser — generic agent-output primitive (Chunk 1, migration 0267)
 import agentRecommendationsRouter from './routes/agentRecommendations.js';
+// Agentic Commerce — spend ledger, budgets, policies, approval channels (Chunks 12, 13)
+import spendingBudgetsRouter from './routes/spendingBudgets.js';
+import spendingPoliciesRouter from './routes/spendingPolicies.js';
+import agentChargesRouter from './routes/agentCharges.js';
+import approvalChannelsRouter from './routes/approvalChannels.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -318,6 +325,7 @@ app.use(webLoginConnectionsRouter);
 app.use(workflowTemplatesRouter);
 app.use(workflowRunsRouter);
 app.use(workflowStudioRouter);
+app.use(workflowGatesRouter);
 app.use(subaccountOnboardingRouter);
 app.use(automationConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
@@ -336,7 +344,8 @@ app.use(mcpRouter);
 app.use(agentInboxRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
+// ghl/teamwork/slack/stripe-agent webhook routers mounted before body parsing (need raw body for HMAC)
+app.use(stripeAgentWebhookRouter);
 app.use(subaccountTagsRouter);
 app.use(subaccountSkillsRouter);
 app.use(orgMemoryRouter);
@@ -387,6 +396,11 @@ app.use(suggestedActionsRouter);
 app.use(conversationThreadContextRouter);
 // Sub-Account Optimiser — generic agent-output primitive (Chunk 1)
 app.use(agentRecommendationsRouter);
+// Agentic Commerce — spend ledger + budgets + policies + approval channels
+app.use(spendingBudgetsRouter);
+app.use(spendingPoliciesRouter);
+app.use(agentChargesRouter);
+app.use(approvalChannelsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -561,6 +575,21 @@ async function start() {
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {
       console.error('[boot] failed to register iee-run-completed handler', err);
+    }
+  }
+  // Workflow gate stall-notification worker (Workflows V1 §5.3)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const pgboss = await getPgBoss();
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { createWorker } = await import('./lib/createWorker.js');
+      await createWorker({
+        queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
+        boss: pgboss,
+        handler: workflowGateStallNotifyHandler,
+      });
+    } catch (err) {
+      console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
     }
   }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.

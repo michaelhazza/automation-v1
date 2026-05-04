@@ -22,11 +22,14 @@
 // Intermediate (non-terminal → non-terminal) transitions are NOT validated
 // here. The documented step/run lifecycles are covered by existing WHERE
 // guards and a comprehensive transition table is out of scope.
+//
+// Also exports assertValidAgentChargeTransition for the agent_charges state
+// machine (spec §4 transitions table). See § agent_charges below.
 // ---------------------------------------------------------------------------
 
 import { TERMINAL_RUN_STATUSES, AGENT_RUN_STATUS } from './runStatus.js';
 
-export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run';
+export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run' | 'workflow_step_gate';
 
 const AGENT_RUN_TERMINAL: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 const AGENT_RUN_KNOWN: ReadonlySet<string> = new Set(Object.values(AGENT_RUN_STATUS));
@@ -41,6 +44,7 @@ const WORKFLOW_RUN_TERMINAL: ReadonlySet<string> = new Set([
 const WORKFLOW_RUN_KNOWN: ReadonlySet<string> = new Set([
   'pending',
   'running',
+  'paused',
   'awaiting_input',
   'awaiting_approval',
   'completed',
@@ -68,6 +72,11 @@ const WORKFLOW_STEP_KNOWN: ReadonlySet<string> = new Set([
   'invalidated',
 ]);
 
+// Gate state machine uses 'open' and 'resolved' as logical states,
+// tracked by resolved_at IS NULL (open) vs IS NOT NULL (resolved).
+const WORKFLOW_STEP_GATE_TERMINAL: ReadonlySet<string> = new Set(['resolved']);
+const WORKFLOW_STEP_GATE_KNOWN: ReadonlySet<string> = new Set(['open', 'resolved']);
+
 interface KindSets {
   terminal: ReadonlySet<string>;
   known: ReadonlySet<string>;
@@ -81,6 +90,8 @@ function setsForKind(kind: StateMachineKind): KindSets {
       return { terminal: WORKFLOW_RUN_TERMINAL, known: WORKFLOW_RUN_KNOWN };
     case 'workflow_step_run':
       return { terminal: WORKFLOW_STEP_TERMINAL, known: WORKFLOW_STEP_KNOWN };
+    case 'workflow_step_gate':
+      return { terminal: WORKFLOW_STEP_GATE_TERMINAL, known: WORKFLOW_STEP_GATE_KNOWN };
   }
 }
 
@@ -183,4 +194,161 @@ export function describeTransition(event: TransitionEvent): Record<string, unkno
     site: event.site,
     guarded: event.guarded,
   };
+}
+
+// ---------------------------------------------------------------------------
+// agent_charges state machine (spec §4 — Agentic Commerce)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the DB-level trigger CASE expression in 0271_agentic_commerce_schema.sql
+// exactly. Any divergence between the two is a correctness bug.
+//
+// The failed → succeeded carve-out (invariant 33) is gated on
+// options.callerIdentity === 'stripe_webhook'. Only stripeAgentWebhookService
+// passes this value.
+// ---------------------------------------------------------------------------
+
+/** Closed enum matching the agent_charge_status Postgres ENUM (invariant 30). */
+export const AGENT_CHARGE_STATUSES = [
+  'proposed',
+  'pending_approval',
+  'approved',
+  'executed',
+  'succeeded',
+  'failed',
+  'blocked',
+  'denied',
+  'disputed',
+  'shadow_settled',
+  'refunded',
+] as const;
+
+export type AgentChargeStatus = (typeof AGENT_CHARGE_STATUSES)[number];
+
+/** Closed enum matching the agent_charge_transition_caller Postgres ENUM (invariant 30). */
+export const AGENT_CHARGE_TRANSITION_CALLERS = [
+  'charge_router',
+  'stripe_webhook',
+  'timeout_job',
+  'worker_completion',
+  'approval_expiry_job',
+  'retention_purge',
+] as const;
+
+export type AgentChargeTransitionCaller = (typeof AGENT_CHARGE_TRANSITION_CALLERS)[number];
+
+export interface AgentChargeTransitionOptions {
+  callerIdentity: AgentChargeTransitionCaller;
+}
+
+export class InvalidAgentChargeTransitionError extends Error {
+  readonly from: AgentChargeStatus;
+  readonly to: AgentChargeStatus;
+  readonly callerIdentity: AgentChargeTransitionCaller;
+
+  constructor(
+    message: string,
+    from: AgentChargeStatus,
+    to: AgentChargeStatus,
+    callerIdentity: AgentChargeTransitionCaller,
+  ) {
+    super(message);
+    this.name = 'InvalidAgentChargeTransitionError';
+    this.from = from;
+    this.to = to;
+    this.callerIdentity = callerIdentity;
+  }
+}
+
+/**
+ * Assert that an agent_charges status transition is valid per spec §4.
+ * Throws InvalidAgentChargeTransitionError on violation; returns void on success.
+ *
+ * Pure (no I/O) — safe to call inside a transaction immediately before the
+ * UPDATE that performs the transition.
+ *
+ * Mirrors the trigger CASE expression in 0271_agentic_commerce_schema.sql.
+ * The failed → succeeded carve-out requires callerIdentity === 'stripe_webhook'.
+ */
+export function assertValidAgentChargeTransition(
+  from: AgentChargeStatus,
+  to: AgentChargeStatus,
+  options: AgentChargeTransitionOptions,
+): void {
+  // Same-state writes are idempotent retries — always permitted.
+  if (from === to) return;
+
+  const { callerIdentity } = options;
+
+  // Check target status is in the closed set.
+  if (!(AGENT_CHARGE_STATUSES as readonly string[]).includes(to)) {
+    throw new InvalidAgentChargeTransitionError(
+      `Invalid agent_charges transition: target status '${to}' is not in the canonical set`,
+      from,
+      to,
+      callerIdentity,
+    );
+  }
+
+  // Evaluate allowed transitions per spec §4 transitions table.
+  const allowed = isAllowedAgentChargeTransition(from, to, callerIdentity);
+
+  if (!allowed) {
+    throw new InvalidAgentChargeTransitionError(
+      `Invalid agent_charges transition: ${from} → ${to} (caller: ${callerIdentity})`,
+      from,
+      to,
+      callerIdentity,
+    );
+  }
+}
+
+/**
+ * Pure predicate: returns true if the (from, to, callerIdentity) triple is a
+ * permitted agent_charges transition per spec §4.
+ *
+ * Exported for test access. Application code should use assertValidAgentChargeTransition.
+ */
+export function isAllowedAgentChargeTransition(
+  from: AgentChargeStatus,
+  to: AgentChargeStatus,
+  callerIdentity: AgentChargeTransitionCaller,
+): boolean {
+  switch (from) {
+    case 'proposed':
+      return to === 'blocked' || to === 'pending_approval' || to === 'approved';
+
+    case 'pending_approval':
+      return to === 'approved' || to === 'denied';
+
+    case 'approved':
+      return to === 'blocked' || to === 'executed' || to === 'shadow_settled';
+
+    case 'executed':
+      return to === 'succeeded' || to === 'failed';
+
+    case 'succeeded':
+      return to === 'refunded' || to === 'disputed';
+
+    case 'disputed':
+      return to === 'succeeded' || to === 'refunded';
+
+    case 'failed':
+      // Post-terminal carve-out (invariant 33): only stripe_webhook may apply
+      // failed → succeeded, and only for timeout-row reconciliation.
+      if (to === 'succeeded') {
+        return callerIdentity === 'stripe_webhook';
+      }
+      return false;
+
+    // Truly-terminal states: no outbound transitions.
+    case 'blocked':
+    case 'denied':
+    case 'shadow_settled':
+    case 'refunded':
+      return false;
+
+    default:
+      return false;
+  }
 }

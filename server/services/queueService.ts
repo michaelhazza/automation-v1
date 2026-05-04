@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { executions, executionPayloads, executionFiles, budgetReservations, automationEngines, users } from '../db/schema/index.js';
+import { executions, executionPayloads, executionFiles, computeReservations, automationEngines, users } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
@@ -445,12 +445,12 @@ export const queueService = {
    * Reservations expire after 5 minutes if the billing flow crashes.
    * Mark them as 'released' so they no longer inflate projected spend.
    */
-  async cleanupExpiredBudgetReservations(): Promise<number> {
+  async cleanupExpiredComputeReservations(): Promise<number> {
     const result = await db
-      .update(budgetReservations)
+      .update(computeReservations)
       .set({ status: 'released' })
       .where(
-        sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
+        sql`${computeReservations.status} = 'active' AND ${computeReservations.expiresAt} < NOW()`
       );
     const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (count > 0) console.log(JSON.stringify({ event: 'maintenance:release_budget_reservations', rows_released: count }));
@@ -561,7 +561,7 @@ export const queueService = {
       await (boss as any).work('maintenance:cleanup-budget-reservations', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
         try {
           await withTimeout(
-            queueService.cleanupExpiredBudgetReservations().then(() => undefined),
+            queueService.cleanupExpiredComputeReservations().then(() => undefined),
             90_000,
           );
         } catch (err) {
@@ -1205,6 +1205,72 @@ export const queueService = {
         });
       }
 
+      // Agentic Commerce — execution-window timeout sweep (every minute).
+      // Transitions approved agent_charges past expires_at → failed/execution_timeout.
+      // Admin-bypass cross-org sweep; teamSize=1 (pg-boss deduplicates across instances).
+      await (boss as any).work('maintenance:execution-window-timeout', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runExecutionWindowTimeoutSweep } = await import('../jobs/executionWindowTimeoutJob.js');
+          await withTimeout(runExecutionWindowTimeoutSweep().then(() => undefined), 55_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:execution-window-timeout', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:execution-window-timeout', '* * * * *', {});
+
+      // Agentic Commerce — approval-expiry sweep (every minute).
+      // Transitions pending_approval agent_charges past approval_expires_at → denied/approval_expired.
+      // Admin-bypass cross-org sweep; teamSize=1.
+      await (boss as any).work('maintenance:approval-expiry', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runApprovalExpirySweep } = await import('../jobs/approvalExpiryJob.js');
+          await withTimeout(runApprovalExpirySweep().then(() => undefined), 55_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:approval-expiry', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:approval-expiry', '* * * * *', {});
+
+      // Agentic Commerce — Stripe agent reconciliation poll (every 5 minutes).
+      // Polls Stripe for executed agent_charges that haven't received a webhook
+      // confirmation within 30 minutes. Drives equivalent transitions on terminal results.
+      // Admin-bypass cross-org sweep; teamSize=1.
+      await (boss as any).work('maintenance:stripe-agent-reconciliation-poll', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runStripeAgentReconciliationPoll } = await import('../jobs/stripeAgentReconciliationPollJob.js');
+          await withTimeout(runStripeAgentReconciliationPoll().then(() => undefined), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:stripe-agent-reconciliation-poll', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:stripe-agent-reconciliation-poll', '*/5 * * * *', {});
+
+      // Agentic Commerce — shadow charge retention purge (daily 03:30 UTC).
+      // Deletes shadow_settled agent_charges rows past the per-org retention window.
+      // Retention job is the ONLY DB path that may delete agent_charges rows.
+      // Sets app.spend_caller = 'retention_purge' before each DELETE.
+      await (boss as any).work('maintenance:shadow-charge-retention', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runShadowChargeRetentionSweep } = await import('../jobs/shadowChargeRetentionJob.js');
+          await withTimeout(runShadowChargeRetentionSweep().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:shadow-charge-retention', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:shadow-charge-retention', '30 3 * * *', {});
+
       // Canonical Data Platform P1 — connector polling tick (every-minute cron).
       // Cross-org sweep: selects connections due for sync across all orgs and
       // fan-outs one connector-polling-sync job per connection via boss.send().
@@ -1234,6 +1300,26 @@ export const queueService = {
         },
       });
 
+      // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
+      // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
+      // emits WorkerSpendResponse on agent-spend-response by correlationId.
+      {
+        const { registerAgentSpendRequestHandler } = await import('../jobs/agentSpendRequestHandler.js');
+        await registerAgentSpendRequestHandler(boss as any);
+      }
+
+      // Agentic Commerce — agent-spend-completion handler (worker→main, Chunk 11)
+      // Receives WorkerSpendCompletion after worker fills merchant form.
+      // Implements invariant 20: sets provider_charge_id or transitions executed → failed only.
+      {
+        const { registerAgentSpendCompletionHandler } = await import('../jobs/agentSpendCompletionHandler.js');
+        await registerAgentSpendCompletionHandler(boss as any);
+      }
+
+      // Agentic Commerce — agent-spend-response queue (main→worker, Chunk 11)
+      // Consumed by the IEE worker; main app does not register a handler for this queue.
+      // Declared here for documentation completeness. The worker polls by correlationId.
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
@@ -1247,7 +1333,7 @@ export const queueService = {
 
       setInterval(async () => {
         await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
-          queueService.cleanupExpiredBudgetReservations().then(() => undefined)
+          queueService.cleanupExpiredComputeReservations().then(() => undefined)
         ).catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
         });

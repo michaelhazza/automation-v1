@@ -10,7 +10,7 @@ import {
   SchemaValidationError,
   AuthRedirectError,
   EnvironmentError,
-  BudgetExceededError,
+  ComputeBudgetExceededError,
   type FailureReason,
 } from '../../../shared/iee/failureReason.js';
 
@@ -19,7 +19,7 @@ export function classifyError(err: unknown): FailureReason {
   if (err instanceof StepLimitError) return 'step_limit_reached';
   if (err instanceof SafetyError || err instanceof SchemaValidationError) return 'execution_error';
   if (err instanceof AuthRedirectError) return 'auth_failure';
-  if (err instanceof BudgetExceededError) return 'budget_exceeded';
+  if (err instanceof ComputeBudgetExceededError) return 'budget_exceeded';
   if (err instanceof EnvironmentError) return 'environment_error';
 
   // Heuristic fallback for raw errors that escape typed handlers

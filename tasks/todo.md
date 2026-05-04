@@ -65,30 +65,6 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 
 ---
 
-## Fix Progress
-
-- [x] Fix TypeScript compile errors
-- [x] Convert manual try/catch routes to asyncHandler (25 files)
-- [x] Fix missing org scoping in services
-- [x] Fix missing soft-delete filters
-- [x] Add missing DB indexes
-- [x] Fix unsafe JSON.parse calls
-- [x] Wrap multi-step DB operations in transactions
-- [x] Convert hard-delete to soft-delete in taskService
-- [x] Validate TOKEN_ENCRYPTION_KEY on startup
-- [x] Add API request timeout
-- [x] Final build & type check (server + client clean)
-
-### Migration Required
-
-The following schema changes need a DB migration before testing:
-- `skills` table: new `deleted_at` column (for soft-delete support)
-- `task_deliverables` table: new `deleted_at` column (for soft-delete support)
-
-Generate with: `npm run db:generate` then `npm run migrate`
-
----
-
 ## Hermes Tier 1 — Deferred Item (S1 from pr-reviewer)
 
 **Captured**: 2026-04-21  
@@ -362,6 +338,26 @@ Captured from ChatGPT's closing verdict on PR #179 — actions that belong in th
 - [x] ~~[user] **R4-F3 — Eviction priority reorder (severity → updated_at → category → dedupe_key).** ChatGPT R4 proposed moving `updated_at` to position 2 to remove alphabetical-category bias. Deferred because the R4-F1 namespace hard rule (`optimiser.agent.*` vs `optimiser.memory.*`) scopes all bias within one agent — within-namespace alphabetical ordering is a stable, arbitrary tiebreaker. **Reconsider per trigger:** production eviction logs show a specific category systematically dominating the cap within the same namespace in a way operators notice.~~ **SUPERSEDED 2026-05-02 by R5-F4 apply** — ChatGPT R5 surfaced concrete impact (`optimiser.agent.*` consistently dominates `optimiser.skill.*` every run, not arbitrary). Reorder applied to spec in commit `dd27581e`. No further action.
 - [ ] [user] **R4-F5 — Bypass-once-per-cooldown-window guard.** ChatGPT R4 proposed tracking `last_escalation_bypass_at` and allowing severity-escalation cooldown bypass only once per cooldown window, to prevent warn→critical oscillation causing flip-flop re-surfacing. Deferred because the scenario requires multiple severity oscillations within one cooldown window — implausible in pre-production. **Reconsider per trigger:** post-launch production logs show cooldown-bypass or eviction patterns for specific categories that indicate oscillation.
 - [ ] [user] **R3-F7 — "Ongoing for X days" UI persistence indicator.** `created_at` and `updated_at` are both stored; the UI today sorts by `updated_at` desc but doesn't surface persistence ("open for 5 days"). Deferred because v1's surface is "what to look at right now" — persistence indicators need an established operator workflow that benefits from them, which doesn't exist pre-launch. **Reconsider per trigger:** when v1.1 surface design picks up dashboard refinements, OR when operator feedback indicates persistence context would help triage.
+
+### workflows-dev-spec (2026-05-02)
+
+**Source log:** `tasks/review-logs/chatgpt-spec-review-workflows-dev-spec-2026-05-02T10-00-00Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**PR:** #252 — https://github.com/michaelhazza/automation-v1/pull/252
+**Branch:** `claude/workflows-brainstorm-LSdMm`
+
+All ten items below are **architect-time runtime quotas / picks** — none are spec-blocking. They surface during the `architect` decomposition pass as concrete numbers / endpoints to pin in the implementation chunks.
+
+- [ ] [user] **M1 — Define max approver pool size.** UI guard (picker shows up to N users) + query-time performance cap. Architect to pick at decomposition.
+- [ ] [user] **M2 — Define max Ask fields per step.** Validator rule + UX field-count limit. Architect to pick at decomposition.
+- [ ] [user] **M3 — Define max files per task before grouping becomes mandatory.** UI threshold based on strip overflow profiling. Architect to pick after first real task with many files.
+- [ ] [user] **M4 — Timeout for /run/resume race window.** Confirm against §19 open extension-cap parameters. Architect-time confirmation.
+- [ ] [user] **F21 — Max step count per run runtime quota (e.g. 10k).** §4.4 prevents structural infinite loops at validation; this guards against Approval-on-reject runtime cycles. Simple `max_steps_per_run` quota; architect to pick value.
+- [ ] [user] **F23 — Fan-in result ordering by `task_sequence` of producing event.** §4.3 fan-in doesn't address result aggregation order; the right answer is "by `task_sequence` of the producing event" so downstream LLM inputs are deterministic. Architect to confirm during decomposition; depends on existing engine fan-in semantics.
+- [ ] [user] **F24 — Permission drift policy (snapshot for gates, live for controls).** Spec already has the consistent split (snapshot for `workflow_step_gates.approver_pool_snapshot` per §5.1; live for Pause/Stop buttons per §7.5). Worth a one-line statement in §14 making this split explicit. Not a blocking gap — architect-time clarification.
+- [ ] [auto] **F38 — Max concurrent steps per run / per org runtime quota.** Same family as F21 — runtime safety rail; bundle the picks.
+- [ ] [auto] **F40 — Hard upper bounds (max tasks per run, max steps per task, max runtime duration).** Same family as F21 + M1–M3 — architect-time quotas.
+- [ ] [auto] **F42 — Visibility timeout / stuck execution recovery.** Engine/worker-level concern; existing `createWorker()` + `withBackoff` primitives handle worker death. Architect to confirm the recovery semantics are wired correctly during decomposition.
 
 ---
 
@@ -695,18 +691,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
   - Gap: Current return value has `error` as a flat string and `context` hoisted to the top level. The telemetry event writes (`insertExecutionEventSafe` payloads) use the spec-correct nested envelope, so the split is return-value-only.
   - Suggested approach: This is a contract change. Legacy `skillExecutor` skills throughout the file return `error: string`, so moving delegation errors to a nested envelope either (a) introduces inconsistency across skills, or (b) implies a broader migration. Decide with architect whether the legacy string pattern is grandfathered and spec §4.3 describes the new-delegation-skills-only envelope, or whether the return shape should be changed and downstream consumers (agent prompts, action-audit wrapper `executeWithActionAudit`, any LLM-facing serialization) must be audited for breakage.
 
-## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4b (2026-04-24)
-
-**Captured:** 2026-04-24T00:00:00Z
-**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-2026-04-24T00-00-00Z.md`
-**Spec:** `tasks/builds/paperclip-hierarchy/plan.md` (Chunk 4b, lines 627–661) + `docs/hierarchical-delegation-dev-spec.md` (§6.5, §12.2)
-
-- [x] REQ #C4b-1 — Pure test file `skillService.resolver.test.ts` does not cover the "WARN logged" assertion called out in the plan's Files-New bullet.
-  - Spec section: `plan.md` line 632 ("`context.hierarchy` undefined → no derived skills, WARN logged"); acceptance criterion line 661 ("logs WARN `hierarchy_missing_at_resolver_time` once").
-  - Gap: The pure test file only covers the "returns `[]`" half of the plan's undefined-hierarchy case. WARN emission lives inside the impure `resolveSkillsForAgent`; the test file explicitly notes (lines 7–10) that this case was deferred to integration-level coverage because it requires a logger mock plus DB scaffolding. No such integration test exists yet in this chunk.
-  - Suggested approach: Either (a) mock the `logger` module and assert WARN in a thin integration test against `resolveSkillsForAgent` (will need to stub the `skills` table query or use an empty `skillSlugs` input so the DB path short-circuits on line 127's early return), or (b) refactor the WARN decision into a pure helper returning `{ derivedSlugs, warn: boolean, reason }` so the pure test can assert the boolean alongside the slug output. Option (b) is the cleaner pure-helper shape and keeps `skillServicePure.ts` authoritative for Chunk 4b's logic.
-  - Closed 2026-04-24 (commit `8c68d8a9`): option (b) taken — `shouldWarnMissingHierarchy({ hierarchy, subaccountId })` extracted into `skillServicePure.ts`; `resolveSkillsForAgent` calls it; three new pure tests assert the full decision table (undefined/undefined, undefined/provided, present/provided). Re-verified by `spec-conformance` re-run — see `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-chunk-4b-recheck-2026-04-24T01-00-00Z.md`.
-
 ## Deferred from spec-conformance review — paperclip-hierarchy-chunk-4c (2026-04-24)
 
 **Captured:** 2026-04-23T22:05:43Z
@@ -733,15 +717,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
   - Gap: Spec presumes a two-tab baseline (Trace + Payload) that did not exist in `main`. Implementation decided to add exactly two tabs (Trace + Delegation Graph). Labelled the first "Trace" (title-case matches spec); labelled the second "Delegation Graph" (title-case — spec says "Delegation graph", lowercase `g`). This is a spec-vs-reality contradiction, not an implementation defect.
   - Suggested approach: Human call required. Three options: (a) accept the two-tab surface as final and edit the plan to remove the ghost "Payload" tab reference; (b) introduce a genuine "Payload" tab that renders some run-payload view (would need its own spec — the plan does not define Payload tab contents); (c) amend the plan to make the third-tab phrasing a typo and confirm two tabs is the shape. Recommend (a) or (c).
 
-## Deferred from spec-conformance review — paperclip-hierarchy (2026-04-23)
-
-**Captured:** 2026-04-23T23:05:56Z
-**Source log:** `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`
-**Spec:** `docs/hierarchical-delegation-dev-spec.md` (whole-branch pass — all four phases)
-**Branch:** `claude/build-paperclip-hierarchy-ymgPW`
-
-- [x] **REQ #WB-1 — INV-1.2 `agent_runs.handoff_source_run_id` is never written; handoff edges cannot render in the delegation graph (architectural).** **DONE (2026-04-29 verification):** shipped under pre-launch-hardening Phase 2 (commit `f2696a53`). `AgentRunRequest.handoffSourceRunId?: string` added at `agentExecutionService.ts:183`; INSERT propagation at `agentExecutionService.ts:407`; `agent-handoff-run` worker dual-writes both pointers at `agentScheduleService.ts:127-128`; `skill_executor.ts:2934, 3677` propagate `context.runId` per spec §10.6. Pure tests green: `agentExecutionServiceWb1Pure.test.ts` (4/4) + `delegationGraphServicePure.test.ts` (11/11 incl. handoff-edge + dual-pointer cases). Re-attempting via the `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op. The spec's run-id continuity invariant (§10.6 clause 2) requires every handoff-created `agent_runs` row to carry `handoffSourceRunId = context.runId` of the `reassign_task` call. The column exists on the Drizzle schema (`agentRuns.ts:211`) and is read by `delegationGraphServicePure.ts:72` to produce handoff edges, but no write site populates it: `AgentRunRequest` has no `handoffSourceRunId` field, `agentExecutionService`'s `agent_runs` INSERT (lines ~395–412) does not set it, and the handoff worker at `agentScheduleService.ts:127` routes `sourceRunId → parentRunId` instead. Consequences: (1) handoff edges are invisible in the `/api/agent-runs/:id/delegation-graph` response (spawn edges still render because `parentRunId + isSubAgent` gate); (2) INV-1.3 "both pointers when both caused it" is unreachable; (3) INV-1.4 "`delegation_outcomes.runId === child.handoffSourceRunId` for handoffs" is structurally broken. Because `parentRunId` is currently reused for handoff chains by pre-existing code (the trace-session logic at `agentExecutionService.ts:1226-1232` and `agentActivityService.getRunChain` read `parentRunId` for handoff chains), the fix is cross-cutting — it requires a design call (keep `parentRunId` for handoff runs alongside the new `handoffSourceRunId`, or clear it and migrate downstream chain logic to the new column). Deferring as architectural. Suggested approach: (a) add `handoffSourceRunId?: string` to `AgentRunRequest`; (b) propagate it into the `agent_runs` INSERT in `agentExecutionService.executeRun`; (c) extend the `agent-handoff-run` worker payload and pass it through; (d) decide whether `parentRunId` is ALSO set (backward-compat) or null for handoff runs, and update pure graph emission + run-chain consumers accordingly. Source: `docs/hierarchical-delegation-dev-spec.md` §5.3 + §7.2 + §10.6; log `tasks/review-logs/spec-conformance-log-paperclip-hierarchy-2026-04-23T23-05-56Z.md`.
-
 ## Deferred from spec-conformance review — riley-observations wave 1 (2026-04-24)
 
 **Captured:** 2026-04-24T05:37:51Z
@@ -762,17 +737,6 @@ Classified DIRECTIONAL rather than MECHANICAL because adding these tests require
 **Source log:** tasks/review-logs/pr-review-log-riley-observations-2026-04-24T06-20-00Z.md
 
 - [ ] **Migration 0219 — rename `review_audit_records.workflow_run_id` column** (#9): The column on `review_audit_records` references `flow_runs` (post-M1) but is still named `workflow_run_id`. This is misleading post-M3 when a new `workflow_runs` table also exists. Add `ALTER TABLE review_audit_records RENAME COLUMN workflow_run_id TO flow_run_id` to migration 0219 and update `server/db/schema/reviewAuditRecords.ts` + the down migration. This is a schema change requiring a new migration if 0219 is already applied to any environment.
-
-## Deferred from dual-reviewer review — riley-observations (2026-04-24)
-
-**Captured:** 2026-04-24 from dual-reviewer iteration 2
-**Source log:** tasks/review-logs/dual-review-log-riley-observations-2026-04-24T08-00-00Z.md
-
-- [x] **Review-gated `invoke_automation` steps never dispatch after approval** (Codex iter 2 finding #4). **DONE (2026-04-29 verification):** spec'd at `docs/superpowers/specs/2026-04-28-pre-test-backend-hardening-spec.md` §1.3, shipped via `28f7b371 feat(approval): extract resolveApprovalDispatchAction pure helper + tests (§1.3)` + `47777472 feat(pre-launch-hardening): Phase 6 — wire dead paths DR1/DR2/DR3/C4a-REVIEWED-DISP`. Resolution: option (b) — `resolveApprovalDispatchAction` pure helper at `server/services/resolveApprovalDispatchActionPure.ts` decides; `decideApproval` at `workflowRunService.ts:577-584` routes invoke_automation through `WorkflowEngineService.resumeInvokeAutomationStep` (dedicated resume path at `workflowEngineService.ts:1749`). Audit-trail decision: mutate-existing row (UPDATE awaiting_approval → running, same `flow_step_run` id). Pure tests green: `decideApprovalStepTypePure.test.ts` (9/9) + `resumeInvokeAutomationStepPure.test.ts` (10/10). Integration harness exists at `workflowEngineApprovalResumeDispatch.integration.test.ts` (3 cases incl. HMAC + sign-call boundary spy + concurrent double-approve) — note: end-to-end run is currently blocked by env.ts Zod enum not allowing `NODE_ENV='integration'`, separate bug worth filing. Re-attempting via `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op.
-
-- [x] **Inline-dispatch step handlers do not re-check invalidation after awaiting external I/O** (Codex iter 3 finding #7). **DONE (2026-04-29 verification):** shipped under pre-launch-hardening Phase 5 (`35112d09 feat(hardening): Phase 5 — execution-path correctness`). `withInvalidationGuard` helper at `workflowEngineService.ts:128-139` re-reads the step row after external I/O and returns `{ discarded: true, reason: 'invalidated' }` if status flipped. Wrapped around every external-I/O dispatch site: action_call (line 1386), agent-step queue dispatch covering agent_call/prompt (line 1555), invoke_automation primary (line 1609), approval-resume path (line 1808). Each call site short-circuits on `'discarded' in guardedResult` before reaching `completeStepRunInternal`. Pure tests green: `invalidationRacePure.test.ts` (5/5: still-running / invalidated / completed-non-invalidated / failed / discarded-sentinel-distinct). Re-attempting via `pre-prod-workflow-and-delegation` brief on 2026-04-29 confirmed everything is built; brief closed as no-op.
-
-
 
 ## Deferred from chatgpt-pr-review — riley-observations (2026-04-24 round 2)
 
@@ -1000,7 +964,6 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 - [ ] **P3-M6 — `toolCallsLog` column marked DEPRECATED in `server/db/schema/agentRunSnapshots.ts`** — Sprint 3B removal pending. medium/low. Fix: confirm Sprint 3B timeline; write removal migration.
 - [ ] **P3-M8 — Agent handoff depth ≤ 5 not verified by code or named test**. medium/low. Fix: trace depth check in `server/services/agentRunHandoffService.ts`; add trajectory test.
 - [ ] **P3-M9 — Degraded fallback (missing active lead) not covered by named test**. medium/low. Fix: add trajectory test for missing-lead fallback in `server/services/agentRunHandoffService.ts`.
-- [ ] **P3-L2 — `server/routes/ghl.ts` Module C GHL OAuth stubs** — intentional deferred feature work. low/high. Track: feature implementation sprint.
 - [ ] **P3-L3 — `server/services/staleRunCleanupService.ts:21` dual threshold** (`LEGACY_STALE_THRESHOLD_MS`) for pre-migration `agent_runs`. low/low. Fix: confirm whether rows with `lastActivityAt IS NULL` exist in production; remove legacy branch if safe.
 - [ ] **P3-L4 — `actionRegistry.ts` stub comments** at lines 1342, 1428, 1577 (Support Agent, Ads Management Agent, Email Outreach Agent). low/high. Fix: convert stub labels to tracked tasks; gate or remove stub actions until implemented.
 - [ ] **P3-L5 — `EventRow.tsx` exports `SetupConnectionRequest`** — possible shared-type duplication. low/low. Fix: trace all consumers before moving; verify no circular import.
@@ -1380,18 +1343,6 @@ The structural surface of all four spec items (DR2 / S8 / N7 / S3) lands cleanly
 
 ---
 
-## Deferred from spec-conformance review — code-intel-phase-0 (2026-04-28)
-
-**Captured:** 2026-04-28T04:04:26Z
-**Source log:** `tasks/review-logs/spec-conformance-log-code-intel-phase-0-2026-04-28T04-04-26Z.md`
-**Spec:** `tasks/builds/code-intel-phase-0/plan.md`
-
-- [x] D1 — Watcher start failure logged to log file rather than dev-server stdout
-  - Resolved in-session in commit `36d97be9`. plan.md line 112 updated to state the watcher subprocess logs init failures to `references/.code-graph-watcher.log`. Parent process already prints the spawn-time pointer (`[code-graph] watcher started in background (pid X). Tail logs with: …`).
-
-- [x] D2 — `code-graph:rebuild` does not release a held watcher lock
-  - Resolved in-session in commit `36d97be9`. Watcher now writes its PID to `references/.watcher.pid` after lock acquisition. `--rebuild` reads the PID, sends SIGTERM, waits 300ms, then force-clears the lock and PID artifacts before dropping the cache. Validated end-to-end: rebuild with a live watcher prints "sent SIGTERM to watcher (pid X)", terminates the old, spawns a new one with a fresh PID; PowerShell process count confirms the singleton invariant.
-
 ## Follow-ups surfaced during pr-reviewer pass — code-intel-phase-0 (2026-04-28)
 
 - [x] Add executable test coverage for the watcher's load-bearing invariants (pr-reviewer S4)
@@ -1512,16 +1463,6 @@ Source: ChatGPT review on PR #224 (`feat(code-graph): on-demand CEO-level health
   - Current behaviour: ~750-token prompt, runtime cost negligible.
   - Suggested fix: if/when token cost matters, trim repeated explanations and condense the section 4 bucket guidance to a single sentence.
   - Defer; not blocking. Cosmetic.
-
-## ChatGPT PR final-review — round 3 (P1 + P2 applied) — code-graph-health-check (2026-04-28)
-
-Reviewer's framing: the script has crossed from "utility" to "decision engine," which raises the bar — silently misleading data and rule contradictions are now critical, not refinements.
-
-- [x] **P1 — Cross-project transcript contamination** (resolved)
-  - `resolveProjectDirs()` previously fell back to scanning every directory under `~/.claude/projects` when no exact / sibling match was found. That silently mixed adoption / correction / volume signals from unrelated codebases, producing a misleading "this repo's cache is healthy" report when the truth was "this repo has no transcripts." Resolved: the fallback block is removed; the function returns `[]` on no match, and the downstream `transcriptsAvailable === false` path correctly surfaces "no session data found." Code comment in the function explains the deliberate non-fallback.
-
-- [x] **P2 — ESCALATE gated on healthy adoption** (resolved)
-  - `recommendation = 'ESCALATE'` previously gated only on `adoption.references > 0`, which allowed the contradictory state of high query volume + 1 cache reference firing ESCALATE ("invest in Phase 1") when the truth was "no one is using it" (which should be TUNE). Resolved: introduced `const healthyAdoption = references >= 3 && !hasCacheLinkedYellow && !zeroAdoptionMeaningful` and gated the ESCALATE branch on it. Threshold of 3 mirrors the existing "marginal adoption" YELLOW boundary so the rule cells line up.
 
 ## ChatGPT PR final-review — round 4 (deferred refinements) — code-graph-health-check (2026-04-28)
 
@@ -1663,23 +1604,6 @@ production. On staging/prod with 5–20ms app→DB latency, expected speedup is 
 Action: re-run `tasks/builds/pre-prod-tenancy/time_write_path_v2.ts` after deploy to
 a staging environment with real app→DB network latency. Pass conditions remain:
 ≥5× speedup vs legacy advisory-lock path AND ≥200 rows/sec/org.
-
----
-
-## Deferred from spec-conformance review — pre-prod-tenancy (2026-04-29)
-
-**Captured:** 2026-04-29T06:57:41Z
-**Source log:** `tasks/review-logs/spec-conformance-log-pre-prod-tenancy-2026-04-29T06-57-41Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`
-
-- [x] **CONFORM-1 [CLOSED 2026-04-29]**: workflow_engines / workflow_runs manifest entries cite migrations that contain no `CREATE POLICY` block
-  - **Resolution:** Option (a) — added `0000_wandering_firedrake.sql` and `0076_playbooks.sql` to `HISTORICAL_BASELINE_FILES` in `scripts/verify-rls-coverage.sh` with `@rls-baseline:` annotations in both migration files. Also fixed redundant `migrations/` prefix in registry `policyMigration` entries (convention is filename only). `verify-rls-coverage.sh` workflow_engines/workflow_runs violations now resolved (gate violation count 10 → 8; remaining 8 are pre-existing about other tables). Honors §3.4.1 registry-only rule, §7.1 CI invariant, and §0.4 sister-branch scope-out.
-
-- [x] **CONFORM-2 [CLOSED 2026-04-29]**: Nullable-aware RLS policy on `org_margin_configs` and `skills` allows tenant code paths to write `organisation_id = NULL` rows
-  - **Resolution:** Audit confirmed only one tenant write path on `skills` could hit NULL — `seedBuiltInSkills` at boot. Migration 0245 WITH CHECK clauses tightened to canonical shape (drop `IS NULL` from WITH CHECK; keep nullable-aware USING for read access). `seedBuiltInSkills` migrated to `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS) so boot-time NULL writes go via admin path. `org_margin_configs` had no tenant writes at all — only migration 0024 seeds the platform-default NULL row. Now fully compliant with spec §2.1 canonical shape.
-
-- [x] **CONFORM-3 [CLOSED 2026-04-29]**: Phase 3 §5.2.1 audit triplet line-number drift for ruleAutoDeprecateJob
-  - **Resolution:** Updated per-job audit paragraph in `tasks/builds/pre-prod-tenancy/progress.md` to use commit-message line ranges (134-148 for per-org writes, 175 for lock acquisition). All three places now agree byte-identically per §5.2.1.
 
 ---
 
@@ -1828,62 +1752,6 @@ Captured 2026-04-30 from ChatGPT review of [PR #237](https://github.com/michaelh
   - Issue: ChatGPT flagged silent catches as "dangerous in admin flows". Some are intentional (`.catch(() => setIdentity(null))` = "no identity yet → render onboarding CTA"), others swallow real errors (e.g. `.catch(() => setThreadMessages([]))`).
   - Why deferred: codebase-wide pattern, not specific to this PR. Blanket-fix would regress UX (the "no identity yet" path).
   - Suggested approach: pass: classify each catch — if the error is a meaningful state ("not found"), keep the silent transition but log at `console.warn`. Otherwise surface a toast or error banner. Worth a focused sweep across `client/src/pages/Agent*Page.tsx` and the workspace components.
-
-## Deferred from spec-conformance review — agent-as-employee phases D+E (2026-04-30)
-
-**Captured:** 2026-04-30T00:38:18Z
-**Source log:** `tasks/review-logs/spec-conformance-log-agent-as-employee-phases-de-2026-04-30T00-38-18Z.md`
-**Spec:** `docs/superpowers/specs/2026-04-29-agents-as-employees-spec.md`
-
-- [x] **DE-CR-1** — `processIdentityMigration` worker is registered with bare `(boss as any).work(...)` so no `withOrgTx` is opened for the handler — `getOrgScopedDb()` will throw `missing_org_context` on first invocation
-  - Spec section: §13 (queued execution model), §10.5 (multi-tenant safety checklist item 6)
-  - Gap: `server/services/queueService.ts:1140` registers `workspace.migrate-identity` outside `createWorker`, but `workspaceMigrationService.processIdentityMigration` uses `getOrgScopedDb`. The handler will fail-closed on every job. Migration is non-functional in production until this is wired.
-  - Suggested approach: switch the registration to `createWorker<MigrateIdentityJob>({ queue: 'workspace.migrate-identity', boss, handler: ..., timeoutMs: 270_000 })`. The job payload already carries `organisationId` + `subaccountId`, so the default `resolveOrgContext` works. Remove the bare `boss.work(...)` block.
-
-- [x] **DE-CR-2** — `seatRollupJob` reads from `workspace_identities` via the bare `db` connection — RLS-FORCED table, no session var → returns 0 rows
-  - Spec section: §10.6 (seat rollup wiring), §10.5 (multi-tenant safety checklist item 6), DEVELOPMENT_GUIDELINES.md §1
-  - Gap: `server/jobs/seatRollupJob.ts` imports `db` directly. `workspace_identities` has `FORCE ROW LEVEL SECURITY` (migration 0254 line 245). With `app.organisation_id` unset, the policy rejects every row. `consumed_seats` will always roll up to 0.
-  - Suggested approach: replicate `memoryDedupJob.ts`. Use `withAdminConnection` for the cross-org SELECT iteration (BYPASSRLS), then `withOrgTx` per-organisation for the `UPDATE org_subscriptions ... consumed_seats`.
-
-- [x] **DE-CR-3** — Migration status-poll response shape diverges from spec §12 `MigrateSubaccountResponse`
-  - Spec section: §12 (Contract `MigrateSubaccountResponse`)
-  - Gap: spec contract says `{ status, total, migrated, failed, failures: [{ actorId, previousIdentityId, reason, retryable }] }`. Implementation returns `{ status, total, completed, failed, skipped, perIdentity }`. `migrated` was renamed to `completed`; `failures[]` (with `retryable`) is replaced by `perIdentity[]` (no retryable classification).
-  - Suggested approach: rename `completed` → `migrated`. Add a `failures: Array<{ actorId, previousIdentityId, reason, retryable }>` aggregate alongside `perIdentity` (keep `perIdentity` for the modal's progress bar, but populate the spec-named `failures[]` for callers expecting the contract). `previousIdentityId` is recoverable from `auditEvents.metadata.from`. `retryable` follows §7's failure-reason → retryability table.
-
-- [x] **DE-CR-4** — `WorkspaceTenantConfig` interface drops spec-named fields `backend`, `connectorConfigId`, `domain`
-  - Spec section: §12 (Contract `WorkspaceTenantConfig`)
-  - Gap: spec example carries `backend`, `connectorConfigId`, `domain`, `defaultSignatureTemplate`, `discloseAsAgent`, `vanityDomain`. Implementation in `shared/types/workspaceAdapterContract.ts:79–84` carries only the last three plus an extra `subaccountName`. Callers cannot resolve which backend or connector this tenant is on without a separate query.
-  - Suggested approach: extend `WorkspaceTenantConfig` to include `backend: 'synthetos_native' | 'google_workspace' | null`, `connectorConfigId: string | null`, `domain: string | null` populated from `connector_configs.config_json.domain` (with the `NATIVE_EMAIL_DOMAIN` fallback already used in the workspace summary route). `subaccountName` is fine as an additive helper; document why it's there.
-
-- [x] **DE-CR-5** — Per-step migration failure audits emit `identity.migration_activation_failed` and `identity.migration_archive_failed` action types not enumerated in spec §14.4
-  - Spec section: §14.4 (terminal events), §10 (activity types)
-  - Gap: spec §14.4 says the per-identity terminal failure event is `identity.migration_failed`. `workspaceMigrationService.processIdentityMigration` writes step-specific actions for activation (line 202) and archive (line 227) failures. These types are not in `WORKSPACE_EVENT_TYPES` (`activityService.ts:509`), so they will not surface on the activity feed; the migration status-poll route detects them via hardcoded action-name matching, which couples the route to an action namespace that isn't in the spec or the activity union.
-  - Suggested approach: collapse all three terminal-failure events to `identity.migration_failed`, distinguishing the failed step via `metadata.step ∈ {'provision','activate','archive'}`. Update the status-poll route to read only `identity.migrated` and `identity.migration_failed`.
-
-- [x] **DE-CR-6** — `subaccount.migration_completed` audit event is in the activity-type union but never written
-  - Spec section: §14.4 (terminal event for "Migration of one subaccount")
-  - Gap: spec §14.4 lists `subaccount.migration_completed` as the per-subaccount terminal event with `status ∈ {'success','partial','failed'}`. Nothing in the implementation writes this row — the status-poll route computes the aggregate on demand from per-identity audits. Operators have no audit trail of "subaccount X migrated" for the activity feed.
-  - Suggested approach: when the last in-flight identity for a `migrationJobBatchId` reaches a terminal state, write a single `subaccount.migration_completed` audit row with `metadata = { batchId, status, total, migrated, failed }`. Either fire from the worker after each per-identity job (idempotent on `(batchId)`), or schedule a "migration finaliser" job dispatched on the last per-identity completion.
-
-- [x] **DE-CR-7** — `activity.ts` route uses offset-based pagination; spec §12 forbids it for the activity feed
-  - Spec section: §12 (Contract `ActivityFeedItem` — "Offset pagination ... is explicitly forbidden for this feed")
-  - Gap: `parseFilters` accepts `limit` + `offset`; `listActivityItems` slices `items.slice(offset, offset + limit)`. Spec §12 mandates cursor pagination (`{ created_at, id }` opaque cursor) and explicitly forbids offset, citing drift under concurrent inserts.
-  - Suggested approach: change the contract to cursor-based. Server emits `{ items, nextCursor }`; cursor is `base64({ created_at, id })`. WHERE clause becomes `(created_at, id) < (cursor.created_at, cursor.id)` over the merged result set. Keep limit; remove offset. ActivityPage and AgentActivityTab both need updating in lockstep.
-
-- [x] **DE-CR-8** — `ActivityFeedItem` tiebreaker is `id DESC`; spec §12 says `id ASC`
-  - Spec section: §12 (Contract `ActivityFeedItem` — "Tie-breaker: `id ASC` within the same `created_at`")
-  - Gap: `server/services/activityServicePure.ts:98` defines `idDesc(a, b)` as the tiebreaker; spec contract calls for `id ASC`. The DB-level `.orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))` (activityService line 593) follows the same DESC pattern.
-  - Suggested approach: flip both the pure tiebreaker and the DB orderBy. The pure-function determinism test in §8.21 should be re-run after the change.
-
-- [x] **DE-CR-9** — Org-chart and actors routes use `WORKSPACE_CONNECTOR_MANAGE` instead of a viewer-level permission
-  - Spec section: §10.1 (permission keys table)
-  - Gap: spec §10.1 reserves `subaccounts:manage_workspace` (= `WORKSPACE_CONNECTOR_MANAGE`) for *configuring* the workspace; viewing the org chart and actor list should be available to a `manager` who has `agents:view_activity` (already exists). The current permission gate hides the org chart from operators who can manage agents day-to-day but lack workspace-config rights.
-  - Suggested approach: split the gates. `GET /workspace/org-chart` and `GET /workspace/actors` use `AGENTS_VIEW_ACTIVITY` (or just `authenticate`+`resolveSubaccount` if the data is non-sensitive). `POST /configure`, `POST /onboard`, `POST /migrate`, lifecycle mutations stay on `WORKSPACE_CONNECTOR_MANAGE`.
-
-- [x] **DE-CR-10** — `seatRollupJob` and `activityService` call `db` directly instead of going through service-layer helpers
-  - Spec section: §10.5 (multi-tenant safety checklist), DEVELOPMENT_GUIDELINES.md §2 ("Routes and `server/lib/**` never import `db` directly — call a service")
-  - Gap: `server/jobs/seatRollupJob.ts` and the workspace-extension fetchers in `server/services/activityService.ts` keep the pre-existing pattern of importing `db` directly. The activityService precedent existed before this branch — but the new `fetchAuditEvents` adds another consumer.
-  - **Resolution (2026-04-30):** Decision recorded in `tasks/builds/agent-as-employee/progress.md` § "Spec-conformance follow-ups". The DEVELOPMENT_GUIDELINES.md §2 rule scopes to "routes and `server/lib/**`" — services and jobs are exempt. `seatRollupJob` no longer imports `db` directly post-DE-CR-2 fix (uses `withAdminConnection`); `activityService` (a service) is permitted to import `db` per the rule. No code change required.
 
 ## Test infrastructure hygiene
 
@@ -2173,11 +2041,6 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 ---
 
-## Doc drift backlog (audit 2026-05-01)
-
-- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] A1 — `docs/capabilities.md`: add Agents-as-Employees / workspace-identity capability entry. Added "Agent Workplace Identity" section; feature confirmed delivered (all phases A–E complete per tasks/builds/agent-as-employee/progress.md).
-- [x] [origin:audit:doc-sync:2026-05-01T00-00-00Z] [status:resolved] B1 — `docs/frontend-design-principles.md`: add ClientPulse redesign as worked example. Added "Worked example — ClientPulse health monitoring" section covering band-pill pattern, drilldown minimal surface, intervention modal, and per-block settings. User approved editorial decisions 2026-05-01.
-
 ## Deferred from pr-reviewer review — fix-doco-may2026
 
 **Captured:** 2026-05-01
@@ -2217,6 +2080,58 @@ Add `CHECK (failure_reason IN ('auth_revoked','file_deleted','rate_limited','net
 
 Fix when UX polish is prioritised: call `verifyAccess(connectionId, fileId)` on connection select, show an inline warning if it fails, disable the confirm button. Low urgency.
 
+
+## Deferred spec decisions — workflows-dev-spec
+
+**Source:** spec-reviewer iteration 1 — 2026-05-02T00-48-25Z
+**Spec:** `docs/workflows-dev-spec.md` (v1)
+**Brief:** `docs/workflows-dev-brief.md` (v2)
+
+The spec-reviewer auto-decided the following directional findings during iteration 1. Each was accepted and applied to the spec mechanically using the most conservative resolution available; flagged here so a human can validate the resolution before implementation proceeds.
+
+### D-W1-C2: Ask multi-submitter / quorum semantics — resolved as single-submit / first-wins
+
+**Codex:** the spec inherits Approval-style `quorum` for Ask via the shared `submitterGroup` shape, but Ask runtime persists a single submitted-value JSON and never defines what multiple submitters mean.
+
+**Resolution applied:** Ask is single-submit / first-submit-wins. Validator caps `quorum` at 1 for Ask in §4.8; subsequent submissions return 409 with the existing submitter info. Matches the brief's implicit model (one row of submitted values per Ask step) and avoids inventing a multi-submit aggregation concept.
+
+**What to validate:** confirm with the brief author that "multiple people in the submitter group, only one fills the form" is the intended UX. If multi-submitter aggregation is wanted in V1, this needs a redo.
+
+### D-W1-C3: Idempotency / concurrency / unique-constraint→HTTP for Approval and Ask writes — resolved with state-based predicate + UNIQUE on review row
+
+**Codex:** new write paths had no idempotency posture, no concurrency guard, no duplicate-request HTTP mapping (spec-authoring-checklist §10 requires all three).
+
+**Resolution applied:** standard repo posture (per checklist §10 examples) — Approval writes get key-based + state-based posture (UNIQUE on `(workflow_run_id, step_id, deciding_user_id)` for double-click idempotency, optimistic predicate on step status for first-commit-wins quorum-counting, 23505 → 200 idempotent-hit). Ask writes get state-based posture (predicate on step status, 0-rows-updated → 409 already_submitted). State machine closure pinned in §5.1.1 + §11.4.1.
+
+**What to validate:** confirm the (workflow_run_id, step_id, deciding_user_id) UNIQUE constraint is the right granularity (vs (run_id, step_id) — but that disallows multi-approver quorum, which is wrong). Architect to verify the existing schema doesn't already have a conflicting constraint.
+
+### D-W1-I6: Ask form `params` Contracts entry — applied with the seven field types pinned
+
+**Codex:** Ask form contract underspecified — no canonical `params` schema, no `autoFillFrom` enum, skip-flag schema, `error_message` field.
+
+**Resolution applied:** added a Contracts subsection to §3.2 pinning the full Ask `params` shape (prompt, fields[] with seven types + per-field error_message, submitterGroup, quorum=1, autoFillFrom enum 'none'|'last_completed_run', allowSkip:boolean default false).
+
+**What to validate:** confirm the seven field types are the right V1 set. Confirm `autoFillFrom` is the right enum shape (vs a more flexible structure). Confirm reserved field-key list (currently unspecified — architect picks).
+
+### D-W1-I7: Pause / resume / extend state machine + API — resolved with full pin (path b)
+
+**Codex:** Pause system promised resume/extend but no endpoint, no persisted state, no permission contract, no state-machine closure.
+
+**Resolution applied:** path b chosen (pin the full state machine + resume API rather than cutting extend from V1). Added a §7.5 subsection with: new `paused` status, valid transitions (running ↔ paused, running/paused → failed via Stop), forbidden transitions, resume API contract (`POST /api/tasks/:taskId/run/resume` with optional extension params), Stop API contract, idempotency posture (state-based), permission guard (§14.5 visibility set), default 2-extension cap per run.
+
+**What to validate:** confirm the codebase wants to ship `Continue for another 30 minutes / $2.50` extension affordance in V1, OR whether path a (Stop only, no extend) is preferred for simplicity. The current spec assumes extend is in scope per §7.2 mock and spec-time decision #4.
+
+### D-W1-R2: Staging deploy step — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `staged_rollout: never_for_this_codebase_yet` and `rollout_model: commit_and_revert`. §18.1 step 5 was rewritten to commit-and-revert; staging smoke-test step removed.
+
+**What to validate:** if the codebase has actually moved to a staged rollout posture (e.g. an internal staging environment for the workflows feature specifically), the spec-context.md framing needs to be updated and this rejection re-litigated.
+
+### D-W1-R4: Frontend `*.test.tsx` tests — auto-rejected per framing
+
+**Auto-rejected** because `docs/spec-context.md` declares `frontend_tests: none_for_now` and `convention_rejections` explicitly says "do not add frontend unit tests". §17.5 .test.tsx block was removed and replaced with a deviation note pointing back at spec-context.md; one .test.tsx in §17.6 was renamed to a server-side .test.ts.
+
+**What to validate:** if the codebase is ready to land a frontend testing posture for this feature specifically (justifiable because of the WebSocket-coordinated multi-pane UI), update spec-context.md first, then re-litigate.
 
 ---
 
@@ -2473,3 +2388,397 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **P2.5 — Extract `resolveDefault<T>(mod): T` helper for dynamic-import default-export pattern.** Centralises the `(mod as any).default ?? (mod as any).x` workaround currently duplicated across `cron-parser` (`server/services/__tests__/scheduleCalendarParity.test.ts`), `rrule` (used in scheduling helpers), and `pdf-parse` (used in document ingestion). Only 3 callsites today. [user] — premature abstraction at current callsite count; revisit if a 4th case appears.
 - [ ] **P2.1 (R3) — CI enforcement check for `eslint-disable` requiring `// reason:` on the preceding line.** Add a CI step (script under `scripts/` or `.github/workflows/`) that walks line pairs across the codebase and fails the build when an `eslint-disable` directive is not preceded by a `// reason:` comment line. Naive `grep -v` matches reason anywhere on the same line; the correct check needs an awk/script that handles preceding-line semantics and skips block-comment regions. Belongs in its own focused PR with test coverage of the script itself. [user] — out of scope for the lint-cleanup PR; requires its own design + tests.
 - [ ] **P2.4 (R3) — Add "React effect dependency policy" section to `CONTRIBUTING.md`.** Document the target pattern (`useCallback` or `useRef`-stabilised inline function) for `useEffect` bodies that close over component state, alongside the existing lint-suppression policy. Coupling: write this when the React effect refactor (R1 P2.1) lands so the doc describes the post-refactor pattern, not the current inline-async pattern. [user] — defer until the refactor PR ships so the policy and the code agree from day one.
+
+## Spec Review deferred items
+
+### agentic-commerce (2026-05-03)
+
+- [ ] Shadow-vs-live delta panel — non-trivial UI surface; existing Spend Ledger `mode = 'shadow'` filter in Chunk 14 captures most value for the promotion decision; defer until v1 produces evidence operators can't decide without a side-by-side view. [user]
+- [ ] Per-skill execution-timeout overrides (`executionTimeoutMinutes: number | null` on `ActionDefinition`) — v1 ships single global `EXECUTION_TIMEOUT_MINUTES` default 30; non-breaking addition when needed. Defer until a specific v1 skill produces evidence 30 min is too short. [user]
+- [ ] Implementation Contract Checklist — pre-build artifact translating spec invariants to enforceable DB/code rules (constraint map, allowed-transitions table, idempotency enforcement points, webhook validation checklist, retry classification enforcement, required logs per transition). ChatGPT advisory from R4; high ROI for engineer handoff. [user]
+
+---
+
+## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
+
+Source logs:
+- `tasks/review-logs/pr-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+- `tasks/review-logs/adversarial-review-log-workflows-v1-2026-05-03T00-00-00Z.md`
+
+Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blocking findings (B1–B5) and CRITICAL/HIGH adversarial findings (F1, F2, F5, F6, F8) plus strong pr-reviewer findings (S1–S6) have been applied in-spec / in-plan in the same session. Remaining items below are non-blocking improvements and lower-severity adversarial concerns deferred to either the workflows-v1 implementation (where they land in the relevant chunk's acceptance criteria) or to a follow-up V2 spec.
+
+### W1-N1 — Spec §3.1 `agent_execution_events` invariant duplicates §8.1
+
+**Source:** pr-reviewer N1.
+**Action:** condense §3.1 row to a one-line cross-reference to §8.1 (which has the canonical allocation invariant in full). Cleanup, not load-bearing.
+**Owner:** spec polish; can fold into Chunk 1 PR or a docs-sync follow-up.
+
+### W1-N2 — Plan Chunk 0 spike effort accounting
+
+**Source:** pr-reviewer N2.
+**Action:** clarify that the 2-day spike is on top of the ~40-day baseline, not inside it. Plan reads ambiguous; the operator should know the spike is a sunk cost on top.
+**Owner:** plan polish; can fold into the next plan revision.
+
+### W1-N3 — Spec §16.5 effort estimate (~59d) vs plan's revised baseline (~40d)
+
+**Source:** pr-reviewer N3.
+**Action:** spec §16.5 still cites ~59 engineer-days; plan's primitive-reuse re-baseline is ~40d. Either update spec §16.5 or add a one-line "plan-gate re-baseline: ~40 engineer-days (see plan.md line 303)" so future spec readers know the spec figure is stale.
+**Owner:** spec polish.
+
+### W1-N4 — Plan §Risks markdown anchor links
+
+**Source:** pr-reviewer N4.
+**Action:** for the most consequential risks, add `(Chunk N)` anchor links in the mitigation cells. Low-effort navigation improvement.
+**Owner:** plan polish.
+
+### W1-F3 — `assignable-users` email enumeration mitigation
+
+**Source:** adversarial-reviewer F3 (MEDIUM).
+**Action:** consider redacting email for users not in caller's subaccount membership; OR rate-limiting the endpoint (max 10 unique subaccount-IDs per minute per org admin); OR requiring an explicit "I want to assign across subaccounts" admin permission. V1 may ship as-is if the operator accepts the tradeoff (org admins are relatively trusted), but it should be a deliberate trade-off, not an oversight.
+**Owner:** Chunk 10 acceptance criteria — operator decides ship-as-is vs. add mitigation.
+
+### W1-F4 — Approver-pool snapshot UUID normalisation
+
+**Source:** adversarial-reviewer F4 (LOW, worth-confirming).
+**Action:** spec §5.1 should pin the `ApproverPoolSnapshot` normalisation contract — UUIDs lowercase, branded type, parsed at write-time. Without this, a `userInPool` equality check could fail for a legitimate approver if the snapshot captured uppercase UUIDs or surrogate IDs.
+**Owner:** Chunk 4 acceptance criteria + spec §5.1 polish.
+
+### W1-F7 — Stall-and-notify cancellation race verification
+
+**Source:** adversarial-reviewer F7 (LOW, worth-confirming).
+**Action:** verify at Chunk 8 implementation time that the `expectedCreatedAt` stale-fire guard correctly handles the race where the pg-boss job starts executing between `resolved_at` SET and the job-cancel call. Spec analysis suggests it does; confirm with a unit test.
+**Owner:** Chunk 8 implementation + test author.
+
+### W1-F9 — Cadence-detection NLP heuristic gameability note
+
+**Source:** adversarial-reviewer F9 (LOW).
+**Action:** add a one-line note in spec §13.1 that the cadence-detection heuristic is advisory only — any draft created from it goes through the standard publish flow with full validation, so user-tuned prompts can't bypass authorisation. Documentation only; no code change.
+**Owner:** spec polish.
+
+### W1-F10 — Aggregate cost cap across `workflow.run.start`-spawned children (V2)
+
+**Source:** adversarial-reviewer F10 (MEDIUM).
+**Action:** V1 acceptable as-is now that F6's depth cap (max 3) is in place (3 levels × ~10 children per level × $5 = $150 worst-case). V2 should add an aggregate "lineage cost" cap across a parent run and all `workflow.run.start`-spawned descendants. Track in workflows V2 spec.
+**Owner:** workflows V2 spec.
+
+### W1-F11 — `approval.queued` event approver-pool ID broadcast
+
+**Source:** adversarial-reviewer F11 (LOW).
+**Action:** verify at Chunk 9 implementation time whether the client resolves approver-pool IDs to display names. If yes, consider broadcasting only a hash + count rather than the full ID list, OR scope the broadcast to subscribers who are themselves in the pool.
+**Owner:** Chunk 9 implementation + Chunk 11 (open task UI) consumer review.
+
+### W1-spec19 — Confidence-chip cut-points decision before launch
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** spec §19.1 #A (confidence-chip cut-points) is left to architect after collecting 100 internal cards. Track as a release blocker in spec §19; if never formally decided, `workflowConfidenceCopyMap.ts` ships with placeholder values producing misleading confidence in production.
+**Owner:** architect post-Chunk-6.
+
+### W1-pre-existing-1 — Pool-membership CI gap documentation
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** add a note to `DEVELOPMENT_GUIDELINES.md` that `verify-rls-coverage.sh` does NOT catch pool-membership / authz checks (it's RLS-coverage only). Manual reviewer is the only gate today; improving CI coverage of authz patterns is a separate codebase-audit follow-up.
+**Owner:** DEVELOPMENT_GUIDELINES.md docs-sync follow-up.
+
+### W1-approval-pool-refresh — `approval.pool_refreshed` event payload
+
+**Source:** adversarial-reviewer additional observation.
+**Action:** confirm at Chunk 5 implementation time that the Approval card re-fetches the gate's authoritative pool snapshot after a `pool_refreshed` event (not just the `new_pool_size`). If the client renders pool members anywhere, stale display is possible without the re-fetch.
+**Owner:** Chunk 5 + Chunk 11 consumer review.
+
+---
+
+## Deferred from spec-conformance review — ghl-module-c-oauth (2026-05-03)
+
+**Captured:** 2026-05-03T04:47:51Z
+**Source log:** `tasks/review-logs/spec-conformance-log-ghl-module-c-oauth-2026-05-03T04-47-51Z.md`
+**Spec:** `docs/ghl-module-c-oauth-spec.md`
+
+- [ ] REQ #25 — `autoStartOwedOnboardingWorkflows` partially executes inline; spec mandates pure pg-boss enqueue.
+  - Spec section: §6 Phase 3 ("Queue invariant: `autoStartOwedOnboardingWorkflows` MUST enqueue each workflow job via pg-boss — never execute inline")
+  - Gap: `subaccountOnboardingService.autoStartOwedOnboardingWorkflows` calls `startOwedOnboardingWorkflow` synchronously, which performs DB writes and `WorkflowEngineService.enqueueTick(runId)` — the run-row insert and template lookup happen inline. For a 500-location burst inside the OAuth callback, this serialises 500 workflow-resolution + insert round-trips before the callback returns. The TODO comment at `server/services/ghlAgencyOauthService.ts:242` acknowledges this gap.
+  - Suggested approach: introduce a thin pg-boss job (e.g. `auto-start-onboarding`) whose payload is `(organisationId, subaccountId, startedByUserId)`; have the service publish one job per inserted location and let the existing handler invoke `startOwedOnboardingWorkflow` async. Migration concern: the run-deduplication logic at `startOwedOnboardingWorkflow:253-272` needs to stay correct under concurrent invocation. Decision needed on whether the OAuth callback path should still wait for any acknowledgement or fire-and-forget.
+
+- [ ] REQ #23 / REQ #30 — `notify_operator` not actually fired for enumeration truncation or UNINSTALL.
+  - Spec sections: §5.5 ("emit a single `notify_operator` event"), §5.4 ("(4) fire `notify_operator` (org-admin recipient)")
+  - Gap: `server/services/ghlAgencyOauthService.ts:170-176` and `server/services/ghlWebhookMutationsService.ts:177-181` only emit `logger.warn`/`logger.info` — the spec-named `notify_operator` action (registered in `server/config/actionRegistry.ts:2776` as a workflow action) is never invoked. Both sites carry TODO comments stating "fire notify_operator skill when it is wired as a callable primitive".
+  - Suggested approach: `notify_operator` is currently a workflow-action node, not a service-callable function. Two architectural options: (a) build a lightweight `operatorNotificationService` that creates an `agency_inbox_alerts` row directly without going through the workflow engine; (b) define a system workflow `ghl-truncation-alert` / `ghl-uninstall-alert` and dispatch via pg-boss with a templated payload. Option (a) is simpler but creates a parallel notification path; option (b) is consistent with the registry but requires authoring the workflow definitions. Needs a design decision before implementation.
+
+- [ ] REQ #33 — Missing-`webhookId` for lifecycle events returns generic 400 with misleading message.
+  - Spec section: §5.4 ("Events missing `webhookId` are rejected with **HTTP 400**")
+  - Gap: `server/routes/webhooks/ghlWebhook.ts:45` uses `if (eventType && webhookId && companyId && lifecycleTypes.has(eventType))` — when a lifecycle event type arrives without `webhookId`, control falls through to the location flow at line 74 which 400s with `'Missing locationId'`. Status code is correct but the error code/message does not name the actual contract violation. A genuinely malformed lifecycle replay without `locationId` would also be misclassified.
+  - Suggested approach: split the lifecycle gate so a lifecycle eventType with missing `webhookId` short-circuits to `400 { error: 'Missing webhookId', code: 'WEBHOOK_MISSING_ID' }` before the locationId fallback. The `classifyWebhookEvent` pure helper already throws on missing webhookId — reuse that path at the route layer. Watch for unintended impact on non-lifecycle events that legitimately lack webhookId today.
+
+## Deferred from pr-reviewer + adversarial-reviewer — ghl-module-c-oauth (2026-05-03)
+
+**Captured:** 2026-05-03T05:58:35Z
+**Source logs:**
+- `tasks/review-logs/pr-review-log-ghl-module-c-oauth-2026-05-03T05-58-35Z.md`
+- `tasks/review-logs/adversarial-review-log-ghl-module-c-oauth-2026-05-03T05-58-35Z.md`
+
+- [ ] **S1 — Lifecycle webhook `peek-before-dispatch` dedupe.** `server/routes/webhooks/ghlWebhook.ts:91` calls `webhookDedupeStore.isDuplicate(webhookId)` only AFTER side effects ran (correct per §5.4). On GHL retries the side effects re-fire — they are idempotent (xmax=0 upsert pattern), so this is "safe but wasteful, not a correctness bug" per the reviewer. To suppress wasted work, add a `peek(id)` method to `WebhookDedupeStore` and check it BEFORE calling `dispatchWebhookSideEffects`. Out of scope for the security-fix pass; only worth doing if the wasted dispatch cost (one GHL `/locations/search` enumeration per duplicate INSTALL) becomes measurable.
+
+- [ ] **Adversarial confirmed-hole #2 — OAuth callback should verify session org matches state nonce.** `server/routes/oauthIntegrations.ts:307-414` consumes the state nonce → orgId without checking that the browser session at callback time belongs to a member of `ghlOrgId`. Cross-site delivery of an Org A nonce to an Org B user could cause Org B to complete Org A's install (leaking Org B's GHL credentials into Org A's namespace). Mitigation options: (a) require an authenticated session at callback time (re-using the existing session JWT) and assert `userOrg === stateOrg`; (b) bind a session fingerprint into the nonce at issue and verify at consume. Option (b) is more aligned with the unauthenticated-by-design webhook+callback pattern; option (a) breaks browser-redirect ergonomics for users not logged in. Decision needed before Stage 6b real-agency verification.
+
+- [ ] **Agency-level canonical mutation rows.** `server/services/ghlWebhookMutationsService.ts dispatchWebhookSideEffects` now returns `organisationId` for INSTALL and UNINSTALL, but no `subaccountId` (those events are agency-scope). The Staff Activity Pulse (§2.0b) writer at `recordGhlMutation` short-circuits to `skipped_no_subaccount` when subaccountId is null. Two follow-up options: (a) extend `canonical_subaccount_mutations` to allow `subaccount_id IS NULL` for agency-scope rows (schema change + RLS-policy update + downstream readers handling null); (b) materialise an "agency root" subaccount per organisation and use it as the carrier for agency-level mutations. Decision needed before reporting on operator install/uninstall events.
+
+- [ ] **In-memory `ghlOAuthStateStore` not cluster-safe.** `server/lib/ghlOAuthStateStore.ts` is a process-local Map — multi-instance deployments will fail nondeterministically as nonces issued on instance A are not visible to instance B. The file flags this in a header comment but no runtime assertion guards production deployment. Replace with Redis (matching `webhookDedupeStore`'s production replacement TODO) or a `ghl_oauth_states` DB table with TTL sweep. At minimum, add a startup assertion that fails loudly when `NODE_ENV === 'production'` and `OAUTH_STATE_STORE_DRIVER !== 'memory_acknowledged'`.
+
+- [ ] **`enumerateAgencyLocations` cap can briefly overflow + no global circuit breaker.** `server/services/ghlAgencyOauthService.ts:100-151` — if GHL returns more than `GHL_PAGINATION_LIMIT` items in a single page (ignoring the `limit` param), the array can briefly exceed `GHL_LOCATION_CAP`. Tighten by `all.push(...page.slice(0, GHL_LOCATION_CAP - all.length))`. Separately, `withBackoff` retries (4 attempts × up to 4s × 10 pages) can wall-clock ~160s under sustained 5xx, with no per-org or global circuit breaker — only the OAuth-callback caller wraps a 15s timeout, the INSTALL_company webhook caller does not. Add a cumulative-time budget + a per-companyId circuit breaker.
+
+- [ ] **`docs/create-ghl-app.md` env-var name drift.** The doc references `GHL_APP_WEBHOOK_SECRET` but the runtime uses `GHL_WEBHOOK_SIGNING_SECRET` (defined in `server/lib/env.ts` and consumed in `server/routes/webhooks/ghlWebhook.ts`). Align the doc to the runtime name to avoid operator misconfiguration.
+
+- [ ] **Drop dynamic-import + duck-typed cast for `autoEnrolAgencyLocations` in OAuth callback.** `server/routes/oauthIntegrations.ts:399-402` imports the function via `await import(...) as unknown as { autoEnrolAgencyLocations?: ... }`. The function exists now; replace with a top-of-file static import.
+
+- [ ] **`oauthProviders.ts` GHL `tokenUrl` duplication.** `server/config/oauthProviders.ts:52-72` defines a `tokenUrl`, but `exchangeGhlAuthCode` (`server/services/ghlAgencyOauthService.ts:26`) hard-codes the same URL. Either route the exchange through the registry-driven helper or remove the unused entry — do not let two sources drift.
+
+- [ ] **GHL unauthenticated auto-start onboarding silently no-ops under FORCE RLS.** `server/services/subaccountOnboardingService.ts` uses module-level `db` and queries FORCE-RLS tables (`org_subscriptions`, `workflow_runs`, `workflow_templates`). Two callers reach this from unauthenticated contexts where no `app.organisation_id` GUC is set on the pool connection: (a) `server/services/ghlAgencyOauthService.ts:autoEnrolAgencyLocations` (OAuth callback + INSTALL_company webhook), (b) `server/services/ghlWebhookMutationsService.ts dispatchWebhookSideEffects` LocationCreate path. Result: every owed-onboarding lookup returns 0 rows, no auto-start fires. The previous `db.transaction(async (tx) => set_config; ...)` wrapper around the call did NOT scope the inner queries — drizzle's `tx` and module-level `db` use different pool connections. The wrapper has been removed (false confidence) — failure is now honest. Fix options: (i) refactor `subaccountOnboardingService` to accept an explicit `tx` parameter or use `getOrgScopedDb()` so callers can wire it through `withOrgTx`; (ii) extend admin-bypass to `subaccountOnboardingService` for the unauthenticated paths only — high blast radius because `WorkflowRunService.startRun` is invoked downstream and itself touches RLS-protected tables. Decision needed before Stage 6b real-agency verification — without it, GHL-installed subaccounts never auto-start their onboarding workflows. Source: codex dual-review 2026-05-03.
+
+## Deferred from chatgpt-pr-review — PR #254 ghl-module-c-oauth (2026-05-03 round 1)
+
+- [ ] **In-process `getLocationToken` mint lock is single-instance.** `server/services/locationTokenService.ts:29` uses a module-level `Map<string, Promise<string>>` to coalesce concurrent mints for the same `(configId, locationId)` pair. DB unique partial index `(connector_config_id, location_id) WHERE deleted_at IS NULL` is the authoritative correctness guard, so cross-instance racers correctly settle via the `INSERT … ON CONFLICT DO NOTHING RETURNING` race-loser re-read path. The lock is a perf optimisation only (avoids redundant cold-start mints in a single worker). When moving beyond single-instance, either accept the redundant mint cost or replace with an advisory lock keyed on `hashtext(connector_config_id || ':' || location_id)`. Source: chatgpt-pr-review PR #254 round 1 finding 5.
+
+- [ ] **Centralise GHL retry classification.** Spec §5.8 documents the canonical retry policy (429 + 5xx retryable, 4xx hard fail). The implementation respects it but inlines the `isRetryable` predicate at every `withBackoff` call site in `server/services/locationTokenService.ts` and `server/services/ghlAgencyOauthService.ts`. Extract to a shared `isGhlRetryable(err)` helper so future call sites can't drift. Source: chatgpt-pr-review PR #254 round 1 finding 6.
+
+- [ ] **Slug-collision third-tier fallback (UUID).** `server/services/ghlAgencyOauthService.ts:231` and `server/services/ghlWebhookMutationsService.ts:252` retry slug generation with `[baseSlug, baseSlug-${locId.slice(-4)}]` and on second-tier collision skip the location with a `slug_collision_unresolved` log line. GHL location IDs are 24-char unique opaque strings, so a same-`(name, last-4)` collision is vanishingly rare in practice — but possible. Add a third tier `${baseSlug}-${crypto.randomUUID().slice(0, 8)}` so we never need an operator runbook entry to resolve enrolment-time slug collisions. Source: chatgpt-pr-review PR #254 round 1 finding 7.
+
+## Deferred from chatgpt-pr-review — PR #254 ghl-module-c-oauth (2026-05-03 round 2)
+
+- [ ] **Cascade location-token soft-delete when agency token is permanently revoked.** When `connectorConfigService.refreshAgencyTokenIfExpired` flips `connector_configs.status='disconnected'` on a permanent 401 (lines 432-440 of `server/services/connectorConfigService.ts`), the existing per-connector `connector_location_tokens` rows are not soft-deleted. They become unreachable through any live code path because `findAgencyConnectionByCompanyId` filters `ne(status, 'disconnected')`, so the staleness is harmless — but the rows linger until the next UNINSTALL webhook (which mass-soft-deletes them) or a one-time cleanup query. Add a parallel `UPDATE connector_location_tokens SET deleted_at=now() WHERE connector_config_id=? AND deleted_at IS NULL` inside the same admin-bypass block so the table stays tidy. **When required:** before high-churn orgs (where stale-row buildup becomes operator-visible in counts/storage). Source: chatgpt-pr-review PR #254 round 2 finding 1.
+
+- [ ] **Add `grant_type` / token-source column to `connector_location_tokens` and `connector_configs`.** Currently both tables persist tokens without recording how the token was acquired (`agency_oauth_mint`, `location_oauth`, `direct_install`, `manual_paste`, `user_oauth`, future provider-specific grant types). When a second OAuth provider lands or when GHL adds a new grant flow, distinguishing source is a join-on-nothing problem. Cheap migration now (`token_source text`, default backfill `'agency_oauth_mint'` for existing GHL rows) saves a debugging session later when an operator needs to filter by source. **When required:** when the second OAuth provider lands. Source: chatgpt-pr-review PR #254 round 2 finding 6.
+
+- [ ] **Operator-facing kill switch UI / endpoint for `connector_configs.status='disconnected'`.** The status enum (`'active' | 'error' | 'disconnected'`) and short-circuiting at `findAgencyConnectionByCompanyId` + `connectorPollingTick` are already in place. What's missing is a one-click admin path: `POST /api/admin/connector-configs/:id/disable` that flips the status to `disconnected` and soft-deletes the location tokens (see related cascade item above). Useful in production incident response when a partner integration is misbehaving. **When required:** before the first production incident (operator response time gates this). Source: chatgpt-pr-review PR #254 round 2 finding 7.
+
+## Deferred from setup refactor — 2026-05-03
+
+**Captured:** 2026-05-03
+**Source:** session refactoring agent fleet + adding ADR + context-pack + hotfix conventions
+**Status update (2026-05-03 same day):** all 8 items addressed inline — see resolution notes per item.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Migrate historical KNOWLEDGE.md "Decision" entries into proper ADRs under `docs/decisions/`
+  - Resolution: 5 ADRs written (0001-0005) covering the clearest decisions: mixed-mode review agents, interactive vs walk-away review agents, workspace identity canonical pattern, GEO skills as methodology skills, risk-class split rollout. Remaining 6 historical Decision entries judged to be patterns/observations/research-notes rather than ADR-worthy and stay in KNOWLEDGE.md.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Section-anchor architecture.md so context-packs can splice precisely
+  - Resolution: 54 HTML anchors added via Python script. All 5 context-pack files updated to reference specific anchors (`architecture.md#service-layer`, etc.).
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Build the `context-pack-loader` skill that reads a pack and emits sliced content
+  - Resolution: agent at `.claude/agents/context-pack-loader.md`. Inline playbook (not a sub-agent — that would defeat the token-savings point). Wired into CLAUDE.md fleet table. Auto-triggered by `current-focus.md` status when operator types "load context pack" without naming a mode.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Slim `.claude/agents/spec-reviewer.md` by extracting the directional-signals classifier
+  - Resolution: 70 lines extracted to `references/spec-review-directional-signals.md`. Agent file: 575 → 509 lines. Saves tokens on every spec-reviewer invocation.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Archive sweep of `tasks/todo.md`
+  - Resolution: 9 fully-resolved sections (every checkbox `[x]`) moved to `tasks/todo-archive/2026-Q2.md`. todo.md: 2,567 → 2,411 lines. Mixed and all-open sections kept — they're active backlog.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Archive sweep of `docs/`
+  - Resolution: 0 docs eligible for automated archive after re-verification (the original 4 candidates were false positives — see `tasks/docs-archive-triage-2026-05-03.md` for analysis). Durable enabler shipped instead: Status: header convention added to `docs/spec-authoring-checklist.md § 11`. Future archive sweeps will work once specs adopt the header.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Add a "codebase-explainer" agent for external onboarding
+  - Resolution: agent at `.claude/agents/codebase-explainer.md`. Produces `docs/codebase-tour.md`. Different audience from architecture.md (human-facing prose vs agent-facing dense reference). Wired into CLAUDE.md fleet table.
+
+- [x] [origin:setup-refactor:2026-05-03] [status:resolved] Wire spec-reviewer to enforce `docs/spec-context.md` staleness check
+  - Resolution: staleness gate added to `spec-reviewer.md § Step A`. Reads `last_reviewed_at` / `stale_after_days` / `stale_blocks_at_days` from spec-context.md YAML block. Yellow warning at `stale_after_days`, red block at `stale_blocks_at_days`. Falls back to yellow + deferred-item if the staleness header is missing.
+
+## Deferred from setup audit — 2026-05-03
+
+**Captured:** 2026-05-03 (audit pass before propagating framework to other repos)
+**Scope:** items surfaced during the pre-propagation audit. Each is HIGH-VALUE but HIGH-COST — too risky to land in the same session as the smaller fixes.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Extract shared boilerplate from `chatgpt-pr-review.md` (976 lines) and `chatgpt-spec-review.md` (667 lines) to `references/chatgpt-review-protocol.md`
+  - **Why:** the two files have the EXACT same 7-section structure (`Configuration`, `Before doing anything else, read`, `On Start`, `Per-Round Loop`, `Finalization`, `Log Format`, `Rules`). Probably 30-40% shared content (round handling, finding triage shape, KNOWLEDGE.md sweep, doc-sync at finalisation, log format). Saves ~400 tokens/session when either agent runs.
+  - **Approach:** read both end-to-end, identify shared sections, extract to `references/chatgpt-review-protocol.md`. Each agent then carries only its mode-specific content + a pointer.
+  - **Risk:** breaking either agent's flow if the extraction over-merges. Agents are load-bearing for review pipeline. Test by running each on a real PR/spec after extraction.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Move domain-specific subsystem sections out of `architecture.md` (3,542 lines) to `architecture/<domain>.md` files
+  - **Why:** 15 of 19 agents always-load architecture.md. Domain-specific subsystems (IEE 423 lines, Playbooks 299 lines, ClientPulse Intervention Pipeline 190 lines, Scraping Engine 150 lines, Run Continuity 124 lines) only matter when working on those subsystems. Their full-load tax is paid every session whether the session touches them or not. Saves ~1,200 tokens always-loaded.
+  - **Approach:** create `architecture/iee.md`, `architecture/playbooks.md`, etc. Replace each domain section in `architecture.md` with a one-paragraph summary + pointer. Update context-pack anchors that reference moved sections. Confirm `KNOWLEDGE.md` cross-references still resolve.
+  - **Risk:** breaks every agent that loads `architecture.md` until their context-loading instructions are updated. Better done once context-pack-loader is wired to all agents (next deferred item below).
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Wire the agent fleet to use context packs by default (not opt-in)
+  - **Why:** `context-pack-loader.md` ships in this version but is operator-invoked. Most agents still load full architecture.md. To realise the token savings, each agent's `Context Loading` step should default to its matching pack: `pr-reviewer` → review pack, `architect` → implement pack, etc.
+  - **Approach:** edit each agent's Context Loading block to read "load context pack: <mode> (or fall back to listed full files if pack-loader is unavailable)". Pack name comes from a per-agent table.
+  - **Risk:** agents need their packs to actually contain the sections they need. Requires the architecture.md domain-split above to land first, otherwise packs reference monolithic sections.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Add a `validate-setup` skill that confirms the agent fleet is healthy in a new repo
+  - **Why:** ADAPT.md Phase 4 does this once at setup time. After that, drift accumulates silently — anchors get renamed, agents get edited, the operator never re-runs ADAPT. A `validate-setup` skill would re-check on demand and emit a health report.
+  - **Approach:** new agent at `.claude/agents/validate-setup.md`. Steps: (1) read every agent in fleet, confirm referenced files exist; (2) read every context pack, confirm referenced anchors exist; (3) check `FRAMEWORK_VERSION` against latest known; (4) check `KNOWLEDGE.md` size; (5) check `tasks/todo.md` size; (6) emit a report.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Quarterly KNOWLEDGE.md grouping pass
+  - **Why:** the size-bound policy (KNOWLEDGE.md preamble) prescribes a quarterly grouping pass but no agent runs it. Without an agent, the policy is aspirational.
+  - **Approach:** extend `audit-runner` with a `knowledge` mode that reads KNOWLEDGE.md, identifies thematically duplicate entries, appends summary entries that cite originals by date, never edits originals. Run quarterly.
+
+- [ ] [origin:setup-audit:2026-05-03] [status:open] Backfill `Status:` headers across the existing 84 specs in `docs/`
+  - **Why:** the Status: convention added in this session is forward-looking only. The existing 84 specs lack it, so docs/ archive sweeps still produce 0 candidates (per the 2026-05-03 triage report). One-time backfill unlocks the future archive sweeps.
+  - **Approach:** `audit-runner` mode that reads each spec, infers status from `tasks/builds/<slug>/handoff.md` (if it exists) and merge state, writes the header. Operator review before commit.
+
+## Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)
+
+**Captured:** 2026-05-03T22:07:50Z
+**Source log:** `tasks/review-logs/adversarial-review-log-agentic-commerce-2026-05-03T22-07-50Z.md`
+**Spec:** `tasks/builds/agentic-commerce/spec.md`
+**Branch:** `claude/agentic-commerce-spending`
+
+One blocker fixed in branch (Finding 2.2 — webhook `connectionStatus` allowlist at `server/routes/webhooks/stripeAgentWebhook.ts:155`). Three reviewer findings dissolved as false positives or by-design. Items below are deferred.
+
+- [ ] **AC-ADV-1** — Stylistic inconsistency: `chargeRouterService.updateChargeStatus` uses `SELECT set_config('app.spend_caller', $1, true)` while all other GUC setters in the same diff use `SET LOCAL "app.spend_caller" = $1`. Both are correct inside an active org-scoped transaction (which `getOrgScopedDb` guarantees), but mixing styles is a maintenance hazard. Convert to `SET LOCAL` for consistency.
+  - File: `server/services/chargeRouterService.ts:138`
+
+- [ ] **AC-ADV-2** — `GET /api/spending-budgets?subaccountId=<id>` accepts a raw `subaccountId` query param without calling `resolveSubaccount(...)`. Org-scoping is enforced (RLS + app-layer org filter), but a same-org caller with `SETTINGS_EDIT` can enumerate subaccount budget summaries by guessing IDs. Product question: should org-level SPEND_APPROVER see all subaccounts' budgets, or only ones they administer? If the latter, gate via subaccount membership.
+  - File: `server/routes/spendingBudgets.ts:85-91`, `server/services/spendingBudgetService.ts:82-88`
+
+- [x] **AC-ADV-3** — DELETE `/api/approval-channels/:channelId/grants/:grantId` does not validate that `grantId` belongs to `channelId`. **CLOSED 2026-05-04** in chatgpt-pr-review Round 3 after ChatGPT independently raised the same point. `revokeGrant` now takes an optional `expectedOrgChannelId` parameter and throws 404 on mismatch; route handler passes `req.params.channelId`. Original dissolution rationale (SETTINGS_EDIT org-wide) was correct but defense-in-depth justified the apply when a second reviewer flagged it.
+
+- [ ] **AC-ADV-4** — `approvalChannelService.requestApproval` active-approval guard filters on `metadataJson->>'category' = 'spend'` and `metadataJson->>'chargeId' = ...` without an explicit `eq(actions.organisationId, ...)` filter and without a supporting index. RLS on `actions` is the primary defence against cross-org leakage, but adding the explicit filter is best-practice defense-in-depth and a GIN index on `actions.metadataJson` (or a partial btree on the extracted chargeId path) would address the per-approval full-table-scan cost.
+  - File: `server/services/approvalChannelService.ts:95-101`
+
+- [ ] **AC-ADV-5** — `approvalExpiryJob` uses `sql.raw` with string-interpolated `cutoff.toISOString()`. `cutoff` is internal-derived (`deriveApprovalCutoff(now)`) so there is no current SQL-injection vector, but `sql.raw` bypasses Drizzle parameterisation. Convert to `sql\`... WHERE approval_expires_at < ${cutoff.toISOString()}::timestamptz LIMIT 1000\`` for consistency with every other job in the diff and to future-proof against any later change that makes `cutoff` partially user-controlled.
+  - File: `server/jobs/approvalExpiryJob.ts:46-52`
+
+- [ ] **AC-ADV-6** — `WebhookDedupeStore` for `stripe_agent` is sized at `MAX_ENTRIES = 10000` with a 96h TTL. Layer 2 (`last_transition_event_id` row check) and Layer 3 (DB trigger) still protect against double-processing if the LRU evicts a still-relevant entry, but the *primary* dedupe layer's intent (avoid DB round-trip on retries) is silently degraded under load. Add an instrumented counter + alert when eviction fires, or raise `MAX_ENTRIES` based on a measured high-watermark.
+  - File: `server/lib/webhookDedupe.ts:13`, `server/routes/webhooks/stripeAgentWebhook.ts:38-39`
+
+- [ ] **AC-ADV-7** — `stripeAgentWebhookService` `recordIncident` payload for cross-tenant `provider_charge_id` collisions includes both `webhookOrg` and `rowOrg` UUIDs in `errorDetail`. Per-org incident readers therefore see another org's identifier on this incident class. Severity is low (Stripe charge IDs are globally unique; this is an attacker-with-Stripe-collusion scenario), but the incident-log identifier exposure should be redacted: store `rowOrg = '<other>'` or hash it.
+  - File: `server/services/stripeAgentWebhookService.ts:255-269`
+
+- [ ] **AC-ADV-8** — `agentSpendRequestHandler` infers `executionPath` from `chargeType` via an implicit switch (`invoice_payment → main_app_stripe`, else `worker_hosted_form`). This duplicates information already on `ActionDefinition.executionPath`. A new chargeType added without updating the switch will silently mis-route. Derive `executionPath` from the registered action definition instead.
+  - File: `server/jobs/agentSpendRequestHandler.ts:229`
+
+- [ ] **AC-ADV-9** — `stripeAgentWebhookService` out-of-order webhook handling logs a warning and returns silently for ambiguous-sequence events when `_retryCount < 3`, with an in-code TODO acknowledging the re-enqueue mechanism is "outside scope for this chunk." Three retries will each return without re-enqueueing; the charge stays stuck until the reconciliation poll job intervenes. Wire actual re-enqueue (push event back onto pg-boss with a delay).
+  - File: `server/services/stripeAgentWebhookService.ts:332-358`
+
+- [ ] **AC-ADV-10** — `spending_budgets` table has no FK constraint preventing hard delete when in-flight `agent_charges` rows reference the budget. An org admin with `SETTINGS_EDIT` could orphan in-flight charges. Add `ON DELETE RESTRICT` (or `ON DELETE SET NULL` with explicit audit trail) to `agent_charges.spending_budget_id`. A migration is needed.
+  - File: `migrations/0271_agentic_commerce_schema.sql`
+
+- [ ] **AC-ADV-11** — `PATCH /api/spending-budgets/:id` accepts `disabledAt` from the request body as a string and converts via `new Date(disabledAt)` without validation. A malformed string yields `Invalid Date` which Drizzle serialises as `NaN`, producing an obscure DB error rather than a clean 400. Validate via Zod/zod-derived schema like the other PATCH handlers in the diff.
+  - File: `server/routes/spendingBudgets.ts`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 1)
+
+**Captured:** 2026-05-03T22:41:01Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T22-41-01Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 1 produced 8 findings. 5 auto-applied in-branch (1, 2, 4, 5, 7); the 3 below routed here as follow-up items. ChatGPT's Round 1 final verdict was *Yellow → close to green*.
+
+- [ ] **AC-CGPT-1** — Missing retry / error model on `GrantManagementSection.load()` failures. Today the catch only fires a `toast.error` and leaves the UI in a hard-failed state (no retry button, no degraded view, no exponential-backoff). UX decision: pick one of (a) explicit "Retry" button on the failed-load state, (b) auto-retry with backoff up to N attempts, (c) degraded-view fallback rendering empty grants list with a banner. Apply project-wide as a pattern if (a) or (b) is chosen.
+  - File: `client/src/components/approval/GrantManagementSection.tsx:40-55`
+
+- [ ] **AC-CGPT-2** — `groupByIntent` time-semantics in `client/src/components/spend/RetryGroupingPure.ts` and related grouping helpers assume `createdAt: string` is always ISO-8601 with no timezone drift. The codebase invariant is "server-generated timestamps only" (Drizzle `.defaultNow()` + `withTimezone: true`), but the client has no explicit parse step. Consider one of: (a) explicit `Date.parse(createdAt)` + invariant-violation `console.warn` on `NaN`, (b) extract a `compareCreatedAt(a, b)` comparator helper, (c) document the invariant as a JSDoc on `groupByIntent` and call it day. Lower priority — current behaviour is correct in practice.
+  - File: `client/src/components/spend/RetryGroupingPure.ts`
+
+- [ ] **AC-CGPT-3** — `ConservativeDefaultsButton` `POST /spending-budgets/:id/conservative-defaults` lacks operator-visible safety guards. ChatGPT recommends one of: (a) a confirmation modal listing the fields about to be overwritten with the conservative defaults, (b) a diff preview (current → defaults) before commit, (c) idempotency indicator (e.g. button disabled when already at defaults). UX decision required — applying defaults to a freshly-created budget vs an in-use one have different risk profiles.
+  - File: `client/src/components/spend/ConservativeDefaultsButton.tsx`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 2)
+
+**Captured:** 2026-05-03T23:24:25Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T23-24-25Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 2 produced 8 findings. 3 auto-applied in-branch (2, 4, 5); 1 was already done in Round 1 (1 — DB-level UNIQUE in migration 0275); 4 routed here as follow-ups. ChatGPT's Round 2 verdict was *Green with 2 minor caveats*; both caveats were resolved or already in place. A side-finding (frontend↔server route mismatch on `GrantManagementSection`) discovered during Round 2 work was also fixed in this round — see the review log for detail.
+
+- [ ] **AC-CGPT-R2-1** — `GrantManagementSection.handleAdd` and `handleRevoke` `await load()` after every mutation, blocking the UI until the full reload completes. ChatGPT Round 2 Finding 3 recommends fire-and-forget reload OR optimistic-with-background-sync to reduce perceived latency. Trade-off: this conflicts with the Round 1 server-authoritative-reload pattern that resolved the original mixed-update-strategy bug. Prefer to defer until the admin-config UI sees enough use to measure actual latency stacking. If applied: keep server-authoritative as the source of truth, but render an optimistic insert/remove immediately and reconcile on `load()` completion.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R2-2** — `formatSpendCardPure` does not insert thousands separators for large amounts. `999999.99` could read as `$999,999.99` for clearer comprehension. ChatGPT itself recommends keeping the pure function deterministic (no locale-dependent `Intl.NumberFormat`) and adding an optional formatter layer at the rendering tier instead. Two-tier: pure helper produces canonical `999999.99`, render layer optionally formats with `Intl.NumberFormat` for display.
+  - File: `client/src/components/spend/formatSpendCardPure.ts`
+
+- [ ] **AC-CGPT-R2-3** — `PendingApprovalCardLaneConfig.test.ts` hardcodes `expectedLanes = ['client', 'major', 'internal', 'spend']`. If the server adds a new lane, the test still passes (it only checks the hardcoded list is covered, not that the server's actual emit set is covered). Consider extracting the canonical lane set into a shared types file (`shared/types/pulseAttention.ts` or similar) and importing it into both server and test for true drift detection.
+  - File: `client/src/components/dashboard/__tests__/PendingApprovalCardLaneConfig.test.ts`
+
+- [ ] **AC-CGPT-R2-4** — `GrantManagementSection.load()` fires three parallel `api.get()` calls every time `orgId` changes. For large orgs with many channels and subaccounts, this can be slow. Consider: (a) caching org channels and subaccounts client-side (rare changes), (b) consolidating into a single `/api/approval-channels/grants/management-data` endpoint that returns all three, (c) prefetching at app load. Lower priority — admin-config UI traffic is low-volume.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 3)
+
+**Captured:** 2026-05-03T23:40:43Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T23-40-43Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 3 produced 6 findings. 2 auto-applied in-branch (2, 3); 1 rejected as false positive (1 — see review log for trace); 3 routed here as follow-ups. ChatGPT's Round 3 verdict was *🟢 Clean green (production-safe)*. **chatgpt-pr-review LOOP CLOSED at Round 3.**
+
+- [ ] **AC-CGPT-R3-1** — `availableSubaccounts` is derived from client state only, so a multi-tab race could let a user submit a (channel, subaccount) pair that's already granted by another tab. The DB-level partial UNIQUE in migration 0275 catches the actual data corruption — the user just gets a 404 / unique-violation error response on submit. ChatGPT itself flagged this as "Not worth fixing now, just noting." Multi-tab UX consistency is a UX nicety, not a correctness bug.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R3-2** — `loading` flag has a micro-edge: load A starts → load B starts → A's fetch ignored (correctly) → B errors before `setLoading(false)`. The user sees a stuck spinner until manual reload. Probability is low (requires concurrent loads + a fetch error on the latest); manual refresh resolves. If applied, the fix is to move `setLoading(false)` outside the generation-equality check in the finally block — but that contradicts the cancellation guard's intent (older loads shouldn't touch state at all). Better: use a separate ref for "the latest load's loading state" rather than a setState.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R3-3** — `humaniseChannelType` returns `channelType` directly when no label is registered, which means multiple channels of the same type render identically (e.g. two `slack` channels with different config look identical to the operator). v1 only ships `in_app` so the ambiguity doesn't manifest today. When a second channel type lands AND multiple instances of the same type can coexist, add a `name` column to `org_approval_channels` (and `subaccount_approval_channels`) and render channel `name + type`. Couples to `[2026-05-04] Rule — Do not introduce "future-use" schema columns without active invariants` in KNOWLEDGE.md — defer the schema add until the multi-channel-type build needs it.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`, `server/db/schema/orgApprovalChannels.ts`
+
+## Deferred from Workflows V1 Chunks 5–6 (2026-05-03)
+
+- [ ] **Chunk 5: `task_requester` pool uses `workflowRuns.startedByUserId` instead of `tasks.created_by_user_id`.** `server/services/workflowApproverPoolService.ts` task_requester branch resolves from `workflowRuns.startedByUserId` because `tasks` has no `workflow_run_id` FK in V1. When a `workflow_run_id` FK is added to `tasks`, update this branch to resolve from `tasks.created_by_user_id` instead. A V1/V2 comment is already in the code at the resolution site.
+
+- [ ] **Chunk 5: `approval.pool_refreshed` WebSocket event not emitted on `/refresh-pool`.** Spec §5.1.2 requires emitting `approval.pool_refreshed` so open clients update their Approval card. This emission is deferred to Chunk 9 which owns the event taxonomy and WebSocket transport layer. Implement in `workflowStepGateService.ts resolveGate` / `workflowGateRefreshPoolService.ts` once Chunk 9's `emitTaskEvent` primitive is available.
+
+- [ ] **Chunk 6: Minor quality cleanup (non-blocking).** `workflowRunService.ts` has 4 identical V1-atomicity-gap NOTE blocks (lines ~558, 716, 774, 814) — extract to a single comment. `workflowStepGateService.ts` has inline `import('...')` types for `SeenPayload`/`SeenConfidence` — move to top-level import block. `workflowConfidenceServicePure.ts signals` array emits all 5 entries (0-weight non-firing rules) while the fallback path emits `[]` — align to one shape.
+
+
+## Deferred from spec-conformance review — workflows-v1 (2026-05-03)
+
+**Captured:** 2026-05-03T20:29:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-workflows-v1-chunks-3-8-2026-05-03T20-29-16Z.md`
+**Spec:** `docs/workflows-dev-spec.md`
+**Scope verified:** Chunks 3-8
+
+- [ ] **REQ 6.4 — `workflowSeenPayloadService.ts` (impure wrapper) does not exist.** Plan Chunk 6 named this file as an impure orchestrator that loads run context. Implementation calls the pure builder (`buildSeenPayload`) directly from `workflowStepGateServicePure.ts → buildGateSnapshot`. Whether this is a missing layer or an intentional simplification (avoiding premature abstraction; gate service already loads runContext) needs human judgment.
+  - Spec section: Plan Chunk 6 file list
+  - Gap: file named in plan does not exist on disk
+  - Suggested approach: either (a) add a one-line passthrough wrapper to satisfy the literal plan requirement, or (b) update the plan to reflect the inlined call chain. Option (b) is cleaner — the impure wrapper would be redundant since the gate service already provides the run-context load step.
+
+- [ ] **REQ 7.9 — Pause / Resume / Stop routes diverge from spec contract.** Spec §7 names `POST /api/tasks/:taskId/run/{pause,resume,stop}`; implementation lands them at `POST /api/workflow-runs/:runId/{pause,resume,stop}` (`server/routes/workflowRuns.ts` lines 274, 294, 331). Implementation pattern matches existing approval route (`/api/workflow-runs/:runId/steps/:stepRunId/approve`); migrating to task-scoped URLs requires a `tasks → workflow_runs` lookup that depends on the deferred `workflow_run_id` FK on tasks (already noted in this todo file).
+  - Spec section: §7 (Pause/Resume/Stop routes)
+  - Gap: route URLs are run-scoped instead of spec-mandated task-scoped
+  - Suggested approach: defer until the `workflow_run_id` FK on tasks lands; then add task-scoped variants (or replace the run-scoped routes). Alternatively, amend spec §7 to use run-scoped URLs to match the existing approval route convention — that would be a `chatgpt-spec-review` decision. Chunk 11 (open task UI) will consume these endpoints, so the decision must be made before Chunk 11 ships.
+
+
+## Deferred from spec-conformance review — framework-standalone-repo (2026-05-04)
+
+**Captured:** 2026-05-04T05:53:43Z
+**Source log:** `tasks/review-logs/spec-conformance-log-framework-standalone-repo-2026-05-04T05-53-43Z.md`
+**Spec:** `tasks/builds/framework-standalone-repo/spec.md`
+**Scope verified:** Phase A (in-tree sync infrastructure under `setup/portable/`)
+
+- [ ] **REQ #11 — §4.5 step 8 rename-detection INFO log not implemented.** Spec text: "Check: if a removed path and a newly-written path share the same directory + similar filename: Print 'INFO: possible rename detected — old: <removed-path>, new: <new-path>'." Implementation (`setup/portable/sync.js:1278-1289`) handles `removedFiles` warn-only (conforms to that part) but does NOT scan for renames.
+  - Spec section: §4.5 step 8
+  - Gap: rename-detection check missing from removed-files loop
+  - Suggested approach: pick a similarity heuristic (suggest: same directory + filename Levenshtein distance ≤ 3, OR shared filename stem) — the spec leaves this undefined. Alternatively, defer to Phase B and amend spec §4.5 step 8 to remove the requirement (Phase A is in-tree-only and rename-detection has low ROI pre-public-launch).
+
+- [ ] **REQ-extra (plan Chunk 1 verification) — `scripts/build-portable-framework.ts` preflight scan fails on intentional negative-test legacy placeholders.** Plan Chunk 1's verification command (`npx tsx scripts/build-portable-framework.ts # expect: exit 0`) currently exits 1 because `setup/portable/tests/substitute-write.test.ts` contains intentional `[PROJECT_NAME]` test fixtures (verifying the substitution engine ignores non-`{{...}}` formats). The legacy-placeholder walk in `scripts/build-portable-framework.ts:114-133` does not exempt the `tests/` directory.
+  - Spec section: plan Chunk 1 verification commands (spec §4.5 invariant 1 substitution placeholder format)
+  - Gap: build script's preflight false-positives on test fixtures
+  - Suggested approach: add `tests/` to a path-prefix exclusion in the legacy-placeholder walk (mirrors the existing filename-set exemption for `CHANGELOG.md` / `README.md`). One-line addition; preserves test integrity without inventing escape syntax.
+
+---
+
+## Deferred from pr-reviewer review — framework-standalone-repo (2026-05-04)
+
+Source: `tasks/review-logs/pr-reviewer-log-framework-standalone-repo-2026-05-04T05-59-12Z.md`. Items marked Strong/Nit not addressed in-branch — Tier 1 fixes (B1, B2, S1, plus all confirmed adversarial holes) landed; Tier 2 items deferred here.
+
+- [ ] **S4. SYNC.md crash-recovery troubleshooting note.** If sync is killed mid-walk, files written before the crash exist but have no state entry; next run will write `.framework-new` for each, alarming the operator. Spec invariant ("re-run sync is always safe") is satisfied for state.json but introduces a noisy false-positive disk path. Add one paragraph to `setup/portable/SYNC.md § Troubleshooting` instructing the operator to run `sync.js --adopt` to rebaseline cleanly.
+- [ ] **S5. validateSubstitutions on first-run --adopt symmetry.** If an operator runs `--adopt` with no pre-existing state.json AND pollutes substitutions later, validation is bypassed for the initial run. Add `validateSubstitutions(ctx.state.substitutions)` after the line ~1219 init for symmetry.
+- [ ] **N2. mergeSettings malformed-JSON path should exit 1.** Currently warns and proceeds treating project hooks as `{}` — silently overwrites a malformed-but-recoverable settings.json. Exit 1 with "fix or delete settings.json before re-running sync" instead.
+- [ ] **N3. classifyForAdopt sync vs async fs API consistency.** Lines ~993, 1000, 1005 use `require('fs').existsSync` / `readFileSync` while the rest of writers use `fs.promises`. Tiny consistency nit.
+- [ ] **N4. writeNewFile Branch 2 lastAppliedHash initialised to ''.** When sync writes `.framework-new` for an untracked-but-existing file, state entry is created with `lastAppliedHash: ''`. On subsequent runs (after operator merges), `classifyFile` sees `targetHash !== ''` → `customised` → re-writes `.framework-new`. Operator falls back to `--adopt` rebaseline. Either record current target hash or document the path in SYNC.md.
+- [ ] **N5. writeFrameworkNew mtime heuristic visibility.** The 5-second mtime heuristic emits `inline_check=hash_drift_no_priorMerge` but the meaning isn't surfaced to the operator. Promote to stderr INFO when it fires, or remove in favour of `--doctor`'s case(b) check.
+- [ ] **N6. frameworkHookIdentity / isFrameworkOwnedCommand DRY.** Both functions duplicate the same regex + interpreter check. Extract a single helper returning `null | string`; boolean form is `frameworkHookIdentity(cmd) !== null`.
+- [ ] **N7. classifyFile mode-change check (spec §4.5 step 7.b2).** Spec says "previous recorded mode === sync, new mode === adopt-only" triggers `ownership-transferred`. Impl returns `ownership-transferred` whenever state exists, mode is `adopt-only`, and `adoptedOwnership` is unset. No regression today (all current adopt-only files were always adopt-only at adoption time) but tighten the check for future adopters.
+
+## Deferred from adversarial-reviewer review — framework-standalone-repo (2026-05-04)
+
+Source: `tasks/review-logs/adversarial-review-log-framework-standalone-repo-2026-05-04T06-08-15Z.md`. Confirmed-holes (path traversal, shell injection) and high-leverage worth-confirming items (--check ownership-transferred, mergeSettings non-hooks keys, atomic-write race) were fixed in-branch. Remaining advisory items routed here per Phase 1 advisory non-blocking convention.
+
+- [ ] **Symlink follow guard on writers.** `writeUpdated`, `writeNewFile`, `writeFrameworkNew` use `fs.writeFile` which follows symlinks unconditionally. A managed path that is itself a symlink (e.g. `.claude/agents/architect.md` → `/etc/passwd`) gets overwritten via the symlink. Mitigation: `fs.lstat` before each write; reject symlinks at managed paths. Threat depends on whether the deployment model allows untrusted contributors to add files to the target repo — currently low for single-operator usage.
+- [ ] **Substitution values shell-metacharacter validation.** `validateSubstitutions` rejects `{{` (idempotency invariant) but does not restrict `$()`, backtick, `|`, `;`, `&`, newlines. Substitution values land verbatim in agent `.md` files; if any future hook templates a substituted value into a shell command, injection is possible. Currently low-exploit (agent files are prose context). Mitigation: at minimum document allowed character set; consider rejecting shell metacharacters for substitutions used in agent files.
+- [ ] **`--force` silently replaces in-progress operator merge work.** `writeFrameworkNew` line ~641 logs `prior_framework_new=replaced` to stdout (not stderr) when `--force` overwrites an existing `.framework-new`. SYNC.md warns "not recommended" but doesn't call out specific data-loss scenario. Mitigations: write to `<file>.framework-new.incoming` instead, or emit replacement warning to stderr with stronger label.
+- [ ] **No schema validation on `readState`.** `readState` does `JSON.parse(raw)` and returns the result with no field-level validation. An attacker who can write to `.framework-state.json` can set `lastAppliedHash` to forge a "clean" classification of a malicious file. Mitigations: document explicitly that `.framework-state.json` MUST be committed to source control and changes reviewed in PRs (add to SYNC.md / ADAPT.md). Add a `--verify` mode that recomputes all hashes from disk.
+
+## Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)
+
+Source: `tasks/review-logs/chatgpt-pr-review-framework-standalone-repo-2026-05-04T07-05-51Z.md` (round 2). Round 1 findings F1–F5 all actioned in-branch (commit `5e2163ce`). Round 2 surfaced 4 hardening items beyond the must-fix set; the 3 must-fix items (version authority strengthening, scanner case variants, CI test gate) were applied in-branch (commit pending). The 4 hardening items below routed here.
+
+- [ ] **Scanner: positive-validation rules beyond the string blacklist.** Round 2 F2 deeper recommendation. Current scanner is reactive (blacklist + variants). Move toward positive validation: define allow-listed patterns, ban absolute paths in agent prose, ban project-specific directories (`apps/`, `services/`, `server/routes/...`) unless explicitly intentional, ban references to project-specific routes / DB tables / services. Wants architect input on the rule set; not a Round 2 fix because it's a meaningful enforcement-model redesign. Strong long-term value as the bundle reaches more consumer repos.
+- [ ] **Agent duplication guard — root vs portable agents.** Round 2 F5. Today `.claude/agents/*` (root deployment) and `setup/portable/.claude/agents/*` (canonical bundle) are intentionally duplicated; nothing enforces that they stay in sync. Drift risk: bundle updates to an agent definition without root catching up, so this repo's local Claude sessions run a stale version. Add a build-step hash comparison (or a derived-from rule that root is generated from portable). Mostly addressable via Phase C self-adoption — at that point root becomes a sync.js output and the duplication question dissolves. Until Phase C, low priority.
+- [ ] **Manifest schema validation in `sync.js`.** Round 2 F6. `manifest.json` is the single configuration input that drives everything sync.js does, but `loadManifest` performs no schema validation — a missing field or wrong type leads to undefined sync behaviour. Add a hand-rolled `validateManifestShape(m)` (no external deps per the bundle's no-deps invariant) that asserts required fields, allowed mode values, and glob string types. Wants architect input on whether to also version the manifest format itself (`manifest.json`'s top-level `frameworkVersion` field already exists; should we add `manifestSchemaVersion` independent of framework version?). Real concern but heavier than a Round 2 in-branch fix.
+- [ ] **Sync engine observability — dry-run summary / machine-readable report.** Round 2 F7. `--dry-run` exists but emits one log line per file; no aggregated summary, no JSON output suitable for CI gating. Add a final-line summary block (`SYNC summary classified=X new=Y customised=Z customised-by-substitution=W ...`) and an opt-in `--report-json <path>` mode emitting the full classification + planned writes as a single JSON document. Useful when this engine is invoked across many consumer repos and the operator needs aggregate status. Polish, not blocker.

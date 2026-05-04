@@ -10,12 +10,14 @@
   timestamp,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { workflowTemplateVersions } from './workflowTemplates';
+import type { GateResolutionReason } from '../../../shared/types/workflowStepGate.js';
 
 // ---------------------------------------------------------------------------
 // Workflow Runs — execution instances against a single subaccount
@@ -26,6 +28,7 @@ export type WorkflowRunMode = 'auto' | 'supervised' | 'background' | 'bulk';
 export type WorkflowRunStatus =
   | 'pending'
   | 'running'
+  | 'paused'
   | 'awaiting_input'
   | 'awaiting_approval'
   | 'completed'
@@ -73,6 +76,12 @@ export const workflowRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
     failedDueToStepId: text('failed_due_to_step_id'),
+    // Workflows V1 — cost/time ceiling (migration 0270, spec §3.1)
+    effectiveCostCeilingCents: integer('effective_cost_ceiling_cents'),
+    effectiveWallClockCapSeconds: integer('effective_wall_clock_cap_seconds'),
+    extensionCount: integer('extension_count').notNull().default(0),
+    costAccumulatorCents: integer('cost_accumulator_cents').notNull().default(0),
+    degradationReason: text('degradation_reason'),
     // Phase E — onboarding-Workflows-spec §9.2 / §9.3 / §9.4.
     // Drives the portal card visibility toggle and the admin Onboarding tab.
     isPortalVisible: boolean('is_portal_visible').notNull().default(false),
@@ -91,6 +100,16 @@ export const workflowRuns = pgTable(
       table.status
     ),
     templateVersionIdx: index('workflow_runs_template_version_idx').on(table.templateVersionId),
+    // Workflows V1 (migration 0270)
+    statusPausedIdx: index('workflow_runs_status_paused_idx')
+      .on(table.id)
+      .where(sql`${table.status} = 'paused'`),
+    statusUpdatedIdx: index('workflow_runs_status_updated_idx').on(table.status, table.updatedAt),
+    // Workflows V1 (migration 0270) — accumulator never goes negative
+    costAccumulatorNonneg: check(
+      'workflow_runs_cost_accumulator_nonneg',
+      sql`${table.costAccumulatorCents} >= 0`,
+    ),
   })
 );
 
@@ -115,6 +134,11 @@ export type WorkflowRunEventSequence = typeof workflowRunEventSequences.$inferSe
 // ---------------------------------------------------------------------------
 
 export type WorkflowStepType =
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask'
+  // Engine / legacy names — used in system templates and pre-V1 forks.
   | 'prompt'
   | 'agent_call'
   | 'user_input'
@@ -196,9 +220,17 @@ export const workflowStepReviews = pgTable(
     decidedByUserId: uuid('decided_by_user_id').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // Workflows V1 (migration 0270)
+    gateId: uuid('gate_id'),
+    decisionReason: text('decision_reason'),
+    resolutionReason: text('resolution_reason').$type<GateResolutionReason | null>(),
   },
   (table) => ({
     stepRunIdx: index('workflow_step_reviews_step_run_idx').on(table.stepRunId),
+    // Unique: one decision per (gate, deciding user) for non-null deciders
+    gateUserUniqIdx: uniqueIndex('workflow_step_reviews_gate_user_uniq_idx')
+      .on(table.gateId, table.decidedByUserId)
+      .where(sql`${table.decidedByUserId} IS NOT NULL`),
   })
 );
 

@@ -319,6 +319,12 @@ export function validateDefinition(
           });
         }
         break;
+      // V1 user-facing ("four A's") aliases — accepted by the engine. No
+      // additional required fields beyond the common ones already checked.
+      case 'agent':
+      case 'action':
+      case 'ask':
+        break;
       default: {
         const exhaustiveCheck: never = step.type as never;
         errors.push({

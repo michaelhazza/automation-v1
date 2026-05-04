@@ -9,6 +9,18 @@ import {
 } from '../config/actionRegistry.js';
 import { policyEngineService } from './policyEngineService.js';
 import { IDEMPOTENCY_KEY_VERSION } from '../lib/idempotencyVersion.js';
+import {
+  canonicaliseJson,
+  hashActionArgs,
+  computeValidationDigest,
+} from '../lib/canonicalJsonPure.js';
+
+// Re-exports preserve existing import surface for callers (proposeAction
+// middleware, executionLayerService, regressionCaptureServicePure). The
+// canonical-JSON helpers physically live in server/lib/canonicalJsonPure.ts
+// to keep them out of the impure DB import chain — see DG#2 in
+// tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T14-12-21Z.md.
+export { canonicaliseJson, hashActionArgs, computeValidationDigest };
 
 // ---------------------------------------------------------------------------
 // Deterministic idempotency keys — P1.1 Layer 3 contract
@@ -22,53 +34,9 @@ import { IDEMPOTENCY_KEY_VERSION } from '../lib/idempotencyVersion.js';
 // pass a stable synthetic key — e.g. actionType + a stable business key.
 // ---------------------------------------------------------------------------
 
-/**
- * Canonical JSON stringification with recursive key sorting. Unlike
- * `JSON.stringify(value, Object.keys(value).sort())` — whose 2nd arg is an
- * allowlist applied at every depth (thus silently dropping nested keys) —
- * this walks the value and sorts object keys at every level before emitting.
- * Arrays retain order (positional semantics). Used by both the idempotency-key
- * hash and the validationDigest drift check so two logically-identical
- * payloads always produce the same string regardless of key insertion order.
- *
- * Object properties with `undefined` values are omitted — matching
- * `JSON.stringify`'s default behaviour. This closes the "present-vs-absent"
- * trap where one caller writes `{ x: undefined }` and another omits `x`
- * entirely; both now canonicalise the same way. Explicit `null` stays
- * distinct from omitted — null is semantically meaningful ("explicitly
- * unset"), whereas `undefined` vs absent is a JS surface accident.
- */
-function canonicaliseJson(value: unknown): string {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicaliseJson).join(',')}]`;
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicaliseJson(v)}`).join(',')}}`;
-  }
-  if (value === undefined) return 'null';
-  // primitives — strings, numbers, booleans — JSON.stringify handles encoding.
-  return JSON.stringify(value);
-}
-
-export function hashActionArgs(args: Record<string, unknown>): string {
-  const canonical = canonicaliseJson(args);
-  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
-}
-
-/**
- * Full SHA-256 digest of a canonicalised payload. Stored in
- * metadata_json.validationDigest at propose-time; re-computed by the execution
- * engine's precondition gate (ClientPulse Session 2 §2.6 precondition 2) and
- * compared byte-for-byte — a drift triggers `blocked: drift_detected`.
- */
-export function computeValidationDigest(payload: Record<string, unknown>): string {
-  const canonical = canonicaliseJson(payload);
-  return createHash('sha256').update(canonical).digest('hex');
-}
+// canonicaliseJson, hashActionArgs, computeValidationDigest live in
+// server/lib/canonicalJsonPure.ts — re-exported above for callers that
+// import them from this module.
 
 /**
  * Deterministic idempotency key for an action.
@@ -107,7 +75,13 @@ export interface ProposeActionInput {
   organisationId: string;
   /** Null for org-level agent runs */
   subaccountId: string | null;
-  agentId: string;
+  /**
+   * Null for system-initiated actions (e.g. shadow-to-live promotion). The
+   * `actions.agent_id` column was made nullable in migration 0274 to support
+   * these flows. Empty string is NOT accepted — Postgres rejects '' as a uuid
+   * value at runtime.
+   */
+  agentId: string | null;
   agentRunId?: string;
   parentActionId?: string;
   actionType: string;
@@ -582,6 +556,11 @@ async function resolveGateLevel(
     toolIntentConfidence: input.toolIntentConfidence,
   });
   let gate = policyDecision.decision;
+
+  // 1b. Chunk 7: merge spendDecision into gate — highest restriction wins
+  if (policyDecision.spendDecision?.evaluated === true) {
+    gate = higherGate(gate, policyDecision.spendDecision.outcome);
+  }
 
   // 2. Explicit override from caller
   if (input.gateOverride) {

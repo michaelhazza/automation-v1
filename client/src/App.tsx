@@ -111,6 +111,13 @@ const ReportsListPage = lazy(() => import('./pages/ReportsListPage'));
 const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
 const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
 
+// Agentic Commerce — Chunk 14 spend UI
+const SpendingBudgetsListPage = lazy(() => import('./pages/SpendingBudgetsListPage'));
+const SpendingBudgetDetailPage = lazy(() => import('./pages/SpendingBudgetDetailPage'));
+const SpendLedgerPage = lazy(() => import('./pages/SpendLedgerPage'));
+const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
+const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
+
 function PageLoader() {
   return (
     <div className="flex justify-center items-center min-h-[300px]">
@@ -195,6 +202,50 @@ function SystemAdminGuard({ user }: { user: User | null }) {
 function SubaccountIntegrationsRoute({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
+}
+
+// Agentic Commerce — permission-aware route wrappers (Chunk 14)
+// Server enforces actual permission checks; these wrappers derive UI-level
+// edit/read-only mode from the permissions already loaded in Layout context.
+// Using user.role for a fast local decision; spend_approver is a permission-set
+// key that lives in orgPerms (Layout), not on user.role directly — so we default
+// canCreate/canEdit to true and let each page call /api/my-permissions if needed.
+// The server's 403 response is the authoritative gate.
+
+function SpendingBudgetsListPageRoute({ user }: { user: User }) {
+  const [canCreate, setCanCreate] = useState(false);
+  useEffect(() => {
+    api.get('/api/my-permissions').then(({ data }) => {
+      const perms: string[] = data?.permissions ?? [];
+      setCanCreate(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
+    }).catch(() => {});
+  }, [user]);
+  return <SpendingBudgetsListPage canCreate={canCreate} />;
+}
+
+function SpendingBudgetDetailPageRoute({ user }: { user: User }) {
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => {
+    api.get('/api/my-permissions').then(({ data }) => {
+      const perms: string[] = data?.permissions ?? [];
+      setCanEdit(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
+    }).catch(() => {});
+  }, [user]);
+  return <SpendingBudgetDetailPage user={user} canEdit={canEdit} />;
+}
+
+function SpendLedgerPageRoute({ user }: { user: User }) {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  const [readOnly, setReadOnly] = useState(true);
+  useEffect(() => {
+    if (!subaccountId) return;
+    api.get(`/api/subaccounts/${subaccountId}/my-permissions`).then(({ data }) => {
+      const perms: string[] = data?.permissions ?? [];
+      const hasSpend = perms.includes('spend_approver') || perms.includes('org.spend.admin');
+      setReadOnly(!hasSpend);
+    }).catch(() => {});
+  }, [subaccountId]);
+  return <SpendLedgerPage user={user} readOnly={readOnly} />;
 }
 
 export default function App() {
@@ -362,6 +413,12 @@ export default function App() {
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
+            {/* Agentic Commerce — Chunk 14: Spending Budgets + Spend Ledger + Approval Channels */}
+            <Route path="/admin/spending-budgets" element={<SpendingBudgetsListPageRoute user={user!} />} />
+            <Route path="/admin/spending-budgets/:budgetId" element={<SpendingBudgetDetailPageRoute user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<SpendLedgerPageRoute user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/approval-channels" element={<SubaccountApprovalChannelsPage />} />
+            <Route path="/admin/org-approval-channels" element={<OrgApprovalChannelsPage user={user!} />} />
           </Route>
 
           {/* ClientPulse routes */}

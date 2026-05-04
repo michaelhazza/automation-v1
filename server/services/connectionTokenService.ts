@@ -10,13 +10,13 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
+import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
+import { getRefreshBufferMs } from './connectionTokenServicePure.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
-// Refresh tokens 5 minutes before they expire
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 // Current key version written into every new encrypted value.
 // To rotate: set TOKEN_ENCRYPTION_KEY to a new 64-char hex value, move the old
 // value to TOKEN_ENCRYPTION_KEY_V0, then bump this constant to 'k2'. Once all
@@ -136,8 +136,8 @@ export const connectionTokenService = {
     const expiresAt = new Date(connection.tokenExpiresAt).getTime();
     const now = Date.now();
 
-    // Token still valid with buffer
-    if (expiresAt > now + REFRESH_BUFFER_MS) return connection;
+    // Token still valid with per-provider buffer
+    if (expiresAt > now + getRefreshBufferMs(connection.providerType)) return connection;
 
     // Need to refresh
     if (!connection.refreshToken) {
@@ -238,6 +238,62 @@ export const connectionTokenService = {
       case 'slack': {
         // Slack bot tokens don't typically expire, but user tokens can
         throw { statusCode: 400, message: 'Slack token refresh not yet implemented' };
+      }
+
+      case 'stripe_agent': {
+        // Stripe Connect SPT rotation via platform-level secret key.
+        // Uses POST /v1/ephemeral_keys with Stripe-Account header set to the
+        // connected account ID. The 'refreshToken' stored on the connection row
+        // is the Stripe connected account ID (acct_...) — stable across refreshes.
+        // Bypasses per-connection clientIdEnc/clientSecretEnc/tokenUrl per §7.4.
+        const platformKey = process.env.STRIPE_PLATFORM_SECRET_KEY ?? '';
+        if (!platformKey) {
+          throw { statusCode: 500, message: 'STRIPE_PLATFORM_SECRET_KEY is not configured' };
+        }
+        const connectedAccountId = refreshToken;
+        const result = await withBackoff(
+          async () => {
+            const response = await fetch('https://api.stripe.com/v1/ephemeral_keys', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${platformKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Stripe-Account': connectedAccountId,
+                'Stripe-Version': '2024-06-20',
+              },
+              body: new URLSearchParams({
+                customer: connectedAccountId,
+              }),
+            });
+            if (!response.ok) {
+              const body = await response.text().catch(() => response.statusText);
+              throw { statusCode: response.status, message: `Stripe SPT refresh failed: ${body}` };
+            }
+            const data = await response.json() as { secret?: string; expires?: number };
+            if (!data.secret) {
+              throw { statusCode: 500, message: 'Stripe SPT refresh returned no secret' };
+            }
+            return data;
+          },
+          {
+            label: 'connectionTokenService.stripe_agent.refresh',
+            maxAttempts: 3,
+            isRetryable: (err: unknown) => {
+              const e = err as { statusCode?: number };
+              return typeof e.statusCode === 'number' && e.statusCode >= 500;
+            },
+            correlationId: connectedAccountId,
+            runId: 'spt_refresh',
+          },
+        );
+        return {
+          accessToken: result.secret!,
+          // refreshToken is the connected account ID — stable, pass it back unchanged
+          refreshToken: connectedAccountId,
+          expiresInSeconds: result.expires
+            ? Math.max(0, result.expires - Math.floor(Date.now() / 1000))
+            : 3600,
+        };
       }
 
       default:

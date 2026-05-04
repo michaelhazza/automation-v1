@@ -285,6 +285,39 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'payload-key' as const, // pageId + action
   },
 
+  // ── Agentic Commerce — IEE worker round-trip (Chunk 11) ─────────────
+  // Three queues: request (worker→main), response (main→worker), completion (worker→main).
+  // agent-spend-request: worker emits; main app processes via proposeCharge.
+  //   payload-key: correlationId is the per-request dedup token.
+  // agent-spend-response: main app emits; worker picks up by correlationId.
+  //   Consumed by worker — no main-app handler. payload-key: correlationId.
+  // agent-spend-completion: worker emits after merchant form-fill; main app processes.
+  //   one-shot: one completion per executed row (idempotent via trigger + WHERE status='executed').
+  'agent-spend-request': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 45, // Must be processed within 30s deadline + margin
+    deadLetter: 'agent-spend-request__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-response': {
+    retryLimit: 1,
+    retryDelay: 2,
+    retryBackoff: false,
+    expireInSeconds: 35, // Response must reach worker within 30s window
+    deadLetter: 'agent-spend-response__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-completion': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120, // Completion is async from the 30s round-trip
+    deadLetter: 'agent-spend-completion__dlq',
+    idempotencyStrategy: 'one-shot' as const, // one per executed row
+  },
+
   // ── IEE — Integrated Execution Environment (rev 6) ──────────────
   // Spec refs: §3.1, §3.4, §11.5.5, §13.2 (reservation interplay).
   // expireInSeconds is the hard pg-boss ceiling. The worker enforces a
@@ -366,6 +399,19 @@ export const JOB_CONFIG = {
     expireInSeconds: 14400,
     deadLetter: 'skill-analyzer__dlq',
     idempotencyStrategy: 'one-shot' as const,
+  },
+
+  // ── Workflows V1 — gate stall notifications (spec §5.3) ─────────
+  // Three delayed jobs per gate (24h, 72h, 7d). singletonKey deduplicates
+  // re-enqueues for the same gate+cadence. stale-fire guard in the handler
+  // provides durable safety even if cancel races.
+  'workflow-gate-stall-notify': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'workflow-gate-stall-notify__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-{gateId}-{cadence}
   },
 
   // ── Workflows engine (multi-step automation, migration 0076) ────
