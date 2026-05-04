@@ -455,12 +455,32 @@ export default function OnboardingWizardPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedCount, setSelectedCount] = useState(0);
+  // SPT onboarding gate: true when org has spending budgets but no stripe_agent connection.
+  const [needsSptOnboarding, setNeedsSptOnboarding] = useState(false);
 
   useEffect(() => {
     api.get('/api/onboarding/status')
       .then(({ data }) => setStatus(data))
       .catch(() => setStatus({ needsOnboarding: true, ghlConnected: false, agentsProvisioned: false, firstRunComplete: false }))
       .finally(() => setLoading(false));
+  }, []);
+
+  // Check if org has spending budgets but no stripe_agent connection.
+  // Non-blocking — failure falls through and skips the SPT step.
+  useEffect(() => {
+    Promise.all([
+      api.get('/api/spending-budgets').catch(() => null),
+      api.get('/api/org/connections?provider=stripe_agent').catch(() => null),
+    ]).then(([budgetsRes, connectionsRes]) => {
+      const budgets = budgetsRes?.data;
+      const connections = connectionsRes?.data;
+      const hasBudgets = Array.isArray(budgets) && budgets.length > 0;
+      const hasStripeAgent = Array.isArray(connections) &&
+        connections.some((c: { providerType: string; connectionStatus: string }) =>
+          c.providerType === 'stripe_agent' && c.connectionStatus === 'active',
+        );
+      setNeedsSptOnboarding(hasBudgets && !hasStripeAgent);
+    }).catch(() => {});
   }, []);
 
   // Handle GHL OAuth callback errors
@@ -525,7 +545,7 @@ export default function OnboardingWizardPage() {
           {currentStep === 2 && (
             <Step3Sync onComplete={handleSyncComplete} totalAccounts={selectedCount} />
           )}
-          {currentStep === 3 && (
+          {currentStep === 3 && !needsSptOnboarding && (
             <div className="text-center">
               <p className="text-slate-600 text-[14px] mb-4">Setup complete. Redirecting to your dashboard...</p>
               <button
@@ -543,6 +563,34 @@ export default function OnboardingWizardPage() {
               >
                 View dashboard →
               </button>
+            </div>
+          )}
+          {currentStep === 3 && needsSptOnboarding && (
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center mx-auto mb-4">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                  <line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mb-2">Connect Stripe to enable agent payments</h2>
+              <p className="text-slate-500 text-[13.5px] mb-6 max-w-xs mx-auto leading-relaxed">
+                Your org has spending budgets configured. Connect Stripe so agents can make payments within your limits.
+              </p>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={() => navigate('/onboarding/connect-stripe')}
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[14px] font-semibold rounded-xl transition-colors"
+                >
+                  Connect Stripe →
+                </button>
+                <button
+                  onClick={() => setNeedsSptOnboarding(false)}
+                  className="text-[13px] text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer"
+                >
+                  Skip for now
+                </button>
+              </div>
             </div>
           )}
         </div>

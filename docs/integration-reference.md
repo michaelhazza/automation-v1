@@ -73,6 +73,12 @@ read_capabilities:
   - slug: organisation.config.history
     aliases: [pulse_config_history, config_audit_trail]
     description: Browse the config_history audit trail for ClientPulse operational_config changes
+  - slug: charge_list
+    aliases: [charges_read, list_charges, agent_charges_list]
+    description: List agent_charges ledger rows (settled + in-flight) for the authed org
+  - slug: charge_status
+    aliases: [charge_read, get_charge, charge_detail]
+    description: Read a single agent_charges ledger row by id (status + state-machine snapshot)
 
 write_capabilities:
   - slug: send_email
@@ -120,6 +126,18 @@ write_capabilities:
   - slug: create_task
     aliases: [task_create, add_task, assign_task]
     description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
+  - slug: charge_create
+    aliases: [create_charge, agent_charge_create, charge_propose]
+    description: Propose an agent-driven charge through the charge router (gated by Spending Budget + Spending Policy; honours kill switch and shadow mode)
+  - slug: charge_refund
+    aliases: [refund_charge, agent_charge_refund, issue_refund_capability]
+    description: Issue a refund against a previously-succeeded agent charge (full or partial; subject to policy gating)
+  - slug: subscription_create
+    aliases: [create_subscription, agent_subscription_create, recurring_charge_create]
+    description: Create a recurring agent-driven charge (subscription / scheduled top-up) through the charge router
+  - slug: balance_topup
+    aliases: [topup_balance, agent_balance_topup, prepaid_topup]
+    description: Top up a prepaid balance (e.g. ad-spend account) via an agent-driven charge
 
 skills:
   - slug: classify_email
@@ -152,6 +170,21 @@ skills:
   - slug: crm.create_task
     aliases: [crm_create_task_skill, client_task_skill]
     description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
+  - slug: pay_invoice
+    aliases: [invoice_pay_skill, pay_invoice_skill]
+    description: Agent-driven invoice payment via the charge router (Stripe SPT path; main-app execution; spec §9.x)
+  - slug: purchase_resource
+    aliases: [resource_purchase_skill, agent_purchase_skill]
+    description: Agent-driven purchase via the worker-hosted-form path (Stripe SPT delivered to IEE worker; spec §9.x)
+  - slug: subscribe_to_service
+    aliases: [subscription_create_skill, agent_subscribe_skill]
+    description: Agent-driven recurring subscription creation via the charge router (Stripe SPT; recurring agent_charges rows)
+  - slug: top_up_balance
+    aliases: [balance_topup_skill, agent_topup_skill]
+    description: Agent-driven prepaid balance top-up via the charge router (Stripe SPT; ad-spend / messaging credit / similar)
+  - slug: issue_refund
+    aliases: [refund_issue_skill, agent_refund_skill]
+    description: Agent-driven refund issuance against a previously-succeeded agent charge (Stripe SPT; respects refund-policy gating)
 
 primitives:
   - slug: scheduled_run
@@ -175,6 +208,15 @@ primitives:
   - slug: config_history
     aliases: [audit_log, config_audit]
     description: Append-only audit log for config entity changes (version + snapshot + change_source)
+  - slug: spt_vault
+    aliases: [stripe_spt_vault, programmable_token_vault]
+    description: Stripe Programmable Token (SPT) storage primitive — short-lived, scoped, revocable per-sub-account credentials for agent-driven money movement
+  - slug: charge_router
+    aliases: [agent_charge_router, charge_routing]
+    description: Policy gate + state-machine + idempotency + advisory-lock-held capacity reads for agent-driven charges (spec §7)
+  - slug: spend_ledger
+    aliases: [agent_charge_ledger, agent_spend_ledger]
+    description: Append-only agent_charges ledger primitive — every spend attempt with full policy decision trace, idempotency key, and status lifecycle (DB-trigger-enforced append-only)
 ```
 
 ---
@@ -392,6 +434,65 @@ client_specific_patterns:
   - Tier/plan naming tied to one merchant
 implemented_since: "2026-03-15"
 last_verified: "2026-04-17"
+owner: platform-team
+```
+
+### Stripe Agent (write-capable spend integration)
+
+```yaml integration
+slug: stripe_agent
+name: Stripe Agent
+provider_type: oauth
+status: partial
+visibility: public
+read_capabilities:
+  - charge_list
+  - charge_status
+write_capabilities:
+  - charge_create
+  - charge_refund
+  - subscription_create
+  - balance_topup
+skills_enabled:
+  - pay_invoice
+  - purchase_resource
+  - subscribe_to_service
+  - top_up_balance
+  - issue_refund
+primitives_required:
+  - oauth_connection
+  - webhook_receiver
+  - spt_vault
+  - charge_router
+  - spend_ledger
+auth_method: oauth2
+required_scopes:
+  - spt_issue
+  - charge_create
+  - charge_refund
+setup_steps_summary: Per-sub-account Stripe Programmable Tokens (SPT) connection for agent-driven money movement. SPT is short-lived, scoped, and revocable; renewals are automatic. Distinct from the read-only Stripe reporting integration.
+setup_doc_link: null
+typical_use_cases:
+  - Agent pays vendor invoices on a client's behalf
+  - Agent completes a one-shot purchase against a vendor's hosted checkout
+  - Agent activates a vendor subscription
+  - Agent tops up a prepaid balance or credits account
+  - Agent issues a refund against a prior charge
+broadly_useful_patterns:
+  - Per-sub-account spending budgets with hard ceilings and kill switch
+  - Shadow-mode policy rollout with explicit promotion approval
+  - Per-charge approval gates above operator-defined thresholds
+  - Append-only spend ledger with database-level lifecycle guards
+  - Idempotency at the charge-key layer prevents double-billing under retries
+client_specific_patterns:
+  - Allowlist of approved merchants per spending policy
+  - Per-currency policy rules (one currency per policy)
+known_gaps:
+  - Multi-currency-within-a-policy not supported (out of scope)
+  - Automatic FX not supported (out of scope)
+  - Customer-facing SPT issuance not supported (out of scope)
+implemented_since: "2026-05-04"
+last_verified: "2026-05-04"
 owner: platform-team
 ```
 

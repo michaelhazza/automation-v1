@@ -162,6 +162,15 @@ export function buildPermissionMask(input: BuildMaskInput): PermissionMask {
         editHref: null,
       };
 
+    case 'spend_ledger':
+      return {
+        canView: superUser || user.orgPermissions.has('org.agents.view'),
+        canEdit: false,
+        canViewPayload: baseCanViewPayload,
+        viewHref: null,
+        editHref: null,
+      };
+
     default: {
       const _unused: never = entityType;
       return EMPTY_MASK;

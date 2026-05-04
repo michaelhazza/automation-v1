@@ -2,53 +2,36 @@ import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
 import {
   workspaceLimits,
-  orgBudgets,
-  budgetReservations,
+  orgComputeBudgets,
+  computeReservations,
   costAggregates,
   subaccountAgents,
 } from '../db/schema/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+import {
+  ComputeBudgetContext,
+  ComputeBudgetExceededError,
+  projectCostCents,
+  compareToLimit,
+} from './computeBudgetServicePure.js';
+
+export { ComputeBudgetContext, ComputeBudgetExceededError, isComputeBudgetExceededError } from './computeBudgetServicePure.js';
 
 // Transaction-aware db handle: either the root db or a transaction context
 type TxOrDb = DB | Parameters<Parameters<DB['transaction']>[0]>[0];
 
 // ---------------------------------------------------------------------------
-// Budget enforcement hierarchy (checked in order, most granular first):
+// Compute Budget enforcement hierarchy (checked in order, most granular first):
 // 1. Agent max LLM calls per run   → subaccountAgents.maxLlmCallsPerRun
 // 2. Agent cost cap per run        → subaccountAgents.maxCostPerRunCents
 // 3. Run cost cap                  → workspaceLimits.maxCostPerRunCents
 // 4. Run LLM call count cap        → workspaceLimits.maxLlmCallsPerRun
 // 5. Daily subaccount cost cap     → workspaceLimits.dailyCostLimitCents
 // 6. Monthly subaccount cost cap   → workspaceLimits.monthlyCostLimitCents
-// 7. Monthly org cost cap          → orgBudgets.monthlyCostLimitCents
+// 7. Monthly org compute cap       → orgComputeBudgets.monthlyComputeLimitCents
 // 8. Global platform safety cap    → env.PLATFORM_MONTHLY_COST_LIMIT_CENTS
 // ---------------------------------------------------------------------------
-
-export interface BudgetContext {
-  organisationId:   string;
-  subaccountId?:    string;
-  runId?:           string;
-  subaccountAgentId?: string;
-  // Rev §6 — sourceType lets the service recognise non-billable system work
-  // ('system', 'analyzer') and skip reservation entirely. See checkAndReserve()
-  // and spec §7.2.
-  sourceType?:      string;
-  billingDay:       string;   // 'YYYY-MM-DD'
-  billingMonth:     string;   // 'YYYY-MM'
-}
-
-export class BudgetExceededError extends Error {
-  constructor(
-    public readonly limitType: string,
-    public readonly limitCents: number,
-    public readonly projectedCents: number,
-    public readonly entityId: string,
-  ) {
-    super(`Budget exceeded: ${limitType} limit ${limitCents}¢ < projected ${projectedCents}¢`);
-    this.name = 'BudgetExceededError';
-  }
-}
 
 export class RateLimitError extends Error {
   constructor(public readonly limitType: string, public readonly windowKey: string) {
@@ -68,14 +51,14 @@ async function getActiveReservationTotal(
 ): Promise<number> {
   const result = await conn
     .select({
-      total: sql<number>`COALESCE(SUM(COALESCE(${budgetReservations.actualCostCents}, ${budgetReservations.estimatedCostCents})), 0)`,
+      total: sql<number>`COALESCE(SUM(COALESCE(${computeReservations.actualCostCents}, ${computeReservations.estimatedCostCents})), 0)`,
     })
-    .from(budgetReservations)
+    .from(computeReservations)
     .where(
       and(
-        eq(budgetReservations.entityType, entityType),
-        eq(budgetReservations.entityId, entityId),
-        eq(budgetReservations.status, 'active'),
+        eq(computeReservations.entityType, entityType),
+        eq(computeReservations.entityId, entityId),
+        eq(computeReservations.status, 'active'),
       ),
     );
   return Number(result[0]?.total ?? 0);
@@ -130,7 +113,7 @@ async function getRunCallCount(runId: string, conn: TxOrDb = db): Promise<number
 // ---------------------------------------------------------------------------
 
 async function checkRateLimits(
-  ctx: BudgetContext,
+  ctx: ComputeBudgetContext,
   limits: Awaited<ReturnType<typeof getWorkspaceLimits>>,
   conn: TxOrDb = db,
 ): Promise<void> {
@@ -202,37 +185,33 @@ async function getSubaccountAgentLimits(subaccountAgentId: string | undefined, c
 }
 
 // ---------------------------------------------------------------------------
-// Load org budget
+// Load org compute budget
 // ---------------------------------------------------------------------------
 
-async function getOrgBudget(organisationId: string, conn: TxOrDb = db) {
+async function getOrgComputeBudget(organisationId: string, conn: TxOrDb = db) {
   const [row] = await conn
     .select()
-    .from(orgBudgets)
-    .where(eq(orgBudgets.organisationId, organisationId));
+    .from(orgComputeBudgets)
+    .where(eq(orgComputeBudgets.organisationId, organisationId));
   return row ?? null;
 }
 
 // ---------------------------------------------------------------------------
-// Acquire org-level budget lock via SELECT ... FOR UPDATE
+// Acquire org-level compute budget lock via SELECT ... FOR UPDATE
 // This serializes all budget checks for the same organisation within the tx.
-// If no org_budgets row exists, we use a PostgreSQL advisory lock instead.
+// If no org_compute_budgets row exists, we use a PostgreSQL advisory lock.
 // ---------------------------------------------------------------------------
 
-async function acquireOrgBudgetLock(
+async function acquireOrgComputeBudgetLock(
   tx: TxOrDb,
   organisationId: string,
 ): Promise<void> {
-  // Try to lock the org_budgets row. This serializes concurrent budget checks.
   const locked = await tx
-    .select({ id: orgBudgets.id })
-    .from(orgBudgets)
-    .where(eq(orgBudgets.organisationId, organisationId))
+    .select({ id: orgComputeBudgets.id })
+    .from(orgComputeBudgets)
+    .where(eq(orgComputeBudgets.organisationId, organisationId))
     .for('update');
 
-  // If no org_budgets row exists, fall back to an advisory lock keyed on the
-  // organisation UUID. This ensures serialization even for orgs without an
-  // explicit budget row.
   if (locked.length === 0) {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${organisationId}))`,
@@ -241,34 +220,28 @@ async function acquireOrgBudgetLock(
 }
 
 // ---------------------------------------------------------------------------
-// Main: check all budget limits and create reservation
+// Main: check all compute budget limits and create reservation
 // ---------------------------------------------------------------------------
 
 export async function checkAndReserve(
-  ctx:                  BudgetContext,
+  ctx:                  ComputeBudgetContext,
   estimatedCostCents:   number,
   idempotencyKey:       string,
 ): Promise<string | null> {
-  // Rev §6 — system-level work (sourceType='system' | 'analyzer') has no
-  // billing line and no budget math to unwind. Skip reservation entirely
-  // and return null; the router tolerates null on both the success and the
-  // error release path. See spec §7.2.
+  // System-level work (sourceType='system' | 'analyzer') has no billing line
+  // and no compute budget math to unwind. Skip reservation entirely and return
+  // null; the router tolerates null on both the success and error release path.
   if (ctx.sourceType === 'system' || ctx.sourceType === 'analyzer') {
     return null;
   }
 
-  // Wrap the entire check-and-reserve flow in a serializable transaction.
-  // acquireOrgBudgetLock() uses SELECT ... FOR UPDATE on the org_budgets row
-  // (or pg_advisory_xact_lock for orgs without one) to serialize concurrent
-  // budget checks for the same organisation, eliminating the race condition
-  // where two requests both pass budget checks before either reserves.
   return await db.transaction(async (tx) => {
     // ── 0. Acquire org-level lock to serialize concurrent budget checks ────
-    await acquireOrgBudgetLock(tx, ctx.organisationId);
+    await acquireOrgComputeBudgetLock(tx, ctx.organisationId);
 
-    const [wsLimits, orgBudget] = await Promise.all([
+    const [wsLimits, orgComputeBudget] = await Promise.all([
       getWorkspaceLimits(ctx.subaccountId, tx),
-      getOrgBudget(ctx.organisationId, tx),
+      getOrgComputeBudget(ctx.organisationId, tx),
     ]);
 
     const subaccountAgentLimits = await getSubaccountAgentLimits(ctx.subaccountAgentId, tx);
@@ -286,32 +259,32 @@ export async function checkAndReserve(
       // Agent-level call cap
       if (subaccountAgentLimits?.maxLlmCallsPerRun) {
         if (runCallCount >= subaccountAgentLimits.maxLlmCallsPerRun) {
-          throw new BudgetExceededError('agent_llm_calls_per_run', subaccountAgentLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+          throw new ComputeBudgetExceededError('agent_llm_calls_per_run', subaccountAgentLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
         }
       }
 
       // Workspace-level call cap
       if (wsLimits?.maxLlmCallsPerRun) {
         if (runCallCount >= wsLimits.maxLlmCallsPerRun) {
-          throw new BudgetExceededError('llm_calls_per_run', wsLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+          throw new ComputeBudgetExceededError('llm_calls_per_run', wsLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
         }
       }
 
       // Agent cost cap per run
       if (subaccountAgentLimits?.maxCostPerRunCents) {
         const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId, tx);
-        const projected = runSpend + runReservations + estimatedCostCents;
-        if (projected > subaccountAgentLimits.maxCostPerRunCents) {
-          throw new BudgetExceededError('agent_cost_per_run', subaccountAgentLimits.maxCostPerRunCents, projected, ctx.runId);
+        const projected = projectCostCents(runSpend + runReservations, estimatedCostCents);
+        if (compareToLimit(projected, subaccountAgentLimits.maxCostPerRunCents) === 'exceeded') {
+          throw new ComputeBudgetExceededError('agent_cost_per_run', subaccountAgentLimits.maxCostPerRunCents, projected, ctx.runId);
         }
       }
 
       // Workspace run cost cap
       if (wsLimits?.maxCostPerRunCents) {
         const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId, tx);
-        const projected = runSpend + runReservations + estimatedCostCents;
-        if (projected > wsLimits.maxCostPerRunCents) {
-          throw new BudgetExceededError('run_cost', wsLimits.maxCostPerRunCents, projected, ctx.runId);
+        const projected = projectCostCents(runSpend + runReservations, estimatedCostCents);
+        if (compareToLimit(projected, wsLimits.maxCostPerRunCents) === 'exceeded') {
+          throw new ComputeBudgetExceededError('run_cost', wsLimits.maxCostPerRunCents, projected, ctx.runId);
         }
       }
     }
@@ -325,29 +298,29 @@ export async function checkAndReserve(
       ]);
 
       if (wsLimits?.dailyCostLimitCents) {
-        const projected = dailySpend + subaccountReservations + estimatedCostCents;
-        if (projected > wsLimits.dailyCostLimitCents) {
-          throw new BudgetExceededError('daily_subaccount', wsLimits.dailyCostLimitCents, projected, ctx.subaccountId);
+        const projected = projectCostCents(dailySpend + subaccountReservations, estimatedCostCents);
+        if (compareToLimit(projected, wsLimits.dailyCostLimitCents) === 'exceeded') {
+          throw new ComputeBudgetExceededError('daily_subaccount', wsLimits.dailyCostLimitCents, projected, ctx.subaccountId);
         }
       }
 
       if (wsLimits?.monthlyCostLimitCents) {
-        const projected = monthlySpend + subaccountReservations + estimatedCostCents;
-        if (projected > wsLimits.monthlyCostLimitCents) {
-          throw new BudgetExceededError('monthly_subaccount', wsLimits.monthlyCostLimitCents, projected, ctx.subaccountId);
+        const projected = projectCostCents(monthlySpend + subaccountReservations, estimatedCostCents);
+        if (compareToLimit(projected, wsLimits.monthlyCostLimitCents) === 'exceeded') {
+          throw new ComputeBudgetExceededError('monthly_subaccount', wsLimits.monthlyCostLimitCents, projected, ctx.subaccountId);
         }
       }
     }
 
-    // ── Org monthly cap ──────────────────────────────────────────────────────
-    if (orgBudget?.monthlyCostLimitCents) {
+    // ── Org monthly compute cap ──────────────────────────────────────────────
+    if (orgComputeBudget?.monthlyComputeLimitCents) {
       const [orgMonthlySpend, orgReservations] = await Promise.all([
         getCurrentSpend('organisation', ctx.organisationId, 'monthly', ctx.billingMonth, tx),
         getActiveReservationTotal('organisation', ctx.organisationId, tx),
       ]);
-      const projected = orgMonthlySpend + orgReservations + estimatedCostCents;
-      if (projected > orgBudget.monthlyCostLimitCents) {
-        throw new BudgetExceededError('monthly_org', orgBudget.monthlyCostLimitCents, projected, ctx.organisationId);
+      const projected = projectCostCents(orgMonthlySpend + orgReservations, estimatedCostCents);
+      if (compareToLimit(projected, orgComputeBudget.monthlyComputeLimitCents) === 'exceeded') {
+        throw new ComputeBudgetExceededError('monthly_org', orgComputeBudget.monthlyComputeLimitCents, projected, ctx.organisationId);
       }
     }
 
@@ -358,9 +331,9 @@ export async function checkAndReserve(
         getCurrentSpend('platform', 'global', 'monthly', ctx.billingMonth, tx),
         getActiveReservationTotal('platform', 'global', tx),
       ]);
-      const projected = platformSpend + platformReservations + estimatedCostCents;
-      if (projected > globalCap) {
-        throw new BudgetExceededError('global_platform', globalCap, projected, 'global');
+      const projected = projectCostCents(platformSpend + platformReservations, estimatedCostCents);
+      if (compareToLimit(projected, globalCap) === 'exceeded') {
+        throw new ComputeBudgetExceededError('global_platform', globalCap, projected, 'global');
       }
     }
 
@@ -369,7 +342,7 @@ export async function checkAndReserve(
 
     const insertedAt = new Date();
     const [reservation] = await tx
-      .insert(budgetReservations)
+      .insert(computeReservations)
       .values({
         idempotencyKey,
         entityType: ctx.subaccountId ? 'subaccount' : 'organisation',
@@ -380,17 +353,15 @@ export async function checkAndReserve(
       })
       // H-1: idempotency_key is UNIQUE. On conflict we perform a no-op UPDATE so
       // that RETURNING always yields the winning row (new or pre-existing).
-      // This guarantees true exactly-once semantics: the caller always gets a
-      // valid reservation ID regardless of concurrent duplicate submissions.
       .onConflictDoUpdate({
-        target: budgetReservations.idempotencyKey,
+        target: computeReservations.idempotencyKey,
         set: { idempotencyKey: sql`EXCLUDED.idempotency_key` },
       })
       .returning();
 
     if (reservation.createdAt < insertedAt) {
       console.warn(JSON.stringify({
-        event: 'budget:idempotency_conflict',
+        event: 'compute_budget:idempotency_conflict',
         idempotencyKey,
         reservationId: reservation.id,
       }));
@@ -401,7 +372,7 @@ export async function checkAndReserve(
 }
 
 // ---------------------------------------------------------------------------
-// Commit reservation with actual cost (releases delta back to budget)
+// Commit reservation with actual cost (releases delta back to compute budget)
 // ---------------------------------------------------------------------------
 
 export async function commitReservation(
@@ -412,9 +383,9 @@ export async function commitReservation(
   // checkAndReserve) so there's nothing to commit.
   if (reservationId === null) return;
   await db
-    .update(budgetReservations)
+    .update(computeReservations)
     .set({ status: 'committed', actualCostCents })
-    .where(eq(budgetReservations.id, reservationId));
+    .where(eq(computeReservations.id, reservationId));
 }
 
 // ---------------------------------------------------------------------------
@@ -424,12 +395,12 @@ export async function commitReservation(
 export async function releaseReservation(reservationId: string | null): Promise<void> {
   if (reservationId === null) return;
   await db
-    .update(budgetReservations)
+    .update(computeReservations)
     .set({ status: 'released' })
-    .where(eq(budgetReservations.id, reservationId));
+    .where(eq(computeReservations.id, reservationId));
 }
 
-export const budgetService = {
+export const computeBudgetService = {
   checkAndReserve,
   commitReservation,
   releaseReservation,
