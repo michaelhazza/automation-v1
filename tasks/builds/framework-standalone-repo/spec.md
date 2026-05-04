@@ -520,7 +520,7 @@ Flags:
 | `--doctor` | Diagnose state.json health: orphaned entries, missing target files, hash mismatches. Detects: (a) files where content ≠ lastAppliedHash (modified since last sync), (b) files where content ≠ lastAppliedHash AND no .framework-new sibling exists (unconfirmed merge resolution — merge was completed manually but sync was never re-run). Cannot reconstruct provenance (framework version, substitutions). No writes. |
 | `--force` | Skip the `.framework-new` startup check and proceed even if unresolved merges exist. |
 
-Implementation: TypeScript, ~300 lines. Standalone — no dependencies beyond Node stdlib (`fs/promises` + a small lexicographic glob expander).
+Implementation: JavaScript with JSDoc-annotated types (type-checked via `tsc --noEmit --allowJs --checkJs`), ~300 lines. Standalone — no dependencies beyond Node stdlib (`fs/promises` + a small lexicographic glob expander). Source ships as a single `.js` file so the consume-time invocation `node sync.js` works without a build step or runtime TypeScript loader.
 
 **Substitution engine rules (hard invariants)**
 
@@ -819,7 +819,7 @@ node .claude-framework/sync.js
 Stay on this branch (or a successor). Do not lift to a separate repo yet. Build:
 
 - `setup/portable/manifest.json` — file ownership declaration
-- `setup/portable/sync.js` — sync engine (~200 lines TypeScript)
+- `setup/portable/sync.js` — sync engine (~300 lines JavaScript with JSDoc types)
 - `setup/portable/SYNC.md` — upgrade walkthrough prompt
 - Update `setup/portable/ADAPT.md` to add Phase 6 (record adoption state)
 - Test cases: synthetic target repo, exercise adopt + sync + customisation detection + merge flow

@@ -67,3 +67,31 @@ The spec lives on `claude/evaluate-summonaikit-B89k3`. The implementation branch
 - Spec: `tasks/builds/framework-standalone-repo/spec.md`
 - Review log: `tasks/review-logs/chatgpt-spec-review-framework-standalone-repo-2026-05-04T00-52-24Z.md`
 - This handoff: `tasks/builds/framework-standalone-repo/handoff.md`
+
+---
+
+## Phase 2 (FEATURE COORDINATION) — complete
+
+**Captured:** 2026-05-04
+**Full handoff document:** `tasks/builds/framework-standalone-repo/handoff-phase2.md` (sibling file — authoritative artefact, kept full-length to preserve build narrative; this section is the entry-guard marker for `finalisation-coordinator`).
+
+**Branch-level review pass:**
+
+| Reviewer | Verdict |
+|---|---|
+| spec-conformance | CONFORMANT (54/54 requirements) |
+| pr-reviewer | CHANGES_REQUESTED → all blocking + chosen strong fixed in-branch |
+| adversarial-reviewer | HOLES_FOUND → 2 confirmed-holes + 2 worth-confirming fixed in-branch |
+| dual-reviewer | SKIPPED — Codex CLI unavailable (allowed per CLAUDE.md framework convention) |
+
+**REVIEW_GAP:** Codex CLI unavailable → `dual-reviewer` skipped silently. Phase 3 `chatgpt-pr-review` is the primary second-opinion pass.
+
+**Spec deviations** (both pre-approved at plan-review):
+1. `sync.js` is JS-with-JSDoc (~1413 lines), not "TypeScript ~300 lines." Plan §1.1: no build step in framework repo.
+2. `lastSubstitutionHash` is an additive optional field on FrameworkState (plan §1.11) to enforce the substitution-drift invariant. Forward-migrates pre-2.2.0 state.json transparently.
+
+**G2 gates (integrated state):** lint 0 errors / typecheck clean / 113 targeted tests pass. Test gates run by CI per policy.
+
+**Tier 2 deferred** to `tasks/todo.md` under two new sections — pr-reviewer S4/S5/N2-N7 + adversarial symlink-follow / shell-metacharacter / `--force` UX / state schema validation.
+
+**Changed-file count:** ~24 files in working tree at handoff (16 modified + 8 untracked) — committed in four-commit grouping per `handoff-phase2.md` lines 139–151. Final branch HEAD recorded after Phase 3 launch.
