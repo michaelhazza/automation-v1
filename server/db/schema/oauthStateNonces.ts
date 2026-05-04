@@ -14,6 +14,7 @@ export const oauthStateNonces = pgTable(
     organisationId: uuid('organisation_id').notNull(),
     expiresAt:      timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    pendingRunId:   uuid('pending_run_id'),
   },
   (table) => ({
     expiresIdx: index('idx_oauth_state_nonces_expires').on(table.expiresAt),

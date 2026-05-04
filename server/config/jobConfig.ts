@@ -533,6 +533,19 @@ export const JOB_CONFIG = {
     deadLetter: 'ghl:auto-start-onboarding__dlq',
     idempotencyStrategy: 'singleton-key' as const,
   },
+
+  // ── Pre-launch hardening C-P0-2 — OAuth resume restart ───────────
+  // Enqueued after a successful OAuth token exchange when a pendingRunId
+  // was stored on the state nonce. singletonKey on runId deduplicates
+  // within a 60s window so double-click / callback retry cannot double-resume.
+  'run:resumeAfterOAuth': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'run:resumeAfterOAuth__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

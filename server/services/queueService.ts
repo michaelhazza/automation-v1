@@ -1328,6 +1328,20 @@ export const queueService = {
         },
       });
 
+      // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
+      // Dequeued after a successful OAuth token exchange when a pendingRunId was
+      // stored on the state nonce. resolveOrgContext: null because
+      // WorkflowRunPauseStopService uses the module-level db handle.
+      await createWorker<import('../jobs/resumeRunAfterOAuthJob.js').ResumeRunAfterOAuthPayload>({
+        queue: 'run:resumeAfterOAuth',
+        boss: boss as any,
+        resolveOrgContext: () => null,
+        handler: async (job) => {
+          const { resumeRunAfterOAuthWorker } = await import('../jobs/resumeRunAfterOAuthJob.js');
+          await resumeRunAfterOAuthWorker(job.data);
+        },
+      });
+
       // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
       // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
       // emits WorkerSpendResponse on agent-spend-response by correlationId.
