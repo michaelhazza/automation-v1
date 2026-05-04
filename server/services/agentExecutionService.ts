@@ -893,18 +893,59 @@ export const agentExecutionService = {
       // (e.g., smart-board runs), the workspace-context string derived above
       // acts as the query text. Explicit attachments always pass through and
       // ensure zero regression for agents configured with pinned blocks.
+
+      // Derive agent domain early — needed for tier-2 block filtering (F1 §4)
+      // and for workspace memory retrieval below.
+      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
+
+      // Tier-1 baseline artefacts: pinned, hash-stable, always present when captured.
+      // Spec: docs/sub-account-baseline-artefacts-spec.md §4.
+      const tier1Blocks = await memoryBlockService.getTier1Blocks(
+        request.organisationId,
+        request.subaccountId ?? null,
+      );
+
       const memoryBlocksForPrompt = await memoryBlockService.getBlocksForInjection({
         agentId: request.agentId,
         subaccountId: request.subaccountId ?? null,
         organisationId: request.organisationId,
         taskContext: workspaceContext,
+        agentDomain,
       });
-      const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
+
+      // Prepend tier-1 ahead of the relevance/explicit set.
+      // Dedupe: if a tier-1 block also appears via explicit attachment, tier-1 entry wins.
+      const tier1BlockIds = new Set(tier1Blocks.map((b) => b.id));
+      const composedBlocks = [
+        ...tier1Blocks.map((b) => ({ ...b, permission: 'read' as const })),
+        ...memoryBlocksForPrompt.filter((b) => !tier1BlockIds.has(b.id)),
+      ];
+
+      // F1 §4 — emit one telemetry event per tier-1 and tier-2 baseline block injected.
+      for (const block of composedBlocks) {
+        const blockTier: 1 | 2 | null = tier1BlockIds.has(block.id)
+          ? 1
+          : (block as { tier?: 1 | 2 | null }).tier === 2
+          ? 2
+          : null;
+        if (blockTier === 1 || blockTier === 2) {
+          createEvent('baseline_artefact.tier_loaded', {
+            organisation_id: request.organisationId,
+            subaccount_id: request.subaccountId ?? null,
+            agent_role: agent.agentRole,
+            tier: blockTier,
+            block_slug: block.name,
+            token_count: approxTokens(block.content),
+          });
+        }
+      }
+
+      const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(composedBlocks);
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
       }
       // Phase 8 / W3c — log injected block IDs for provenance trail
-      const injectedBlockIds = memoryBlocksForPrompt.map((b) => b.id);
+      const injectedBlockIds = composedBlocks.map((b) => b.id);
       if (injectedBlockIds.length > 0) {
         void db
           .update(agentRuns)
@@ -1002,7 +1043,6 @@ export const agentExecutionService = {
         ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
         : undefined;
 
-      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
       let memory: string | null = null;
       // Phase 2 S12: track injected memory entries for the citation detector
       // hook at run completion.

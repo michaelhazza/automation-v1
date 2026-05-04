@@ -45,6 +45,7 @@ import {
   subaccountAgents,
   organisations,
   subaccounts,
+  memoryBlocks,
 } from '../db/schema/index.js';
 import type {
   WorkflowRun,
@@ -83,6 +84,13 @@ import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types
 import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import {
+  isBaselineSlug,
+  tierFor,
+  domainsFor,
+} from '../../shared/constants/baselineArtefacts.js';
+import type { BaselineSlug } from '../../shared/constants/baselineArtefacts.js';
+import { subaccountOnboardingService } from './subaccountOnboardingService.js';
 import { taskService } from './taskService.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
@@ -347,6 +355,25 @@ async function finaliseRunKnowledgeBindings(
 
     const serialised = serialiseForBlock(value);
 
+    // F1 §3 — inject tier + appliesToDomains for baseline-artefacts-capture
+    // bindings so the created block is classified and domain-scoped correctly.
+    // Only Tier-1 and Tier-2 slugs produce memory blocks; Tier-3 goes to
+    // workspace memory via markArtefactCaptured.
+    const baselineTierFields: {
+      tier?: 1 | 2;
+      appliesToDomains?: string[] | null;
+      autoAttach?: boolean;
+    } = {};
+    if (slug === 'baseline-artefacts-capture' && isBaselineSlug(binding.blockLabel)) {
+      const blockTier = tierFor(binding.blockLabel);
+      if (blockTier === 1 || blockTier === 2) {
+        baselineTierFields.tier = blockTier;
+        const domains = domainsFor(binding.blockLabel);
+        baselineTierFields.appliesToDomains = domains.length > 0 ? [...domains] : null;
+        baselineTierFields.autoAttach = true;
+      }
+    }
+
     try {
       const result = await upsertFromWorkflow({
         organisationId: run.organisationId,
@@ -358,6 +385,7 @@ async function finaliseRunKnowledgeBindings(
         workflowSlug: slug,
         actorAgentId,
         confidence: binding.firstRunOnly ? 'low' : 'normal',
+        ...baselineTierFields,
       });
 
       switch (result.kind) {
@@ -426,6 +454,91 @@ async function finaliseRunKnowledgeBindings(
         stepId: binding.stepId,
         blockLabel: binding.blockLabel,
         error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/**
+ * F1 §3 — per-step completion hook for `baseline-artefacts-capture`.
+ *
+ * For each completed or skipped step whose id maps to a baseline slug:
+ *   - completed + tier 1/2: look up the just-written memory block by name
+ *     and call markArtefactCaptured with its id.
+ *   - completed + tier 3: use the step's outputJson as tier3Payload.
+ *   - skipped: call markArtefactSkipped (tier-3 only; tier-1/2 cannot skip).
+ *
+ * Throws propagate to the caller — errors here are not swallowed.
+ */
+async function finaliseBaselineArtefactCapture(
+  runId: string,
+  subaccountId: string,
+  organisationId: string,
+  userId: string,
+  liveStepRuns: WorkflowStepRun[],
+): Promise<void> {
+  const BASELINE_STEP_IDS = [
+    'brand_identity',
+    'voice_tone',
+    'offer_positioning',
+    'audience_icp',
+    'operating_constraints',
+    'proof_library',
+  ] as const;
+
+  for (const stepShortId of BASELINE_STEP_IDS) {
+    const fullSlug = `baseline.${stepShortId}` as BaselineSlug;
+    const sr = liveStepRuns.find((r) => r.stepId === stepShortId);
+    if (!sr) continue;
+
+    const tier = tierFor(fullSlug);
+
+    if (sr.status === 'completed') {
+      if (tier === 1 || tier === 2) {
+        const blockLabel = fullSlug;
+        const [block] = await db
+          .select({ id: memoryBlocks.id })
+          .from(memoryBlocks)
+          .where(
+            and(
+              eq(memoryBlocks.organisationId, organisationId),
+              eq(memoryBlocks.subaccountId, subaccountId),
+              eq(memoryBlocks.name, blockLabel),
+              isNull(memoryBlocks.deletedAt),
+            ),
+          );
+        if (!block) {
+          logger.warn('baseline_artefact_block_missing_at_finalise', {
+            runId,
+            slug: fullSlug,
+            subaccountId,
+          });
+          continue;
+        }
+        await subaccountOnboardingService.markArtefactCaptured({
+          organisationId,
+          subaccountId,
+          slug: fullSlug,
+          userId,
+          memoryBlockId: block.id,
+        });
+      } else {
+        // tier === 3
+        await subaccountOnboardingService.markArtefactCaptured({
+          organisationId,
+          subaccountId,
+          slug: fullSlug,
+          userId,
+          tier3Payload: (sr.outputJson ?? {}) as Record<string, unknown>,
+        });
+      }
+    } else if (sr.status === 'skipped' && tier === 3) {
+      await subaccountOnboardingService.markArtefactSkipped({
+        organisationId,
+        subaccountId,
+        slug: fullSlug,
+        userId,
+        reason: 'defer_for_later',
       });
     }
   }
@@ -863,6 +976,22 @@ export const WorkflowEngineService = {
             runId,
             error: err instanceof Error ? err.message : String(err),
           });
+        }
+
+        // F1 §3 — per-step artefact status update for baseline-artefacts-capture.
+        // Errors propagate (not swallowed) per chunk spec.
+        if (
+          run.workflowSlug === 'baseline-artefacts-capture' &&
+          run.subaccountId !== null &&
+          run.startedByUserId !== null
+        ) {
+          await finaliseBaselineArtefactCapture(
+            runId,
+            run.subaccountId,
+            run.organisationId,
+            run.startedByUserId,
+            liveStepRuns,
+          );
         }
 
         const completedAt = new Date();

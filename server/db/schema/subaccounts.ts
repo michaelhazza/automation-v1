@@ -78,6 +78,13 @@ export const subaccounts = pgTable(
     // unless the operator explicitly opts out via admin SQL or Configuration Assistant.
     optimiserEnabled: boolean('optimiser_enabled').notNull().default(true),
 
+    // ── F1 baseline artefacts capture status (migration 0277, spec §3) ──
+    // Tracks per-artefact completion state across three tiers. Null until
+    // first onboarding wizard visit; default set by migration for existing rows.
+    baselineArtefactsStatus: jsonb('baseline_artefacts_status').default(
+      sql`'{"version":1,"tier1":{"brand_identity":{"status":"not_started"},"voice_tone":{"status":"not_started"}},"tier2":{"offer_positioning":{"status":"not_started"},"audience_icp":{"status":"not_started"}},"tier3":{"operating_constraints":{"status":"not_started"},"proof_library":{"status":"not_started"}}}'::jsonb`
+    ),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

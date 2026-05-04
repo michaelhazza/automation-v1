@@ -74,16 +74,16 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Users | `users.ts` |
 | Subaccounts | `subaccounts.ts` |
 | Permission sets | `permissionSets.ts` |
-| Processes | `processes.ts` |
+| Automations | `automations.ts` |
 | Executions | `executions.ts` |
 | Integration connections | `integrationConnections.ts` |
 | LLM usage | `llmUsage.ts` |
 | Web login connections (Reporting Agent) | `webLoginConnections.ts` |
 | Agent inbox | `agentInbox.ts` |
 | Goals | `goals.ts` |
-| Playbook runs | `playbookRuns.ts` |
-| Playbook templates | `playbookTemplates.ts` |
-| Playbook studio | `playbookStudio.ts` |
+| Workflow runs | `workflowRuns.ts` |
+| Workflow templates | `workflowTemplates.ts` |
+| Workflow studio | `workflowStudio.ts` |
 | Activity | `activity.ts` |
 | Pulse | `pulse.ts` |
 | Skill studio | `skillStudio.ts` |
@@ -1400,6 +1400,12 @@ Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple age
 
 `read_data_source` and `update_memory_block` are injected into every agent run via the universal skills list in `server/config/universalSkills.ts`. The Agent Coworker Features added two more universal skills: `search_agent_history` (cross-agent memory search) and `read_priority_feed` (prioritized work queue).
 
+### Baseline artefacts (migration 0277)
+
+`domain='baseline'` in `workspace_memory_entries` is a reserved keyword for F1 baseline artefacts (tier-3 operating constraints and proof library). Do not use this domain value for any other purpose.
+
+`memory_blocks.tier` (1=always-pinned, 2=domain-matched) and `memory_blocks.applies_to_domains` (TEXT[]) were added to support tiered injection. `subaccounts.baseline_artefacts_status` (JSONB, version-gated) tracks capture state for the six reserved-slug artefacts. See `shared/constants/baselineArtefacts.ts` for the slug registry and `shared/schemas/subaccount.ts` for the locked JSONB shape.
+
 ---
 
 <a id="agent-execution-middleware-pipeline"></a>
@@ -2465,10 +2471,10 @@ Pure tests live in `server/services/__tests__/skillAnalyzerServicePure*.test.ts`
 
 ---
 
-<a id="playbooks-multi-step-automation"></a>
-## Playbooks (Multi-Step Automation)
+<a id="workflows-multi-step-automation"></a>
+## Workflows (Multi-Step Automation)
 
-Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
+Workflows automate longer-form, multi-step operations (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Workflow is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
 
 ### Terminology
 
@@ -3399,6 +3405,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify Workflows V1 — workflow template service | `server/services/workflowTemplateService.ts` (create / publish / version-pin). Schema: `workflow_templates` + `workflow_template_versions`. Engine validator: `server/services/workflowEngineService.ts`. |
 | Modify Workflows V1 — draft service | `server/services/workflowDraftService.ts` (create / findById / markConsumed). Schema: `workflow_drafts` (FORCE RLS). Cleanup: `server/jobs/workflowDraftsCleanupJob.ts` (daily 03:00 UTC, reaps unconsumed rows older than 7 days). Cleanup MUST use `withAdminConnection` + `SET LOCAL ROLE admin_role` — bare `db` from a pg-boss handler runs without `app.organisation_id` and the FORCE RLS policy fail-closes (every DELETE affects 0 rows silently). |
 | Modify Workflows V1 — orchestrator job | `server/jobs/orchestratorFromTaskJob.ts` (cadence detection, recommendation card emission, draft creation). Cadence detection pure helper: `server/services/orchestratorCadenceDetectionPure.ts`. |
+| Modify sub-account baseline artefacts (F1) | `server/services/memoryBlockService.ts` (tier loaders: `getTier1Blocks`, `getBlocksForInjection`, `getBaselineVoiceTone`) + `server/workflows/baseline-artefacts-capture.workflow.ts` (capture workflow) + `shared/constants/baselineArtefacts.ts` (reserved-slug registry). Status JSONB shape: `shared/schemas/subaccount.ts::baselineArtefactsStatusSchema`. Status service: `server/services/subaccountOnboardingService.ts` (`markArtefactCaptured` / `markArtefactSkipped` / `markArtefactEdited` / `recordArtefactStarted`). Routes: `server/routes/subaccounts.ts` (`GET/POST .../baseline-artefacts-status`, `POST .../baseline-artefacts/started`, `POST .../baseline-artefacts/:slug/skip`, `PATCH .../baseline-artefacts/:slug`). UI: `OnboardingWizardPage.tsx` (step 4), `EditArtefactDrawer`, `BaselineArtefactsStatusBadge`, `SubaccountKnowledgePage`. |
 | Modify the CRM Query Planner | Spec: `tasks/builds/crm-query-planner/spec.md`. Orchestration: `server/services/crmQueryPlanner/crmQueryPlannerService.ts` (§3 / §19; wraps pipeline in `withPrincipalContext` per §16.4 when outer `withOrgTx` is active; `runLlmStage3` seam on `RunQueryDeps` for test stubbing). Pure layer: `normaliseIntentPure.ts`, `registryMatcherPure.ts`, `validatePlanPure.ts` (10-rule validator + three-case canonical-precedence — case b uses `isLiveOnlyField` from `liveExecutorPure.ts`), `planCachePure.ts`, `approvalCardGeneratorPure.ts`, `plannerCostPure.ts`, `resultNormaliserPure.ts`, `schemaContextPure.ts`, `llmPlannerPromptPure.ts`. Executors: `executors/canonicalExecutor.ts` (skip-unknown-capability rule §12.1 + debug `canonical.capability_skipped`), `executors/liveExecutor.ts` + `liveExecutorPure.ts` (rate-limiter keyed on real GHL `locationId` from `resolveGhlContext`, NOT `context.subaccountLocationId`), `executors/hybridExecutor.ts` + `hybridExecutorPure.ts` (row-count guard before live dispatch), `executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`. LLM fallback: `llmPlanner.ts` (single-escalation retry; passes `wasEscalated: true` + `escalationReason` on router context so `getPlannerMetrics.escalationRate` populates). Cache: `planCache.ts` (LRU with discriminated `{ hit, plan, entry } \| { hit: false, reason }` result). Events: `plannerEvents.ts` (forwards ONLY `planner.result_emitted` / `planner.error_emitted` to agent execution log — exactly one `skill.completed` per planner run). Budget classification: `isBudgetExceededError` helper discriminates `{statusCode: 402, code: 'BUDGET_EXCEEDED'}` vs `RATE_LIMITED`; `classifyStage3FallbackSubcategory` splits `parse_failure` / `rate_limited` / `planner_internal_error` / `validation_failed` on `errorSubcategory` (external `ambiguous_intent` unchanged). Route: `server/routes/crmQueryPlanner.ts` (authenticate → `resolveSubaccount` → `listAgentCapabilityMaps` union for `crm.query` gate). Skill surface: `'crm.query'` handler in `server/services/skillExecutor.ts` with `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort`. Observability: `getPlannerMetrics` in `server/services/systemPnlService.ts` + route in `server/routes/systemPnl.ts` + `SystemPnlPage.tsx` panel. Trace: `PlannerTrace` accumulator threaded through pipeline with top-level `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` + deep-frozen at terminal emission. CI guard: `scripts/verify-crm-query-planner-read-only.sh` (import-restriction enforcement; read-only is structural). |
 
 ---

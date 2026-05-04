@@ -19,8 +19,10 @@
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { memoryBlocks, memoryBlockAttachments, subaccountAgents } from '../db/schema/index.js';
+import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
+import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
+import { assertVersionGate } from '../../shared/schemas/subaccount.js';
 import {
   decideUpsert,
   MEMORY_BLOCKS_PER_RUN_MAX,
@@ -36,6 +38,7 @@ import {
   BLOCK_RELEVANCE_THRESHOLD,
   BLOCK_RELEVANCE_TOP_K,
   BLOCK_TOKEN_BUDGET,
+  MEMORY_BLOCK_TIER2_BOOST,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
 
@@ -221,6 +224,8 @@ export interface GetBlocksForInjectionParams {
   tokenBudget?: number;
   /** Pre-computed task context embedding. */
   embedding?: number[];
+  /** F1 §4 — agent domain for tier-2 baseline block selection. Use agentRoleToDomain(). */
+  agentDomain?: string;
 }
 
 /**
@@ -283,10 +288,45 @@ export async function getBlocksForInjection(
     embedding: params.embedding,
   });
 
+  // F1 §4 — Tier-2 baseline blocks: domain-scoped, active, scored just above
+  // the relevance threshold so they pass rankBlocksForInjection's filter.
+  const tier2BlockIds = new Set<string>();
+  let tier2Candidates: CandidateBlock[] = [];
+  if (params.agentDomain && params.subaccountId) {
+    const tier2Rows = await db
+      .select({
+        id: memoryBlocks.id,
+        name: memoryBlocks.name,
+        content: memoryBlocks.content,
+      })
+      .from(memoryBlocks)
+      .where(
+        and(
+          eq(memoryBlocks.organisationId, params.organisationId),
+          eq(memoryBlocks.subaccountId, params.subaccountId),
+          eq(memoryBlocks.tier, 2),
+          eq(memoryBlocks.status, ACTIVE_STATUS),
+          isNull(memoryBlocks.deletedAt),
+          sql`${memoryBlocks.appliesToDomains} @> ARRAY[${params.agentDomain}]::text[]`,
+        ),
+      );
+    tier2Candidates = tier2Rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      content: r.content,
+      score: BLOCK_RELEVANCE_THRESHOLD + MEMORY_BLOCK_TIER2_BOOST,
+      source: 'relevance' as const,
+      protected: false,
+    }));
+    for (const r of tier2Rows) {
+      tier2BlockIds.add(r.id);
+    }
+  }
+
   // Compose: rank combined set. Explicit blocks bypass eviction (handled in
   // the pure ranker by source='explicit'); relevance blocks share the budget.
   const ranked = rankBlocksForInjection(
-    [...explicitCandidates, ...relevantCandidates],
+    [...explicitCandidates, ...relevantCandidates, ...tier2Candidates],
     {
       threshold: BLOCK_RELEVANCE_THRESHOLD,
       topK: BLOCK_RELEVANCE_TOP_K,
@@ -301,9 +341,110 @@ export async function getBlocksForInjection(
     // Explicit blocks preserve their original permission; relevance blocks
     // are read-only by default (no mutation path outside explicit attachment).
     permission: permissionByBlockId.get(c.id) ?? 'read',
+    tier: tier2BlockIds.has(c.id) ? (2 as const) : undefined,
   }));
 }
 
+
+// ─── F1: Tier-1 baseline artefact loader ─────────────────────────────────────
+
+/**
+ * Return all active Tier-1 memory blocks for a sub-account, sorted by name
+ * ASC for hash-stable prefix caching.
+ *
+ * Returns an empty array when subaccountId is null (no sub-account context).
+ *
+ * Spec: docs/sub-account-baseline-artefacts-spec.md §4.
+ */
+export async function getTier1Blocks(
+  organisationId: string,
+  subaccountId: string | null,
+): Promise<Array<{ id: string; name: string; content: string; tier: 1 }>> {
+  if (!subaccountId) return [];
+  const rows = await db
+    .select({
+      id: memoryBlocks.id,
+      name: memoryBlocks.name,
+      content: memoryBlocks.content,
+      tier: memoryBlocks.tier,
+    })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.tier, 1),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    )
+    .orderBy(asc(memoryBlocks.name));
+
+  return rows.map((r) => ({ ...r, tier: 1 as const }));
+}
+
+/**
+ * F1 -> F2 contract (spec §6b). Returns the parsed voice/tone artefact when
+ * status='completed'; returns null for any other state. F2 imports this;
+ * F1 does not import F2.
+ */
+export async function getBaselineVoiceTone(
+  organisationId: string,
+  subaccountId: string,
+): Promise<BaselineVoiceTone | null> {
+  const [sub] = await db
+    .select({ status: subaccounts.baselineArtefactsStatus })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.id, subaccountId),
+        eq(subaccounts.organisationId, organisationId),
+        isNull(subaccounts.deletedAt),
+      ),
+    );
+  if (!sub) return null;
+
+  let status;
+  try {
+    status = assertVersionGate(sub.status, 1);
+  } catch {
+    return null;
+  }
+  if (status.tier1.voice_tone.status !== 'completed') return null;
+
+  const [block] = await db
+    .select({ content: memoryBlocks.content, updatedAt: memoryBlocks.updatedAt })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.name, 'baseline.voice_tone'),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  if (!block) return null;
+
+  try {
+    const parsed = JSON.parse(block.content) as Partial<BaselineVoiceTone>;
+    if (
+      !Array.isArray(parsed.descriptors) ||
+      !Array.isArray(parsed.example_sentences) ||
+      !Array.isArray(parsed.prohibited_phrases) ||
+      (parsed.formality_level !== 'casual' && parsed.formality_level !== 'neutral' && parsed.formality_level !== 'formal')
+    ) return null;
+    return {
+      descriptors: parsed.descriptors as string[],
+      example_sentences: parsed.example_sentences as string[],
+      prohibited_phrases: parsed.prohibited_phrases as string[],
+      formality_level: parsed.formality_level,
+      captured_at: block.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ─── Write path (skill handler) ──────────────────────────────────────────────
 
@@ -659,6 +800,17 @@ export interface UpsertFromWorkflowParams {
    * — existing blocks keep whatever `autoAttach` they were created with.
    */
   autoAttach?: boolean;
+  /**
+   * F1 §3 — baseline artefact tier classification. Only Tier-1 (1) and
+   * Tier-2 (2) blocks reach this path; Tier-3 writes go to workspace memory.
+   * Persisted on the `create` path only.
+   */
+  tier?: 1 | 2 | null;
+  /**
+   * F1 §3 — domains this block applies to (Tier-2 only). Persisted on the
+   * `create` path only. Use null when the block has no domain restriction.
+   */
+  appliesToDomains?: string[] | null;
 }
 
 export type UpsertFromWorkflowResult =
@@ -723,6 +875,18 @@ export async function upsertFromWorkflow(
       ),
     );
 
+  // F1 §3 — baseline slug conflict: a block with the same name exists but
+  // lacks a tier classification, meaning it was created outside the baseline
+  // pipeline. Reject rather than silently overwrite the tier-less block.
+  if (
+    workflowSlug === 'baseline-artefacts-capture' &&
+    params.tier != null &&
+    existingRow &&
+    existingRow.tier == null
+  ) {
+    throw { statusCode: 409, errorCode: 'BASELINE_SLUG_CONFLICT' };
+  }
+
   const decision = decideUpsert({
     existing: existingRow
       ? {
@@ -770,6 +934,8 @@ export async function upsertFromWorkflow(
             lastWrittenByWorkflowSlug: workflowSlug,
             confidence,
             autoAttach,
+            ...(params.tier != null ? { tier: params.tier } : {}),
+            ...(params.appliesToDomains != null ? { appliesToDomains: params.appliesToDomains } : {}),
           })
           .returning({ id: memoryBlocks.id });
 

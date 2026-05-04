@@ -15,6 +15,7 @@
  */
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { ARTEFACT_FORM_SCHEMAS } from '../../shared/schemas/baselineArtefactsForms.js';
 import { db } from '../db/index.js';
 import {
   modules,
@@ -24,11 +25,22 @@ import {
   subaccounts,
   subscriptions,
   systemWorkflowTemplates,
+  workspaceMemoryEntries,
+  memoryBlocks,
 } from '../db/schema/index.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
 import { WorkflowRunService } from './workflowRunService.js';
 import { taskService } from './taskService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import {
+  isBaselineSlug,
+  tierFor,
+  WORKSPACE_MEMORY_DOMAIN,
+  WORKSPACE_MEMORY_TOPIC_BY_SLUG,
+} from '../../shared/constants/baselineArtefacts.js';
+import type { BaselineSlug } from '../../shared/constants/baselineArtefacts.js';
+import { assertVersionGate } from '../../shared/schemas/subaccount.js';
+import { createEvent } from '../lib/tracing.js';
 
 export interface OwedOnboardingWorkflow {
   slug: string;
@@ -398,6 +410,310 @@ class SubaccountOnboardingService {
     completedAt: Date | null;
   }): Promise<void> {
     return upsertSubaccountOnboardingState(params);
+  }
+
+  /**
+   * F1 §3 — mark a baseline artefact as captured.
+   *
+   * Tier 1/2: records the memory block id in the JSONB status column.
+   * Tier 3: inserts a workspace memory entry then records its id.
+   *
+   * Uses atomic jsonb_set SQL — never reads and re-writes in JS.
+   * Calls assertVersionGate before any mutation.
+   */
+  async markArtefactCaptured(params: {
+    organisationId: string;
+    subaccountId: string;
+    slug: string;
+    userId: string;
+    memoryBlockId?: string;
+    tier3Payload?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!isBaselineSlug(params.slug)) {
+      throw { statusCode: 400, errorCode: 'INVALID_BASELINE_SLUG' };
+    }
+    const slug = params.slug as BaselineSlug;
+    const tier = tierFor(slug);
+
+    if (tier !== 3 && !params.memoryBlockId) {
+      throw {
+        statusCode: 500,
+        errorCode: 'TIER12_MISSING_MEMORY_BLOCK_ID',
+        message: 'Tier-1/2 capture requires a memoryBlockId',
+      };
+    }
+
+    // Short key: 'baseline.brand_identity' → 'brand_identity'
+    const shortKey = slug.split('.')[1];
+    const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
+
+    const [row] = await db
+      .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
+      .from(subaccounts)
+      .where(
+        and(
+          eq(subaccounts.id, params.subaccountId),
+          eq(subaccounts.organisationId, params.organisationId),
+          isNull(subaccounts.deletedAt),
+        ),
+      );
+    if (!row) {
+      throw { statusCode: 404, message: 'Subaccount not found' };
+    }
+
+    assertVersionGate(row.baselineArtefactsStatus, 1);
+
+    let workspaceMemoryId: string | undefined;
+    if (tier === 3) {
+      const topic = WORKSPACE_MEMORY_TOPIC_BY_SLUG[slug];
+      const [inserted] = await db
+        .insert(workspaceMemoryEntries)
+        .values({
+          organisationId: params.organisationId,
+          subaccountId: params.subaccountId,
+          content: JSON.stringify(params.tier3Payload ?? {}),
+          entryType: 'observation',
+          domain: WORKSPACE_MEMORY_DOMAIN,
+          topic: topic ?? shortKey,
+          provenanceSourceType: 'manual',
+          provenanceConfidence: 1,
+          isUnverified: false,
+          qualityScore: 1,
+          qualityScoreUpdater: 'initial_score',
+        })
+        .returning({ id: workspaceMemoryEntries.id });
+      workspaceMemoryId = inserted.id;
+    }
+
+    const refId = tier === 3 ? workspaceMemoryId : params.memoryBlockId;
+    const refField = tier === 3 ? 'workspace_memory_id' : 'memory_block_id';
+
+    await db.execute(sql`
+      UPDATE subaccounts
+      SET baseline_artefacts_status = jsonb_set(
+        jsonb_set(
+          jsonb_set(
+            jsonb_set(
+              baseline_artefacts_status,
+              ${sql.raw(`'{${tierKey},${shortKey},status}'`)},
+              '"completed"'
+            ),
+            ${sql.raw(`'{${tierKey},${shortKey},captured_at}'`)},
+            to_jsonb(now()::text)
+          ),
+          ${sql.raw(`'{${tierKey},${shortKey},${refField}}'`)},
+          ${refId != null ? sql`to_jsonb(${refId}::text)` : sql`'null'::jsonb`}
+        ),
+        ${sql.raw(`'{${tierKey},${shortKey},captured_by_user_id}'`)},
+        to_jsonb(${params.userId}::text)
+      )
+      WHERE id = ${params.subaccountId}
+        AND organisation_id = ${params.organisationId}
+    `);
+
+    createEvent('artefact.capture.completed', {
+      subaccount_id: params.subaccountId,
+      tier,
+      slug,
+      user_id: params.userId,
+      ...(tier === 3 ? { workspace_memory_id: workspaceMemoryId } : { memory_block_id: params.memoryBlockId }),
+      version: 1,
+    });
+  }
+
+  /**
+   * F1 §3 — emit a started event for a baseline artefact capture (no DB write).
+   * Called from the client-facing route when the user opens a capture step (Chunk 4A).
+   */
+  recordArtefactStarted(params: {
+    subaccountId: string;
+    organisationId: string;
+    slug: string;
+    userId: string;
+  }): void {
+    if (!isBaselineSlug(params.slug)) return;
+    const slug = params.slug as BaselineSlug;
+    createEvent('artefact.capture.started', {
+      subaccount_id: params.subaccountId,
+      tier: tierFor(slug),
+      slug,
+      user_id: params.userId,
+    });
+  }
+
+  /**
+   * F1 §3 — mark a Tier-3 baseline artefact as skipped.
+   *
+   * Tier-1 and Tier-2 artefacts cannot be skipped — throws BASELINE_SKIP_NOT_PERMITTED.
+   * Uses atomic jsonb_set SQL.
+   * Calls assertVersionGate before any mutation.
+   */
+  async markArtefactSkipped(params: {
+    organisationId: string;
+    subaccountId: string;
+    slug: string;
+    userId: string;
+    reason: 'defer_for_later' | 'not_applicable';
+  }): Promise<void> {
+    if (!isBaselineSlug(params.slug)) {
+      throw { statusCode: 400, errorCode: 'INVALID_BASELINE_SLUG' };
+    }
+    const slug = params.slug as BaselineSlug;
+    const tier = tierFor(slug);
+
+    if (tier !== 3) {
+      throw { statusCode: 400, errorCode: 'BASELINE_SKIP_NOT_PERMITTED' };
+    }
+
+    const shortKey = slug.split('.')[1];
+
+    const [row] = await db
+      .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
+      .from(subaccounts)
+      .where(
+        and(
+          eq(subaccounts.id, params.subaccountId),
+          eq(subaccounts.organisationId, params.organisationId),
+          isNull(subaccounts.deletedAt),
+        ),
+      );
+    if (!row) {
+      throw { statusCode: 404, message: 'Subaccount not found' };
+    }
+
+    const status = assertVersionGate(row.baselineArtefactsStatus, 1);
+
+    const tier3Section = status.tier3 as Record<string, { status: string }>;
+    const currentEntry = tier3Section[shortKey];
+    if (currentEntry?.status === 'completed') {
+      throw { statusCode: 409, errorCode: 'ARTEFACT_ALREADY_COMPLETED' };
+    }
+
+    await db.execute(sql`
+      UPDATE subaccounts
+      SET baseline_artefacts_status = jsonb_set(
+        jsonb_set(
+          jsonb_set(
+            baseline_artefacts_status,
+            ${sql.raw(`'{tier3,${shortKey},status}'`)},
+            '"skipped"'
+          ),
+          ${sql.raw(`'{tier3,${shortKey},skipped_at}'`)},
+          to_jsonb(now()::text)
+        ),
+        ${sql.raw(`'{tier3,${shortKey},captured_by_user_id}'`)},
+        to_jsonb(${params.userId}::text)
+      )
+      WHERE id = ${params.subaccountId}
+        AND organisation_id = ${params.organisationId}
+    `);
+
+    createEvent('artefact.capture.skipped', {
+      subaccount_id: params.subaccountId,
+      tier,
+      slug,
+      user_id: params.userId,
+      reason: params.reason,
+      version: 1,
+    });
+  }
+
+  /**
+   * F1 §4B — edit the content of a previously-captured baseline artefact.
+   *
+   * Only `completed` artefacts may be edited. Status stays `completed`; only
+   * the underlying memory block or workspace memory entry content is updated.
+   * No JSONB mutation needed.
+   */
+  async markArtefactEdited(params: {
+    organisationId: string;
+    subaccountId: string;
+    slug: string;
+    userId: string;
+    payload: Record<string, unknown>;
+  }): Promise<void> {
+    if (!isBaselineSlug(params.slug)) {
+      throw { statusCode: 400, errorCode: 'INVALID_BASELINE_SLUG' };
+    }
+    const slug = params.slug as BaselineSlug;
+    const tier = tierFor(slug);
+    const shortKey = slug.split('.')[1];
+    const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
+
+    const [row] = await db
+      .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
+      .from(subaccounts)
+      .where(
+        and(
+          eq(subaccounts.id, params.subaccountId),
+          eq(subaccounts.organisationId, params.organisationId),
+          isNull(subaccounts.deletedAt),
+        ),
+      );
+    if (!row) {
+      throw { statusCode: 404, message: 'Subaccount not found' };
+    }
+
+    const status = assertVersionGate(row.baselineArtefactsStatus, 1);
+
+    const artefactEntry = (status[tierKey] as Record<string, { status: string }>)[shortKey];
+    if (!artefactEntry || artefactEntry.status !== 'completed') {
+      throw { statusCode: 400, errorCode: 'ARTEFACT_NOT_COMPLETED' };
+    }
+
+    const schema = ARTEFACT_FORM_SCHEMAS[slug];
+    const parseResult = schema.safeParse(params.payload);
+    if (!parseResult.success) {
+      throw {
+        statusCode: 400,
+        errorCode: 'INVALID_ARTEFACT_PAYLOAD',
+        message: 'Payload does not match the artefact schema',
+        fieldErrors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    if (tier === 1 || tier === 2) {
+      await db
+        .update(memoryBlocks)
+        .set({ content: JSON.stringify(parseResult.data) })
+        .where(
+          and(
+            eq(memoryBlocks.name, slug),
+            eq(memoryBlocks.subaccountId, params.subaccountId),
+            eq(memoryBlocks.organisationId, params.organisationId),
+            isNull(memoryBlocks.deletedAt),
+          ),
+        );
+    } else {
+      const tier3Entry = (status.tier3 as Record<string, { workspace_memory_id: string | null }>)[shortKey];
+      const workspaceMemoryId = tier3Entry?.workspace_memory_id;
+      if (!workspaceMemoryId) {
+        throw {
+          statusCode: 500,
+          errorCode: 'TIER3_WORKSPACE_MEMORY_MISSING',
+          message: 'Tier-3 artefact is completed but has no workspace_memory_id',
+        };
+      }
+      await db
+        .update(workspaceMemoryEntries)
+        .set({ content: JSON.stringify(parseResult.data) })
+        .where(
+          and(
+            eq(workspaceMemoryEntries.id, workspaceMemoryId),
+            eq(workspaceMemoryEntries.organisationId, params.organisationId),
+            eq(workspaceMemoryEntries.subaccountId, params.subaccountId),
+          ),
+        );
+    }
+
+    createEvent('artefact.capture.edited', {
+      subaccount_id: params.subaccountId,
+      tier,
+      slug,
+      user_id: params.userId,
+      prior_version: 'v1',
+      new_version: 'v1',
+    });
   }
 }
 

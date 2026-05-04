@@ -52,7 +52,7 @@ Mechanical doc updates so future sessions read Riley accurately. Folded in here 
 | Wave | State | Evidence |
 |------|-------|----------|
 | W1 — naming + `invoke_automation` | SHIPPED | PR #186, migrations 0219-0222 |
-| W2 — Explore/Execute mode | SCHEMA-ONLY | migration 0230 added `flow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`. No services / routes / UI / tests. |
+| W2 — Explore/Execute mode | SCHEMA-ONLY | migration 0230 added `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`. No services / routes / UI / tests. |
 | W3 — context-assembly telemetry | NOT STARTED | No `context.assembly.complete` event in `server/lib/tracing.ts`; no emit in `agentExecutionService.ts`; no helper module. |
 | W4 — heartbeat gate | NOT STARTED | Prep columns landed in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Service / dispatcher / event registry / UI all pending. |
 
