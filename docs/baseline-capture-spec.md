@@ -112,18 +112,23 @@ CREATE TABLE subaccount_baselines (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Idempotency invariant: only ONE active (non-reset) baseline per (subaccount, version).
--- A reset bumps baseline_version and writes a new row; the prior row's status transitions to 'reset'.
--- This UNIQUE prevents duplicate writes across the four-writer surface (subscriber, fallback job,
+-- Idempotency invariant: AT MOST ONE active (non-reset) baseline per sub-account, regardless of version.
+-- A reset is a single transaction: UPDATE prior SET status='reset' THEN INSERT new with baseline_version+1.
+-- The partial unique index on subaccount_id (NOT (subaccount_id, baseline_version)) is what enforces the
+-- §10 invariant "Exactly one active baseline per sub-account" — without baseline_version in the key, two
+-- non-reset rows for the same sub-account at different versions would be permitted, defeating the invariant.
+-- This UNIQUE also prevents duplicate writes across the four-writer surface (subscriber, fallback job,
 -- retry, manual entry) — see §5.2 single-writer rule.
 CREATE UNIQUE INDEX subaccount_baselines_active_uniq
-  ON subaccount_baselines(subaccount_id, baseline_version)
+  ON subaccount_baselines(subaccount_id)
   WHERE status <> 'reset';
 
 CREATE INDEX subaccount_baselines_status_idx ON subaccount_baselines(organisation_id, status);
+-- Retry pickup index: covers the cron's `WHERE status='ready' AND capture_attempt_count > 0` predicate.
+-- `failed` is terminal (recovery via <ManualBaselineForm>) and is intentionally excluded.
 CREATE INDEX subaccount_baselines_pending_retry_idx
   ON subaccount_baselines(last_attempt_at)
-  WHERE status IN ('ready', 'failed') AND capture_attempt_count > 0;
+  WHERE status = 'ready' AND capture_attempt_count > 0;
 ```
 
 **Timestamp invariant.** Every TIMESTAMPTZ in this schema is set by Postgres `now()` / `transaction_timestamp()` — never by application-level `Date.now()`. This guarantees deterministic ordering for month-over-month comparisons, retry anchoring, and reporting-agent delta narration. Enforce in services: every INSERT / UPDATE that sets a timestamp column SHOULD use `sql\`now()\`` (Drizzle) or omit the field and rely on the column default.
@@ -182,8 +187,8 @@ Integrations need time to settle, polls need time to land. The settle window (�
 ### §5.1 State machine
 
 ```
-pending → (readiness met)        → ready
-ready   → (capture job picks up) → capturing
+pending  → (capture job picks up, readiness already evaluated) → capturing
+ready    → (capture job picks up, retry path)                  → capturing
 capturing → success              → captured
 capturing → retryable failure    → ready  (capture_attempt_count++, last_attempt_at=now())
 capturing → non-retryable / 3rd retryable failure → failed
@@ -191,7 +196,9 @@ ready (status='captured', operator opens form) → captured (source='mixed' or '
 captured → (admin reset)         → reset; new row written with baseline_version+1, status='pending'
 ```
 
-The `capturing` status is intentional — it makes the in-flight state visible in DB and prevents two retry workers from picking up the same baseline simultaneously (the worker takes the row via `UPDATE … SET status='capturing' WHERE id=? AND status='ready' RETURNING *`; only one update wins).
+There is no separate `pending → ready` transition writer. Readiness is evaluated by `baselineReadinessService.evaluate` (pure read; no writes), and only the subscriber/cron that observed `ready` enqueues the capture job. The job's lock acquisition (§5.3 step 1) atomically transitions `pending` (or `ready` on retry) → `capturing`. This preserves the §5.2 single-writer rule: `captureBaselineService` is still the only surface that mutates `subaccount_baselines.status`.
+
+The `capturing` status is intentional — it makes the in-flight state visible in DB and prevents two retry workers from picking up the same baseline simultaneously (the worker takes the row via `UPDATE … SET status='capturing' WHERE id=? AND status IN ('pending','ready') RETURNING *`; only one update wins).
 
 ### §5.2 Single-writer rule (invariant)
 
@@ -211,7 +218,7 @@ This eliminates the four-writer race the reviewer flagged. Concentrating all wri
 
 The entrypoint is also the only retry entry point. The job runner calls it with the sub-account ID; the service handles state transitions internally.
 
-1. **Acquire `capturing` lock**: `UPDATE subaccount_baselines SET status='capturing', last_attempt_at=now() WHERE subaccount_id=? AND status='ready' AND baseline_version = (SELECT MAX(baseline_version) FROM subaccount_baselines WHERE subaccount_id=? AND status <> 'reset') RETURNING id`. Zero rows affected → another worker picked it up; exit cleanly (no error).
+1. **Acquire `capturing` lock**: `UPDATE subaccount_baselines SET status='capturing', last_attempt_at=now() WHERE subaccount_id=? AND status IN ('pending','ready') AND baseline_version = (SELECT MAX(baseline_version) FROM subaccount_baselines WHERE subaccount_id=? AND status <> 'reset') RETURNING id`. Zero rows affected → another worker picked it up, or the row is no longer in a runnable state; exit cleanly (no error). Matching both `pending` and `ready` is what allows the first-ever capture (initial row inserted as `pending`) to proceed without a separate writer transitioning `pending → ready`.
 2. **Read opted-in metric set** from `subaccount_settings.baseline_metrics_opt_in[]` (default = full v1 set).
 3. **Read source data per metric** via the per-metric reader (`getPipelineValue`, `getLeadCount`, etc.). Each reader returns `{ value, source, unavailable_reason? }` where `source ∈ {'canonical_metric', 'unavailable'}` and `unavailable_reason` describes the gap (`integration_not_connected`, `api_failure`, `no_data_yet`).
 4. **Upsert metric rows** in one transaction: `INSERT INTO subaccount_baseline_metrics (...) VALUES (...) ON CONFLICT (baseline_id, metric_slug) DO UPDATE SET value=EXCLUDED.value, source=EXCLUDED.source, captured_at=now()`. Idempotent re-write per §3.
@@ -230,7 +237,7 @@ Errors are classified at the per-metric reader boundary. Aggregate classificatio
 | **Non-retryable** | HTTP 4xx (other than 429), schema mismatch on canonical metric shape, `integration_not_connected`, opted-in metric with no reader implementation | No | `failed` immediately; `failure_reason` set to category |
 | **Soft-success** | Some metrics retryable, ≥2 already captured | n/a — already success | `captured` with `confidence='partial'` |
 
-Retry budget: maximum **3 attempts** for retryable failures (per the original spec intent). After the 3rd retryable failure, transition to `failed` with `failure_reason='retry_budget_exhausted'`. Backoff anchor is `last_attempt_at` (column added in §3 migration 0278). The `evaluateAllPendingBaselines` cron picks up rows where `status IN ('ready', 'failed') AND capture_attempt_count > 0 AND last_attempt_at <= now() - <backoff_window>`.
+Retry budget: maximum **3 attempts** for retryable failures (per the original spec intent). After the 3rd retryable failure, transition to `failed` with `failure_reason='retry_budget_exhausted'`. Backoff anchor is `last_attempt_at` (column added in §3 migration 0278). The `evaluateAllPendingBaselines` cron picks up rows where `status='ready' AND capture_attempt_count > 0 AND last_attempt_at <= now() - <backoff_window>` for retry. **`failed` rows are terminal** — they are NOT re-enqueued by the cron; recovery is via `<ManualBaselineForm>` (§6) only.
 
 Non-retryable errors transition straight to `failed` without consuming retry budget — so a sub-account whose connector isn't installed never burns 3 retries before surfacing for manual entry.
 
@@ -383,7 +390,7 @@ Functional outcomes:
 - All 9 telemetry events from §6a emit at the correct state transitions.
 
 Hard invariants (asserted by tests):
-- **Exactly one active baseline per sub-account.** UNIQUE index on `(subaccount_id, baseline_version) WHERE status <> 'reset'` is enforced; integration test seeds two concurrent `pending` inserts and asserts the second fails with constraint violation.
+- **Exactly one active baseline per sub-account.** UNIQUE index on `(subaccount_id) WHERE status <> 'reset'` is enforced — at most one non-reset row per sub-account regardless of `baseline_version`. Admin reset must run as a single transaction: `UPDATE prior SET status='reset'` then `INSERT new` with `baseline_version+1`; the partial unique index lets the new row coexist only after the prior is marked `reset`. Integration test seeds two concurrent `pending` inserts and asserts the second fails with constraint violation; a second test asserts the admin-reset transaction succeeds while a non-transactional double-insert fails.
 - **Idempotent retry.** Calling `captureBaselineService.run` twice for the same `ready` baseline produces the same row state and the same metric rows; `subaccount_baseline_metrics` count is unchanged on the second call (tested via fixture).
 - **Single-writer rule honoured.** No code path other than `captureBaselineService` writes to `subaccount_baselines` after the initial `pending` insert. Asserted via grep / static check in CI; integration test asserts that simulating the subscriber and the cron in parallel never produces duplicate rows.
 - **Manual override never conflicts with auto capture.** When `<ManualBaselineForm>` POSTs while a `capturing` lock is held, the manual write blocks until the auto path completes (or fails), then runs as `runManual` against the same baseline_id. Asserted via integration test simulating concurrent auto + manual.

@@ -1,0 +1,9 @@
+The documentation changes introduce misleading build state and an internally inconsistent baseline-capture state machine that would cause future implementation work to be skipped or built incorrectly.
+
+Full review comments:
+
+- [P2] Mark unimplemented F1 chunks as pending — C:\Files\Projects\automation-v1\tasks\builds\subaccount-artefacts\progress.md:7-7
+  This progress file now says the backend is complete and marks chunks 1A–3C as DONE, but this PR does not include the referenced migration, schema/constants, workflow, or service files (for example `migrations/0277_*.sql` and `server/workflows/baseline-artefacts-capture.workflow.ts`). If this lands as-is, the next Stream 1 session will likely skip required backend work because the source-of-truth progress file claims it is already done.
+
+- [P2] Define the pending-to-ready transition — C:\Files\Projects\automation-v1\docs\baseline-capture-spec.md:214-214
+  When a sub-account first satisfies readiness, §4 says the subscriber and fallback cron only enqueue a job and never write `subaccount_baselines`, but `captureBaselineService.run` only acquires rows already in `status='ready'`. With the initial row still `pending`, the first capture job will affect zero rows and exit cleanly, so automatic baseline capture never starts unless some unspecified writer performs `pending → ready`.
