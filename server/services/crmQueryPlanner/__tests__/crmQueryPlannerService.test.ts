@@ -136,7 +136,7 @@ test('Stage 3 parse failure → ambiguous_intent artefact', async () => {
 
 // Stage 3 throws plain object { statusCode: 402 } → cost_exceeded (B1 coverage)
 test('Stage 3 budget exceeded (plain statusCode: 402) → cost_exceeded artefact', async () => {
-  const budgetErr = { statusCode: 402, code: 'BUDGET_EXCEEDED', message: 'over budget' };
+  const budgetErr = { statusCode: 402, code: 'COMPUTE_BUDGET_EXCEEDED', message: 'over compute budget' };
   const output = await runQuery(
     { rawIntent: 'anything', subaccountId: 'sub-1' },
     makeContext(),
@@ -163,9 +163,9 @@ test('Stage 3 budget exceeded (FailureError cost_limit_exceeded) → cost_exceed
 });
 
 // llmRouter also throws `statusCode: 402` with `code: 'RATE_LIMITED'` for
-// reservation-side rate-limit rejections (a transient failure, not a budget
-// overrun). The isBudgetExceededError discriminator must gate on
-// `code === 'BUDGET_EXCEEDED'` so rate-limited 402s fall through to the
+// reservation-side rate-limit rejections (a transient failure, not a compute
+// budget overrun). The isComputeBudgetExceededError discriminator must gate on
+// `code === 'COMPUTE_BUDGET_EXCEEDED'` so rate-limited 402s fall through to the
 // generic parse-failure → ambiguous_intent path rather than being surfaced
 // as a final cost_exceeded terminal.
 test('Stage 3 rate-limited (statusCode: 402, code: RATE_LIMITED) → ambiguous_intent, not cost_exceeded', async () => {

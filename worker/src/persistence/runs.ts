@@ -7,7 +7,7 @@ import type PgBoss from 'pg-boss';
 import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
-import { budgetReservations } from '../../../server/db/schema/budgetReservations.js';
+import { computeReservations } from '../../../server/db/schema/computeReservations.js';
 import { llmRequests } from '../../../server/db/schema/llmRequests.js';
 import type { ResultSummary } from '../../../shared/iee/jobPayload.js';
 import type { FailureReason } from '../../../shared/iee/failureReason.js';
@@ -128,12 +128,12 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
     // Release the soft reservation (committed status closes the lifecycle)
     await tx
-      .update(budgetReservations)
+      .update(computeReservations)
       .set({
         status: 'committed',
         actualCostCents: totalCostCents,
       })
-      .where(eq(budgetReservations.idempotencyKey, `iee:${input.ieeRunId}`));
+      .where(eq(computeReservations.idempotencyKey, `iee:${input.ieeRunId}`));
   });
 
   if (!claimedThisCall) {
@@ -258,6 +258,124 @@ export async function assertWorkerOwnership(
   if (!row) return false;
   if (row.status !== 'running') return false;
   return row.workerInstanceId === expectedWorkerInstanceId;
+}
+
+// ---------------------------------------------------------------------------
+// Spend round-trip helpers — iee-spend-request and iee-spend-completion emit
+// (Agentic Commerce Chunk 11, spec §7.2, §8.3, §8.4a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit an agent-spend-request job to the main app.
+ *
+ * Called from the execution loop when the LLM emits a `spend_request` action.
+ * The worker pre-builds the idempotency key; the main app recomputes and
+ * rejects on mismatch (invariant 21).
+ *
+ * INVARIANT 3: The worker MUST carry agent_charges.idempotency_key as Stripe's
+ * Idempotency-Key header on every merchant call. The idempotencyKey field in
+ * this payload is that value — emitted to the main app here and later used
+ * as the Stripe header when filling the merchant form on the worker_hosted_form path.
+ */
+export async function emitSpendRequest(
+  payload: import('../../../shared/iee/actionSchema.js').SpendRequestPayload,
+): Promise<void> {
+  if (!bossRef) {
+    logger.warn('iee.spend_request.boss_not_ready', { correlationId: payload.correlationId });
+    return;
+  }
+  try {
+    await bossRef.send('agent-spend-request', payload, {
+      retryLimit: 2,
+      retryDelay: 5,
+      retryBackoff: true,
+    });
+  } catch (err) {
+    logger.warn('iee.spend_request.emit_failed', {
+      correlationId: payload.correlationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err; // propagate so the loop can record the failure
+  }
+}
+
+/**
+ * Emit an agent-spend-completion job to the main app.
+ *
+ * Called from the execution loop after the worker fills the merchant's hosted
+ * payment form (worker_hosted_form path). Reports whether the form-fill
+ * succeeded or failed. The main app's handler updates the agent_charges row
+ * per invariant 20.
+ */
+export async function emitSpendCompletion(
+  payload: import('../../../shared/iee/actionSchema.js').SpendCompletionPayload,
+): Promise<void> {
+  if (!bossRef) {
+    logger.warn('iee.spend_completion.boss_not_ready', { ledgerRowId: payload.ledgerRowId });
+    return;
+  }
+  try {
+    await bossRef.send('agent-spend-completion', payload, {
+      retryLimit: 3,
+      retryDelay: 5,
+      retryBackoff: true,
+    });
+  } catch (err) {
+    logger.warn('iee.spend_completion.emit_failed', {
+      ledgerRowId: payload.ledgerRowId,
+      outcome: payload.outcome,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err; // propagate so the loop can record the failure
+  }
+}
+
+/**
+ * Poll the agent-spend-response queue for a response matching the given correlationId.
+ * Returns the response payload if found within the timeout, or null on timeout.
+ *
+ * The 30-second deadline applies only to the IMMEDIATE decision response — not
+ * to HITL approval resolution or merchant form-fill duration (spec §8.4).
+ */
+export async function awaitSpendResponse(
+  correlationId: string,
+  timeoutMs: number,
+): Promise<import('../../../server/jobs/agentSpendRequestHandler.js').WorkerSpendResponse | null> {
+  if (!bossRef) return null;
+
+  const deadline = Date.now() + timeoutMs;
+  const pollIntervalMs = 200;
+
+  while (Date.now() < deadline) {
+    try {
+      // Fetch next available job from the response queue.
+      const jobs = await bossRef.fetch('agent-spend-response', 10);
+      if (jobs) {
+        const jobArray = Array.isArray(jobs) ? jobs : [jobs];
+        for (const job of jobArray) {
+          const data = job.data as Record<string, unknown>;
+          if (data.correlationId === correlationId) {
+            // Ack the job so it's removed from the queue.
+            await bossRef.complete(job.id);
+            return data as import('../../../server/jobs/agentSpendRequestHandler.js').WorkerSpendResponse;
+          }
+          // Not our correlationId — re-queue (nack) so another worker can pick it up.
+          // pg-boss fetch does not nack automatically so we complete it back as a new job.
+          // Since we can't put it back, complete and re-send so we don't drop it.
+          await bossRef.complete(job.id);
+          await bossRef.send('agent-spend-response', data);
+        }
+      }
+    } catch (err) {
+      logger.warn('iee.spend_response.poll_error', {
+        correlationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return null; // timeout
 }
 
 /** Aggregate LLM cost for the run from llm_requests, used at finalization. */

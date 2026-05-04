@@ -659,10 +659,22 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-level overrides for agent configuration — expose custom agent parameters and capability settings.',
   },
   {
+    // Pre-rename name — kept in the manifest so the rls-coverage reverse
+    // check accepts the CREATE POLICY ON org_budgets statement that lives
+    // (immutably) in migration 0245. The runtime table is renamed to
+    // org_compute_budgets in 0270; the org_budgets policy text remains in
+    // 0245 as historical record. Pairs with the org_compute_budgets entry
+    // below.
     tableName: 'org_budgets',
-    schemaFile: 'orgBudgets.ts',
+    schemaFile: 'orgComputeBudgets.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Per-org LLM and execution budget limits — cross-tenant leak reveals financial configuration and usage caps.',
+    rationale: 'Pre-rename name for Compute Budget. The runtime table is org_compute_budgets (renamed in migration 0270); migration 0245 still contains the CREATE POLICY ON org_budgets text under the old name, so the manifest declares both names. The org_compute_budgets entry below carries the post-rename policy.',
+  },
+  {
+    tableName: 'org_compute_budgets',
+    schemaFile: 'orgComputeBudgets.ts',
+    policyMigration: '0270_compute_budget_rename.sql',
+    rationale: 'Per-org LLM and compute cost limits (Compute Budget) — cross-tenant leak reveals financial configuration and usage caps. Originally protected as org_budgets in migration 0245; renamed to org_compute_budgets in 0270 and re-asserted RLS under the new name there.',
   },
   {
     tableName: 'org_margin_configs',
@@ -961,6 +973,65 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'workflowDrafts.ts',
     policyMigration: '0270_workflows_v1_additive_schema.sql',
     rationale: 'Orchestrator-authored workflow draft payloads — cross-tenant leak exposes workflow configuration and session state.',
+  },
+  // 0271 — Agentic Commerce: 7 new tables with canonical org-isolation RLS
+  {
+    tableName: 'spending_budgets',
+    schemaFile: 'spendingBudgets.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spending Budget accounting containers — carry operator-defined spending authority, kill-switch timestamps, and alert thresholds. Cross-tenant leak exposes financial configuration.',
+  },
+  {
+    tableName: 'spending_policies',
+    schemaFile: 'spendingPolicies.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spending Policy rules objects — hold per-transaction / daily / monthly limits, merchant allowlists, approval thresholds, and shadow/live mode. Cross-tenant leak exposes spend controls.',
+  },
+  {
+    tableName: 'agent_charges',
+    schemaFile: 'agentCharges.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Spend Ledger — every money-movement attempt with full policy decision trace, idempotency key, and status lifecycle. Highest-sensitivity financial audit record; cross-tenant leak is a critical incident.',
+  },
+  {
+    tableName: 'subaccount_approval_channels',
+    schemaFile: 'subaccountApprovalChannels.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Per-sub-account HITL approval channel configs — reveal notification routing and approval workflow configuration.',
+  },
+  {
+    tableName: 'org_approval_channels',
+    schemaFile: 'orgApprovalChannels.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Org-owned HITL approval channel configs — reveal org-level notification routing for spend approvals.',
+  },
+  {
+    tableName: 'org_subaccount_channel_grants',
+    schemaFile: 'orgSubaccountChannelGrants.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Bridge table granting org channels to sub-accounts — reveals approval delegation topology.',
+  },
+  {
+    tableName: 'spending_budget_approvers',
+    schemaFile: 'spendingBudgetApprovers.ts',
+    policyMigration: '0271_agentic_commerce_schema.sql',
+    rationale: 'Explicit per-user approver grants for spending budgets — reveals who may approve charges; cross-tenant leak exposes access control configuration.',
+  },
+  // 0272 — cost_aggregates RLS retrofit.
+  //
+  // Note: the CREATE TABLE for cost_aggregates in migration 0024 has no
+  // organisation_id column; it was added via ALTER TABLE in 0272 alongside
+  // the CREATE POLICY. Because of this, the rls-protected-tables Check 2
+  // would otherwise complain ("no matching CREATE TABLE with organisation_id").
+  // cost_aggregates is therefore listed in the check2-exempt section of
+  // scripts/rls-not-applicable-allowlist.txt — same pattern as task_activities,
+  // task_deliverables, reference_document_versions (all manifest-registered
+  // tables whose tenant column was added via later ALTER).
+  {
+    tableName: 'cost_aggregates',
+    schemaFile: 'costAggregates.ts',
+    policyMigration: '0272_cost_aggregates_rls_and_spend_dims.sql',
+    rationale: 'Pre-aggregated LLM and agent spend rollups — new agent_spend_* dimensions carry per-subaccount and per-org spend totals that are financially sensitive. organisation_id added via ALTER TABLE in migration 0272 (CREATE TABLE in 0024 had no tenant column — pre-multi-tenant aggregate). Sentinel UUID rows (platform/provider) are globally readable per policy.',
   },
 ];
 

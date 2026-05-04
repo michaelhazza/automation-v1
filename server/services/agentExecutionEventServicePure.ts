@@ -81,6 +81,7 @@ const LINKED_ENTITY_TYPES: ReadonlyArray<LinkedEntityType> = [
   'agent',
   'llm_request',
   'action',
+  'spend_ledger',
 ];
 
 export function isValidLinkedEntityType(value: unknown): value is LinkedEntityType {

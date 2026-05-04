@@ -36,7 +36,8 @@ export type LinkedEntityType =
   | 'prompt'
   | 'agent'
   | 'llm_request'
-  | 'action';
+  | 'action'
+  | 'spend_ledger';
 
 export interface LinkedEntity {
   type: LinkedEntityType;

@@ -7,6 +7,79 @@ import type { IntegrationConnection } from '../db/schema/integrationConnections.
 const STRIPE_API_BASE = 'https://api.stripe.com/v1';
 const TIMEOUT_MS = 12_000;
 
+// ---------------------------------------------------------------------------
+// chargeViaSpt — agent-spend Stripe charge using SPT (Shared Payment Token)
+//
+// Called exclusively by chargeRouterService.executeApproved on the
+// main_app_stripe path. Stripe errors propagate as-is so classifyStripeError
+// in chargeRouterServicePure can classify them. Invariant 34: metadata must
+// carry agent_charge_id + mode + traceId.
+// ---------------------------------------------------------------------------
+
+export interface ChargeViaSptInput {
+  sptToken: string;
+  idempotencyKey: string;
+  amountMinor: number;
+  currency: string;
+  merchantId: string | null;
+  merchantDescriptor: string;
+  metadata: { agent_charge_id: string; mode: 'live'; traceId: string };
+}
+
+export interface ChargeViaSptResult {
+  providerChargeId: string;
+}
+
+/**
+ * Create a Stripe PaymentIntent using the Shared Payment Token.
+ * Throws on any Stripe error — caller handles via classifyStripeError.
+ */
+export async function chargeViaSpt(input: ChargeViaSptInput): Promise<ChargeViaSptResult> {
+  const params = new URLSearchParams();
+  params.append('amount', String(input.amountMinor));
+  params.append('currency', input.currency.toLowerCase());
+  params.append('confirm', 'true');
+  if (input.merchantId) {
+    params.append('payment_method', input.merchantId);
+  }
+  params.append('metadata[agent_charge_id]', input.metadata.agent_charge_id);
+  params.append('metadata[mode]', input.metadata.mode);
+  params.append('metadata[traceId]', input.metadata.traceId);
+
+  const response = await axios.post(
+    `${STRIPE_API_BASE}/payment_intents`,
+    params.toString(),
+    {
+      headers: {
+        Authorization: `Bearer ${input.sptToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Idempotency-Key': input.idempotencyKey,
+      },
+      timeout: TIMEOUT_MS,
+    },
+  );
+
+  const data = response.data as { id?: string };
+  if (!data.id) {
+    throw Object.assign(new Error('Stripe PaymentIntent missing id'), { statusCode: 500 });
+  }
+
+  return { providerChargeId: data.id };
+}
+
+/**
+ * Get the active SPT (Shared Payment Token) for a stripe_agent connection.
+ * Reads accessToken via connectionTokenService.getAccessToken, which triggers
+ * auto-refresh if the token is within the per-provider refresh buffer window.
+ *
+ * Used exclusively by the agent-spend execution path (chargeRouterService).
+ * The existing checkout path continues to read secretsRef directly — do NOT
+ * use this function for the checkout/payment-status path.
+ */
+export async function getAgentSpendToken(connection: IntegrationConnection): Promise<string> {
+  return connectionTokenService.getAccessToken(connection);
+}
+
 export const stripeAdapter: IntegrationAdapter = {
   supportedActions: ['create_checkout', 'get_payment_status'],
 

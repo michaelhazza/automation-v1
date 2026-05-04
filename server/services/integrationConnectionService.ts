@@ -207,6 +207,65 @@ export const integrationConnectionService = {
       ));
     return true;
   },
+
+  /**
+   * Revoke all connections of the given providerType for a sub-account.
+   * Idempotent — if all matching connections are already revoked, returns
+   * { alreadyRevoked: true } rather than throwing.
+   *
+   * Sets connectionStatus = 'revoked' and nulls both accessToken and
+   * refreshToken on every matching row. Audit-logged via configHistoryService.
+   *
+   * Used by sptVaultService for SPT kill-switch (providerType = 'stripe_agent').
+   */
+  async revokeSubaccountConnection(
+    subaccountId: string,
+    organisationId: string,
+    providerType: string,
+  ): Promise<{ alreadyRevoked: boolean }> {
+    const rows = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+        eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+      ));
+
+    if (rows.length === 0) {
+      return { alreadyRevoked: true };
+    }
+
+    const allAlreadyRevoked = rows.every((r) => r.connectionStatus === 'revoked');
+    if (allAlreadyRevoked) {
+      // Audit-log even on idempotent calls so every revoke attempt is visible
+      for (const row of rows) {
+        await configHistoryService.recordHistory({
+          entityType: 'integration_connection', entityId: row.id, organisationId,
+          snapshot: { ...sanitizeConnection(row), revokeNote: 'already_revoked' } as unknown as Record<string, unknown>,
+          changedBy: null, changeSource: 'api',
+        });
+      }
+      return { alreadyRevoked: true };
+    }
+
+    for (const row of rows) {
+      await configHistoryService.recordHistory({
+        entityType: 'integration_connection', entityId: row.id, organisationId,
+        snapshot: sanitizeConnection(row) as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
+    await db.update(integrationConnections)
+      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
+      .where(and(
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+        eq(integrationConnections.providerType, providerType as IntegrationConnection['providerType']),
+      ));
+
+    return { alreadyRevoked: false };
+  },
   /**
    * Get a decrypted, valid connection for a subaccount + provider.
    * Auto-refreshes if the token expires within the next 15 minutes.

@@ -387,6 +387,12 @@ export async function resumeActionCallAfterApproval(
   // Engine is imported dynamically to avoid a service-graph cycle
   const { WorkflowEngineService } = await import('./workflowEngineService.js');
 
+  // Workflow-driven action_call steps always carry an agentId. System-initiated
+  // actions (e.g. spend-promotion) never reach the workflow executor.
+  if (!action.agentId) {
+    return { stepRunId, runId, status: 'failed', error: 'missing_agent_id' };
+  }
+
   const context: SkillExecutionContext = {
     runId,
     organisationId: action.organisationId,

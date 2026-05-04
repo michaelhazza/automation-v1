@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS org_subaccount_channel_grants_active_unique;

@@ -77,7 +77,7 @@ test('timeout → no-op (terminal)', () => {
 });
 
 test('budget_exceeded → no-op (terminal)', () => {
-  assert(shouldNoOp(AGENT_RUN_STATUS.BUDGET_EXCEEDED), 'budget_exceeded must be no-op');
+  assert(shouldNoOp(AGENT_RUN_STATUS.COMPUTE_BUDGET_EXCEEDED), 'budget_exceeded must be no-op');
 });
 
 test('loop_detected → no-op (terminal)', () => {

@@ -1,0 +1,239 @@
+import { useEffect, useRef, useState } from 'react';
+import api from '../../lib/api';
+import { toast } from 'sonner';
+
+interface OrgChannel {
+  id: string;
+  channelType: string;
+}
+
+interface SubaccountOption {
+  id: string;
+  name: string;
+}
+
+interface Grant {
+  id: string;
+  orgChannelId: string;
+  subaccountId: string;
+  orgChannel: OrgChannel;
+  subaccount: SubaccountOption;
+}
+
+// Channel-type display string. v1 only ships `in_app`; future channel types
+// (slack, email, telegram, sms) can extend this lookup. Falls back to the
+// raw channelType when an entry is missing so a server-added type that lacks
+// a client-side mapping renders safely instead of as `undefined`.
+const CHANNEL_TYPE_LABELS: Record<string, string> = {
+  in_app: 'In-app',
+};
+
+// Session-local memo of unknown types we've already warned about. Keeps
+// the warn signal surfacing once-per-type-per-session rather than spamming
+// on every render. Codebase pattern: log the unexpected, don't silently
+// accept (chatgpt-pr-review Round 3 Finding 3).
+const warnedUnknownChannelTypes = new Set<string>();
+
+function humaniseChannelType(channelType: string): string {
+  const label = CHANNEL_TYPE_LABELS[channelType];
+  if (label !== undefined) return label;
+
+  if (!warnedUnknownChannelTypes.has(channelType)) {
+    warnedUnknownChannelTypes.add(channelType);
+    console.warn(
+      `[GrantManagementSection] unknown channelType '${channelType}' — add an entry to CHANNEL_TYPE_LABELS to humanise the display string.`,
+    );
+  }
+  return channelType;
+}
+
+interface GrantManagementSectionProps {
+  orgId: string;
+}
+
+/**
+ * Org admin section for granting org-level approval channels to sub-account fan-out.
+ * Lets the org admin add/revoke which org channels receive approvals from which sub-accounts.
+ */
+export default function GrantManagementSection({ orgId }: GrantManagementSectionProps) {
+  const [grants, setGrants] = useState<Grant[]>([]);
+  const [orgChannels, setOrgChannels] = useState<OrgChannel[]>([]);
+  const [subaccounts, setSubaccounts] = useState<SubaccountOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addForm, setAddForm] = useState({ orgChannelId: '', subaccountId: '' });
+  const [adding, setAdding] = useState(false);
+
+  // Cancellation guard — only the latest load() generation may write state.
+  // Protects against the React stale-state race where:
+  //   1. orgId changes → load A starts
+  //   2. orgId changes again → load B starts
+  //   3. load B completes (correct data)
+  //   4. load A resolves with stale data → overwrites B
+  // Each load() ++'s the ref; only the call that matches the current ref at
+  // completion is allowed to write. Same guard covers mutation-triggered
+  // load() races (handleAdd / handleRevoke firing while a previous load is
+  // still in flight).
+  const loadGeneration = useRef(0);
+
+  const load = async () => {
+    const myGeneration = ++loadGeneration.current;
+    try {
+      const [grantsRes, channelsRes, subRes] = await Promise.all([
+        api.get(`/api/approval-channels/grants?orgId=${orgId}`),
+        api.get(`/api/approval-channels?scope=org`),
+        api.get('/api/subaccounts'),
+      ]);
+      if (myGeneration !== loadGeneration.current) return;
+      setGrants(grantsRes.data ?? []);
+      setOrgChannels(channelsRes.data ?? []);
+      setSubaccounts(subRes.data ?? []);
+    } catch {
+      if (myGeneration !== loadGeneration.current) return;
+      toast.error('Failed to load grant data');
+    } finally {
+      if (myGeneration === loadGeneration.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => { load(); }, [orgId]);
+
+  const handleAdd = async () => {
+    if (!addForm.orgChannelId || !addForm.subaccountId) return;
+    setAdding(true);
+    try {
+      // Channel id is part of the URL path; only subaccount id goes in the
+      // body. Server route: POST /api/approval-channels/:channelId/grants.
+      await api.post(
+        `/api/approval-channels/${addForm.orgChannelId}/grants`,
+        { subaccountId: addForm.subaccountId },
+      );
+      toast.success('Grant added');
+      setAddForm({ orgChannelId: '', subaccountId: '' });
+      await load();
+    } catch {
+      toast.error('Failed to add grant');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRevoke = async (grant: Grant) => {
+    try {
+      // Server route: DELETE /api/approval-channels/:channelId/grants/:grantId.
+      // Both ids come from the grant row.
+      await api.delete(
+        `/api/approval-channels/${grant.orgChannelId}/grants/${grant.id}`,
+      );
+      toast.success('Grant revoked');
+      // Server-authoritative reload — keeps the grants list in sync with the
+      // backend after every mutation. Avoids divergence under concurrent
+      // updates / failed background refreshes.
+      await load();
+    } catch {
+      toast.error('Failed to revoke grant');
+    }
+  };
+
+  // Subaccounts that already have an active grant on the currently-selected
+  // org channel. Hidden from the subaccount picker so the user cannot submit
+  // a duplicate (which the partial UNIQUE index in migration 0275 would
+  // otherwise reject as a unique violation).
+  const grantedSubaccountIdsForChannel: ReadonlySet<string> = new Set(
+    addForm.orgChannelId
+      ? grants.filter(g => g.orgChannelId === addForm.orgChannelId).map(g => g.subaccountId)
+      : [],
+  );
+  const availableSubaccounts = subaccounts.filter(s => !grantedSubaccountIdsForChannel.has(s.id));
+
+  if (loading) {
+    return <div className="text-[13px] text-slate-400 py-4">Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[13px] font-semibold text-slate-700 mb-1">Channel grants</p>
+        <p className="text-[12px] text-slate-500 mb-3">
+          Choose which org channels receive approval requests from each sub-account.
+        </p>
+      </div>
+
+      {/* Add grant form */}
+      <div className="flex gap-2 items-end flex-wrap">
+        <div className="flex flex-col gap-1 min-w-[180px]">
+          <label className="text-[11.5px] font-medium text-slate-600">Org channel</label>
+          <select
+            value={addForm.orgChannelId}
+            onChange={e => setAddForm(p => ({ ...p, orgChannelId: e.target.value }))}
+            className="border border-slate-200 rounded-md px-2.5 py-1.5 text-[12.5px] bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">Select channel...</option>
+            {orgChannels.map(c => (
+              <option key={c.id} value={c.id}>{humaniseChannelType(c.channelType)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1 min-w-[180px]">
+          <label className="text-[11.5px] font-medium text-slate-600">Sub-account</label>
+          <select
+            value={addForm.subaccountId}
+            onChange={e => setAddForm(p => ({ ...p, subaccountId: e.target.value }))}
+            className="border border-slate-200 rounded-md px-2.5 py-1.5 text-[12.5px] bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            disabled={!addForm.orgChannelId}
+          >
+            <option value="">
+              {!addForm.orgChannelId
+                ? 'Select channel first...'
+                : availableSubaccounts.length === 0
+                  ? 'All sub-accounts already granted'
+                  : 'Select sub-account...'}
+            </option>
+            {availableSubaccounts.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={handleAdd}
+          disabled={adding || !addForm.orgChannelId || !addForm.subaccountId}
+          className="px-3 py-1.5 text-[12.5px] font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed border-0 cursor-pointer [font-family:inherit]"
+        >
+          {adding ? 'Adding...' : 'Add grant'}
+        </button>
+      </div>
+
+      {/* Grants table */}
+      {grants.length === 0 ? (
+        <p className="text-[12.5px] text-slate-400 py-2">No grants configured.</p>
+      ) : (
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="px-3 py-2 text-[11.5px] font-semibold text-slate-500 uppercase tracking-wide">Org channel</th>
+              <th className="px-3 py-2 text-[11.5px] font-semibold text-slate-500 uppercase tracking-wide">Sub-account</th>
+              <th className="px-3 py-2 w-20" />
+            </tr>
+          </thead>
+          <tbody>
+            {grants.map(g => (
+              <tr key={g.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-3 py-2 text-[12.5px] text-slate-700">{humaniseChannelType(g.orgChannel.channelType)}</td>
+                <td className="px-3 py-2 text-[12.5px] text-slate-700">{g.subaccount.name}</td>
+                <td className="px-3 py-2 text-right">
+                  <button
+                    onClick={() => handleRevoke(g)}
+                    className="text-[12px] text-red-600 hover:text-red-700 border-none bg-transparent cursor-pointer [font-family:inherit]"
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}

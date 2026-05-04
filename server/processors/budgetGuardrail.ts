@@ -30,7 +30,7 @@ export const budgetGuardrailProcessor: Pick<ProcessorHooks, 'processOutputStep'>
 
     // Budget enforcement uses the existing budget service indirectly via llmRouter;
     // here we check if the run has gone over the tool-level soft limit (if set).
-    // The hard financial limit is enforced upstream in budgetService.
+    // The hard financial limit is enforced upstream in computeBudgetService.
     // This processor is a safety valve for external-tool cost signals.
     return result;
   },

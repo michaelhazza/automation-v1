@@ -84,6 +84,9 @@ const SEG: Record<string, string | null> = {
   usage: 'Usage & Costs',
   'mcp-servers': 'Integrations',
   'llm-pnl': 'LLM P&L',
+  'spending-budgets': 'Spending Budgets',
+  'spend-ledger': 'Spend Ledger',
+  'approval-channels': 'Approval Channels',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -878,6 +881,14 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
+              {/* Agentic Commerce — Spending Budgets (admin edit) or read-only (spend_approver) */}
+              {(hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver')) && (
+                <NavItem to="/admin/spending-budgets" icon={<Icons.usage />} label="Spending Budgets" />
+              )}
+              {/* Agentic Commerce — Spend Ledger (spend_approver or admin) */}
+              {activeClientId && (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver') || hasClientPerm('spend_approver')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/spend-ledger`} icon={<Icons.diagnostic />} label="Spend Ledger" />
+              )}
             </>
           )}
 

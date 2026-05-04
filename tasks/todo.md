@@ -2389,6 +2389,14 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **P2.1 (R3) — CI enforcement check for `eslint-disable` requiring `// reason:` on the preceding line.** Add a CI step (script under `scripts/` or `.github/workflows/`) that walks line pairs across the codebase and fails the build when an `eslint-disable` directive is not preceded by a `// reason:` comment line. Naive `grep -v` matches reason anywhere on the same line; the correct check needs an awk/script that handles preceding-line semantics and skips block-comment regions. Belongs in its own focused PR with test coverage of the script itself. [user] — out of scope for the lint-cleanup PR; requires its own design + tests.
 - [ ] **P2.4 (R3) — Add "React effect dependency policy" section to `CONTRIBUTING.md`.** Document the target pattern (`useCallback` or `useRef`-stabilised inline function) for `useEffect` bodies that close over component state, alongside the existing lint-suppression policy. Coupling: write this when the React effect refactor (R1 P2.1) lands so the doc describes the post-refactor pattern, not the current inline-async pattern. [user] — defer until the refactor PR ships so the policy and the code agree from day one.
 
+## Spec Review deferred items
+
+### agentic-commerce (2026-05-03)
+
+- [ ] Shadow-vs-live delta panel — non-trivial UI surface; existing Spend Ledger `mode = 'shadow'` filter in Chunk 14 captures most value for the promotion decision; defer until v1 produces evidence operators can't decide without a side-by-side view. [user]
+- [ ] Per-skill execution-timeout overrides (`executionTimeoutMinutes: number | null` on `ActionDefinition`) — v1 ships single global `EXECUTION_TIMEOUT_MINUTES` default 30; non-breaking addition when needed. Defer until a specific v1 skill produces evidence 30 min is too short. [user]
+- [ ] Implementation Contract Checklist — pre-build artifact translating spec invariants to enforceable DB/code rules (constraint map, allowed-transitions table, idempotency enforcement points, webhook validation checklist, retry classification enforcement, required logs per transition). ChatGPT advisory from R4; high ROI for engineer handoff. [user]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
@@ -2602,6 +2610,101 @@ Branch: `claude/workflows-brainstorm-LSdMm`. Build slug: `workflows-v1`. All blo
 - [ ] [origin:setup-audit:2026-05-03] [status:open] Backfill `Status:` headers across the existing 84 specs in `docs/`
   - **Why:** the Status: convention added in this session is forward-looking only. The existing 84 specs lack it, so docs/ archive sweeps still produce 0 candidates (per the 2026-05-03 triage report). One-time backfill unlocks the future archive sweeps.
   - **Approach:** `audit-runner` mode that reads each spec, infers status from `tasks/builds/<slug>/handoff.md` (if it exists) and merge state, writes the header. Operator review before commit.
+
+## Deferred from adversarial-reviewer — agentic-commerce (2026-05-03)
+
+**Captured:** 2026-05-03T22:07:50Z
+**Source log:** `tasks/review-logs/adversarial-review-log-agentic-commerce-2026-05-03T22-07-50Z.md`
+**Spec:** `tasks/builds/agentic-commerce/spec.md`
+**Branch:** `claude/agentic-commerce-spending`
+
+One blocker fixed in branch (Finding 2.2 — webhook `connectionStatus` allowlist at `server/routes/webhooks/stripeAgentWebhook.ts:155`). Three reviewer findings dissolved as false positives or by-design. Items below are deferred.
+
+- [ ] **AC-ADV-1** — Stylistic inconsistency: `chargeRouterService.updateChargeStatus` uses `SELECT set_config('app.spend_caller', $1, true)` while all other GUC setters in the same diff use `SET LOCAL "app.spend_caller" = $1`. Both are correct inside an active org-scoped transaction (which `getOrgScopedDb` guarantees), but mixing styles is a maintenance hazard. Convert to `SET LOCAL` for consistency.
+  - File: `server/services/chargeRouterService.ts:138`
+
+- [ ] **AC-ADV-2** — `GET /api/spending-budgets?subaccountId=<id>` accepts a raw `subaccountId` query param without calling `resolveSubaccount(...)`. Org-scoping is enforced (RLS + app-layer org filter), but a same-org caller with `SETTINGS_EDIT` can enumerate subaccount budget summaries by guessing IDs. Product question: should org-level SPEND_APPROVER see all subaccounts' budgets, or only ones they administer? If the latter, gate via subaccount membership.
+  - File: `server/routes/spendingBudgets.ts:85-91`, `server/services/spendingBudgetService.ts:82-88`
+
+- [x] **AC-ADV-3** — DELETE `/api/approval-channels/:channelId/grants/:grantId` does not validate that `grantId` belongs to `channelId`. **CLOSED 2026-05-04** in chatgpt-pr-review Round 3 after ChatGPT independently raised the same point. `revokeGrant` now takes an optional `expectedOrgChannelId` parameter and throws 404 on mismatch; route handler passes `req.params.channelId`. Original dissolution rationale (SETTINGS_EDIT org-wide) was correct but defense-in-depth justified the apply when a second reviewer flagged it.
+
+- [ ] **AC-ADV-4** — `approvalChannelService.requestApproval` active-approval guard filters on `metadataJson->>'category' = 'spend'` and `metadataJson->>'chargeId' = ...` without an explicit `eq(actions.organisationId, ...)` filter and without a supporting index. RLS on `actions` is the primary defence against cross-org leakage, but adding the explicit filter is best-practice defense-in-depth and a GIN index on `actions.metadataJson` (or a partial btree on the extracted chargeId path) would address the per-approval full-table-scan cost.
+  - File: `server/services/approvalChannelService.ts:95-101`
+
+- [ ] **AC-ADV-5** — `approvalExpiryJob` uses `sql.raw` with string-interpolated `cutoff.toISOString()`. `cutoff` is internal-derived (`deriveApprovalCutoff(now)`) so there is no current SQL-injection vector, but `sql.raw` bypasses Drizzle parameterisation. Convert to `sql\`... WHERE approval_expires_at < ${cutoff.toISOString()}::timestamptz LIMIT 1000\`` for consistency with every other job in the diff and to future-proof against any later change that makes `cutoff` partially user-controlled.
+  - File: `server/jobs/approvalExpiryJob.ts:46-52`
+
+- [ ] **AC-ADV-6** — `WebhookDedupeStore` for `stripe_agent` is sized at `MAX_ENTRIES = 10000` with a 96h TTL. Layer 2 (`last_transition_event_id` row check) and Layer 3 (DB trigger) still protect against double-processing if the LRU evicts a still-relevant entry, but the *primary* dedupe layer's intent (avoid DB round-trip on retries) is silently degraded under load. Add an instrumented counter + alert when eviction fires, or raise `MAX_ENTRIES` based on a measured high-watermark.
+  - File: `server/lib/webhookDedupe.ts:13`, `server/routes/webhooks/stripeAgentWebhook.ts:38-39`
+
+- [ ] **AC-ADV-7** — `stripeAgentWebhookService` `recordIncident` payload for cross-tenant `provider_charge_id` collisions includes both `webhookOrg` and `rowOrg` UUIDs in `errorDetail`. Per-org incident readers therefore see another org's identifier on this incident class. Severity is low (Stripe charge IDs are globally unique; this is an attacker-with-Stripe-collusion scenario), but the incident-log identifier exposure should be redacted: store `rowOrg = '<other>'` or hash it.
+  - File: `server/services/stripeAgentWebhookService.ts:255-269`
+
+- [ ] **AC-ADV-8** — `agentSpendRequestHandler` infers `executionPath` from `chargeType` via an implicit switch (`invoice_payment → main_app_stripe`, else `worker_hosted_form`). This duplicates information already on `ActionDefinition.executionPath`. A new chargeType added without updating the switch will silently mis-route. Derive `executionPath` from the registered action definition instead.
+  - File: `server/jobs/agentSpendRequestHandler.ts:229`
+
+- [ ] **AC-ADV-9** — `stripeAgentWebhookService` out-of-order webhook handling logs a warning and returns silently for ambiguous-sequence events when `_retryCount < 3`, with an in-code TODO acknowledging the re-enqueue mechanism is "outside scope for this chunk." Three retries will each return without re-enqueueing; the charge stays stuck until the reconciliation poll job intervenes. Wire actual re-enqueue (push event back onto pg-boss with a delay).
+  - File: `server/services/stripeAgentWebhookService.ts:332-358`
+
+- [ ] **AC-ADV-10** — `spending_budgets` table has no FK constraint preventing hard delete when in-flight `agent_charges` rows reference the budget. An org admin with `SETTINGS_EDIT` could orphan in-flight charges. Add `ON DELETE RESTRICT` (or `ON DELETE SET NULL` with explicit audit trail) to `agent_charges.spending_budget_id`. A migration is needed.
+  - File: `migrations/0271_agentic_commerce_schema.sql`
+
+- [ ] **AC-ADV-11** — `PATCH /api/spending-budgets/:id` accepts `disabledAt` from the request body as a string and converts via `new Date(disabledAt)` without validation. A malformed string yields `Invalid Date` which Drizzle serialises as `NaN`, producing an obscure DB error rather than a clean 400. Validate via Zod/zod-derived schema like the other PATCH handlers in the diff.
+  - File: `server/routes/spendingBudgets.ts`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 1)
+
+**Captured:** 2026-05-03T22:41:01Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T22-41-01Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 1 produced 8 findings. 5 auto-applied in-branch (1, 2, 4, 5, 7); the 3 below routed here as follow-up items. ChatGPT's Round 1 final verdict was *Yellow → close to green*.
+
+- [ ] **AC-CGPT-1** — Missing retry / error model on `GrantManagementSection.load()` failures. Today the catch only fires a `toast.error` and leaves the UI in a hard-failed state (no retry button, no degraded view, no exponential-backoff). UX decision: pick one of (a) explicit "Retry" button on the failed-load state, (b) auto-retry with backoff up to N attempts, (c) degraded-view fallback rendering empty grants list with a banner. Apply project-wide as a pattern if (a) or (b) is chosen.
+  - File: `client/src/components/approval/GrantManagementSection.tsx:40-55`
+
+- [ ] **AC-CGPT-2** — `groupByIntent` time-semantics in `client/src/components/spend/RetryGroupingPure.ts` and related grouping helpers assume `createdAt: string` is always ISO-8601 with no timezone drift. The codebase invariant is "server-generated timestamps only" (Drizzle `.defaultNow()` + `withTimezone: true`), but the client has no explicit parse step. Consider one of: (a) explicit `Date.parse(createdAt)` + invariant-violation `console.warn` on `NaN`, (b) extract a `compareCreatedAt(a, b)` comparator helper, (c) document the invariant as a JSDoc on `groupByIntent` and call it day. Lower priority — current behaviour is correct in practice.
+  - File: `client/src/components/spend/RetryGroupingPure.ts`
+
+- [ ] **AC-CGPT-3** — `ConservativeDefaultsButton` `POST /spending-budgets/:id/conservative-defaults` lacks operator-visible safety guards. ChatGPT recommends one of: (a) a confirmation modal listing the fields about to be overwritten with the conservative defaults, (b) a diff preview (current → defaults) before commit, (c) idempotency indicator (e.g. button disabled when already at defaults). UX decision required — applying defaults to a freshly-created budget vs an in-use one have different risk profiles.
+  - File: `client/src/components/spend/ConservativeDefaultsButton.tsx`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 2)
+
+**Captured:** 2026-05-03T23:24:25Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T23-24-25Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 2 produced 8 findings. 3 auto-applied in-branch (2, 4, 5); 1 was already done in Round 1 (1 — DB-level UNIQUE in migration 0275); 4 routed here as follow-ups. ChatGPT's Round 2 verdict was *Green with 2 minor caveats*; both caveats were resolved or already in place. A side-finding (frontend↔server route mismatch on `GrantManagementSection`) discovered during Round 2 work was also fixed in this round — see the review log for detail.
+
+- [ ] **AC-CGPT-R2-1** — `GrantManagementSection.handleAdd` and `handleRevoke` `await load()` after every mutation, blocking the UI until the full reload completes. ChatGPT Round 2 Finding 3 recommends fire-and-forget reload OR optimistic-with-background-sync to reduce perceived latency. Trade-off: this conflicts with the Round 1 server-authoritative-reload pattern that resolved the original mixed-update-strategy bug. Prefer to defer until the admin-config UI sees enough use to measure actual latency stacking. If applied: keep server-authoritative as the source of truth, but render an optimistic insert/remove immediately and reconcile on `load()` completion.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R2-2** — `formatSpendCardPure` does not insert thousands separators for large amounts. `999999.99` could read as `$999,999.99` for clearer comprehension. ChatGPT itself recommends keeping the pure function deterministic (no locale-dependent `Intl.NumberFormat`) and adding an optional formatter layer at the rendering tier instead. Two-tier: pure helper produces canonical `999999.99`, render layer optionally formats with `Intl.NumberFormat` for display.
+  - File: `client/src/components/spend/formatSpendCardPure.ts`
+
+- [ ] **AC-CGPT-R2-3** — `PendingApprovalCardLaneConfig.test.ts` hardcodes `expectedLanes = ['client', 'major', 'internal', 'spend']`. If the server adds a new lane, the test still passes (it only checks the hardcoded list is covered, not that the server's actual emit set is covered). Consider extracting the canonical lane set into a shared types file (`shared/types/pulseAttention.ts` or similar) and importing it into both server and test for true drift detection.
+  - File: `client/src/components/dashboard/__tests__/PendingApprovalCardLaneConfig.test.ts`
+
+- [ ] **AC-CGPT-R2-4** — `GrantManagementSection.load()` fires three parallel `api.get()` calls every time `orgId` changes. For large orgs with many channels and subaccounts, this can be slow. Consider: (a) caching org channels and subaccounts client-side (rare changes), (b) consolidating into a single `/api/approval-channels/grants/management-data` endpoint that returns all three, (c) prefetching at app load. Lower priority — admin-config UI traffic is low-volume.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+## Deferred from chatgpt-pr-review — agentic-commerce (2026-05-03 round 3)
+
+**Captured:** 2026-05-03T23:40:43Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-agentic-commerce-2026-05-03T23-40-43Z.md`
+**PR:** #255 (`claude/agentic-commerce-spending`)
+
+ChatGPT Round 3 produced 6 findings. 2 auto-applied in-branch (2, 3); 1 rejected as false positive (1 — see review log for trace); 3 routed here as follow-ups. ChatGPT's Round 3 verdict was *🟢 Clean green (production-safe)*. **chatgpt-pr-review LOOP CLOSED at Round 3.**
+
+- [ ] **AC-CGPT-R3-1** — `availableSubaccounts` is derived from client state only, so a multi-tab race could let a user submit a (channel, subaccount) pair that's already granted by another tab. The DB-level partial UNIQUE in migration 0275 catches the actual data corruption — the user just gets a 404 / unique-violation error response on submit. ChatGPT itself flagged this as "Not worth fixing now, just noting." Multi-tab UX consistency is a UX nicety, not a correctness bug.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R3-2** — `loading` flag has a micro-edge: load A starts → load B starts → A's fetch ignored (correctly) → B errors before `setLoading(false)`. The user sees a stuck spinner until manual reload. Probability is low (requires concurrent loads + a fetch error on the latest); manual refresh resolves. If applied, the fix is to move `setLoading(false)` outside the generation-equality check in the finally block — but that contradicts the cancellation guard's intent (older loads shouldn't touch state at all). Better: use a separate ref for "the latest load's loading state" rather than a setState.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`
+
+- [ ] **AC-CGPT-R3-3** — `humaniseChannelType` returns `channelType` directly when no label is registered, which means multiple channels of the same type render identically (e.g. two `slack` channels with different config look identical to the operator). v1 only ships `in_app` so the ambiguity doesn't manifest today. When a second channel type lands AND multiple instances of the same type can coexist, add a `name` column to `org_approval_channels` (and `subaccount_approval_channels`) and render channel `name + type`. Couples to `[2026-05-04] Rule — Do not introduce "future-use" schema columns without active invariants` in KNOWLEDGE.md — defer the schema add until the multi-channel-type build needs it.
+  - File: `client/src/components/approval/GrantManagementSection.tsx`, `server/db/schema/orgApprovalChannels.ts`
 
 ## Deferred from Workflows V1 Chunks 5–6 (2026-05-03)
 

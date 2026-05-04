@@ -25,7 +25,7 @@ export const AGENT_RUN_STATUS = {
   TIMEOUT: 'timeout',
   CANCELLED: 'cancelled',
   LOOP_DETECTED: 'loop_detected',
-  BUDGET_EXCEEDED: 'budget_exceeded',
+  COMPUTE_BUDGET_EXCEEDED: 'budget_exceeded',
   AWAITING_CLARIFICATION: 'awaiting_clarification',
   WAITING_ON_CLARIFICATION: 'waiting_on_clarification',
   COMPLETED_WITH_UNCERTAINTY: 'completed_with_uncertainty',
@@ -51,7 +51,7 @@ export const TERMINAL_RUN_STATUSES: readonly AgentRunStatus[] = [
   AGENT_RUN_STATUS.TIMEOUT,
   AGENT_RUN_STATUS.CANCELLED,
   AGENT_RUN_STATUS.LOOP_DETECTED,
-  AGENT_RUN_STATUS.BUDGET_EXCEEDED,
+  AGENT_RUN_STATUS.COMPUTE_BUDGET_EXCEEDED,
   AGENT_RUN_STATUS.COMPLETED_WITH_UNCERTAINTY,
 ];
 
