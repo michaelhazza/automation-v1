@@ -39,6 +39,7 @@ const CHANGELOG_FILE = path.join(SOURCE_DIR, '.claude', 'CHANGELOG.md');
 // one — if it leaks into the export, target repos will see it.
 const FORBIDDEN_STRINGS = [
   'Automation OS',
+  'AutomationOS',
   'automation-v1',
   'Synthetos',
 ];
@@ -174,10 +175,24 @@ async function buildZip(version: string): Promise<string> {
       `Compress-Archive -Path "${SOURCE_DIR}\\*" -DestinationPath "${zipPath}" -Force`,
     ]);
   } else {
-    // POSIX — `zip` should be present.
+    // POSIX — `zip` should be present. Preflight-check before invoking so we
+    // give a clear error rather than a cryptic ENOENT when running in minimal
+    // containers / CI images that ship without `zip`.
+    await assertZipBinaryAvailable();
     await runCommand('zip', ['-rq', zipPath, '.'], { cwd: SOURCE_DIR });
   }
   return zipPath;
+}
+
+function assertZipBinaryAvailable(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('zip', ['-v'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    child.on('error', () => reject(new Error(
+      "`zip` binary not found on PATH. The portable-framework builder uses the system `zip` on POSIX. " +
+      "Install it (apt: `apt-get install -y zip`, alpine: `apk add zip`, brew: `brew install zip`) and re-run.",
+    )));
+    child.on('exit', () => resolve());
+  });
 }
 
 interface RunOptions {

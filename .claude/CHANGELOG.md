@@ -30,6 +30,17 @@ When a repo's `FRAMEWORK_VERSION` falls behind the latest:
 
 Repos can stay on older versions intentionally. The framework is designed to be additive; older versions don't break.
 
+## Root vs portable bundle versioning
+
+This repo carries two `FRAMEWORK_VERSION` files that may drift intentionally:
+
+- **Root** (`.claude/FRAMEWORK_VERSION`, this changelog) — the framework version actually deployed in this repo's `.claude/` tree. Reflects what is currently running for our own sessions.
+- **Portable bundle** (`setup/portable/.claude/FRAMEWORK_VERSION`, `setup/portable/.claude/CHANGELOG.md`) — the framework version shipped to consuming repos via the bundle / sync engine. May ship versions that this repo has not yet self-adopted.
+
+When the bundle introduces new framework infrastructure that lives entirely under `setup/portable/` (e.g. the v2.2.0 sync engine, manifest, and substitution-engine contract), the bundle changelog bumps but the root changelog does NOT — because the root deployment is unchanged. The root catches up only when this repo self-adopts the bundle (Phase C of the framework-standalone-repo build).
+
+If `validate-setup` or future drift-detection tooling needs to compare versions, it should read the file relevant to its scope: the root file for "what is deployed here," the bundle file for "what would a consumer get."
+
 ---
 
 ## 2.1.0 — 2026-05-04
