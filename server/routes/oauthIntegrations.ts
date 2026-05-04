@@ -450,11 +450,16 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
     });
   }
 
-  // C-P0-2: agent resume after OAuth is satisfied by the synchronous
-  // resumeFromIntegrationConnect path in /api/integrations/oauth2/callback
-  // (JWT-based OAuth flow). The GHL agency OAuth path (/api/oauth/callback)
-  // uses a raw nonce store and does not carry an agent resume token, so no
-  // resume is needed here.
+  // C-P0-2: agent resume after OAuth.
+  // The JWT-based OAuth flow (/api/integrations/oauth2/callback) handles
+  // agent run resume via resumeFromIntegrationConnect when payload.resumeToken
+  // is set. The GHL agency OAuth path (/api/oauth/callback) is initiated from
+  // the settings/onboarding UI (routes/ghl.ts), which never passes pendingRunId
+  // to setGhlOAuthState — so stateData.pendingRunId is always null here.
+  // The oauth_state_nonces.pending_run_id column and enqueueResumeAfterOAuth
+  // are pre-built for a future agent-triggered GHL OAuth path; when that path
+  // is wired, the initiation site (routes/ghl.ts) must pass pendingRunId and
+  // the consume site here must call enqueueResumeAfterOAuth(stateData.pendingRunId).
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));

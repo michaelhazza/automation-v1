@@ -294,6 +294,9 @@ export const WorkflowRunPauseStopService = {
 
     // Cascade orphaned gates before status update (invariant), then update status.
     // Both operations run on the same org-scoped tx so they are atomic.
+    // The tx is the outer Postgres transaction opened by the HTTP auth middleware
+    // (server/middleware/auth.ts:106 db.transaction()) or the createWorker wrapper.
+    // getOrgScopedDb() returns that tx handle from ALS — no local transaction needed.
     const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(
       runId,
       organisationId,

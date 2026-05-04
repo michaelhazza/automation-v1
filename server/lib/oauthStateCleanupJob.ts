@@ -29,7 +29,8 @@ export async function runOauthStateCleanupOnce(): Promise<{ rowsDeleted: number 
     )
     RETURNING 1 AS ok
   `);
-  const rows = result as unknown as Array<{ ok: number }>;
+  // db.execute returns a QueryResult with a .rows array, not a bare array.
+  const rows = (result as unknown as { rows?: Array<{ ok: number }> }).rows ?? [];
   return { rowsDeleted: rows.length };
 }
 

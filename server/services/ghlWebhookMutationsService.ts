@@ -292,7 +292,15 @@ export async function dispatchWebhookSideEffects(
           organisationId: connection.organisationId,
           subaccountId: result.id,
         });
-      } catch { /* non-fatal — onboarding enqueue failure logged by enqueueGhlOnboarding */ }
+      } catch (enqueueErr) {
+        // Non-fatal: subaccount is created; onboarding will retry on next cron sweep.
+        // enqueueGhlOnboarding throws on failure (does not log internally).
+        logger.warn('ghl_webhook.onboarding_enqueue_failed', {
+          event: 'ghl_webhook.onboarding_enqueue_failed',
+          organisationId: connection.organisationId,
+          error: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
+        });
+      }
     }
 
     return {
