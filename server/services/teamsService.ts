@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
-import { teams, teamMembers } from '../db/schema/index.js';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { teams, teamMembers, users } from '../db/schema/index.js';
+import { eq, and, isNull, inArray, sql } from 'drizzle-orm';
 
 export class TeamNameConflictError extends Error {
   readonly code = 'team_name_conflict' as const;
@@ -169,6 +169,36 @@ async function deleteTeam(teamId: string, organisationId: string): Promise<void>
     .where(and(eq(teams.id, teamId), eq(teams.organisationId, organisationId)));
 }
 
+interface MemberRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+}
+
+async function listMembers(teamId: string, organisationId: string): Promise<MemberRow[]> {
+  const rows = await db
+    .select({
+      id: users.id,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      email: users.email,
+      role: users.role,
+    })
+    .from(teamMembers)
+    .innerJoin(users, eq(users.id, teamMembers.userId))
+    .where(
+      and(
+        eq(teamMembers.teamId, teamId),
+        eq(teamMembers.organisationId, organisationId),
+        isNull(users.deletedAt)
+      )
+    );
+
+  return rows;
+}
+
 async function addMembers(
   teamId: string,
   organisationId: string,
@@ -190,7 +220,15 @@ async function addMembers(
 
   if (userIds.length === 0) return { added: 0 };
 
-  const values = userIds.map((userId) => ({
+  const validUsers = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(inArray(users.id, userIds), eq(users.organisationId, organisationId), isNull(users.deletedAt)));
+  const validIds = validUsers.map((u) => u.id);
+
+  if (validIds.length === 0) return { added: 0 };
+
+  const values = validIds.map((userId) => ({
     teamId,
     userId,
     organisationId,
@@ -226,7 +264,13 @@ async function removeMember(
 
   await db
     .delete(teamMembers)
-    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    .where(
+      and(
+        eq(teamMembers.teamId, teamId),
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.organisationId, organisationId)
+      )
+    );
 }
 
 export const teamsService = {
@@ -234,6 +278,7 @@ export const teamsService = {
   createTeam,
   updateTeam,
   deleteTeam,
+  listMembers,
   addMembers,
   removeMember,
 };

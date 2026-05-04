@@ -32,6 +32,10 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!checkOrgId(req, res)) return;
     const { name, subaccountId } = req.body as { name: string; subaccountId?: string };
+    if (!name?.trim()) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
     try {
       const team = await teamsService.createTeam({
         organisationId: req.orgId!,
@@ -56,6 +60,10 @@ router.patch(
   asyncHandler(async (req, res) => {
     if (!checkOrgId(req, res)) return;
     const { name } = req.body as { name: string };
+    if (!name?.trim()) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
     try {
       const team = await teamsService.updateTeam(req.params.teamId, req.orgId!, name);
       res.json({ team });
@@ -92,6 +100,25 @@ router.delete(
   })
 );
 
+router.get(
+  '/api/orgs/:orgId/teams/:teamId/members',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.TEAMS_MANAGE),
+  asyncHandler(async (req, res) => {
+    if (!checkOrgId(req, res)) return;
+    try {
+      const members = await teamsService.listMembers(req.params.teamId, req.orgId!);
+      res.json({ members });
+    } catch (err) {
+      if (err instanceof TeamNotFoundError) {
+        res.status(404).json({ error: 'team_not_found' });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
 router.post(
   '/api/orgs/:orgId/teams/:teamId/members',
   authenticate,
@@ -99,6 +126,10 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!checkOrgId(req, res)) return;
     const { userIds } = req.body as { userIds: string[] };
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({ error: 'userIds must be a non-empty array' });
+      return;
+    }
     try {
       const result = await teamsService.addMembers(req.params.teamId, req.orgId!, userIds);
       res.json(result);
