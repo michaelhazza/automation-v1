@@ -1,74 +1,52 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { env } from '../lib/env.js';
-import { OAUTH_PROVIDERS } from '../config/oauthProviders.js';
-
-// In-memory store for OAuth state nonces (production: use session or DB)
-const pendingOAuthStates = new Map<string, { orgId: string; expiresAt: number }>();
+import { OAUTH_PROVIDERS, getProviderClientId } from '../config/oauthProviders.js';
+import { setGhlOAuthState } from '../lib/ghlOAuthStateStore.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
 /**
- * GHL OAuth + API stub routes.
- * These are placeholders for the full Module C implementation.
- * They provide the endpoints the onboarding UI expects.
+ * GET /api/ghl/oauth-url
+ * Generates the GHL install URL and registers the CSRF state nonce.
+ * Requires authenticated session — orgId is taken from JWT (never from query params).
  */
-
-/** GET /api/ghl/oauth-url — generate GHL OAuth redirect URL */
 router.get('/api/ghl/oauth-url', authenticate, asyncHandler(async (req, res) => {
-  // TODO: Build from env.GHL_CLIENT_ID, env.GHL_REDIRECT_URI, required scopes.
-  // For now return a placeholder so the UI doesn't break.
-  const clientId = (env as unknown as Record<string, string | undefined>).GHL_CLIENT_ID;
+  const clientId = getProviderClientId('ghl');
   if (!clientId) {
-    res.json({ url: null, message: 'GHL OAuth not configured. Set GHL_CLIENT_ID in environment.' });
-    return;
+    throw Object.assign(
+      new Error('GHL OAuth not configured: OAUTH_GHL_CLIENT_ID missing'),
+      { statusCode: 503 },
+    );
   }
 
-  // Generate CSRF-safe state nonce tied to the user's org
-  const state = crypto.randomBytes(32).toString('hex');
-  const orgId = req.orgId ?? '';
-  pendingOAuthStates.set(state, { orgId, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10min expiry
+  const orgId = req.orgId;
+  if (!orgId) throw Object.assign(new Error('orgId missing on authenticated request'), { statusCode: 500 });
 
-  const redirectUri = encodeURIComponent(`${env.APP_BASE_URL}/api/ghl/oauth/callback`);
-  // SSoT: scope list lives in OAUTH_PROVIDERS.ghl.scopes — never hardcode here.
-  const scopes = encodeURIComponent(OAUTH_PROVIDERS.ghl.scopes.join(' '));
-  const url = `${OAUTH_PROVIDERS.ghl.authUrl}?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scopes}&state=${state}`;
-
-  res.json({ url });
-}));
-
-/** GET /api/ghl/oauth/callback — handle GHL OAuth callback */
-router.get('/api/ghl/oauth/callback', asyncHandler(async (req, res) => {
-  const { code, state, error: oauthError } = req.query;
-
-  if (oauthError || !code) {
-    res.redirect('/onboarding?error=oauth_denied');
-    return;
+  const hasPermission = await checkOrgPermission(
+    req.user!.id, orgId, req.user!.role, ORG_PERMISSIONS.CONNECTIONS_MANAGE,
+  );
+  if (!hasPermission) {
+    throw Object.assign(new Error('Forbidden: org.connections.manage permission required'), { statusCode: 403 });
   }
 
-  // Validate OAuth state nonce to prevent CSRF
-  const stateStr = String(state ?? '');
-  const pending = pendingOAuthStates.get(stateStr);
-  if (!pending || pending.expiresAt < Date.now()) {
-    pendingOAuthStates.delete(stateStr);
-    res.redirect('/onboarding?error=oauth_denied');
-    return;
-  }
-  pendingOAuthStates.delete(stateStr);
+  const nonce = crypto.randomBytes(32).toString('hex');
+  setGhlOAuthState(nonce, orgId);
 
-  // TODO: Exchange code for access token using pending.orgId,
-  // store in connector_configs, then redirect to onboarding step 2.
-  // For now, redirect back to onboarding.
-  res.redirect('/onboarding');
-}));
+  const appBase = process.env.OAUTH_CALLBACK_BASE_URL || process.env.APP_BASE_URL || '';
+  const redirectUri = `${appBase}/api/oauth/callback`;
+  const scopes = OAUTH_PROVIDERS.ghl.scopes.join(' ');
 
-/** GET /api/ghl/locations — list discovered GHL locations for the onboarding wizard */
-router.get('/api/ghl/locations', authenticate, asyncHandler(async (req, res) => {
-  // TODO: Call GHL API to list locations using stored agency token.
-  // For now, return empty list.
-  res.json({ locations: [] });
+  const url = new URL(OAUTH_PROVIDERS.ghl.authUrl);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('scope', scopes);
+  url.searchParams.set('state', nonce);
+
+  res.json({ url: url.toString() });
 }));
 
 export default router;

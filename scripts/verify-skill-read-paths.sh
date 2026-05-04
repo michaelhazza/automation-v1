@@ -10,7 +10,7 @@ FILE="server/config/actionRegistry.ts"
 # definition, the methodology template variable, and function parameters.
 ACTION_COUNT=$(grep -cE "actionType: '[a-z_]+'" "$FILE" || true)
 
-# Count readPath entries, subtracting 7 non-entry occurrences (calibration constant = 7):
+# Count readPath entries, subtracting 8 non-entry occurrences (calibration constant = 8):
 #   1. Pattern: "readPath: 'canonical' | 'liveFetch' | 'none'"  — interface definition (ActionDefinition type body)
 #   2. Pattern: "readPath: 'none' as const"                     — methodology template variable (Object.fromEntries block)
 #   3. Pattern: "actionType: 'crm.fire_automation'"             — crm.* entry; readPath real but actionType dot-namespaced, not matched by ACTION_COUNT pattern '[a-z_]+'
@@ -18,11 +18,12 @@ ACTION_COUNT=$(grep -cE "actionType: '[a-z_]+'" "$FILE" || true)
 #   5. Pattern: "actionType: 'crm.send_sms'"                    — crm.* entry; same reason as #3
 #   6. Pattern: "actionType: 'crm.create_task'"                 — crm.* entry; same reason as #3
 #   7. Pattern: "actionType: 'crm.query'"                       — crm.* entry; same reason as #3
-# Items 3-7: these are valid action entries but their actionType names contain dots, so they are
+#   8. Pattern: "actionType: 'workflow.run.start'"              — workflows-v1 entry; same reason as #3 (added 2026-05-04)
+# Items 3-8: these are valid action entries but their actionType names contain dots, so they are
 # not counted by ACTION_COUNT (grep pattern '[a-z_]+' requires only lowercase letters and underscores).
 # Subtracting their readPath occurrences keeps ENTRY_READ_PATH aligned with ACTION_COUNT.
 RAW_READ_PATH=$(grep -c "readPath:" "$FILE" || true)
-ENTRY_READ_PATH=$((RAW_READ_PATH - 7))
+ENTRY_READ_PATH=$((RAW_READ_PATH - 8))
 
 # For the summary, count the methodology block as 1 entry on each side.
 TOTAL_ACTIONS=$((ACTION_COUNT + 1))

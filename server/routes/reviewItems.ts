@@ -158,10 +158,13 @@ router.post(
         ackCurrencyCode: lane === 'major' ? majorCurrencyCode : undefined,
       }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
 
-      // If this action was created by a workflow step, enqueue a resume job
+      // If this action was created by a workflow step, enqueue a resume job.
+      // Workflow-driven actions always carry an agentId; system-initiated
+      // actions (e.g. spend-promotion) carry no workflowRunId and never
+      // reach this branch.
       const meta = action.metadataJson as Record<string, unknown> | null;
       const workflowRunId = meta?.workflowRunId as string | undefined;
-      if (workflowRunId) {
+      if (workflowRunId && action.agentId) {
         queueService.enqueueWorkflowResume({
           workflowRunId,
           approvedActionId: action.id,

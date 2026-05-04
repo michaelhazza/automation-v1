@@ -598,6 +598,13 @@ export const scheduledTaskService = {
   },
 
   // ─── Fire Occurrence ───────────────────────────────────────────────────────
+  //
+  // Spec §5.4 — scheduled→workflow dispatch: when a scheduled task fires a
+  // workflow run (Chunk 15 scope), read `st.pinnedTemplateVersionId` from the
+  // scheduled task row and pass it as `pinnedTemplateVersionId` to
+  // WorkflowRunService.startRun. startRun honours the pin via
+  // WorkflowScheduleDispatchService.pickVersionForSchedule and throws
+  // `pinned_version_unavailable` (422) when the pinned version no longer exists.
 
   async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
     const [st] = await db

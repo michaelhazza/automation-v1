@@ -1,10 +1,11 @@
 # Sub-Account Optimiser Meta-Agent — Dev Spec
 
-**Status:** DRAFT (v2 — post-design-review 2026-05-02)
+**Status:** Phase 0 SHIPPED on main (migration 0267 / PR #251); §9 Phases 1-4 PENDING.
+**Last reviewed against main:** 2026-05-04 (post-merge of Workflows v1 Phase 2 / PR #258)
 **Build slug:** `subaccount-optimiser`
 **Branch:** `claude/subaccount-optimiser`
-**Migrations claimed:** `0267`, `0267a`
-**Concurrent peers:** F1 `subaccount-artefacts` (0266), F3 `baseline-capture` (0268-0270)
+**Migrations claimed:** `0267` (SHIPPED on main); `0267a` (peer-medians materialised view, PENDING — to be authored as part of Phase 1; reallocate to next-free if conflict at build time)
+**Concurrent peers:** F1 `subaccount-artefacts` (migration to be reallocated to `0277`; Riley doc-sync folded into F1 Phase 0), F3 `baseline-capture` (migrations to be reallocated to `0278-0280`; Module C OAuth blocker resolved via PR #254)
 
 **Related code:**
 - `companies/automation-os/agents/portfolio-health-agent/` (org-tier sibling, do not merge)
@@ -605,9 +606,9 @@ Default-on. Opt-out is the backend boolean `subaccounts.optimiser_enabled` (defa
 
 Total ~25h. Phase 0 builds the reusable primitive; Phases 1-4 are the optimiser as the first consumer (the previous Phase 4 phrase tokeniser was folded into Phase 1 since the work is part of the same query module — see §9 / Phase 1 / `escalationPhrases.ts`).
 
-### Phase 0 — Generic agent-output primitive (~6h)
+### Phase 0 — Generic agent-output primitive (~6h) — **SHIPPED on main 2026-05-02 via PR #251**
 
-Builds reusable infrastructure that survives beyond the optimiser.
+Builds reusable infrastructure that survives beyond the optimiser. All Phase 0 task-list items below are complete and live on main; left in place for spec readability and future audit. See `tasks/builds/subaccount-optimiser/progress.md` for closeout notes (Phase 0 is recorded there as "Phase 1 — Generic agent-output primitive: COMPLETE" — the offset-by-one is a known progress-file vs spec-file numbering inconsistency).
 
 - [ ] Author migration `migrations/0267_agent_recommendations.sql` (+ `.down.sql`). Same migration adds the boolean column `subaccounts.optimiser_enabled NOT NULL DEFAULT true` (the opt-out toggle referenced in §1, §4, §8, §9, §11) AND the four `agent_recommendations` indexes (dedupe partial-unique, open-by-scope, dismissed-active-cooldown, organisation-id rollup) per §6.1. Not added as a separate migration because all are conceptually owned by the optimiser feature; a dedicated migration would be heavier overhead than the primitive itself.
 - [ ] Add table to `server/db/schema/agentRecommendations.ts` (including `dismissed_until TIMESTAMPTZ` column and discriminated-union `RecommendationEvidence` type).
@@ -767,13 +768,14 @@ Builds reusable infrastructure that survives beyond the optimiser.
 
 ## §14 Concurrent-build hygiene
 
-- Migrations `0267` (table + RLS for `agent_recommendations`) and `0267a` (cross-tenant materialised view `optimiser_skill_peer_medians`) reserved here. Do not use elsewhere. Two-file split is deliberate — the primitive (Phase 0) and the optimiser-specific peer-median view (Phase 1) live on different migration boundaries because the primitive is intended to outlive the optimiser.
+- Migration `0267` (table + RLS for `agent_recommendations` + `subaccounts.optimiser_enabled` column) **SHIPPED on main 2026-05-02 via PR #251**.
+- Migration `0267a` (cross-tenant materialised view `optimiser_skill_peer_medians`) PENDING — to be authored as part of §9 Phase 1. **At Phase 1 build time, claim the next free migration number** rather than `0267a`, since the latter is a non-standard suffix the rest of the repo doesn't use; the view is conceptually independent of `0267` and a clean integer number is preferred. Two-step migration boundary is deliberate — the primitive (Phase 0) is intended to outlive the optimiser.
 - Branch `claude/subaccount-optimiser`. Worktree at `../automation-v1.subaccount-optimiser`.
 - Progress lives in `tasks/builds/subaccount-optimiser/progress.md`.
 - Touches `server/services/skillExecutor.ts` switch — F1 and F3 don't touch this; safe.
 - Touches `server/services/agentScheduleService.ts` — neither F1 nor F3 touches; safe.
 - Touches `client/src/pages/DashboardPage.tsx` — F1 and F3 don't touch this; safe.
-- Fully independent of F1 and F3. Can land any time.
+- Phases 1-4 fully independent of F1 and F3. Can land any time in parallel.
 
 ## §15 What Riley W3 would unlock (when it ships)
 

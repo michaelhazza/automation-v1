@@ -109,6 +109,11 @@ const envSchema = z.object({
   SYNTHETOS_INTERNAL_SLACK_WEBHOOK: z.string().optional(),
   OAUTH_GHL_CLIENT_ID: z.string().optional(),
   OAUTH_GHL_CLIENT_SECRET: z.string().optional(),
+  // GHL app-level webhook signing secret (set in GHL Marketplace app settings).
+  // Used to verify HMAC-SHA256 signatures on agency lifecycle webhooks
+  // (INSTALL/UNINSTALL/LocationCreate/LocationUpdate). When unset, lifecycle
+  // webhooks are processed without signature verification (development only).
+  GHL_WEBHOOK_SIGNING_SECRET: z.string().optional(),
   // GitHub App — fine-grained, per-repo access (replaces OAUTH_GITHUB_* OAuth App)
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM key, base64-encoded for env vars

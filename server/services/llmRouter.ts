@@ -10,7 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
 import { pricingService } from './pricingService.js';
-import { budgetService, BudgetExceededError, RateLimitError } from './budgetService.js';
+import { computeBudgetService, ComputeBudgetExceededError, RateLimitError } from './computeBudgetService.js';
 import { resolveLLM } from './llmResolver.js';
 import type { ProviderMessage, ProviderTool, ProviderResponse } from './providers/types.js';
 import { env } from '../lib/env.js';
@@ -587,7 +587,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const provisionalLedgerRowId = idempotencyResult.provisionalRowId;
 
   try {
-    reservationId = await budgetService.checkAndReserve(
+    reservationId = await computeBudgetService.checkAndReserve(
       {
         organisationId:    ctx.organisationId,
         subaccountId:      ctx.subaccountId,
@@ -601,7 +601,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       idempotencyKey,
     );
   } catch (err) {
-    if (err instanceof BudgetExceededError) {
+    if (err instanceof ComputeBudgetExceededError) {
       budgetBlockedStatus = 'budget_blocked';
       budgetErrorMessage = err.message;
       createEvent('llm.router.budget_exceeded', {
@@ -688,7 +688,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     throw {
       statusCode: 402,
-      code: budgetBlockedStatus === 'budget_blocked' ? 'BUDGET_EXCEEDED' : 'RATE_LIMITED',
+      code: budgetBlockedStatus === 'budget_blocked' ? 'COMPUTE_BUDGET_EXCEEDED' : 'RATE_LIMITED',
       message: budgetErrorMessage,
     };
   }
@@ -1086,7 +1086,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     callError = (e?.message ?? 'All providers failed') + (lastError instanceof Error && lastError.message.includes('timed out') ? ' (timeout)' : '');
 
     // Release reservation — no cost incurred (tolerates null for system/analyzer)
-    await budgetService.releaseReservation(reservationId);
+    await computeBudgetService.releaseReservation(reservationId);
 
     const providerLatencyMs = Date.now() - providerStart;
     const routerOverheadMs  = Date.now() - routerStart - providerLatencyMs;
@@ -1637,7 +1637,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           // the row, so RunCostPanel and aggregate-backed readers permanently
           // undercount the triggering call's spend. Both calls are best-effort:
           // failures here must not mask the cost_limit_exceeded error.
-          budgetService.commitReservation(reservationId, costResult.costWithMarginCents).catch((e) => {
+          computeBudgetService.commitReservation(reservationId, costResult.costWithMarginCents).catch((e) => {
             console.error('[llmRouter] costBreaker.commit_reservation_failed', {
               runId: breakerRunId, correlationId: idempotencyKey,
               error: e instanceof Error ? e.message : String(e),
@@ -1812,7 +1812,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   // ── 14. Commit reservation with actual cost (releases delta) ─────────────
   // commitReservation tolerates null (system/analyzer paths never reserve).
-  await budgetService.commitReservation(reservationId, costResult.costWithMarginCents);
+  await computeBudgetService.commitReservation(reservationId, costResult.costWithMarginCents);
 
   // ── 15. Enqueue aggregate update (async — do not await) ──────────────────
   enqueueAggregateUpdate(idempotencyKey).catch((err) => {

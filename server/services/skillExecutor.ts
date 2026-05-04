@@ -173,6 +173,12 @@ export interface SkillExecutionContext {
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
   /**
+   * Depth of the current workflow run chain. 1 = top-level. Incremented on
+   * each workflow.run.start call. MAX_WORKFLOW_DEPTH = 3.
+   * Absent for non-workflow runs (orchestrator job, direct agent invocations).
+   */
+  workflowRunDepth?: number;
+  /**
    * The conversation this run is associated with, when known. Populated from
    * AgentRunRequest.conversationId so that worker skills that need to write
    * conversation-scoped data (e.g. update_thread_context) can resolve the
@@ -611,6 +617,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
+  },
+  'workflow.run.start': async (input, context) => {
+    const { handleWorkflowRunStartSkill } = await import('./workflowRunStartSkillService.js');
+    return handleWorkflowRunStartSkill(input, context);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
@@ -2141,6 +2151,34 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.llm.cache_poor_reuse', error: err instanceof Error ? err.message : String(err), subaccountId });
       throw err;
     }
+  },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
+  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
+  // input, resolves spending context, normalises merchant (invariant 21), and
+  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
+  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: async (input, context) => {
+    const { executePayInvoice } = await import('./spendSkillHandlers.js');
+    return executePayInvoice(input, context);
+  },
+  purchase_resource: async (input, context) => {
+    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
+    return executePurchaseResource(input, context);
+  },
+  subscribe_to_service: async (input, context) => {
+    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
+    return executeSubscribeToService(input, context);
+  },
+  top_up_balance: async (input, context) => {
+    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
+    return executeTopUpBalance(input, context);
+  },
+  issue_refund: async (input, context) => {
+    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
+    return executeIssueRefund(input, context);
   },
 };
 

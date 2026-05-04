@@ -1,10 +1,11 @@
 # Sub-Account Baseline Artefact Set — Dev Spec
 
-**Status:** DRAFT
+**Status:** DRAFT — pending `spec-reviewer`
+**Last reviewed against main:** 2026-05-04 (post-merge of Workflows v1 Phase 2 / PR #258)
 **Build slug:** `subaccount-artefacts`
 **Branch:** `claude/subaccount-artefacts`
-**Migrations claimed:** `0266`
-**Concurrent peers:** F2 `agency-readiness-audit` (0267), F3 `baseline-capture` (0268-0270)
+**Migrations claimed:** `0277` (was `0266`; reallocated after main consumed 0266-0276)
+**Concurrent peers:** F2 `subaccount-optimiser` (Phase 0 / migration 0267 SHIPPED on main; Phases 1-4 pending), F3 `baseline-capture` (migrations to be reallocated to `0278-0280`)
 **Related code:** `server/services/agentExecutionService.ts`, `server/services/llmService.ts`, `server/services/memoryBlockService.ts`, `server/services/workspaceMemoryService.ts`, `server/db/schema/memoryBlocks.ts`, `server/db/schema/workspaceMemories.ts`, `server/db/schema/subaccounts.ts`, `server/workflows/intelligence-briefing.workflow.ts`, `server/routes/subaccounts.ts`, `client/src/pages/OnboardingWizardPage.tsx`
 **Related specs:** `docs/onboarding-playbooks-spec.md`, `docs/cached-context-infrastructure-spec.md`, `docs/memory-and-briefings-spec.md`
 
@@ -24,7 +25,7 @@ Every sub-account produces six bounded foundational artefacts at onboarding. Any
 
 - §1 Tier model
 - §2 Storage model — convention over schema
-- §3 Migration 0266
+- §3 Migration 0277
 - §4 Tier loading wiring
 - §5 Onboarding capture flow
 - §6 Build chunks
@@ -103,10 +104,10 @@ Rules: `autoAttach=false`, loaded by tier-2 loader keyed off `tier=2` + `applies
 - `domain='baseline'`, `topic='operating_constraints'`
 - `domain='baseline'`, `topic='proof_library'` — heavy items go to `reference_documents` and are linked from the memory entry.
 
-## §3 Migration 0266
+## §3 Migration 0277
 
 ```sql
--- migrations/0266_subaccount_baseline_artefacts.sql
+-- migrations/0277_subaccount_baseline_artefacts.sql
 ALTER TABLE memory_blocks
   ADD COLUMN tier SMALLINT,
   ADD COLUMN applies_to_domains TEXT[];
@@ -182,7 +183,7 @@ Per-block `<EditArtefactDrawer>` accessible later from `/subaccounts/:id/knowled
 
 ### Phase 1 — Schema + naming convention (~3h)
 
-- [ ] Author migration `migrations/0266_subaccount_baseline_artefacts.sql` (+ paired `.down.sql`).
+- [ ] Author migration `migrations/0277_subaccount_baseline_artefacts.sql` (+ paired `.down.sql`).
 - [ ] Update `server/db/schema/memoryBlocks.ts` to add `tier: smallint('tier')`, `appliesToDomains: text('applies_to_domains').array()`.
 - [ ] Update `server/db/schema/subaccounts.ts` to add `baselineArtefactsStatus: jsonb('baseline_artefacts_status').default(...)`.
 - [ ] Add reserved-slug constants in `shared/constants/baselineArtefacts.ts`: slug list, tier mapping, domain mapping.
@@ -276,9 +277,10 @@ None blocking. All upstream primitives ship today (memory blocks, workspace memo
 
 ## §11 Concurrent-build hygiene
 
-- Migration number `0266` reserved here. Do not use elsewhere.
+- Migration number `0277` reserved here (was `0266`; reallocated after main consumed through `0276`). Do not use elsewhere.
 - Branch `claude/subaccount-artefacts`. Worktree at `../automation-v1.subaccount-artefacts`.
 - Progress lives in `tasks/builds/subaccount-artefacts/progress.md`.
 - Touches `agentExecutionService.ts` lines ~834-870 — F3 may also touch this file but only at lines ~875-957 (briefing/beliefs region) — coordinate via merge order, F1 lands first.
-- F1 must land before F3 begins (F3's baseline-status JSON shape references the same `subaccounts` table).
-- F2 is fully independent; can land any time.
+- F1 must land before F3 begins (both extend `subaccountOnboardingService.ts` and `subaccounts` table area; F1 lands first because of smaller scope).
+- F2 Phase 0 (the generic `agent_recommendations` primitive + `output.recommend` skill + `<AgentRecommendationsList>`) ALREADY SHIPPED on main via migration 0267 / PR #251. Phases 1-4 of F2 (telemetry rollups, optimiser agent itself, dashboard wiring, verification) remain. F2 Phases 1-4 are fully independent of F1 and can land any time in parallel.
+- GHL Module C agency OAuth (was a hard upstream blocker for F3 only) shipped on main via PR #254. Does not affect F1.

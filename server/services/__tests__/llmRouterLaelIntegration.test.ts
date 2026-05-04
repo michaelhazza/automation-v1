@@ -57,7 +57,7 @@ let llmRequests: Awaited<typeof import('../../db/schema/index.js')>['llmRequests
 let agentRuns: Awaited<typeof import('../../db/schema/index.js')>['agentRuns'];
 let agents: Awaited<typeof import('../../db/schema/index.js')>['agents'];
 let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisations'];
-let orgBudgets: Awaited<typeof import('../../db/schema/index.js')>['orgBudgets'];
+let orgComputeBudgets: Awaited<typeof import('../../db/schema/index.js')>['orgComputeBudgets'];
 let costAggregates: Awaited<typeof import('../../db/schema/index.js')>['costAggregates'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
@@ -76,7 +76,7 @@ if (!SKIP) {
     agentRuns,
     agents,
     organisations,
-    orgBudgets,
+    orgComputeBudgets,
     costAggregates,
   } = await import('../../db/schema/index.js'));
   ({ eq, and, sql } = await import('drizzle-orm'));
@@ -375,12 +375,12 @@ test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with
 
 // ─── Test 2: budget_blocked silence ─────────────────────────────────────────
 test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and inserts no payload row', async () => {
-  // Deterministically trip the budget breaker by saturating the org-monthly
-  // cap. We seed BOTH `org_budgets.monthlyCostLimitCents` (a tight cap) AND
+  // Deterministically trip the compute budget breaker by saturating the org-monthly
+  // cap. We seed BOTH `org_compute_budgets.monthlyComputeLimitCents` (a tight cap) AND
   // a `cost_aggregates` row showing the org has already exceeded the cap;
-  // `budgetService.checkAndReserve` reads both inside its own tx via
+  // `computeBudgetService.checkAndReserve` reads both inside its own tx via
   // `getCurrentSpend('organisation', ..., 'monthly', billingMonth)` and
-  // throws `BudgetExceededError` BEFORE the provider adapter is reached.
+  // throws `ComputeBudgetExceededError` BEFORE the provider adapter is reached.
   // The router catches that, writes the ledger row with status='budget_blocked',
   // and re-throws — `shouldEmitLaelLifecycle` returns false for
   // budget_blocked, so no LAEL events emit and no payload row is inserted.
@@ -399,8 +399,8 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
   // Snapshot prior state for save/restore.
   const [priorOrgBudget] = await db
     .select()
-    .from(orgBudgets)
-    .where(eq(orgBudgets.organisationId, orgId));
+    .from(orgComputeBudgets)
+    .where(eq(orgComputeBudgets.organisationId, orgId));
   const [priorAggregate] = await db
     .select()
     .from(costAggregates)
@@ -416,13 +416,13 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
   // Install the tight cap + saturated aggregate.
   if (priorOrgBudget) {
     await db
-      .update(orgBudgets)
-      .set({ monthlyCostLimitCents: 1 })
-      .where(eq(orgBudgets.organisationId, orgId));
+      .update(orgComputeBudgets)
+      .set({ monthlyComputeLimitCents: 1 })
+      .where(eq(orgComputeBudgets.organisationId, orgId));
   } else {
-    await db.insert(orgBudgets).values({
+    await db.insert(orgComputeBudgets).values({
       organisationId: orgId,
-      monthlyCostLimitCents: 1,
+      monthlyComputeLimitCents: 1,
     });
   }
   if (priorAggregate) {
@@ -443,6 +443,7 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
       entityId: orgId,
       periodType: 'monthly',
       periodKey: billingMonth,
+      organisationId: orgId,
       totalCostCents: 1_000_000,
     });
   }
@@ -522,11 +523,11 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
     // Restore prior org_budgets state.
     if (priorOrgBudget) {
       await db
-        .update(orgBudgets)
-        .set({ monthlyCostLimitCents: priorOrgBudget.monthlyCostLimitCents })
-        .where(eq(orgBudgets.organisationId, orgId));
+        .update(orgComputeBudgets)
+        .set({ monthlyComputeLimitCents: priorOrgBudget.monthlyComputeLimitCents })
+        .where(eq(orgComputeBudgets.organisationId, orgId));
     } else {
-      await db.delete(orgBudgets).where(eq(orgBudgets.organisationId, orgId));
+      await db.delete(orgComputeBudgets).where(eq(orgComputeBudgets.organisationId, orgId));
     }
 
     // Restore prior cost_aggregates state.

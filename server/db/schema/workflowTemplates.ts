@@ -90,6 +90,9 @@ export const workflowTemplates = pgTable(
     createdByUserId: uuid('created_by_user_id').references(() => users.id),
     // Phase 1.5 — parameterization layer column. Empty in Phase 1.
     paramsJson: jsonb('params_json').notNull().default({}).$type<Record<string, unknown>>(),
+    // Workflows V1 (migration 0270, spec §3.1) — cost/time ceiling defaults
+    costCeilingCents: integer('cost_ceiling_cents').notNull().default(500),
+    wallClockCapSeconds: integer('wall_clock_cap_seconds').notNull().default(3600),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -123,6 +126,8 @@ export const workflowTemplateVersions = pgTable(
     definitionJson: jsonb('definition_json').notNull(),
     publishedAt: timestamp('published_at', { withTimezone: true }).defaultNow().notNull(),
     publishedByUserId: uuid('published_by_user_id').references(() => users.id),
+    // Workflows V1 (migration 0270)
+    publishNotes: text('publish_notes'),
   },
   (table) => ({
     uniqueVersion: uniqueIndex('workflow_template_versions_unique_idx').on(

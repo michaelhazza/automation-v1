@@ -23,7 +23,11 @@ export type StepType =
   | 'conditional'
   | 'agent_decision'
   | 'action_call'
-  | 'invoke_automation';
+  | 'invoke_automation'
+  // V1 user-facing ("four A's") names — used in Studio-authored templates.
+  | 'agent'
+  | 'action'
+  | 'ask';
 
 export type SideEffectType =
   | 'none'
@@ -251,6 +255,13 @@ export interface WorkflowStep {
    */
   final?: boolean;
 
+  /**
+   * V1 publish-time metadata bag. Read by workflowValidatorPure (Rules 6–8):
+   * approverGroup, is_critical, allowMultipleSubmissions. Not consumed by the
+   * engine directly — engine uses the typed fields above.
+   */
+  params?: Record<string, unknown>;
+
   // ── type: invoke_automation ───────────────────────────────────────────────
   /**
    * References `automations.id`. Resolved at dispatch time against the run's
@@ -392,8 +403,8 @@ export interface WorkflowDefinition {
   /** Bumped on every published edit. Validator enforces strict monotonicity. */
   version: number;
 
-  /** What the user provides at run start. */
-  initialInputSchema: ZodSchema;
+  /** What the user provides at run start. Null for org templates stored without a live Zod schema. */
+  initialInputSchema: ZodSchema | null;
 
   /** Phase 1.5 — declared but unused in Phase 1. */
   paramsSchema?: ZodSchema;
@@ -511,6 +522,8 @@ export interface RunContext {
     };
     isReplay?: boolean;
     replaySourceRunId?: string;
+    /** Nesting depth for workflow.run.start fan-out guard. 1 = top-level. */
+    workflowRunDepth?: number;
   };
 }
 

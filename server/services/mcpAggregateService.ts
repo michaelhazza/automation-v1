@@ -23,7 +23,7 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
   // budget_blocked is a policy exit, not an infra failure — only error/timeout count as errors
   const isError = row.status === 'error' || row.status === 'timeout';
 
-  type Dimension = { entityType: string; entityId: string; periodType: string; periodKey: string };
+  type Dimension = { entityType: string; entityId: string; periodType: string; periodKey: string; organisationId: string };
   const dimensions: Dimension[] = [];
 
   if (!row.isTestRun) {
@@ -33,12 +33,14 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
       entityId: row.organisationId,
       periodType: 'monthly',
       periodKey: row.billingMonth,
+      organisationId: row.organisationId,
     });
     dimensions.push({
       entityType: 'mcp_org',
       entityId: row.organisationId,
       periodType: 'daily',
       periodKey: row.billingDay,
+      organisationId: row.organisationId,
     });
 
     // Subaccount (monthly + daily)
@@ -48,12 +50,14 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
         entityId: row.subaccountId,
         periodType: 'monthly',
         periodKey: row.billingMonth,
+        organisationId: row.organisationId,
       });
       dimensions.push({
         entityType: 'mcp_subaccount',
         entityId: row.subaccountId,
         periodType: 'daily',
         periodKey: row.billingDay,
+        organisationId: row.organisationId,
       });
     }
   }
@@ -65,6 +69,7 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
       entityId: row.runId,
       periodType: 'run',
       periodKey: row.runId,
+      organisationId: row.organisationId,
     });
   }
 
@@ -75,6 +80,7 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
       entityId: `${row.organisationId}:${row.serverSlug}`,
       periodType: 'monthly',
       periodKey: row.billingMonth,
+      organisationId: row.organisationId,
     });
   }
 
@@ -87,6 +93,7 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
           entityId: dim.entityId,
           periodType: dim.periodType,
           periodKey: dim.periodKey,
+          organisationId: dim.organisationId,
           totalCostRaw: '0',
           totalCostWithMargin: '0',
           totalCostCents: 0,

@@ -19,7 +19,6 @@ export const actions = pgTable(
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
     agentId: uuid('agent_id')
-      .notNull()
       .references(() => agents.id),
     agentRunId: uuid('agent_run_id')
       .references(() => agentRuns.id),

@@ -110,8 +110,8 @@ export class AuthRedirectError extends Error {
 export class EnvironmentError extends Error {
   readonly _tag = 'EnvironmentError' as const;
 }
-export class BudgetExceededError extends Error {
-  readonly _tag = 'BudgetExceededError' as const;
+export class ComputeBudgetExceededError extends Error {
+  readonly _tag = 'ComputeBudgetExceededError' as const;
   constructor(
     message: string,
     readonly scope: 'subaccount' | 'organisation' | 'system',

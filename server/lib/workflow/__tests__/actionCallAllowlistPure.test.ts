@@ -18,13 +18,15 @@ import {
 
 // ── Shape ──────────────────────────────────────────────────────────────────
 
-test('allowlist covers the full 32-slug set (28 base + 2 Phase G + 2 Memory & Briefings Phase 3)', () => {
+test('allowlist covers the full 37-slug set (28 base + 2 Phase G + 2 Memory & Briefings Phase 3 + 5 spend)', () => {
   // Spec §4.3 — the closed set for v1. 28 pre-existing config_* slugs plus
   // two Phase G additions (portal + email digest) plus two Memory &
   // Briefings Phase 3 additions (`config_weekly_digest_gather` and
-  // `config_deliver_workflow_output`). Every expansion requires editing
+  // `config_deliver_workflow_output`) plus five Agentic Commerce spend skills
+  // (pay_invoice, purchase_resource, subscribe_to_service, top_up_balance,
+  // issue_refund). Every expansion requires editing
   // actionCallAllowlist.ts AND bumping this number — that's the friction.
-  expect(ACTION_CALL_ALLOWED_SLUGS.size === 32, `expected exactly 32 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`).toBeTruthy();
+  expect(ACTION_CALL_ALLOWED_SLUGS.size === 37, `expected exactly 37 slugs, got ${ACTION_CALL_ALLOWED_SLUGS.size}`).toBeTruthy();
 });
 
 test('read-only set is a subset of the allowlist', () => {
@@ -113,6 +115,21 @@ test('isReadOnlyAction is false for mutations', () => {
   ];
   for (const slug of mutations) {
     expect(!isReadOnlyAction(slug), `${slug} is a mutation, not read-only`).toBeTruthy();
+  }
+});
+
+// ── Spend skills (Agentic Commerce Chunk 6) ───────────────────────────────
+
+test('spend slugs are allowed in action_call steps', () => {
+  const spendSlugs = [
+    'pay_invoice',
+    'purchase_resource',
+    'subscribe_to_service',
+    'top_up_balance',
+    'issue_refund',
+  ];
+  for (const slug of spendSlugs) {
+    expect(isActionCallSlugAllowed(slug), `spend slug '${slug}' must be on the allowlist`).toBeTruthy();
   }
 });
 

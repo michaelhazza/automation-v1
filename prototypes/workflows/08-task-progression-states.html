@@ -1,0 +1,694 @@
+<!doctype html>
+<!--
+  Mock 08 · Task progression states — v2 chat-thinking-box pattern
+  =================================================================
+  Five states, one canvas. State buttons at top swap the contents
+  of all three panes (chat, activity, right) simultaneously.
+
+  Demonstrates v2 design refinements:
+    - Chat panel = operator-orchestrator conversation + a single
+      thinking box at the bottom (not a per-agent log).
+    - Activity panel = chronological event log with timestamps
+      and linked-entity chips (the structured source of truth).
+    - Right pane = whichever tab makes sense for the moment
+      (Now, Plan, or Files), updating live.
+    - All three panes refresh from one event stream — see brief
+      §6.2 "Real-time coordination across the three panes."
+
+  States shown:
+    1. Just kicked off       (Plan tab — orchestrator forming the plan)
+    2. Multi-agent dispatch  (Now tab — three sub-agents working)
+    3. Fetching references   (Files tab — Stripe rate card selected)
+    4. File created          (Files tab — Acme proposal selected)
+    5. Awaiting approval     (Plan tab — Critical pill + confidence chip)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 08 — Task progression states</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; color:#0f172a; }
+
+  /* State switching — pure CSS via radio inputs */
+  input[name="state-switcher"] { display: none; }
+  .sc { display: none; }
+  #state-1:checked ~ .page .sc.s1,
+  #state-2:checked ~ .page .sc.s2,
+  #state-3:checked ~ .page .sc.s3,
+  #state-4:checked ~ .page .sc.s4,
+  #state-5:checked ~ .page .sc.s5 { display: block; }
+
+  /* Active state button */
+  .state-btn { padding: 8px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600; color: #475569; background: white; border: 1px solid #e2e8f0; cursor: pointer; transition: all 100ms; }
+  .state-btn:hover { border-color: #cbd5e1; }
+  #state-1:checked ~ .page label[for="state-1"],
+  #state-2:checked ~ .page label[for="state-2"],
+  #state-3:checked ~ .page label[for="state-3"],
+  #state-4:checked ~ .page label[for="state-4"],
+  #state-5:checked ~ .page label[for="state-5"] { background: #4f46e5; color: white; border-color: #4f46e5; }
+
+  /* Tab pill styling for right-pane focus indicator */
+  .tab-pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .tab-pill.active { background: #eef2ff; color: #4338ca; }
+  .tab-pill.muted { background: #f1f5f9; color: #94a3b8; }
+
+  /* Activity dot styles */
+  .ad { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .ad-active { background: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.18); animation: pulse 1.6s ease-in-out infinite; }
+  .ad-done { background: #10b981; }
+  .ad-note { background: #94a3b8; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+  /* Linked-entity chip in activity */
+  .ref-chip { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 3px; font-size: 10.5px; font-weight: 500; }
+  .ref-chip.doc { background: #eef2ff; color: #3730a3; }
+  .ref-chip.crm { background: #ecfdf5; color: #047857; }
+  .ref-chip.rule { background: #fef3c7; color: #92400e; }
+  .ref-chip.memory { background: #fae8ff; color: #86198f; }
+  .ref-chip.pdf { background: #f1f5f9; color: #475569; }
+
+  /* Step card on the Plan tab */
+  .step-card { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 7px; min-width: 220px; }
+  .step-card.current { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(99,102,241,0.10); }
+  .step-card.done { opacity: 0.55; }
+  .step-card.queued { opacity: 0.5; border-style: dashed; }
+  .step-num { width: 22px; height: 22px; border-radius: 5px; background: #f1f5f9; color: #64748b; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .step-card.done .step-num { background: #d1fae5; color: #065f46; }
+  .step-card.current .step-num { background: #eef2ff; color: #4338ca; }
+  .a-pill { padding: 1px 5px; border-radius: 3px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .a-pill.agent { background: #eef2ff; color: #4338ca; }
+  .a-pill.action { background: #ecfdf5; color: #065f46; }
+  .a-pill.approval { background: #fff7ed; color: #9a3412; }
+  .a-pill.ask { background: #fef3c7; color: #92400e; }
+  .crit { padding: 1px 5px; border-radius: 3px; background: #fee2e2; color: #991b1b; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+
+  /* Org chart node on the Now tab */
+  .org-node { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; background: white; border: 1px solid #e2e8f0; border-radius: 7px; font-size: 11.5px; }
+  .org-node.active { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.10); }
+  .org-node.done { background: #f0fdf4; border-color: #bbf7d0; }
+  .org-node.idle { opacity: 0.6; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.done { background: #10b981; }
+  .status-dot.active { background: #3b82f6; animation: pulse 1.6s ease-in-out infinite; }
+  .status-dot.idle { background: #cbd5e1; }
+  .org-edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
+  .org-edge.done { stroke: #10b981; }
+  .org-edge.active { stroke: #3b82f6; stroke-dasharray: 4 3; animation: dashflow 1s linear infinite; }
+  @keyframes dashflow { to { stroke-dashoffset: -7; } }
+
+  /* File thumbnail */
+  .file-thumb { width: 90px; flex-shrink: 0; cursor: pointer; }
+  .file-thumb .page { background: white; border: 1px solid #e2e8f0; border-radius: 4px; aspect-ratio: 17/22; padding: 7px; display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .file-thumb.selected .page { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(99,102,241,0.12); }
+  .file-thumb.landscape .page { aspect-ratio: 22/14; }
+  .file-thumb .name { font-size: 10.5px; color: #475569; margin-top: 4px; text-align: center; line-height: 1.25; }
+  .file-thumb .icon { width: 16px; height: 16px; border-radius: 3px; display: flex; align-items: center; justify-content: center; }
+  .file-thumb .lines { flex: 1; display: flex; flex-direction: column; gap: 2px; justify-content: flex-start; }
+  .file-thumb .line { height: 2px; border-radius: 1px; background: #e2e8f0; }
+  .file-thumb .line.short { width: 65%; }
+  .file-thumb .ext { position: absolute; bottom: 4px; right: 4px; padding: 0 3px; border-radius: 2px; font-size: 7.5px; font-weight: 700; color: white; letter-spacing: 0.04em; }
+
+  /* Reader pane */
+  .reader-paper { background: white; border: 1px solid #e2e8f0; box-shadow: 0 4px 14px rgba(15,23,42,0.05); padding: 24px 32px; max-width: 360px; margin: 12px auto; aspect-ratio: 17/22; font-size: 11px; line-height: 1.55; color: #0f172a; }
+  .reader-paper.landscape { aspect-ratio: 22/14; max-width: 460px; }
+  .reader-paper h1 { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .reader-paper h2 { font-size: 11.5px; font-weight: 600; margin-top: 10px; margin-bottom: 3px; }
+  .reader-paper p { margin-bottom: 5px; color: #334155; }
+  .reader-paper table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10px; }
+  .reader-paper th, .reader-paper td { padding: 3px 6px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+  .reader-paper th { color: #64748b; font-weight: 600; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .reader-paper .meta { font-size: 9.5px; color: #94a3b8; margin-bottom: 8px; }
+
+  /* The thinking box at the bottom of chat */
+  .thinking-box { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: #f8fafc; border-top: 1px solid #e2e8f0; border-left: 3px solid #4f46e5; }
+  .thinking-pulse { width: 6px; height: 6px; border-radius: 50%; background: #4f46e5; animation: pulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+  .thinking-text { font-size: 12px; color: #334155; font-style: italic; }
+  .thinking-dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
+  @keyframes dots { 0%, 25% { content: ''; } 50% { content: '.'; } 75% { content: '..'; } 100% { content: '...'; } }
+
+  /* Chat bubbles */
+  .chat-bubble { max-width: 92%; padding: 7px 11px; border-radius: 14px; font-size: 12px; line-height: 1.45; }
+  .chat-bubble.user { background: #4f46e5; color: white; border-bottom-right-radius: 5px; }
+  .chat-bubble.agent { background: #f1f5f9; color: #334155; border-bottom-left-radius: 5px; }
+  .chat-handoff { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 10px; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Radio inputs at body level so the page-tree CSS sibling selectors work -->
+<input type="radio" name="state-switcher" id="state-1" checked>
+<input type="radio" name="state-switcher" id="state-2">
+<input type="radio" name="state-switcher" id="state-3">
+<input type="radio" name="state-switcher" id="state-4">
+<input type="radio" name="state-switcher" id="state-5">
+
+<div class="page mx-auto max-w-[1280px] p-6">
+  <div class="flex justify-between items-baseline mb-3">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 08 · Task progression states</h1>
+    <a href="index.html" class="text-[12.5px] text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mb-4 leading-relaxed">
+    Five moments in the same task: Mike submits "Draft a proposal for the Acme renewal." Click each state below to see what the chat (left), activity (middle), and right pane look like at that point. All three panes update from one event stream in real time. The chat carries a conversation plus a thinking box, not a per-agent log; the activity log is the source of truth; the right pane focuses on whichever tab makes sense for the moment.
+  </p>
+
+  <!-- State switcher -->
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <label for="state-1" class="state-btn">1 · Just kicked off</label>
+    <label for="state-2" class="state-btn">2 · Multi-agent working</label>
+    <label for="state-3" class="state-btn">3 · Fetching references</label>
+    <label for="state-4" class="state-btn">4 · File created</label>
+    <label for="state-5" class="state-btn">5 · Awaiting approval</label>
+  </div>
+
+  <!-- Tab focus indicator -->
+  <div class="mb-3 flex items-center gap-2 text-[11.5px]">
+    <span class="text-slate-500">Right pane focused on:</span>
+    <span class="sc s1"><span class="tab-pill active">Plan</span><span class="tab-pill muted ml-1">Now</span><span class="tab-pill muted ml-1">Files</span></span>
+    <span class="sc s2"><span class="tab-pill muted">Plan</span><span class="tab-pill active ml-1">Now</span><span class="tab-pill muted ml-1">Files</span></span>
+    <span class="sc s3"><span class="tab-pill muted">Plan</span><span class="tab-pill muted ml-1">Now</span><span class="tab-pill active ml-1">Files</span></span>
+    <span class="sc s4"><span class="tab-pill muted">Plan</span><span class="tab-pill muted ml-1">Now</span><span class="tab-pill active ml-1">Files</span></span>
+    <span class="sc s5"><span class="tab-pill active">Plan</span><span class="tab-pill muted ml-1">Now</span><span class="tab-pill muted ml-1">Files</span></span>
+  </div>
+
+  <!-- Three-pane container -->
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden flex" style="height: 640px;">
+
+    <!-- ====================== CHAT (26%) ====================== -->
+    <div class="flex-shrink-0 flex flex-col border-r border-slate-200" style="width: 26%; min-width: 320px;">
+      <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2 bg-white">
+        <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Chat</span>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">conversation</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3.5 text-[12.5px] leading-relaxed">
+        <!-- User message — same in all states -->
+        <div class="flex justify-end">
+          <div class="chat-bubble user">Draft a proposal for the Acme renewal. Include competitor pricing and a pricing annex.</div>
+        </div>
+
+        <!-- State 1 chat -->
+        <div class="sc s1">
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span></div>
+              <div class="chat-bubble agent mt-1">On it. I'll pull in three teams to research, draft, and consolidate. I'll come back when there's something for you to review.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 2 chat -->
+        <div class="sc s2">
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span></div>
+              <div class="chat-bubble agent mt-1">On it. I'll pull in three teams to research, draft, and consolidate. I'll come back when there's something for you to review.</div>
+            </div>
+          </div>
+          <div class="flex justify-center mt-2"><span class="chat-handoff">Handed off to 3 teams</span></div>
+        </div>
+
+        <!-- State 3 chat (same as state 2 — no new milestone yet, only thinking box changed) -->
+        <div class="sc s3">
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span></div>
+              <div class="chat-bubble agent mt-1">On it. I'll pull in three teams to research, draft, and consolidate. I'll come back when there's something for you to review.</div>
+            </div>
+          </div>
+          <div class="flex justify-center mt-2"><span class="chat-handoff">Handed off to 3 teams</span></div>
+        </div>
+
+        <!-- State 4 chat — Sales milestone: speaks directly with the deliverable -->
+        <div class="sc s4">
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span></div>
+              <div class="chat-bubble agent mt-1">On it. I'll pull in three teams.</div>
+            </div>
+          </div>
+          <div class="flex justify-center mt-2"><span class="chat-handoff">Handed off to 3 teams</span></div>
+          <!-- v2 milestone card: Sales has a deliverable → speaks directly with attribution + View link -->
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">Head of Sales</span><span class="a-pill agent">Agent</span><span class="text-[10px] text-slate-400">just now</span></div>
+              <div class="chat-bubble agent mt-1">Body drafted ✓ Pulled SDR-1 for last quarter MRR + terms.</div>
+              <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium mt-1 inline-block">Open draft →</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 5 chat — full milestone arc, then COO consolidation + Approve -->
+        <div class="sc s5">
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span></div>
+              <div class="chat-bubble agent mt-1">On it. I'll pull in three teams.</div>
+            </div>
+          </div>
+          <div class="flex justify-center mt-2"><span class="chat-handoff">Handed off to 3 teams</span></div>
+
+          <!-- Sub-agent milestones: each speaks once when their deliverable is done -->
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HS</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">Head of Sales</span><span class="a-pill agent">Agent</span><span class="text-[10px] text-slate-400">18s ago</span></div>
+              <div class="chat-bubble agent mt-1">Body drafted ✓</div>
+              <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium mt-1 inline-block">Open draft →</a>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HR</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">Head of Research</span><span class="a-pill agent">Agent</span><span class="text-[10px] text-slate-400">12s ago</span></div>
+              <div class="chat-bubble agent mt-1">Pricing analysis done ✓ We sit ~12% below Stripe and PayPal on effective pricing.</div>
+              <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium mt-1 inline-block">Open analysis →</a>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">HO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">Head of Operations</span><span class="a-pill agent">Agent</span><span class="text-[10px] text-slate-400">8s ago</span></div>
+              <div class="chat-bubble agent mt-1">Pricing annex ready ✓ Line items, terms, and 3% loyalty credit reflected.</div>
+              <a class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium mt-1 inline-block">Open annex →</a>
+            </div>
+          </div>
+
+          <!-- COO consolidation + question with action buttons -->
+          <div class="flex gap-2 mt-3">
+            <div class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style="background:#eef2ff; color:#3730a3;">CO</div>
+            <div class="flex-1">
+              <div class="flex items-center gap-1"><span class="text-[12px] font-semibold text-slate-900">COO</span><span class="a-pill agent">Agent</span><span class="text-[10px] text-slate-400">just now</span></div>
+              <div class="chat-bubble agent mt-1">Consolidated the three deliverables into the final proposal. Approve to send to Acme.</div>
+              <div class="flex gap-1.5 mt-2">
+                <button class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11.5px] font-semibold rounded">Approve</button>
+                <button class="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[11.5px] font-medium rounded border border-slate-300">Open files</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thinking box — different per state -->
+      <div class="thinking-box">
+        <span class="thinking-pulse"></span>
+        <span class="thinking-text"><span class="sc s1">Drafting the plan<span class="thinking-dots"></span></span><span class="sc s2">Working with Sales, Research, Operations · 3 agents active</span><span class="sc s3">Fetching competitor rate cards<span class="thinking-dots"></span></span><span class="sc s4">Reviewing the draft<span class="thinking-dots"></span></span><span class="sc s5">Waiting on your approval</span></span>
+      </div>
+
+      <!-- Composer -->
+      <div class="border-t border-slate-200 px-3 py-2.5">
+        <div class="border border-slate-300 rounded-md bg-white flex items-center px-2.5 py-1.5">
+          <span class="text-[12px] text-slate-400">Add a note or steer the agents…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== ACTIVITY (24%) ====================== -->
+    <div class="flex-shrink-0 flex flex-col border-r border-slate-200 bg-white" style="width: 24%; min-width: 240px;">
+      <div class="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
+        <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Activity</span>
+        <span class="sc s1 text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 font-semibold">2</span>
+        <span class="sc s2 text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 font-semibold">7</span>
+        <span class="sc s3 text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 font-semibold">10</span>
+        <span class="sc s4 text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 font-semibold">12</span>
+        <span class="sc s5 text-[10px] text-white bg-indigo-600 rounded-full px-1.5 py-0.5 font-semibold">15</span>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">live</span>
+      </div>
+
+      <!-- v2: events flow top-down in chronological order (oldest at top).
+           When the list overflows, auto-scroll keeps the newest event in
+           view at the bottom of the viewport. -->
+      <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2.5">
+
+        <!-- State 1 activity (oldest at top, newest at bottom) -->
+        <div class="sc s1">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">4s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">2s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">COO</span> drafting a plan</div></div>
+          </div>
+        </div>
+
+        <!-- State 2 activity (oldest at top, newest at bottom) -->
+        <div class="sc s2">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">20s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">18s ago</div><div class="text-slate-700">Routed to <span class="font-medium">COO</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">14s ago</div><div class="text-slate-700"><span class="font-medium">COO</span> delegated to 3 teams</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">8s ago</div><div class="text-slate-700"><span class="font-medium">SDR 1</span> CRM context ✓</div><div class="mt-1"><span class="ref-chip crm">Acme · CRM</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">5s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Sales</span> drafting body</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">3s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Research Analyst</span> scanning competitors</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Operations</span> drafting pricing annex</div></div>
+          </div>
+        </div>
+
+        <!-- State 3 activity (Fetching references — oldest at top, newest at bottom) -->
+        <div class="sc s3">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">26s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">24s ago</div><div class="text-slate-700"><span class="font-medium">COO</span> delegated to 3 teams</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">22s ago</div><div class="text-slate-700">Applied rule</div><div class="mt-1"><span class="ref-chip rule">15% min margin</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">18s ago</div><div class="text-slate-700"><span class="font-medium">SDR 1</span> CRM context ✓</div><div class="mt-1"><span class="ref-chip crm">Acme · CRM</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">14s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Sales</span> drafting body</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">10s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Operations</span> drafting annex</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">6s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Research Analyst</span> scanning Square, Adyen</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-note mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">3s ago</div><div class="text-slate-700">Fetched <span class="font-medium">PayPal</span> rate card</div><div class="mt-1"><span class="ref-chip pdf">PayPal · PDF</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-note mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700">Fetched <span class="font-medium">Stripe</span> rate card</div><div class="mt-1"><span class="ref-chip pdf">Stripe · PDF</span></div></div>
+          </div>
+        </div>
+
+        <!-- State 4 activity (File created — oldest at top, newest at bottom) -->
+        <div class="sc s4">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">30s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">26s ago</div><div class="text-slate-700"><span class="font-medium">COO</span> delegated to 3 teams</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">22s ago</div><div class="text-slate-700"><span class="font-medium">SDR 1</span> CRM context ✓</div><div class="mt-1"><span class="ref-chip crm">Acme · CRM</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">18s ago</div><div class="text-slate-700">Applied rule</div><div class="mt-1"><span class="ref-chip rule">15% min margin</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-note mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">12s ago</div><div class="text-slate-700">Fetched <span class="font-medium">PayPal</span> rate card</div><div class="mt-1"><span class="ref-chip pdf">PayPal · PDF</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-note mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">10s ago</div><div class="text-slate-700">Fetched <span class="font-medium">Stripe</span> rate card</div><div class="mt-1"><span class="ref-chip pdf">Stripe · PDF</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-active mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">8s ago</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Operations</span> drafting annex</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">4s ago</div><div class="text-slate-700">Memory consulted</div><div class="mt-1"><span class="ref-chip memory">3 blocks</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Head of Sales</span> drafted body ✓</div><div class="mt-1"><span class="ref-chip doc">Acme proposal · DOC</span></div></div>
+          </div>
+        </div>
+
+        <!-- State 5 activity (Awaiting approval — oldest at top, newest at bottom) -->
+        <div class="sc s5">
+          <div class="flex items-start gap-2 text-[11px]">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">28s ago</div><div class="text-slate-700"><span class="font-medium">Mike H.</span> created task</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">26s ago</div><div class="text-slate-700"><span class="font-medium">COO</span> delegated to 3 teams</div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">22s ago</div><div class="text-slate-700">Applied rule</div><div class="mt-1"><span class="ref-chip rule">15% min margin</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">18s ago</div><div class="text-slate-700"><span class="font-medium">Head of Sales</span> body ✓</div><div class="mt-1"><span class="ref-chip doc">Acme proposal · DOC</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">12s ago</div><div class="text-slate-700"><span class="font-medium">Head of Research</span> pricing ✓</div><div class="mt-1"><span class="ref-chip doc">Competitor pricing · CSV</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">8s ago</div><div class="text-slate-700"><span class="font-medium">Head of Operations</span> annex ✓</div><div class="mt-1"><span class="ref-chip doc">Pricing annex · XLS</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-done mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">4s ago</div><div class="text-slate-700"><span class="font-medium">COO</span> consolidated 3 outputs ✓</div><div class="mt-1"><span class="ref-chip doc">Acme proposal v2 · DOC</span></div></div>
+          </div>
+          <div class="flex items-start gap-2 text-[11px] mt-2.5">
+            <span class="ad ad-note mt-1.5"></span>
+            <div class="flex-1"><div class="text-[10px] text-slate-400">just now</div><div class="text-slate-700"><span class="font-medium text-slate-900">Approval queued</span> for Mike H.</div></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ====================== RIGHT PANE (50%) ====================== -->
+    <div class="flex-1 flex flex-col bg-white" style="min-width: 0;">
+      <div class="px-5 border-b border-slate-200 flex items-center gap-1 py-1.5">
+        <button class="px-3 py-1.5 text-[12.5px] font-semibold text-slate-500 hover:text-slate-800"><span class="sc s2 text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Now</span><span class="sc s1">Now</span><span class="sc s3">Now</span><span class="sc s4">Now</span><span class="sc s5">Now</span></button>
+        <button class="px-3 py-1.5 text-[12.5px] font-semibold text-slate-500 hover:text-slate-800"><span class="sc s1 text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Plan</span><span class="sc s2">Plan</span><span class="sc s3">Plan</span><span class="sc s4">Plan</span><span class="sc s5 text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Plan</span></button>
+        <button class="px-3 py-1.5 text-[12.5px] font-semibold text-slate-500 hover:text-slate-800"><span class="sc s1">Files <span class="text-[10px] text-slate-400">0</span></span><span class="sc s2">Files <span class="text-[10px] text-slate-400">2</span></span><span class="sc s3 text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Files <span class="text-[10px] text-slate-400">4</span></span><span class="sc s4 text-indigo-700 border-b-2 border-indigo-600 pb-1.5">Files <span class="text-[10px] text-slate-400">5</span></span><span class="sc s5">Files <span class="text-[10px] text-slate-400">6</span></span></button>
+        <span class="ml-auto text-[10.5px] text-slate-400 italic">updates automatically</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-6">
+
+        <!-- State 1 — Plan tab, plan being formed -->
+        <div class="sc s1">
+          <div class="text-[13px] font-semibold text-slate-800 mb-1">The shape of this work</div>
+          <div class="text-[11.5px] text-slate-500 mb-5">COO is sketching the plan. Steps will lock in as the team confirms.</div>
+
+          <div class="mx-auto max-w-[560px]">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 1 · research and draft (parallel, forming)</div>
+            <div class="grid grid-cols-3 gap-3 mb-1">
+              <div class="step-card current"><div class="step-num">1</div><div class="flex-1 text-[11.5px] font-medium">Sales drafts body</div></div>
+              <div class="step-card current"><div class="step-num">2</div><div class="flex-1 text-[11.5px] font-medium">Research pricing</div></div>
+              <div class="step-card current"><div class="step-num">3</div><div class="flex-1 text-[11.5px] font-medium">Ops annex</div></div>
+            </div>
+            <div class="w-px h-6 bg-slate-300 mx-auto"></div>
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center mt-2">Phase 2 · consolidate</div>
+            <div class="flex justify-center mb-1"><div class="step-card queued" style="width:240px;"><div class="step-num">4</div><div class="flex-1 text-[11.5px] font-medium">COO consolidates</div></div></div>
+            <div class="w-px h-6 bg-slate-300 mx-auto"></div>
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center mt-2">Phase 3 · review and deliver</div>
+            <div class="flex justify-center mb-1"><div class="step-card queued" style="width:240px;"><div class="step-num">5</div><div class="flex-1 text-[11.5px] font-medium">Mike approves</div><span class="a-pill approval">Approval</span></div></div>
+            <div class="w-px h-5 bg-slate-300 mx-auto"></div>
+            <div class="flex justify-center"><div class="step-card queued" style="width:240px;"><div class="step-num">6</div><div class="flex-1 text-[11.5px] font-medium">Send to Acme</div><span class="crit">Critical</span><span class="a-pill action">Action</span></div></div>
+          </div>
+        </div>
+
+        <!-- State 2 — Now tab, multi-agent working -->
+        <div class="sc s2">
+          <div class="text-[13px] font-semibold text-slate-800 mb-1">Who is doing what right now</div>
+          <div class="text-[11.5px] text-slate-500 mb-5">Three agents in parallel; COO will consolidate when they finish.</div>
+
+          <div style="position:relative; width:100%; max-width: 720px; margin: 0 auto; height:340px;">
+            <svg width="100%" height="100%" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" style="position:absolute; top:0; left:0;">
+              <path class="org-edge done" d="M 360 60 L 360 100 L 130 100 L 130 145" />
+              <path class="org-edge active" d="M 360 60 L 360 145" />
+              <path class="org-edge active" d="M 360 60 L 360 100 L 590 100 L 590 145" />
+              <path class="org-edge done" d="M 130 215 L 130 280" />
+              <path class="org-edge active" d="M 360 215 L 360 280" />
+              <path class="org-edge" d="M 590 215 L 590 280" stroke-dasharray="3 3" />
+            </svg>
+            <div style="position:absolute; left:50%; top:8px; transform:translateX(-50%);">
+              <div class="org-node done"><span class="status-dot done"></span><div><div class="font-semibold text-slate-900">COO</div><div class="text-[10px] text-slate-500">Orchestrator</div></div></div>
+            </div>
+            <div style="position:absolute; left:8px; top:145px;">
+              <div class="org-node active"><span class="status-dot active"></span><div><div class="font-semibold text-slate-900">Head of Sales</div><div class="text-[10px] text-blue-600">Drafting body</div></div></div>
+            </div>
+            <div style="position:absolute; left:50%; top:145px; transform:translateX(-50%);">
+              <div class="org-node active"><span class="status-dot active"></span><div><div class="font-semibold text-slate-900">Head of Research</div><div class="text-[10px] text-blue-600">Pricing analysis</div></div></div>
+            </div>
+            <div style="position:absolute; right:8px; top:145px;">
+              <div class="org-node active"><span class="status-dot active"></span><div><div class="font-semibold text-slate-900">Head of Operations</div><div class="text-[10px] text-blue-600">Pricing annex</div></div></div>
+            </div>
+            <div style="position:absolute; left:8px; top:280px;">
+              <div class="org-node done"><span class="status-dot done"></span><div><div class="font-semibold text-slate-900">SDR 1</div><div class="text-[10px] text-emerald-700">Acme CRM context ✓</div></div></div>
+            </div>
+            <div style="position:absolute; left:50%; top:280px; transform:translateX(-50%);">
+              <div class="org-node active"><span class="status-dot active"></span><div><div class="font-semibold text-slate-900">Research Analyst</div><div class="text-[10px] text-blue-600">Scanning 4 competitors</div></div></div>
+            </div>
+            <div style="position:absolute; right:8px; top:280px;">
+              <div class="org-node idle"><span class="status-dot idle"></span><div><div class="font-semibold text-slate-900">Pricing Specialist</div><div class="text-[10px] text-slate-400">Waiting</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 3 — Files tab, Stripe rate card selected -->
+        <div class="sc s3">
+          <div class="text-[13px] font-semibold text-slate-800 mb-1">What was produced</div>
+          <div class="text-[11.5px] text-slate-500 mb-3">Outputs in progress · references just fetched.</div>
+
+          <div class="flex gap-2 items-stretch overflow-x-auto pb-3 mb-2 border-b border-slate-100">
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#eef2ff; color:#4f46e5;">📄</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div><span class="ext" style="background:#4f46e5;">DOC</span></div><div class="name">Acme proposal<br><span class="text-slate-400 text-[9.5px]">in progress</span></div></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#fffbeb; color:#d97706;">📊</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div><span class="ext" style="background:#d97706;">XLS</span></div><div class="name">Pricing annex<br><span class="text-slate-400 text-[9.5px]">in progress</span></div></div>
+            <div style="width:1px; background:#cbd5e1; margin: 0 8px; align-self: center; height: 60px;"></div>
+            <div class="file-thumb selected"><div class="page"><div class="icon" style="background:#f1f5f9; color:#475569;">📑</div><div class="lines"><div class="line"></div><div class="line"></div><div class="line short"></div></div><span class="ext" style="background:#64748b;">PDF</span></div><div class="name">Stripe<br><span class="text-slate-400 text-[9.5px]">just now</span></div></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#f1f5f9; color:#475569;">📑</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div><span class="ext" style="background:#64748b;">PDF</span></div><div class="name">PayPal<br><span class="text-slate-400 text-[9.5px]">3s ago</span></div></div>
+          </div>
+
+          <div class="text-[10.5px] text-slate-500 mb-2 px-2 flex items-center justify-between">
+            <span><strong>Stripe rate card</strong> · PDF · external · stripe.com · just now</span>
+            <span class="flex gap-1">
+              <button class="p-1 hover:bg-slate-100 rounded" title="Download">⬇</button>
+              <button class="p-1 hover:bg-slate-100 rounded" title="Open in new window">↗</button>
+            </span>
+          </div>
+
+          <div class="reader-paper portrait">
+            <div class="meta">Stripe · Standard Plan rate card · 2026-Q3</div>
+            <h1>Stripe Standard Plan</h1>
+            <h2>Per-seat pricing</h2>
+            <table>
+              <thead><tr><th>Tier</th><th>List $/seat/mo</th><th>Effective $/seat/mo</th></tr></thead>
+              <tbody>
+                <tr><td>Starter</td><td>$54</td><td>$48</td></tr>
+                <tr><td>Pro</td><td>$78</td><td>$72</td></tr>
+                <tr><td>Business</td><td>$112</td><td>$98</td></tr>
+              </tbody>
+            </table>
+            <h2>Volume discounts</h2>
+            <p>5% off at 50+ seats; 12% off at 200+ seats; custom at 1,000+ seats.</p>
+            <h2>Annex</h2>
+            <p>Includes 24/7 support, 99.9% SLA, dedicated CSM at Business tier.</p>
+          </div>
+        </div>
+
+        <!-- State 4 — Files tab, Acme proposal selected -->
+        <div class="sc s4">
+          <div class="text-[13px] font-semibold text-slate-800 mb-1">What was produced</div>
+          <div class="text-[11.5px] text-slate-500 mb-3">First draft of the proposal body just landed.</div>
+
+          <div class="flex gap-2 items-stretch overflow-x-auto pb-3 mb-2 border-b border-slate-100">
+            <div class="file-thumb selected"><div class="page"><div class="icon" style="background:#eef2ff; color:#4f46e5;">📄</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div><div class="line short"></div></div><span class="ext" style="background:#4f46e5;">DOC</span></div><div class="name">Acme proposal<br><span class="text-slate-400 text-[9.5px]">just now · v1</span></div></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#fffbeb; color:#d97706;">📊</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div><span class="ext" style="background:#d97706;">XLS</span></div><div class="name">Pricing annex<br><span class="text-slate-400 text-[9.5px]">in progress</span></div></div>
+            <div style="width:1px; background:#cbd5e1; margin: 0 8px; align-self: center; height: 60px;"></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#f1f5f9; color:#475569;">📑</div><div class="lines"><div class="line"></div><div class="line"></div><div class="line short"></div></div><span class="ext" style="background:#64748b;">PDF</span></div><div class="name">Stripe<br><span class="text-slate-400 text-[9.5px]">10s ago</span></div></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#f1f5f9; color:#475569;">📑</div><div class="lines"><div class="line"></div><div class="line short"></div><div class="line"></div></div><span class="ext" style="background:#64748b;">PDF</span></div><div class="name">PayPal<br><span class="text-slate-400 text-[9.5px]">12s ago</span></div></div>
+            <div class="file-thumb"><div class="page"><div class="icon" style="background:#ecfdf5; color:#059669;">📈</div><div class="lines"><div class="line"></div><div class="line short"></div></div><span class="ext" style="background:#059669;">CSV</span></div><div class="name">Competitor pricing<br><span class="text-slate-400 text-[9.5px]">in progress</span></div></div>
+          </div>
+
+          <div class="text-[10.5px] text-slate-500 mb-2 px-2 flex items-center justify-between">
+            <span><strong>Acme renewal proposal</strong> · DOC · v1 · Head of Sales · just now</span>
+            <span class="flex gap-1">
+              <button class="p-1 hover:bg-slate-100 rounded" title="Download">⬇</button>
+              <button class="p-1 hover:bg-slate-100 rounded" title="Open in new window">↗</button>
+            </span>
+          </div>
+
+          <div class="reader-paper portrait">
+            <div class="meta">Acme renewal proposal · Draft v1 · Head of Sales · just now</div>
+            <h1>Acme · Q3 Renewal Proposal</h1>
+            <p>Acme has been a customer since Q2 2024, moving from pilot to mid-market with $48K ARR and 23% NRR expansion.</p>
+            <h2>Renewal terms</h2>
+            <p>Twelve-month extension at a 9% list-price increase, offset by a 3% loyalty credit and twelve months of priority support.</p>
+            <h2>Why we believe this works</h2>
+            <p>Acme's usage has grown 23% YoY. Competitor pricing sits roughly 12% above our proposed renewal. The 15% minimum-margin policy is met.</p>
+            <h2>What we're asking for</h2>
+            <p>Mike's sign-off on the proposal body and the pricing annex.</p>
+          </div>
+        </div>
+
+        <!-- State 5 — Plan tab, awaiting approval, with Critical pill + confidence chip -->
+        <div class="sc s5">
+          <div class="text-[13px] font-semibold text-slate-800 mb-1">The shape of this work</div>
+          <div class="text-[11.5px] text-slate-500 mb-5">All work is done. One approval gate left, then the irreversible send.</div>
+
+          <div class="mx-auto max-w-[560px]">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center">Phase 1 · research and draft (parallel)</div>
+            <div class="grid grid-cols-3 gap-3 mb-1">
+              <div class="step-card done"><div class="step-num">1</div><div class="flex-1"><div class="text-[11.5px] font-medium">Sales: body</div><div class="text-[10px] text-emerald-700">✓ done</div></div></div>
+              <div class="step-card done"><div class="step-num">2</div><div class="flex-1"><div class="text-[11.5px] font-medium">Research: pricing</div><div class="text-[10px] text-emerald-700">✓ done</div></div></div>
+              <div class="step-card done"><div class="step-num">3</div><div class="flex-1"><div class="text-[11.5px] font-medium">Ops: annex</div><div class="text-[10px] text-emerald-700">✓ done</div></div></div>
+            </div>
+            <div class="w-px h-6 bg-slate-300 mx-auto"></div>
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center mt-2">Phase 2 · consolidate</div>
+            <div class="flex justify-center mb-1"><div class="step-card done" style="width:240px;"><div class="step-num">4</div><div class="flex-1"><div class="text-[11.5px] font-medium">COO consolidates</div><div class="text-[10px] text-emerald-700">✓ done</div></div></div></div>
+            <div class="w-px h-6 bg-slate-300 mx-auto"></div>
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 mb-2 text-center mt-2">Phase 3 · review and deliver</div>
+            <div class="flex justify-center mb-1"><div class="step-card current" style="width:240px;"><div class="step-num">5</div><div class="flex-1"><div class="text-[11.5px] font-medium">Mike approves</div><div class="text-[10px] text-indigo-600 font-medium">awaiting decision</div></div><span class="a-pill approval">Approval</span></div></div>
+
+            <!-- Confidence preview anchored to the current Approval -->
+            <div class="flex items-center gap-2 mt-2 mb-2 justify-center text-[10.5px]">
+              <span style="display:inline-block; padding:2px 8px; border-radius:9999px; background:#fef3c7; color:#92400e; font-weight:700; font-size:10px;">Medium</span>
+              <span class="text-slate-600">the next step can't be undone, worth a careful look</span>
+            </div>
+
+            <div class="w-px h-5 bg-slate-300 mx-auto"></div>
+            <div class="flex justify-center"><div class="step-card queued" style="width:240px;"><div class="step-num">6</div><div class="flex-1 text-[11.5px] font-medium">Send to Acme</div><span class="crit">Critical</span><span class="a-pill action">Action</span></div></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Footnote per state -->
+  <div class="mt-5 p-4 bg-white border border-slate-200 rounded-lg text-[12px] leading-relaxed">
+    <div class="sc s1"><strong>State 1 · Just kicked off.</strong> The thinking box reads "Drafting the plan." Activity has 2-3 events. Plan tab shows the steps as forming (current border). Notice: the chat has only the operator's prompt and one orchestrator response. No per-agent log on the left, that's what activity is for.</div>
+    <div class="sc s2"><strong>State 2 · Multi-agent working.</strong> The thinking box reads "Working with Sales, Research, Operations · 3 agents active." Activity is pumping events from the three sub-agents. Now tab shows the org chart with three sub-agents' status dots pulsing blue. The chat hasn't grown, the conversation is still just the operator's prompt and the orchestrator's milestone.</div>
+    <div class="sc s3"><strong>State 3 · Fetching references.</strong> The thinking box reads "Fetching competitor rate cards." Activity shows the Stripe and PayPal fetches with linked entity chips. Files tab is the natural focus, with the rate cards landing on the references side of the divider; the Stripe PDF is selected and rendered in the reader.</div>
+    <div class="sc s4"><strong>State 4 · File created.</strong> The thinking box reads "Reviewing the draft." Activity surfaces the new draft with a chip back to it. Chat gets a milestone card from <strong>Head of Sales speaking directly</strong> ("Body drafted ✓ Pulled SDR-1 for last quarter MRR + terms.") with a "Open draft" link. The sub-agent owns the milestone, not the orchestrator narrating it. Files tab auto-selects the freshly produced Acme proposal and renders it in the reader.</div>
+    <div class="sc s5"><strong>State 5 · Awaiting approval.</strong> The thinking box reads "Waiting on your approval." Activity records the approval-queued event. Chat now has the <strong>full milestone arc</strong>: each sub-agent (Sales, Research, Operations) speaks once with their deliverable + a link, then COO consolidates and asks for approval with inline Approve / Open files buttons. This is the v2 milestone-shaped pattern: every card in chat is a state-change worth surfacing. Plan tab highlights step 5 (the Approval) with a confidence chip ("Medium · the next step can't be undone, worth a careful look") and shows the Critical pill on step 6 (Send to Acme). When Mike clicks Approve, the audit fields snapshot what he saw at this exact moment.</div>
+  </div>
+
+  <p class="mt-3 text-[11.5px] text-slate-500 leading-relaxed">
+    All five states render from a single WebSocket subscription on the open task. Each pane filters and renders the events relevant to it. No polling, no per-pane fetches. The thinking box is a derived field on the latest event; the activity list is the event stream verbatim; the right pane is whichever tab the operator has selected, redrawing on relevant events. See <code class="text-[11px] bg-slate-100 px-1 rounded">docs/workflows-dev-brief.md § 6.2</code> for the engineering checklist.
+  </p>
+</div>
+
+</body>
+</html>

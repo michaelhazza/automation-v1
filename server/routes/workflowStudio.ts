@@ -10,9 +10,13 @@
  */
 
 import { Router } from 'express';
-import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin, requireOrgPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { WorkflowStudioService } from '../services/workflowStudioService.js';
+import { WorkflowTemplateService } from '../services/workflowTemplateService.js';
+import { workflowPublishService } from '../services/workflowPublishService.js';
+import type { WorkflowStep } from '../lib/workflow/types.js';
 
 const router = Router();
 
@@ -215,6 +219,90 @@ router.patch(
       return;
     }
     res.json({ ok: true });
+  })
+);
+
+// ─── Org-admin: load workflow template for Studio ────────────────────────────
+
+router.get(
+  '/api/admin/workflows/:id',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId!;
+    const { id } = req.params;
+
+    const template = await WorkflowTemplateService.getOrgTemplate(orgId, id);
+    if (!template) {
+      res.status(404).json({ error: 'Workflow template not found' });
+      return;
+    }
+
+    const latestVersionRow = await WorkflowTemplateService.getOrgTemplateLatestVersion(id);
+    const definition = (latestVersionRow?.definitionJson ?? null) as Record<string, unknown> | null;
+
+    res.json({
+      template,
+      definition,
+      latestVersionId: latestVersionRow?.id ?? null,
+      latestVersionPublishedByUserId: latestVersionRow?.publishedByUserId ?? null,
+    });
+  })
+);
+
+// ─── Org-admin: publish workflow template ────────────────────────────────────
+
+router.post(
+  '/api/admin/workflows/:id/publish',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId!;
+    const { id } = req.params;
+    const { steps, publishNotes, expectedUpstreamUpdatedAt } = req.body as {
+      steps?: unknown;
+      publishNotes?: unknown;
+      expectedUpstreamUpdatedAt?: unknown;
+    };
+
+    if (!Array.isArray(steps)) {
+      res.status(400).json({ error: 'steps must be an array' });
+      return;
+    }
+
+    try {
+      const result = await workflowPublishService.publish({
+        organisationId: orgId,
+        templateId: id,
+        steps: steps as WorkflowStep[],
+        publishNotes: typeof publishNotes === 'string' ? publishNotes : undefined,
+        expectedUpstreamUpdatedAt: typeof expectedUpstreamUpdatedAt === 'string' ? expectedUpstreamUpdatedAt : undefined,
+        userId: req.user!.id,
+      });
+      res.json({ version_id: result.versionId, version_number: result.versionNumber });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; errorCode?: string; message?: string; upstreamUpdatedAt?: string; upstreamUserId?: string | null; errors?: unknown[]; details?: unknown };
+      if (e.statusCode === 404) {
+        res.status(404).json({ error: 'template_not_found' });
+        return;
+      }
+      if (e.statusCode === 409 && e.errorCode === 'concurrent_publish') {
+        res.status(409).json({
+          error: 'concurrent_publish',
+          upstream_updated_at: e.upstreamUpdatedAt,
+          upstream_user_id: e.upstreamUserId ?? null,
+        });
+        return;
+      }
+      if (e.statusCode === 422) {
+        res.status(422).json({
+          error: e.errorCode ?? 'validation_failed',
+          errors: e.errors ?? [],
+        });
+        return;
+      }
+      throw err;
+    }
   })
 );
 

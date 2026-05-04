@@ -80,6 +80,12 @@ export const ORG_PERMISSIONS = {
   // ── GEO audits (Generative Engine Optimisation) ─────────────────────────
   GEO_AUDIT_VIEW: 'org.geo_audit.view',
   GEO_AUDIT_RUN: 'org.geo_audit.run',
+  // ── Agentic Commerce — spend approval (spec §11.1) ───────────────────────
+  // spend_approver default-grant: when a SpendingBudget is created,
+  // spendingBudgetService.create() runs atomically to grant spend_approver to
+  // all current org-admin (org-scoped budget) or subaccount-admin users
+  // (subaccount-scoped budget). Implementation: spendingBudgetService.ts.
+  SPEND_APPROVER: 'spend_approver',
   // ── Universal Brief (Phase 2) ────────────────────────────────────────────
   BRIEFS_READ: 'org.briefs.read',
   BRIEFS_WRITE: 'org.briefs.write',
@@ -88,6 +94,8 @@ export const ORG_PERMISSIONS = {
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
   // ── Observability (delegation outcomes; paperclip-hierarchy spec) ───────────
   ORG_OBSERVABILITY_VIEW: 'org.observability.view',
+  // ── Teams ─────────────────────────────────────────────────────────────────
+  TEAMS_MANAGE: 'org.teams.manage',
   // ── Cached Context Infrastructure ────────────────────────────────────────
   REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
   REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
@@ -196,6 +204,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.USERS_INVITE, description: 'Invite users to org',          groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_EDIT,   description: 'Edit org users',               groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_DELETE, description: 'Delete org users',             groupName: 'org.users' },
+  // org.teams
+  { key: ORG_PERMISSIONS.TEAMS_MANAGE, description: 'Create, edit, and delete teams and manage team membership', groupName: 'org.teams' },
   // org.engines
   { key: ORG_PERMISSIONS.ENGINES_VIEW,   description: 'View workflow engines',       groupName: 'org.engines' },
   { key: ORG_PERMISSIONS.ENGINES_MANAGE, description: 'Create/edit/delete engines',  groupName: 'org.engines' },
@@ -304,6 +314,10 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.ORG_OBSERVABILITY_VIEW,
     description: 'View delegation outcomes and observability data',
     groupName: 'org.observability' },
+  // spend_approver (Agentic Commerce §11.1) — org-scoped; default-granted by budget creation (Chunk 13)
+  { key: ORG_PERMISSIONS.SPEND_APPROVER,
+    description: 'Approve or deny agent spending actions against a Spending Budget',
+    groupName: 'org.spend' },
   // org.billing + subaccount.billing (IEE — Integrated Execution Environment; rev 6 §11.5.3)
   { key: ORG_PERMISSIONS.IEE_USAGE_VIEW,
     description: 'View IEE usage and billing data at the org level',

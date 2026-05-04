@@ -41,6 +41,11 @@
 # Excluded paths:
 #   - node_modules, dist
 #   - tools/mission-control/** (out of CI scope per vitest.config.ts)
+#   - setup/portable/** (the portable framework bundle ships with zero
+#     external deps per its spec invariant, so it uses node:test as its
+#     test runner — out of vitest's scope by design. The portable bundle
+#     has its own test gate: portable_framework_tests in .github/workflows/
+#     ci.yml runs node --import tsx --test on setup/portable/tests/*.test.ts).
 #   - The conversion script itself (scripts/convert-assert-to-expect.mjs
 #     is removed after one-shot use; not an exclusion).
 #
@@ -189,6 +194,7 @@ done < <(find "$ROOT_DIR" -type f -name '*.test.ts' \
   -not -path '*/node_modules/*' \
   -not -path '*/dist/*' \
   -not -path '*/tools/mission-control/*' \
+  -not -path '*/setup/portable/*' \
   2>/dev/null)
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"

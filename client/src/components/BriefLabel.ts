@@ -28,5 +28,5 @@ export function briefArtefactKindLabel(kind: BriefChatArtefact['kind']): string 
 
 /** Maps a task record to its Brief-facing display title. Prefers title; falls back to 'Brief'. */
 export function briefTitle(title?: string | null): string {
-  return title?.trim() || 'Brief';
+  return title?.trim() || 'Task';
 }
