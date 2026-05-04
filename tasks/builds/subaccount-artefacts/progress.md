@@ -43,4 +43,16 @@
 
 **Completed:** 2026-05-04
 
-All 10 chunks (0 through 5) implemented and passing G1 (lint, typecheck, build). Doc sync complete. Branch ready for spec-conformance + pr-reviewer pass before merge.
+All 10 chunks (0 through 5) implemented and passing G1 (lint, typecheck, build). Doc sync complete.
+
+**2026-05-05 — Spec-conformance + PR-reviewer passes completed:**
+- spec-conformance: CONFORMANT_AFTER_FIXES (1 mechanical fix: drawer open telemetry emit re-applied)
+- pr-reviewer: CHANGES_REQUESTED → fixed. 3 blocking + 4 strong issues resolved:
+  - B1: `to_jsonb(now()::text)` → `to_jsonb(now())` (ISO-8601 timestamps for zod .datetime())
+  - B2: `assertVersionGate` reads version raw before parsing (typed BASELINE_ARTEFACTS_VERSION_MISMATCH errorCode)
+  - B3: Removed unconditional wizard skip link that bypassed Tier-1+2 invariant
+  - S1: Fixed short slug in telemetry emit (`brand_identity` → `baseline.brand_identity`)
+  - S3+S4: `markArtefactEdited` now checks rowCount and adds `isNull(deletedAt)` on Tier-3 update
+  - S5: Removed duplicate try/catch blocks in skip + edit routes (asyncHandler handles these)
+
+Final commits: `d7c75fe5` (spec-conformance), `794248fd` (chunk 4B), `0ada2249` (PR reviewer fixes).
