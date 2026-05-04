@@ -2391,6 +2391,10 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 
 ## Spec Review deferred items
 
+### deferred-items-pre-launch (2026-05-04)
+
+- [ ] Soft-delete enforcement mechanism — add `selectActive()` query helper or ESLint rule to auto-include `isNull(deletedAt)` so §2.3's 23-site fix doesn't regress as the codebase grows; manual site-by-site fixing won't scale. [auto]
+
 ### agentic-commerce (2026-05-03)
 
 - [ ] Shadow-vs-live delta panel — non-trivial UI surface; existing Spend Ledger `mode = 'shadow'` filter in Chunk 14 captures most value for the promotion decision; defer until v1 produces evidence operators can't decide without a side-by-side view. [user]
