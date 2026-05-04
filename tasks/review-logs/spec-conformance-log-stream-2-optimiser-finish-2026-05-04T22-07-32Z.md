@@ -8,6 +8,7 @@
 **Scope:** Stream 2 — verification of the 8 directional gaps surfaced by the prior `spec-conformance` run on 2026-05-04T20:49:01Z (NON_CONFORMANT). All other in-scope spec items remained PASS in that run; this re-verification re-checks only the items the gaps named. New code paths introduced as part of the fixes (job handler, queue config) are also verified.
 **Run at:** 2026-05-04T22:07:32Z
 **Prior log:** `tasks/review-logs/spec-conformance-log-stream-2-optimiser-finish-2026-05-04T20-49-01Z.md`
+**Commit at finish:** `50e25242`
 
 ---
 
@@ -209,4 +210,4 @@ Triage suggestion for `pr-reviewer`:
 
 The two remaining open items (DG-4 timezone, DG-6 cost gate) ride into `pr-reviewer` and PR creation as live entries on `tasks/todo.md`. Neither blocks merge per the plan; both are tracked so they don't fall off.
 
-**Commit at finish:** populated post-commit.
+**Commit at finish:** `50e25242`
