@@ -403,8 +403,8 @@ export interface WorkflowDefinition {
   /** Bumped on every published edit. Validator enforces strict monotonicity. */
   version: number;
 
-  /** What the user provides at run start. */
-  initialInputSchema: ZodSchema;
+  /** What the user provides at run start. Null for org templates stored without a live Zod schema. */
+  initialInputSchema: ZodSchema | null;
 
   /** Phase 1.5 — declared but unused in Phase 1. */
   paramsSchema?: ZodSchema;

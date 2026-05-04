@@ -91,6 +91,8 @@ const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
 const BriefDetailPage = lazy(() => import('./pages/BriefDetailPage'));
 // Workflows V1 Phase 2 — open task view (Chunk 11)
 const OpenTaskView = lazy(() => import('./pages/OpenTaskView'));
+// Workflows V1 Phase 2 — Workflow Studio (Chunk 14a)
+const StudioPage = lazy(() => import('./pages/StudioPage'));
 // Learned Rules library (Phase 5)
 const LearnedRulesPage = lazy(() => import('./pages/LearnedRulesPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
@@ -416,6 +418,9 @@ export default function App() {
             <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
             {/* Workflows V1 Phase 2 — open task view (Chunk 11) */}
             <Route path="/admin/tasks/:taskId" element={<OpenTaskView user={user!} />} />
+            {/* Workflows V1 Phase 2 — Workflow Studio (Chunk 14a) */}
+            <Route path="/admin/workflows/:id/edit" element={<StudioPage user={user!} />} />
+            <Route path="/admin/workflows/new" element={<StudioPage user={user!} />} />
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
