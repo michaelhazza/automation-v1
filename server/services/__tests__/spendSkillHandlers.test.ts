@@ -9,7 +9,7 @@
 // Plan:  tasks/builds/agentic-commerce/plan.md §Chunk 6
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { normaliseMerchantDescriptor } from '../chargeRouterServicePure.js';
 
 // ---------------------------------------------------------------------------
@@ -20,18 +20,20 @@ vi.mock('../chargeRouterService.js', () => ({
   proposeCharge: vi.fn(),
 }));
 
-vi.mock('../../db/index.js', () => ({
-  db: {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-  },
+// `spendSkillHandlers.resolveSpendingContext` reads via `getOrgScopedDb()`,
+// not the raw `db` import. Mock the org-scoped accessor so each call returns
+// a fresh chainable handle the test can configure per-call. Without this, the
+// production guard in `getOrgScopedDb` throws `missing_org_context` because
+// these unit tests don't run inside a `withOrgTx(...)` block.
+vi.mock('../../lib/orgScopedDb.js', () => ({
+  getOrgScopedDb: vi.fn(),
+  getOrgScopedOrgId: vi.fn(),
+  peekOrgTxContext: vi.fn(() => null),
 }));
 
 // After hoisting, import the modules under test.
 import * as chargeRouterService from '../chargeRouterService.js';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import {
   executePayInvoice,
   executePurchaseResource,
@@ -77,32 +79,34 @@ const MOCK_SHADOW_RESPONSE = {
   chargeId: 'charge-shadow-id',
 };
 
-/** Setup the DB mock to return spending context (budget + policy). */
+/**
+ * Setup the org-scoped-DB mock to return spending context (budget + policy).
+ * Each `getOrgScopedDb()` call gets a fresh chain whose `.select().from().where().limit()`
+ * resolves to the budget query result on call 1, the policy query result on call 2.
+ */
 function mockSpendingContextResolution() {
-  const dbMock = db as unknown as {
-    select: MockInstance;
-    from: MockInstance;
-    where: MockInstance;
-    limit: MockInstance;
-  };
-
-  // First call: budgets query
-  // Second call: policy query
   let callCount = 0;
-  dbMock.select.mockImplementation(() => {
+  const makeChain = () => {
     callCount++;
     return {
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue(
-            callCount === 1
-              ? [{ id: MOCK_SPENDING_CONTEXT.spendingBudgetId, subaccountId: 'sub-1111-2222-3333-444444444444', agentId: null }]
-              : [{ id: MOCK_SPENDING_CONTEXT.spendingPolicyId, mode: MOCK_SPENDING_CONTEXT.mode }],
-          ),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(
+              callCount === 1
+                ? [{ id: MOCK_SPENDING_CONTEXT.spendingBudgetId, subaccountId: 'sub-1111-2222-3333-444444444444', agentId: null }]
+                : [{ id: MOCK_SPENDING_CONTEXT.spendingPolicyId, mode: MOCK_SPENDING_CONTEXT.mode }],
+            ),
+          }),
         }),
       }),
     };
-  });
+  };
+
+  // resolveSpendingContext calls getOrgScopedDb() twice — once for the budget
+  // lookup and once for the policy lookup. Both return chainable handles whose
+  // terminal `.limit()` resolves to the respective row set.
+  vi.mocked(getOrgScopedDb).mockImplementation(() => makeChain() as unknown as ReturnType<typeof getOrgScopedDb>);
 }
 
 /** Merchant input used across tests. */
@@ -152,15 +156,17 @@ describe('executePayInvoice', () => {
   });
 
   it('returns blocked when no active spending budget exists', async () => {
-    // DB returns empty array for budget query
-    const dbMock = db as unknown as { select: MockInstance };
-    dbMock.select.mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
+    // org-scoped-DB returns empty array for the budget query — exercises the
+    // resolveSpendingContext "no_active_spending_budget" branch.
+    vi.mocked(getOrgScopedDb).mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
         }),
       }),
-    });
+    } as unknown as ReturnType<typeof getOrgScopedDb>);
 
     const input = {
       invoiceId: 'inv_002',
