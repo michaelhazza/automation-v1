@@ -879,6 +879,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('workflows') && hasOrgPerm('org.automations.view') && <NavItem to="/admin/automations" icon={<Icons.automations />} label="Automations" />}
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasSidebarItem('team') && hasOrgPerm('org.teams.manage') && <NavItem to="/admin/teams" icon={<Icons.team />} label="Teams" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
               {/* Agentic Commerce — Spending Budgets (admin edit) or read-only (spend_approver) */}

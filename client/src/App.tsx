@@ -21,6 +21,7 @@ const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminAutomationsPage = lazy(() => import('./pages/AdminAutomationsPage'));
 const AdminAutomationEditPage = lazy(() => import('./pages/AdminAutomationEditPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const TeamsAdminPage = lazy(() => import('./pages/TeamsAdminPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
@@ -340,6 +341,7 @@ export default function App() {
             <Route path="/admin/automations" element={<AdminAutomationsPage user={user!} />} />
             <Route path="/admin/automations/:id" element={<AdminAutomationEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
+            <Route path="/admin/teams" element={<TeamsAdminPage user={user!} />} />
             <Route path="/admin/settings" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/board-config" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/categories" element={<Navigate to="/admin/org-settings" replace />} />

@@ -184,6 +184,9 @@ import agentChargesRouter from './routes/agentCharges.js';
 import approvalChannelsRouter from './routes/approvalChannels.js';
 // Workflows V1 Phase 2 — task event stream replay (Chunk 9)
 import taskEventStreamRouter from './routes/taskEventStream.js';
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+import assignableUsersRouter from './routes/assignableUsers.js';
+import teamsRouter from './routes/teams.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -405,6 +408,9 @@ app.use(agentChargesRouter);
 app.use(approvalChannelsRouter);
 // Workflows V1 Phase 2 — task event stream replay (Chunk 9)
 app.use(taskEventStreamRouter);
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+app.use(assignableUsersRouter);
+app.use(teamsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
