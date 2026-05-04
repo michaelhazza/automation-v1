@@ -111,3 +111,68 @@ Note on workflows-v1-phase-2 (PR #258) and other large merges: they introduced r
 **Recommendation:** **SHRINK and FOLD into Chunk 5.** Chunk 3's dead-path scope is essentially gone. The one architectural call left (`C4a-REVIEWED-DISP`) lives in the dispatcher and naturally pairs with `W1-43` / `W1-44` (also dispatcher contract gaps) in Chunk 5.
 
 If approval-resume work in `pre-test-integration-harness` (2026-04-28) already implemented the post-approval dispatch path, `C4a-REVIEWED-DISP` may also be closed — verification needed before authoring.
+
+---
+
+## §4 Chunk 4 — Maintenance Job RLS Contract
+
+**Status overall:** **partially closed.** The silent-no-op behaviour is gone; the defense-in-depth upgrade is routed but not yet implemented.
+
+| Mini-spec ID | Status now | Evidence |
+|---|---|---|
+| `B10-MAINT-RLS` | **PARTIAL** — original failure mode resolved; defense-in-depth upgrade routed to pre-prod-tenancy Phase 3 (optional) | `tasks/todo.md` line 451: "no longer silent no-ops"; per-org `withOrgTx` upgrade routed to `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md` Phase 3 |
+
+**Recommendation:** **DROP standalone Chunk 4 spec.** The mini-spec's stated done-criterion ("decay/pruning actually runs") is met. The remaining defense-in-depth concern is either (a) already in pre-prod-tenancy Phase 3 or (b) a one-line follow-on PR — does not warrant a dedicated spec.
+
+If the user wants the defense-in-depth upgrade prioritised, the cleanest path is: confirm it's still in pre-prod-tenancy Phase 3, and if not, add it as one bullet to Chunk 6 (gate hygiene).
+
+---
+
+## §5 Chunk 5 — Execution-Path Correctness
+
+**Status overall:** **6 of 7 items still open.** One item (`C4b-INVAL-RACE`) is partially covered by PR #211's state-machine guards but the original cross-cutting fix scope is wider than what shipped.
+
+| Mini-spec ID | Status now | Notes |
+|---|---|---|
+| `C4b-INVAL-RACE` re-check invalidation after I/O | **PARTIAL** — terminal-write boundaries covered by PR #211 (`shared/stateMachineGuards.ts`); intermediate non-terminal transitions, `decideApproval`, `completeStepRunFromReview`, run-level terminal writes, agent-run aggregation paths NOT covered | `tasks/todo.md` line 1133 records the gap explicitly |
+| `W1-43` dispatcher §5.10a rule 4 defence-in-depth | OPEN | line 729 |
+| `W1-44` pre-dispatch required_connections resolution | OPEN | line 730 |
+| `W1-38` automation_execution_error vocab alignment | OPEN | line 732 |
+| `HERMES-S1` errorMessage thread from preFinalizeMetadata | OPEN | line 73 (still in Hermes Tier 1 deferred section) |
+| `H3-PARTIAL-COUPLING` partial-status decoupled from summary | OPEN | line 128 |
+| `C4a-6-RETSHAPE` skill error envelope grandfather-vs-migrate | OPEN | lines 439, 689 (cross-referenced) |
+
+**Plus, recommended fold-in from Chunk 3:** `C4a-REVIEWED-DISP` (post-approval dispatch architectural call) — cleanly belongs alongside W1-43/W1-44 in the dispatcher contract.
+
+**Recommendation:** **KEEP Chunk 5 with two adjustments:**
+1. Narrow `C4b-INVAL-RACE` scope to the **uncovered surface area** (per the post-merge state of PR #211): intermediate non-terminal transitions + `decideApproval` + `completeStepRunFromReview` + run-level terminal writes + agent-run aggregation. Reference `shared/stateMachineGuards.ts` as the existing primitive to extend.
+2. Fold `C4a-REVIEWED-DISP` from Chunk 3 into Chunk 5's dispatcher items. Keep its architect-call separate from the inline-resolved items.
+
+---
+
+## §6 Chunk 6 — Gate Hygiene Cleanup
+
+**Status overall:** **most items still open.** One closure (`S2-SKILL-MD` shipped via PR #247).
+
+| Mini-spec ID | Status now | `tasks/todo.md` line |
+|---|---|---|
+| `P3-H4` actionCallAllowlist.ts file missing | OPEN | 928 |
+| `P3-H5` measureInterventionOutcomeJob queries canonicalAccounts outside service | OPEN | 929 |
+| `P3-H6` referenceDocumentService imports anthropicAdapter | OPEN | 930 |
+| `P3-H7` 5+ files import canonicalDataService without PrincipalContext | OPEN | 931 |
+| `S-2` Principal-context propagation import-only | OPEN | 1009 |
+| `S-5` saveSkillVersion pure unit test | OPEN | 1016 |
+| `S2-SKILL-MD` skill .md files for ask_clarifying_questions / challenge_assumptions | **CLOSED 2026-05-01** | PR #247 |
+| `S3-CONFLICT-TESTS` rule-conflict parser tests | OPEN | 453 |
+| `P3-M10` skill visibility drift | OPEN | 949 |
+| `P3-M11` 5 workflow skills missing YAML frontmatter | OPEN | 950 |
+| `P3-M12` verify-integration-reference.mjs yaml dep | OPEN | 951 |
+| `P3-M15` canonical_flow_definitions / canonical_row_subaccount_scopes registry | OPEN | 933 |
+| `P3-M16` docs/capabilities.md editorial violation | OPEN | 953 |
+| `P3-L1` explicit package.json deps | OPEN | 952 |
+| `SC-COVERAGE-BASELINE` (REQ #35) | OPEN | 985 |
+| `RLS-CONTRACT-IMPORT` (GATES-2026-04-26-2) | OPEN | 1077 |
+
+**Recommendation:** **KEEP Chunk 6, narrowed.**
+- Drop `S2-SKILL-MD` (closed).
+- Optionally absorb `SC-2026-04-26-1` if it turns out to need a new owning spec (verification: run `verify-rls-protected-tables.sh` and confirm exit code).
