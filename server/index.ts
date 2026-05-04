@@ -215,6 +215,13 @@ const httpServer = createServer(app);
 // Security middleware
 const isProduction = env.NODE_ENV === 'production';
 
+// Trust the first upstream proxy (load balancer / Nginx) in production so
+// that req.ip reflects the real client IP, not the proxy IP. Without this,
+// rate-limiter keys based on req.ip are the same for all users behind the LB.
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginOpenerPolicy: false,

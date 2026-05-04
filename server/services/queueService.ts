@@ -1331,12 +1331,12 @@ export const queueService = {
 
       // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
       // Dequeued after a successful OAuth token exchange when a pendingRunId was
-      // stored on the state nonce. resolveOrgContext: null because
-      // WorkflowRunPauseStopService uses the module-level db handle.
+      // stored on the state nonce. Default resolveOrgContext reads organisationId
+      // from the payload and opens an org-scoped tx with the GUC set so that
+      // WorkflowRunPauseStopService (now using getOrgScopedDb) can read workflow_runs.
       await createWorker<import('../jobs/resumeRunAfterOAuthJob.js').ResumeRunAfterOAuthPayload>({
         queue: 'run:resumeAfterOAuth',
         boss: boss as any,
-        resolveOrgContext: () => null,
         handler: async (job) => {
           const { resumeRunAfterOAuthWorker } = await import('../jobs/resumeRunAfterOAuthJob.js');
           await resumeRunAfterOAuthWorker(job.data);

@@ -67,6 +67,11 @@ export async function appendAndEmitTaskEvent(
   // DB row is the source of truth — clients may miss the notification and
   // re-fetch the event log; that is acceptable.
   await db.transaction(async (tx) => {
+    // FORCE-RLS tables require the GUC before any tenant-table access.
+    // This transaction is opened from the module-level db pool (callers use
+    // fire-and-forget, so no outer org-scoped tx is guaranteed to be active).
+    await tx.execute(sql`SELECT set_config('app.organisation_id', ${ctx.organisationId}, true)`);
+
     // Atomic per-task sequence allocation. The UPDATE locks the row for the
     // bump, so concurrent callers serialise correctly and each receives a
     // distinct increasing integer.
