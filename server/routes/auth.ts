@@ -48,7 +48,7 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
 
 router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
   const { email, password, organisationSlug } = req.body as LoginInput;
-  const limitResult = await rateLimitCheck(rateLimitKeys.authLogin(req.ip ?? 'unknown', String(email)), 10, 900);
+  const limitResult = await rateLimitCheck(rateLimitKeys.authLogin(req.ip ?? 'unknown', String(email)), 10, 60);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
@@ -90,13 +90,13 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
 }));
 
 router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
-  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown'), 5, 900);
+  const { email } = req.body as ForgotPasswordInput;
+  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', String(email)), 5, 300);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });
     return;
   }
-  const { email } = req.body as ForgotPasswordInput;
   const result = await authService.forgotPassword(email);
   auditService.log({
     actorType: 'user',
@@ -108,7 +108,7 @@ router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), async
 }));
 
 router.post('/api/auth/reset-password', validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
-  const limitResult = await rateLimitCheck(rateLimitKeys.authReset(req.ip ?? 'unknown'), 5, 900);
+  const limitResult = await rateLimitCheck(rateLimitKeys.authReset(req.ip ?? 'unknown'), 5, 300);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many password reset attempts. Please try again later.' });

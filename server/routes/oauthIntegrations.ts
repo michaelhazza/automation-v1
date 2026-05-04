@@ -17,6 +17,8 @@ import { integrationConnectionService } from '../services/integrationConnectionS
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const router = Router();
@@ -333,11 +335,12 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   }
 
   const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
-  const ghlOrgId = consumeGhlOAuthState(state);
-  if (!ghlOrgId) {
+  const stateData = await consumeGhlOAuthState(state);
+  if (!stateData) {
     logCallbackFailure('invalid_state', null, null);
     return res.redirect(`${appBase}/onboarding?error=invalid_state`);
   }
+  const ghlOrgId = stateData.organisationId;
 
   const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
   const redirectUri = `${callbackBase}/api/oauth/callback`;
@@ -395,19 +398,23 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   });
 
   // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
-  // even if enumeration fails. Hard timeout: 15s. autoEnrolAgencyLocations is added
-  // in Task 9; imported via unknown cast to avoid a typecheck error before that chunk lands.
+  // even if enumeration fails. Hard timeout: 15s. Wrapped in withOrgTx so that
+  // any downstream service call that reads getOrgTxContext() receives the correct
+  // org context (S-P0-4: GUC propagation on unauthenticated callback paths).
   try {
     const svc = await import('../services/ghlAgencyOauthService.js') as unknown as {
       autoEnrolAgencyLocations?: (orgId: string, connection: unknown, label: string) => Promise<void>;
     };
     if (typeof svc.autoEnrolAgencyLocations === 'function') {
-      await Promise.race([
-        svc.autoEnrolAgencyLocations(ghlOrgId, connection, `oauth_callback:${connection.id}`),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
-        ),
-      ]);
+      await withOrgTx(
+        { tx: db, organisationId: ghlOrgId, source: 'oauth:callback:ghl:enrol' },
+        () => Promise.race([
+          svc.autoEnrolAgencyLocations!(ghlOrgId, connection, `oauth_callback:${connection.id}`),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
+          ),
+        ]),
+      );
     }
   } catch (err) {
     logger.warn('ghl.oauth.callback_enrol_failed', {
@@ -420,6 +427,12 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
       error: { message: String(err) },
     });
   }
+
+  // C-P0-2: agent resume after OAuth is satisfied by the synchronous
+  // resumeFromIntegrationConnect path in /api/integrations/oauth2/callback
+  // (JWT-based OAuth flow). The GHL agency OAuth path (/api/oauth/callback)
+  // uses a raw nonce store and does not carry an agent resume token, so no
+  // resume is needed here.
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));

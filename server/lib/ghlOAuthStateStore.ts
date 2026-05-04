@@ -1,34 +1,35 @@
-// Shared singleton nonce store for GHL agency OAuth CSRF protection.
-// ghl.ts writes; oauthIntegrations.ts validates + consumes.
-// One-shot: nonce is deleted on first successful validation.
-// TTL: 10 minutes from creation.
+import { db } from '../db/index.js';
+import { oauthStateNonces } from '../db/schema/oauthStateNonces.js';
+import { and, eq, gt, sql } from 'drizzle-orm';
 
-const NONCE_TTL_MS = 10 * 60 * 1000;
+const TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-interface GhlOAuthState {
-  orgId: string;
-  expiresAt: number;
+export async function setGhlOAuthState(
+  nonce: string,
+  organisationId: string,
+  pendingRunId?: string,
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + TTL_MS);
+  await db.insert(oauthStateNonces).values({
+    nonce,
+    organisationId,
+    expiresAt,
+    pendingRunId: pendingRunId ?? null,
+  });
 }
 
-// Single-instance only: state is lost on process restart and invisible to other nodes.
-// A user who completes OAuth mid-restart will receive invalid_state and must restart the flow.
-// Replace with Redis/DB-backed store before running multi-instance or blue-green deployments.
-const store = new Map<string, GhlOAuthState>();
-
-export function setGhlOAuthState(nonce: string, orgId: string): void {
-  // Prune expired entries on every write to prevent unbounded growth.
-  const now = Date.now();
-  for (const [key, val] of store) {
-    if (val.expiresAt < now) store.delete(key);
-  }
-  store.set(nonce, { orgId, expiresAt: now + NONCE_TTL_MS });
-}
-
-/** Returns orgId if valid; null if missing, expired, or already consumed. */
-export function consumeGhlOAuthState(nonce: string): string | null {
-  const entry = store.get(nonce);
-  if (!entry) return null;
-  store.delete(nonce);
-  if (entry.expiresAt < Date.now()) return null;
-  return entry.orgId;
+// Nonce is single-use: DELETE ... RETURNING atomically guarantees consume-once.
+// Expired AND unknown nonces both return null — callers cannot distinguish them.
+export async function consumeGhlOAuthState(
+  nonce: string,
+): Promise<{ organisationId: string; pendingRunId: string | null } | null> {
+  const rows = await db
+    .delete(oauthStateNonces)
+    // Use DB time (sql`now()`) rather than new Date() to avoid clock-skew across nodes
+    .where(and(eq(oauthStateNonces.nonce, nonce), gt(oauthStateNonces.expiresAt, sql`now()`)))
+    .returning({
+      organisationId: oauthStateNonces.organisationId,
+      pendingRunId: oauthStateNonces.pendingRunId,
+    });
+  return rows[0] ?? null;
 }

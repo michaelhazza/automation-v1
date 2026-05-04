@@ -20,6 +20,7 @@ import { queueService } from './services/queueService.js';
 import { initializePageIntegrationWorker } from './services/pageIntegrationWorker.js';
 import { initializePaymentReconciliationJob } from './services/paymentReconciliationJob.js';
 import { registerRateLimitCleanupJob } from './lib/rateLimitCleanupJob.js';
+import { registerOauthStateCleanupJob } from './lib/oauthStateCleanupJob.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
 import { getPgBoss, stopPgBoss } from './lib/pgBossInstance.js';
@@ -554,6 +555,7 @@ async function start() {
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
   await registerRateLimitCleanupJob();  // Phase 2C — TTL on rate_limit_buckets
+  await registerOauthStateCleanupJob(); // Pre-Launch Phase 1 — TTL on oauth_state_nonces (S-P0-1, S-P0-2)
   // Workflow engine workers (tick + watchdog cron) — spec §5.2 + §5.7
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {

@@ -282,24 +282,17 @@ export async function dispatchWebhookSideEffects(
     }
 
     if (result?.inserted) {
-      // KNOWN-BROKEN from this unauthenticated webhook path: subaccountOnboardingService
-      // uses the module-level `db` handle internally and queries org-scoped FORCE-RLS
-      // tables (org_subscriptions, workflow_runs, workflow_templates). Without an
-      // app.organisation_id GUC bound to the pool connection it picks up, those
-      // queries return zero rows and the auto-start silently no-ops. The previous
-      // attempt to wrap this in `db.transaction(async (tx) => set_config; ...)` did
-      // NOT scope the inner queries — `tx` and the module-level `db` use different
-      // pool connections. Calling it bare so the failure mode is honest; deferred
-      // to tasks/todo.md "GHL unauthenticated auto-start onboarding" (architectural
-      // refactor of subaccountOnboardingService to be admin-bypass-capable).
+      // D-P0-1: enqueue via pg-boss instead of inline sync call. The GUC
+      // propagation problem (KNOWN-BROKEN comment removed) is resolved because
+      // the worker runs with its own admin-bypass DB access, decoupled from
+      // this unauthenticated request path.
       try {
-        const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
-        await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
+        const { enqueueGhlOnboarding } = await import('../jobs/ghlAutoStartOnboardingJob.js');
+        await enqueueGhlOnboarding({
           organisationId: connection.organisationId,
           subaccountId: result.id,
-          startedByUserId: 'system',
         });
-      } catch { /* non-fatal — auto-start currently a no-op from webhook path, see comment above */ }
+      } catch { /* non-fatal — onboarding enqueue failure logged by enqueueGhlOnboarding */ }
     }
 
     return {

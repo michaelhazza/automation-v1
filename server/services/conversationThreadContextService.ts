@@ -21,6 +21,7 @@ import type {
   ThreadContextReadModel,
 } from '../../shared/types/conversationThreadContext.js';
 import type { ConversationThreadContext } from '../db/schema/conversationThreadContext.js';
+import { OptimisticLockError } from '../lib/errors.js';
 
 // ── Idempotency dedup store (module-level, in-memory, v1) ────────────────────
 // Keyed by `${runId}:${sha256(normalizePatch(patch))}`.
@@ -80,6 +81,12 @@ export async function buildThreadContextReadModel(
 
 // ── applyPatch ────────────────────────────────────────────────────────────────
 
+/**
+ * Updates a thread context row using optimistic concurrency (WHERE version = ?).
+ * Throws OptimisticLockError when the row disappears or the second retry conflicts.
+ * Callers should retry with exponential backoff (≤3 attempts) after re-reading the
+ * current version. Do NOT pass a stale version into a retry — always re-fetch first.
+ */
 export async function applyPatch(
   conversationId: string,
   organisationId: string,
@@ -256,7 +263,7 @@ export async function applyPatch(
         .limit(1);
 
       if (reloaded.length === 0) {
-        throw new Error(`thread_context: row ${current.id} disappeared mid-update`);
+        throw new OptimisticLockError(`thread_context: row ${current.id} disappeared mid-update`);
       }
 
       const concurrentState = {
@@ -286,7 +293,7 @@ export async function applyPatch(
         .returning();
 
       if (retried.length === 0) {
-        throw new Error(`thread_context: optimistic-concurrency retry failed for row ${current.id}`);
+        throw new OptimisticLockError(`thread_context: optimistic-concurrency retry failed for row ${current.id}`);
       }
       updatedRow = retried[0];
     }

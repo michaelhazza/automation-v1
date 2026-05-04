@@ -18,7 +18,7 @@ export function parsePositiveInt(value: unknown): number | undefined {
 
 const upload = multer({
   storage: multer.diskStorage({ destination: os.tmpdir() }),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB hard cap (spec §6.1)
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB hard cap — returns 413 on oversize (S-P0-8)
 });
 
 type ValidationMode = 'enforce' | 'warn';

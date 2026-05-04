@@ -285,33 +285,22 @@ export async function autoEnrolAgencyLocations(
 
     if (result.inserted) {
       insertedCount++;
-      // TODO: refactor to pg-boss dispatch — currently inline (spec §6 Phase 3 notes this should be async)
-      // KNOWN-BROKEN from this unauthenticated webhook/OAuth-callback path:
-      // subaccountOnboardingService uses the module-level `db` handle internally
-      // and queries org-scoped FORCE-RLS tables (org_subscriptions, workflow_runs,
-      // workflow_templates). Without an app.organisation_id GUC bound to the pool
-      // connection it picks up, those queries return zero rows and the auto-start
-      // silently no-ops. The previous attempt to wrap this in
-      // `db.transaction(async (tx) => set_config; ...)` did NOT scope the inner
-      // queries — `tx` and the module-level `db` use different pool connections.
-      // Calling it bare so the failure mode is honest; deferred to tasks/todo.md
-      // "GHL unauthenticated auto-start onboarding" (architectural refactor of
-      // subaccountOnboardingService to be admin-bypass-capable).
+      // D-P0-1: enqueue via pg-boss instead of inline sync call. The GUC
+      // propagation problem (KNOWN-BROKEN comment removed) is resolved because
+      // the worker runs with its own admin-bypass DB access, decoupled from
+      // this unauthenticated request path. singletonKey prevents double-enqueue
+      // on webhook replay.
       try {
-        const { subaccountOnboardingService } = await import('./subaccountOnboardingService.js');
-        await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
-          organisationId: orgId,
-          subaccountId: result.id,
-          startedByUserId: 'system',
-        });
+        const { enqueueGhlOnboarding } = await import('../jobs/ghlAutoStartOnboardingJob.js');
+        await enqueueGhlOnboarding({ organisationId: orgId, subaccountId: result.id });
       } catch (err) {
-        logger.error('ghl.enumeration.onboarding_dispatch_failed', {
-          event: 'ghl.enumeration.onboarding_dispatch_failed',
+        logger.error('ghl.enumeration.onboarding_enqueue_failed', {
+          event: 'ghl.enumeration.onboarding_enqueue_failed',
           provider: 'ghl',
           orgId,
           subaccountId: result.id,
           locationId: loc.id,
-          error: { code: 'ONBOARDING_DISPATCH_FAILED', message: String(err) },
+          error: { code: 'ONBOARDING_ENQUEUE_FAILED', message: String(err) },
         });
       }
     }

@@ -24,8 +24,8 @@ export const rateLimitKeys = {
     `rl:${KEY_VERSION}:auth:login:${ip}:${email.toLowerCase()}`,
   authSignup: (ip: string): string =>
     `rl:${KEY_VERSION}:auth:signup:${ip}`,
-  authForgot: (ip: string): string =>
-    `rl:${KEY_VERSION}:auth:forgot:${ip}`,
+  authForgot: (ip: string, email: string): string =>
+    `rl:${KEY_VERSION}:auth:forgot:${ip}:${email.toLowerCase()}`,
   authReset: (ip: string): string =>
     `rl:${KEY_VERSION}:auth:reset:${ip}`,
 

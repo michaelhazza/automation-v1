@@ -2821,47 +2821,43 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
         const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
 
-        let blockDecision: Awaited<ReturnType<typeof checkRequiredIntegration>>;
-        try {
-          blockDecision = await checkRequiredIntegration(
-            toolCall.name,
-            toolCall.input as Record<string, unknown>,
-            {
-              organisationId: request.organisationId,
-              subaccountId: request.subaccountId ?? null,
-              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
-              runId,
-              agentId: request.agentId,
-              currentBlockSequence: newBlockSeq,
+        const blockDecision = await checkRequiredIntegration(
+          toolCall.name,
+          toolCall.input as Record<string, unknown>,
+          {
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            runId,
+            agentId: request.agentId,
+            currentBlockSequence: newBlockSeq,
+          },
+        );
+
+        if ('code' in blockDecision && blockDecision.code === 'TOOL_NOT_RESUMABLE') {
+          // Cancel the run — this tool cannot be safely paused mid-execution.
+          await db.update(agentRuns).set({
+            status: 'cancelled',
+            runResultStatus: 'failed',
+            runMetadata: {
+              ...currentRunMeta,
+              cancelReason: 'tool_not_resumable',
             },
-          );
-        } catch (err: any) {
-          if (err?.errorCode === 'TOOL_NOT_RESUMABLE') {
-            // Cancel the run — this tool cannot be safely paused mid-execution.
-            await db.update(agentRuns).set({
-              status: 'cancelled',
-              runResultStatus: 'failed',
-              runMetadata: {
-                ...currentRunMeta,
-                cancelReason: 'tool_not_resumable',
-              },
-              completedAt: new Date(),
-              updatedAt: new Date(),
-            }).where(eq(agentRuns.id, runId));
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
 
-            logger.error('tool_not_resumable', {
-              runId,
-              conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
-              blockedReason: 'integration_required',
-              toolName: toolCall.name,
-              action: 'tool_not_resumable',
-            });
+          logger.error('tool_not_resumable', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            toolName: toolCall.name,
+            action: 'tool_not_resumable',
+          });
 
-            finalStatus = 'failed';
-            emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
-            break outerLoop;
-          }
-          throw err;
+          finalStatus = 'failed';
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
         }
 
         if (blockDecision.shouldBlock) {

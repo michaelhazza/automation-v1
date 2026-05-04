@@ -5,6 +5,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { saveRule } from '../services/ruleCaptureService.js';
 import { listRules, patchRule, deprecateRule } from '../services/ruleLibraryService.js';
 import { draftCandidates } from '../services/ruleCandidateDrafter.js';
+import { listDraftCandidates, approveDraftCandidate, rejectDraftCandidate } from '../services/draftCandidatesService.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and, sql } from 'drizzle-orm';
@@ -222,6 +223,39 @@ router.post(
     });
 
     res.json(result);
+  }),
+);
+
+// GET /api/rules/draft-candidates — list persisted draft rule candidates for review
+router.get(
+  '/draft-candidates',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const candidates = await listDraftCandidates(req.orgId!);
+    res.json({ data: candidates });
+  }),
+);
+
+// POST /api/rules/draft-candidates/:id/approve — approve a draft rule candidate
+router.post(
+  '/draft-candidates/:id/approve',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const result = await approveDraftCandidate(req.params.id, req.orgId!, req.user!.id);
+    res.json({ data: result });
+  }),
+);
+
+// POST /api/rules/draft-candidates/:id/reject — reject a draft rule candidate
+router.post(
+  '/draft-candidates/:id/reject',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const result = await rejectDraftCandidate(req.params.id, req.orgId!, req.user!.id);
+    res.json({ data: result });
   }),
 );
 

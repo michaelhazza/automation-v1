@@ -712,7 +712,7 @@ router.get(
         identityPhotoUrl: workspaceIdentities.photoUrl,
       })
       .from(workspaceActors)
-      .leftJoin(agents, eq(agents.workspaceActorId, workspaceActors.id))
+      .leftJoin(agents, and(eq(agents.workspaceActorId, workspaceActors.id), isNull(agents.deletedAt)))
       .leftJoin(users, eq(users.workspaceActorId, workspaceActors.id))
       .leftJoin(
         workspaceIdentities,
