@@ -2534,3 +2534,35 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
   - Gap: opt-out toggle is silently bypassed by the backfill path.
   - Suggested approach: combine the predicates with `and(...)` from `drizzle-orm`: `.where(and(eq(subaccounts.optimiserEnabled, true), isNull(subaccounts.deletedAt)))`. One-line fix, but the test that should have caught it isn't there — backfill integration test is deferred to CI per progress.md.
   - **CLOSED 2026-05-04T22:07:32Z (false positive)** — `scripts/backfill-optimiser-schedules.ts:76` already uses `.where(and(eq(subaccounts.optimiserEnabled, true), isNull(subaccounts.deletedAt)))`. Both predicates are effective. Prior log read against an earlier branch state.
+
+## PR Review Findings — stream-2-optimiser-finish (2026-05-04)
+
+Advisory findings from pr-reviewer pass. Blocking (B-1) and N-1/N-3 were fixed in the same session. Remaining items below.
+
+### S-1 — `agent.over_budget` evaluator threshold mismatches spec
+
+Spec §3/§5 defines "monthly cost > 1.3× budget for 2 consecutive months". Current `agentBudget.ts` evaluator fires at `percentUsed > 0.9` (warn) and `> 1.0` (critical) with `last_month: 0` hardcoded. Fix: extend query module to expose `lastMonthSpendUsd` from `cost_aggregates` (second join filtered to previous calendar month) and update evaluator threshold to `ratio >= 1.3 AND last_month_ratio >= 1.3`.
+
+### S-2 — No test asserts Phase 0 snake_case evidence keys
+
+The 8 evaluator test files don't assert evidence key names against `shared/types/agentRecommendations.ts`. A regression re-introducing camelCase would not be caught. Add evidence-key assertion tests to `server/services/optimiser/recommendations/__tests__/`.
+
+### S-3 — No test for `handleOptimiserScan`
+
+`server/jobs/runOptimiserScanJob.ts` has no `*Pure.test.ts` peer. Add tests at `server/jobs/__tests__/runOptimiserScanJobPure.test.ts` covering: payload-to-arg plumbing, success log, error re-throw.
+
+### S-4 — `median_version` not declared in shared evidence types
+
+All 8 evaluators write `median_version` to evidence but `shared/types/agentRecommendations.ts` union members don't declare it. materialDelta doesn't read it, so a version-only delta triggers a spurious LLM re-render. Fix: add `median_version: number` to each evidence shape in the shared type (and doc-sync spec §6.5).
+
+### N-2 — Undocumented placeholder values in evidence
+
+`agentBudget.ts:65` `top_cost_driver: 'unknown'`, `cacheEfficiency.ts:64` `dominant_skill: 'unknown'`, `memoryCitation.ts:64` `projected_token_savings: 0`, `inactiveWorkflow.ts:78` `expected_cadence: 'daily'`. Add a comment marking these as future query-module work.
+
+### N-4 — `subaccountAgentId` in `handleOptimiserScan` payload not logged
+
+The job payload includes `subaccountAgentId` but it's not destructured in the handler's log lines. Useful for cross-referencing the SA row that fired the scan.
+
+### OPS — Orphan `agent-scheduled-run:<optimiser-sa-id>` schedules
+
+Any optimiser SA rows registered before this PR exist in pg-boss under `agent-scheduled-run:<id>`. These fire daily and hit the LLM agent loop. At next deploy: run a one-time `pgboss.unschedule('agent-scheduled-run:<id>')` for each optimiser SA (query: `SELECT sa.id FROM subaccount_agents sa JOIN agents a ON a.id = sa.agent_id JOIN system_agents sya ON sya.id = a.system_agent_id WHERE sya.slug = 'subaccount-optimiser'`). Optionally add an orphan handler on `agent-scheduled-run` that drops jobs from optimiser agents (pattern: lines 107-110 in agentScheduleService.ts).

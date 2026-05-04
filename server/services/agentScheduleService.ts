@@ -255,6 +255,11 @@ export const agentScheduleService = {
    * Register all active agent schedules from the database.
    */
   async registerAllActiveSchedules() {
+    // LEFT JOIN system_agents filtered to the optimiser slug so we can exclude those
+    // rows from AGENT_RUN_QUEUE registration. Optimiser SAs use OPTIMISER_SCAN_QUEUE
+    // and are re-registered at startup via registerOptimiserSchedule (called by the
+    // subaccount-create hook and backfill script). isNull(systemAgents.id) retains all
+    // non-optimiser rows (join miss → null id).
     const rows = await db
       .select({
         sa: subaccountAgents,
@@ -262,11 +267,16 @@ export const agentScheduleService = {
       })
       .from(subaccountAgents)
       .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .leftJoin(
+        systemAgents,
+        and(eq(agents.systemAgentId, systemAgents.id), eq(systemAgents.slug, 'subaccount-optimiser')),
+      )
       .where(
         and(
           eq(subaccountAgents.scheduleEnabled, true),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
+          isNull(systemAgents.id), // exclude optimiser SAs — they use OPTIMISER_SCAN_QUEUE
         )
       );
 
@@ -367,7 +377,7 @@ export const agentScheduleService = {
    * Both the backfill script and the subaccount-create hook call this function.
    * The INSERT ... ON CONFLICT DO NOTHING makes it safe to re-run idempotently.
    *
-   * Schedule name: `${AGENT_RUN_QUEUE}:${subaccountAgentId}` (invariant 13).
+   * Schedule name: `${OPTIMISER_SCAN_QUEUE}:${subaccountAgentId}` (invariant 13).
    * Cron: `${computeStaggerMinutes(subaccountId)} 6 * * *` — runs in the 6-hour
    * window 06:00–11:59 UTC, deterministically offset per subaccount.
    */
@@ -464,13 +474,14 @@ export const agentScheduleService = {
       subaccountAgentId = existing.id;
       wasNew = false;
 
-      // Self-heal: update schedule if cron formula changed
+      // Self-heal: update DB if cron formula changed.
+      // Do NOT call updateSchedule() — it calls registerSchedule() which hardcodes AGENT_RUN_QUEUE.
+      // The pg-boss schedule is re-registered unconditionally below (step 6) on OPTIMISER_SCAN_QUEUE.
       if (existing.scheduleCron !== cron) {
-        await this.updateSchedule(subaccountAgentId, {
-          scheduleCron: cron,
-          scheduleEnabled: true,
-          scheduleTimezone: 'UTC', // hardcoded UTC — see above
-        });
+        await db
+          .update(subaccountAgents)
+          .set({ scheduleCron: cron, scheduleEnabled: true, scheduleTimezone: 'UTC', updatedAt: new Date() })
+          .where(eq(subaccountAgents.id, subaccountAgentId));
       }
     }
 

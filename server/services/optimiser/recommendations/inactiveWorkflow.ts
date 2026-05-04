@@ -74,7 +74,7 @@ export const evaluate: Evaluator<InactiveWorkflowEvidence> = (
       evidence: {
         subaccount_agent_id: ev.subaccountAgentId,
         agent_id: ev.agentId,
-        agent_name: ev.agentName ?? null,
+        agent_name: ev.agentName,
         expected_cadence: 'daily',
         last_run_at: ev.lastRunAt ?? null,
         median_version: ev.median_version,
