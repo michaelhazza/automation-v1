@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 
 export type PopupStatus = 'idle' | 'pending' | 'success' | 'error';
 
+const viteApiOrigin = (import.meta as unknown as Record<string, Record<string, string>>).env?.VITE_API_ORIGIN;
+const ALLOWED_ORIGINS = [
+  window.location.origin,
+  viteApiOrigin,
+].filter((o): o is string => typeof o === 'string' && o.length > 0);
+
 export function useOAuthPopup() {
   const [status, setStatus] = useState<PopupStatus>('idle');
   const popupRef = useRef<Window | null>(null);
@@ -12,7 +18,7 @@ export function useOAuthPopup() {
     mountedRef.current = true;
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (!ALLOWED_ORIGINS.includes(event.origin)) return;
       if (event.data?.type === 'oauth_success') {
         if (mountedRef.current) setStatus('success');
         popupRef.current?.close();

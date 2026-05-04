@@ -256,3 +256,6 @@ export * from './connectorLocationTokens.js';
 // Workflows V1 — step gates + drafts (migration 0270)
 export * from './workflowStepGates.js';
 export * from './workflowDrafts.js';
+
+// Pre-Launch Hardening Phase 1 — Postgres-backed OAuth state nonces (migration 0277)
+export * from './oauthStateNonces.js';

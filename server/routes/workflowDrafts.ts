@@ -35,6 +35,7 @@ router.get(
       return;
     }
 
+    // S-P0-3: subaccount guard verified — returns 404 (not 403) on cross-subaccount access
     // Spec §3.3 — RLS only enforces org scope; a same-org cross-subaccount
     // read by ID would otherwise leak. Verify caller has access to the draft's
     // subaccount. 404 (not 403) so an attacker cannot enumerate which draft

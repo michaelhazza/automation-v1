@@ -520,6 +520,19 @@ export const JOB_CONFIG = {
     deadLetter: 'system-monitor-ingest__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
+
+  // ── Pre-launch hardening D-P0-1 — GHL auto-start onboarding ─────
+  // Enqueued after subaccount creation from webhook/OAuth callback.
+  // singletonKey deduplicates on (organisationId, subaccountId) within
+  // a 5-minute window so webhook replay cannot double-start onboarding.
+  'ghl:auto-start-onboarding': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'ghl:auto-start-onboarding__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

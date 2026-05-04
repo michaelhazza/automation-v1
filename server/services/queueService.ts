@@ -1314,6 +1314,20 @@ export const queueService = {
         },
       });
 
+      // Pre-launch hardening D-P0-1 — GHL auto-start onboarding (event-driven).
+      // Dequeued after subaccount creation from webhook/OAuth-callback paths.
+      // resolveOrgContext: null because subaccountOnboardingService uses the
+      // module-level db handle; the service is responsible for its own DB access.
+      await createWorker<import('../jobs/ghlAutoStartOnboardingJob.js').GhlAutoStartOnboardingPayload>({
+        queue: 'ghl:auto-start-onboarding',
+        boss: boss as any,
+        resolveOrgContext: () => null,
+        handler: async (job) => {
+          const { ghlAutoStartOnboardingWorker } = await import('../jobs/ghlAutoStartOnboardingJob.js');
+          await ghlAutoStartOnboardingWorker(job.data);
+        },
+      });
+
       // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
       // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
       // emits WorkerSpendResponse on agent-spend-response by correlationId.
