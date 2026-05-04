@@ -3,8 +3,10 @@
  *
  * Replaces the inline synchronous call to autoStartOwedOnboardingWorkflows
  * in the unauthenticated webhook/OAuth-callback paths. By deferring via
- * pg-boss the GUC propagation problem is eliminated: the worker runs with
- * a proper admin connection that can bypass RLS, and pg-boss singletonKey
+ * pg-boss the GUC propagation problem is eliminated: the worker runs inside
+ * an org-scoped tx (set up by createWorker's default resolveOrgContext) so
+ * `app.organisation_id` is set and FORCE-RLS reads in
+ * subaccountOnboardingService (via getOrgScopedDb) pass. pg-boss singletonKey
  * deduplicates within a 5-minute window so webhook replay is idempotent.
  */
 
@@ -16,6 +18,13 @@ export const GHL_AUTO_START_ONBOARDING_JOB = 'ghl:auto-start-onboarding' as cons
 export interface GhlAutoStartOnboardingPayload {
   organisationId: string;
   subaccountId: string;
+  /**
+   * UUID of the user who triggered the enqueue (UI-driven creation), or
+   * null for unauthenticated trigger paths (webhook / OAuth callback).
+   * `started_by_user_id` is a nullable UUID FK — passing a non-UUID literal
+   * like 'system' fails Postgres uuid parsing and aborts the run.
+   */
+  startedByUserId?: string | null;
 }
 
 export async function enqueueGhlOnboarding(
@@ -35,7 +44,7 @@ export async function enqueueGhlOnboarding(
 export async function ghlAutoStartOnboardingWorker(
   payload: GhlAutoStartOnboardingPayload,
 ): Promise<void> {
-  const { organisationId, subaccountId } = payload;
+  const { organisationId, subaccountId, startedByUserId } = payload;
 
   const { subaccountOnboardingService } = await import(
     '../services/subaccountOnboardingService.js'
@@ -51,7 +60,7 @@ export async function ghlAutoStartOnboardingWorker(
   const result = await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
     organisationId,
     subaccountId,
-    startedByUserId: 'system',
+    startedByUserId: startedByUserId ?? null,
   });
 
   logger.info('ghl.autoStartOnboarding.complete', {

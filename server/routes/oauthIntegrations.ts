@@ -286,12 +286,27 @@ router.get(
         console.warn('[OAuth] run resume failed after connect:', err);
       }
 
+      // Target the app origin (NOT window.location.origin, which equals the API
+      // origin in split-origin deployments). The browser drops postMessage when
+      // targetOrigin ≠ opener origin, so a same-origin fallback would silently
+      // fail to notify the popup parent in split-origin setups.
+      let appOrigin: string | null = null;
+      try {
+        appOrigin = new URL(appBase).origin;
+      } catch {
+        appOrigin = null;
+      }
+      // If APP_BASE_URL is malformed, fall back to the same-origin behaviour
+      // (broken in split-origin deploys, but this is the pre-fix default).
+      const targetOriginExpr = appOrigin
+        ? JSON.stringify(appOrigin)
+        : 'window.location.origin';
       return res.send(`<!DOCTYPE html>
 <html>
 <head><title>Connected</title></head>
 <body>
 <script>
-  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, window.location.origin); } catch (e) {}
+  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, ${targetOriginExpr}); } catch (e) {}
   window.close();
 </script>
 <p>Connected! You may close this window.</p>

@@ -1316,12 +1316,13 @@ export const queueService = {
 
       // Pre-launch hardening D-P0-1 — GHL auto-start onboarding (event-driven).
       // Dequeued after subaccount creation from webhook/OAuth-callback paths.
-      // resolveOrgContext: null because subaccountOnboardingService uses the
-      // module-level db handle; the service is responsible for its own DB access.
+      // The default resolveOrgContext reads `organisationId` from the payload and
+      // opens an org-scoped tx with `app.organisation_id` set, so the FORCE-RLS
+      // tenant-table reads inside subaccountOnboardingService (now using
+      // getOrgScopedDb) pass policy checks.
       await createWorker<import('../jobs/ghlAutoStartOnboardingJob.js').GhlAutoStartOnboardingPayload>({
         queue: 'ghl:auto-start-onboarding',
         boss: boss as any,
-        resolveOrgContext: () => null,
         handler: async (job) => {
           const { ghlAutoStartOnboardingWorker } = await import('../jobs/ghlAutoStartOnboardingJob.js');
           await ghlAutoStartOnboardingWorker(job.data);

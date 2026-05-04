@@ -225,9 +225,10 @@ export async function autoEnrolAgencyLocations(
   //      a 23505 from one slug attempt rolls back only that row's tx, not
   //      the whole enrolment
   //
-  // The autoStartOwedOnboardingWorkflows call below runs OUTSIDE this tx and
-  // uses module-level `db`, so its queries do NOT inherit the GUC. See the
-  // KNOWN-BROKEN comment at the call site.
+  // The auto-start path below enqueues a pg-boss job that runs inside its
+  // own org-scoped tx (set up by createWorker's default resolveOrgContext),
+  // so the worker's reads via getOrgScopedDb in subaccountOnboardingService
+  // pass FORCE-RLS — this enrolment loop is decoupled from those reads.
   for (const loc of locations) {
     const baseSlug = generateSubaccountSlug(loc.name, loc.id);
 
