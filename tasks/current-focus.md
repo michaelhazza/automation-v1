@@ -3,7 +3,7 @@ active_spec: tasks/builds/framework-standalone-repo/spec.md
 active_plan: tasks/builds/framework-standalone-repo/plan.md
 build_slug: framework-standalone-repo
 branch: claude/framework-standalone-repo
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-04
 last_merge_ready_pr: #255
 last_merge_ready_slug: agentic-commerce
@@ -23,9 +23,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** `tasks/builds/framework-standalone-repo/spec.md` — Final.
-**Active plan:** `tasks/builds/framework-standalone-repo/plan.md` — pending (architect not yet run).
+**Active plan:** `tasks/builds/framework-standalone-repo/plan.md`.
 **Active build slug:** `framework-standalone-repo`.
-**Status:** **BUILDING** — Phase 1 complete. Spec locked after 3 ChatGPT review rounds (31 findings, all closed). Handoff written at `tasks/builds/framework-standalone-repo/handoff.md`. Feature-coordinator to run Phase 2 on a fresh branch `claude/framework-standalone-repo` from `main`.
+**Status:** **REVIEWING** — Phase 2 complete. Phase A implementation shipped (sync engine, manifest, 113 passing tests). Branch-level review pass closed: spec-conformance CONFORMANT (54/54) → pr-reviewer CHANGES_REQUESTED with all blocking + chosen strong fixed in-branch (B1 mergeSettingsHooksBlock mixed-group fix + S1 test, B2 drive-by reverted, S2 lastSubstitutionHash early-exit forward-migration) → adversarial-reviewer HOLES_FOUND with 2 confirmed-holes + 2 worth-confirming fixed (path-traversal `assertWithinRoot` guard with 2 rejection tests, `execSync` → `spawnSync` shell-injection fix, mergeSettings non-hooks key preservation, `--check` ownership-transferred counting, PID-suffix `writeStateAtomic` race fix) → dual-reviewer **SKIPPED** (Codex CLI unavailable; allowed per framework convention). 12 Tier 2 items routed to `tasks/todo.md`. G2 gates clean (lint 0 errors, typecheck clean, 113/113 targeted tests pass). Phase 2 handoff at `tasks/builds/framework-standalone-repo/handoff-phase2.md`. Awaiting operator commit + Phase 3 (`finalisation-coordinator`) launch.
 
 **Last merge-ready:** `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). Phase 3 complete for `agentic-commerce` (PR #255, branch `claude/agentic-commerce-spending`). Merge-conflict against `origin/main` (3 files) resolved in commit `a9c9c1f1` (workflows-v1 + agentic-commerce coexist; precedent for migration number collision at 0263). chatgpt-pr-review LOOP CLOSED at Round 3 with verdict 🟢 Clean green (production-safe); rounds 1+2+3 across 3 ChatGPT manual rounds applied 7 fixes + caught 1 critical side-finding (frontend↔server route mismatch on grant management UI) + rejected 1 false positive + deferred 10 items + had 3 dissolutions independently confirmed every round. `ready-to-merge` label re-applied at <pending> after operator's explicit end-to-end authorisation. CI is running G5 / heavyweight test suite. Awaiting CI green, then merge via `gh pr merge` (operator authorised the merge as part of finalisation). After merge, set status to `MERGED` (or `NONE` to clear the trail). finalisation-coordinator does NOT auto-merge by default — this PR has explicit operator authorisation.
 
