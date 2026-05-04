@@ -140,16 +140,8 @@ router.post(
     // Verify an active run for the task (scopes the task to this org).
     const runId = await resolveActiveRunForTask(taskId, orgId);
     if (runId === null) {
-      // No active run — still allow revert but verify task belongs to org.
-      const db = getOrgScopedDb('fileRevert.revertHunk');
-      const [task] = await db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId)));
-      if (!task) {
-        res.status(404).json({ error: 'no_active_run_for_task' });
-        return;
-      }
+      res.status(404).json({ error: 'no_active_run_for_task' });
+      return;
     }
 
     const { from_version, hunk_index } = req.body as {
@@ -162,21 +154,38 @@ router.post(
       return;
     }
 
-    const result = await fileRevertHunkService.revertHunk({
-      taskId,
-      fileId,
-      fromVersion: from_version,
-      hunkIndex: hunk_index,
-      organisationId: orgId,
-      userId,
-    });
+    try {
+      const result = await fileRevertHunkService.revertHunk({
+        taskId,
+        fileId,
+        fromVersion: from_version,
+        hunkIndex: hunk_index,
+        organisationId: orgId,
+        userId,
+      });
 
-    if (!result.reverted) {
-      res.json({ reverted: false, reason: result.reason });
-      return;
+      if (!result.reverted) {
+        res.json({ reverted: false, reason: result.reason });
+        return;
+      }
+
+      res.json({ reverted: true, new_version: result.newVersion });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; error?: string; current_version?: number };
+      if (e.statusCode === 409 && e.error === 'base_version_changed') {
+        res.status(409).json({ error: 'base_version_changed', current_version: e.current_version });
+        return;
+      }
+      if (e.statusCode === 404 && e.error === 'file_not_found') {
+        res.status(404).json({ error: 'file_not_found' });
+        return;
+      }
+      if (e.statusCode === 404 && e.error === 'version_not_found') {
+        res.status(404).json({ error: 'file_not_found' });
+        return;
+      }
+      throw err; // let asyncHandler handle unexpected errors
     }
-
-    res.json({ reverted: true, new_version: result.newVersion });
   }),
 );
 

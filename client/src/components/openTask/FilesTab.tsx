@@ -129,6 +129,7 @@ export function FilesTab({ taskId, files }: FilesTabProps) {
             fileName={selectedFile.fileId}
             producerAgentId={selectedFile.producerAgentId}
             updatedAt={selectedFile.updatedAt}
+            lastEditRequest={selectedFile.lastEditRequest}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-[12px] text-slate-400">

@@ -165,9 +165,22 @@ export function applyRevertHunk(to: string, hunks: DiffHunk[], hunkIndex: number
     ];
     return joinLines(rebuilt);
   } else {
-    // hunk only removed lines — they should not be present in `to`.
-    // Nothing to revert in `to` (the lines were deleted and aren't there).
-    return null;
+    // Pure-delete hunk: re-insert fromLines at the correct position in `to`.
+    // Because the concurrency guard ensures `to` is exactly version fromVersion+1,
+    // the startLine position relative to `to` is stable:
+    // each preceding hunk shifts the position by (toLines.length - fromLines.length).
+    // For the simple case (no preceding hunks), startLine is the insertion point.
+    // For multi-hunk diffs, accumulate the delta from preceding hunks.
+    const precedingHunks = hunks.filter(h => h.hunkIndex < hunk.hunkIndex);
+    const delta = precedingHunks.reduce((acc, h) => acc + h.toLines.length - h.fromLines.length, 0);
+    const insertAt = hunk.startLine + delta;
+    const clampedInsertAt = Math.max(0, Math.min(insertAt, toLines.length));
+    const rebuilt = [
+      ...toLines.slice(0, clampedInsertAt),
+      ...hunkFromLines,
+      ...toLines.slice(clampedInsertAt),
+    ];
+    return joinLines(rebuilt);
   }
 }
 

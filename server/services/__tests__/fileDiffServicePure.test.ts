@@ -102,6 +102,18 @@ describe('applyRevertHunk', () => {
     const secondRevert = applyRevertHunk(reverted!, hunks, 0);
     assertEqual(secondRevert, null, 'second revert on already-reverted content → null');
   });
+
+  test('pure-delete hunk revert re-inserts the deleted lines', () => {
+    const from3 = 'alpha\nbeta\ngamma';
+    const to3 = 'alpha\ngamma'; // deleted 'beta'
+    const hunks3 = computeHunks(from3, to3);
+    // Should have 1 hunk: remove 'beta', insert nothing
+    assertEqual(hunks3.length, 1, 'one hunk for pure deletion');
+    assertEqual(hunks3[0].fromLines, ['beta'], 'fromLines contains deleted line');
+    assertEqual(hunks3[0].toLines, [], 'toLines is empty (pure delete)');
+    const reverted3 = applyRevertHunk(to3, hunks3, 0);
+    assertEqual(reverted3, from3, 'pure-delete revert re-inserts the deleted line');
+  });
 });
 
 console.log('All fileDiffServicePure tests passed.');

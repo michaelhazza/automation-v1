@@ -8,6 +8,7 @@ interface DiffRendererProps {
   fromVersion: number;
   producerAgentId?: string;
   updatedAt?: string;
+  lastEditRequest?: string;
   onReverted: () => void;
 }
 
@@ -17,17 +18,21 @@ interface DiffData {
   to: string;
 }
 
-export function DiffRenderer({ taskId, fileId, fromVersion, producerAgentId, updatedAt, onReverted }: DiffRendererProps) {
+export function DiffRenderer({ taskId, fileId, fromVersion, producerAgentId, updatedAt, lastEditRequest, onReverted }: DiffRendererProps) {
   const [data, setData] = useState<DiffData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [revertingHunk, setRevertingHunk] = useState<number | null>(null);
+  const [revertError, setRevertError] = useState<string | null>(null);
 
   const fetchDiff = useCallback(() => {
     setLoading(true);
     setError(false);
     api.get<DiffData>(`/api/tasks/${taskId}/files/${fileId}/diff?from_version=${fromVersion}`)
-      .then(({ data: d }) => setData(d))
+      .then(({ data: d }) => {
+        setData(d);
+        setRevertError(null);
+      })
       .catch((err) => {
         console.error('[DiffRenderer] Failed to fetch diff', err);
         setError(true);
@@ -41,6 +46,7 @@ export function DiffRenderer({ taskId, fileId, fromVersion, producerAgentId, upd
 
   const handleRevert = async (hunkIndex: number) => {
     setRevertingHunk(hunkIndex);
+    setRevertError(null);
     try {
       const res = await api.post<{ reverted: boolean; reason?: string; new_version?: number }>(
         `/api/tasks/${taskId}/files/${fileId}/revert-hunk`,
@@ -48,9 +54,22 @@ export function DiffRenderer({ taskId, fileId, fromVersion, producerAgentId, upd
       );
       if (res.data.reverted) {
         onReverted();
+      } else {
+        // already_absent or similar — refresh diff to show current state.
+        fetchDiff();
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[DiffRenderer] Revert hunk failed', err);
+      const axiosErr = err as { response?: { data?: { error?: string } } };
+      const errCode = axiosErr?.response?.data?.error;
+      if (errCode === 'base_version_changed') {
+        const msg = 'This draft has been edited again. Refresh to see the latest.';
+        setRevertError(msg);
+        setTimeout(() => setRevertError(null), 5000);
+      } else {
+        setRevertError('Revert failed. Please try again.');
+        setTimeout(() => setRevertError(null), 5000);
+      }
     } finally {
       setRevertingHunk(null);
     }
@@ -68,15 +87,19 @@ export function DiffRenderer({ taskId, fileId, fromVersion, producerAgentId, upd
     );
   }
 
-  const caption = [
+  const captionParts = [
     producerAgentId ? `Edits requested by ${producerAgentId}` : 'Edits',
     updatedAt ? `at ${new Date(updatedAt).toLocaleString()}` : '',
-    `Applied as v${fromVersion + 1}.`,
   ].filter(Boolean).join(' ');
+  const editRequestClause = lastEditRequest ? ` '${lastEditRequest}'.` : '';
+  const caption = `${captionParts}.${editRequestClause} Applied as v${fromVersion + 1}.`;
 
   return (
     <div className="flex flex-col gap-3 p-4">
       <p className="text-[11px] text-slate-500">{caption}</p>
+      {revertError && (
+        <p className="text-[11px] text-red-500">{revertError}</p>
+      )}
       {data.hunks.length === 0 && (
         <p className="text-[12px] text-slate-400">No changes in this diff.</p>
       )}

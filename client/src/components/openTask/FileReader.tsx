@@ -8,6 +8,7 @@ interface FileReaderProps {
   fileName: string;
   producerAgentId?: string;
   updatedAt?: string;
+  lastEditRequest?: string;
 }
 
 interface VersionContent {
@@ -22,7 +23,7 @@ interface VersionContent {
   } | null;
 }
 
-export function FileReader({ taskId, fileId, fileName, producerAgentId, updatedAt }: FileReaderProps) {
+export function FileReader({ taskId, fileId, fileName, producerAgentId, updatedAt, lastEditRequest }: FileReaderProps) {
   const [data, setData] = useState<VersionContent | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [content, setContent] = useState<string>('');
@@ -148,6 +149,7 @@ export function FileReader({ taskId, fileId, fileName, producerAgentId, updatedA
           fromVersion={currentVersion - 1}
           producerAgentId={producerAgentId}
           updatedAt={updatedAt}
+          lastEditRequest={lastEditRequest}
           onReverted={handleReverted}
         />
       ) : (
