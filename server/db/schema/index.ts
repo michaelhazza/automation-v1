@@ -259,3 +259,6 @@ export * from './workflowDrafts.js';
 
 // Pre-Launch Hardening Phase 1 — Postgres-backed OAuth state nonces (migration 0277)
 export * from './oauthStateNonces.js';
+
+// Pre-Launch Hardening Phase 1 — Durable task event log (migration 0279)
+export * from './taskEvents.js';

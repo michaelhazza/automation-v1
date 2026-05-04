@@ -2,6 +2,7 @@
  * TaskEventService — validated, sequence-allocated emit path for task events.
  *
  * Spec: tasks/builds/workflows-v1-phase-2/spec.md Chunk 9.
+ * Durability added: tasks/builds/pre-launch-hardening/plan.md D-P0-5.
  *
  * This service is the write path for non-agent-run-shaped task events (pause,
  * resume, stop, gate updates, cadence chat cards, milestones). It owns:
@@ -11,21 +12,16 @@
  *      paths bump the same column and never collide because the UPDATE is
  *      atomic per row). Without this, callers were passing `Date.now()` as a
  *      placeholder, poisoning the projection's delta-cursor (pr-review B2).
- *   2. WebSocket envelope emission to the `task:${taskId}` room.
- *
- * Persistence to `agent_execution_events` is deliberately NOT done here — the
- * column `agent_execution_events.run_id` is NOT NULL and references an
- * `agent_runs` row, but task-level events (pause/resume/stop/orchestrator
- * cards) have no associated agent run. Replay via the HTTP endpoint
- * therefore cannot reconstruct these events on full-rebuild — the projection's
- * pause/resume/stop state is whatever the live socket recorded. A schema
- * migration making `run_id` nullable (or adding `workflow_run_id`) is the
- * prerequisite for full persistence; tracked in tasks/todo.md as deferred S1.
+ *   2. Durable persistence to `task_events` table inside the same transaction
+ *      as the seq allocation. The socket emit happens AFTER commit so clients
+ *      are never notified of a row that did not durably land.
+ *   3. WebSocket envelope emission to the `task:${taskId}` room.
  */
 
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks } from '../db/schema/tasks.js';
+import { taskEvents } from '../db/schema/taskEvents.js';
 import type { TaskEvent, TaskEventEnvelope } from '../../shared/types/taskEvent.js';
 import { validateTaskEvent, validateEventOrigin } from '../../shared/types/taskEventValidator.js';
 import { emitTaskEvent } from '../websocket/emitters.js';
@@ -38,6 +34,8 @@ export interface TaskEventContext {
   organisationId: string;
   subaccountId: string | null;
 }
+
+const MAX_PAYLOAD_BYTES = 64 * 1024; // 64KB
 
 export async function appendAndEmitTaskEvent(
   ctx: TaskEventContext,
@@ -54,19 +52,51 @@ export async function appendAndEmitTaskEvent(
     return;
   }
 
-  // Atomic per-task sequence allocation. The UPDATE locks the row for the
-  // bump, so concurrent callers serialise correctly and each receives a
-  // distinct increasing integer.
-  const [taskRow] = await db
-    .update(tasks)
-    .set({ nextEventSeq: sql`${tasks.nextEventSeq} + 1` })
-    .where(and(eq(tasks.id, ctx.taskId), eq(tasks.organisationId, ctx.organisationId)))
-    .returning({ nextEventSeq: tasks.nextEventSeq });
-  if (!taskRow) {
-    logger.warn('task_event_task_missing', { taskId: ctx.taskId });
-    return;
+  // 64KB payload size guard — prevents runaway payloads from bloating the DB.
+  const payloadBytes = Buffer.byteLength(JSON.stringify(event));
+  if (payloadBytes > MAX_PAYLOAD_BYTES) {
+    throw new Error(
+      `task_events payload too large: ${payloadBytes} bytes for event type ${event.kind}`,
+    );
   }
-  const allocatedTaskSeq = taskRow.nextEventSeq;
+
+  let allocatedTaskSeq!: number;
+
+  // Atomic seq allocation + durable row insert inside a single transaction.
+  // The socket emit below happens ONLY after this transaction commits so the
+  // DB row is the source of truth — clients may miss the notification and
+  // re-fetch the event log; that is acceptable.
+  await db.transaction(async (tx) => {
+    // Atomic per-task sequence allocation. The UPDATE locks the row for the
+    // bump, so concurrent callers serialise correctly and each receives a
+    // distinct increasing integer.
+    const [taskRow] = await tx
+      .update(tasks)
+      .set({ nextEventSeq: sql`${tasks.nextEventSeq} + 1` })
+      .where(and(eq(tasks.id, ctx.taskId), eq(tasks.organisationId, ctx.organisationId)))
+      .returning({ nextEventSeq: tasks.nextEventSeq });
+
+    if (!taskRow) {
+      logger.warn('task_event_task_missing', { taskId: ctx.taskId });
+      // Return without inserting — the outer function will return early below.
+      return;
+    }
+
+    allocatedTaskSeq = taskRow.nextEventSeq;
+
+    await tx.insert(taskEvents).values({
+      taskId: ctx.taskId,
+      organisationId: ctx.organisationId,
+      subaccountId: ctx.subaccountId ?? null,
+      seq: allocatedTaskSeq,
+      eventType: event.kind,
+      payload: event as Record<string, unknown>,
+      origin: eventOrigin,
+    });
+  });
+
+  // If the task was not found, allocatedTaskSeq was never set — exit silently.
+  if (allocatedTaskSeq === undefined) return;
 
   const envelope: TaskEventEnvelope = {
     eventId: `task:${ctx.taskId}:${allocatedTaskSeq}:0:${event.kind}`,
@@ -80,5 +110,7 @@ export async function appendAndEmitTaskEvent(
     payload: event,
   };
 
+  // Socket emit is a notification, NOT the source of truth. The DB row
+  // inserted above is durable; the emit merely informs connected clients.
   emitTaskEvent(ctx.taskId, envelope);
 }
