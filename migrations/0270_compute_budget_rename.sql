@@ -27,7 +27,7 @@ ALTER INDEX IF EXISTS budget_reservations_expires_idx
 ALTER TABLE org_compute_budgets
   RENAME COLUMN monthly_cost_limit_cents TO monthly_compute_limit_cents;
 
--- ── 4. Recreate RLS policy under the new table name ─────────────────────────
+-- ── 4. Recreate RLS policy on org_compute_budgets under the new table name ──
 --
 -- Postgres carries policies through ALTER TABLE RENAME, so the runtime RLS
 -- on org_compute_budgets is already active (inherited from the org_budgets
@@ -56,21 +56,12 @@ CREATE POLICY org_compute_budgets_org_isolation ON org_compute_budgets
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );
 
--- Same treatment for compute_reservations (renamed from budget_reservations).
-ALTER TABLE compute_reservations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE compute_reservations FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS compute_reservations_org_isolation ON compute_reservations;
-DROP POLICY IF EXISTS budget_reservations_org_isolation ON compute_reservations;
-
-CREATE POLICY compute_reservations_org_isolation ON compute_reservations
-  USING (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  )
-  WITH CHECK (
-    current_setting('app.organisation_id', true) IS NOT NULL
-    AND current_setting('app.organisation_id', true) <> ''
-    AND organisation_id = current_setting('app.organisation_id', true)::uuid
-  );
+-- Note: compute_reservations (renamed from budget_reservations) has no
+-- `organisation_id` column. It uses an `entity_type` / `entity_id` pattern
+-- where entity_id may be an org or sub-account UUID. The original
+-- budget_reservations table had no RLS for the same reason, and 0245's
+-- "all tenant tables RLS" sweep correctly skipped it. We do not retrofit
+-- RLS here either — the table is operational queue infrastructure, not
+-- per-tenant ownership data, and adding an RLS policy without an
+-- organisation_id column would require a join-based policy that doesn't
+-- match this table's lookup patterns.
