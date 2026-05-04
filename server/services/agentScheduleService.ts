@@ -1,6 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents } from '../db/schema/index.js';
+import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
@@ -12,6 +13,20 @@ import { createWorker } from '../lib/createWorker.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
+
+// ---------------------------------------------------------------------------
+// Pure helper — exported for testability
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a deterministic stagger offset in minutes [0, 359] for a subaccount.
+ * Uses the first 4 hex chars of sha256(subaccountId) mod 360 to spread daily
+ * optimiser scans across a 6-hour window starting at 06:00 UTC.
+ */
+export function computeStaggerMinutes(subaccountId: string): number {
+  const hashHex = createHash('sha256').update(subaccountId).digest('hex');
+  return parseInt(hashHex.slice(0, 4), 16) % 360;
+}
 
 // ---------------------------------------------------------------------------
 // Agent Schedule Service — manages cron-based agent scheduling via pg-boss
@@ -323,6 +338,137 @@ export const agentScheduleService = {
     }
 
     return updated;
+  },
+
+  /**
+   * Register (or self-heal) the daily optimiser schedule for a subaccount.
+   *
+   * Invariant 14: this is the ONLY writer for (subaccount_agents × optimiser).
+   * Both the backfill script and the subaccount-create hook call this function.
+   * The INSERT ... ON CONFLICT DO NOTHING makes it safe to re-run idempotently.
+   *
+   * Schedule name: `${AGENT_RUN_QUEUE}:${subaccountAgentId}` (invariant 13).
+   * Cron: `${computeStaggerMinutes(subaccountId)} 6 * * *` — runs in the 6-hour
+   * window 06:00–11:59 UTC, deterministically offset per subaccount.
+   */
+  async registerOptimiserSchedule(subaccountId: string): Promise<{
+    subaccountAgentId: string;
+    cron: string;
+    scheduleName: string;
+    wasNew: boolean;
+  }> {
+    // 1. Resolve the optimiser system_agents row by slug
+    const [systemAgent] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(eq(systemAgents.slug, 'subaccount-optimiser'))
+      .limit(1);
+
+    if (!systemAgent) {
+      throw { statusCode: 500, message: 'Optimiser system agent not found', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+    }
+
+    // 2. Resolve the subaccount to get organisationId and timezone
+    const [subaccount] = await db
+      .select({ id: subaccounts.id, organisationId: subaccounts.organisationId })
+      .from(subaccounts)
+      .where(eq(subaccounts.id, subaccountId))
+      .limit(1);
+
+    if (!subaccount) {
+      throw { statusCode: 404, message: 'Subaccount not found', errorCode: 'SUBACCOUNT_NOT_FOUND' };
+    }
+
+    // 3. Resolve the agents row for this org that links to the system agent
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.systemAgentId, systemAgent.id),
+          eq(agents.organisationId, subaccount.organisationId),
+          isNull(agents.deletedAt),
+        )
+      )
+      .limit(1);
+
+    if (!agent) {
+      throw { statusCode: 500, message: 'Optimiser agent not found for organisation', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+    }
+
+    // 4. Compute staggered cron
+    const minutes = computeStaggerMinutes(subaccountId);
+    const cron = `${minutes} 6 * * *`;
+
+    // 5. INSERT subaccount_agents ON CONFLICT DO NOTHING (idempotent)
+    const inserted = await db
+      .insert(subaccountAgents)
+      .values({
+        subaccountId,
+        agentId: agent.id,
+        organisationId: subaccount.organisationId,
+        scheduleCron: cron,
+        scheduleEnabled: true,
+        scheduleTimezone: 'UTC',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning({ id: subaccountAgents.id });
+
+    let subaccountAgentId: string;
+    let wasNew: boolean;
+
+    if (inserted.length > 0) {
+      subaccountAgentId = inserted[0].id;
+      wasNew = true;
+    } else {
+      // Row already existed — fetch the existing id
+      const [existing] = await db
+        .select({ id: subaccountAgents.id, scheduleCron: subaccountAgents.scheduleCron, scheduleTimezone: subaccountAgents.scheduleTimezone })
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, subaccountId),
+            eq(subaccountAgents.agentId, agent.id),
+          )
+        )
+        .limit(1);
+
+      if (!existing) {
+        throw { statusCode: 500, message: 'Failed to resolve existing subaccount agent after conflict', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+      }
+
+      subaccountAgentId = existing.id;
+      wasNew = false;
+
+      // Self-heal: update schedule if cron formula changed
+      if (existing.scheduleCron !== cron) {
+        await this.updateSchedule(subaccountAgentId, {
+          scheduleCron: cron,
+          scheduleEnabled: true,
+          scheduleTimezone: 'UTC',
+        });
+      }
+    }
+
+    const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
+
+    // 6. Register (or re-register) the pg-boss schedule
+    await this.registerSchedule(
+      subaccountAgentId,
+      cron,
+      {
+        subaccountAgentId,
+        agentId: agent.id,
+        subaccountId,
+        organisationId: subaccount.organisationId,
+      },
+      'UTC',
+    );
+
+    return { subaccountAgentId, cron, scheduleName, wasNew };
   },
 
   /**

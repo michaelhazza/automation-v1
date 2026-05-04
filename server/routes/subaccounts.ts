@@ -16,6 +16,7 @@ import { eq, and, isNull, desc } from 'drizzle-orm';
 import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
+import { agentScheduleService } from '../services/agentScheduleService.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -150,6 +151,20 @@ router.post(
             subaccountId: sa.id,
             organisationId,
             error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
+
+    // Fire-and-forget: schedule the optimiser for the new subaccount.
+    // Failure logs but does not block the response (§5.8 pattern).
+    if (sa.optimiserEnabled !== false) {
+      agentScheduleService.registerOptimiserSchedule(sa.id)
+        .catch((err) => {
+          logger.warn('optimiser_schedule_register_failed', {
+            event: 'optimiser.schedule.register_failed',
+            subaccountId: sa.id,
+            organisationId,
+            error: err?.message ?? String(err),
           });
         });
     }
