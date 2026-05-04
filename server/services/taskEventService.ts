@@ -55,12 +55,18 @@ export async function appendAndEmitTaskEvent(
   // 64KB payload size guard — prevents runaway payloads from bloating the DB.
   const payloadBytes = Buffer.byteLength(JSON.stringify(event));
   if (payloadBytes > MAX_PAYLOAD_BYTES) {
+    logger.warn('task_event_payload_too_large', {
+      taskId: ctx.taskId,
+      eventKind: event.kind,
+      payloadBytes,
+      limitBytes: MAX_PAYLOAD_BYTES,
+    });
     throw new Error(
       `task_events payload too large: ${payloadBytes} bytes for event type ${event.kind}`,
     );
   }
 
-  let allocatedTaskSeq!: number;
+  let allocatedTaskSeq: number | undefined;
 
   // Atomic seq allocation + durable row insert inside a single transaction.
   // The socket emit below happens ONLY after this transaction commits so the

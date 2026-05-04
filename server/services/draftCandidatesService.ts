@@ -1,8 +1,9 @@
 // draftCandidatesService — stub implementation for draft rule candidate management.
 // No draft_candidates table exists in the schema at the time of this chunk.
 // These stubs return empty arrays / no-ops so the routes are wired and the
-// client can call them without receiving 404. A future chunk will add the
-// persistent table and replace these implementations.
+// client can call them without receiving 404.
+// TODO: replace with persistent implementation once draft_candidates schema lands
+// (tracked in tasks/todo.md § DR1 / DR3 deferred items).
 
 export interface DraftCandidate {
   id: string;

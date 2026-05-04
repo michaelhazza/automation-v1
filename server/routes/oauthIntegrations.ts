@@ -290,7 +290,7 @@ router.get(
       // origin in split-origin deployments). The browser drops postMessage when
       // targetOrigin ≠ opener origin, so a same-origin fallback would silently
       // fail to notify the popup parent in split-origin setups.
-      let appOrigin: string | null = null;
+      let appOrigin: string | null;
       try {
         appOrigin = new URL(appBase).origin;
       } catch {
@@ -352,6 +352,13 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
   const stateData = await consumeGhlOAuthState(state);
   if (!stateData) {
+    // Expired, already consumed, and unknown nonces all return null (intentional —
+    // avoids an oracle that distinguishes the three cases). Log for observability.
+    logger.warn('oauth_state.consume_failed', {
+      event: 'oauth_state.consume_failed',
+      noncePrefix: typeof state === 'string' ? state.slice(0, 6) : 'unknown',
+      reason: 'expired_or_missing',
+    });
     logCallbackFailure('invalid_state', null, null);
     return res.redirect(`${appBase}/onboarding?error=invalid_state`);
   }
