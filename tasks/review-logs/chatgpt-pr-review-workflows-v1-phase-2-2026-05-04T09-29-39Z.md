@@ -143,3 +143,51 @@ S2 sync absorbed `5090dc99` (PR #257 — framework portable sync engine) and `ed
 No remaining technical blockers. The chatgpt-pr-review loop has produced two clean rounds (Round 1: 5 fixes + 1 false-positive verification; Round 2: 2 fixes + 2 verifications + 1 deferred). Per the canonical stop condition (two clean rounds), the loop closes here.
 
 **Next:** finalisation-coordinator continuation — G4 regression guard → doc-sync sweep → KNOWLEDGE.md pattern extraction → current-focus → MERGE_READY → ready-to-merge label.
+
+---
+
+## Round 3
+
+**Round 3 received:** 2026-05-04 (operator pasted ChatGPT response after Round 2 push of `98da6401` + diff regen).
+
+### ChatGPT Round 3 verdict
+
+> "Blocker: event dedup/idempotency. Everything else: polish / safety / consistency."
+
+ChatGPT continued to flag event dedup as the only blocker — which is the same R2-1 finding it raised in Round 2 and which Round 2's cursor short-circuit at the top of `applyTaskEvent` already addressed. ChatGPT preferred the "dedup by eventId in `useTaskProjection`" approach as cleaner.
+
+### Triage decision
+
+Operator instruction: "implement what is important from here, close this review and proceed to finalising this to merge". Treating ChatGPT's preferred approach as the canonical fix even though the cursor short-circuit was already correct — adding the eventId Set dedup at the hook boundary as belt-and-braces over the reducer-level guard. Two-layer dedup eliminates any future reviewer ambiguity and removes the dependency on the reducer maintaining the cursor invariant under future edits.
+
+### R3-1 — Belt-and-braces eventId Set dedup at hook boundary
+
+**File:** `client/src/hooks/useTaskProjection.ts`
+
+Added `seenEventIds` ref (insertion-ordered Set, FIFO eviction at 2000 entries — ~15 min at typical task-event rates which exceeds the 5-tick / 5-min full-rebuild interval). All three event-application paths (socket via `useTaskEventStream`, full rebuild, delta reconcile) now check `noteSeen(eventId)` before applying. Full rebuild resets the Set alongside resetting state.
+
+This is layered on top of the Round 2 reducer cursor short-circuit. Either layer alone is correctness-sufficient; together they form a defence-in-depth chain that survives:
+- Reducer regressions (Set still dedups)
+- Set eviction past cap (reducer cursor still dedups)
+- Race between socket arrival and replay overlap (both layers catch)
+
+### R3 items already-resolved or deferred
+
+- R3-2 (delta cursor exclusive) — VERIFIED in Round 2; server uses `>` (strictly greater than) at `agentExecutionEventService.ts:714`.
+- R3-3 (migration safety) — DEFERRED in Round 2 to `tasks/todo.md` Tier D as pre-prod-to-prod migration prep.
+- R3-4 (silent catch) — FIXED in Round 2.
+- R3-5 (workflow start contract) — VERIFIED SAFE in Round 2.
+
+### Files changed in Round 3
+
+- `client/src/hooks/useTaskProjection.ts` — added `seenEventIds` ref + `noteSeen` helper + `SEEN_EVENT_ID_CAP` constant. Wired into socket / rebuild / delta paths. Full rebuild resets the Set.
+
+### Verification
+
+`npm run typecheck` exits 0.
+
+### Round 3 verdict — REVIEW LOOP CLOSED
+
+3 rounds total: Round 1 (5 fixes + 1 false-positive verification), Round 2 (2 fixes + 2 verifications + 1 deferred), Round 3 (1 belt-and-braces fix layered on Round 2's correctness fix). All ChatGPT findings either implemented, verified safe, or deferred with explicit rationale. The chatgpt-pr-review loop closes here per operator instruction.
+
+**Status:** proceeding directly to finalisation continuation per operator instruction — no further questions.
