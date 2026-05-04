@@ -414,6 +414,11 @@ export default function EditArtefactDrawer({
       .then(content => setFormState(contentToFormState(slug, content)))
       .catch(() => setFormState(contentToFormState(slug, {})))
       .finally(() => setLoading(false));
+    // Spec §6a — emit `artefact.capture.started` on drawer open. Same trigger
+    // semantic as the wizard's "Start capture" button. Fire-and-forget; a
+    // telemetry failure must never block the edit UI.
+    api.post(`/api/subaccounts/${subaccountId}/baseline-artefacts/started`, { slug })
+      .catch(() => {});
   }, [open, subaccountId, slug]);
 
   useEffect(() => {
