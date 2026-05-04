@@ -4,6 +4,7 @@ Read this before making any backend changes. It documents the conventions, patte
 
 ---
 
+<a id="project-structure"></a>
 ## Project Structure
 
 ```
@@ -31,6 +32,7 @@ client/
 
 ---
 
+<a id="route-conventions"></a>
 ## Route Conventions
 
 ### Use `asyncHandler` — never write manual try/catch in routes
@@ -99,6 +101,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 
 ---
 
+<a id="service-layer"></a>
 ## Service Layer
 
 - Services contain all business logic. Routes are thin wrappers.
@@ -120,6 +123,7 @@ A new service file is justified only when (a) the route has more than one DB int
 
 ---
 
+<a id="auth-permissions"></a>
 ## Auth & Permissions
 
 ### Middleware chain
@@ -151,6 +155,7 @@ System admin can scope into any org via the `X-Organisation-Id` header. This is 
 
 ---
 
+<a id="three-tier-agent-model"></a>
 ## Three-Tier Agent Model
 
 This is the core data model. Understand it before touching anything agent-related.
@@ -223,6 +228,7 @@ If either invariant changes, search for `resolveAgentSubaccountId` and `workspac
 
 ---
 
+<a id="orchestrator-capability-aware-routing"></a>
 ## Orchestrator Capability-Aware Routing
 
 System-managed agent that classifies inbound tasks into one of four deterministic routes. Full spec at [`docs/orchestrator-capability-routing-spec.md`](./docs/orchestrator-capability-routing-spec.md). Implemented in migrations 0156 (schema), 0157 (agent seed), 0158 (hardening), 0159 (revert forever-unique index).
@@ -321,6 +327,7 @@ Migration 0156 does not constrain the `tasks.status` text column, so new statuse
 
 ---
 
+<a id="task-system"></a>
 ## Task System
 
 ### Core schema
@@ -337,6 +344,7 @@ This turns the orchestrator from a timed polling model into an event-driven reac
 
 ---
 
+<a id="heartbeat-scheduling"></a>
 ## Heartbeat Scheduling
 
 Agent scheduling uses **pg-boss** (PostgreSQL-based job queue), managed by `agentScheduleService`.
@@ -348,6 +356,7 @@ Agent scheduling uses **pg-boss** (PostgreSQL-based job queue), managed by `agen
 
 ---
 
+<a id="handoff-sub-agent-system"></a>
 ## Handoff & Sub-agent System
 
 Agents can spawn sub-agents via the `spawn_sub_agents` skill.
@@ -362,6 +371,7 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 
 ---
 
+<a id="run-continuity-workspace-health"></a>
 ## Run Continuity & Workspace Health
 
 A continuity layer that lets agents "remember" prior runs and surfaces planning state to humans, plus a workspace health audit subsystem that flags configuration drift.
@@ -485,6 +495,7 @@ Replaces the legacy dashboard, inbox, and activity pages with a single operation
 
 ---
 
+<a id="idempotency-keys"></a>
 ## Idempotency Keys
 
 Agent runs accept an `idempotencyKey` (migration 0040). Prevents duplicate execution on client retry.
@@ -527,6 +538,7 @@ Saved prompt/input payloads for the inline Run Now test panel. Scoped per org/su
 
 ---
 
+<a id="agent-run-messages-crash-resume-sprint-3"></a>
 ## Agent Run Messages & Crash-Resume (Sprint 3)
 
 Migration 0084 adds `agent_run_checkpoints` and `agent_run_messages` — the infrastructure for crash-resume (Sprint 3A/3B).
@@ -578,6 +590,7 @@ Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTH
 
 ---
 
+<a id="universal-brief-spec-docs-universal-brief-dev-spec-md"></a>
 ## Universal Brief (spec: `docs/universal-brief-dev-spec.md`)
 
 The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
@@ -660,6 +673,7 @@ The policy module isolates the thresholds so future dimensions (source type, per
 
 ---
 
+<a id="crm-query-planner-spec-tasks-builds-crm-query-planner-spec-md"></a>
 ## CRM Query Planner (spec: `tasks/builds/crm-query-planner/spec.md`)
 
 A deterministic-first natural-language CRM read layer shipped as PR #177. Staged pipeline: registry match → plan cache → LLM fallback → validator → canonical / live / hybrid executor. Read-only by structural import restriction (CI guard `scripts/verify-crm-query-planner-read-only.sh`) — the planner cannot reach the write-side of `canonicalDataService` or any write helper.
@@ -714,6 +728,7 @@ A deterministic-first natural-language CRM read layer shipped as PR #177. Staged
 
 ---
 
+<a id="skill-system"></a>
 ## Skill System
 
 ### File-based definitions
@@ -799,6 +814,7 @@ Spend handlers (in `spendSkillHandlers.ts`) each: validate input with the regist
 
 ---
 
+<a id="context-data-sources"></a>
 ## Context Data Sources
 
 Reference material attached to agents, scheduled tasks, or task instances. Loaded into the system prompt at run start, with cascading scope precedence and on-demand retrieval via the `read_data_source` skill. Migration 0078. Full spec at [`docs/cascading-context-data-sources-spec.md`](./docs/cascading-context-data-sources-spec.md).
@@ -890,6 +906,7 @@ The agent-level data source routes at `/api/agents/:id/data-sources` are unchang
 
 ---
 
+<a id="external-document-references"></a>
 ## External Document References
 
 Live pointers to files in connected cloud storage (v1: Google Drive). Distinct from static uploads — content is always fetched at its latest version when a run starts. Spec: [`docs/external-document-references-spec.md`](./docs/external-document-references-spec.md). Migrations 0262–0264.
@@ -958,6 +975,7 @@ Both are process-local (single-instance assumption — see tasks/todo.md D-GPT-1
 
 ---
 
+<a id="scraping-engine"></a>
 ## Scraping Engine
 
 Multi-tier web scraping with automatic escalation, adaptive CSS selector healing, and recurring change monitoring. Lives in `server/services/scrapingEngine/`.
@@ -1107,6 +1125,7 @@ Three skill handlers in `skillExecutor.ts`:
 
 ---
 
+<a id="review-gates-hitl"></a>
 ## Review Gates & HITL
 
 Tasks can set `reviewRequired: true`. When an agent acts on such a task, actions escalate to the review queue before executing.
@@ -1123,6 +1142,7 @@ When a review item is created, `reviewService` optionally calls `slackConversati
 
 ---
 
+<a id="github-app-integration"></a>
 ## GitHub App Integration
 
 `githubWebhook.ts` is intentionally **unauthenticated** — GitHub cannot provide JWT tokens.
@@ -1137,6 +1157,7 @@ Flow:
 
 ---
 
+<a id="ghl-agency-oauth-integration"></a>
 ## GHL Agency OAuth Integration
 
 Spec: `docs/ghl-module-c-oauth-spec.md`. Branch: `ghl-agency-oauth`.
@@ -1179,6 +1200,7 @@ UNINSTALL webhook flips agency status to `disconnected` AND mass-soft-deletes ch
 
 ---
 
+<a id="board-config-hierarchy"></a>
 ## Board Config Hierarchy
 
 ```
@@ -1193,6 +1215,7 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ---
 
+<a id="workspace-memory"></a>
 ## Workspace Memory
 
 - `workspaceMemoryEntries` table stores agent-written facts (type, content, embedding `vector(1536)`, `quality_score`, `tsv` for full-text)
@@ -1274,6 +1297,7 @@ All tunable constants live in `server/config/limits.ts` under the `── Hybrid
 
 ---
 
+<a id="agent-briefing-agent-intelligence-upgrade-phase-2d"></a>
 ## Agent Briefing (Agent Intelligence Upgrade Phase 2D)
 
 A compact, cross-run orientation document automatically maintained per agent-subaccount pair and injected into the system prompt at every run start.
@@ -1294,6 +1318,7 @@ The `handoffJson` block in the briefing LLM prompt is delimited by `<run-outcome
 
 ---
 
+<a id="agent-beliefs-phase-1"></a>
 ## Agent Beliefs (Phase 1)
 
 Discrete, confidence-scored facts per agent-subaccount — individually addressable, auto-extracted from run outcomes, designed for Phase 2 state evolution.
@@ -1325,6 +1350,7 @@ Discrete, confidence-scored facts per agent-subaccount — individually addressa
 
 ---
 
+<a id="subaccount-state-summary-agent-intelligence-upgrade-phase-3b"></a>
 ## Subaccount State Summary (Agent Intelligence Upgrade Phase 3B)
 
 A structured operational snapshot injected into the system prompt so agents have immediate situational awareness without running data-fetching tool calls first.
@@ -1340,6 +1366,7 @@ Injected into the system prompt as a dynamic section after `## Current Board`. N
 
 ---
 
+<a id="stable-dynamic-prompt-split-agent-intelligence-upgrade-phase-0c"></a>
 ## Stable/Dynamic Prompt Split (Agent Intelligence Upgrade Phase 0C)
 
 The system prompt is split into two parts to enable multi-breakpoint prompt caching:
@@ -1353,6 +1380,7 @@ The `runAgenticLoop` call receives `systemPrompt` as `{ stablePrefix, dynamicSuf
 
 ---
 
+<a id="memory-blocks-letta-pattern"></a>
 ## Memory Blocks (Letta Pattern)
 
 Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple agents. Unlike workspace memory (per-subaccount, agent-written), memory blocks are admin-managed persistent context that agents can read and (if permitted) write during runs.
@@ -1374,6 +1402,7 @@ Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple age
 
 ---
 
+<a id="agent-execution-middleware-pipeline"></a>
 ## Agent Execution Middleware Pipeline
 
 The agent execution loop runs every tool call through a three-phase middleware chain defined in `server/services/middleware/index.ts`. The pipeline is the central quality/safety filter for all agent behaviour.
@@ -1407,12 +1436,14 @@ Runs per tool call, in order:
 
 ---
 
+<a id="policy-engine"></a>
 ## Policy Engine
 
 `policyRules` table defines constraints on agent behaviour. `policyEngineService` evaluates rules during execution — can restrict actions, require escalation, or block execution. Evaluated before skill execution in the processor pipeline. Sprint 3 adds `confidence_threshold` and `guidance_text` columns (migration 0085) enabling decision-time guidance — the middleware injects guidance when a rule matches but confidence is above the threshold.
 
 ---
 
+<a id="canonical-data-platform"></a>
 ## Canonical Data Platform
 
 Normalised data layer that consolidates provider-specific records into a shared canonical schema. Full spec: `docs/canonical-data-platform-roadmap.md`. Implementation details: `docs/canonical-data-platform-p1-p2-p3-impl.md`.
@@ -1483,6 +1514,7 @@ ClientPulse Phases 0–3 + Phase 1 follow-ups add 12 new canonical and ClientPul
 
 ---
 
+<a id="row-level-security-rls-three-layer-fail-closed-data-isolation"></a>
 ## Row-Level Security (RLS) — Three-Layer Fail-Closed Data Isolation
 
 Sprint 2 introduces a defence-in-depth data isolation model. All three layers are required; no single layer is sufficient alone.
@@ -1635,6 +1667,7 @@ Valid values (closed enum `agent_charge_transition_caller`): `'charge_router'`, 
 
 ---
 
+<a id="cost-tracking-budgets"></a>
 ## Cost Tracking & Budgets
 
 - `computeReservations` — pre-allocate token budget before a run starts
@@ -1661,6 +1694,7 @@ Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one
 
 ---
 
+<a id="event-driven-architecture"></a>
 ## Event-Driven Architecture
 
 - **pg-boss** — job queue for all async work (handoffs, heartbeats, scheduled tasks, slack inbound, priority feed cleanup)
@@ -1702,6 +1736,7 @@ Live updates to the home dashboard use a coalescing + last-write-wins pattern in
 
 ---
 
+<a id="agent-recommendations-surface-pr-250-spec-docs-sub-account-optimiser-spec-md"></a>
 ## Agent Recommendations Surface (PR #250 / spec: `docs/sub-account-optimiser-spec.md`)
 
 Operator-facing recommendations table populated by single-writer service `agentRecommendationsService.upsertRecommendation()`. Single writer is enforced both architecturally (one file performs `INSERT` / `UPDATE` against `agent_recommendations`) and at test time (`server/services/__tests__/agentRecommendations.singleWriter.test.ts` greps the repo for INSERT/UPDATE patterns and asserts exactly one source file matches).
@@ -1718,6 +1753,7 @@ Operator-facing recommendations table populated by single-writer service `agentR
 
 ---
 
+<a id="regression-capture-trajectory-testing"></a>
 ## Regression Capture & Trajectory Testing
 
 ### Regression capture (Sprint 2 P1.2)
@@ -1742,6 +1778,7 @@ Structural comparison of agent execution trajectories against reference patterns
 
 ---
 
+<a id="quality-infrastructure-static-gates-testing-posture"></a>
 ## Quality Infrastructure — Static Gates & Testing Posture
 
 The codebase runs a deliberate **static-gates-over-runtime-tests** posture. 33 `verify-*.sh` scripts enforce architectural invariants at CI time. Runtime unit tests follow the pure helper convention (below). There are zero frontend/E2E tests by design at this stage.
@@ -1789,6 +1826,7 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ---
 
+<a id="client-patterns"></a>
 ## Client Patterns
 
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
@@ -1799,6 +1837,7 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ---
 
+<a id="key-patterns"></a>
 ## Key Patterns
 
 - **Soft deletes** — most tables use `deletedAt`. Always filter with `isNull(table.deletedAt)`.
@@ -1811,6 +1850,7 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ---
 
+<a id="deterministic-vs-interpretive-knowledge"></a>
 ## Deterministic vs Interpretive Knowledge
 
 Agent-consumed knowledge falls into two classes. Treating them the same wastes tokens on questions whose answers don't change between sessions.
@@ -1837,6 +1877,7 @@ When introducing a new feature whose behaviour the agents will need to query, as
 
 ---
 
+<a id="migrations"></a>
 ## Migrations
 
 109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
@@ -1887,6 +1928,7 @@ Recent migrations:
 
 ---
 
+<a id="shared-infrastructure-use-these-do-not-reinvent"></a>
 ## Shared Infrastructure (use these — do not reinvent)
 
 The following modules exist as **single-emit-point** primitives. New features must reuse them; bypassing them is a blocking issue in code review. Several are enforced by lint rules.
@@ -1992,6 +2034,7 @@ Shared client-side money formatter. Values are in whole dollars (fractional), no
 
 ---
 
+<a id="configuration-assistant"></a>
 ## Configuration Assistant
 
 A system-managed org-tier agent (`slug: configuration-assistant`, seeded by migration 0115) that turns natural-language requests into structured configuration changes — creating agents, linking them to subaccounts, setting skills and schedules, attaching data sources, and running health checks. It is the conversational front end to the `config_*` action registry; all mutations still flow through the same services the UI uses, so there is only one write path.
@@ -2066,6 +2109,7 @@ This list is enforced in the master prompt and each group has a dedicated UI.
 
 ---
 
+<a id="config-history-config-backups"></a>
 ## Config History & Config Backups
 
 Every mutation to a configurable entity writes a versioned snapshot so the whole platform has a single audit / rollback substrate. Used by the UI (undo), the Configuration Assistant (plan replay + restore), the Skill Analyzer (bulk rollback), and the Admin History view.
@@ -2129,6 +2173,7 @@ Sensitive fields are redacted at the service layer before snapshotting — see `
 
 ---
 
+<a id="clientpulse-intervention-pipeline-phases-4-4-5-session-2"></a>
 ## ClientPulse Intervention Pipeline (Phases 4 + 4.5 + Session 2)
 
 The end-to-end loop that turns a churn assessment into an operator-approved CRM action and measures the outcome 24h later. Closes ship-gates **B2** (outcome attribution), **B3** (config_history audit), **B5** (sensitive-path gating); Session 2 closes **S2-6.1** (real adapter dispatch), **S2-6.3** (drilldown), **S2-8.1** (outcome-weighted recommendation), **S2-8.3** (notify_operator fan-out).
@@ -2318,6 +2363,7 @@ All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (conf
 
 ---
 
+<a id="skill-analyzer"></a>
 ## Skill Analyzer
 
 System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
@@ -2419,6 +2465,7 @@ Pure tests live in `server/services/__tests__/skillAnalyzerServicePure*.test.ts`
 
 ---
 
+<a id="playbooks-multi-step-automation"></a>
 ## Playbooks (Multi-Step Automation)
 
 Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
@@ -2717,6 +2764,7 @@ Integrate into the existing permission set UI.
 
 ---
 
+<a id="agent-coworker-features"></a>
 ## Agent Coworker Features
 
 Five features shipped together (spec: `docs/agent-coworker-features-spec.md`) to transform agents from tools into autonomous coworkers. Migrations 0097–0103.
@@ -2794,6 +2842,7 @@ Extends the existing multi-tenant Slack webhook to dispatch inbound messages to 
 
 ---
 
+<a id="iee-integrated-execution-environment"></a>
 ## IEE — Integrated Execution Environment
 
 IEE is a deterministic, multi-tenant execution context for **stateful agentic loops** over a browser or a dev workspace. Where the skill system is request/response, IEE is **iterative**: the LLM observes environment state, decides on an action, executes it, observes the result, and loops until `done`, `failed`, the step limit, or the wall-clock timeout. Costs are attributed per run for billing.
@@ -3216,6 +3265,7 @@ Zod schemas + typed errors imported by both server and worker:
 
 ---
 
+<a id="local-development-setup"></a>
 ## Local Development Setup
 
 **Do not use `docker compose up app` for active development.** The app image is baked at build time — source changes require a full rebuild and container restart, which makes the feedback loop unusable.
@@ -3273,6 +3323,7 @@ Everything else in `.env` is portable.
 
 ---
 
+<a id="key-files-per-domain"></a>
 ## Key files per domain
 
 Quick reference for "where do I start when adding X". This is the index, not the deep reference — see the relevant sections above in this document for full architectural details.
@@ -3352,6 +3403,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 
 ---
 
+<a id="architecture-rules-automation-os-specific"></a>
 ## Architecture Rules (Automation OS specific)
 
 These are non-negotiable. Violations are blocking issues in any code review.
@@ -3391,6 +3443,7 @@ These are non-negotiable. Violations are blocking issues in any code review.
 
 ---
 
+<a id="hierarchical-agent-delegation"></a>
 ## Hierarchical Agent Delegation
 
 Full contract: `docs/hierarchical-delegation-dev-spec.md`.
@@ -3472,6 +3525,7 @@ Three detectors for the delegation subsystem (all in `server/services/workspaceH
 
 ---
 
+<a id="system-monitor-phase-0-0-5"></a>
 ## System Monitor (Phase 0 + 0.5)
 
 ### Schema
