@@ -24,11 +24,33 @@ export type {
 
 /**
  * Pure deterministic reducer: (prev, event) => next.
- * Idempotent — applying the same event twice produces the same state.
+ *
+ * Idempotent via a cursor-based short-circuit: events with `(taskSequence,
+ * eventSubsequence) <= (prev.lastEventSeq, prev.lastEventSubseq)` are dropped
+ * because their effect is already baked into `prev`. This makes overlapping
+ * replay-vs-socket deliveries safe — the appending paths below
+ * (`activityEvents`, `chatMessages`, `milestones`) would otherwise duplicate
+ * UI rows on any re-application, since the per-task `(seq, subseq)` pair is
+ * the unique identifier for an event in `agent_execution_events`.
+ *
+ * Out-of-order arrivals (rare, but possible if the socket buffers reorder)
+ * are dropped here too; they recover on the next full-rebuild tick which
+ * resets state and replays in seq-order.
+ *
  * All arrays are newest-at-bottom (append-only).
  */
 export function applyTaskEvent(prev: TaskProjection, envelope: TaskEventEnvelope): TaskProjection {
   const { payload, timestamp, eventId, taskSequence, eventSubsequence } = envelope;
+
+  // Short-circuit: this event's coordinates are at or before the highest-seen
+  // cursor — its effect is already in `prev`. Returning `prev` keeps the
+  // reducer truly idempotent.
+  if (
+    taskSequence < prev.lastEventSeq ||
+    (taskSequence === prev.lastEventSeq && eventSubsequence <= prev.lastEventSubseq)
+  ) {
+    return prev;
+  }
 
   const next: TaskProjection = {
     ...prev,

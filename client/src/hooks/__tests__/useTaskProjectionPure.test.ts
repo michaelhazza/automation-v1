@@ -93,13 +93,24 @@ describe('useTaskProjectionPure', () => {
     const onceState = applyTaskEvent({ ...INITIAL_TASK_PROJECTION }, env);
     const twiceState = applyTaskEvent(onceState, env);
 
-    // chatMessages should have 2 entries when applied twice (not idempotent at reducer level;
-    // dedup is handled by the hook via seenIds Set), but activityEvents also doubles.
-    // The reducer itself is deterministic — same input produces same output.
-    // Applying twice with same envelope produces same shape as once applied twice.
-    const alsoTwiceState = applyTaskEvent(applyTaskEvent({ ...INITIAL_TASK_PROJECTION }, env), env);
-    expect(twiceState.chatMessages).toHaveLength(alsoTwiceState.chatMessages.length);
-    expect(twiceState.activityEvents).toHaveLength(alsoTwiceState.activityEvents.length);
-    expect(twiceState.lastEventSeq).toBe(alsoTwiceState.lastEventSeq);
+    // The reducer is now truly idempotent via cursor short-circuit: the second
+    // apply detects (taskSequence, eventSubsequence) <= (lastEventSeq,
+    // lastEventSubseq) and returns prev unchanged. This prevents replay /
+    // socket-overlap from duplicating UI rows in activityEvents, chatMessages,
+    // or milestones (chatgpt-pr-review Round 2 finding R2-1).
+    expect(twiceState).toBe(onceState);
+    expect(twiceState.chatMessages).toHaveLength(1);
+    expect(twiceState.activityEvents).toHaveLength(1);
+    expect(twiceState.lastEventSeq).toBe(onceState.lastEventSeq);
+  });
+
+  it('out-of-order arrivals: a stale event after a newer one is dropped (recovers on full rebuild)', () => {
+    const newer = mkEnv('chat.message', { authorKind: 'user', authorId: 'u1', body: 'newer' }, 5);
+    const stale = mkEnv('chat.message', { authorKind: 'user', authorId: 'u1', body: 'stale' }, 3);
+    const afterNewer = applyTaskEvent({ ...INITIAL_TASK_PROJECTION }, newer);
+    const afterStale = applyTaskEvent(afterNewer, stale);
+    expect(afterStale).toBe(afterNewer);
+    expect(afterStale.chatMessages).toHaveLength(1);
+    expect(afterStale.chatMessages[0].body).toBe('newer');
   });
 });

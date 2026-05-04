@@ -100,3 +100,46 @@ S2 sync absorbed `5090dc99` (PR #257 — framework portable sync engine) and `ed
 5 high-priority items addressed (4 auto-applied + 1 false positive). 1 medium item auto-applied. 3 medium/nit items deferred (1 user-facing copy, 2 nits). No remaining blockers from this round.
 
 **Awaiting operator decision:** Round 2? Or proceed to finalisation continuation (G4 regression guard → doc-sync sweep → KNOWLEDGE.md → MERGE_READY)?
+
+---
+
+## Round 2
+
+**Round 2 received:** 2026-05-04 (operator chose Option A — push Round 1 commit `7e61f350` to PR #258, regenerate the diff, paste fresh ChatGPT response).
+
+### ChatGPT confirmed (Round 1 fixes verified)
+
+- F2 (AskFormCard sync) — reconcile from projection visible
+- F3 (cancellation guards) — present in both ApprovalCard + AskFormCard.autofill
+- F4 (ActivityPane dep) — array reference, not `.length`
+- F1 (GlobalAskBar) — single navigate confirmed (false positive in Round 1 was correct)
+- F5 (validation parity) — noted as direction is correct, can't confirm fully from diff
+
+### New findings (Round 2 R2-1 through R2-5)
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| R2-1 | `useTaskProjection` reducer claims idempotent but appends `activityEvents` / `chatMessages` / `milestones` unconditionally — replay-vs-socket overlap duplicates UI rows | TECHNICAL | **AUTO-APPLIED.** Added cursor short-circuit at top of `applyTaskEvent`: events with `(taskSequence, eventSubsequence) <= (prev.lastEventSeq, prev.lastEventSubseq)` return `prev` unchanged. Existing test at `useTaskProjectionPure.test.ts:91` updated to assert true idempotency (was acknowledging the old non-idempotent behavior). Added new test for out-of-order arrival drop. |
+| R2-2 | Delta-replay cursor inclusive vs exclusive | TECHNICAL — VERIFY | **VERIFIED CORRECT.** Server uses `(taskSequence, eventSubsequence) > (fromSeq, fromSubseq)` at `agentExecutionEventService.ts:714` — STRICTLY greater than = exclusive cursor. The boundary event is NOT re-delivered on delta poll. R2-1 fix above also makes the reducer robust regardless of cursor semantics. |
+| R2-3 | `useTaskProjection.doDeltaReconcile` silent `.catch(() => {})` | TECHNICAL | **AUTO-APPLIED.** Both `doFullRebuild` and `doDeltaReconcile` now `console.warn` with structured `{ taskId, fromSeq?, fromSubseq?, error }` payload. |
+| R2-4 | `workflow_runs.task_id NOT NULL` migration not staged — would fail if rows pre-exist | TECHNICAL — DEFERRED | **DEFERRED to `tasks/todo.md` Tier D as pre-prod-to-prod migration prep.** Safe today per `docs/spec-context.md` (`pre_prod: yes`, `breaking_changes_expected: yes`); dev DBs that ran chunks 1-8 wipe state before re-applying. Before the first production deploy that includes this migration, restructure as nullable-add → backfill → SET NOT NULL. The plan amendment A7 already noted "with backfill" — implement it before the prod migration window. |
+| R2-5 | `workflow.run.start` action contract requires task_id; verify skill creates task before `startRun` | TECHNICAL — VERIFY | **VERIFIED SAFE.** `server/services/workflowRunStartSkillService.ts:58-67` creates the task at step 5, then calls `WorkflowRunService.startRun({ taskId: task.id })` at step 6 (line 70-79), then returns `{ ok: true, task_id: task.id }` at line 81. No fix needed. |
+
+### Files changed in Round 2
+
+- `client/src/hooks/useTaskProjectionPure.ts` — added cursor short-circuit at top of `applyTaskEvent`; updated reducer JSDoc to explain the idempotency contract
+- `client/src/hooks/useTaskProjection.ts` — replaced both `.catch()` with structured `console.warn`; added comment to delta loop noting the reducer dedups overlap
+- `client/src/hooks/__tests__/useTaskProjectionPure.test.ts` — updated existing idempotency test to assert true idempotency; added new test for out-of-order drop
+- `tasks/todo.md` — added R2-4 deferred entry under Tier D
+
+### Verification
+
+`npm run typecheck` exits 0. Lint not re-run (no new lint surface beyond the existing baseline; `console.warn` lines have inline `eslint-disable-next-line no-console` comments matching the Round 1 pattern).
+
+### Round 2 verdict
+
+5 findings: 2 fixed in code (R2-1, R2-3), 2 verified safe with no fix needed (R2-2, R2-5), 1 deferred to follow-up branch with explicit pre-prod-to-prod note (R2-4).
+
+No remaining technical blockers. The chatgpt-pr-review loop has produced two clean rounds (Round 1: 5 fixes + 1 false-positive verification; Round 2: 2 fixes + 2 verifications + 1 deferred). Per the canonical stop condition (two clean rounds), the loop closes here.
+
+**Next:** finalisation-coordinator continuation — G4 regression guard → doc-sync sweep → KNOWLEDGE.md pattern extraction → current-focus → MERGE_READY → ready-to-merge label.

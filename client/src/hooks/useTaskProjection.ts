@@ -32,8 +32,15 @@ export function useTaskProjection(taskId: string | undefined): {
         }
         return state;
       });
-    } catch {
-      // Network error during rebuild — keep existing projection
+    } catch (err: unknown) {
+      // Network error during rebuild — keep existing projection. Surface to the
+      // console so a sustained outage shows up in browser logs rather than
+      // failing silently.
+      // eslint-disable-next-line no-console
+      console.warn('useTaskProjection.full_rebuild_failed', {
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }, [taskId]);
 
@@ -53,10 +60,21 @@ export function useTaskProjection(taskId: string | undefined): {
         if (data.events.length === 0) return;
         setProjection(p => {
           let s = p;
+          // Reducer is idempotent (cursor short-circuit) — a delta response
+          // that overlaps with already-applied socket events drops the
+          // duplicates rather than appending them twice.
           for (const ev of data.events) s = applyTaskEvent(s, ev);
           return s;
         });
-      }).catch(() => {});
+      }).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn('useTaskProjection.delta_reconcile_failed', {
+          taskId,
+          fromSeq: prev.lastEventSeq,
+          fromSubseq: prev.lastEventSubseq,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       return prev;
     });
   }, [taskId, doFullRebuild]);
