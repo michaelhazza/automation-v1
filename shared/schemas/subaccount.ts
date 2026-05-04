@@ -78,13 +78,13 @@ export function assertVersionGate(
   raw: unknown,
   expectedVersion: 1,
 ): BaselineArtefactsStatus {
-  const parsed = baselineArtefactsStatusSchema.parse(raw);
-  if (parsed.version !== expectedVersion) {
+  const version = (raw != null && typeof raw === 'object' ? (raw as Record<string, unknown>).version : undefined);
+  if (version !== expectedVersion) {
     throw {
       statusCode: 500,
       message: 'baseline_artefacts_status version mismatch',
       errorCode: 'BASELINE_ARTEFACTS_VERSION_MISMATCH',
     };
   }
-  return parsed;
+  return baselineArtefactsStatusSchema.parse(raw);
 }

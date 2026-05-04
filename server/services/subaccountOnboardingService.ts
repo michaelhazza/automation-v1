@@ -499,7 +499,7 @@ class SubaccountOnboardingService {
               '"completed"'
             ),
             ${sql.raw(`'{${tierKey},${shortKey},captured_at}'`)},
-            to_jsonb(now()::text)
+            to_jsonb(now())
           ),
           ${sql.raw(`'{${tierKey},${shortKey},${refField}}'`)},
           ${refId != null ? sql`to_jsonb(${refId}::text)` : sql`'null'::jsonb`}
@@ -599,7 +599,7 @@ class SubaccountOnboardingService {
             '"skipped"'
           ),
           ${sql.raw(`'{tier3,${shortKey},skipped_at}'`)},
-          to_jsonb(now()::text)
+          to_jsonb(now())
         ),
         ${sql.raw(`'{tier3,${shortKey},captured_by_user_id}'`)},
         to_jsonb(${params.userId}::text)
@@ -673,7 +673,7 @@ class SubaccountOnboardingService {
     }
 
     if (tier === 1 || tier === 2) {
-      await db
+      const updated = await db
         .update(memoryBlocks)
         .set({ content: JSON.stringify(parseResult.data) })
         .where(
@@ -683,7 +683,15 @@ class SubaccountOnboardingService {
             eq(memoryBlocks.organisationId, params.organisationId),
             isNull(memoryBlocks.deletedAt),
           ),
-        );
+        )
+        .returning({ id: memoryBlocks.id });
+      if (updated.length === 0) {
+        throw {
+          statusCode: 404,
+          errorCode: 'ARTEFACT_TARGET_MISSING',
+          message: `No active memory block found for slug=${slug}`,
+        };
+      }
     } else {
       const tier3Entry = (status.tier3 as Record<string, { workspace_memory_id: string | null }>)[shortKey];
       const workspaceMemoryId = tier3Entry?.workspace_memory_id;
@@ -694,7 +702,7 @@ class SubaccountOnboardingService {
           message: 'Tier-3 artefact is completed but has no workspace_memory_id',
         };
       }
-      await db
+      const updated = await db
         .update(workspaceMemoryEntries)
         .set({ content: JSON.stringify(parseResult.data) })
         .where(
@@ -702,8 +710,17 @@ class SubaccountOnboardingService {
             eq(workspaceMemoryEntries.id, workspaceMemoryId),
             eq(workspaceMemoryEntries.organisationId, params.organisationId),
             eq(workspaceMemoryEntries.subaccountId, params.subaccountId),
+            isNull(workspaceMemoryEntries.deletedAt),
           ),
-        );
+        )
+        .returning({ id: workspaceMemoryEntries.id });
+      if (updated.length === 0) {
+        throw {
+          statusCode: 404,
+          errorCode: 'ARTEFACT_TARGET_MISSING',
+          message: `No active workspace memory entry found for slug=${slug}`,
+        };
+      }
     }
 
     createEvent('artefact.capture.edited', {

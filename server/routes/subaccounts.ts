@@ -855,27 +855,14 @@ router.post(
       res.status(400).json({ error: 'Validation failed', details: 'reason must be defer_for_later or not_applicable' });
       return;
     }
-    try {
-      await subaccountOnboardingService.markArtefactSkipped({
-        organisationId: req.orgId!,
-        subaccountId: sa.id,
-        slug,
-        userId: req.user!.id,
-        reason,
-      });
-      res.json({ ok: true });
-    } catch (err: unknown) {
-      const e = err as { statusCode?: number; errorCode?: string; message?: string };
-      if (e.errorCode === 'BASELINE_SKIP_NOT_PERMITTED') {
-        res.status(400).json({ error: 'Skip not permitted', errorCode: 'BASELINE_SKIP_NOT_PERMITTED' });
-        return;
-      }
-      if (e.errorCode === 'INVALID_BASELINE_SLUG') {
-        res.status(400).json({ error: 'Invalid baseline slug', errorCode: 'INVALID_BASELINE_SLUG' });
-        return;
-      }
-      throw err;
-    }
+    await subaccountOnboardingService.markArtefactSkipped({
+      organisationId: req.orgId!,
+      subaccountId: sa.id,
+      slug,
+      userId: req.user!.id,
+      reason,
+    });
+    res.json({ ok: true });
   })
 );
 
@@ -896,27 +883,14 @@ router.patch(
       res.status(400).json({ error: 'Validation failed', details: 'payload must be an object' });
       return;
     }
-    try {
-      await subaccountOnboardingService.markArtefactEdited({
-        organisationId: req.orgId!,
-        subaccountId: sa.id,
-        slug,
-        userId: req.user!.id,
-        payload,
-      });
-      res.json({ ok: true });
-    } catch (err: unknown) {
-      const e = err as { statusCode?: number; errorCode?: string; message?: string };
-      if (e.errorCode === 'INVALID_BASELINE_SLUG') {
-        res.status(400).json({ error: 'Invalid baseline slug', errorCode: 'INVALID_BASELINE_SLUG' });
-        return;
-      }
-      if (e.errorCode === 'ARTEFACT_NOT_COMPLETED') {
-        res.status(400).json({ error: 'Artefact must be completed before editing', errorCode: 'ARTEFACT_NOT_COMPLETED' });
-        return;
-      }
-      throw err;
-    }
+    await subaccountOnboardingService.markArtefactEdited({
+      organisationId: req.orgId!,
+      subaccountId: sa.id,
+      slug,
+      userId: req.user!.id,
+      payload,
+    });
+    res.json({ ok: true });
   })
 );
 

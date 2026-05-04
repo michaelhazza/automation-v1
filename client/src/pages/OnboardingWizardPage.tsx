@@ -594,7 +594,7 @@ function Step4Baseline({ onComplete }: { onComplete: () => void }) {
                         : t2?.audience_icp.status !== 'completed' ? 'audience_icp'
                         : t3?.operating_constraints.status !== 'completed' ? 'operating_constraints'
                         : 'proof_library';
-                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: firstIncomplete }).catch(() => {});
+                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: `baseline.${firstIncomplete}` }).catch(() => {});
                     }}
                   >
                     Start capture
@@ -667,14 +667,6 @@ function Step4Baseline({ onComplete }: { onComplete: () => void }) {
         </p>
       )}
 
-      <div className="mt-4 text-center">
-        <button
-          onClick={onComplete}
-          className="text-[13px] text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer"
-        >
-          Skip for now, I'll complete this later
-        </button>
-      </div>
     </div>
   );
 }
