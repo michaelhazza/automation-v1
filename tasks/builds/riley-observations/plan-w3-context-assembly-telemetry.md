@@ -1,5 +1,7 @@
 # Wave 3 — Context-assembly telemetry
 
+> **Not started.** No `context.assembly.complete` event registered in `server/lib/tracing.ts`, no emit in `agentExecutionService.ts`, no helper module.
+
 _Build: riley-observations_
 _Wave: W3 — Part 5 (spec §8, lines 1490–1598)_
 _Class: Standard_

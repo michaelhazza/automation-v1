@@ -87,3 +87,15 @@ These are non-blocking; PR is ready to merge as-is. Each item has full trigger c
 - W4 (heartbeat gate) — `plan-w4-heartbeat-gate.md`
 
 Each is its own PR once Wave 1 lands on main.
+
+---
+
+## Wave status as of 2026-05-01
+
+**W1 — SHIPPED.** PR #186, migrations 0219-0222. Naming pass + `invoke_automation` fully implemented including services, routes, tests.
+
+**W2 — SCHEMA-ONLY.** The three W2 schema columns landed in migration 0230 (`workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`), but this migration arrived out-of-band via the `pre-launch-hardening` build — not the Riley build. Services, routes, UI, and tests for W2 have not started. Note: migration 0230 is a hybrid migration (contains columns for multiple features beyond just Riley W2).
+
+**W3 — NOT STARTED.** No `context.assembly.complete` event is registered in `server/lib/tracing.ts`. No emit in `agentExecutionService.ts`. No helper module written.
+
+**W4 — NOT STARTED.** Two prep columns landed in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, event registry, and UI remain fully pending.
