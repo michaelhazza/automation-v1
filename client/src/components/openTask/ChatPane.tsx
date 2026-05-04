@@ -3,7 +3,7 @@ import type { TaskProjection } from '../../../../shared/types/taskProjection';
 import { MilestoneCard } from './MilestoneCard';
 import { ApprovalCard } from './ApprovalCard';
 import { ThinkingBox } from './ThinkingBox';
-import { AskFormCardPlaceholder } from './AskFormCardPlaceholder';
+import { AskFormCard } from './AskFormCard';
 import { PauseCard } from './PauseCard';
 
 interface ChatPaneProps { taskId: string; projection: TaskProjection }
@@ -57,7 +57,7 @@ export function ChatPane({ taskId, projection }: ChatPaneProps) {
           <ApprovalCard key={g.gateId} gate={g} taskId={taskId} />
         ))}
         {pendingAsks.map(g => (
-          <AskFormCardPlaceholder key={g.gateId} gate={g} />
+          <AskFormCard key={g.gateId} gate={g} taskId={taskId} />
         ))}
         {projection.thinkingText && <ThinkingBox text={projection.thinkingText} />}
         {projection.runStatus?.startsWith('paused') && (
