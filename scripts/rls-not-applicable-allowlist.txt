@@ -66,9 +66,7 @@
 #
 # (Add new entries below in alphabetical order by table name.)
 
-budget_reservations  Operational reservation queue with no organisation_id column — uses an entity_type / entity_id pattern. Renamed to compute_reservations in migration 0270; never had RLS in 0245's "all tenant tables RLS" sweep for the same reason (no direct tenant column). Listed here defensively in case the gate flags it via the historical CREATE TABLE token.  [ref: migrations/0270_compute_budget_rename.sql]
 llm_inflight_history  Reads are system-admin only and intentionally cross-tenant (same posture as llm_requests_archive); the table is a short-TTL forensic ledger of in-flight add/remove events, not per-org ownership data.  [ref: spec §3.3.1]
-org_budgets  Table was renamed to org_compute_budgets in migration 0270 (Compute Budget rename). The CREATE TABLE (with organisation_id) lives in an earlier migration under the old name; the live RLS policy lives on org_compute_budgets in 0270.  [ref: migrations/0270_compute_budget_rename.sql]
 permission_groups  Table was created with organisation_id in migration 0000 but dropped entirely in migration 0005 — it does not exist at runtime and cannot receive an RLS policy.
 playbook_runs  Table was renamed to workflow_runs in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_runs in migration 0245.
 playbook_templates  Table was renamed to workflow_templates in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_templates in migration 0245.

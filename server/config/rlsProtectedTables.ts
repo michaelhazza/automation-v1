@@ -659,6 +659,18 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-level overrides for agent configuration — expose custom agent parameters and capability settings.',
   },
   {
+    // Pre-rename name — kept in the manifest so the rls-coverage reverse
+    // check accepts the CREATE POLICY ON org_budgets statement that lives
+    // (immutably) in migration 0245. The runtime table is renamed to
+    // org_compute_budgets in 0270; the org_budgets policy text remains in
+    // 0245 as historical record. Pairs with the org_compute_budgets entry
+    // below.
+    tableName: 'org_budgets',
+    schemaFile: 'orgComputeBudgets.ts',
+    policyMigration: '0245_all_tenant_tables_rls.sql',
+    rationale: 'Pre-rename name for Compute Budget. The runtime table is org_compute_budgets (renamed in migration 0270); migration 0245 still contains the CREATE POLICY ON org_budgets text under the old name, so the manifest declares both names. The org_compute_budgets entry below carries the post-rename policy.',
+  },
+  {
     tableName: 'org_compute_budgets',
     schemaFile: 'orgComputeBudgets.ts',
     policyMigration: '0270_compute_budget_rename.sql',
@@ -1005,10 +1017,22 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0271_agentic_commerce_schema.sql',
     rationale: 'Explicit per-user approver grants for spending budgets — reveals who may approve charges; cross-tenant leak exposes access control configuration.',
   },
-  // (cost_aggregates is registered in scripts/rls-not-applicable-allowlist.txt
-  // under the "ALTER TABLE ADD organisation_id" carve-out — the column was
-  // added in migration 0272, not in the original CREATE TABLE in 0024. RLS
-  // policy lives on cost_aggregates in migration 0272.)
+  // 0272 — cost_aggregates RLS retrofit.
+  //
+  // Note: the CREATE TABLE for cost_aggregates in migration 0024 has no
+  // organisation_id column; it was added via ALTER TABLE in 0272 alongside
+  // the CREATE POLICY. Because of this, the rls-protected-tables Check 2
+  // would otherwise complain ("no matching CREATE TABLE with organisation_id").
+  // cost_aggregates is therefore listed in the check2-exempt section of
+  // scripts/rls-not-applicable-allowlist.txt — same pattern as task_activities,
+  // task_deliverables, reference_document_versions (all manifest-registered
+  // tables whose tenant column was added via later ALTER).
+  {
+    tableName: 'cost_aggregates',
+    schemaFile: 'costAggregates.ts',
+    policyMigration: '0272_cost_aggregates_rls_and_spend_dims.sql',
+    rationale: 'Pre-aggregated LLM and agent spend rollups — new agent_spend_* dimensions carry per-subaccount and per-org spend totals that are financially sensitive. organisation_id added via ALTER TABLE in migration 0272 (CREATE TABLE in 0024 had no tenant column — pre-multi-tenant aggregate). Sentinel UUID rows (platform/provider) are globally readable per policy.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
