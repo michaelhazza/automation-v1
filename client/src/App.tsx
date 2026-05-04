@@ -89,6 +89,8 @@ const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
 // Universal Brief — detail page (Phase 2)
 const BriefDetailPage = lazy(() => import('./pages/BriefDetailPage'));
+// Workflows V1 Phase 2 — open task view (Chunk 11)
+const OpenTaskView = lazy(() => import('./pages/OpenTaskView'));
 // Learned Rules library (Phase 5)
 const LearnedRulesPage = lazy(() => import('./pages/LearnedRulesPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
@@ -412,6 +414,8 @@ export default function App() {
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
             {/* Universal Brief detail page (Phase 2) */}
             <Route path="/admin/briefs/:briefId" element={<BriefDetailPage user={user!} />} />
+            {/* Workflows V1 Phase 2 — open task view (Chunk 11) */}
+            <Route path="/admin/tasks/:taskId" element={<OpenTaskView user={user!} />} />
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
