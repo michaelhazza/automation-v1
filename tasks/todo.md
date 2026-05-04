@@ -2731,3 +2731,21 @@ ChatGPT Round 3 produced 6 findings. 2 auto-applied in-branch (2, 3); 1 rejected
   - Spec section: §7 (Pause/Resume/Stop routes)
   - Gap: route URLs are run-scoped instead of spec-mandated task-scoped
   - Suggested approach: defer until the `workflow_run_id` FK on tasks lands; then add task-scoped variants (or replace the run-scoped routes). Alternatively, amend spec §7 to use run-scoped URLs to match the existing approval route convention — that would be a `chatgpt-spec-review` decision. Chunk 11 (open task UI) will consume these endpoints, so the decision must be made before Chunk 11 ships.
+
+
+## Deferred from spec-conformance review — framework-standalone-repo (2026-05-04)
+
+**Captured:** 2026-05-04T05:53:43Z
+**Source log:** `tasks/review-logs/spec-conformance-log-framework-standalone-repo-2026-05-04T05-53-43Z.md`
+**Spec:** `tasks/builds/framework-standalone-repo/spec.md`
+**Scope verified:** Phase A (in-tree sync infrastructure under `setup/portable/`)
+
+- [ ] **REQ #11 — §4.5 step 8 rename-detection INFO log not implemented.** Spec text: "Check: if a removed path and a newly-written path share the same directory + similar filename: Print 'INFO: possible rename detected — old: <removed-path>, new: <new-path>'." Implementation (`setup/portable/sync.js:1278-1289`) handles `removedFiles` warn-only (conforms to that part) but does NOT scan for renames.
+  - Spec section: §4.5 step 8
+  - Gap: rename-detection check missing from removed-files loop
+  - Suggested approach: pick a similarity heuristic (suggest: same directory + filename Levenshtein distance ≤ 3, OR shared filename stem) — the spec leaves this undefined. Alternatively, defer to Phase B and amend spec §4.5 step 8 to remove the requirement (Phase A is in-tree-only and rename-detection has low ROI pre-public-launch).
+
+- [ ] **REQ-extra (plan Chunk 1 verification) — `scripts/build-portable-framework.ts` preflight scan fails on intentional negative-test legacy placeholders.** Plan Chunk 1's verification command (`npx tsx scripts/build-portable-framework.ts # expect: exit 0`) currently exits 1 because `setup/portable/tests/substitute-write.test.ts` contains intentional `[PROJECT_NAME]` test fixtures (verifying the substitution engine ignores non-`{{...}}` formats). The legacy-placeholder walk in `scripts/build-portable-framework.ts:114-133` does not exempt the `tests/` directory.
+  - Spec section: plan Chunk 1 verification commands (spec §4.5 invariant 1 substitution placeholder format)
+  - Gap: build script's preflight false-positives on test fixtures
+  - Suggested approach: add `tests/` to a path-prefix exclusion in the legacy-placeholder walk (mirrors the existing filename-set exemption for `CHANGELOG.md` / `README.md`). One-line addition; preserves test integrity without inventing escape syntax.
