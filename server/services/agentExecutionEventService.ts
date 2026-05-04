@@ -677,6 +677,25 @@ export async function streamEvents(
  * Composite cursor: only returns rows where
  *   (task_sequence, event_subsequence) > (fromSeq, fromSubseq).
  */
+/**
+ * Returns the smallest `task_sequence` still retained for the task, or null
+ * when no events exist. Routes call this for replay-cursor gap detection
+ * (callers whose `fromSeq` is below this value have missed a window).
+ *
+ * Per DEVELOPMENT_GUIDELINES §2 routes never import `db` directly — the
+ * gap-detection aggregate now lives here instead of inline in the route.
+ */
+export async function getOldestRetainedTaskSequence(
+  taskId: string,
+): Promise<number | null> {
+  const db = getOrgScopedDb('agentExecutionEventService.getOldestRetainedTaskSequence');
+  const [row] = await db
+    .select({ oldestSeq: sql<number | null>`min(${agentExecutionEvents.taskSequence})` })
+    .from(agentExecutionEvents)
+    .where(eq(agentExecutionEvents.taskId, taskId));
+  return row?.oldestSeq ?? null;
+}
+
 export async function streamEventsByTask(
   taskId: string,
   opts: StreamEventsOptions & { fromSeq?: number; fromSubseq?: number },

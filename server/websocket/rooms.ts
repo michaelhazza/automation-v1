@@ -12,6 +12,7 @@ import { db } from '../db/index.js';
 import { executions, agentRuns, agentConversations, subaccounts, workflowRuns } from '../db/schema/index.js';
 import { orgUserRoles, permissionSetItems, systemAgents } from '../db/schema/index.js';
 import { resolveAgentRunVisibility } from '../lib/agentRunVisibility.js';
+import { handleJoinTask, handleLeaveTask } from './taskRoom.js';
 
 // UUID format check — reject malformed IDs early
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -223,6 +224,17 @@ export function handleConnection(socket: Socket): void {
   socket.on('leave:workflow-run', (runId: unknown) => {
     if (!isValidUUID(runId)) return;
     socket.leave(`workflow-run:${runId}`);
+  });
+
+  // ── Join a task room (validated against org ownership) ───────────────
+  socket.on('join:task', async (data: unknown) => {
+    const taskId = (data as { taskId?: unknown })?.taskId;
+    await handleJoinTask(socket, taskId);
+  });
+
+  socket.on('leave:task', async (data: unknown) => {
+    const taskId = (data as { taskId?: unknown })?.taskId;
+    handleLeaveTask(socket, taskId);
   });
 
   // Clean up on disconnect — Socket.IO auto-removes from all rooms

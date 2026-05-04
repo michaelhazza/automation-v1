@@ -28,6 +28,17 @@ export interface ConfidenceResult {
   confidence: SeenConfidence;
 }
 
+// Architect-tuned 2026-05-04 — see tasks/builds/workflows-v1-phase-2/confidence-cut-points-decision.md
+// Clean history: 3+ approvals with zero rejections. Even a small sample is strong signal
+// when there are literally zero rejections. Covers the common V1 pattern where a template
+// is reviewed carefully for its first 3 runs then becomes routine.
+const CLEAN_HISTORY_MIN_APPROVED = 3;
+// Established pattern: 5+ reviews with <15% rejection rate. 15% chosen over 20% (old default)
+// because at 5 reviews, 1 rejection = 20% — a 1-in-5 rejection rate still warrants
+// medium confidence. At 15%, you need 0 rejections in 5 reviews, OR 1 rejection in 7+.
+const ESTABLISHED_PATTERN_MIN_TOTAL = 5;
+const ESTABLISHED_PATTERN_MAX_REJECTION_RATE = 0.15;
+
 /**
  * Compute the confidence heuristic for a gate.
  *
@@ -36,12 +47,22 @@ export interface ConfidenceResult {
  * 2. subaccountFirstUseFlag        → first_use_in_subaccount
  * 3. stepDefinition.isCritical     → is_critical_next_step
  * 4. sideEffectClass === 'irreversible' → irreversible_side_effect
- * 5. approved+rejected >= 5 AND rejected/total < 0.2 → many_similar_past_runs
+ * 5. clean history OR established pattern → many_similar_past_runs
  * 6. default                       → few_past_runs_mixed_history
  */
 export function computeConfidence(input: ConfidenceInput): ConfidenceResult {
   const { stepDefinition, pastReviewsCount, subaccountFirstUseFlag, upstreamConfidence } = input;
   const total = pastReviewsCount.approved + pastReviewsCount.rejected;
+
+  // Signal weight for past_run_history: fires when either high-confidence pathway is met.
+  const pastRunHistorySignal =
+    (pastReviewsCount.approved >= CLEAN_HISTORY_MIN_APPROVED &&
+      pastReviewsCount.rejected === 0) ||
+    (total >= ESTABLISHED_PATTERN_MIN_TOTAL &&
+      total > 0 &&
+      pastReviewsCount.rejected / total < ESTABLISHED_PATTERN_MAX_REJECTION_RATE)
+      ? 1
+      : 0;
 
   // Build signal array — always populated regardless of which rule fires.
   const signals = [
@@ -52,7 +73,7 @@ export function computeConfidence(input: ConfidenceInput): ConfidenceResult {
       name: 'irreversible_side_effect',
       weight: stepDefinition.sideEffectClass === 'irreversible' ? 1 : 0,
     },
-    { name: 'past_run_history', weight: total >= 5 ? 1 : 0 },
+    { name: 'past_run_history', weight: pastRunHistorySignal },
   ];
 
   // Determine the winning key by priority order.
@@ -66,7 +87,13 @@ export function computeConfidence(input: ConfidenceInput): ConfidenceResult {
     key = 'is_critical_next_step';
   } else if (stepDefinition.sideEffectClass === 'irreversible') {
     key = 'irreversible_side_effect';
-  } else if (total >= 5 && pastReviewsCount.rejected / total < 0.2) {
+  } else if (
+    (pastReviewsCount.approved >= CLEAN_HISTORY_MIN_APPROVED &&
+      pastReviewsCount.rejected === 0) ||
+    (total >= ESTABLISHED_PATTERN_MIN_TOTAL &&
+      total > 0 &&
+      pastReviewsCount.rejected / total < ESTABLISHED_PATTERN_MAX_REJECTION_RATE)
+  ) {
     key = 'many_similar_past_runs';
   } else {
     key = 'few_past_runs_mixed_history';

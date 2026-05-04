@@ -2628,6 +2628,31 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
+  // ── Workflow V1 — start a workflow run from within an agent skill ──────────
+  'workflow.run.start': {
+    actionType: 'workflow.run.start',
+    description: 'Start a new workflow run for a published org workflow template. Returns the task_id of the newly created workflow task.',
+    actionCategory: 'api',
+    topics: ['workflow', 'automation'],
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['workflow_template_id', 'template_version_id', 'initial_inputs'],
+    parameterSchema: z.object({
+      workflow_template_id: z.string().uuid().describe('UUID of the org workflow template to run'),
+      template_version_id: z.string().uuid().optional().describe('Pin to a specific version; omit for latest published'),
+      initial_inputs: z.record(z.unknown()).optional().default({}).describe('Initial input values for the workflow'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
   config_send_workflow_email_digest: {
     actionType: 'config_send_workflow_email_digest',
     description: 'Send a markdown email digest to a list of recipients. Deduplicated per (runId, sorted recipients) so retries never double-send.',

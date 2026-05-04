@@ -94,6 +94,8 @@ export const ORG_PERMISSIONS = {
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
   // ── Observability (delegation outcomes; paperclip-hierarchy spec) ───────────
   ORG_OBSERVABILITY_VIEW: 'org.observability.view',
+  // ── Teams ─────────────────────────────────────────────────────────────────
+  TEAMS_MANAGE: 'org.teams.manage',
   // ── Cached Context Infrastructure ────────────────────────────────────────
   REFERENCE_DOCUMENTS_READ:       'reference_documents.read',
   REFERENCE_DOCUMENTS_WRITE:      'reference_documents.write',
@@ -202,6 +204,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.USERS_INVITE, description: 'Invite users to org',          groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_EDIT,   description: 'Edit org users',               groupName: 'org.users' },
   { key: ORG_PERMISSIONS.USERS_DELETE, description: 'Delete org users',             groupName: 'org.users' },
+  // org.teams
+  { key: ORG_PERMISSIONS.TEAMS_MANAGE, description: 'Create, edit, and delete teams and manage team membership', groupName: 'org.teams' },
   // org.engines
   { key: ORG_PERMISSIONS.ENGINES_VIEW,   description: 'View workflow engines',       groupName: 'org.engines' },
   { key: ORG_PERMISSIONS.ENGINES_MANAGE, description: 'Create/edit/delete engines',  groupName: 'org.engines' },

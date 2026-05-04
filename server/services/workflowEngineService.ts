@@ -65,6 +65,8 @@ import {
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
 import { emitOrgUpdate, emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
+import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -81,6 +83,7 @@ import type { ActionCallStep, InvokeAutomationStep } from '../lib/workflow/types
 import { invokeAutomationStep } from './invokeAutomationStepService.js';
 import { upsertFromWorkflow } from './memoryBlockService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { taskService } from './taskService.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
 import {
@@ -1604,6 +1607,18 @@ export const WorkflowEngineService = {
               'Workflow:step:awaiting_approval',
               { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
             );
+            // Chunk 9: also emit step.awaiting_approval to the task event stream.
+            if (run.taskId) {
+              void appendAndEmitTaskEvent(
+                {
+                  taskId: run.taskId,
+                  organisationId: run.organisationId,
+                  subaccountId: run.subaccountId,
+                },
+                'engine',
+                { kind: 'step.awaiting_approval', payload: { stepId: step.id, reviewKind, actionId: result.actionId } },
+              );
+            }
             return;
           }
           if (result.status === 'failed') {
@@ -2532,9 +2547,13 @@ export const WorkflowEngineService = {
       if (created >= slotsAvailable) break; // respect concurrency cap
 
       try {
-        const [childRun] = await db
-          .insert(workflowRuns)
-          .values({
+        const childTask = await taskService.createTask(run.organisationId, targetId, {
+          title: `Workflow run`,
+          status: 'inbox',
+        }, run.startedByUserId ?? undefined);
+        const childRun = await insertRunRowWithUniqueGuard(
+          db,
+          {
             organisationId: run.organisationId,
             subaccountId: targetId,
             templateVersionId: run.templateVersionId,
@@ -2544,8 +2563,10 @@ export const WorkflowEngineService = {
             parentRunId: run.id,
             targetSubaccountId: targetId,
             startedByUserId: run.startedByUserId,
-          })
-          .returning();
+            taskId: childTask.id,
+          },
+          childTask.id,
+        );
 
         if (childRun) {
           // Create step runs for the child
@@ -2771,11 +2792,19 @@ export const WorkflowEngineService = {
       },
     };
 
+    // Replay creates a new task linked to the replayed run.
+    const replayTask = await taskService.createTask(
+      organisationId,
+      source.subaccountId ?? organisationId,
+      { title: `Workflow run`, status: 'inbox' },
+      userId,
+    );
+
     let runId!: string;
     await db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(workflowRuns)
-        .values({
+      const created = await insertRunRowWithUniqueGuard(
+        tx as unknown as typeof db,
+        {
           organisationId,
           subaccountId: source.subaccountId,
           // Carry forward the scope so org-scope replays don't violate the
@@ -2788,9 +2817,11 @@ export const WorkflowEngineService = {
           contextSizeBytes: Buffer.byteLength(JSON.stringify(replayContext), 'utf8'),
           replayMode: true,
           startedByUserId: userId,
+          taskId: replayTask.id,
           startedAt,
-        })
-        .returning();
+        },
+        replayTask.id,
+      );
       runId = created.id;
       // Patch runId into _meta
       await tx.execute(

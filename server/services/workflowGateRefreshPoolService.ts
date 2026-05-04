@@ -22,6 +22,8 @@ import type { WorkflowDefinition } from '../lib/workflow/types.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { WorkflowApproverPoolService } from './workflowApproverPoolService.js';
 import type { ApproverGroup } from '../../shared/types/workflowApproverGroup.js';
+import { appendAndEmitTaskEvent } from './taskEventService.js';
+import { normaliseApproverPoolSnapshot, poolFingerprint } from '../../shared/types/approverPoolSnapshot.js';
 import { logger } from '../lib/logger.js';
 
 // Transaction-aware db handle
@@ -85,6 +87,7 @@ export const WorkflowGateRefreshPoolService = {
       runId: run.id,
       organisationId: run.organisationId,
       subaccountId: run.subaccountId,
+      taskId: run.taskId,
     };
 
     // Step 3: load the template definition to find the approverGroup for this step
@@ -163,6 +166,33 @@ export const WorkflowGateRefreshPoolService = {
       organisationId,
       requestingUserId,
     });
+
+    // Spec REQ 9-10 — emit approval.pool_refreshed so all open Approval cards
+    // can update their reviewer-count display without a full reconcile.
+    if (run.taskId) {
+      const normalised = normaliseApproverPoolSnapshot(newSnapshot);
+      const fingerprint = poolFingerprint(normalised);
+      const stepDefForQuorum = def.steps.find((s) => s.id === gate.stepId);
+      const quorum = (stepDefForQuorum?.params?.quorum as number | undefined) ?? 1;
+      void appendAndEmitTaskEvent(
+        {
+          taskId: run.taskId,
+          organisationId: run.organisationId,
+          subaccountId: run.subaccountId,
+        },
+        'gate',
+        {
+          kind: 'approval.pool_refreshed',
+          payload: {
+            gateId,
+            actorId: requestingUserId,
+            newPoolSize: newSnapshot.length,
+            newPoolFingerprint: fingerprint,
+            stillBelowQuorum: newSnapshot.length < quorum,
+          },
+        },
+      );
+    }
 
     return { found: true, refreshed: true, poolSize: newSnapshot.length };
   },

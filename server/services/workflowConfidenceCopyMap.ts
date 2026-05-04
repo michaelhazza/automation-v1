@@ -20,7 +20,7 @@ export const CONFIDENCE_COPY_MAP: Record<
 > = {
   many_similar_past_runs: {
     value: 'high',
-    reason: 'matches recent successful runs',
+    reason: 'clean run history for this template',
   },
   is_critical_next_step: {
     value: 'medium',

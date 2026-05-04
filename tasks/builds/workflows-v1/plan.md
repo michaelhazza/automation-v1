@@ -9,6 +9,48 @@ _Spec effort estimate: ~12–16 weeks calendar (~59 engineer-days, parallelisabl
 
 ---
 
+> ## ⚠️ Continuation pointer (added 2026-05-04)
+>
+> **Chunks 1–8 of this plan have been merged into `main`.** All remaining work (Chunks 9–16) plus surgical adjustments to Chunks 1–8 (migration 0270 in-place edit, two service refactors, route migration, architect-led confidence cut-points decision) live in a separate continuation plan:
+>
+> **→ [`tasks/builds/workflows-v1-phase-2/plan.md`](../workflows-v1-phase-2/plan.md)**
+>
+> The plan-amendment changelog below (A1–A11) is preserved as the historical record of what surfaced after Chunks 1–8 review pipeline completed. The "fold-back" amendments (A1, A2, A4) describe what was already applied via the chatgpt-pr-review hardening pass; the forward-looking amendments (A3, A5, A6, A7, A8, A9) are now restated as pre-chunk items P0–P5 in the phase-2 plan, OR are folded inline into Chunks 9 / 10 of the phase-2 plan. Chunks 9–16 detail in this file is superseded by the phase-2 plan; do not re-execute from this plan.
+>
+> **Status:** this file is now read-only context. Future amendments to remaining work land in the phase-2 plan, not here.
+
+---
+
+## Plan-amendment changelog
+
+Living section. Every amendment lands here with date + scope + reason. Plan body is the source of truth; this changelog is a fast-scan map for sessions resuming mid-build.
+
+### 2026-05-04 — Post-Chunks-3-8 review-pipeline amendments
+
+Triggered by spec-conformance NON_CONFORMANT (2 directional gaps), pr-reviewer CHANGES_REQUESTED (resolved in-branch), chatgpt-pr-review hardening pass, and a pre-Chunk-9 cross-entity-relationship gap analysis. Source logs:
+- `tasks/review-logs/spec-conformance-log-workflows-v1-chunks-3-8-2026-05-03T20-29-16Z.md`
+- `tasks/review-logs/pr-review-log-workflows-v1-chunks-3-8-2026-05-03T20-55-00Z.md`
+- `tasks/review-logs/dual-review-skipped-workflows-v1-chunks-3-8-2026-05-03T21-00-00Z.md`
+- Commits `acac4ef8`, `9e25dc26`, `edb8145f`.
+
+| # | Scope | Amendment | Reason |
+|---|---|---|---|
+| A1 | Chunk 1 | Drop `workflow_step_gates.superseded_by_gate_id` column from contract pin and migration shape | KNOWLEDGE.md 2026-05-04 rule: no future-use schema columns without active invariants. Already removed from code. |
+| A2 | Chunk 1 | Document CHECK constraints (`event_origin` enum, `tasks.next_event_seq >= 0`, `cost_accumulator_cents >= 0`) | Hardening pass added these; plan must reflect for future-session fidelity. |
+| A3 | Chunk 5 | Annotate `task_requester` pool resolution as V1 fallback to `workflowRuns.startedByUserId`; rebinds to `tasks.created_by_user_id` after Chunk 8.5 lands | Plan assumed `tasks.workflow_run_id` FK existed; it didn't. Fallback path is in-code with V1/V2 comment. |
+| A4 | Chunk 6 | Drop `workflowSeenPayloadService.ts` impure wrapper; pure builder consumed directly via `workflowStepGateServicePure.buildGateSnapshot` | spec-conformance REQ 6.4 directional gap. Inlined design is cleaner — gate service already provides run-context load step. |
+| A5 | Chunk 6 | Add W1-spec19 confidence cut-points decision as a hard pre-Chunk-11 blocker | `workflowConfidenceCopyMap.ts` ships with placeholder values; without architect cut-point decision, production confidence chips render misleading copy. Surfaces in Chunk 11 UI. |
+| A6 | Chunk 7 | Note: pause/resume/stop routes shipped at `/api/workflow-runs/:runId/...` (divergent from plan/spec); migration to `/api/tasks/:taskId/run/...` lands in Chunk 8.5 | spec-conformance REQ 7.9 directional gap. Plan was correct; implementation diverged. Migration deferred until FK lands. |
+| A7 | NEW Chunk 8.5 | Add `workflow_runs.task_id uuid NOT NULL REFERENCES tasks(id)` (with backfill) + route migration to spec-shape `/api/tasks/:taskId/...` | Spec uses task-scoped routes universally (line 1406 references `workflow_runs WHERE task_id = :taskId`). Without this FK, Chunks 9 / 11 / 12 / 13 each invent ad-hoc translation patterns. |
+| A8 | Chunk 9 | Add `approval.pool_refreshed` event emission (deferred from Chunk 5); pin `ApproverPoolSnapshot` UUID-normalisation contract (W1-F4); broadcast pool size + hash, not full ID list (W1-F11); validator fail-fast on bad `eventOrigin` | Chunk 5 deferred the event because Chunk 9 owns the transport. Snapshot UUID normalisation prevents `userInPool` false-negatives. Hash+count broadcast prevents pool-ID enumeration via WebSocket. |
+| A9 | Chunk 10 | Add W1-F3 operator decision: email enumeration mitigation on `assignable-users` endpoint (rate-limit / redact / require admin permission) | adversarial-reviewer F3 (MEDIUM). Operator decides ship-as-is vs. mitigate before chunk merges. |
+| A10 | Chunk overview + dep graph | Insert Chunk 8.5 between Chunks 8 and 9; update graph + parallelisation hints | Mechanical reflection of A7. |
+| A11 | Spec coverage map | Add Chunk 8.5 entries for the new spec sections it owns | Mechanical reflection of A7. |
+
+Polish-only items (W1-N1 spec §3.1 redundancy with §8.1, W1-N2 Chunk 0 spike effort accounting, W1-N3 spec §16.5 stale ~59d estimate, W1-N4 Risks markdown anchors) remain in `tasks/todo.md` and fold into the doc-sync sweep at finalisation. They are deliberately NOT bundled here — they don't affect future-chunk implementation.
+
+---
+
 ## Contents
 
 1. [System invariants](#system-invariants)
@@ -28,6 +70,7 @@ _Spec effort estimate: ~12–16 weeks calendar (~59 engineer-days, parallelisabl
    - [Chunk 6 — Confidence chip + audit field write paths](#chunk-6--confidence--audit)
    - [Chunk 7 — Cost / wall-clock runaway protection (pause/resume/stop)](#chunk-7--cost--wall-clock-runaway-protection)
    - [Chunk 8 — Stall-and-notify (24h / 72h / 7d) + schedule version pinning](#chunk-8--stall-and-notify--schedule-pinning)
+   - [Chunk 8.5 — `workflow_runs.task_id` FK + route migration to spec shape](#chunk-85--workflow_runstask_id-fk--route-migration-to-spec-shape)
    - [Chunk 9 — Real-time WebSocket coordination (task rooms, replay, gap-detection)](#chunk-9--real-time-websocket-coordination)
    - [Chunk 10 — Permissions API (assignable users) + Teams CRUD UI](#chunk-10--permissions-api--teams-crud)
    - [Chunk 11 — Open task view UI (three-pane layout, Now/Plan/Files tabs, header)](#chunk-11--open-task-view-ui)
@@ -290,7 +333,8 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 | 6 | Confidence chip + audit field write paths | §6.1, §6.2, §6.3, §6.4, §6.5 | 4 | ~1.5 days |
 | 7 | Cost / wall-clock runaway protection (pause/resume/stop) | §3.1 (`effective_*`, `extension_count`), §7 (full) | 1, 4, 9 | ~2 days |
 | 8 | Stall-and-notify (24h / 72h / 7d) + schedule version pinning | §5.3, §3.1 (`pinned_template_version_id`), §5.4 (schedule dispatch) | 4 | ~1.5 days |
-| 9 | Real-time WebSocket coordination (task rooms, replay, gap-detection, run.paused/resumed/stopped event taxonomy) | §8 (full) | 3 | ~3 days |
+| 8.5 | `workflow_runs.task_id` FK + route migration (added 2026-05-04, A7) | §3.1 (implicit), §7 (route shape), §11 (route shape), §12 (route shape) | 1, 5, 7 | ~1 day |
+| 9 | Real-time WebSocket coordination (task rooms, replay, gap-detection, run.paused/resumed/stopped event taxonomy) | §8 (full) | 3, 8.5 (Chunk 9 needs `workflow_runs.task_id` to populate event envelopes) | ~3 days |
 | 10 | Permissions API (assignable users) + Teams CRUD UI | §14, §16.2 #31 | 1 | ~2 days |
 | 11 | Open task view UI (three-pane layout, Now/Plan/Files tabs, header) | §9 (full), §15 (Brief → Task UI) | 9, 10 | ~5 days |
 | 12 | Ask form runtime (form card primitive, submit/skip, autofill) | §3.2 (Ask params shape), §11 (full) | 4, 9, 11 | ~3 days |
@@ -298,9 +342,9 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 | 14a | Studio canvas + bottom bar + publish flow | §10.1, §10.2, §10.4, §10.5 (publish + concurrent-edit) | 2, 10 | ~3.5 days |
 | 14b | Four A's inspectors + Studio chat panel + draft hydration | §3.3 (`workflow_drafts`), §10.3 (inspectors), §10.6 (Studio chat), §10.7 (draft hydration) | 14a | ~3.5 days |
 | 15 | Orchestrator changes (suggest-don't-decide, draft creation, milestone events, workflow.run.start skill) | §13 (full), §16.3 (full) | 9, 14 | ~3 days |
-| 16 | Naming cleanup (Brief → Task) + workflow_drafts cleanup job | §15 (full), §16.3 #35a, §18 (final migration polish + telemetry registry entries) | 1, 11, 14 | ~1 day |
+| 16 | Naming cleanup (Brief → Task) + workflow_drafts cleanup job + remove Chunk 8.5 route aliases | §15 (full), §16.3 #35a, §18 (final migration polish + telemetry registry entries) | 1, 8.5, 11, 14 | ~1 day |
 
-**Total: ~40 engineer-days of focused work** across 17 chunks (Chunk 14 split into 14a + 14b at plan-gate review for reviewer-fatigue management; net effort unchanged). Lower than the spec's ~59-day estimate because primitives reuse (existing engine, WebSocket layer, schedule service, queue infrastructure) shaves time off engine + real-time chunks. UI chunks remain the dominant cost.
+**Total: ~41 engineer-days of focused work** across 18 chunks (Chunk 14 split into 14a + 14b at plan-gate review; Chunk 8.5 added 2026-05-04 to close the `workflow_runs.task_id` FK gap, ~1 day). Lower than the spec's ~59-day estimate because primitives reuse (existing engine, WebSocket layer, schedule service, queue infrastructure) shaves time off engine + real-time chunks. UI chunks remain the dominant cost.
 
 **Chunk dependency graph (forward-only, no cycles):**
 
@@ -308,16 +352,17 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
 1 (schema)
 ├── 2 (validator)
 ├── 3 (per-task events)
-│   └── 9 (websocket — event taxonomy + transport)
-│       ├── 7 (pause/stop/resume — emits run.paused / run.resumed / run.stopped via 9)
-│       ├── 11 (open task UI)
-│       │   ├── 12 (Ask runtime)
-│       │   ├── 13 (Files + diff)
-│       │   └── 16 (naming cleanup)
-│       └── 15 (orchestrator)
-│           └── (depends on 14b too)
+│   └── 8.5 (workflow_runs.task_id FK + route migration)   ← added 2026-05-04 (A7)
+│       └── 9 (websocket — event taxonomy + transport)
+│           ├── 7-routes-migrated (alias surface, see Chunk 7's A6 amendment)
+│           ├── 11 (open task UI)
+│           │   ├── 12 (Ask runtime)
+│           │   ├── 13 (Files + diff)
+│           │   └── 16 (naming cleanup)
+│           └── 15 (orchestrator)
+│               └── (depends on 14b too)
 ├── 4 (gates)
-│   ├── 5 (approvals)
+│   ├── 5 (approvals) → consumed by 8.5 (task_requester rebind) and 9 (snapshot normalisation)
 │   ├── 6 (confidence + audit)
 │   ├── 7 (pause/stop/resume — also depends on 9; see above)
 │   └── 8 (stall-and-notify + pinning)
@@ -327,7 +372,7 @@ Each chunk is independently testable, ordered for forward-only dependencies. A s
         └── 14b (inspectors + draft hydration)
 ```
 
-**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 8 can ship in parallel after 4 lands. Chunk 7 requires 4 AND 9 (it emits `run.paused` / `run.resumed` / `run.stopped` events through 9's WebSocket transport, so 9 must land first; 9 owns the event taxonomy and transport, 7 owns the emitting call sites). Chunks 11, 14a require 9 and 10. Chunk 14b requires 14a. Chunks 12, 13 require 11. Chunk 15 requires 9 and 14b. Chunk 16 is post-everything.
+**Parallelisation hints (for `feature-coordinator` if multi-engineer):** chunks 2, 3, 4, 10 can ship in parallel after 1 lands. Chunks 5, 6, 8 can ship in parallel after 4 lands. **Chunk 8.5 is sequential** — it lands after 5 and 7 ship (it migrates them) and BEFORE 9 starts (Chunk 9's event envelopes carry `taskId` from `workflow_runs.task_id`). Chunk 7 requires 4 AND 9 (it emits `run.paused` / `run.resumed` / `run.stopped` events through 9's WebSocket transport, so 9 must land first; 9 owns the event taxonomy and transport, 7 owns the emitting call sites). Chunks 11, 14a require 9 and 10. Chunk 14b requires 14a. Chunks 12, 13 require 11. Chunk 15 requires 9 and 14b. Chunk 16 is post-everything (and also removes the run-scoped pause/resume/stop route aliases per Chunk 8.5 acceptance).
 
 ---
 
@@ -433,7 +478,9 @@ ALTER TABLE workflow_runs
   ADD COLUMN effective_wall_clock_cap_seconds integer,
   ADD COLUMN extension_count integer NOT NULL DEFAULT 0,
   ADD COLUMN cost_accumulator_cents integer NOT NULL DEFAULT 0,          -- Decision 12: control-flow source of truth
-  ADD COLUMN degradation_reason text;                                    -- Round-2: consumer-side gap = degraded, not failed
+  ADD COLUMN degradation_reason text,                                    -- Round-2: consumer-side gap = degraded, not failed
+  ADD CONSTRAINT workflow_runs_cost_accumulator_nonneg                   -- A2 (2026-05-04): hardening pass invariant
+    CHECK (cost_accumulator_cents >= 0);
 -- Partial index for the resume / paused-listing path (round-1 minor tweak)
 CREATE INDEX workflow_runs_status_paused_idx
   ON workflow_runs (id)
@@ -455,7 +502,9 @@ ALTER TABLE agent_execution_events
   ADD COLUMN task_sequence bigint,
   ADD COLUMN event_origin text,                                          -- Decision 11: 'engine' | 'gate' | 'user' | 'orchestrator'
   ADD COLUMN event_subsequence integer DEFAULT 0,                        -- Decision 11: deterministic intra-bundle order
-  ADD COLUMN event_schema_version integer NOT NULL DEFAULT 1;            -- Round-2: per-kind shape evolution
+  ADD COLUMN event_schema_version integer NOT NULL DEFAULT 1,            -- Round-2: per-kind shape evolution
+  ADD CONSTRAINT agent_execution_events_event_origin_enum                -- A2 (2026-05-04): hardening pass invariant
+    CHECK (event_origin IS NULL OR event_origin IN ('engine','gate','user','orchestrator'));  -- NULL allowed for legacy / non-task rows
 CREATE UNIQUE INDEX agent_execution_events_task_seq_idx
   ON agent_execution_events (task_id, task_sequence, event_subsequence)
   WHERE task_id IS NOT NULL;
@@ -466,7 +515,9 @@ CREATE INDEX agent_execution_events_run_task_seq_idx
 
 -- ── tasks ──
 ALTER TABLE tasks
-  ADD COLUMN next_event_seq integer NOT NULL DEFAULT 0;
+  ADD COLUMN next_event_seq integer NOT NULL DEFAULT 0,
+  ADD CONSTRAINT tasks_next_event_seq_nonneg                             -- A2 (2026-05-04): hardening pass invariant
+    CHECK (next_event_seq >= 0);
 
 -- ── workflow_step_gates (new) ──
 CREATE TABLE workflow_step_gates (
@@ -481,7 +532,8 @@ CREATE TABLE workflow_step_gates (
   created_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz,
   resolution_reason text,                                                 -- 'approved'|'rejected'|'submitted'|'skipped'|'run_terminated'
-  superseded_by_gate_id uuid REFERENCES workflow_step_gates(id),          -- Round-2: future re-open seam, V1 always NULL
+  -- A1 (2026-05-04): superseded_by_gate_id removed per KNOWLEDGE.md "no future-use schema columns" rule.
+  -- If a future re-open flow needs this column, the migration that introduces the behaviour adds it then.
   organisation_id uuid NOT NULL REFERENCES organisations(id)              -- for RLS
 );
 CREATE UNIQUE INDEX workflow_step_gates_run_step_uniq_idx
@@ -523,7 +575,7 @@ CREATE POLICY workflow_drafts_isolation ON workflow_drafts
 **Contracts pinned in this chunk:**
 
 - `WorkflowRunStatus` (TS) — extended with `'paused'`. Sites consuming the union (e.g., `runStatus.ts`, route handlers, UI badges) compile-error if they don't handle the new value — caught by `npm run typecheck`. `WorkflowRun` type extended with `degradationReason: string | null` (Round-2: consumer-side gap signal).
-- `WorkflowStepGate` (TS) — derived from `workflow_step_gates` schema. `gateKind: 'approval' | 'ask'`. `resolutionReason: 'approved' | 'rejected' | 'submitted' | 'skipped' | 'run_terminated' | null`. `supersededByGateId: string | null`. Source of truth for gate state everywhere downstream.
+- `WorkflowStepGate` (TS) — derived from `workflow_step_gates` schema. `gateKind: 'approval' | 'ask'`. `resolutionReason: 'approved' | 'rejected' | 'submitted' | 'skipped' | 'run_terminated' | null`. Source of truth for gate state everywhere downstream. (A1 — `supersededByGateId` removed per KNOWLEDGE.md 2026-05-04.)
 - `WorkflowDraft` (TS) — `payload jsonb` typed loosely; the orchestrator-side draft shape lives in `shared/types/workflowDraftPayload.ts` (Chunk 15 owns the precise shape). `draftSource: 'orchestrator' | 'studio_handoff'`.
 - `seenPayload`, `seenConfidence`, `approverPoolSnapshot` — typed in `shared/types/workflowStepGate.ts` per the spec §6.2.1, §6.3 shapes.
 - `EventOrigin` (TS) — `'engine' | 'gate' | 'user' | 'orchestrator'`. New in `shared/types/agentExecutionLog.ts`.
@@ -803,8 +855,9 @@ export type ApproverPoolSnapshot = string[];                              // use
 **Files to create:**
 
 - `server/services/workflowApproverPoolService.ts` — resolves a pool from `approverGroup`. Methods:
-  - `resolvePool(approverGroup, runContext, organisationId, subaccountId) → Promise<ApproverPoolSnapshot>` — dispatches by `kind`. For `team`: queries `team_members` filtered by `teams.deletedAt IS NULL`. For `specific_users`: returns the array verbatim (validator already enforced the IDs are valid). For `task_requester`: reads `tasks.created_by_user_id`. For `org_admin`: queries `org_user_roles` for users with `org_admin` role. Returns `string[]` of user IDs.
+  - `resolvePool(approverGroup, runContext, organisationId, subaccountId) → Promise<ApproverPoolSnapshot>` — dispatches by `kind`. For `team`: queries `team_members` filtered by `teams.deletedAt IS NULL`. For `specific_users`: returns the array verbatim (validator already enforced the IDs are valid). For `task_requester`: see V1 fallback note below. For `org_admin`: queries `org_user_roles` for users with `org_admin` role. Returns `string[]` of user IDs.
   - `userInPool(snapshot, userId) → boolean` — pure helper.
+  - **A3 (2026-05-04) — `task_requester` resolution V1 fallback.** Spec semantics are "the user who created the task." Until Chunk 8.5 lands `workflow_runs.task_id` FK, V1 cannot join run → task; the resolver reads `workflow_runs.started_by_user_id` instead. After Chunk 8.5, switch to `tasks.created_by_user_id` joined via the new FK. The code site must carry an inline `// V1 → V2: rebind to tasks.created_by_user_id once workflow_runs.task_id FK lands (Chunk 8.5)` comment so the migration is unambiguous when picked up. Both fields converge to the same identity for runs started directly by the requester; they diverge for system-initiated runs (scheduler / orchestrator) where the spec intent ("requester") is clearer with the task-side field.
 - `server/services/workflowApproverPoolServicePure.ts` — pure `userInPool` and `resolveSpecificUsersPool` (no DB) for testing.
 - `server/routes/workflowGates.ts` — new route file owning `POST /api/tasks/:taskId/gates/:gateId/refresh-pool`. Uses `requireOrgPermission` or `requireSubaccountPermission` per spec §5.1.2 permission guard.
 - `server/services/workflowGateRefreshPoolService.ts` — wraps `WorkflowApproverPoolService.resolvePool` + `WorkflowStepGateService.refreshPool` with permission verification.
@@ -886,7 +939,7 @@ export interface ApproverGroup {
 - `server/services/workflowConfidenceServicePure.ts` — pure heuristic computation. Inputs: `templateVersionId`, `stepId`, `stepDefinition` (for `is_critical`, `side_effect_class`), `pastReviewsCount: { approved, rejected }` (loaded by the impure wrapper), `subaccountFirstUseFlag`, `upstreamConfidence: 'high'|'medium'|'low'|null`. Returns `SeenConfidence`. Plain-language reason copy per §6.2 mapping table.
 - `server/services/workflowConfidenceService.ts` — impure wrapper. Loads aggregates from `workflow_step_reviews` filtered by `template_version_id` + `step_id`; loads subaccount-first-use signal. Calls the pure module.
 - `server/services/workflowSeenPayloadServicePure.ts` — pure builder for the snapshot per spec §6.3 shape. Inputs: `stepDefinition`, `runContext` (for resolving bindings), `agentReasoning?` (for Agent steps), `branchDecision?`. Returns `SeenPayload`.
-- `server/services/workflowSeenPayloadService.ts` — impure wrapper that orchestrates the pure module with run-context loading.
+- ~~`server/services/workflowSeenPayloadService.ts` — impure wrapper~~ **A4 (2026-05-04): dropped.** `workflowStepGateServicePure.buildGateSnapshot` consumes the pure `buildSeenPayload` builder directly. The gate service already loads `runContext` before calling `buildGateSnapshot`, so a separate orchestration wrapper would be a redundant pass-through. Not adding the wrapper avoids premature abstraction. Source: spec-conformance REQ 6.4 directional gap → resolved in plan, no code change.
 
 **Files to modify:**
 
@@ -920,7 +973,7 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 **Test considerations:**
 
 - `workflowConfidenceServicePure.test.ts` — every mapping row in the table; clamp interactions; cascade from upstream.
-- `workflowSeenPayloadServicePure.test.ts` — snapshot shape correctness; null-handling for missing `agentReasoning` / `branchDecision`.
+- `workflowSeenPayloadServicePure.test.ts` — snapshot shape correctness; null-handling for missing `agentReasoning` / `branchDecision`. (Tests the pure builder directly; no impure-wrapper test needed per A4.)
 - `workflowConfidenceImmutableSnapshot.integration.test.ts` — gate opens with confidence X; later read of `gate.seen_confidence` returns X regardless of underlying signals shifting.
 
 **Verification commands:**
@@ -936,6 +989,14 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - Plain-language reason strings only — no engineering jargon ("clamp", "threshold", "score").
 - High-confidence does NOT auto-approve (failsafe — explicit test).
 - `decision_reason` persists on the per-decider review when provided.
+
+**A5 (2026-05-04) — Pre-Chunk-11 release blocker (W1-spec19):**
+
+- `server/services/workflowConfidenceCopyMap.ts` ships in V1 with **placeholder values** for the heuristic cut-points and reason copy. Without an architect-led tuning pass against ~100 real internal cards, production confidence chips will render misleading "high / medium / low" labels in the Open Task Plan tab (Chunk 11) — undermining the operator-trust premise of the entire confidence-chip surface.
+- **Owner:** architect, post-Chunk-6, pre-Chunk-11.
+- **Inputs:** sample of 100 historical / synthetic Approval gate-opens with engineer-labelled "would I want to be flagged on this?" judgments.
+- **Outputs:** revised cut-points (the boolean predicates inside `workflowConfidenceServicePure`), revised reason-copy strings in `workflowConfidenceCopyMap.ts`, captured rationale in spec §19.1 #A.
+- **Gate:** Chunk 11 cannot ship the Plan-tab confidence chip surface until this decision lands. Chunk 11's acceptance-criteria reflects the dependency. If the decision slips, Chunk 11 ships with the chip hidden behind a feature flag (`SHOW_CONFIDENCE_CHIP=false`) and the rest of the Plan tab proceeds.
 
 **Dependencies:** Chunks 1 (schema columns), 4 (gate write path).
 
@@ -977,17 +1038,24 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
   - Every outbound HTTP / webhook / integration call sets the canonical idempotency key `${runId}:${stepId}:${taskSequence}`.
   - Implementation paths by provider: Stripe `Idempotency-Key` header; HTTP webhooks include `X-Idempotency-Key`; CRM / email providers use provider-specific equivalents.
   - Skill executors that don't support an idempotency header SHOULD record the key in a local `external_call_log` row keyed on the canonical key and short-circuit on the second attempt. (Audit at Chunk 5 entry — list every existing skill executor, mark which already support keys, route the gaps to `tasks/todo.md`.)
-- `server/routes/workflowRuns.ts` — three new routes (mounted on the existing router):
-  - `POST /api/tasks/:taskId/run/resume` body `{ extendCostCents?, extendSeconds? }`. Permission guard: caller in §14.5 visibility set.
-  - `POST /api/tasks/:taskId/run/stop` body `{}`.
+- `server/routes/workflowRuns.ts` — three new routes. **A6 (2026-05-04) — V1 ships at run-scoped URLs; Chunk 8.5 migrates to spec-shape task-scoped URLs.**
+  - **As shipped in V1 Chunk 7 (current code):** `POST /api/workflow-runs/:runId/{pause,resume,stop}`. Pattern matches the existing approval route (`/api/workflow-runs/:runId/steps/:stepRunId/approve`) and the legacy run-scoped surface. Permission guard: caller in §14.5 visibility set.
+  - **Target shape (post-Chunk-8.5):** `POST /api/tasks/:taskId/run/{pause,resume,stop}` per spec §7. Migration requires `workflow_runs.task_id` FK so the route handler can resolve `:taskId → runId`. Chunk 8.5 lands the FK + the new route variants + a redirect/alias from the run-scoped routes for back-compat through the migration window. Old routes deleted at Chunk 16 cleanup once Chunk 11 (UI consumer) is on the new shape.
   - (Pause card endpoint reuses `resume` with extension semantics.)
+  - Source: spec-conformance REQ 7.9 directional gap. Plan was correct; implementation took the easier run-scoped path because the task-FK didn't exist. Chunk 8.5 closes the loop.
 - `server/services/workflowRunService.ts` — extend with pass-through methods to `workflowRunPauseStopService`.
 - `shared/stateMachineGuards.ts` — `workflow_run` machine update: add `paused` as a valid state; `running → paused`, `paused → running`, `running → failed`, `paused → failed` valid; everything else from `paused` and to `paused` is invalid.
 
 **Contracts pinned in this chunk:**
 
 ```typescript
-// POST /api/tasks/:taskId/run/resume
+// V1 routes as shipped (A6 — see chunk body above):
+//   POST /api/workflow-runs/:runId/resume  | /pause | /stop
+// Target routes (post-Chunk-8.5):
+//   POST /api/tasks/:taskId/run/resume     | /pause | /stop
+// Bodies / response shapes are identical — only the path shape moves.
+
+// POST .../resume
 // Body: { extendCostCents?: integer, extendSeconds?: integer }
 // 200: { resumed: true, extension_count: number } | { resumed: false, reason: 'not_paused' }
 // 400: { error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: 'cost_ceiling' | 'wall_clock' }
@@ -995,7 +1063,7 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 // 403: { error: 'forbidden' }
 // 409: { error: 'race_with_other_action', current_status: string }
 
-// POST /api/tasks/:taskId/run/stop
+// POST .../stop
 // Body: {}
 // 200: { stopped: true } | { stopped: false, reason: 'already_terminal', current_status: string }
 // 403: { error: 'forbidden' }
@@ -1110,6 +1178,131 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 
 ---
 
+### Chunk 8.5 — `workflow_runs.task_id` FK + route migration to spec shape
+
+_Added 2026-05-04 (amendment A7). Source: pre-Chunk-9 cross-entity-relationship gap analysis. Spec assumes `workflow_runs.task_id` everywhere ([docs/workflows-dev-spec.md:1406](../../../docs/workflows-dev-spec.md), all `/api/tasks/:taskId/...` route patterns) but Chunk 1 only added `agent_execution_events.task_id`. Without this FK, every downstream UI / API chunk (9, 11, 12, 13, 15) invents its own `taskId → runId` translation — and the V1 fallback in Chunk 5's `task_requester` resolver (A3) cannot be cleaned up._
+
+**Spec sections owned:** §3.1 (`workflow_runs.task_id` schema delta — implicit; spec §3.1's table-level deltas don't enumerate this column but the routing surface assumes it), §7 (route shape on pause/resume/stop), §11 (route shape on Ask submit/skip), §12 (route shape on file revert).
+
+**Scope.** One additive migration adding `workflow_runs.task_id` (NOT NULL FK to `tasks.id`, with backfill for existing rows). Update Chunk 5's `task_requester` resolver to use the new FK. Add task-scoped route variants for pause/resume/stop (Chunk 7 surface) wired to the same service methods; keep run-scoped routes alive as aliases through the migration window. Update Chunk 4's run-ownership FK check (spec §5.1.1) to use the new FK directly when the route arrives via `/api/tasks/:taskId/...`. No engine logic changes.
+
+**Out of scope.** Other task-scoped routes that don't yet exist (Ask submit/skip in Chunk 12, file revert in Chunk 13 — those chunks land their routes natively at the task-scoped path). UI consumption of the new routes (Chunk 11 owns). Removal of run-scoped pause/resume/stop routes (deferred to Chunk 16 cleanup once Chunk 11 is on the new shape).
+
+**Files to create:**
+
+- `migrations/<NNNN>_workflows_v1_task_id_fk.sql` — additive migration:
+  ```sql
+  -- File header
+  -- Workflows V1: workflow_runs.task_id FK (spec line 1406 routing assumption, plan amendment A7)
+
+  -- Step 1: add nullable column + FK
+  ALTER TABLE workflow_runs
+    ADD COLUMN task_id uuid REFERENCES tasks(id);
+
+  -- Step 2: backfill for existing rows.
+  -- Strategy: every existing workflow_run was started under a brief/task pairing.
+  -- For runs created from a brief, the linkage is recoverable via
+  --   tasks.linked_entity_kind = 'workflow_run' AND linked_entity_id = workflow_runs.id
+  -- For runs without a clean linkage, write a placeholder task row preserved as
+  -- 'orphan' (status='closed_no_action', requester=startedByUserId, name='[orphan workflow run]')
+  -- so the NOT NULL constraint can be applied without losing audit trail.
+  -- Backfill SQL is multi-statement; see migration body for the full transaction.
+
+  WITH linked AS (
+    SELECT t.id AS task_id, (t.linked_entity_id)::uuid AS run_id
+    FROM tasks t
+    WHERE t.linked_entity_kind = 'workflow_run'
+  )
+  UPDATE workflow_runs wr
+  SET task_id = linked.task_id
+  FROM linked
+  WHERE linked.run_id = wr.id AND wr.task_id IS NULL;
+
+  -- Step 3: insert orphan tasks for any remaining unlinked runs (preserves audit).
+  --         (Run only against rows where task_id IS NULL after step 2.)
+  --         See migration body for the INSERT … RETURNING + UPDATE chain.
+
+  -- Step 4: enforce NOT NULL once backfill is complete.
+  ALTER TABLE workflow_runs
+    ALTER COLUMN task_id SET NOT NULL;
+
+  -- Step 5: index for the dominant query shape (open-task replay endpoint).
+  CREATE INDEX workflow_runs_task_id_idx
+    ON workflow_runs (task_id);
+  ```
+  Migration runs inside a single transaction so a partial backfill cannot leave the table in a NOT-NULL-with-NULLs state.
+
+**Files to modify:**
+
+- `server/db/schema/workflowRuns.ts` — add `taskId: uuid('task_id').notNull().references(() => tasks.id)`. The schema-level NOT NULL ships in the same migration as the backfill, so first-deploy ordering is: migration runs → app deploys with new schema. (Drizzle's migrator runs before app startup.)
+- `server/services/workflowApproverPoolService.ts` — `task_requester` resolver: replace the V1 fallback (read `workflowRuns.startedByUserId`) with the spec-correct read of `tasks.created_by_user_id` joined via the new FK. Delete the `// V1 → V2: rebind to tasks.created_by_user_id` comment introduced in A3 — it's now resolved. (See A3 Chunk 5 amendment.)
+- `server/routes/workflowRuns.ts` — add task-scoped variants for pause / resume / stop. Each handler resolves `:taskId → :runId` via a single SELECT under `withOrgTx`, then calls the same `WorkflowRunPauseStopService` method as the existing run-scoped handler. The run-scoped routes stay alive as aliases (return same response) for the migration window.
+- `server/services/workflowStepGateService.ts` — when a gate event needs to surface a `taskId` (Chunk 9 will consume this), read `workflow_runs.task_id` directly rather than walking the `agent_execution_events` join. (Optimisation; not load-bearing.)
+- `tasks/builds/workflows-v1/plan.md` — strike the V1/V2 comment in Chunk 5's contract pin to reflect the now-resolved fallback.
+
+**Backfill correctness reasoning.**
+
+- The existing workflow_runs population on `claude/workflows-brainstorm-LSdMm` is small (no production data on this branch). On main, the population is also pre-launch. The backfill therefore tolerates an "orphan task" placeholder for any run that wasn't created from a brief — operator-visible only as a `closed_no_action` row in the Tasks list, with name `[orphan workflow run <id>]`.
+- Existing tasks created from briefs already carry `linked_entity_kind='workflow_run'` and `linked_entity_id=<runId>` (per the `system incident escalation` pattern at `server/db/schema/tasks.ts:58-62`). The backfill query in step 2 uses this.
+- After the migration, every new `workflow_runs` row is created in the same transaction as the parent task — `WorkflowRunService.startRun` already accepts a `taskId` (or creates one); enforce in the same chunk that the `taskId` is always passed at insert time.
+
+**Contracts pinned in this chunk:**
+
+```typescript
+// shared/types/workflowRun.ts
+export interface WorkflowRun {
+  id: string;
+  taskId: string;         // NEW — A7. Always populated post-migration.
+  organisationId: string;
+  subaccountId: string;
+  // ...rest of the existing shape
+}
+
+// New route shape (V1.5 — co-exists with run-scoped variants through migration window):
+//   POST /api/tasks/:taskId/run/pause   body {}
+//   POST /api/tasks/:taskId/run/resume  body { extendCostCents?, extendSeconds? }
+//   POST /api/tasks/:taskId/run/stop    body {}
+// Resolution: SELECT id FROM workflow_runs WHERE task_id = :taskId AND status NOT IN ('succeeded','failed','cancelled')
+//             ORDER BY created_at DESC LIMIT 1.
+//             If no row, 404 { error: 'no_active_run_for_task' }.
+//             If multiple active runs (data anomaly — should never happen post-migration), 409 { error: 'multiple_active_runs' }.
+```
+
+**Error handling:**
+
+- Backfill query fails: migration aborts, deploy stops. Operator runs the standard Drizzle rollback to drop the column. Investigate root cause (most likely: a `tasks.linked_entity_id` row pointing at a deleted run).
+- `task_id` resolution miss in route handler: 404 `no_active_run_for_task` (do NOT 200 with a fallback — fail explicitly so the UI can render the right message).
+- Multiple active runs for one task: 409 `multiple_active_runs` (data anomaly — log a `workflow_run_task_id_anomaly` metric counter so this surfaces on the ops dashboard).
+
+**Test considerations:**
+
+- `workflowRunsTaskIdMigration.integration.test.ts` — boot a clean DB at the prior schema, insert mixed run rows (some linked, some orphan), run the migration, assert: every row has `task_id NOT NULL`, every linked row resolves to its source brief/task, every orphan row resolves to a generated `[orphan workflow run]` task.
+- `workflowApproverPoolTaskRequester.integration.test.ts` — `task_requester` resolution returns `tasks.created_by_user_id` (not `workflow_runs.started_by_user_id`) for the spec-relevant case where requester ≠ started-by (system-initiated runs).
+- `workflowRunPauseStopTaskScopedRoute.integration.test.ts` — `POST /api/tasks/:taskId/run/pause` resolves the run, transitions, returns the same shape as the run-scoped route. Same handler, different entry point.
+- `workflowRunPauseStopRouteAlias.integration.test.ts` — both route shapes co-exist; same response from both.
+
+**Verification commands:**
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run db:generate` — regenerate Drizzle artefacts; verify migration file shape matches schema delta.
+- `npm run build:server`
+- `npx tsx server/services/__tests__/workflowApproverPoolTaskRequester.integration.test.ts`
+
+**Acceptance criteria:**
+
+- Migration runs against a clean (post-Chunk-1) database without error; every existing `workflow_runs` row ends up with `task_id NOT NULL`.
+- `task_requester` pool resolves from `tasks.created_by_user_id`; A3 fallback is removed from code; A3 V1/V2 comment is removed.
+- Task-scoped pause/resume/stop routes return identical responses to the run-scoped routes.
+- `WorkflowRun` TS type is updated; every consumer typechecks.
+- Chunk 16 cleanup item logged: "remove run-scoped pause/resume/stop routes once Chunk 11 ships."
+
+**Dependencies:** Chunks 1 (schema baseline), 5 (the V1 fallback this chunk replaces), 7 (the routes this chunk migrates).
+
+**Effort estimate:** ~1 engineer-day. Smallest of the post-launch chunks. Carries higher operational care than its size suggests because of the migration backfill.
+
+---
+
 ### Chunk 9 — Real-time WebSocket coordination
 
 **Spec sections owned:** §8 (full): connection model, event taxonomy, per-pane subscription, optimistic rendering, latency budget, gap-detection invariant, client ordering invariant.
@@ -1121,7 +1314,8 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 **Files to create:**
 
 - `shared/types/taskEvent.ts` — discriminated union of every event kind from spec §8.2. One type per kind with literal `kind` discriminator + payload fields. `TaskEventKind` enum exported. Source of truth for the event allow-list (per DEVELOPMENT_GUIDELINES §8.13).
-- `shared/types/taskEventValidator.ts` — pure runtime validator: `validateTaskEvent(payload: unknown): { ok: true, event: TaskEvent } | { ok: false, reason: string }`. Used at write-time before persisting.
+- `shared/types/taskEventValidator.ts` — pure runtime validator: `validateTaskEvent(payload: unknown): { ok: true, event: TaskEvent } | { ok: false, reason: string }`. Used at write-time before persisting. **A8 (2026-05-04):** validator MUST also fail-fast on `event_origin` values outside `'engine' | 'gate' | 'user' | 'orchestrator'` — the DB CHECK constraint added in Chunk 1 is the durable safety, but app-layer rejection produces a structured error before the write attempt and surfaces in metrics rather than a Postgres exception.
+- `shared/types/approverPoolSnapshot.ts` — **A8 (2026-05-04, W1-F4):** pin the canonical normalisation contract for the `ApproverPoolSnapshot` JSON shape. Branded type `ApproverPoolSnapshot = Brand<readonly LowercaseUuid[], 'ApproverPoolSnapshot'>`. Constructor `normaliseApproverPoolSnapshot(raw: unknown): ApproverPoolSnapshot` lowercases every UUID, strips duplicates (last-wins), validates each is a syntactically valid UUID, throws `InvalidApproverPoolSnapshotError` otherwise. Every snapshot write site (Chunk 5 `WorkflowApproverPoolService.resolvePool`, refresh-pool, gate creation) calls this before persisting. Every read site that performs a `userInPool` check is fed a normalised snapshot. Without this, a `userInPool(snapshot, callerUuid)` equality check can false-negative for a legitimate approver if the snapshot captured uppercase UUIDs (Postgres returns UUIDs lowercase, but `specific_users` arrays from the validator preserve author input).
 - `server/services/taskEventService.ts` — write path. Wraps `agentExecutionEventService.appendEvent` with `taskId` and the per-task sequence. Emits via `emitTaskEvent`.
 - `server/websocket/taskRoom.ts` — `join:task` / `leave:task` handlers. Validates the user has visibility into the task (per Chunk 10 permission helpers; for now, calls a stub that allows owner / org admin / subaccount admin). Joins `task:${taskId}` room.
 - `server/websocket/emitters.ts` (modify) — add `emitTaskEvent(taskId, envelope)` mirroring `emitAgentExecutionEvent`. Envelope shape:
@@ -1147,7 +1341,8 @@ Stored in `server/services/workflowConfidenceCopyMap.ts` as a const map; the pur
 - `server/websocket/rooms.ts` — wire `join:task` / `leave:task` listeners (calling `taskRoom.handleJoinTask`).
 - `server/websocket/emitters.ts` — add the `emitTaskEvent` export.
 - `server/services/workflowEngineService.ts` — every step transition calls `taskEventService.appendAndEmit(...)` with the relevant kind. Replace any direct `emitWorkflowRunUpdate` call that should now be a task-scoped event (the per-run scope continues to coexist for legacy consumers).
-- `server/services/workflowStepGateService.ts` — `openGate` / `resolveGate` emit `approval.queued` / `approval.decided` / `ask.queued` / `ask.submitted` / `ask.skipped` / `approval.pool_refreshed` events.
+- `server/services/workflowStepGateService.ts` — `openGate` / `resolveGate` emit `approval.queued` / `approval.decided` / `ask.queued` / `ask.submitted` / `ask.skipped` events.
+- `server/services/workflowGateRefreshPoolService.ts` — **A8 (2026-05-04):** emit `approval.pool_refreshed` after a successful pool re-resolution. Deferred from Chunk 5 because Chunk 9 owns the event taxonomy and transport. Payload follows the W1-F11 reduced-broadcast contract below.
 - `server/services/workflowRunPauseStopService.ts` — emit `run.paused.cost_ceiling` / `run.paused.wall_clock` / `run.paused.by_user` / `run.resumed` / `run.stopped.by_user`.
 
 **Contracts pinned in this chunk (the V1-canonical event taxonomy):**
@@ -1164,10 +1359,16 @@ export type TaskEvent =
   | { kind: 'step.completed'; payload: { stepId: string; outputs: unknown; fileRefs: string[] } }
   | { kind: 'step.failed'; payload: { stepId: string; errorClass: string; errorMessage: string } }
   | { kind: 'step.branch_decided'; payload: { stepId: string; field: string; resolvedValue: unknown; targetStep: string } }
-  | { kind: 'approval.queued'; payload: { gateId: string; stepId: string; approverPool: string[]; seenPayload: SeenPayload; seenConfidence: SeenConfidence } }
+  // A8 (2026-05-04, W1-F11): approval.queued and ask.queued payloads no longer ship the full
+  // approver/submitter pool ID list to every WebSocket subscriber. Each carries `poolSize` plus
+  // a stable `poolFingerprint` (sha256(sortedJoinedIds).slice(0, 12)) so the client can detect
+  // pool-membership changes without enumerating the IDs to non-pool subscribers. Pool-member
+  // clients fetch the full snapshot via the gate-detail REST endpoint when they render the
+  // Approval / Ask card. Prevents pool-ID enumeration via WebSocket sniffing.
+  | { kind: 'approval.queued'; payload: { gateId: string; stepId: string; poolSize: number; poolFingerprint: string; seenPayload: SeenPayload; seenConfidence: SeenConfidence } }
   | { kind: 'approval.decided'; payload: { gateId: string; decidedBy: string; decision: 'approved' | 'rejected'; decisionReason?: string } }
-  | { kind: 'approval.pool_refreshed'; payload: { gateId: string; actorId: string; newPoolSize: number; stillBelowQuorum: boolean } }
-  | { kind: 'ask.queued'; payload: { gateId: string; stepId: string; submitterPool: string[]; schema: AskFormSchema; prompt: string } }
+  | { kind: 'approval.pool_refreshed'; payload: { gateId: string; actorId: string; newPoolSize: number; newPoolFingerprint: string; stillBelowQuorum: boolean } }
+  | { kind: 'ask.queued'; payload: { gateId: string; stepId: string; poolSize: number; poolFingerprint: string; schema: AskFormSchema; prompt: string } }
   | { kind: 'ask.submitted'; payload: { gateId: string; submittedBy: string; values: Record<string, unknown> } }
   | { kind: 'ask.skipped'; payload: { gateId: string; submittedBy: string; stepId: string } }
   | { kind: 'file.created'; payload: { fileId: string; version: number; producerAgentId: string } }
@@ -1256,8 +1457,12 @@ The 7-day hot retention (Open Q4) is the V1 baseline. Long-running workflows and
 - Replay-on-reconnect resumes from `lastEventId` cursor; no events lost; no replay from start.
 - Gap detection signals to the client when retention has expired the cursor.
 - Out-of-order arrival is buffered and reconciled.
+- **A8 (W1-F4) — `ApproverPoolSnapshot` normalisation contract is enforced**: every snapshot write goes through `normaliseApproverPoolSnapshot`; `userInPool` checks never false-negative on UUID case mismatch (regression test asserts uppercase-input snapshot resolves correctly).
+- **A8 (W1-F11) — pool-ID broadcast is reduced**: `approval.queued` / `ask.queued` / `approval.pool_refreshed` events ship `poolSize + poolFingerprint`, not the full ID list. Pool-member clients fetch the full snapshot via the gate-detail REST endpoint when they render the card. WebSocket sniffing cannot enumerate pool membership.
+- **A8 — `approval.pool_refreshed` is emitted by `WorkflowGateRefreshPoolService` after a successful re-resolution**: the deferred Chunk 5 emission lands here.
+- **A8 — `taskEventValidator` rejects unknown `event_origin` values before the DB write**: structured error returned to the caller; metric counter `task_event_invalid_origin_total` increments.
 
-**Dependencies:** Chunks 1 (schema), 3 (per-task event log allocation). Chunk 9 does NOT depend on Chunk 7; Chunk 9 ships the event taxonomy and transport, Chunk 7 (downstream) emits `run.paused` / `run.resumed` / `run.stopped` events through this chunk's primitive. The chunk-overview table reflects 9 → 7, not 7 → 9.
+**Dependencies:** Chunks 1 (schema), 3 (per-task event log allocation), 5 (approver pool resolver — `normaliseApproverPoolSnapshot` consumed at every snapshot write site, including back-fill of existing call sites). Chunk 9 does NOT depend on Chunk 7; Chunk 9 ships the event taxonomy and transport, Chunk 7 (downstream) emits `run.paused` / `run.resumed` / `run.stopped` events through this chunk's primitive. The chunk-overview table reflects 9 → 7, not 7 → 9.
 
 ---
 
@@ -1344,6 +1549,19 @@ The 7-day hot retention (Open Q4) is the V1 baseline. Long-running workflows and
 - Picker endpoint returns correctly scoped pools per role.
 - Teams CRUD page allows org admin to create / edit / delete teams and add / remove members.
 - Cross-subaccount routing works for org admin; blocked for subaccount admin.
+- **A9 — operator decision recorded on email-enumeration mitigation** (see below).
+
+**A9 (2026-05-04, W1-F3) — Email enumeration mitigation: pre-merge operator decision required.**
+
+The `assignable-users` endpoint returns user emails for everyone in the resolved pool. For an org admin authoring an Approval gate's `specific_users` group, this exposes the email of every user across every subaccount the admin can route into. Threat model: a compromised org-admin session enumerates the org's user base by iterating subaccount IDs.
+
+Operator picks ONE of these three before the chunk merges, and the chosen mitigation lands in the same PR:
+
+1. **Ship as-is.** Org admins are inside the trust boundary; the endpoint already requires authentication + admin role. Acceptable trade-off if the org-admin role is treated as effectively-staff. Risk: if the admin role is delegated to a less-trusted operator (e.g. an agency-managed sub-account admin), the surface widens. Operator confirms the policy explicitly in the PR description.
+2. **Redact email** for users who are NOT members of the caller's own subaccounts. Returns `{ id, name, email: null, role, ... }` for cross-subaccount entries. Picker UX still works (name + role visible); the bulk-enumeration data leak is closed. Recommended default.
+3. **Rate-limit + audit-log.** Add `assignable_users_lookups_per_minute` counter scoped to `(orgAdminUserId)`; allow up to 10 distinct subaccount IDs per minute; 429 above. Log every cross-subaccount lookup to `audit_logs` for after-the-fact review. Useful when the org-admin role is highly trusted but operators want forensic visibility.
+
+**Decision capture:** the chosen option lands in the chunk PR description with a one-line rationale and a link to this amendment. The implementation lands in `server/services/assignableUsersService.ts` and `server/routes/assignableUsers.ts`.
 
 **Dependencies:** Chunk 1 (no schema changes, but the existing `teams` / `team_members` schemas + RLS are required — they exist already).
 
@@ -1858,8 +2076,9 @@ Concurrent-edit handling: optimistic UX. The Studio reads the latest version's `
 - Email templates use "task" in user-facing copy.
 - Cleanup job reaps unconsumed drafts after 7 days.
 - `architecture.md` and `docs/capabilities.md` updated.
+- **A7 follow-up — run-scoped pause/resume/stop route aliases removed.** Chunk 8.5 left `POST /api/workflow-runs/:runId/{pause,resume,stop}` alive as aliases for the migration window. By Chunk 16 time, every consumer (Chunk 11 Open Task UI) is on the task-scoped variants — delete the alias handlers; verify no remaining call sites grep across `client/` and `server/`.
 
-**Dependencies:** Chunks 1 (`workflow_drafts` table), 11 (Tasks page lives in OpenTaskView), 14b (drafts service exists).
+**Dependencies:** Chunks 1 (`workflow_drafts` table), 8.5 (route aliases must exist to be removed), 11 (Tasks page lives in OpenTaskView; consumer must be on the new routes), 14b (drafts service exists).
 
 ---
 
@@ -1966,31 +2185,31 @@ Every spec section is owned by a chunk OR routed to deferred. No section silentl
 |---|---|---|
 | §1 Summary, scope, related docs | covered by intro; spec-time decisions #1–#11 land in their respective chunks | |
 | §2 Concepts and cross-references | covered by [System invariants](#system-invariants) + per-chunk references | |
-| §3.1 New columns on existing tables | Chunk 1 | |
+| §3.1 New columns on existing tables | Chunk 1; Chunk 8.5 (`workflow_runs.task_id` FK — A7 amendment) | A7: spec implicitly assumes `workflow_runs.task_id` via line 1406 routing query; not in §3.1 table; Chunk 8.5 closes |
 | §3.2 New `approval` step `params` shape | Chunks 1 (storage shape), 5 (resolution), 12 (Ask consumption) | Embedded in `definitionJson` |
-| §3.3 New tables (`workflow_drafts`, `workflow_step_gates`) | Chunk 1 (schema), 4 (gate write path), 14 (drafts) | |
-| §3.4 Indexes and constraints | Chunk 1 | |
+| §3.3 New tables (`workflow_drafts`, `workflow_step_gates`) | Chunk 1 (schema), 4 (gate write path), 14 (drafts) | A1: `superseded_by_gate_id` removed |
+| §3.4 Indexes and constraints | Chunk 1 (incl. A2 CHECK constraints for `event_origin` / `next_event_seq` / `cost_accumulator_cents`) | |
 | §3.5 What does NOT change in schema | Chunk 1 (verified) | |
 | §4 Engine validator (4.0–4.8) | Chunk 2 | |
-| §5.1 Approver pool resolution | Chunk 5 | |
+| §5.1 Approver pool resolution | Chunk 5 (incl. A3 V1 fallback) → Chunk 8.5 cleanup; A8 W1-F4 normalisation contract via Chunk 9's `shared/types/approverPoolSnapshot.ts` consumed at every Chunk 5 snapshot write site | |
 | §5.1.1 Approval write contracts | Chunk 4 (write contracts), Chunk 5 (pool enforcement) | |
-| §5.1.2 `/refresh-pool` endpoint | Chunk 5 | |
+| §5.1.2 `/refresh-pool` endpoint | Chunk 5 (write path), Chunk 9 (`approval.pool_refreshed` event emission per A8) | A8: emission lives in Chunk 9 because Chunk 9 owns the event taxonomy |
 | §5.2 isCritical routing | Chunk 5 | V2 recovery path → deferred |
 | §5.3 Stall-and-notify | Chunk 8 | |
 | §5.4 Engine entry-points modified | Chunks 5 (gate-resolution + isCritical), 7 (cap monitoring), 8 (stall jobs + schedule pinning) | |
-| §6.1–§6.5 Confidence + audit | Chunk 6; Plan-tab caption rendering Chunk 11 | Audit drawer V2 → deferred |
-| §7.1–§7.6 Cost / wall-clock runaway | Chunk 7; UI rendering of pause card Chunk 11 | Mid-step interruption V2 → deferred |
+| §6.1–§6.5 Confidence + audit | Chunk 6 (incl. A4 inlined seenPayload + A5 confidence cut-points blocker); Plan-tab caption rendering Chunk 11 | Audit drawer V2 → deferred |
+| §7.1–§7.6 Cost / wall-clock runaway | Chunk 7 (V1 routes at run-scope per A6); Chunk 8.5 (route migration to spec-shape task-scope per A7); UI rendering of pause card Chunk 11 | Mid-step interruption V2 → deferred |
 | §8.1 Connection model + replay + ordering invariants | Chunks 3 (allocation), 9 (replay + client ordering) | |
-| §8.2 Event taxonomy | Chunk 9 (taxonomy + validator) | |
+| §8.2 Event taxonomy | Chunk 9 (taxonomy + validator + A8 W1-F11 reduced-broadcast for pool IDs) | A8: `approval.queued`/`ask.queued`/`pool_refreshed` ship `poolSize + poolFingerprint`, not full ID list |
 | §8.3 Per-pane subscription | Chunk 11 | |
 | §8.4 Optimistic rendering | Chunk 11 | |
 | §8.5 Latency budget | Chunk 9 (synthetic load test in verification) | |
 | §9 Open task view UI | Chunk 11 | Mobile fallback V2 → deferred |
 | §10 Studio UI | Chunks 14a (canvas + publish), 14b (inspectors + chat panel + draft hydration) | |
-| §11 Ask form runtime | Chunk 12 | File-upload + conditional fields V2 → deferred |
-| §12 Files and conversational editing | Chunk 13 | Side-by-side diff + non-adjacent-version diff V2 → deferred |
+| §11 Ask form runtime | Chunk 12 (route shape ships natively at `/api/tasks/:taskId/ask/...` post-Chunk-8.5) | File-upload + conditional fields V2 → deferred |
+| §12 Files and conversational editing | Chunk 13 (route shape ships natively at `/api/tasks/:taskId/files/...` post-Chunk-8.5) | Side-by-side diff + non-adjacent-version diff V2 → deferred |
 | §13 Orchestrator changes | Chunk 15 | |
-| §14 Permissions model | Chunk 10 | Restricted-view V2 → deferred |
+| §14 Permissions model | Chunk 10 (incl. A9 W1-F3 email enumeration mitigation operator decision) | Restricted-view V2 → deferred |
 | §15 Naming cleanup | Chunk 11 (page-title + breadcrumb), Chunk 16 (full sweep + redirect + email) | |
 | §16 Build punch list | Per chunk; effort estimates revised in [Chunk overview](#chunk-overview) | |
 | §17 Test plan | Per chunk's "Test considerations" + "Verification commands" sections | Frontend tests V2 → deferred per `spec-context.md` |

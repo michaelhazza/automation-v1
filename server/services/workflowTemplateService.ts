@@ -374,7 +374,8 @@ export const WorkflowTemplateService = {
     templateId: string,
     def: WorkflowDefinition,
     userId: string,
-    publishNotes?: string
+    publishNotes?: string,
+    expectedUpdatedAt?: Date
   ): Promise<{ version: number }> {
     const template = await this.getOrgTemplate(organisationId, templateId);
     if (!template) {
@@ -419,6 +420,30 @@ export const WorkflowTemplateService = {
     }
 
     await db.transaction(async (tx) => {
+      // Concurrent-edit guard: re-read updatedAt inside the transaction so
+      // the check and the write are atomic — no TOCTOU window.
+      if (expectedUpdatedAt !== undefined) {
+        const [current] = await tx
+          .select({ updatedAt: workflowTemplates.updatedAt, latestVersion: workflowTemplates.latestVersion })
+          .from(workflowTemplates)
+          .where(and(eq(workflowTemplates.id, templateId), isNull(workflowTemplates.deletedAt)));
+        if (!current || current.updatedAt.toISOString() !== expectedUpdatedAt.toISOString()) {
+          const [latestVer] = await tx
+            .select({ publishedByUserId: workflowTemplateVersions.publishedByUserId })
+            .from(workflowTemplateVersions)
+            .where(eq(workflowTemplateVersions.templateId, templateId))
+            .orderBy(desc(workflowTemplateVersions.version))
+            .limit(1);
+          throw {
+            statusCode: 409,
+            message: 'Concurrent publish detected',
+            errorCode: 'concurrent_publish',
+            upstreamUpdatedAt: current?.updatedAt.toISOString() ?? new Date().toISOString(),
+            upstreamUserId: latestVer?.publishedByUserId ?? null,
+          };
+        }
+      }
+
       await tx.insert(workflowTemplateVersions).values({
         templateId,
         version: def.version,
