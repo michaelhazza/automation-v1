@@ -167,7 +167,7 @@ export async function resumeFromIntegrationConnect(params: {
   if (txResult !== null) {
     logger.info('run_resumed', {
       runId: txResult.runId,
-      conversationId: '', // not available without conversation_id on agent_runs
+      conversationId: resumeConvId ?? '',
       blockedReason: 'integration_required',
       integrationId: '', // not stored on run — TODO(v2): store integrationId in runMetadata at block time
       tokenHashPrefix,
