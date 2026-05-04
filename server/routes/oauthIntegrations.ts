@@ -428,6 +428,28 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
     });
   }
 
+  // C-P0-2: if a pendingRunId was stored on the nonce, enqueue a resume job
+  // so the paused agent run continues automatically after OAuth completes.
+  const pendingRunId = stateData.pendingRunId ?? null;
+  if (pendingRunId) {
+    try {
+      const { enqueueResumeAfterOAuth } = await import('../jobs/resumeRunAfterOAuthJob.js');
+      await enqueueResumeAfterOAuth({ runId: pendingRunId, organisationId: ghlOrgId });
+    } catch (err) {
+      logger.warn('ghl.oauth.resume_enqueue_failed', {
+        event: 'ghl.oauth.resume_enqueue_failed',
+        orgId: ghlOrgId,
+        runId: pendingRunId,
+        error: { message: String(err) },
+      });
+    }
+  } else {
+    logger.debug('ghl.oauth.no_pending_run', {
+      event: 'ghl.oauth.no_pending_run',
+      orgId: ghlOrgId,
+    });
+  }
+
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));
 // ── End GHL agency callback ───────────────────────────────────────────────
