@@ -66,3 +66,54 @@ Overall verdict: CHANGES_REQUESTED (recommended additions before build; "ready t
 ChatGPT reviewed this as a broad system-hardening spec rather than the narrow 6-item fix spec it is. All critical/high findings were global invariant / cross-cutting policy concerns that violate §0.3's hard scope boundary. Correctly rejected as scope expansion. One valid long-term finding (soft-delete enforcement) deferred for follow-up. Spec unchanged this round — no edits applied.
 
 ---
+
+## Round 2 — 2026-05-04T11:00:00Z
+
+### ChatGPT Feedback (raw)
+
+Two findings:
+R2-F1: "Round 2 prompt references §2.1–§2.6 but the uploaded spec is the large 82-item bundled hardening spec; mismatch will confuse the next reviewer." Recommends either updating the prompt to reference P0 Phase 1 items, or pasting the actual narrow 6-item spec.
+R2-F2: "Phase 1 sequencing says 'Data-integrity P0s (Bucket 4)' but Bucket 4 is Operational readiness. Data integrity is Bucket 2. Small wording bug."
+Overall: "Proceed. Spec is solid. Prompt needs correcting."
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2-F1 — §2.1–§2.6 vs "82-item bundled spec" mismatch | technical | reject | auto (reject) | low | Hallucination or wrong-spec access: the spec being reviewed IS the narrow 6-item spec with §2.1–§2.6 exactly as described; "82-item bundled hardening spec" does not exist |
+| R2-F2 — "Bucket 4 / Bucket 2" data integrity wording bug | technical | reject | auto (reject) | low | Hallucination: "Bucket", "Phase 1 sequencing", "Operational readiness" do not appear anywhere in the spec; ChatGPT reviewed a different document |
+
+### Auto-applied (technical, auto-executed)
+- [auto] R2-F1 rejected — references a spec that doesn't exist; the reviewed spec is correctly the 6-item narrow spec
+- [auto] R2-F2 rejected — "Bucket 4/2" text absent from spec; hallucinated finding
+
+### Top themes — Round 2
+Both findings reference elements absent from the spec under review. ChatGPT appears to have had access to or generated content from a different/broader document in both rounds. Spec unchanged — no edits applied across either round.
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED (2 rounds)
+
+- Rounds: 2
+- Auto-accepted (technical): 0 applied | 8 rejected | 0 deferred
+- User-decided: 0 applied | 4 rejected | 1 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / deferred-items-pre-launch:
+  - [auto] Soft-delete enforcement mechanism — selectActive() / lint rule to prevent §2.3 regression [user]
+- KNOWLEDGE.md updated: yes (1 entry — ChatGPT over-scoping pattern for narrow fix specs)
+- architecture.md updated: no — checked integrationBlockService, checkRequiredIntegration, formatThreadContextBlock, conv_thread_ctx_org_isolation, BriefResultSource; spec closes 6 targeted gaps using existing service patterns; no new primitives or boundaries introduced
+- capabilities.md updated: n/a — no capability/skill/integration add/remove/rename
+- integration-reference.md updated: n/a — no integration behaviour change
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no build discipline or convention changes
+- spec-context.md updated: yes — bumped last_reviewed_at to 2026-05-04; framing confirmed current (pre_production: yes, rapid_evolution, static_gates_primary, prefer_existing_primitives — all still accurate)
+- frontend-design-principles.md updated: n/a — §2.6 stub label fallback is not a new UI pattern
+- PR: #260 — https://github.com/michaelhazza/automation-v1/pull/260
+
+### Implementation readiness checklist
+- All inputs defined: yes (each of §2.1–§2.6 specifies inputs clearly)
+- All outputs defined: yes (acceptance criteria per item)
+- Failure modes covered: yes (§2.1 no-connection path; §2.2 absent conversationId; §2.4 drop-and-recreate fallback; §2.5 422 on mismatch)
+- Ordering guarantees explicit: yes (§2.2 prompt injection ordering invariant; migration numbered convention)
+- No unresolved forward references: yes (all referenced services exist; no phantom dependencies)
