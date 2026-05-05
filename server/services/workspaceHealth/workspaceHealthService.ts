@@ -10,6 +10,7 @@
 
 import { and, desc, eq, inArray, isNull, max, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
+import { isActive } from '../../lib/queryHelpers.js';
 import {
   agents,
   agentRuns,
@@ -214,7 +215,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
       isSystemManaged: agents.isSystemManaged,
     })
     .from(agents)
-    .where(eq(agents.organisationId, organisationId));
+    .where(and(eq(agents.organisationId, organisationId), isActive(agents)));
 
   // Get max(createdAt) per agentId from agent_runs in one query
   const lastRunRows = await db

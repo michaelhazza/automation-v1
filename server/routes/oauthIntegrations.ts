@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { sql } from 'drizzle-orm';
 import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -17,7 +18,7 @@ import { integrationConnectionService } from '../services/integrationConnectionS
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
-// guard-ignore-next-line: rls-contract-compliance reason="db is passed as connection handle to withOrgTx for GUC propagation on the pre-auth GHL callback path — no direct queries issued here; no authenticated org context is available for getOrgScopedDb"
+// guard-ignore-next-line: rls-contract-compliance reason="db.transaction is used to open a proper org-scoped tx with GUC propagation on the pre-auth GHL callback path; no authenticated org context is available for getOrgScopedDb"
 import { db } from '../db/index.js';
 import { withOrgTx } from '../instrumentation.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
@@ -421,23 +422,27 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   });
 
   // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
-  // even if enumeration fails. Hard timeout: 15s. Wrapped in withOrgTx so that
-  // any downstream service call that reads getOrgTxContext() receives the correct
-  // org context (S-P0-4: GUC propagation on unauthenticated callback paths).
+  // even if enumeration fails. Hard timeout: 15s. Wrapped in a proper db.transaction
+  // with set_config so that any downstream service call that reads getOrgTxContext()
+  // receives the correct org context and GUC (S-P0-4 / AR-3.1 fix).
   try {
     const svc = await import('../services/ghlAgencyOauthService.js') as unknown as {
-      autoEnrolAgencyLocations?: (orgId: string, connection: unknown, label: string) => Promise<void>;
+      autoEnrolAgencyLocations?: (orgId: string, connection: unknown, correlationId: string) => Promise<unknown>;
     };
     if (typeof svc.autoEnrolAgencyLocations === 'function') {
-      await withOrgTx(
-        { tx: db, organisationId: ghlOrgId, source: 'oauth:callback:ghl:enrol' },
-        () => Promise.race([
-          svc.autoEnrolAgencyLocations!(ghlOrgId, connection, `oauth_callback:${connection.id}`),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
-          ),
-        ]),
-      );
+      // guard-ignore-next-line: rls-contract-compliance reason="db.transaction opens an org-scoped tx with set_config GUC on the pre-auth GHL OAuth callback path — no authenticated org context exists for getOrgScopedDb (AR-3.1 fix, S-P0-4)"
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.organisation_id', ${ghlOrgId}, true)`);
+        await withOrgTx(
+          { tx, organisationId: ghlOrgId, source: 'oauth:callback:ghl:enrol' },
+          () => Promise.race([
+            svc.autoEnrolAgencyLocations!(ghlOrgId, connection, `oauth_callback:${connection.id}`),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
+            ),
+          ]),
+        );
+      });
     }
   } catch (err) {
     logger.warn('ghl.oauth.callback_enrol_failed', {
@@ -452,15 +457,23 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   }
 
   // C-P0-2: agent resume after OAuth.
-  // The JWT-based OAuth flow (/api/integrations/oauth2/callback) handles
-  // agent run resume via resumeFromIntegrationConnect when payload.resumeToken
-  // is set. The GHL agency OAuth path (/api/oauth/callback) is initiated from
-  // the settings/onboarding UI (routes/ghl.ts), which never passes pendingRunId
-  // to setGhlOAuthState — so stateData.pendingRunId is always null here.
-  // The oauth_state_nonces.pending_run_id column and enqueueResumeAfterOAuth
-  // are pre-built for a future agent-triggered GHL OAuth path; when that path
-  // is wired, the initiation site (routes/ghl.ts) must pass pendingRunId and
-  // the consume site here must call enqueueResumeAfterOAuth(stateData.pendingRunId).
+  // When the GHL OAuth flow was initiated with a pendingRunId (agent-triggered
+  // path), resume the blocked run via pg-boss after the token exchange succeeds.
+  if (stateData.pendingRunId) {
+    try {
+      const { enqueueResumeAfterOAuth } = await import('../jobs/resumeRunAfterOAuthJob.js');
+      await enqueueResumeAfterOAuth({ runId: stateData.pendingRunId, organisationId: ghlOrgId });
+    } catch (err) {
+      // Non-fatal — the OAuth connection is stored; the run resume failure is
+      // an independent concern and will surface via the incident monitor.
+      logger.warn('ghl.oauth.resume_enqueue_failed', {
+        event: 'ghl.oauth.resume_enqueue_failed',
+        orgId: ghlOrgId,
+        pendingRunId: stateData.pendingRunId,
+        error: { message: String(err) },
+      });
+    }
+  }
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));

@@ -469,6 +469,35 @@ For each round:
   The diff link MUST appear in the same message as the round summary. A round
   summary without the diff link is incomplete — the user cannot proceed without it.
 
+  **Format rules — MANDATORY for every round, every diff reference:**
+
+  - Use markdown link syntax `[.chatgpt-diffs/<filename>](.chatgpt-diffs/<filename>)`
+    with a **repo-relative path** (begins with `.chatgpt-diffs/`).
+  - Render to VSCode as a clickable link. The user opens the file by clicking it.
+  - This is non-negotiable — see the "VSCode Extension Context / Code References
+    in Text" guidance in CLAUDE.md.
+
+  **DO NOT** (these formats break VSCode click-to-open and are forbidden):
+
+  - Absolute paths (`c:\Files\Projects\...\.chatgpt-diffs\pr264-round2-code-diff.diff`).
+  - Backslash separators on any platform.
+  - Backtick-wrapped paths without the markdown link wrapper
+    (`` `.chatgpt-diffs/pr264-round2-code-diff.diff` ``).
+  - Listing the file under a heading like "Absolute paths:" instead of inline
+    in the round-summary block.
+
+  **Worked example — round 2 summary, exactly this shape:**
+
+  ```
+  Round 2 diff ready for upload to ChatGPT:
+
+    - [.chatgpt-diffs/pr264-round2-code-diff.diff](.chatgpt-diffs/pr264-round2-code-diff.diff) — 8.2K, code-only (7 files)
+
+  Upload the file to ChatGPT (focus on remaining issues and any new ones
+  introduced by the latest changes), then paste the response here to continue.
+  Or say 'done' to finalise.
+  ```
+
 **After printing the round summary and round N+1 diff link: WAIT. Do not finalize.**
 Every round ends with the mode-appropriate line:
   [Automated] "Say 'next round' to fetch another automated review, or 'done' to finalise."

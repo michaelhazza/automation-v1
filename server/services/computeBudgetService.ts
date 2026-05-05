@@ -200,6 +200,10 @@ async function getOrgComputeBudget(organisationId: string, conn: TxOrDb = db) {
 // Acquire org-level compute budget lock via SELECT ... FOR UPDATE
 // This serializes all budget checks for the same organisation within the tx.
 // If no org_compute_budgets row exists, we use a PostgreSQL advisory lock.
+//
+// KNOWLEDGE.md 2026-04-21: SELECT FOR UPDATE only locks EXISTING rows; when
+// no row exists, two concurrent first-calls both pass the check. The advisory
+// lock branch covers that case to prevent the double-reservation race window.
 // ---------------------------------------------------------------------------
 
 async function acquireOrgComputeBudgetLock(

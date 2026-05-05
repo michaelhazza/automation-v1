@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getSubaccountWorkspaceConfig } from '../../lib/api';
+import { logAndSwallow } from '../../lib/silentCatchHelper';
 
 interface SeatUsage {
   active: number;
@@ -17,7 +18,7 @@ export function SeatsPanel({ subaccountId }: { subaccountId: string }) {
   useEffect(() => {
     getSubaccountWorkspaceConfig(subaccountId)
       .then((data: { seatUsage: SeatUsage }) => setSeats(data.seatUsage))
-      .catch(() => {});
+      .catch(logAndSwallow('SeatsPanel: workspace config fetch'));
   }, [subaccountId]);
 
   if (!seats) return null;

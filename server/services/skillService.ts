@@ -1,4 +1,5 @@
 import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
@@ -39,7 +40,7 @@ export const skillService = {
     return db
       .select()
       .from(skills)
-      .where(and(conditions, eq(skills.isActive, true), isNull(skills.deletedAt)))
+      .where(and(conditions, eq(skills.isActive, true), isActive(skills)))
       .orderBy(skills.skillType, skills.name);
   },
 
@@ -52,7 +53,7 @@ export const skillService = {
     const [skill] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), orgCondition, eq(skills.isActive, true), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), orgCondition, eq(skills.isActive, true), isActive(skills)));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
     return skill;
   },
@@ -66,7 +67,7 @@ export const skillService = {
     const rows = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.slug, slug), eq(skills.isActive, true), orgCondition, isNull(skills.deletedAt)));
+      .where(and(eq(skills.slug, slug), eq(skills.isActive, true), orgCondition, isActive(skills)));
 
     if (organisationId) {
       const orgSkill = rows.find(s => s.organisationId === organisationId);
@@ -90,7 +91,7 @@ export const skillService = {
       .where(and(
         eq(skills.slug, slug),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
         or(
           and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)),
           and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
@@ -133,7 +134,7 @@ export const skillService = {
       .from(skills)
       .where(and(
         inArray(skills.slug, effectiveSlugs),
-        isNull(skills.deletedAt),
+        isActive(skills),
         eq(skills.isActive, true),
         or(
           subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
@@ -318,7 +319,7 @@ export const skillService = {
           eq(skills.id, id),
           eq(skills.organisationId, organisationId),
           isNull(skills.subaccountId),
-          isNull(skills.deletedAt),
+          isActive(skills),
         ));
 
       if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -379,7 +380,7 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isActive(skills)));
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') {
       throw { statusCode: 400, message: 'Built-in skill visibility is managed at the system tier' };
@@ -461,7 +462,7 @@ export const skillService = {
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ))
       .orderBy(skills.skillType, skills.name);
 
@@ -486,7 +487,7 @@ export const skillService = {
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
 
@@ -510,7 +511,7 @@ export const skillService = {
       const [countRow] = await tx
         .select({ count: sql<number>`count(*)` })
         .from(skills)
-        .where(and(eq(skills.subaccountId, subaccountId), isNull(skills.deletedAt)));
+        .where(and(eq(skills.subaccountId, subaccountId), isActive(skills)));
       if ((countRow?.count ?? 0) >= MAX_SKILLS_PER_SUBACCOUNT) {
         throw { statusCode: 400, message: `Subaccount skill limit (${MAX_SKILLS_PER_SUBACCOUNT}) reached` };
       }
@@ -583,7 +584,7 @@ export const skillService = {
           eq(skills.id, id),
           eq(skills.organisationId, organisationId),
           eq(skills.subaccountId, subaccountId),
-          isNull(skills.deletedAt),
+          isActive(skills),
         ));
 
       if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -640,7 +641,7 @@ export const skillService = {
         eq(skills.id, id),
         eq(skills.organisationId, organisationId),
         eq(skills.subaccountId, subaccountId),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -658,7 +659,7 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isActive(skills)));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };

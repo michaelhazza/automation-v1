@@ -7,6 +7,7 @@ import {
   boardConfigs,
   agents,
 } from '../db/schema/index.js';
+import { assertActive } from '../lib/queryHelpers.js';
 import type { Task } from '../db/schema/tasks.js';
 
 type TaskStatus = Task['status'];
@@ -154,6 +155,15 @@ export const taskService = {
     const position = await this._nextPosition(subaccountId, status);
 
     const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
+
+    if (agentId) {
+      const [assignedAgent] = await db
+        .select({ id: agents.id, deletedAt: agents.deletedAt })
+        .from(agents)
+        .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
+        .limit(1);
+      assertActive(assignedAgent, 'Agent');
+    }
 
     const [item] = await db
       .insert(tasks)

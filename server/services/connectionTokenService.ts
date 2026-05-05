@@ -14,6 +14,8 @@ import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import { getRefreshBufferMs } from './connectionTokenServicePure.js';
 
+export { validateEncryptionKeyOrThrow } from './connectionTokenValidation.js';
+
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;

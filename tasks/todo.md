@@ -49,19 +49,19 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 | 24 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 1]** Multer memory storage accepts 500MB — OOM DoS risk | `server/middleware/validate.ts:17-20` | MEDIUM |
 | 25 | **Security** | **[CLOSED 2026-04-29 — route wiring; primitive swap remaining in pre-prod-boundary-and-brief-api Phase 2]** Forgot/reset-password rate-limited via `express-rate-limit` 5/15min at `server/routes/auth.ts:11-12,108,120`. Swap to DB-backed primitive folded into Phase 2. | `server/routes/auth.ts:11-12,108,120` | MEDIUM |
 | 26 | **Security** | **[CLOSED 2026-04-29]** Production error envelope `{ error: { code, message }, correlationId }` strips internals; 5xx `message` replaced with "Internal server error" in prod | `server/index.ts:436-443` | MEDIUM |
-| 27 | **Security** | **[OPEN — out of scope for pre-prod-boundary-and-brief-api per brief; broader follow-up]** Missing security audit trail — no logging of auth/permission events | No centralized audit | MEDIUM |
+| 27 | **Security** | **[CLOSED 2026-05-05 — pre-launch-phase-2]** Security audit trail now lives in the dedicated `security_audit_events` table (migration 0281) with `securityAuditService` writing `auth.login.failure`, `auth.login.success`, oauth state events, abuse events. Sentinel-org row anchors orgless events; boot-time invariant in `securityAuditSentinelValidation.ts`. Stream split documented in `architecture.md` §Layer 4. | `server/services/securityAuditService.ts` + migration `0281_security_audit_events.sql` | MEDIUM |
 
 ### Noted (Lower Priority / Post-Testing)
 
 - Route files exceeding 200-line limit: `subaccounts.ts` (758L), `permissionSets.ts` (587L), `llmUsage.ts` (524L), `portal.ts` (502L)
 - Auth tokens stored in localStorage (XSS risk — migrate to httpOnly cookies later)
-- No React ErrorBoundary component
+- ~~No React ErrorBoundary component~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** `client/src/components/ErrorBoundary.tsx` now ingests client errors via `/api/client-errors` endpoint (16kb tight body cap; rate-limited).
 - Silent promise rejections in `workspaceMemoryService.ts`
 - Missing cascade delete rules on parent-child task/agent relationships
 - Deprecated columns in agents schema (`sourceTemplateId`, `sourceTemplateVersion`)
-- OAuth state JWT window too long (10 min, recommend 5 min)
+- ~~OAuth state JWT window too long (10 min, recommend 5 min)~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** Tightened to 5min. Revert decision pending telemetry — see deferred CHATGPT-R1-7.
 - No refresh token rotation on OAuth integrations
-- JWT session expiry at 24h with no forced logout on password change
+- ~~JWT session expiry at 24h with no forced logout on password change~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** `passwordChangedAt` JWT iat invalidation wired with second-precision alignment (write-side `authService.resetPassword` floors to whole seconds; read-side `middleware/auth.ts` compares whole seconds with strict `>`). See KNOWLEDGE.md [2026-05-05] JWT iat invalidation.
 
 ---
 
@@ -2990,3 +2990,142 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
   - Spec section: plan chunk 4B step 6 "Idempotency posture per route" — *"Skip: state-based; precondition `tier3.{slug}.status IN ('not_started')` — UPDATE WHERE that predicate. 0 rows affected = race; return 409 with the current state."*
   - Gap: implementation at `server/services/subaccountOnboardingService.ts:586-590` only blocks `status === 'completed'` (errorCode `ARTEFACT_ALREADY_COMPLETED`); skipping from `in_progress` or re-skipping a `skipped` artefact is allowed. Plan §4B literal precondition is `IN ('not_started')` only.
   - Suggested approach: decide whether to tighten the precondition to `not_started`-only (matches §4B; introduce errorCode `BASELINE_SKIP_PRECONDITION_FAILED` and wire 409 mapping in `server/routes/subaccounts.ts:867-879`), OR relax §4B in the spec to match the current operationally-permissive implementation. Not a regression — same behaviour the prior 2026-05-04T13-04-44Z conformance run marked PASS without flagging — so this is a follow-up cleanup, not a PR blocker.
+
+## Deferred from spec-conformance review — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05T05:08:56Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-launch-phase-2-2026-05-05T04-56-49Z.md`
+**Spec:** `docs/pre-launch-hardening-mini-spec.md`
+
+- [ ] REQ #4 — Maintenance-job done criteria: pure-function tests vs real-row integration tests
+  - Spec section: Mini-spec § Chunk 4 done criteria
+  - Gap: mini-spec says "test added per job that verifies a real row is decayed/pruned/recalibrated"; implementation ships pure-function tests of computation logic only (`ruleAutoDeprecateJobPure.test.ts`, `fastPathDecisionsPruneJobPure.test.ts`, `fastPathRecalibrateJobPure.test.ts`).
+  - Suggested approach: documented divergence — operator-locked decision per plan § 12 "no unit test suite during development" + memory note `feedback_unit-tests-mid-build`. Either (a) accept the divergence and amend the mini-spec done criteria to match the project's pure-test posture, OR (b) author DB-backed integration tests for the three jobs in a follow-up branch. No code change needed in this branch.
+
+- [ ] REQ #15 — Skill error envelope CI grep gate not implemented (C4a-6-RETSHAPE adherence enforcement)
+  - Spec section: Mini-spec § Chunk 5 done criteria — *"Skill error envelope contract is one of two documented options and 100% adherent."*
+  - Gap: plan Task 6b.7 last bullet promised "Add a CI grep gate (Chunk 7) that asserts every skill handler return shape matches the flat-string pattern (no mixed shapes — invariant 2.4 closure)." Chunk 7 shipped audit-stream-split gate and RLS-CONTRACT-IMPORT gate but did NOT ship the skill envelope adherence gate. Grep finds nested `error: { code, message, ... }` shapes in `connectorConfigService.ts`, `ghlAgencyOauthService.ts`, `locationTokenService.ts`, `skillExecutor.ts` (delegation skills) — i.e. mixed shapes still in the code.
+  - Suggested approach: author `scripts/verify-skill-error-envelope.sh` that scans `server/skills/**`, `server/tools/**`, and `server/services/skillExecutor.ts` `SKILL_HANDLERS` for return shapes; compare against the grandfather flat-string contract. Decisions required: (a) which file paths are in scope (skill handlers only, or every service that returns a skill envelope?), (b) whether the existing nested shapes in connector/oauth services represent skill returns or are out of scope (they appear to be event payloads, not skill envelopes — needs human confirmation). Not a mechanical fix because the scope decision is a design choice.
+
+- [ ] REQ #29 — SC-COVERAGE-BASELINE numbers are placeholders, not actual CI counts
+  - Spec section: Mini-spec § Chunk 6 — *"capture pre-Phase-2 baseline counts before testing changes them"*
+  - Gap: `tasks/builds/pre-launch-phase-2/progress.md` records section heading but the two count rows are placeholder text ("update with actual count from first CI run"), not actual numbers from a CI run.
+  - Suggested approach: after the next CI run on this branch, read the warning counts from `verify-input-validation.sh` and `verify-permission-scope.sh` outputs and update progress.md. Not auto-fixable from a local session because the values come from CI, not local invocation, and CLAUDE.md forbids local gate runs.
+
+---
+
+## Deferred from adversarial-review — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05T07:11:14Z
+**Source log:** `tasks/review-logs/adversarial-review-log-pre-launch-phase-2-2026-05-05T07-11-14Z.md`
+**Branch:** `claude/pre-launch-phase-2`
+
+**Confirmed hole — fixed in-session:**
+- [x] AR-2.1 — Signup/acceptInvite JWT revoked on first use due to DB/Node clock skew. Fixed: `authService.signup()` now sets `passwordChangedAt: new Date(0)`; `acceptInvite` floors `now` to second-precision before storing. See commit following this entry.
+
+**Likely holes — design decisions required:**
+
+- [ ] AR-3.1 — Advisory lock scope ambiguity for pg-boss dispatch
+  - `server/services/workflowEngineService.ts:840, 1897-1924`
+  - `pg_try_advisory_xact_lock` at line 840 is `xact`-scoped (releases on commit). Confirm that `pgboss.send()` at line 1897 runs inside the same DB transaction so the lock holds for the full dispatch. If outside, two concurrent workers can both pass the lock check (though `singletonKey` deduplication at the pg-boss level prevents double-execution). Verify the transaction boundary; if send() is outside, either accept the singletonKey defence or move the lock to cover the send.
+
+- [ ] AR-5.1 — Login rate limiter bypassable via IP rotation (no per-email bucket)
+  - `server/lib/rateLimitKeys.ts:24-28`, `server/routes/auth.ts:64-77`
+  - Both rate-limit windows key on `ip:email`. A botnet rotating IPs can exceed the nominal 50/hour limit against a single email. Add a separate `rl:v1:auth:login:email:<normalised-email>` bucket (e.g., 100/3600s) as a belt-and-suspenders cap. Design decision: what limit makes sense vs. false-positive risk for shared IPs (offices, universities)?
+
+**Worth-confirming — may close without code change:**
+
+- [ ] AR-1.1 — `security_audit_events` login-failure rows stored under sentinel UUID `00000000-0000-0000-0000-000000000000`
+  - `server/routes/auth.ts:92`, `server/services/securityAuditService.ts:16`
+  - Intentional for pre-auth events. Admin queries scoped to a real org UUID will not see login-failure rows. Confirm the admin login-failure audit query is aware of this and handles the sentinel UUID explicitly if needed.
+
+- [ ] AR-2.2 — `requireSubaccountPermission` emits no `auth.permission_denied` security event
+  - `server/middleware/auth.ts:349-394`
+  - `requireOrgPermission` records the event; subaccount variant does not. Add `recordSecurityEvent({ eventType: 'auth.permission_denied', ... })` in the 403 branch of `requireSubaccountPermission`, matching the org-level pattern.
+
+- [ ] AR-4.1 — PII blacklist in `normaliseSecurityEvent` is exact-key-match only
+  - `server/services/securityAuditServicePure.ts:31-38`
+  - `PII_BLACKLIST` does not match composite keys like `accessToken`, `refreshToken`, `passwordHash`. Extend to substring-match (e.g., `PII_SUBSTRINGS = ['password', 'token', 'secret', 'authorization', 'credential']`) so future callers can't accidentally store credential material. Low urgency — current callers are safe.
+
+- [ ] AR-6.1 — `connectionTokenService.refreshIfExpired` relies on caller discipline for org scoping
+  - `server/services/connectionTokenService.ts:147-174`
+  - The `guard-ignore-next-line` exemption requires every caller to fetch the connection via an org-scoped query. Audit all call sites of `getAccessToken` to confirm each path obtains the connection through an org-scoped lookup before passing it here. If any admin-path caller exists, add an assertion: `if (connection.organisationId !== principalOrgId) throw new Error(...)`.
+
+---
+
+## Deferred from chatgpt-pr-review Round 1 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md`
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+
+- [ ] CHATGPT-R1-4 — Tighten audit-stream split enforcement
+  - Current `scripts/verify-audit-stream-split.sh` is a grep gate. Replace with either a centralised audit API that mechanically enforces routing (operational vs. security streams) or a TypeScript ESLint rule that flags writes to the wrong stream at lint time. Grep gates drift; an API or lint rule is structurally enforced.
+  - Out of scope for this PR — design decision required on which approach (API vs. lint rule), and a non-trivial refactor of every audit call site.
+
+- [ ] CHATGPT-R1-6 — Tighten `isActive` helper generic constraint
+  - `server/lib/softDelete.ts` (or wherever the helper lives) — the generic constraint accepts any object with a `deletedAt` field, which is broader than the intended Drizzle-table use. Either narrow the generic to Drizzle table types (`PgTable` with a `deletedAt` column), or add overloads for the known soft-deletable tables (users, organisations, agents, …).
+  - Mechanical-feeling but the constraint design is a small architecture call (do we want a single generic helper or per-table overloads?). Defer until we have time to decide.
+
+- [ ] CHATGPT-R1-7 — Instrument OAuth state TTL before deciding on revert
+  - `server/services/ghlAgencyOauthService.ts` (and similar OAuth state stores) — the state TTL was tightened from 10min → 5min in this branch. Before committing to the new value (or reverting), instrument the state-store with a metric for `expired-on-callback` vs `not-found-on-callback` rate and observe it for a week in staging. If `expired-on-callback` is non-trivial, revert to 10min.
+  - Pre-launch we don't have telemetry yet, so this is correctly a follow-up after we have a baseline.
+  - **UX-risk scenarios driving the revert decision (ChatGPT Round 2):** mobile users on flaky cellular paths (consent flow easily exceeds 5min); slow-consent paths where the IdP shows extra prompts (MFA, scope review, re-authentication); enterprise SSO with multi-factor or admin-approval interstitials. Any non-trivial `expired-on-callback` rate from these segments argues for the 10min default. Capture segment breakdown in the metric (mobile vs desktop, IdP type) so the revert call has signal, not just a global rate.
+
+- [ ] CHATGPT-R1-8 — GHL auto-enrol pagination / partial-onboarding UX
+  - `server/services/ghlAgencyOauthService.ts` `autoEnrolLocations` (or similar) — the auto-enrol loop iterates GHL locations to create/link subaccounts; for agencies with hundreds of locations, the request can time out or partially succeed without surfacing state to the operator. Either add a cursor/pagination strategy with a background-job continuation, or surface partial-onboarding status to the UI so the operator can resume.
+  - Design call required (background job vs. UI surface). Defer until we have a concrete agency hitting the limit or post-launch telemetry suggesting risk.
+
+---
+
+## Deferred from chatgpt-pr-review Round 2 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md` (Round 2 entry)
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+
+- [ ] CHATGPT-R2-2 — `logAndSwallow` production observability
+  - `server/lib/logAndSwallow.ts` (or wherever the helper lives) — currently good for local debugging but provides no production observability. Either (a) sample-log to the backend at 1–5% so failures surface in System Monitor without flooding it, or (b) upgrade specific critical-path call sites to `console.warn` so they always emit. ChatGPT framing: "good for debugging, not for observability."
+  - Defer because the right answer (sample vs upgrade) depends on which call sites we treat as critical, and that classification is post-launch work.
+
+- [ ] CHATGPT-R2-3 — `/api/client-errors` endpoint dedupe
+  - `server/routes/clientErrors.ts` — under heavy client-side error spam, identical errors flood the endpoint and consume rate-limit budget without informational value. Add a hash(message + stack) dedupe that drops duplicates within a short window (e.g. 60s) before they hit the rate-limiter. ChatGPT framing: "Future improvement (not now)."
+  - Defer — endpoint is rate-limited (30/300s per user) and tight-bodied (16kb), so the abuse surface is bounded. Dedupe is an optimisation, not a correctness fix.
+
+- [ ] CHATGPT-R2-6 — Pre+post invalidation guards double DB reads under heavy workflow load
+  - The new validation/invalidation guards added in this branch read state both before and after the protected operation. Under heavy workflow load this doubles the read cost for the guarded paths. Options: (a) cache the pre-read for the duration of the call where consistency permits, (b) collapse to post-read only where the pre-read was defensive rather than load-bearing, or (c) accept the cost if profiling shows it's negligible. ChatGPT framing: "not a problem now, just something to track."
+  - Defer — we don't have load profiling against the new guards yet. Re-evaluate after pre-launch load testing or first production traffic spike.
+
+---
+
+## Deferred from chatgpt-pr-review Round 3 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md` (Round 3 entry)
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+**ChatGPT verdict:** "You are genuinely done." Round 3 closed all open findings; the items below are scoped follow-ups, not blockers.
+
+- [ ] CHATGPT-R3-1 — Extend CI grep invariants pattern to additional safety guards
+  - The audit-stream split grep guard added in Round 1 (`scripts/verify-audit-stream-split.sh`) is a useful pattern: a CI-grep that triggers on a known-bad usage. Extend the pattern to other invariants ChatGPT flagged in Round 3:
+    - **`assertActive` on entity fetch paths** — every service-layer fetch that returns a soft-deletable entity should pass through `assertActive`/`isActive` before the row is consumed. Grep guard would fail-fast on any new fetch path that bypasses the helper.
+    - **Forbid raw `console.*` outside allowed zones** — bootstrap, logger internals, build scripts, test fixtures. Production runtime paths must use the structured logger. Grep guard would catch new `console.*` regressions.
+    - **Normalized email at rate-limit-key construction sites** — every call site that builds a rate-limit key from an email must use the normalised form (lowercased, trimmed). Grep guard would catch raw email-as-key regressions.
+  - Wants its own scoped session: define the invariant set, write each guard, prove each one triggers on a known-bad fixture, then wire into CI.
+  - **ChatGPT framing:** "Optional. The pattern is sound; extending it is leverage."
+
+- [ ] CHATGPT-R3-2 — Canonical error taxonomy `{ code, statusCode, message, context? }`
+  - Define a single error class shape across the server: `{ code: string, statusCode: number, message: string, context?: Record<string, unknown> }`. Every thrown error in `server/services/**`, `server/routes/**`, and `server/middleware/**` constructs through this shape. The error envelope at `server/index.ts` reads `code` and `statusCode` mechanically rather than mapping ad-hoc by `message` or `instanceof`.
+  - Belongs in its own spec — touches every module that throws and every route that surfaces an error. Coordinate with the error-envelope and correlation-ID work already in place; this is the type-system follow-up that lets the envelope be authoritative.
+  - **ChatGPT framing:** "Not urgent, but high leverage later."
+
+- [ ] CHATGPT-R3-6 — Audit event namespace consistency
+  - Audit event names currently mix conventions across the security-audit and operational-audit streams. Define the namespace convention and align existing call sites:
+    - `auth.*` — user authentication events (login, logout, password change, MFA enrol/verify).
+    - `oauth.*` — provider OAuth flows (state issued, callback success/expired, token refresh).
+    - `security.*` — threat / abuse events (rate-limit trip, suspicious-activity, sentinel-row violation).
+    - `audit.*` — business events (resource created/updated/deleted, ownership changed, permission granted).
+  - Write a short convention doc (likely under `docs/` alongside the security runbook) and run a one-shot rename pass across existing audit call sites. Update `securityAuditService` typing if it currently accepts free-form strings.
+  - **ChatGPT framing:** "Optional. Define a simple convention."

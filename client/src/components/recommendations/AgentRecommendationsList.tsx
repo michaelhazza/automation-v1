@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api.js';
+import { logAndSwallow } from '../../lib/silentCatchHelper.js';
 import { useAgentRecommendations } from '../../hooks/useAgentRecommendations.js';
 import { applyCollapsedView, type RecommendationRowShape, sortRows } from './AgentRecommendationsListPure.js';
 
@@ -100,7 +101,7 @@ export function AgentRecommendationsList({
       setAckBeat((prev) => new Set([...prev, recId]));
 
       // Fire-and-forget acknowledge
-      api.post(`/api/recommendations/${recId}/acknowledge`, {}).catch(() => {});
+      api.post(`/api/recommendations/${recId}/acknowledge`, {}).catch(logAndSwallow('AgentRecommendationsList: acknowledge'));
 
       setTimeout(() => {
         setAckBeat((prev) => {

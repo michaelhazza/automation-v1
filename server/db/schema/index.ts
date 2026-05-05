@@ -266,3 +266,6 @@ export * from './oauthStateNonces.js';
 
 // Pre-Launch Hardening Phase 1 — Durable task event log (migration 0279)
 export * from './taskEvents.js';
+
+// Pre-Launch Hardening Phase 2 — Security audit trail (migration 0281)
+export * from './securityAuditEvents.js';

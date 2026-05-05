@@ -9,10 +9,11 @@
 // falls back to a synchronous executeRun for backwards compatibility.
 // ---------------------------------------------------------------------------
 
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { agents, subaccountAgents } from '../../db/schema/index.js';
 import { agentExecutionService } from '../../services/agentExecutionService.js';
+import { isActive } from '../../lib/queryHelpers.js';
 
 // pg-boss job sender — injected at startup by agentScheduleService
 let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null = null;
@@ -52,7 +53,7 @@ export async function executeAssignTask(
   const [saLink] = await db
     .select({ sa: subaccountAgents, agent: agents })
     .from(subaccountAgents)
-    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, context.subaccountId),

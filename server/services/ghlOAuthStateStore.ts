@@ -2,7 +2,7 @@ import { db } from '../db/index.js';
 import { oauthStateNonces } from '../db/schema/oauthStateNonces.js';
 import { and, eq, gt, sql } from 'drizzle-orm';
 
-const TTL_MS = 10 * 60 * 1000; // 10 minutes
+const TTL_MS = 5 * 60 * 1000; // 5 minutes — tighten the OAuth callback window
 
 export async function setGhlOAuthState(
   nonce: string,
