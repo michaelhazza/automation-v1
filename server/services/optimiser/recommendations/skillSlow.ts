@@ -45,13 +45,15 @@ export function evaluateSkillSlow(
     const severity = 'warn' as const; // spec §2: ratio >= 4 → warn
     const dedupeKey = row.metricKey; // skill_slug
 
-    // Invariant 33: all optional fields set to null, never undefined
+    // Invariant 33: camelCase keys to match the SkillSlowEvidence shape
     const evidence: Record<string, unknown> = {
-      skill_slug: e.skillSlug ?? null,
-      latency_p95_ms: e.thisP95Ms,
-      peer_p95_ms: e.peerP95Ms,
-      ratio: e.ratioVsPeerP95,
+      skillSlug: e.skillSlug ?? null,
+      thisP95Ms: e.thisP95Ms,
+      peerP95Ms: e.peerP95Ms,
+      peerP50Ms: e.peerP50Ms,
+      nTenants: e.nTenants,
       medianVersion: e.medianVersion,
+      ratioVsPeerP95: e.ratioVsPeerP95,
     };
 
     results.push({
