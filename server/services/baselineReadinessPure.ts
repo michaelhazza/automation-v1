@@ -67,7 +67,7 @@ export function evaluateReadiness(
 
   // (4)
   const distinctSlugsWithValue = new Set(metricRows.map((r) => r.slug)).size;
-  if (distinctSlugsWithValue < 2) missing.push('canonical_metrics_min_2');
+  if (distinctSlugsWithValue < 2) missing.push('canonical_metrics_min_2'); // verify-canonical-read-interface: allowed (slug literal, not table access)
 
   return {
     ready: missing.length === 0,
