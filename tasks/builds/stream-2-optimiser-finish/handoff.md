@@ -77,3 +77,41 @@ None. All implemented code aligns with spec. Open items are explicitly deferred 
 See `git log main..stream-2-optimiser-finish` for the full list. Key commits:
 - `50e25242` — spec-conformance CONFORMANT_AFTER_FIXES (includes DG-1/DG-3/DG-4/DG-7 fixes + jobConfig + runOptimiserScanJob.ts)
 - `2504620d` — pr-reviewer B-1/N-1/N-3 fixes + advisory items to todo.md
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #262
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-stream-2-optimiser-finish-2026-05-05T00-24-31Z.md`
+**spec_deviations reviewed:** n/a — Phase 2 handoff recorded none material; the 3 explicitly-deferred items (DG-4 timezone, S-1 over_budget threshold, S-4 median_version typing) were not re-flagged by ChatGPT in round 1
+**Doc-sync sweep verdicts:**
+- `architecture.md`: yes (Sub-account Optimiser service layer + Key files per domain row "Modify the Sub-account Optimiser scan")
+- `docs/capabilities.md`: no — § *Sub-account Optimiser* already accurate; no capability add/remove/rename
+- `docs/integration-reference.md`: n/a — no integration behaviour change
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md`: no — zero stale references on optimiser terms; no convention change
+- `CONTRIBUTING.md`: n/a — no contributor-convention change
+- `docs/frontend-design-principles.md`: no — no new UI pattern; zero stale references
+- `KNOWLEDGE.md`: yes (2 entries appended)
+- `docs/decisions/`: no — no new ADR-worthy decision locked
+- `docs/context-packs/`: n/a
+- `references/test-gate-policy.md`: n/a
+- `references/spec-review-directional-signals.md`: n/a — no spec-review in this build
+- `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`: n/a — no framework-level change
+
+**KNOWLEDGE.md entries added:** 2
+- `[2026-05-05] Pattern — System agents on a dedicated queue must be excluded from the generic schedule registrar` (extracted from pr-reviewer B-1 finding)
+- `[2026-05-05] Pattern — Boot-time recovery summary log carries actionable counts, not a single integer` (extracted from chatgpt-pr-review R1-3 finding)
+
+**tasks/todo.md items removed:** 6 (DG-1, DG-2, DG-3, DG-5, DG-7, DG-8 — closed by this build). Remaining open: DG-4, DG-6 (documented deferrals); S-1, S-2, S-3, S-4, N-2, N-4, OPS (advisory backlog from Phase 2).
+
+**ready-to-merge label applied at:** 2026-05-05T00:38:53Z
+
+**Phase 3 commits (this finalisation pass):**
+- ChatGPT R1-1/R1-2/R1-3 implementation in `server/services/agentScheduleService.ts` (3 new structured log events) — staged in working tree pre-finalisation
+- Doc-sync stale-reference fix + Sub-account Optimiser service layer expansion in `architecture.md`
+- KNOWLEDGE.md two-entry append
+- tasks/todo.md cleanup (6 closed DG items removed; DG-4 + DG-6 retained)
+- chatgpt-pr-review session log Round 1 + Final Summary
+- This handoff Phase 3 section
+- `tasks/current-focus.md` → MERGE_READY

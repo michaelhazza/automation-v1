@@ -2129,4 +2129,16 @@ Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shape
 
 Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
 
+### [2026-05-05] Pattern — System agents on a dedicated queue must be excluded from the generic schedule registrar
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a system agent runs on its own pg-boss queue (e.g. `optimiser-scan`) instead of the generic `agent-scheduled-run` queue, the boot-time scheduler MUST exclude that system agent from the generic registration path. `agentScheduleService.registerAllActiveSchedules` LEFT JOINs `system_agents` (or equivalent SA marker) and skips rows where the SA owns its own queue; a parallel `registerAllOptimiserSchedules` (one per dedicated-queue feature) handles boot-time self-heal for the dedicated queue. Without the exclusion, every active subaccount-agent for that SA gets registered on BOTH queues at boot, causing each scheduled run to fire twice. The self-heal path inside `registerOptimiserSchedule` MUST also do an inline DB UPDATE for the cron rather than calling the generic `updateSchedule()` which would re-register on the wrong queue.
+**Why it matters:** The double-execution failure mode is silent in dev (runs are idempotent) but doubles cost, doubles LLM-render fan-out, and pollutes the recommendations table with duplicate evidence in production. The pattern generalises to any future dedicated-queue feature: when introducing a new queue for a system agent, audit the boot-time registrar in the same PR.
+
+### [2026-05-05] Pattern — Boot-time recovery summary log carries actionable counts, not a single integer
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a service runs a boot-time self-heal sweep over an enabled-rows table (e.g. `registerAllOptimiserSchedules`), the summary log MUST split the total into actionable buckets — `totalEnabled`, `registered` (newly created), `skipped_duplicate` (already present), `failed` — rather than a single `Registered N optimiser schedules on startup` line. The single-integer log conflates "everything was already fine" with "we just created N rows" and hides per-row failures from the dashboard. Pattern: emit a structured `<feature>.startup.recovery_summary` event at the end of the loop, plus per-row `<feature>.schedule.{registered,skipped_duplicate}` events from the inner write path.
+**Why it matters:** A boot-time sweep failing for 1 of 200 rows shows up as "registered 199" in the integer model — operationally invisible. The split-counts model exposes the failure rate as a first-class field; partial failures fire dashboards instead of disappearing into a successful-looking log line.
+
 Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.

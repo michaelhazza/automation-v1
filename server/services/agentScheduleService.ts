@@ -336,17 +336,26 @@ export const agentScheduleService = {
         )
       );
 
-    let registered = 0;
+    let newCount = 0;
+    let existingCount = 0;
+    let failedCount = 0;
     for (const row of rows) {
       try {
-        await this.registerOptimiserSchedule(row.subaccountId);
-        registered++;
+        const result = await this.registerOptimiserSchedule(row.subaccountId);
+        if (result.wasNew) newCount++;
+        else existingCount++;
       } catch (err) {
         logger.error(`[AgentScheduler] Failed to re-register optimiser schedule for subaccount ${row.subaccountId}`, { error: String(err) });
+        failedCount++;
       }
     }
 
-    logger.info(`[AgentScheduler] Registered ${registered} optimiser schedules on startup`);
+    logger.info('optimiser.startup.recovery_summary', {
+      totalOptimiserEnabled: rows.length,
+      schedulesRegistered: newCount,
+      schedulesSkipped: existingCount,
+      schedulesFailed: failedCount,
+    });
   },
 
   /**
@@ -551,6 +560,12 @@ export const agentScheduleService = {
       },
       { tz: 'UTC' },
     );
+
+    if (wasNew) {
+      logger.info('optimiser.schedule.registered', { subaccountId, cron, scheduleName });
+    } else {
+      logger.info('optimiser.schedule.skipped_duplicate', { subaccountId, cron, scheduleName });
+    }
 
     return { subaccountAgentId, cron, scheduleName, wasNew };
   },
