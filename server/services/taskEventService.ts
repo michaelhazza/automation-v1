@@ -72,6 +72,7 @@ export async function appendAndEmitTaskEvent(
   // The socket emit below happens ONLY after this transaction commits so the
   // DB row is the source of truth — clients may miss the notification and
   // re-fetch the event log; that is acceptable.
+  try {
   await db.transaction(async (tx) => {
     // FORCE-RLS tables require the GUC before any tenant-table access.
     // This transaction is opened from the module-level db pool (callers use
@@ -105,6 +106,20 @@ export async function appendAndEmitTaskEvent(
       origin: eventOrigin,
     });
   });
+  } catch (err: unknown) {
+    // The uniq_approval_resolved_per_step constraint enforces exactly-one semantics.
+    // On concurrent double-approve the second writer hits 23505 — the first write
+    // won the race, so silently discard this duplicate and skip the socket emit.
+    const pgErr = err as { code?: string; constraint_name?: string };
+    if (pgErr.code === '23505' && pgErr.constraint_name === 'uniq_approval_resolved_per_step') {
+      logger.debug('task_event_duplicate_approval_resolved', {
+        taskId: ctx.taskId,
+        eventKind: event.kind,
+      });
+      return;
+    }
+    throw err;
+  }
 
   // If the task was not found, allocatedTaskSeq was never set — exit silently.
   if (allocatedTaskSeq === undefined) return;

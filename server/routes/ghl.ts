@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId } from '../config/oauthProviders.js';
-import { setGhlOAuthState } from '../lib/ghlOAuthStateStore.js';
+import { setGhlOAuthState } from '../services/ghlOAuthStateStore.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();

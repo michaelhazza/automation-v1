@@ -17,6 +17,7 @@ import { integrationConnectionService } from '../services/integrationConnectionS
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
+// guard-ignore-next-line: rls-contract-compliance reason="db is passed as connection handle to withOrgTx for GUC propagation on the pre-auth GHL callback path — no direct queries issued here; no authenticated org context is available for getOrgScopedDb"
 import { db } from '../db/index.js';
 import { withOrgTx } from '../instrumentation.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
@@ -349,7 +350,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
     return res.redirect(`${appBase}/onboarding?error=invalid_callback`);
   }
 
-  const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
+  const { consumeGhlOAuthState } = await import('../services/ghlOAuthStateStore.js');
   const stateData = await consumeGhlOAuthState(state);
   if (!stateData) {
     // Expired, already consumed, and unknown nonces all return null (intentional —
