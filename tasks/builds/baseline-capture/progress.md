@@ -1,38 +1,38 @@
 # Progress: Baseline Capture at Sub-Account Onboarding
 
 **Spec:** `docs/baseline-capture-spec.md`
+**Plan:** `tasks/builds/baseline-capture/plan.md`
 **Branch:** `claude/baseline-capture`
 **Worktree:** `../automation-v1.baseline-capture`
-**Migrations claimed:** `0268`, `0269`, `0270`
-**Status:** PLANNING — spec drafted, not started
+**Migrations claimed:** `0278` (subaccount_baselines), `0279` (subaccount_baseline_metrics), `0280` (RLS + canonical dictionary)
+**Status:** READY TO START — plan authored 2026-05-05; F1 dependency merged (PR #263); migration numbers confirmed on main (high-water: 0277)
 
-## Concurrent peers
+## Upstream dependencies
 
-- F1 `subaccount-artefacts` (migration 0266) — F1 must land first; both touch `subaccountOnboardingService.ts` (additive methods, no shared mutation)
-- F2 `subaccount-optimiser` (migration 0267) — fully independent
-
-## Critical upstream caveat
-
-**GHL Module C OAuth is stubbed.** `server/routes/ghl.ts` callback is TODO. For sub-accounts with per-sub-account OAuth via `server/routes/oauthIntegrations.ts`, baseline capture works today. Agency-level scale is gated until Module C ships. Build proceeds regardless; coverage scales when Module C lands.
+| Dependency | Status |
+|---|---|
+| F1 `subaccount-artefacts` (migration 0277) | **MERGED — PR #263, 2026-05-05** |
+| GHL Module C OAuth (`connector_location_tokens`) | **SHIPPED — PR #254, 2026-05-03** |
+| F2 `subaccount-optimiser` | Fully independent — no coordination needed |
 
 ## Phases
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Phase 1 — Schema (3 tables) | pending | Migrations 0268, 0269, 0270. ~3h. |
-| Phase 2 — Readiness + sync-complete event | pending | Event emit + subscriber + daily fallback. ~5h. |
-| Phase 3 — Capture service + retry/failure | pending | Per-metric readers + state machine + retry job. ~5h. |
-| Phase 4 — Manual entry UI + admin reset | pending | Form + validation + sysadmin reset flow. ~4h. |
-| Phase 5 — Reporting Agent delta integration | pending | Helper + portfolio report extension. ~3h. |
-| Phase 6 — Verification + doc sync | pending | Lint, typecheck, manual run, docs. ~2h. |
+| Phase | Chunks | Status | Notes |
+|-------|--------|--------|-------|
+| Phase 1 — Schema (3 tables) | 1A, 1B, 1C | pending | Migrations 0278/0279/0280. ~5h. |
+| Phase 2 — Readiness + sync-complete event | 2A, 2B | pending | Event emit + subscriber + daily fallback. ~5h. |
+| Phase 3 — Capture service + retry/failure | 3A, 3B, 3C | pending | Per-metric readers + state machine + retry job + invariant tests. ~6h. |
+| Phase 4 — Manual entry UI + admin reset | 4A, 4B | pending | Form + validation + sysadmin reset flow + page wiring (ship together). ~5h. |
+| Phase 5 — Reporting Agent delta | 5 | pending | Helper + portfolio report extension. ~3h. |
+| Phase 6 — Verification + doc sync | 6 | pending | Lint, typecheck, manual run, docs. ~2h. |
 
 ## Decisions log
 
-(empty — populate as build progresses)
+(populate as build progresses)
 
 ## Blockers
 
-- **Soft:** GHL Module C OAuth stubbed. Initial scope = per-sub-account-OAuth'd accounts only. File "GHL Module C OAuth completion" as separate Significant task.
+None. All upstream dependencies resolved.
 
 ## Out of scope (filed for later)
 
@@ -40,3 +40,7 @@
 - MRR formula (Stripe adapter reads payments; deferred until proper subscription model)
 - Recurring re-baseline (admin reset only for v1)
 - Historical backfill (v1 = T0 only; full history lives in canonical_metric_history)
+
+## Deferred items from development
+
+(populate if issues arise during build)
