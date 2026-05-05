@@ -3071,7 +3071,29 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 - [ ] CHATGPT-R1-7 — Instrument OAuth state TTL before deciding on revert
   - `server/services/ghlAgencyOauthService.ts` (and similar OAuth state stores) — the state TTL was tightened from 10min → 5min in this branch. Before committing to the new value (or reverting), instrument the state-store with a metric for `expired-on-callback` vs `not-found-on-callback` rate and observe it for a week in staging. If `expired-on-callback` is non-trivial, revert to 10min.
   - Pre-launch we don't have telemetry yet, so this is correctly a follow-up after we have a baseline.
+  - **UX-risk scenarios driving the revert decision (ChatGPT Round 2):** mobile users on flaky cellular paths (consent flow easily exceeds 5min); slow-consent paths where the IdP shows extra prompts (MFA, scope review, re-authentication); enterprise SSO with multi-factor or admin-approval interstitials. Any non-trivial `expired-on-callback` rate from these segments argues for the 10min default. Capture segment breakdown in the metric (mobile vs desktop, IdP type) so the revert call has signal, not just a global rate.
 
 - [ ] CHATGPT-R1-8 — GHL auto-enrol pagination / partial-onboarding UX
   - `server/services/ghlAgencyOauthService.ts` `autoEnrolLocations` (or similar) — the auto-enrol loop iterates GHL locations to create/link subaccounts; for agencies with hundreds of locations, the request can time out or partially succeed without surfacing state to the operator. Either add a cursor/pagination strategy with a background-job continuation, or surface partial-onboarding status to the UI so the operator can resume.
   - Design call required (background job vs. UI surface). Defer until we have a concrete agency hitting the limit or post-launch telemetry suggesting risk.
+
+---
+
+## Deferred from chatgpt-pr-review Round 2 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md` (Round 2 entry)
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+
+- [ ] CHATGPT-R2-2 — `logAndSwallow` production observability
+  - `server/lib/logAndSwallow.ts` (or wherever the helper lives) — currently good for local debugging but provides no production observability. Either (a) sample-log to the backend at 1–5% so failures surface in System Monitor without flooding it, or (b) upgrade specific critical-path call sites to `console.warn` so they always emit. ChatGPT framing: "good for debugging, not for observability."
+  - Defer because the right answer (sample vs upgrade) depends on which call sites we treat as critical, and that classification is post-launch work.
+
+- [ ] CHATGPT-R2-3 — `/api/client-errors` endpoint dedupe
+  - `server/routes/clientErrors.ts` — under heavy client-side error spam, identical errors flood the endpoint and consume rate-limit budget without informational value. Add a hash(message + stack) dedupe that drops duplicates within a short window (e.g. 60s) before they hit the rate-limiter. ChatGPT framing: "Future improvement (not now)."
+  - Defer — endpoint is rate-limited (30/300s per user) and tight-bodied (16kb), so the abuse surface is bounded. Dedupe is an optimisation, not a correctness fix.
+
+- [ ] CHATGPT-R2-6 — Pre+post invalidation guards double DB reads under heavy workflow load
+  - The new validation/invalidation guards added in this branch read state both before and after the protected operation. Under heavy workflow load this doubles the read cost for the guarded paths. Options: (a) cache the pre-read for the duration of the call where consistency permits, (b) collapse to post-read only where the pre-read was defensive rather than load-bearing, or (c) accept the cost if profiling shows it's negligible. ChatGPT framing: "not a problem now, just something to track."
+  - Defer — we don't have load profiling against the new guards yet. Re-evaluate after pre-launch load testing or first production traffic spike.

@@ -532,6 +532,13 @@ async function start() {
   const { validateEncryptionKeyOrThrow } = await import('./services/connectionTokenValidation.js');
   validateEncryptionKeyOrThrow();
 
+  // ChatGPT-Round-2 Finding 1 — fail fast if the security-audit sentinel
+  // organisation row is missing. Pre-auth events (auth.login.failure, etc.)
+  // depend on this row existing; without it, recordSecurityEvent silently
+  // swallows the FK violation and login-failure audit is lost.
+  const { validateSecurityAuditSentinelOrgOrThrow } = await import('./services/securityAuditSentinelValidation.js');
+  await validateSecurityAuditSentinelOrgOrThrow();
+
   await seedPermissions();
   await backfillOrgUserRoles();
   await agentService.scheduleAllProactiveSources();
