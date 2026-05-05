@@ -150,7 +150,7 @@ while IFS= read -r match; do
 
   is_exempt "$rel_path" && continue
 
-  echo "verify-no-raw-console.sh: raw console call in server/ outside allowlist at ${rel_path}:${lineno} — use server/lib/logger.ts instead"
+  echo "verify-no-raw-console.sh: raw console call in server/ outside allowlist at ${rel_path}:${lineno}: use server/lib/logger.ts instead"
   exit 1
 done < <(grep -rn "console\.\(log\|warn\|error\|debug\|info\)" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
 

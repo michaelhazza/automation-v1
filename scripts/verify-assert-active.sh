@@ -49,6 +49,7 @@ SOFT_DELETABLE_TABLES=(
   automations
   reports
   hierarchyTemplates
+  ieeRuns
   modules
   systemAgents
   agentBeliefs
