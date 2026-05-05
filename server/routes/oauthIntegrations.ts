@@ -430,6 +430,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
       autoEnrolAgencyLocations?: (orgId: string, connection: unknown, correlationId: string) => Promise<unknown>;
     };
     if (typeof svc.autoEnrolAgencyLocations === 'function') {
+      // guard-ignore-next-line: rls-contract-compliance reason="db.transaction opens an org-scoped tx with set_config GUC on the pre-auth GHL OAuth callback path — no authenticated org context exists for getOrgScopedDb (AR-3.1 fix, S-P0-4)"
       await db.transaction(async (tx) => {
         await tx.execute(sql`SELECT set_config('app.organisation_id', ${ghlOrgId}, true)`);
         await withOrgTx(
