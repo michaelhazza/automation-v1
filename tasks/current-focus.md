@@ -13,9 +13,9 @@ last_merged_commit: bcc9c965
 -->
 
 <!-- mission-control-parallel
-active_spec: tasks/builds/pre-launch-phase-3/spec.md
-active_plan: tasks/builds/pre-launch-phase-3/plan.md
-build_slug: pre-launch-phase-3
+active_spec: tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md
+active_plan: tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md
+build_slug: pre-launch-phase-3-deferred-backlog
 branch: claude/pre-launch-phase-3
 status: BUILDING
 last_updated: 2026-05-05
@@ -38,7 +38,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active build slug:** `baseline-capture`
 **Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
 
-**Parallel build (BUILDING):** `pre-launch-phase-3` on branch `claude/pre-launch-phase-3` (forked from `main` at `a7ad66fc`). Spec at `tasks/builds/pre-launch-phase-3/spec.md` is locked + APPROVED FINAL. Phase 1 (SPEC) complete: spec-reviewer 3/5 iterations READY_FOR_BUILD + chatgpt-spec-review 5 rounds APPROVED FINAL (commit `35179a4f`); 33 technical findings auto-applied, 2 escalated-to-defer per recommendation, 0 directional findings, 0 blockers. Phase 2 handoff at `tasks/builds/pre-launch-phase-3/handoff.md`. Charter: close the 24-item deferred backlog from Pre-Launch Phases 1 (PR #261) + 2 (PR #264) — final pre-launch hardening pass before UAT. 5 chunks (A canonical types → B grep gates → C observability → D independent hardening → E cleanup); minimal schema delta (one column + one partial-unique index + one inline backfill on `subaccounts`). **Next step:** open a new Claude Code session and type `launch feature coordinator`.
+**Parallel build (BUILDING):** `pre-launch-phase-3-deferred-backlog` on branch `claude/pre-launch-phase-3` (forked from `main` at `a7ad66fc`; build slug renamed from `pre-launch-phase-3` → `pre-launch-phase-3-deferred-backlog` 2026-05-05 to resolve S1 collision with main's parallel `pre-launch-phase-3` spec under `dd08e9a9`, which uses the same directory for a narrower 7-item scope). Spec at `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md` is locked + APPROVED FINAL. Phase 1 (SPEC) complete: spec-reviewer 3/5 iterations READY_FOR_BUILD + chatgpt-spec-review 5 rounds APPROVED FINAL (commit `35179a4f`); 33 technical findings auto-applied, 2 escalated-to-defer per recommendation, 0 directional findings, 0 blockers. Phase 2 handoff at `tasks/builds/pre-launch-phase-3-deferred-backlog/handoff.md`. Charter: close the 24-item deferred backlog from Pre-Launch Phases 1 (PR #261) + 2 (PR #264) — final pre-launch hardening pass before UAT. 5 chunks (A canonical types → B grep gates → C observability → D independent hardening → E cleanup); minimal schema delta (one column + one partial-unique index + one inline backfill on `subaccounts`). **Next step:** open a new Claude Code session and type `launch feature coordinator`.
 
 ---
 

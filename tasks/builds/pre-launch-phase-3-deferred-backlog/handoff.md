@@ -1,15 +1,15 @@
-# Handoff — pre-launch-phase-3
+# Handoff — pre-launch-phase-3-deferred-backlog
 
 **Phase complete:** SPEC
 **Next phase:** BUILD (run `feature-coordinator` in a new session)
-**Spec path:** `tasks/builds/pre-launch-phase-3/spec.md`
+**Spec path:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
 **Branch:** `claude/pre-launch-phase-3` (forked from `main` at `a7ad66fc`)
-**Build slug:** `pre-launch-phase-3`
+**Build slug:** `pre-launch-phase-3-deferred-backlog`
 **UI-touching:** no
 **Mockup paths:** n/a
 **Spec-reviewer iterations used:** 3 / 5 (READY_FOR_BUILD; 2 rounds remain available if a major edit triggers re-review)
-**ChatGPT spec review log:** `tasks/review-logs/chatgpt-spec-review-pre-launch-phase-3-2026-05-05T10-50-30Z.md` (5 rounds, APPROVED FINAL)
-**Spec-reviewer log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md`
+**ChatGPT spec review log:** `tasks/review-logs/chatgpt-spec-review-pre-launch-phase-3-deferred-backlog-2026-05-05T10-50-30Z.md` (5 rounds, APPROVED FINAL)
+**Spec-reviewer log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-deferred-backlog-2026-05-05T10-41-20Z.md`
 
 ---
 
@@ -152,6 +152,6 @@ These are resolved at build time by the `architect` sub-agent or escalated by `b
 
 ## 11. Next-session entry pointer
 
-Open a new Claude Code session and type `launch feature coordinator`. Phase 2 entry reads this handoff first; the spec at `tasks/builds/pre-launch-phase-3/spec.md` is the canonical source of truth for the build.
+Open a new Claude Code session and type `launch feature coordinator`. Phase 2 entry reads this handoff first; the spec at `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md` is the canonical source of truth for the build.
 
 **Phase status:** PHASE_1_COMPLETE — handoff ready for Phase 2 consumption.

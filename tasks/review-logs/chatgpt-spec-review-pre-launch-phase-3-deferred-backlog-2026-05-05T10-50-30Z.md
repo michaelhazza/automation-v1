@@ -1,11 +1,11 @@
-# chatgpt-spec-review log — pre-launch-phase-3
+# chatgpt-spec-review log — pre-launch-phase-3-deferred-backlog
 
 ## Session Info
 
 - **Started:** 2026-05-05T10:50:30Z
 - **Finished:** 2026-05-05T14:00:00Z
 - **Mode:** manual
-- **Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
+- **Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
 - **Spec commit at start:** `29c64f44`
 - **Spec commit at finish:** `cbe80c53` (round-4 commit; round 5 introduced no edits)
 - **Branch:** `claude/pre-launch-phase-3`
@@ -78,7 +78,7 @@ None. All findings classified `technical`. F6 escalated only because the recomme
 
 ### Operator decisions (round 1)
 
-- **F6 — extra CI gate (defer):** operator replied **"all as recommended"** → F6 deferred per agent recommendation. Routed to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3.
+- **F6 — extra CI gate (defer):** operator replied **"all as recommended"** → F6 deferred per agent recommendation. Routed to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3-deferred-backlog.
 
 ### Applied (auto-applied technical + user-approved user-facing)
 
@@ -327,7 +327,7 @@ None. F11 escalated only because the recommendation is `defer` (per the carveout
 
 ### Operator decisions (round 4)
 
-- **F11 — failure playbook (defer):** operator replied **"as recommended"** → F11 deferred per agent recommendation. Routed to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3 as a post-launch task to author after first-agency monitoring + on-call rotation are in place.
+- **F11 — failure playbook (defer):** operator replied **"as recommended"** → F11 deferred per agent recommendation. Routed to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3-deferred-backlog as a post-launch task to author after first-agency monitoring + on-call rotation are in place.
 
 ### Applied (auto-applied technical + user-approved user-facing)
 
@@ -435,7 +435,7 @@ Top theme: validation only — ChatGPT confirmed the spec is closed under the "e
 - **Auto-accepted (technical):** 33 applied | 1 rejected | 0 deferred
 - **User-decided:** 0 applied | 0 rejected | 2 deferred
 - **Index write failures:** 0 (clean)
-- **Deferred to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3:**
+- **Deferred to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3-deferred-backlog:**
   - [user] **CI gate: "no raw DB writes outside transaction helpers"** — Phase 4 candidate; outside Phase 3's deferred-backlog charter; co-locate with R3-2 AppError taxonomy backfill (also Phase 4) — both items "tighten the write surface."
   - [user] **OAuth-enrol + connection-token failure runbooks** — post-launch task; lives at `docs/runbooks/*.md` separate from spec; defer until first-agency monitoring + on-call rotation provide real signal patterns.
 - **Consistency warnings:** 0 (no cross-round contradictions; six themes tracked — AppError, audit-event factory, GHL pagination, NormalisedEmail, LRU dedupe, CI gates — all strictly cumulative).

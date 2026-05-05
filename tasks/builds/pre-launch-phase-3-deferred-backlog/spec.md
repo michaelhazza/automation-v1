@@ -4,7 +4,7 @@
 **Spec date:** 2026-05-05
 **Last updated:** 2026-05-05
 **Author:** spec-coordinator (Opus, parallel session alongside baseline-capture REVIEWING)
-**Build slug:** pre-launch-phase-3
+**Build slug:** pre-launch-phase-3-deferred-backlog
 **Source branch:** `claude/pre-launch-phase-3` (forked from `main` at `a7ad66fc`)
 
 ---
@@ -321,7 +321,7 @@ The build chunks below are presented in dependency order. Each is sized to fit a
 - **E.4** Phase-1 residue: migration `0277_oauth_state_nonces.sql` — add inline `-- system-scoped: pre-auth OAuth state, no organisation_id available pre-callback` comment. File edit only; migration version unchanged.
 - **E.5** Phase-1 residue: `withOrgTx({ tx: db })` refactor — replace the pattern in `oauthIntegrations.ts` callback with a real `db.transaction(async (tx) => { await setGUC(tx, orgId); ... })` wrapper. New `setOrgGUC(tx, orgId)` helper in `server/middleware/orgScoping.ts`. KNOWLEDGE.md "Gotcha" entry refreshed to reference the now-canonical helper.
 - **E.6** REQ #15 — `scripts/verify-skill-error-envelope.sh`. In-scope paths: `server/skills/**/*.ts`, `server/tools/**/*.ts`, `server/services/skillExecutor.ts` `SKILL_HANDLERS`. Out-of-scope: `connectorConfigService.ts`, `ghlAgencyOauthService.ts`, `locationTokenService.ts` — these emit event payloads, not skill envelopes. The gate enforces the flat-string envelope shape: every return path matches `{ ok: true, ... } | { ok: false, error: string, errorCode?: string }` per the C4a-6-RETSHAPE contract. Mixed-shape allowlist (event-payload services) declared inline in the gate script.
-- **E.7** REQ #29 — capture actual SC-COVERAGE-BASELINE numbers from the next CI run on `claude/pre-launch-phase-3` and write into `tasks/builds/pre-launch-phase-3/progress.md`. (Not `pre-launch-phase-2/progress.md` — that file is sealed; Phase 3 captures its own baseline against post-Phase-2 main.)
+- **E.7** REQ #29 — capture actual SC-COVERAGE-BASELINE numbers from the next CI run on `claude/pre-launch-phase-3` and write into `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md`. (Not `pre-launch-phase-2/progress.md` — that file is sealed; Phase 3 captures its own baseline against post-Phase-2 main.)
 
 ### Verdicts not in chunk plan (recorded for completeness)
 
@@ -432,7 +432,7 @@ Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are un
 - `server/db/schema/subaccounts.ts` — add `externalIdNamespace: text('external_id_namespace')` column + register the partial-unique index in the table builder (D.5)
 - `KNOWLEDGE.md` — refresh `withOrgTx({tx:db})` gotcha entry (E.5)
 - `docs/pre-launch-hardening-mini-spec.md` — amend REQ #4 done-criteria text (E.6 verdict)
-- `tasks/builds/pre-launch-phase-3/progress.md` — capture SC-COVERAGE-BASELINE numbers (E.7)
+- `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` — capture SC-COVERAGE-BASELINE numbers (E.7)
 
 ### Files NOT to modify (scope guardrail)
 - Existing throw-sites that surface `{statusCode, message, errorCode}` duck shape — Phase 4 sweep, not Phase 3

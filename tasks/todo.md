@@ -2449,7 +2449,7 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 - [ ] Per-skill execution-timeout overrides (`executionTimeoutMinutes: number | null` on `ActionDefinition`) — v1 ships single global `EXECUTION_TIMEOUT_MINUTES` default 30; non-breaking addition when needed. Defer until a specific v1 skill produces evidence 30 min is too short. [user]
 - [ ] Implementation Contract Checklist — pre-build artifact translating spec invariants to enforceable DB/code rules (constraint map, allowed-transitions table, idempotency enforcement points, webhook validation checklist, retry classification enforcement, required logs per transition). ChatGPT advisory from R4; high ROI for engineer handoff. [user]
 
-### pre-launch-phase-3 (2026-05-05)
+### pre-launch-phase-3-deferred-backlog (2026-05-05)
 
 - [ ] CI gate: "no raw DB writes outside transaction helpers" — Phase 4 candidate. Source: chatgpt-spec-review round 1 finding F6. Forbids `db.insert/update/delete` outside `withOrgTx` / explicit `db.transaction(...)` blocks. Allowlist for system bootstrap, migrations, RLS policy enforcement queries, admin tooling. Aligns with org-scoping invariants but outside Phase 3's deferred-backlog charter. Co-locate with R3-2 `AppError` taxonomy backfill (also Phase 4) — both items "tighten the write surface." [user]
 - [ ] Author OAuth-enrol + connection-token failure runbooks — post-launch task. Source: chatgpt-spec-review round 4 finding F11. Build a 1-page operational playbook covering `auditEvent.oauth.enrolFailed`, `auditEvent.oauth.enrolPartial`, `auditEvent.security.crossTenantAttempt`, `auditEvent.security.missingPrincipalContext` — what each event means, what to check, expected operator action. Defer until first-agency monitoring + on-call rotation are in place so the runbook is grounded in real signal patterns, not speculation. Lives at `docs/runbooks/oauth-enrol-failures.md` (or similar) — separate from the spec. [user]
@@ -3164,15 +3164,15 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 
 ---
 
-## Deferred from spec-reviewer — pre-launch-phase-3 iteration 3 (2026-05-05)
+## Deferred from spec-reviewer — pre-launch-phase-3-deferred-backlog iteration 3 (2026-05-05)
 
 **Captured:** 2026-05-05T10-50-00Z
-**Source log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md` (Iteration 3 entry)
+**Source log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-deferred-backlog-2026-05-05T10-41-20Z.md` (Iteration 3 entry)
 **Branch:** `claude/pre-launch-phase-3`
-**Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
+**Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
 
 - [ ] PARALLEL-BUILD-DASHBOARD-VISIBILITY — Mission Control parser does not understand parallel build pointers
   - `tasks/current-focus.md` carries a `<!-- mission-control-parallel ... -->` block alongside the canonical `<!-- mission-control ... -->` to track the Phase 3 build alongside `baseline-capture` (REVIEWING). The dashboard parser at `tools/mission-control/` reads only the canonical regex (`<!-- mission-control ... -->`), so the parallel block is invisible.
   - Two routes to close: (a) extend `parseCurrentFocusBlock` + `readActiveBuildSlug` to read the canonical block PLUS any `mission-control-parallel` blocks, returning a list rather than a single active build; (b) drop the parallel-block convention and use `tasks/builds/<slug>/progress.md` files alone for tracking concurrent builds (status pointer becomes informational only).
-  - Out of scope for Phase 3 — this is dashboard tooling drift, not a spec or code-correctness issue. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3/progress.md` and the handoff file regardless of dashboard visibility. Operator authorised the parallel-build pattern explicitly in the Phase 3 invocation instructions.
+  - Out of scope for Phase 3 — this is dashboard tooling drift, not a spec or code-correctness issue. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` and the handoff file regardless of dashboard visibility. Operator authorised the parallel-build pattern explicitly in the Phase 3 invocation instructions.
   - **Codex framing:** "Either teach the parser about parallel blocks or use an existing supported mechanism for in-flight builds."

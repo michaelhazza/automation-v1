@@ -1,6 +1,6 @@
-# spec-reviewer log — pre-launch-phase-3
+# spec-reviewer log — pre-launch-phase-3-deferred-backlog
 
-**Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
+**Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
 **Branch:** `claude/pre-launch-phase-3`
 **Reviewer:** spec-coordinator (Opus, inline) running spec-reviewer playbook
 **Cap:** MAX_ITERATIONS = 5
@@ -17,7 +17,7 @@
 
 ## Iteration 1
 
-**Codex command:** `codex review --commit d9949056 --title "pre-launch-phase-3 spec review iteration 1"`
+**Codex command:** `codex review --commit d9949056 --title "pre-launch-phase-3-deferred-backlog spec review iteration 1"`
 **Codex verdict:** "introduces actionable implementation guidance that would produce a brittle CI gate and a non-idempotent GHL pagination job under retries"
 **Findings:** 2 (both P2 / important)
 
@@ -43,7 +43,7 @@
 
 ## Iteration 1 — fixes applied
 
-Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.md` post-iter-1 commit.
+Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md` post-iter-1 commit.
 
 ---
 
@@ -56,7 +56,7 @@ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.m
 
 ## Iteration 2
 
-**Codex command:** `codex review --commit 5729d580 --title "pre-launch-phase-3 spec review iteration 2"`
+**Codex command:** `codex review --commit 5729d580 --title "pre-launch-phase-3-deferred-backlog spec review iteration 2"`
 **Codex verdict:** "directs implementers to use an ON CONFLICT target that will not match the partial unique index it also defines"
 **Findings:** 1 (P2 / important)
 
@@ -96,7 +96,7 @@ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.m
 - **Codex's suggested fix:** teach the parser about parallel blocks OR use an existing mechanism for in-flight builds.
 - **Classification:** ambiguous (operational tooling drift, not a spec finding; outside the spec under review)
 - **Disposition:** auto-decide → log to `tasks/todo.md` as a deferred operational item; do not block Phase 3 spec on dashboard tooling.
-- **Reasoning:** The operator explicitly authorised parallel operation per the Phase 3 invocation instructions ("a parallel `baseline-capture` build is currently in REVIEWING ... Don't disturb its active-build pointer — add the Phase 3 entry alongside it"). The dashboard limitation is a known consequence of running two coordinator sessions in parallel; the spec is not the venue for fixing the dashboard parser. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3/progress.md` and the handoff file regardless of dashboard visibility.
+- **Reasoning:** The operator explicitly authorised parallel operation per the Phase 3 invocation instructions ("a parallel `baseline-capture` build is currently in REVIEWING ... Don't disturb its active-build pointer — add the Phase 3 entry alongside it"). The dashboard limitation is a known consequence of running two coordinator sessions in parallel; the spec is not the venue for fixing the dashboard parser. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` and the handoff file regardless of dashboard visibility.
 
 ## Iteration 3 — stopping heuristic
 

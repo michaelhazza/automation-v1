@@ -2332,7 +2332,7 @@ Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05
 ### 2026-05-05 Pattern — Branded type with single-constructor invariant beats grep gates for input-normalisation enforcement
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 1-3 (NormalisedEmail brand pattern).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 1-3 (NormalisedEmail brand pattern).
 
 When a function depends on a string being in a normalised form (lowercase, trimmed, hashed, sanitised), the canonical enforcement is **a branded type constructed by exactly one function**, NOT a grep gate that scans for normalisation calls.
 
@@ -2364,7 +2364,7 @@ The single escape hatch is the `as NormalisedEmail` cast. A grep gate scoped to 
 ### 2026-05-05 Pattern — Factory const-object as the ONLY source for closed string-enum values
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 1-3 (auditEvent factory).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 1-3 (auditEvent factory).
 
 When a closed set of string values represents a domain enum (event names, action types, error codes, audit categories), prefer a **factory const-object** as the sole source of values, with the discriminated union derived from it via `typeof`. Do NOT export the union directly without a factory.
 
@@ -2399,7 +2399,7 @@ Three properties make this beat a raw union:
 ### 2026-05-05 Pattern — Single-writer pg-boss job: connection-scoped singletonKey + cursor in payload
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 round 1 finding F2 + round 2 finding F1 (GHL pagination).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog round 1 finding F2 + round 2 finding F1 (GHL pagination).
 
 For any pg-boss job that processes a paginated upstream (cursor-based API, batched DB scan, multi-page external resource) and re-enqueues itself for the next page, the singleton key MUST be scoped to the **resource being mutated**, NOT to the page cursor. The cursor lives in the job payload.
 
@@ -2426,7 +2426,7 @@ Connection-scoped singleton + cursor-in-payload gives:
 ### 2026-05-05 Pattern — Three-state job chain: terminal vs non-terminal checkpoint
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 2-3 (GHL pagination state machine).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 2-3 (GHL pagination state machine).
 
 A long-running job that may legitimately stop short of completion (cap reached, operator wants to resume later, scheduled boundary) needs a **third closing state** that is chain-closing but NOT terminal. Forcing every closing event to be `completed | failed` mis-classifies safety aborts as failures and inflates failure rates in post-launch monitoring.
 
@@ -2451,7 +2451,7 @@ Critical invariants:
 ### 2026-05-05 Pattern — Audit logs are observational, not causal: chain identifiers are the only ordering source
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 2-4 (audit causality posture).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 2-4 (audit causality posture).
 
 A multi-writer append-only audit table (`security_audit_events`, `agent_execution_events`, anything `INSERT`-only with a `created_at` timestamp) is **NOT a source of truth for causality**. Two complementary directives are required to prevent future misuse:
 
@@ -2468,7 +2468,7 @@ A multi-writer append-only audit table (`security_audit_events`, `agent_executio
 ### 2026-05-05 Pattern — chatgpt-spec-review terminal round produces zero findings; that IS the closure signal
 
 **Date:** 2026-05-05
-**Source:** chatgpt-spec-review pre-launch-phase-3 round 5 (terminal zero-findings round).
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog round 5 (terminal zero-findings round).
 
 A multi-round chatgpt-spec-review converges when ChatGPT produces a round with no actionable findings AND an explicit "FINAL" or "BUILD WITH CONFIDENCE" verdict. The zero-findings round is not a wasted iteration — it is the closure signal that confirms the spec is locked.
 
