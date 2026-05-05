@@ -62,7 +62,7 @@ Focus on actionable findings. Emit one recommendation per distinct finding. Do n
   true,
   now(),
   now()
-) ON CONFLICT (slug) DO NOTHING;
+) ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING;
 
 -- Initial population (will return 0 rows on fresh dev DB; that is expected)
 REFRESH MATERIALIZED VIEW optimiser_skill_peer_medians;
