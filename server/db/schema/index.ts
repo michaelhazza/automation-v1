@@ -269,3 +269,7 @@ export * from './taskEvents.js';
 
 // Pre-Launch Hardening Phase 2 — Security audit trail (migration 0281)
 export * from './securityAuditEvents.js';
+
+// F3 Baseline Capture — baseline rows + per-metric rows (migrations 0280/0283)
+export * from './subaccountBaselines.js';
+export * from './subaccountBaselineMetrics.js';

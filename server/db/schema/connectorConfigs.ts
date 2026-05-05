@@ -31,6 +31,10 @@ export const connectorConfigs = pgTable(
     scope: text('scope').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    // F3 §4 — readiness condition support (migration 0280).
+    // Both columns updated by connectorPollingService on every successful sync.
+    successfulPollCountTotal: integer('successful_poll_count_total').notNull().default(0),
+    firstQualifyingPollAt: timestamp('first_qualifying_poll_at', { withTimezone: true }),
   },
   (table) => ({
     // connector_configs_org_type_unique dropped in migration 0254 and replaced with

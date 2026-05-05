@@ -2320,3 +2320,11 @@ The rate-limit key construction has two normalisation layers:
 ChatGPT initially flagged this as redundancy. It's not — it's defence-in-depth. If a future caller forgets the call-site normalisation, the key builder still produces a normalised key. If the key-builder implementation is refactored (e.g. switched to a hash that doesn't normalise), call-site normalisation still produces case-equivalent keys. Either layer alone is one regression away from a case-sensitivity bypass (`Foo@example.com` vs `foo@example.com` getting separate buckets, doubling the abuse budget).
 
 The pattern generalises: any "construct a key from user input" path that depends on canonical form should normalise at both the call site AND the builder, with a pure test pinning the case-equivalence invariant (`server/services/__tests__/rateLimitKeysPure.test.ts:19`). Single-layer normalisation works today but rots silently the first time someone touches either layer.
+
+### 2026-05-05 Pattern — chatgpt-pr-review meta-level Round 1 without diff visibility
+
+When ChatGPT is given only the GitHub PR summary (no diff), Round 1 produces a *meta-level pass*: generic recommendations about determinism, observability, idempotency, lifecycle drift — not pinpoint findings against actual code. The reviewer typically signals this themselves ("Right now this is a meta-level review… If you paste the actual code diff, I'll run a true deep pass").
+
+Adjudication shape for these rounds: each "concern" is a verification request, not a defect claim. Treat them as `reject` with a verification-trail rationale, not as `implement` or `defer`. The session log carries the verification (e.g. "verified by partial UNIQUE index `subaccount_baselines_active_uniq` in migration 0280") rather than a code change. Round 2 onwards (with the diff bundle uploaded) sharpens to specific findings; substantive duplicates of Round 1 concerns auto-apply the prior-round decision per the duplicate-detection rule.
+
+Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.

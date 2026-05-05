@@ -1047,6 +1047,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0281_security_audit_events.sql',
     rationale: 'Security audit trail — reveals auth patterns, permission denials, and IP addresses. Must be tenant-isolated.',
   },
+  // 0284 — F3 Baseline Capture: RLS for both new baseline tables
+  {
+    tableName: 'subaccount_baselines',
+    schemaFile: 'subaccountBaselines.ts',
+    policyMigration: '0284_baseline_rls_and_dictionary.sql',
+    rationale: 'Per-subaccount baseline snapshot — captures opening-state metrics. Cross-tenant leak would expose competitive financial data.',
+  },
+  {
+    tableName: 'subaccount_baseline_metrics',
+    schemaFile: 'subaccountBaselineMetrics.ts',
+    policyMigration: '0284_baseline_rls_and_dictionary.sql',
+    rationale: 'Per-baseline metric values — pipeline value, lead count, revenue. Cross-tenant leak would expose customer-specific revenue figures.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
