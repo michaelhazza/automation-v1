@@ -2389,6 +2389,58 @@ Deferred items from chatgpt-spec-review session (`tasks/review-logs/chatgpt-spec
 - [ ] **P2.1 (R3) — CI enforcement check for `eslint-disable` requiring `// reason:` on the preceding line.** Add a CI step (script under `scripts/` or `.github/workflows/`) that walks line pairs across the codebase and fails the build when an `eslint-disable` directive is not preceded by a `// reason:` comment line. Naive `grep -v` matches reason anywhere on the same line; the correct check needs an awk/script that handles preceding-line semantics and skips block-comment regions. Belongs in its own focused PR with test coverage of the script itself. [user] — out of scope for the lint-cleanup PR; requires its own design + tests.
 - [ ] **P2.4 (R3) — Add "React effect dependency policy" section to `CONTRIBUTING.md`.** Document the target pattern (`useCallback` or `useRef`-stabilised inline function) for `useEffect` bodies that close over component state, alongside the existing lint-suppression policy. Coupling: write this when the React effect refactor (R1 P2.1) lands so the doc describes the post-refactor pattern, not the current inline-async pattern. [user] — defer until the refactor PR ships so the policy and the code agree from day one.
 
+## Deferred from spec-conformance review — stream-2-optimiser-finish (2026-05-04)
+
+**Captured:** 2026-05-04T20:49:01Z
+**Source log:** `tasks/review-logs/spec-conformance-log-stream-2-optimiser-finish-2026-05-04T20-49-01Z.md`
+**Spec:** `docs/sub-account-optimiser-spec.md`
+**Plan:** `tasks/builds/stream-2-optimiser-finish/impl-plan.md`
+**Verdict:** NON_CONFORMANT → CONFORMANT_AFTER_FIXES on re-verification 2026-05-04T22:07:32Z. Re-verification log: `tasks/review-logs/spec-conformance-log-stream-2-optimiser-finish-2026-05-04T22-07-32Z.md`.
+
+**Closed by stream-2-optimiser-finish (PR #262):** DG-1, DG-2, DG-3, DG-5, DG-7, DG-8 — see re-verification log for per-item resolution. Two items remain open:
+
+- [ ] **DG-4 (NORMAL — completeness) — `registerOptimiserSchedule` hardcodes timezone to `'UTC'`.** UTC-fallback now documented in code comments at `server/services/agentScheduleService.ts:432` and `:472` as of 2026-05-04T22:07:32Z. The schema/spec choice remains a human call. `server/services/agentScheduleService.ts:412` and `:468` both pass `'UTC'` explicitly because `subaccounts` schema has no `timezone` column. Spec §4 says "daily at sub-account local 06:00 (cron derived from sub-account's `timezone`)"; plan §Contracts repeats it.
+  - Spec section: §4 + plan §Contracts → `registerOptimiserSchedule` cron line.
+  - Gap: timezone-aware scheduling impossible without a column on `subaccounts`.
+  - Suggested approach: pick one — (a) add a `timezone TEXT NOT NULL DEFAULT 'UTC'` column to `subaccounts` in a follow-up migration and propagate it into `registerOptimiserSchedule`; or (b) accept UTC as the v1 stagger window and update spec §4 + plan §Contracts to match. (a) is the spec-honouring path; (b) is the simpler one.
+
+- [ ] **DG-6 (NORMAL — verification) — Cost-gate measurement deferred to CI without ever running.** Plan-allowed CI deferral; the verification surface for `<$0.02/sa/day` is CI with live DB+LLM, not local conformance. Spec §11 done definition: "Cost stays under $0.02 per sub-account per day in measured production runs"; plan invariant 30: "Phase 4 measures actual token usage on a 5-subaccount × 7-day fixture. < $0.02/subaccount/day or the build does not ship." `server/services/optimiser/__tests__/verificationMatrix.test.ts:836-840` is `describe.skip`, and `progress.md` records "Integration cost gate (<$0.02/subaccount/day) deferred to CI with live DB + LLM access." No CI gate has run this measurement yet — there is no "yes, $X measured" record anywhere.
+  - Spec section: §11 + plan invariant 30
+  - Gap: required measurement not yet performed; verdict in progress.md is "deferred", not "PASS at $X measured".
+  - Suggested approach: schedule the integration test in the next CI run that has DB+LLM access (or run it locally against a representative seeded fixture once). Block merge of any future optimiser-touching PR on the cost gate landing a measurement < $0.02/sa/day.
+
+## PR Review Findings — stream-2-optimiser-finish (2026-05-04)
+
+Advisory findings from pr-reviewer pass. Blocking (B-1) and N-1/N-3 were fixed in the same session. Remaining items below.
+
+### S-1 — `agent.over_budget` evaluator threshold mismatches spec
+
+Spec §3/§5 defines "monthly cost > 1.3× budget for 2 consecutive months". Current `agentBudget.ts` evaluator fires at `percentUsed > 0.9` (warn) and `> 1.0` (critical) with `last_month: 0` hardcoded. Fix: extend query module to expose `lastMonthSpendUsd` from `cost_aggregates` (second join filtered to previous calendar month) and update evaluator threshold to `ratio >= 1.3 AND last_month_ratio >= 1.3`.
+
+### S-2 — No test asserts Phase 0 snake_case evidence keys
+
+The 8 evaluator test files don't assert evidence key names against `shared/types/agentRecommendations.ts`. A regression re-introducing camelCase would not be caught. Add evidence-key assertion tests to `server/services/optimiser/recommendations/__tests__/`.
+
+### S-3 — No test for `handleOptimiserScan`
+
+`server/jobs/runOptimiserScanJob.ts` has no `*Pure.test.ts` peer. Add tests at `server/jobs/__tests__/runOptimiserScanJobPure.test.ts` covering: payload-to-arg plumbing, success log, error re-throw.
+
+### S-4 — `median_version` not declared in shared evidence types
+
+All 8 evaluators write `median_version` to evidence but `shared/types/agentRecommendations.ts` union members don't declare it. materialDelta doesn't read it, so a version-only delta triggers a spurious LLM re-render. Fix: add `median_version: number` to each evidence shape in the shared type (and doc-sync spec §6.5).
+
+### N-2 — Undocumented placeholder values in evidence
+
+`agentBudget.ts:65` `top_cost_driver: 'unknown'`, `cacheEfficiency.ts:64` `dominant_skill: 'unknown'`, `memoryCitation.ts:64` `projected_token_savings: 0`, `inactiveWorkflow.ts:78` `expected_cadence: 'daily'`. Add a comment marking these as future query-module work.
+
+### N-4 — `subaccountAgentId` in `handleOptimiserScan` payload not logged
+
+The job payload includes `subaccountAgentId` but it's not destructured in the handler's log lines. Useful for cross-referencing the SA row that fired the scan.
+
+### OPS — Orphan `agent-scheduled-run:<optimiser-sa-id>` schedules
+
+Any optimiser SA rows registered before this PR exist in pg-boss under `agent-scheduled-run:<id>`. These fire daily and hit the LLM agent loop. At next deploy: run a one-time `pgboss.unschedule('agent-scheduled-run:<id>')` for each optimiser SA (query: `SELECT sa.id FROM subaccount_agents sa JOIN agents a ON a.id = sa.agent_id JOIN system_agents sya ON sya.id = a.system_agent_id WHERE sya.slug = 'subaccount-optimiser'`). Optionally add an orphan handler on `agent-scheduled-run` that drops jobs from optimiser agents (pattern: lines 107-110 in agentScheduleService.ts).
+
 ## Spec Review deferred items
 
 ### agentic-commerce (2026-05-03)

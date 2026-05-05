@@ -1879,6 +1879,36 @@ A charge system with worker-mediated execution (worker fills a payment form usin
 
 A single-writer invariant ("exactly one file performs INSERT/UPDATE on table X") is normally enforced architecturally (call sites route through one service) and at runtime (`pg_advisory_xact_lock` prevents races between *concurrent* writers). Both layers leave a gap: a future contributor can copy a `db.insert(table)` into a different file, and the architectural invariant silently breaks — runtime locks won't catch it because the second writer just queues behind the first; tests pass; the behaviour stays correct on the happy path but the cooldown / cap / eviction logic now bypasses the canonical service. **Rule:** for any single-writer table, ship a static-analysis test (`*.singleWriter.test.ts`) that walks `server/**/*.ts` and greps for `INSERT INTO <table>` / `UPDATE <table>` SQL patterns and `db.insert(<schema>)` / `db.update(<schema>)` Drizzle patterns, asserting exactly one source file matches. Run as a normal unit test (no DB needed) so it surfaces in PR review locally. Pattern shipped in `agent_recommendations` (PR #250, chunk 1) — see `server/services/__tests__/agentRecommendations.singleWriter.test.ts`. Combine with: (a) `pg_advisory_xact_lock` for concurrent-writer races, (b) "Suppression is success" return-value rule for coordination losers (architecture.md § *Home dashboard live reactivity*), (c) this static check for new-writer-introduction. The three layers together make the invariant impossible to violate quietly.
 
+### [2026-05-04] Pattern — Shared register-X-schedule function for backfill + create-hook
+
+When two code paths (backfill script and a route hook) both need to register the same pg-boss schedule for a system agent, extract a single `registerXSchedule(entityId)` function that owns both the `INSERT ... ON CONFLICT DO NOTHING` for the entity-agent row and the `updateSchedule` call. Duplicating logic in two writers creates divergence risk (e.g., stagger formula changes only applied in one place).
+
+Applied in: `agentScheduleService.registerOptimiserSchedule` (Chunk 6, stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — Materialised view emptiness signals partial-mode, not failure
+
+When a cross-tenant aggregate materialised view is empty (e.g., on first deploy or before the nightly refresh runs), the consuming scan category should return an empty result and emit `optimiser.scan.partial` rather than throwing an error. The orchestrator continues with the other 7 categories. This avoids a "cold start" failure that would block recommendations for all categories just because the peer-baseline view has not been populated yet.
+
+Applied in: skillLatency category, `peerMediansViewIsPopulated()` check in runOptimiserScan (stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — median_version snapshot determinism for materialised views
+
+When a scan reads a materialised view for baselines, read `SELECT MAX(median_version)` once before the scan loop and thread it into every JOIN as `AND view.median_version = $expectedVersion`. This guards against a concurrent REFRESH bumping the version mid-scan and producing mixed-version evidence. If no rows match after the version check, emit partial-mode — same path as empty view.
+
+Applied in: runOptimiserScan + skillLatency query (stream-2-optimiser-finish, invariant 32).
+
+### [2026-05-05] Gap — renderRecommendation RENDER_VERSION invalidation is a no-op
+
+`server/services/optimiser/renderRecommendation.ts` stores `RENDER_VERSION` from `renderVersion.ts` but does NOT persist it to the DB. Bumping `RENDER_VERSION` does not auto-invalidate cached renders. To invalidate: run `UPDATE agent_recommendations SET evidence_hash = '' WHERE category LIKE 'optimiser.%'` after a prompt-template change, or add a `render_version` column (migration 0269 or later) and AND it into the cache lookup. Tracked in tasks/todo.md. Do NOT add version prefix to the stored `evidence_hash` — that column is used by `materialDelta` comparison in `agentRecommendationsService` and must remain the bare sha256.
+
+### [2026-05-05] Gap — renderRecommendation cache lookup uses bare `db` (RLS bypass)
+
+`renderRecommendation.ts` queries `agent_recommendations` using the raw `db` pool (no `app.organisation_id` session variable). With FORCE RLS enabled, this returns empty rows — the LLM render cache never hits. Workaround: pass an org-scoped tx handle from `runOptimiserScan` into `renderRecommendation`. An `organisationId` filter was added (2026-05-05) as defence-in-depth against cross-tenant copy leakage, but the root fix (org-scoped connection) is deferred. Tracked in tasks/todo.md.
+
+### [2026-05-05] Bug — backfill advisory lock is session-scoped but acquired on a pool connection
+
+`scripts/backfill-optimiser-schedules.ts` acquires `pg_try_advisory_lock` via the shared Drizzle pool. The lock is session-level and only holds for the Postgres backend that ran the `SELECT`. Subsequent `db.execute` calls may use different pool connections, so the lock provides no mutual exclusion. Use `client` (the raw postgres-js client, also exported from `server/db/index.js`) with a dedicated connection for both the lock acquisition and all subsequent queries. Pre-existing bug; not introduced by stream-2-optimiser-finish. Tracked in tasks/todo.md.
+
 ### [2026-05-03] Pattern — ChatGPT diff-misreading: grep-verify every cited line before triaging
 
 When ChatGPT reviews a diff (especially a large one) and produces "critical" findings citing specific lines or symbols (e.g. `(updated as unknown as Record<string, string>).accessToken returns encrypted token`), do NOT pre-accept the verdict — grep the cited symbol against HEAD before triaging. Pattern observed on chatgpt-pr-review PR #254 round 1: 3 of 4 "critical" findings cited code that did not exist in the branch (hallucinated casts, false retry-policy claims, false ordering invariants), and the verified TRUE finding was already covered by an existing spec deferral. Net code-change-required from a "4 critical / 4 high-impact" review: 0 in round 1, 1 surgical observability commit in round 2 after a re-prompt asking for operational checks rather than line citations. **Rule:** every ChatGPT finding that names a file, line, symbol, or invariant gets a `grep` (or `Read`) verification round before going on the triage table. Mark verdicts FALSE and reject them when grep returns zero matches; mark verdicts TRUE and triage normally when the cited code actually exists. Without this gate the review loop wastes time chasing ghosts; with it, ChatGPT becomes a cheap second pair of eyes for behavioural review while you maintain code-truth as the source of truth. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 1 (3-of-4 critical findings hallucinated against HEAD).
@@ -2098,6 +2128,18 @@ Pattern: `await userCanAccessSubaccount(userId, dbRole, resource.subaccountId)` 
 Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shaped task events: pause/resume/stop, gate transitions, orchestrator chat cards, milestones. None of these have an associated `agent_runs` row. The `agent_execution_events` table requires `run_id NOT NULL REFERENCES agent_runs(id)`. So persistence is impossible without a schema migration.
 
 Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
+
+### [2026-05-05] Pattern — System agents on a dedicated queue must be excluded from the generic schedule registrar
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a system agent runs on its own pg-boss queue (e.g. `optimiser-scan`) instead of the generic `agent-scheduled-run` queue, the boot-time scheduler MUST exclude that system agent from the generic registration path. `agentScheduleService.registerAllActiveSchedules` LEFT JOINs `system_agents` (or equivalent SA marker) and skips rows where the SA owns its own queue; a parallel `registerAllOptimiserSchedules` (one per dedicated-queue feature) handles boot-time self-heal for the dedicated queue. Without the exclusion, every active subaccount-agent for that SA gets registered on BOTH queues at boot, causing each scheduled run to fire twice. The self-heal path inside `registerOptimiserSchedule` MUST also do an inline DB UPDATE for the cron rather than calling the generic `updateSchedule()` which would re-register on the wrong queue.
+**Why it matters:** The double-execution failure mode is silent in dev (runs are idempotent) but doubles cost, doubles LLM-render fan-out, and pollutes the recommendations table with duplicate evidence in production. The pattern generalises to any future dedicated-queue feature: when introducing a new queue for a system agent, audit the boot-time registrar in the same PR.
+
+### [2026-05-05] Pattern — Boot-time recovery summary log carries actionable counts, not a single integer
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a service runs a boot-time self-heal sweep over an enabled-rows table (e.g. `registerAllOptimiserSchedules`), the summary log MUST split the total into actionable buckets — `totalEnabled`, `registered` (newly created), `skipped_duplicate` (already present), `failed` — rather than a single `Registered N optimiser schedules on startup` line. The single-integer log conflates "everything was already fine" with "we just created N rows" and hides per-row failures from the dashboard. Pattern: emit a structured `<feature>.startup.recovery_summary` event at the end of the loop, plus per-row `<feature>.schedule.{registered,skipped_duplicate}` events from the inner write path.
+**Why it matters:** A boot-time sweep failing for 1 of 200 rows shows up as "registered 199" in the integer model — operationally invisible. The split-counts model exposes the failure rate as a first-class field; partial failures fire dashboards instead of disappearing into a successful-looking log line.
 
 Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.
 

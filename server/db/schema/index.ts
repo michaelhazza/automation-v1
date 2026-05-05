@@ -250,10 +250,14 @@ export * from './conversationThreadContext';
 // Sub-Account Optimiser — generic agent-output primitive (migration 0267)
 export * from './agentRecommendations';
 
+// Sub-Account Optimiser — cross-tenant peer-median view (migration 0277)
+// BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
+export * from './optimiserSkillPeerMedians';
+
 // GHL Agency OAuth — location token cache (migration 0269)
 export * from './connectorLocationTokens.js';
 
-// Workflows V1 — step gates + drafts (migration 0270)
+// Workflows V1 — step gates + drafts (migration 0276)
 export * from './workflowStepGates.js';
 export * from './workflowDrafts.js';
 
