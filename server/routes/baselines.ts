@@ -46,8 +46,11 @@ router.get(
       .limit(1);
 
     if (!row) {
-      res.status(404).json({ error: 'No baseline found' });
-      return;
+      throw {
+        statusCode: 404,
+        errorCode: 'BASELINE_NOT_FOUND',
+        message: 'No baseline found',
+      };
     }
 
     const metrics = await orgDb
@@ -79,8 +82,12 @@ router.post(
 
     const parsed = manualBaselineFormSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
-      return;
+      throw {
+        statusCode: 400,
+        errorCode: 'VALIDATION_FAILED',
+        message: 'Validation failed',
+        details: parsed.error.flatten(),
+      };
     }
 
     await captureBaselineService.runManual({
@@ -114,8 +121,12 @@ router.post(
 
     const parsed = adminResetSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
-      return;
+      throw {
+        statusCode: 400,
+        errorCode: 'VALIDATION_FAILED',
+        message: 'Validation failed',
+        details: parsed.error.flatten(),
+      };
     }
 
     await captureBaselineService.adminReset({

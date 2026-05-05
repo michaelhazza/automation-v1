@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import api from '../../lib/api';
 import { V1_BASELINE_METRICS } from '../../../../shared/constants/baselineMetrics';
+import {
+  parseInputToServerNumeric,
+  formatServerNumericForInput,
+  type MetricUnit,
+} from './manualBaselineFormPure';
 
 interface MetricValue {
   numeric: number;
@@ -64,19 +69,12 @@ export function ManualBaselineForm({
         setBaseline(data);
         const initial: Record<string, MetricFormEntry> = {};
         for (const m of data.metrics) {
-          // Server stores cents as integers — surface as dollars in the form so
-          // operators don't enter "47000" expecting it to mean $470. Numeric
-          // inputs for non-cents metrics keep their integer/percent representation.
           const meta = V1_BASELINE_METRICS.find((mm) => mm.slug === m.metricSlug);
-          const stored = m.value.numeric;
-          const display =
-            stored == null
-              ? ''
-              : meta?.unit === 'cents'
-                ? String(stored / 100)
-                : String(stored);
           initial[m.metricSlug] = {
-            numeric: display,
+            numeric: formatServerNumericForInput(
+              m.value.numeric,
+              (meta?.unit ?? 'count') as MetricUnit,
+            ),
             currency: m.value.currency ?? 'USD',
           };
         }
@@ -96,14 +94,9 @@ export function ManualBaselineForm({
     const metrics: { slug: string; numeric: number; currency?: string }[] = [];
     for (const m of V1_BASELINE_METRICS) {
       const entry = form[m.slug];
-      if (!entry || entry.numeric === '') continue;
-      const parsed = parseFloat(entry.numeric);
-      if (isNaN(parsed) || parsed < 0) continue;
-      // Convert dollars-and-cents input to integer cents for cents-unit metrics
-      // so the manual write matches the canonical-metric reader format which
-      // stores cents directly. Math.round protects against float artifacts on
-      // values like 47.55 * 100 = 4754.999...
-      const numeric = m.unit === 'cents' ? Math.round(parsed * 100) : parsed;
+      if (!entry) continue;
+      const numeric = parseInputToServerNumeric(entry.numeric, m.unit as MetricUnit);
+      if (numeric === null) continue;
       metrics.push({
         slug: m.slug,
         numeric,
@@ -122,13 +115,8 @@ export function ManualBaselineForm({
       toast.success('Baseline metrics saved.');
       onSaved?.();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string | { code?: string; message?: string } } } };
-      const errBody = e.response?.data?.error;
-      const message =
-        typeof errBody === 'string'
-          ? errBody
-          : errBody?.message ?? 'Failed to save metrics';
-      setError(message);
+      const e = err as { response?: { data?: { error?: { code?: string; message?: string } } } };
+      setError(e.response?.data?.error?.message ?? 'Failed to save metrics');
     } finally {
       setSaving(false);
     }
