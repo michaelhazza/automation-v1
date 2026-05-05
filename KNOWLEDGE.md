@@ -2112,3 +2112,11 @@ Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `
 F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
 
 JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.
+
+### 2026-05-05 Correction — Don't quote third-party SaaS quota numbers without verifying
+
+I asserted "1,000 lifetime credits" and "developer-program bumps it to ~4,000–5,000" for NVIDIA NIM's free tier. Both refuted by web research (`tasks/nvidia-nim-research-findings.md`): NVIDIA retired credit-based metering mid-2025 and replaced it with per-model RPM throttling (40 RPM documented default, per-model limits unpublished). Legacy accounts still display stuck credit balances which is what older blog posts cite. Rule: free-tier and quota numbers for any third-party API must be verified against the provider's current docs / forum staff posts within 90 days, not training-time priors. When hedging is the right answer, hedge explicitly ("I can't confirm this number") rather than softening with "reportedly" — softeners get repeated as facts downstream.
+
+### 2026-05-05 Pattern — Provider adapter template for new OpenAI-compatible endpoints
+
+For a new OpenAI-compatible LLM provider, `server/services/providers/openrouterAdapter.ts` (80 LOC) is the canonical template. Clone it, swap base URL + auth header, drop OpenRouter-specific headers (`HTTP-Referer`, `X-Title`), reuse `openaiFormat.ts` helpers verbatim. Register via `server/services/providers/registry.ts`. Per-provider quirks (role coercion, mandatory `max_tokens`, RFC 7807 vs OpenAI error envelope, streaming-vs-tools restrictions) live as ~30 LOC of shims inside the new adapter — do not pollute `openaiFormat.ts` with provider-specific branching. Map provider-specific exhaustion codes (e.g. NVIDIA's 402 / 429) to a single `PROVIDER_EXHAUSTED` terminal-skip error so the router falls through without retry/backoff.
