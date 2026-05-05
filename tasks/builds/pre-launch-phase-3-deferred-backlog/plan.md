@@ -1079,7 +1079,22 @@ type RlBucketType = 'ip_email_short' | 'ip_email_long' | 'email_only';
 // (process-count) events per 30s window per (bucket, identity). That is still
 // orders of magnitude below an unsuppressed flood and well within
 // signal-to-noise.
+//
+// Soft cap on Map growth — defensive against unbounded creep:
+// Under a high-cardinality attack scenario (bot spray with many distinct
+// (ip, email) pairs) AND a sustained backend outage, the Map could accumulate
+// entries faster than they age out, costing memory in a long-running process.
+// Apply a soft cap: once the Map exceeds MAX_RL_SUPPRESSION_ENTRIES, clear it
+// in full. Clearing rather than evicting LRU-style is intentional — simpler,
+// no extra bookkeeping, and the worst case after a clear is one extra audit
+// event per (bucket, identity) until suppression re-establishes. That is
+// acceptable: best-effort observability tolerates a transient un-suppression
+// burst far better than it tolerates unbounded memory growth. The cap is
+// sized at 10_000 — well above the realistic identity-cardinality of a single
+// process during a 30s window in normal traffic, but low enough to bound RAM
+// at <1MB even under pathological string sizes.
 const RATE_LIMIT_TRIP_SUPPRESSION_MS = 30_000;
+const MAX_RL_SUPPRESSION_ENTRIES = 10_000;
 const lastRateLimitTripEmit = new Map<string, number>();  // key: `${bucket}:${rlKey}`
 
 function shouldEmitRateLimitTrip(bucket: RlBucketType, rlKey: string): boolean {
@@ -1088,6 +1103,10 @@ function shouldEmitRateLimitTrip(bucket: RlBucketType, rlKey: string): boolean {
   const last = lastRateLimitTripEmit.get(suppressionKey);
   if (last !== undefined && now - last < RATE_LIMIT_TRIP_SUPPRESSION_MS) {
     return false;
+  }
+  // Defensive soft cap — prevent unbounded growth under high-cardinality attack.
+  if (lastRateLimitTripEmit.size > MAX_RL_SUPPRESSION_ENTRIES) {
+    lastRateLimitTripEmit.clear();
   }
   lastRateLimitTripEmit.set(suppressionKey, now);
   return true;
@@ -1373,9 +1392,27 @@ export async function ghlAutoEnrolLocationsPageHandler(
   const { connectionId, runId, pageCursor, pageIndex } = payload;
 
   // Drop late retries against a known-closed chain.
-  // Implementation: query the security_audit_events stream for
-  //   auditEvent.oauth.enrolCompleted | enrolFailed | enrolPartial
-  //   where meta.connectionId = $1 AND meta.runId = $2
+  // Implementation: query the security_audit_events stream for any event whose
+  // event_type is in the ENROL_TERMINAL_EVENTS set, scoped to (connectionId, runId).
+  //
+  // The terminal-event set is a SHARED CONSTANT — the SAME set used by the
+  // emitters (emitEnrolCompleted / emitEnrolFailed / emitEnrolPartial) and by
+  // the reader (isChainClosed). This prevents drift between what the job emits
+  // as "terminal" and what the closure check treats as "terminal". Aligns with
+  // the single-source-of-truth pattern used elsewhere (e.g. workflow terminal
+  // statuses). Define once, use in both directions:
+  //
+  //   const ENROL_TERMINAL_EVENTS = new Set<SecurityAuditEventName>([
+  //     auditEvent.oauth.enrolCompleted.name,
+  //     auditEvent.oauth.enrolFailed.name,
+  //     auditEvent.oauth.enrolPartial.name,
+  //   ]);
+  //
+  // The closure-check query uses this set:
+  //   WHERE event_type IN (...ENROL_TERMINAL_EVENTS)
+  //     AND meta->>'connectionId' = $1
+  //     AND meta->>'runId' = $2
+  //
   // (Optimisation: maintain an in-process LRU of recently-closed runIds.)
   if (await isChainClosed(connectionId, runId)) {
     logger.info('ghl_enrol_page_drop_closed_chain', { connectionId, runId, pageIndex });
@@ -1474,6 +1511,7 @@ ghlLocationUnique: uniqueIndex('subaccounts_org_external_ghl_location_idx')
 - Singleton-key is `ghl-enrol:${connectionId}` (NOT cursor-suffixed).
 - All four enrol events fire from the appropriate paths.
 - Post-terminal silence: late retries are dropped.
+- `isChainClosed()` is implemented against a shared `ENROL_TERMINAL_EVENTS` Set constant containing `auditEvent.oauth.enrolCompleted.name`, `auditEvent.oauth.enrolFailed.name`, `auditEvent.oauth.enrolPartial.name`. The same constant is referenced by the emitter call sites and by the closure-check reader. Verified by code inspection — adding a new terminal event must update the constant, not duplicate the list.
 - Migration runs cleanly on a fresh DB and on a DB with existing GHL-enrolled rows (backfill verified).
 - New partial-unique index created.
 - Schema file updated with the column + index.
