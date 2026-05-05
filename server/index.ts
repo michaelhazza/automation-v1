@@ -194,6 +194,8 @@ import asksRouter from './routes/asks.js';
 import fileRevertRouter from './routes/fileRevert.js';
 // Workflows V1 Phase 2 — workflow drafts fetch + discard (Chunk 14b)
 import workflowDraftsRouter from './routes/workflowDrafts.js';
+// Pre-Launch Phase 2 — client-side error reporting
+import clientErrorsRouter from './routes/clientErrors.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -429,6 +431,7 @@ app.use(teamsRouter);
 app.use(asksRouter);
 app.use(fileRevertRouter);
 app.use(workflowDraftsRouter);
+app.use(clientErrorsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -519,6 +522,8 @@ async function start() {
       '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
     );
   }
+  const { validateEncryptionKeyOrThrow } = await import('./services/connectionTokenValidation.js');
+  validateEncryptionKeyOrThrow();
 
   await seedPermissions();
   await backfillOrgUserRoles();

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import api from '../../lib/api';
+import { logAndSwallow } from '../../lib/silentCatchHelper';
 import { TIER_BY_SLUG } from '../../../../shared/constants/baselineArtefacts';
 import type { BaselineSlug } from '../../../../shared/constants/baselineArtefacts';
 
@@ -418,7 +419,7 @@ export default function EditArtefactDrawer({
     // semantic as the wizard's "Start capture" button. Fire-and-forget; a
     // telemetry failure must never block the edit UI.
     api.post(`/api/subaccounts/${subaccountId}/baseline-artefacts/started`, { slug })
-      .catch(() => {});
+      .catch(logAndSwallow('EditArtefactDrawer: artefact.capture.started telemetry'));
   }, [open, subaccountId, slug]);
 
   useEffect(() => {

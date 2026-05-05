@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -43,7 +44,7 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   useEffect(() => {
     api.get('/api/system/company-templates').then(({ data }) => {
       setConfigTemplates(data.filter((t: { isPublished: boolean }) => t.isPublished));
-    }).catch(() => {});
+    }).catch(logAndSwallow('SystemOrganisationsPage: company templates fetch'));
   }, []);
 
   const [editOrg, setEditOrg] = useState<Organisation | null>(null);

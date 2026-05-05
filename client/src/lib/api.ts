@@ -3,7 +3,7 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: '',
   headers: { 'Content-Type': 'application/json' },
-  timeout: 30000,
+  timeout: 15000,
 });
 
 // Attach JWT token and org context to every request
@@ -24,10 +24,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 responses globally
+// Handle 401 and 429 responses globally
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 429) {
+      const retryAfterSec = Number(error.response.headers['retry-after'] ?? '60');
+      error.retryAfterSec = Number.isFinite(retryAfterSec) ? retryAfterSec : 60;
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('userRole');

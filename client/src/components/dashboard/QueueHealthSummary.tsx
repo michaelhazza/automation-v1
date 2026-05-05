@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { logAndSwallow } from '../../lib/silentCatchHelper';
 
 interface TimestampedResponse<T> {
   data: T;
@@ -32,7 +33,7 @@ export function QueueHealthSummary({ refreshToken }: QueueHealthSummaryProps) {
           failed:  queues.reduce((s, q) => s + q.failed, 0),
         });
       })
-      .catch(() => {});
+      .catch(logAndSwallow('QueueHealthSummary: job-queues fetch'));
   }, [refreshToken]);
 
   if (!summary) return null;

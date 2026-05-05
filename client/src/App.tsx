@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import api from './lib/api';
+import { logAndSwallow } from './lib/silentCatchHelper';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -193,13 +194,14 @@ function useOnboardingRedirect(user: User | null) {
 // Org admin routes — any authenticated user may attempt these; API enforces permission-set checks.
 function OrgAdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
-  return <Outlet />;
+  if (user.role !== 'org_admin' && user.role !== 'system_admin') return <Navigate to="/" replace />;
+  return <ErrorBoundary><Outlet /></ErrorBoundary>;
 }
 
 function SystemAdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== 'system_admin') return <Navigate to="/" replace />;
-  return <Outlet />;
+  return <ErrorBoundary><Outlet /></ErrorBoundary>;
 }
 
 function SubaccountIntegrationsRoute({ user }: { user: User }) {
@@ -221,7 +223,7 @@ function SpendingBudgetsListPageRoute({ user }: { user: User }) {
     api.get('/api/my-permissions').then(({ data }) => {
       const perms: string[] = data?.permissions ?? [];
       setCanCreate(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(() => {});
+    }).catch(logAndSwallow('SpendingBudgetsListPageRoute: permissions fetch'));
   }, [user]);
   return <SpendingBudgetsListPage canCreate={canCreate} />;
 }
@@ -232,7 +234,7 @@ function SpendingBudgetDetailPageRoute({ user }: { user: User }) {
     api.get('/api/my-permissions').then(({ data }) => {
       const perms: string[] = data?.permissions ?? [];
       setCanEdit(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(() => {});
+    }).catch(logAndSwallow('SpendingBudgetDetailPageRoute: permissions fetch'));
   }, [user]);
   return <SpendingBudgetDetailPage user={user} canEdit={canEdit} />;
 }
@@ -246,7 +248,7 @@ function SpendLedgerPageRoute({ user }: { user: User }) {
       const perms: string[] = data?.permissions ?? [];
       const hasSpend = perms.includes('spend_approver') || perms.includes('org.spend.admin');
       setReadOnly(!hasSpend);
-    }).catch(() => {});
+    }).catch(logAndSwallow('SpendLedgerPageRoute: permissions fetch'));
   }, [subaccountId]);
   return <SpendLedgerPage user={user} readOnly={readOnly} />;
 }
@@ -290,44 +292,44 @@ export default function App() {
         <ConfigAssistantPopup />
       <Routes>
         <Route path="/login" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             {user ? <Navigate to="/" replace /> : <LoginPage />}
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/signup" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             {user ? <Navigate to="/onboarding" replace /> : <SignupPage />}
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/onboarding" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             {!user ? <Navigate to="/login" replace /> : <OnboardingWizardPage />}
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/onboarding/connect-ghl" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             {!user ? <Navigate to="/login" replace /> : <GhlOAuthInterstitialPage />}
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/onboarding/ready" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             {!user ? <Navigate to="/login" replace /> : <OnboardingCelebrationPage />}
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/invite/accept" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             <AcceptInvitePage />
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/forgot-password" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             <ForgotPasswordPage />
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
         <Route path="/reset-password" element={
-          <Suspense fallback={<PageLoader />}>
+          <ErrorBoundary><Suspense fallback={<PageLoader />}>
             <ResetPasswordPage />
-          </Suspense>
+          </Suspense></ErrorBoundary>
         } />
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
