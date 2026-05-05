@@ -1040,6 +1040,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0272_cost_aggregates_rls_and_spend_dims.sql',
     rationale: 'Pre-aggregated LLM and agent spend rollups — new agent_spend_* dimensions carry per-subaccount and per-org spend totals that are financially sensitive. organisation_id added via ALTER TABLE in migration 0272 (CREATE TABLE in 0024 had no tenant column — pre-multi-tenant aggregate). Sentinel UUID rows (platform/provider) are globally readable per policy.',
   },
+  // 0282 — F3 Baseline Capture: RLS for both new baseline tables
+  {
+    tableName: 'subaccount_baselines',
+    schemaFile: 'subaccountBaselines.ts',
+    policyMigration: '0282_baseline_rls_and_dictionary.sql',
+    rationale: 'Per-subaccount baseline snapshot — captures opening-state metrics. Cross-tenant leak would expose competitive financial data.',
+  },
+  {
+    tableName: 'subaccount_baseline_metrics',
+    schemaFile: 'subaccountBaselineMetrics.ts',
+    policyMigration: '0282_baseline_rls_and_dictionary.sql',
+    rationale: 'Per-baseline metric values — pipeline value, lead count, revenue. Cross-tenant leak would expose customer-specific revenue figures.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

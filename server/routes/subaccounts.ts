@@ -147,6 +147,14 @@ router.post(
         });
     }
 
+    // F3 §4 — insert initial pending baseline row (inline, synchronous).
+    // Must run within the request's org-scoped transaction; fire-and-forget
+    // would execute after the tx commits and lose the org context.
+    await subaccountOnboardingService.markBaselinePending({
+      organisationId,
+      subaccountId: sa.id,
+    });
+
     res.status(201).json({
       id: sa.id,
       name: sa.name,

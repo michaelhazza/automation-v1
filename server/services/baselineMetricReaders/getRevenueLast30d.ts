@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { canonicalMetricHistory } from '../../db/schema/canonicalMetrics.js';
 import { canonicalAccounts } from '../../db/schema/canonicalAccounts.js';
 import type { BaselineMetricReader, MetricReaderResult } from './registry.js';
@@ -22,7 +22,7 @@ export function transformRevenueLast30dRows(rows: { value: unknown }[]): MetricR
 export const getRevenueLast30d: BaselineMetricReader = async ({ organisationId, subaccountId }) => {
   // §10 timestamp invariant: defer the 30-day window to Postgres so the
   // comparison anchor is the DB clock, never the Node process clock.
-  const rows = await db
+  const rows = await getOrgScopedDb('getRevenueLast30d')
     .select({ value: canonicalMetricHistory.value })
     .from(canonicalMetricHistory)
     .innerJoin(canonicalAccounts, eq(canonicalAccounts.id, canonicalMetricHistory.accountId))

@@ -93,6 +93,17 @@ export const EVENT_NAMES = [
   'artefact.capture.completed',
   'artefact.capture.skipped',
   'artefact.capture.edited',
+  // F3 §4 — connector sync + baseline capture lifecycle
+  'connector.sync.complete',
+  'baseline.capture.triggered',
+  'baseline.capture.started',
+  'baseline.metric.captured',
+  'baseline.metric.unavailable',
+  'baseline.capture.succeeded',
+  'baseline.capture.retry_scheduled',
+  'baseline.capture.failed',
+  'baseline.manual.applied',
+  'baseline.admin_reset',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

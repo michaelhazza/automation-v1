@@ -692,4 +692,73 @@ export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
     commonJoins: ['Any canonical table via canonical_row_id WHERE canonical_table = \'<table>\''],
     antiPatterns: ['Do not query without filtering canonical_table — cross-table row IDs may collide'],
   },
+  // ── F3 Baseline Capture (migration 0282) ─────────────────────────────────
+  {
+    tableName: 'subaccount_baselines',
+    humanName: 'Subaccount Baselines',
+    purpose: 'Immutable opening-state snapshot for each sub-account, captured at onboarding readiness. Reporting Agent reads it to narrate month-over-month delta.',
+    principalSemantics: 'Org-scoped, subaccount-scoped. One active (non-reset) row per subaccount.',
+    visibilityFields: { ownerUserId: false, visibilityScope: false, sharedTeamIds: false },
+    columns: [
+      { name: 'id', type: 'uuid', purpose: 'Primary key' },
+      { name: 'organisation_id', type: 'uuid', purpose: 'Owning organisation' },
+      { name: 'subaccount_id', type: 'uuid', purpose: 'Owning sub-account' },
+      { name: 'baseline_version', type: 'integer', purpose: 'Bumps on admin reset; preserves history' },
+      { name: 'status', type: 'text', purpose: 'pending | ready | capturing | captured | failed | manual | reset' },
+      { name: 'capture_attempt_count', type: 'smallint', purpose: 'Retry budget (max 3 retryable failures)' },
+      { name: 'last_attempt_at', type: 'timestamptz', purpose: 'Backoff anchor for cron retry pickup' },
+      { name: 'next_attempt_at', type: 'timestamptz', purpose: 'Stamped at retry transition: last_attempt_at + backoff window. NULL when not in retry-pending state.' },
+      { name: 'ready_at', type: 'timestamptz', purpose: 'When readiness condition was first met' },
+      { name: 'captured_at', type: 'timestamptz', purpose: 'Set on transition to captured; immutable thereafter' },
+      { name: 'source', type: 'text', purpose: 'auto | manual | mixed' },
+      { name: 'confidence', type: 'text', purpose: 'confirmed | estimated | partial' },
+      { name: 'failure_reason', type: 'text', purpose: 'Terminal-failure category' },
+    ],
+    foreignKeys: [
+      { column: 'organisation_id', referencesTable: 'organisations', referencesColumn: 'id' },
+      { column: 'subaccount_id', referencesTable: 'subaccounts', referencesColumn: 'id' },
+      { column: 'reset_by_user_id', referencesTable: 'users', referencesColumn: 'id' },
+    ],
+    freshnessPeriod: 'Immutable once captured; admin reset creates a new version row',
+    cardinality: '1:1',
+    skillReferences: ['generate_portfolio_report'],
+    exampleQueries: [
+      "SELECT * FROM subaccount_baselines WHERE subaccount_id = $1 AND status <> 'reset' ORDER BY baseline_version DESC LIMIT 1",
+    ],
+    commonJoins: [
+      'subaccount_baseline_metrics via subaccount_baseline_metrics.baseline_id',
+    ],
+    antiPatterns: [
+      'Do not write directly — only captureBaselineService.run / runManual / adminReset are valid writers (single-writer rule).',
+      'Do not bypass the reset status to delete history. Admin reset preserves prior rows by design.',
+    ],
+  },
+  {
+    tableName: 'subaccount_baseline_metrics',
+    humanName: 'Subaccount Baseline Metrics',
+    purpose: 'Per-metric value rows for each baseline. PK on (baseline_id, metric_slug) supports idempotent ON CONFLICT writes.',
+    principalSemantics: 'Org-scoped via baseline FK. RLS walks the FK to enforce tenant isolation.',
+    visibilityFields: { ownerUserId: false, visibilityScope: false, sharedTeamIds: false },
+    columns: [
+      { name: 'baseline_id', type: 'uuid', purpose: 'Owning baseline (FK)' },
+      { name: 'metric_slug', type: 'text', purpose: 'pipeline_value | lead_count | conversation_engagement | revenue | open_opportunity_count | ...' },
+      { name: 'value', type: 'jsonb', purpose: '{ numeric, currency?, unit }' },
+      { name: 'source', type: 'text', purpose: 'canonical_metric | manual | unavailable' },
+      { name: 'unavailable_reason', type: 'text', purpose: 'integration_not_connected | api_failure | no_data_yet' },
+      { name: 'captured_at', type: 'timestamptz', purpose: 'Set by Postgres now() on insert; updated on ON CONFLICT' },
+    ],
+    foreignKeys: [
+      { column: 'baseline_id', referencesTable: 'subaccount_baselines', referencesColumn: 'id' },
+    ],
+    freshnessPeriod: 'Immutable on captured baseline; manual edit may overwrite via runManual',
+    cardinality: '1:N',
+    skillReferences: ['generate_portfolio_report'],
+    exampleQueries: [
+      'SELECT metric_slug, value, source FROM subaccount_baseline_metrics WHERE baseline_id = $1',
+    ],
+    commonJoins: ['subaccount_baselines via subaccount_baseline_metrics.baseline_id'],
+    antiPatterns: [
+      'Do not insert without ON CONFLICT (baseline_id, metric_slug) DO UPDATE — the PK enforces uniqueness; raw INSERT will throw on retry.',
+    ],
+  },
 ];

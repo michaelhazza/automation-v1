@@ -194,6 +194,8 @@ import asksRouter from './routes/asks.js';
 import fileRevertRouter from './routes/fileRevert.js';
 // Workflows V1 Phase 2 — workflow drafts fetch + discard (Chunk 14b)
 import workflowDraftsRouter from './routes/workflowDrafts.js';
+// F3 Baseline Capture — baseline status, manual entry, admin reset (Chunks 4A/4B)
+import baselinesRouter from './routes/baselines.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -429,6 +431,7 @@ app.use(teamsRouter);
 app.use(asksRouter);
 app.use(fileRevertRouter);
 app.use(workflowDraftsRouter);
+app.use(baselinesRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
