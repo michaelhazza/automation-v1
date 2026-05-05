@@ -63,8 +63,8 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 |------|--------|-------|
 | 0. Context load + Phase 2 entry | DONE 2026-05-05 | feature-coordinator resumed after S1 collision detected on prior session — slug `pre-launch-phase-3` collided with origin/main `dd08e9a9` parallel spec |
 | 1. Slug rename to resolve S1 collision | DONE 2026-05-05 | Operator approved Recommendation 1: build slug renamed `pre-launch-phase-3` → `pre-launch-phase-3-deferred-backlog`. Branch name `claude/pre-launch-phase-3` unchanged. `git mv` for build dir + 6 review-log files; internal slug references updated in spec.md / handoff.md / progress.md / 2 review log .md files / KNOWLEDGE.md (6 entries) / tasks/todo.md (3 sites) / tasks/current-focus.md (parallel block + prose body) / _index.jsonl (36 file: refs). Codex raw txt captures left as-is (immutable historical terminal output). After rename, main's `tasks/builds/pre-launch-phase-3/` (narrower 7-item spec by `dd08e9a9`) coexists alongside our `tasks/builds/pre-launch-phase-3-deferred-backlog/`. |
-| 2. Branch-sync S1 + freshness check | PENDING | After rename commit, merge origin/main; expect clean (no further collisions, no migration overlap). |
-| 3. architect invocation | PENDING | |
+| 2. Branch-sync S1 + freshness check | DONE 2026-05-05 | Merged `dd08e9a9` (main's parallel pre-launch-phase-3 spec) into branch as merge commit `661e6009`. No file overlaps post-rename. No migration collisions. Post-merge `npm run typecheck` clean. Pushed. Both `tasks/builds/pre-launch-phase-3/` (main's narrower spec) and `tasks/builds/pre-launch-phase-3-deferred-backlog/` (ours) coexist. |
+| 3. architect invocation | PAUSED | Sub-agent Task/Agent tool unavailable in this Claude Code web session — operator decision required: run architect playbook inline OR defer plan-phase to a session with Task tool. Surface the recommendation; await operator reply. |
 | 4. chatgpt-plan-review (MANUAL) | PENDING | |
 | 5. plan-gate | PENDING | Operator approval required before chunk loop |
 | 6. Per-chunk loop (A → B → C → D → E) | PENDING | |
