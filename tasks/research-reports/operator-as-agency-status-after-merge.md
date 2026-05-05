@@ -68,7 +68,36 @@ Highest filename: `0279_task_events.sql`. Notable post-0189 work: 0190–0232 (L
 
 ## Code-level items
 
-*(section appended below)*
+| Proposed item | Status | Evidence (file:line) | Notes |
+|---|---|---|---|
+| `CrmAdapter` formal interface | **NOT BUILT** | `server/adapters/` has only `ghlAdapter.ts`, `integrationAdapter.ts`, `slackAdapter.ts`, `stripeAdapter.ts`, `teamworkAdapter.ts`, `workspace/` | Generic `IntegrationAdapter` (`integrationAdapter.ts:286-335`) remains the only adapter base; no CRM-specific layer |
+| `eventBus.publish()` | **NOT BUILT** | Zero hits across `server/**/*.ts` | Only unrelated `redisPub.publish()` (`llmInflightRegistry.ts:643`) and `workflowPublishService.publish()` (`routes/workflowStudio.ts:274`) |
+| `server/lib/ruleMatcher.ts` | **NOT BUILT** | No file in `server/lib/`; `matchesFilter` still local to `triggerService.ts:44`; `matchesRule` still local to `policyEngineServicePure.ts:106` | Two separate matcher functions remain, no deduplication |
+| Extended `playbookRunService.startRun()` with `triggeredBy` | **NOT BUILT** (redirected) | `playbookRunService.ts` no longer exists. The successor is `workflowRunService.startRun()` at `workflowRunService.ts:136` — its signature has nullable `startedByUserId` but no `triggeredBy: 'user'\|'job'\|'system'` field | The proposal needs to be rewritten against `workflowRunService` |
+| Extended `executeConfigCreateSubaccount()` (prospectData + idempotencyKey) | **NOT BUILT** | `server/tools/config/configSkillHandlers.ts:266-309` — signature is `(input, context)` only; standard insert | |
+| `lead_discover` skill (Google Places) | **PARTIAL — unwired** | `server/skills/discover_prospects.md` (renamed). Provider: `server/services/leadDiscovery/googlePlacesProvider.ts:40`. Handler: `server/services/sdrService.ts:19` | Skill MD + provider + handler all built. **Not registered** in `actionRegistry.ts`, **not dispatched** in `skillExecutor.ts`. Dead code from a dispatch perspective. |
+| `lead_score` skill (Hunter.io) | **PARTIAL — diverged** | `server/skills/score_lead.md` (renamed). Hunter provider: `server/services/leadDiscovery/hunterProvider.ts:37,78` | The shipped `score_lead.md` is a pure LLM criteria-scorer (0-100 letter grade), NOT Hunter.io enrichment. Hunter lives separately, intended to back `enrich_contact` but unwired. |
+| `classify_prospect_reply` skill | **NOT BUILT** | No `classify_prospect_reply.md`; only existing `classify_email.md` (support-triage taxonomy) | BD intent taxonomy (positive/negative/OOO/not-ready/referral) not built |
+| `lead-discover` nightly pg-boss job | **NOT BUILT** | No file matching `lead*discover*` in `server/jobs/`; no queue registration | |
+| `POST /api/webhooks/resend` | **NOT BUILT** | `server/routes/webhooks/` has `ghlWebhook.ts`, `slackWebhook.ts`, `stripeAgentWebhook.ts`, `teamworkWebhook.ts` only | New `stripeAgentWebhook` landed; Resend webhook did not |
+| `email-inbound-poll` pg-boss job (IMAP) | **NOT BUILT** | No such file in `server/jobs/`; `imapflow` absent from `package.json` | |
+| `email-reply-classify` pg-boss job | **NOT BUILT** | No such file; no queue registration | |
+| `lead-discover` system agent seed | **NOT BUILT (different shape)** | `scripts/seed.ts` upserts 16+1 system agents from `companies/automation-os/agents/` slugs. The relevant agent is `sdr-agent` (`companies/automation-os/agents/sdr-agent/AGENTS.md`) which lists `discover_prospects` + `score_lead` in its skill list | One unified `sdr-agent` exists instead of the proposed split-out `lead-discover` agent. The agent is seeded, but its skills are unwired (see above). |
+| `client-onboarding` playbook template | **NOT BUILT** | `server/workflows/` has `baseline-artefacts-capture`, `event-creation`, `intelligence-briefing`, `weekly-digest` only | `seedOnboardingModules.ts` registers only `intelligence-briefing` + `weekly-digest` |
+| `GOOGLE_PLACES_API_KEY` in env | **PARTIAL** | Used via `process.env['GOOGLE_PLACES_API_KEY']` in `sdrService.ts:22` and `googlePlacesProvider.ts:40`. NOT in `server/lib/env.ts` Zod schema. NOT in `.env.example` | Variable used but ungoverned by the typed env wrapper |
+| `HUNTER_API_KEY` in env | **PARTIAL** | Used via `process.env['HUNTER_API_KEY']` in `hunterProvider.ts:37,78`. NOT in `env.ts`. NOT in `.env.example` | Same pattern as Places |
+| `RESEND_WEBHOOK_SECRET` in env | **NOT BUILT** | No reference anywhere | Only `RESEND_API_KEY` is in `.env.example` |
+| Resend message-ID capture in `emailService.ts` | **NOT BUILT** | `emailService.ts:236` — `await resend.emails.send({...})` result discarded; `send()` returns `Promise<void>` | No correlation hook for Resend webhooks |
+| Service-user / system-principal plumbing | **PARTIAL** | `workflow_runs.startedByUserId` is nullable (`workflowRuns.ts:75`). `service_principals` table exists (`server/db/schema/servicePrincipals.ts:9`). | FK nullability resolved. No system-user seed in `scripts/seed.ts`. `service_principals` not wired to `workflowRuns.startedByUserId`. |
+
+### Adjacent / equivalent work observed
+
+- **`sdrService.ts`** (`server/services/sdrService.ts:1-90`) — stub handler covering `discover_prospects`, `draft_outbound`, `score_lead`, `book_meeting`. Imported nowhere.
+- **`googlePlacesProvider.ts`** + **`hunterProvider.ts`** — production-quality wrappers with LRU caching and graceful `not_configured` returns. Disconnected from skill dispatch.
+- **`enrich_contact` skill** (`server/skills/enrich_contact.md`, registry at `actionRegistry.ts:1641`) is the only SDR-adjacent skill wired end-to-end. Stub note suggests `hunterProvider.ts` was meant to back it; wiring missing.
+- **`servicePrincipals` table** landed but no seed or FK usage.
+- **`sdr-agent` system agent** seeded via `scripts/seed.ts` phase 3. Lists `discover_prospects` + `score_lead`. Skill calls would 404 today.
+- **Skill name mapping:** `discover_prospects` ≡ proposed `lead_discover` (concept identical, name changed). `score_lead.md` ≢ proposed `lead_score` (criteria-scorer LLM, not Hunter enrichment — these are effectively two different skills).
 
 ---
 
